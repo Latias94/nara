@@ -765,7 +765,7 @@ fn removing_replacements_requests_q_and_preserves_raw_sources_on_compile_failure
         conflicted
             .startup_compilation_diagnostics()
             .iter()
-            .any(|diagnostic| { diagnostic.code().as_str() == "scene.prefab-overlay-conflict" })
+            .any(|diagnostic| { diagnostic.code().as_str() == "scene.prefab-compilation-failed" })
     );
     assert!(conflicted.unresolved_dependencies().is_empty());
     assert!(conflicted.assets().is_empty());

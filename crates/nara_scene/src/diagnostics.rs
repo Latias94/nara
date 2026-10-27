@@ -332,6 +332,45 @@ pub(crate) fn with_codec_error(
             ),
             "codec-detail",
         ),
+        ComponentCodecError::MaterializationNodeLimit { observed, maximum } => with_public_u64(
+            with_public_u64(
+                with_public_identifier(
+                    diagnostic,
+                    "codec-error-kind",
+                    "materialization-node-limit",
+                ),
+                "observed",
+                usize_to_u64(*observed),
+            ),
+            "maximum",
+            usize_to_u64(*maximum),
+        ),
+        ComponentCodecError::MaterializationByteLimit { observed, maximum } => with_public_u64(
+            with_public_u64(
+                with_public_identifier(
+                    diagnostic,
+                    "codec-error-kind",
+                    "materialization-byte-limit",
+                ),
+                "observed",
+                usize_to_u64(*observed),
+            ),
+            "maximum",
+            usize_to_u64(*maximum),
+        ),
+        ComponentCodecError::MaterializationDepthLimit { observed, maximum } => with_public_u64(
+            with_public_u64(
+                with_public_identifier(
+                    diagnostic,
+                    "codec-error-kind",
+                    "materialization-depth-limit",
+                ),
+                "observed",
+                usize_to_u64(*observed),
+            ),
+            "maximum",
+            usize_to_u64(*maximum),
+        ),
         ComponentCodecError::EntityMissing => {
             with_public_identifier(diagnostic, "codec-error-kind", "entity-missing")
         }

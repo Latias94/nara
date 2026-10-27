@@ -10,9 +10,9 @@ use nara_asset::AssetRef;
 use nara_core::{ByteLimit, DepthLimit, ItemLimit};
 use nara_ecs::{Component, World};
 use nara_reflect::{
-    ComponentCapability, ComponentDecodeContext, ComponentFieldId, ComponentFieldPath,
-    ComponentFieldPathSegment, ComponentFieldSchema, ComponentRegistry, ComponentSchema,
-    ComponentSchemaVersion, ComponentTypeId, ComponentValue, ComponentValueKind,
+    ComponentCapability, ComponentCodecError, ComponentDecodeContext, ComponentFieldId,
+    ComponentFieldPath, ComponentFieldPathSegment, ComponentFieldSchema, ComponentRegistry,
+    ComponentSchema, ComponentSchemaVersion, ComponentTypeId, ComponentValue, ComponentValueKind,
     ComponentValueMaterializationLimits, ComponentValueShape, DeclaredAssetReferenceError,
     EntityReferenceTraversalLimits, collect_declared_asset_references,
     collect_declared_asset_references_from_schema_with_limits, effective_component_value,
@@ -282,12 +282,37 @@ fn missing_map_ancestors_are_shared_and_field_order_is_canonical() {
             .as_ref(),
         &expected
     );
-    for limits in [
-        materialization_limits(3, 33, 3),
-        materialization_limits(4, 32, 3),
-        materialization_limits(4, 33, 2),
+    for (limits, expected) in [
+        (
+            materialization_limits(3, 33, 3),
+            ComponentCodecError::MaterializationNodeLimit {
+                observed: 4,
+                maximum: 3,
+            },
+        ),
+        (
+            materialization_limits(4, 32, 3),
+            ComponentCodecError::MaterializationByteLimit {
+                observed: 33,
+                maximum: 32,
+            },
+        ),
+        (
+            materialization_limits(4, 33, 2),
+            ComponentCodecError::MaterializationDepthLimit {
+                observed: 3,
+                maximum: 2,
+            },
+        ),
     ] {
-        assert!(effective_component_value(&schema, &raw, limits).is_err());
+        assert_eq!(
+            effective_component_value(&schema, &raw, limits).unwrap_err(),
+            expected,
+        );
+        assert_eq!(
+            effective_component_value_owned(&schema, raw.clone(), limits).unwrap_err(),
+            expected,
+        );
     }
     assert_eq!(raw, ComponentValue::map([] as [(&str, ComponentValue); 0]));
 }
@@ -306,14 +331,14 @@ fn explicit_null_or_wrong_container_ancestors_reject_without_overwrite() {
     ] {
         let raw = ComponentValue::map([("settings", parent)]);
         let original = raw.clone();
-        assert!(
+        assert!(matches!(
             effective_component_value(
                 &schema,
                 &raw,
                 ComponentValueMaterializationLimits::default()
-            )
-            .is_err()
-        );
+            ),
+            Err(ComponentCodecError::InvalidField { .. } | ComponentCodecError::Message(_)),
+        ));
         assert_eq!(raw, original);
     }
 }
@@ -417,12 +442,37 @@ fn materialization_charges_raw_values_and_default_subtree_depth_before_clone() {
     let effective = effective_component_value(&schema, &raw, exact).unwrap();
     assert_eq!(effective.cost().nodes(), 4);
     assert_eq!(effective.cost().logical_bytes(), 20);
-    for limits in [
-        materialization_limits(3, 20, 3),
-        materialization_limits(4, 19, 3),
-        materialization_limits(4, 20, 2),
+    for (limits, expected) in [
+        (
+            materialization_limits(3, 20, 3),
+            ComponentCodecError::MaterializationNodeLimit {
+                observed: 4,
+                maximum: 3,
+            },
+        ),
+        (
+            materialization_limits(4, 19, 3),
+            ComponentCodecError::MaterializationByteLimit {
+                observed: 20,
+                maximum: 19,
+            },
+        ),
+        (
+            materialization_limits(4, 20, 2),
+            ComponentCodecError::MaterializationDepthLimit {
+                observed: 3,
+                maximum: 2,
+            },
+        ),
     ] {
-        assert!(effective_component_value(&schema, &raw, limits).is_err());
+        assert_eq!(
+            effective_component_value(&schema, &raw, limits).unwrap_err(),
+            expected,
+        );
+        assert_eq!(
+            effective_component_value_owned(&schema, raw.clone(), limits).unwrap_err(),
+            expected,
+        );
     }
     assert!(raw.get("addition").is_none());
 }
@@ -498,13 +548,17 @@ fn large_raw_opaque_payload_uses_the_selected_expansion_budget() {
     let effective = effective_component_value(&schema, &raw, exact).unwrap();
     assert_eq!(effective.cost().nodes(), expected_nodes);
     assert_eq!(effective.cost().logical_bytes(), expected_bytes);
-    assert!(
+    assert_eq!(
         effective_component_value(
             &schema,
             &raw,
             materialization_limits(16_384, expected_bytes, 3),
         )
-        .is_err()
+        .unwrap_err(),
+        ComponentCodecError::MaterializationNodeLimit {
+            observed: 16_385,
+            maximum: 16_384,
+        },
     );
     assert!(raw.get("amount").is_none());
 }
@@ -527,7 +581,13 @@ fn deep_raw_values_are_rejected_iteratively_when_expansion_is_needed() {
         ComponentValueMaterializationLimits::default(),
     )
     .unwrap_err();
-    assert!(error.to_string().contains("depth limit"));
+    assert_eq!(
+        error,
+        ComponentCodecError::MaterializationDepthLimit {
+            observed: 65,
+            maximum: 64,
+        },
+    );
     let ComponentValue::Map(fields) = &mut raw else {
         unreachable!()
     };
@@ -602,12 +662,21 @@ fn decode_context_budget_rejects_before_the_native_callback() {
     let small = materialization_limits(1, 14, 2);
     let mut context = ComponentDecodeContext::new().with_materialization_limits(small);
     assert_eq!(context.materialization_limits(), small);
-    assert!(matches!(
-        snapshot.preflight_component_with_context(&component, &omitted, &mut context),
-        Err(nara_reflect::ComponentCodecError::Message(message))
-            if message.contains("materialization")
-    ));
-    assert!(validate_component_value_with_limits(&schema, &omitted, small).is_err());
+    let expected = ComponentCodecError::MaterializationNodeLimit {
+        observed: 2,
+        maximum: 1,
+    };
+    assert_eq!(
+        snapshot
+            .preflight_component_with_context(&component, &omitted, &mut context)
+            .err()
+            .expect("materialization must reject before native decoding"),
+        expected,
+    );
+    assert_eq!(
+        validate_component_value_with_limits(&schema, &omitted, small).unwrap_err(),
+        expected,
+    );
     assert_eq!(calls.load(Ordering::SeqCst), 0);
     context.set_materialization_limits(exact);
     assert_eq!(context.materialization_limits(), exact);

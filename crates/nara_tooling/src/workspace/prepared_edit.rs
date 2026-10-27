@@ -3,12 +3,15 @@
 use super::{
     EditorDocumentId, EditorDocumentKind, EditorDocumentSlot, EditorWorkspace,
     EditorWorkspaceCommandReport, WorkspaceDocumentContext, authoring_command_error_report,
-    authoring_document_error_report, report_for_document, report_for_document_patch,
-    workspace_document_error_report, workspace_revision_error_report,
+    authoring_document_error_report, prefab_declarations::rejected_basis_report,
+    report_for_document, report_for_document_patch, workspace_document_error_report,
+    workspace_revision_error_report,
 };
+use crate::EditorDocumentQueryBasis;
 use nara_scene::{
-    AuthoringPropertyEdit, PreparedPrefabAuthoringEdit, PreparedSceneAuthoringEdit,
-    SceneAuthoringRevision, ScenePatchDocument,
+    AuthoringPropertyEdit, PrefabDeclarationLimits, PrefabInstancePath, PrefabRevert,
+    PreparedPrefabAuthoringEdit, PreparedSceneAuthoringEdit, SceneAuthoringRevision,
+    ScenePatchDocument,
 };
 
 /// A move-only edit of one explicitly named open document; it owns no workspace or selection.
@@ -16,6 +19,13 @@ use nara_scene::{
 pub struct PreparedEditorDocumentEdit {
     document: EditorDocumentId,
     edit: PreparedDocumentEdit,
+    origin: PreparedEditOrigin,
+}
+
+#[derive(Debug)]
+enum PreparedEditOrigin {
+    Authoring,
+    PrefabRevert,
 }
 
 #[derive(Debug)]
@@ -27,12 +37,25 @@ enum PreparedDocumentEdit {
 enum EditRequest<'a> {
     Patch(&'a ScenePatchDocument),
     Properties(&'a [AuthoringPropertyEdit]),
+    PrefabRevert {
+        path: &'a PrefabInstancePath,
+        action: PrefabRevert,
+        limits: PrefabDeclarationLimits,
+    },
 }
 
 impl PreparedEditorDocumentEdit {
     #[must_use]
     pub const fn document(&self) -> EditorDocumentId {
         self.document
+    }
+
+    /// Identifies a Revert lowered by the source owner's dedicated preparation API.
+    ///
+    /// A generic patch with identical operations does not carry this origin.
+    #[must_use]
+    pub const fn is_prefab_revert(&self) -> bool {
+        matches!(self.origin, PreparedEditOrigin::PrefabRevert)
     }
 
     #[must_use]
@@ -89,6 +112,31 @@ impl EditorWorkspace {
         self.prepare_edit(document, base_revision, EditRequest::Properties(edits))
     }
 
+    /// Prepares one source-owned Revert without activating its document or changing selection.
+    ///
+    /// Snapshot selectors require the exact incarnation, revision and Schema admission.
+    /// The source owner lowers the Revert and retains the candidate and inverse consumed by
+    /// [`Self::commit_authoring_edit`]; this method adds no publication or history authority.
+    pub fn prepare_prefab_revert(
+        &self,
+        basis: &EditorDocumentQueryBasis,
+        path: &PrefabInstancePath,
+        action: PrefabRevert,
+        limits: PrefabDeclarationLimits,
+    ) -> Result<PreparedEditorDocumentEdit, EditorWorkspaceCommandReport> {
+        self.validate_document_query_basis(basis)
+            .map_err(|error| rejected_basis_report(self, basis, error))?;
+        self.prepare_edit(
+            basis.document,
+            basis.revision,
+            EditRequest::PrefabRevert {
+                path,
+                action,
+                limits,
+            },
+        )
+    }
+
     fn prepare_edit(
         &self,
         document: EditorDocumentId,
@@ -96,6 +144,10 @@ impl EditorWorkspace {
         request: EditRequest<'_>,
     ) -> Result<PreparedEditorDocumentEdit, EditorWorkspaceCommandReport> {
         let slot = self.resolve_authoring_preparation_slot(document, base_revision)?;
+        let origin = match &request {
+            EditRequest::PrefabRevert { .. } => PreparedEditOrigin::PrefabRevert,
+            EditRequest::Patch(_) | EditRequest::Properties(_) => PreparedEditOrigin::Authoring,
+        };
         let prepared = match slot {
             EditorDocumentSlot::Scene(slot) => match request {
                 EditRequest::Patch(patch) => {
@@ -104,6 +156,13 @@ impl EditorWorkspace {
                 EditRequest::Properties(edits) => slot
                     .session
                     .prepare_authoring_property_edit(base_revision, edits),
+                EditRequest::PrefabRevert {
+                    path,
+                    action,
+                    limits,
+                } => slot
+                    .session
+                    .prepare_prefab_revert(base_revision, path, action, limits),
             }
             .map(PreparedDocumentEdit::Scene),
             EditorDocumentSlot::Prefab(slot) => match request {
@@ -113,6 +172,13 @@ impl EditorWorkspace {
                 EditRequest::Properties(edits) => slot
                     .session
                     .prepare_authoring_property_edit(base_revision, edits),
+                EditRequest::PrefabRevert {
+                    path,
+                    action,
+                    limits,
+                } => slot
+                    .session
+                    .prepare_prefab_revert(base_revision, path, action, limits),
             }
             .map(PreparedDocumentEdit::Prefab),
             EditorDocumentSlot::Extension(_) => {
@@ -123,7 +189,11 @@ impl EditorWorkspace {
             }
         };
         prepared
-            .map(|edit| PreparedEditorDocumentEdit { document, edit })
+            .map(|edit| PreparedEditorDocumentEdit {
+                document,
+                edit,
+                origin,
+            })
             .map_err(|patch_report| self.authoring_preparation_error(document, slot, patch_report))
     }
 

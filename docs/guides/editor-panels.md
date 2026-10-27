@@ -315,6 +315,47 @@ protected by the ordinary preservation check. Preparing a declaration does not r
 qualify nested preview or activate Runtime data. Native snapshot loading requires current Schema
 semantics without silently migrating either comparison side.
 
+For removal of stored override intent, use the source-owned Revert port instead of constructing
+replacement declarations in the tool:
+
+```rust,ignore
+let basis = application.document_query_basis(document)?;
+let path = PrefabInstancePath::new(anchor);
+let limits = PrefabDeclarationLimits::default();
+let observation = application.observe_prefab_instance(&basis, &path, limits)?;
+let prepared = application.prepare_prefab_revert(
+    &basis,
+    &observation.path,
+    PrefabRevert::Intent(PrefabOverlaySlot::Component { index }),
+    limits,
+)?;
+preview_changes(prepared.patch(), prepared.inverse());
+let submission = application.commit_authoring_edit(prepared, Duration::ZERO);
+```
+
+The reader observes source declarations without requiring entity selection, inherited targets or
+successful preview. Nested addition and instance-claim paths refer to indices in this exact
+snapshot. The complete query basis fences source incarnation, revision and Schema admission;
+requery after any change rather than transplanting old indices. Scene/Prefab sessions provide
+the same bounded primitives, with their caller responsible for validating retained Schema basis.
+
+Revert removes only the selected intent and preserves unknown siblings. Removing the last property
+claim removes its empty Properties container but retains the overlay's base pin.
+`PrefabRevert::Overlay` removes the overlay and its base pin while keeping the source link.
+Removing an instance claim restores inheritance; a stored `None` claim instead explicitly detaches.
+These operations do not convert effective entities to local records or implicitly remove dependent
+placements/references. Composition can still reject after a valid source repair.
+
+The built-in Inspector's `Prefab Intent` tab uses the same read, prepare, review, commit and result
+ports. A verified `prefab_composition_failure(&basis)` reports the first actual failure, with a source
+location and slot only where established. `None` is not proof that every declaration resolved.
+A failure owned by another canonical Prefab requires that Prefab's own open-session basis.
+Budget/loading/authority refusals cannot authorize a guessed repair target. Preserved source can
+still Save/Reopen when composition rejects, and a rejected analysis supplies no native input stamp.
+Expansion reports expose `PrefabExpansionFailure`; its `reason()` returns
+`PrefabExpansionFailureKind`, covering source admission and work limits as well as invalid intent.
+The optional location describes an established source declaration, not mutation authority.
+
 Raw mixed patches use explicit persistent `SceneEntityId` values and declared component templates;
 use [retained construction](#construct-with-transaction-local-references) for source-owned
 transaction-local allocation and references. Schema-relative nested replacements have their separate

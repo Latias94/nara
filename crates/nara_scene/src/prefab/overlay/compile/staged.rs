@@ -17,18 +17,12 @@ mod values;
 type NodeId = usize;
 type ScopeId = usize;
 
-#[derive(Debug, Clone, Copy)]
-enum Segment {
-    Addition(usize),
-    Claim(usize),
-}
-
 /// Locates a declaration in an immutable input, never in a growing arena allocation.
 #[derive(Debug, Clone)]
 struct Site {
     source: ScopeId,
     entity: usize,
-    segments: Vec<Segment>,
+    segments: Vec<PrefabInstancePathSegment>,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -46,8 +40,8 @@ struct Program {
 
 #[derive(Debug, PartialEq, Eq)]
 struct State {
-    overlay: Option<DeclarationAddress>,
-    demands: Vec<(DeclarationAddress, usize, usize)>,
+    overlay: Option<PrefabInstanceLocation>,
+    demands: Vec<(PrefabInstanceLocation, usize, usize)>,
 }
 
 struct Node {
@@ -88,7 +82,7 @@ struct Compiler<'root, 'context, 'owner, F, E> {
 pub(super) fn expand<F, E>(
     context: &mut PrefabExpansionContext<'_, F, E>,
     document: &SceneDocument,
-) -> Result<SceneDocument, PrefabOverlayConflict>
+) -> Result<SceneDocument, PrefabExpansionFailure>
 where
     F: FnMut(&AssetRef, &mut PrefabExpansionWorkingSet) -> Result<Option<ResolvedPrefabSource>, E>,
 {
@@ -124,7 +118,7 @@ where
         let mut binding_bytes = Some(0usize);
         for &node in &compiler.scopes[0].output {
             for (component, program) in &compiler.nodes[node].programs {
-                compiler.program_bindings(component, program, |_, target| {
+                compiler.program_bindings(component, program, |_, _, target| {
                     binding_bytes = binding_bytes.and_then(|bytes| {
                         bytes
                             .checked_add(target_clone_bytes(target)?)?
@@ -137,14 +131,16 @@ where
         let mut demanded = Vec::new();
         for &node in &compiler.scopes[0].output {
             for (component, program) in &compiler.nodes[node].programs {
-                compiler.program_bindings(component, program, |scope, target| {
-                    demanded.push((scope, target.clone()))
+                compiler.program_bindings(component, program, |scope, slot, target| {
+                    demanded.push((scope, slot, target.clone()))
                 });
             }
         }
         let previous = compiler.scopes.len();
-        for (scope, target) in demanded {
-            compiler.resolve(scope, &target)?;
+        for (scope, slot, target) in demanded {
+            compiler
+                .resolve(scope, &target)
+                .map_err(|failure| compiler.scope_failure(scope, Some(slot), failure))?;
         }
         if previous == compiler.scopes.len() {
             break;
@@ -158,11 +154,11 @@ impl<'root, 'context, 'owner, F, E> Compiler<'root, 'context, 'owner, F, E>
 where
     F: FnMut(&AssetRef, &mut PrefabExpansionWorkingSet) -> Result<Option<ResolvedPrefabSource>, E>,
 {
-    fn admit(&mut self, bytes: Option<usize>) -> Result<(), PrefabOverlayConflict> {
+    fn admit(&mut self, bytes: Option<usize>) -> Result<(), PrefabExpansionFailure> {
         self.context
             .reserve_scratch_bytes(bytes, None, None)
             .then_some(())
-            .ok_or(PrefabOverlayConflict::WorkLimit)
+            .ok_or_else(|| PrefabExpansionFailureKind::WorkLimit.into())
     }
 
     fn source_entities(&self, scope: ScopeId) -> &[SceneEntityRecord] {
@@ -188,8 +184,12 @@ where
         for segment in &site.segments {
             let overlay = instance.overrides.as_ref()?;
             instance = match *segment {
-                Segment::Addition(index) => overlay.additions.get(index)?.prefab.as_ref()?,
-                Segment::Claim(index) => overlay.instances.get(index)?.value.as_ref()?,
+                PrefabInstancePathSegment::Addition { index } => {
+                    overlay.additions.get(index)?.prefab.as_ref()?
+                }
+                PrefabInstancePathSegment::InstanceClaim { index } => {
+                    overlay.instances.get(index)?.value.as_ref()?
+                }
             };
         }
         Some(instance)
@@ -228,29 +228,25 @@ where
         }
     }
 
-    fn stable_site(&self, site: &Site) -> DeclarationAddress {
+    fn stable_site(&self, site: &Site) -> PrefabInstanceLocation {
         let entity = self.source_entities(site.source)[site.entity].id.clone();
-        let root = self.scopes[site.source]
+        let source = self.scopes[site.source]
             .source
             .as_ref()
-            .map_or(DeclarationRoot::Scene(entity.clone()), |source| {
-                DeclarationRoot::Prefab(source.key().clone(), entity)
+            .map_or(PrefabDeclarationSource::Containing, |source| {
+                PrefabDeclarationSource::Prefab(source.key().clone())
             });
-        DeclarationAddress {
-            root,
-            segments: site
-                .segments
-                .iter()
-                .map(|segment| match *segment {
-                    Segment::Addition(index) => DeclarationSegment::Addition(index),
-                    Segment::Claim(index) => DeclarationSegment::InstanceClaim(index),
-                })
-                .collect(),
+        PrefabInstanceLocation {
+            source,
+            path: PrefabInstancePath {
+                anchor: entity,
+                steps: site.segments.clone(),
+            },
         }
     }
 
     fn site_bytes(&self, site: &Site) -> Option<usize> {
-        size_of::<DeclarationAddress>()
+        size_of::<PrefabInstanceLocation>()
             .checked_add(provenance_string_bytes(
                 self.source_entities(site.source)[site.entity].id.as_str(),
             )?)?
@@ -263,11 +259,85 @@ where
             .checked_add(
                 site.segments
                     .len()
-                    .checked_mul(size_of::<DeclarationSegment>())?,
+                    .checked_mul(size_of::<PrefabInstancePathSegment>())?,
             )
     }
 
-    fn register_scope(&mut self, scope: ScopeId) -> Result<(), PrefabOverlayConflict> {
+    fn failure_with_location(
+        &mut self,
+        mut failure: PrefabExpansionFailure,
+        slot: Option<PrefabOverlaySlot>,
+        bytes: Option<usize>,
+        locate: impl FnOnce(&Self) -> PrefabInstanceLocation,
+    ) -> PrefabExpansionFailure {
+        if failure.location.is_some()
+            || matches!(
+                failure.reason,
+                PrefabExpansionFailureKind::WorkLimit | PrefabExpansionFailureKind::OwnerAdmission
+            )
+        {
+            return failure;
+        }
+        if self.admit(bytes).is_err() {
+            return PrefabExpansionFailureKind::WorkLimit.into();
+        }
+        failure.location = Some(locate(self));
+        failure.slot = slot;
+        failure
+    }
+
+    fn site_failure(
+        &mut self,
+        site: &Site,
+        slot: Option<PrefabOverlaySlot>,
+        failure: PrefabExpansionFailure,
+    ) -> PrefabExpansionFailure {
+        self.failure_with_location(failure, slot, self.site_bytes(site), |this| {
+            this.stable_site(site)
+        })
+    }
+
+    fn scope_failure(
+        &mut self,
+        scope: ScopeId,
+        slot: Option<PrefabOverlaySlot>,
+        failure: PrefabExpansionFailure,
+    ) -> PrefabExpansionFailure {
+        let Some(site) = self.scopes[scope].site.as_ref() else {
+            return failure;
+        };
+        let bytes = self.site_bytes(site);
+        self.failure_with_location(failure, slot, bytes, |this| {
+            this.stable_site(
+                this.scopes[scope]
+                    .site
+                    .as_ref()
+                    .expect("the declaring source is retained"),
+            )
+        })
+    }
+
+    fn record_failure(
+        &mut self,
+        record: Record,
+        failure: PrefabExpansionFailure,
+    ) -> PrefabExpansionFailure {
+        let (scope, slot) = match record {
+            Record::Source { .. } => return failure,
+            Record::Addition { scope, index } => {
+                (scope, Some(PrefabOverlaySlot::Addition { index }))
+            }
+            Record::Set { scope, index } => (scope, Some(PrefabOverlaySlot::Component { index })),
+        };
+        self.scope_failure(scope, slot, failure)
+    }
+
+    fn register_scope(&mut self, scope: ScopeId) -> Result<(), PrefabExpansionFailure> {
+        self.register_scope_inner(scope)
+            .map_err(|failure| self.scope_failure(scope, None, failure))
+    }
+
+    fn register_scope_inner(&mut self, scope: ScopeId) -> Result<(), PrefabExpansionFailure> {
         let entities = self.source_entities(scope);
         let count = entities.len();
         let additions = self
@@ -305,11 +375,11 @@ where
                 None,
                 None,
             )
-            .ok_or(PrefabOverlayConflict::WorkLimit)?;
+            .ok_or(PrefabExpansionFailureKind::WorkLimit)?;
         let mut usage = self.context.usage;
         usage.materialized_entities = entities;
         if !self.context.admit_working_usage(usage, None, None) {
-            return Err(PrefabOverlayConflict::WorkLimit);
+            return Err(PrefabExpansionFailureKind::WorkLimit.into());
         }
         self.context.usage = usage;
         let entities = self.source_entities(scope);
@@ -326,7 +396,7 @@ where
         let structure = validate_scene_structure(&document);
         if structure.has_errors() {
             self.context.diagnostics.extend(structure);
-            return Err(PrefabOverlayConflict::Placement);
+            return Err(PrefabExpansionFailureKind::OwnerAdmission.into());
         }
         if let Some(overlay) = self.overlay(scope) {
             let maximum = self.context.options.limits.working_bytes().get();
@@ -368,7 +438,7 @@ where
                         };
                     self.context
                         .fail_budget(kind, observed, maximum, anchor.as_ref(), None);
-                    PrefabOverlayConflict::WorkLimit
+                    PrefabExpansionFailureKind::WorkLimit
                 })?;
             let declarations = self
                 .context
@@ -380,7 +450,7 @@ where
                     anchor.as_ref(),
                     None,
                 )
-                .ok_or(PrefabOverlayConflict::WorkLimit)?;
+                .ok_or(PrefabExpansionFailureKind::WorkLimit)?;
             self.context.usage.overlay_declarations = declarations;
             self.admit(
                 cost.nodes
@@ -394,7 +464,7 @@ where
                     .keys()
                     .any(|component| !addition.components.contains_key(component))
             }) {
-                return Err(PrefabOverlayConflict::Reference);
+                return Err(PrefabExpansionFailureKind::Reference.into());
             }
             let mut claimed = BTreeSet::new();
             for claim in &overlay.instances {
@@ -402,7 +472,7 @@ where
                     || (claim.target.through.is_empty()
                         && matches!(claim.target.entity, PrefabEntityOrigin::InstanceAddition(_)))
                 {
-                    return Err(PrefabOverlayConflict::DuplicateIntent);
+                    return Err(PrefabExpansionFailureKind::DuplicateIntent.into());
                 }
             }
         }
@@ -426,7 +496,8 @@ where
                 let addition = &self.overlay(scope).unwrap().additions[index];
                 let slot = addition.prefab.as_ref().map(|_| {
                     let mut site = self.scopes[scope].site.as_ref().unwrap().clone();
-                    site.segments.push(Segment::Addition(index));
+                    site.segments
+                        .push(PrefabInstancePathSegment::Addition { index });
                     site
                 });
                 (
@@ -443,7 +514,7 @@ where
                 .insert(origin.clone(), node)
                 .is_some()
             {
-                return Err(PrefabOverlayConflict::DuplicateIntent);
+                return Err(PrefabExpansionFailureKind::DuplicateIntent.into());
             }
             self.locators.insert(locator.clone(), node);
             self.nodes.push(Node {
@@ -485,7 +556,7 @@ where
                     Some(&entity.id),
                     None,
                 ) {
-                    return Err(PrefabOverlayConflict::WorkLimit);
+                    return Err(PrefabExpansionFailureKind::WorkLimit.into());
                 }
             }
         }
@@ -548,7 +619,7 @@ where
         node: NodeId,
         site: &Site,
         _key: &SourceDocumentKey,
-    ) -> Result<State, PrefabOverlayConflict> {
+    ) -> Result<State, PrefabExpansionFailure> {
         // Only work which can still enter this slot distinguishes a finite re-entry.
         // Stable source positions, rather than arena addresses, detect actual recursion.
         self.admit(
@@ -564,7 +635,7 @@ where
         loop {
             if let Some(layer) = self.overlay(current) {
                 let mut count = 0usize;
-                structural_targets(layer, |_| count = count.saturating_add(1));
+                structural_targets(layer, |_, _| count = count.saturating_add(1));
                 let declaration_bytes =
                     self.site_bytes(self.scopes[current].site.as_ref().unwrap());
                 let bytes = declaration_bytes
@@ -580,7 +651,7 @@ where
                 let layer = self.overlay(current).unwrap();
                 let relative = self
                     .relative(current, node)
-                    .ok_or(PrefabOverlayConflict::OwnerAdmission)?;
+                    .ok_or(PrefabExpansionFailureKind::OwnerAdmission)?;
                 let prefix = relative
                     .through
                     .iter()
@@ -589,7 +660,7 @@ where
                     .collect::<Vec<_>>();
                 let declaration = self.stable_site(self.scopes[current].site.as_ref().unwrap());
                 let mut index = 0;
-                structural_targets(layer, |target| {
+                structural_targets(layer, |_, target| {
                     if target.through.len() >= prefix.len()
                         && target
                             .through
@@ -619,7 +690,7 @@ where
         node: NodeId,
         request: &AssetRef,
         key: &SourceDocumentKey,
-    ) -> Result<(), PrefabOverlayConflict> {
+    ) -> Result<(), PrefabExpansionFailure> {
         self.context
             .reserve_provenance_bytes(
                 size_of::<AssetRef>()
@@ -630,10 +701,10 @@ where
                 Some(request),
             )
             .then_some(())
-            .ok_or(PrefabOverlayConflict::WorkLimit)
+            .ok_or_else(|| PrefabExpansionFailureKind::WorkLimit.into())
     }
 
-    fn select_site(&self, node: NodeId) -> Result<Option<Site>, PrefabOverlayConflict> {
+    fn select_site(&mut self, node: NodeId) -> Result<Option<Site>, PrefabExpansionFailure> {
         let mut site = self.nodes[node].slot.clone();
         let mut current = self.nodes[node].scope;
         loop {
@@ -643,7 +714,7 @@ where
             {
                 let target = self
                     .relative(current, node)
-                    .ok_or(PrefabOverlayConflict::OwnerAdmission)?;
+                    .ok_or(PrefabExpansionFailureKind::OwnerAdmission)?;
                 let mut matched = false;
                 for (index, claim) in overlay.instances.iter().enumerate() {
                     if claim
@@ -655,15 +726,24 @@ where
                         && claim.target.entity == target.entity
                     {
                         if matched {
-                            return Err(PrefabOverlayConflict::DuplicateIntent);
+                            return Err(self.scope_failure(
+                                current,
+                                Some(PrefabOverlaySlot::InstanceClaim { index }),
+                                PrefabExpansionFailureKind::DuplicateIntent.into(),
+                            ));
                         }
                         if claim.target != target {
-                            return Err(PrefabOverlayConflict::SourceChanged);
+                            return Err(self.scope_failure(
+                                current,
+                                Some(PrefabOverlaySlot::InstanceClaim { index }),
+                                PrefabExpansionFailureKind::SourceChanged.into(),
+                            ));
                         }
                         matched = true;
                         site = claim.value.as_ref().map(|_| {
                             let mut site = self.scopes[current].site.as_ref().unwrap().clone();
-                            site.segments.push(Segment::Claim(index));
+                            site.segments
+                                .push(PrefabInstancePathSegment::InstanceClaim { index });
                             site
                         });
                     }
@@ -677,7 +757,7 @@ where
         Ok(site)
     }
 
-    fn open_slot(&mut self, node: NodeId) -> Result<Option<ScopeId>, PrefabOverlayConflict> {
+    fn open_slot(&mut self, node: NodeId) -> Result<Option<ScopeId>, PrefabExpansionFailure> {
         if self.nodes[node].opened {
             return Ok(self.nodes[node].entered);
         }
@@ -709,10 +789,19 @@ where
             self.nodes[node].opened = true;
             return Ok(None);
         };
+        self.open_selected_slot(node, &site)
+            .map_err(|failure| self.site_failure(&site, None, failure))
+    }
+
+    fn open_selected_slot(
+        &mut self,
+        node: NodeId,
+        site: &Site,
+    ) -> Result<Option<ScopeId>, PrefabExpansionFailure> {
         self.admit(Some(512))?;
         let instance = self
             .instance(&site)
-            .ok_or(PrefabOverlayConflict::OwnerAdmission)?;
+            .ok_or(PrefabExpansionFailureKind::OwnerAdmission)?;
         self.admit(
             provenance_asset_ref_bytes(&instance.source)
                 .and_then(|bytes| bytes.checked_add(size_of::<AssetRef>())),
@@ -745,10 +834,10 @@ where
                 "asset-ref",
                 &request,
             ));
-            return Err(PrefabOverlayConflict::WorkLimit);
+            return Err(PrefabExpansionFailureKind::WorkLimit.into());
         }
         if !self.context.reserve_resolved_instance(&anchor, &request) {
-            return Err(PrefabOverlayConflict::WorkLimit);
+            return Err(PrefabExpansionFailureKind::WorkLimit.into());
         }
         let mut working = self.context.working_set();
         working.source_depth = depth;
@@ -756,7 +845,7 @@ where
             Ok(source) => source,
             Err(error) => {
                 self.context.load_error = Some(error);
-                return Err(PrefabOverlayConflict::OwnerAdmission);
+                return Err(PrefabExpansionFailureKind::OwnerAdmission.into());
             }
         };
         self.context.options.limits = self
@@ -768,7 +857,7 @@ where
             .context
             .admit_working_usage(self.context.usage, Some(&anchor), Some(&request))
         {
-            return Err(PrefabOverlayConflict::WorkLimit);
+            return Err(PrefabExpansionFailureKind::WorkLimit.into());
         }
         let Some(source) = source else {
             self.context.diagnostics.push(with_asset_ref(
@@ -787,7 +876,7 @@ where
                 "asset-ref",
                 &request,
             ));
-            return Err(PrefabOverlayConflict::OwnerAdmission);
+            return Err(PrefabExpansionFailureKind::OwnerAdmission.into());
         };
         if source.key().kind() != SourceDocumentKind::Prefab {
             self.context.diagnostics.push(with_asset_ref(
@@ -798,17 +887,19 @@ where
                 "asset-ref",
                 &request,
             ));
-            return Err(PrefabOverlayConflict::SourceChanged);
+            return Err(PrefabExpansionFailureKind::OwnerAdmission.into());
         }
-        if !source.matches_authority(self.context.authority)
-            || self
-                .instance(&site)
-                .unwrap()
-                .overrides
-                .as_ref()
-                .is_some_and(|overlay| &overlay.base != source.key())
+        if !source.matches_authority(self.context.authority) {
+            return Err(PrefabExpansionFailureKind::OwnerAdmission.into());
+        }
+        if self
+            .instance(&site)
+            .unwrap()
+            .overrides
+            .as_ref()
+            .is_some_and(|overlay| &overlay.base != source.key())
         {
-            return Err(PrefabOverlayConflict::SourceChanged);
+            return Err(PrefabExpansionFailureKind::SourceChanged.into());
         }
         self.reserve_occurrence(node, &request, source.key())?;
         let state = self.state(node, &site, source.key())?;
@@ -846,15 +937,21 @@ where
                     diagnostic = with_asset_ref(diagnostic, "cycle-from", previous);
                 }
                 self.context.diagnostics.push(diagnostic);
-                return Err(PrefabOverlayConflict::OwnerAdmission);
+                return Err(PrefabExpansionFailureKind::OwnerAdmission.into());
             }
             ancestor = self.nodes[parent].scope;
         }
         let scope = self.scopes.len();
+        self.admit(
+            site.segments
+                .len()
+                .checked_mul(size_of::<PrefabInstancePathSegment>())
+                .and_then(|bytes| bytes.checked_add(size_of::<Site>())),
+        )?;
         self.scopes.push(Scope {
             source: Some(source),
             request: Some(request),
-            site: Some(site),
+            site: Some(site.clone()),
             anchor: Some(node),
             depth,
             nodes: BTreeMap::new(),
@@ -873,44 +970,49 @@ where
         &mut self,
         scope: ScopeId,
         target: &PrefabEntityTarget,
-    ) -> Result<NodeId, PrefabOverlayConflict> {
+    ) -> Result<NodeId, PrefabExpansionFailure> {
         let mut current = scope;
         for hop in &target.through {
             let anchor = *self.scopes[current]
                 .nodes
                 .get(&hop.anchor)
-                .ok_or_else(|| PrefabOverlayConflict::MissingTarget(target.clone()))?;
+                .ok_or(PrefabExpansionFailureKind::MissingTarget)?;
             current = self
                 .open_slot(anchor)?
-                .ok_or_else(|| PrefabOverlayConflict::MissingTarget(target.clone()))?;
+                .ok_or(PrefabExpansionFailureKind::MissingTarget)?;
             if self.scopes[current].source.as_ref().unwrap().key() != &hop.expected_base {
-                return Err(PrefabOverlayConflict::SourceChanged);
+                return Err(PrefabExpansionFailureKind::SourceChanged.into());
             }
         }
         self.scopes[current]
             .nodes
             .get(&target.entity)
             .copied()
-            .ok_or_else(|| PrefabOverlayConflict::MissingTarget(target.clone()))
+            .ok_or_else(|| PrefabExpansionFailureKind::MissingTarget.into())
     }
 
-    fn close_demands(&mut self, scanned: &mut usize) -> Result<(), PrefabOverlayConflict> {
+    fn close_demands(&mut self, scanned: &mut usize) -> Result<(), PrefabExpansionFailure> {
         while *scanned < self.scopes.len() {
             let scope = *scanned;
             *scanned += 1;
             let mut bytes = Some(0usize);
             if let Some(overlay) = self.overlay(scope) {
-                structural_targets(overlay, |target| {
-                    bytes = bytes.and_then(|bytes| bytes.checked_add(target_clone_bytes(target)?));
+                structural_targets(overlay, |_, target| {
+                    bytes = bytes.and_then(|bytes| {
+                        bytes
+                            .checked_add(target_clone_bytes(target)?)?
+                            .checked_add(size_of::<PrefabOverlaySlot>())
+                    });
                 });
             }
             self.admit(bytes)?;
             let mut targets = Vec::new();
             if let Some(overlay) = self.overlay(scope) {
-                structural_targets(overlay, |target| targets.push(target.clone()));
+                structural_targets(overlay, |slot, target| targets.push((slot, target.clone())));
             }
-            for target in targets {
-                self.resolve(scope, &target)?;
+            for (slot, target) in targets {
+                self.resolve(scope, &target)
+                    .map_err(|failure| self.scope_failure(scope, Some(slot), failure))?;
             }
         }
         Ok(())
@@ -919,7 +1021,7 @@ where
     fn close_structure(
         &mut self,
         scanned: &mut usize,
-    ) -> Result<SceneDocument, PrefabOverlayConflict> {
+    ) -> Result<SceneDocument, PrefabExpansionFailure> {
         loop {
             self.close_demands(scanned)?;
             self.postorder.clear();
@@ -945,19 +1047,19 @@ where
     fn target_nodes(
         &self,
         scope: ScopeId,
-    ) -> Result<BTreeMap<PrefabEntityTarget, SceneEntityId>, PrefabOverlayConflict> {
+    ) -> Result<BTreeMap<PrefabEntityTarget, SceneEntityId>, PrefabExpansionFailure> {
         self.scopes[scope]
             .output
             .iter()
             .map(|&node| {
                 self.relative(scope, node)
                     .map(|target| (target, self.nodes[node].locator.clone()))
-                    .ok_or(PrefabOverlayConflict::OwnerAdmission)
+                    .ok_or_else(|| PrefabExpansionFailureKind::OwnerAdmission.into())
             })
             .collect()
     }
 
-    fn compose_programs(&mut self) -> Result<(), PrefabOverlayConflict> {
+    fn compose_programs(&mut self) -> Result<(), PrefabExpansionFailure> {
         let bytes = self.nodes.iter().try_fold(0usize, |bytes, node| {
             bytes.checked_add(self.components(node.record).len().checked_mul(256)?)
         });
@@ -981,88 +1083,130 @@ where
         }
         for ordinal in 0..self.postorder.len() {
             let scope = self.postorder[ordinal];
-            let Some(overlay) = self.overlay(scope) else {
-                continue;
+            self.compose_scope_programs(scope)
+                .map_err(|failure| self.scope_failure(scope, None, failure))?;
+        }
+        Ok(())
+    }
+
+    fn compose_scope_programs(&mut self, scope: ScopeId) -> Result<(), PrefabExpansionFailure> {
+        let Some(overlay) = self.overlay(scope) else {
+            return Ok(());
+        };
+        let count = overlay.components.len();
+        let output = self.scopes[scope].output.len();
+        self.admit(
+            self.target_index_bytes(scope)
+                .and_then(|bytes| bytes.checked_add(output.checked_mul(128)?))
+                .and_then(|bytes| bytes.checked_add(count.checked_mul(256)?)),
+        )?;
+        let targets = self.target_nodes(scope)?;
+        let locators = self.scopes[scope]
+            .output
+            .iter()
+            .map(|&node| (&self.nodes[node].locator, node))
+            .collect::<BTreeMap<_, _>>();
+        let overlay = self.overlay(scope).unwrap();
+        let mut touched = BTreeSet::new();
+        let mut intents = Vec::with_capacity(count);
+        for (index, intent) in overlay.components.iter().enumerate() {
+            let (target, component) = match intent {
+                PrefabComponentIntent::Set {
+                    target, component, ..
+                }
+                | PrefabComponentIntent::Suppress { target, component }
+                | PrefabComponentIntent::Properties {
+                    target, component, ..
+                } => (target, component),
             };
-            let count = overlay.components.len();
-            let output = self.scopes[scope].output.len();
-            self.admit(
-                self.target_index_bytes(scope)
-                    .and_then(|bytes| bytes.checked_add(output.checked_mul(128)?))
-                    .and_then(|bytes| bytes.checked_add(count.checked_mul(256)?)),
-            )?;
-            let targets = self.target_nodes(scope)?;
-            let locators = self.scopes[scope]
-                .output
-                .iter()
-                .map(|&node| (&self.nodes[node].locator, node))
-                .collect::<BTreeMap<_, _>>();
-            let overlay = self.overlay(scope).unwrap();
-            let mut touched = BTreeSet::new();
-            let mut intents = Vec::with_capacity(count);
-            for (index, intent) in overlay.components.iter().enumerate() {
-                let (target, component) = match intent {
-                    PrefabComponentIntent::Set {
-                        target, component, ..
-                    }
-                    | PrefabComponentIntent::Suppress { target, component }
-                    | PrefabComponentIntent::Properties {
-                        target, component, ..
-                    } => (target, component),
-                };
-                if target.through.is_empty()
-                    && matches!(target.entity, PrefabEntityOrigin::InstanceAddition(_))
-                {
-                    return Err(PrefabOverlayConflict::DuplicateIntent);
-                }
-                let node = targets
-                    .get(target)
-                    .and_then(|locator| locators.get(locator))
-                    .copied()
-                    .ok_or_else(|| PrefabOverlayConflict::MissingTarget(target.clone()))?;
-                if !touched.insert((node, component.clone())) {
-                    return Err(PrefabOverlayConflict::DuplicateIntent);
-                }
-                intents.push((node, component.clone(), index));
+            if target.through.is_empty()
+                && matches!(target.entity, PrefabEntityOrigin::InstanceAddition(_))
+            {
+                return Err(self.scope_failure(
+                    scope,
+                    Some(PrefabOverlaySlot::Component { index }),
+                    PrefabExpansionFailureKind::DuplicateIntent.into(),
+                ));
             }
-            for (node, component, index) in intents {
-                let exists = self.nodes[node].programs.contains_key(&component);
-                match &self.overlay(scope).unwrap().components[index] {
-                    PrefabComponentIntent::Set { mode, .. } => {
-                        if (*mode == PrefabComponentSetMode::Add) == exists {
-                            return Err(PrefabOverlayConflict::Component);
-                        }
-                        self.nodes[node].programs.insert(
-                            component,
-                            Program {
-                                record: Record::Set { scope, index },
-                                properties: Vec::new(),
-                            },
-                        );
+            let Some(node) = targets
+                .get(target)
+                .and_then(|locator| locators.get(locator))
+                .copied()
+            else {
+                return Err(self.scope_failure(
+                    scope,
+                    Some(PrefabOverlaySlot::Component { index }),
+                    PrefabExpansionFailureKind::MissingTarget.into(),
+                ));
+            };
+            if !touched.insert((node, component.clone())) {
+                return Err(self.scope_failure(
+                    scope,
+                    Some(PrefabOverlaySlot::Component { index }),
+                    PrefabExpansionFailureKind::DuplicateIntent.into(),
+                ));
+            }
+            intents.push((node, component.clone(), index));
+        }
+        for (node, component, index) in intents {
+            let exists = self.nodes[node].programs.contains_key(&component);
+            match &self.overlay(scope).unwrap().components[index] {
+                PrefabComponentIntent::Set { mode, .. } => {
+                    if (*mode == PrefabComponentSetMode::Add) == exists {
+                        return Err(self.scope_failure(
+                            scope,
+                            Some(PrefabOverlaySlot::Component { index }),
+                            PrefabExpansionFailureKind::Component.into(),
+                        ));
                     }
-                    PrefabComponentIntent::Suppress { .. } => {
-                        if !exists {
-                            return Err(PrefabOverlayConflict::Component);
-                        }
-                        self.nodes[node].programs.remove(&component);
+                    self.nodes[node].programs.insert(
+                        component,
+                        Program {
+                            record: Record::Set { scope, index },
+                            properties: Vec::new(),
+                        },
+                    );
+                }
+                PrefabComponentIntent::Suppress { .. } => {
+                    if !exists {
+                        return Err(self.scope_failure(
+                            scope,
+                            Some(PrefabOverlaySlot::Component { index }),
+                            PrefabExpansionFailureKind::Component.into(),
+                        ));
                     }
-                    PrefabComponentIntent::Properties { claims, .. } => {
-                        self.admit(claims.len().checked_mul(size_of::<usize>()))?;
-                        let PrefabComponentIntent::Properties { claims, .. } =
-                            &self.overlay(scope).unwrap().components[index]
-                        else {
-                            unreachable!("the declaration kind does not change");
-                        };
-                        super::super::properties::validate_claim_paths(claims)?;
-                        let program = self.nodes[node]
-                            .programs
-                            .get_mut(&component)
-                            .ok_or(PrefabOverlayConflict::Component)?;
-                        program.properties.push((scope, index));
+                    self.nodes[node].programs.remove(&component);
+                }
+                PrefabComponentIntent::Properties { claims, .. } => {
+                    self.admit(claims.len().checked_mul(size_of::<usize>()))?;
+                    let PrefabComponentIntent::Properties { claims, .. } =
+                        &self.overlay(scope).unwrap().components[index]
+                    else {
+                        unreachable!("the declaration kind does not change");
+                    };
+                    super::super::properties::validate_claim_paths(claims).map_err(|reason| {
+                        self.scope_failure(
+                            scope,
+                            Some(PrefabOverlaySlot::Component { index }),
+                            reason.into(),
+                        )
+                    })?;
+                    if !self.nodes[node].programs.contains_key(&component) {
+                        return Err(self.scope_failure(
+                            scope,
+                            Some(PrefabOverlaySlot::Component { index }),
+                            PrefabExpansionFailureKind::Component.into(),
+                        ));
                     }
+                    let program = self.nodes[node]
+                        .programs
+                        .get_mut(&component)
+                        .expect("the component program was checked above");
+                    program.properties.push((scope, index));
                 }
             }
         }
+
         Ok(())
     }
 
@@ -1070,7 +1214,7 @@ where
         &self,
         component: &ComponentTypeId,
         program: &Program,
-        mut visit: impl FnMut(ScopeId, &PrefabEntityTarget),
+        mut visit: impl FnMut(ScopeId, PrefabOverlaySlot, &PrefabEntityTarget),
     ) {
         match program.record {
             Record::Source { .. } => {}
@@ -1081,7 +1225,11 @@ where
                     .into_iter()
                     .flatten()
                 {
-                    visit(scope, &binding.target);
+                    visit(
+                        scope,
+                        PrefabOverlaySlot::Addition { index },
+                        &binding.target,
+                    );
                 }
             }
             Record::Set { scope, index } => {
@@ -1089,7 +1237,11 @@ where
                     &self.overlay(scope).unwrap().components[index]
                 {
                     for binding in bindings {
-                        visit(scope, &binding.target);
+                        visit(
+                            scope,
+                            PrefabOverlaySlot::Component { index },
+                            &binding.target,
+                        );
                     }
                 }
             }
@@ -1098,8 +1250,17 @@ where
             if let PrefabComponentIntent::Properties { claims, .. } =
                 &self.overlay(scope).unwrap().components[index]
             {
-                for binding in claims.iter().flat_map(|claim| &claim.bindings) {
-                    visit(scope, &binding.target);
+                for (claim_index, claim) in claims.iter().enumerate() {
+                    for binding in &claim.bindings {
+                        visit(
+                            scope,
+                            PrefabOverlaySlot::Property {
+                                component_index: index,
+                                claim_index,
+                            },
+                            &binding.target,
+                        );
+                    }
                 }
             }
         }
@@ -1109,7 +1270,16 @@ where
         &mut self,
         scope: ScopeId,
         nested: &mut BTreeMap<SceneEntityId, Vec<SceneEntityId>>,
-    ) -> Result<SceneDocument, PrefabOverlayConflict> {
+    ) -> Result<SceneDocument, PrefabExpansionFailure> {
+        self.layout_scope_inner(scope, nested)
+            .map_err(|failure| self.scope_failure(scope, None, failure))
+    }
+
+    fn layout_scope_inner(
+        &mut self,
+        scope: ScopeId,
+        nested: &mut BTreeMap<SceneEntityId, Vec<SceneEntityId>>,
+    ) -> Result<SceneDocument, PrefabExpansionFailure> {
         let local = self.scopes[scope]
             .nodes
             .values()
@@ -1183,29 +1353,35 @@ where
     }
 }
 
-fn structural_targets(overlay: &PrefabOverlay, mut visit: impl FnMut(&PrefabEntityTarget)) {
-    for claim in &overlay.instances {
-        visit(&claim.target);
+fn structural_targets(
+    overlay: &PrefabOverlay,
+    mut visit: impl FnMut(PrefabOverlaySlot, &PrefabEntityTarget),
+) {
+    for (index, claim) in overlay.instances.iter().enumerate() {
+        visit(PrefabOverlaySlot::InstanceClaim { index }, &claim.target);
     }
-    for target in &overlay.suppressions {
-        visit(target);
+    for (index, target) in overlay.suppressions.iter().enumerate() {
+        visit(PrefabOverlaySlot::Suppression { index }, target);
     }
-    for placement in &overlay.placements {
-        visit(&placement.target);
+    for (index, placement) in overlay.placements.iter().enumerate() {
+        let slot = PrefabOverlaySlot::Placement { index };
+        visit(slot, &placement.target);
         if let PrefabPlacementParent::Entity(target) = &placement.parent {
-            visit(target);
+            visit(slot, target);
         }
         if let PrefabPlacementSlot::Before(target) | PrefabPlacementSlot::After(target) =
             &placement.slot
         {
-            visit(target);
+            visit(slot, target);
         }
     }
-    for component in &overlay.components {
+    for (index, component) in overlay.components.iter().enumerate() {
         match component {
             PrefabComponentIntent::Set { target, .. }
             | PrefabComponentIntent::Suppress { target, .. }
-            | PrefabComponentIntent::Properties { target, .. } => visit(target),
+            | PrefabComponentIntent::Properties { target, .. } => {
+                visit(PrefabOverlaySlot::Component { index }, target)
+            }
         }
     }
 }

@@ -183,7 +183,9 @@ fn preflight_plan(
     if existing.is_none() {
         budget.observe_node(depth)?;
     }
-    let child_depth = depth.checked_add(1).ok_or_else(depth_overflow)?;
+    let child_depth = depth
+        .checked_add(1)
+        .ok_or_else(|| depth_overflow(budget.limits.depth().get()))?;
     match first {
         ComponentFieldPathSegment::Field(_) => {
             let fields = match existing {
@@ -298,6 +300,18 @@ struct MaterializationBudget {
     bytes: usize,
 }
 
+pub(crate) fn validate_value_materialization_budget(
+    value: &ComponentValue,
+    limits: ComponentValueMaterializationLimits,
+) -> Result<(), ComponentCodecError> {
+    MaterializationBudget {
+        limits,
+        nodes: 0,
+        bytes: 0,
+    }
+    .observe_tree(value, 1)
+}
+
 enum ValueFrame<'value> {
     Value(&'value ComponentValue, usize),
     List(std::slice::Iter<'value, ComponentValue>, usize),
@@ -330,13 +344,17 @@ impl MaterializationBudget {
                         ComponentValue::List(values) if !values.is_empty() => {
                             pending.push(ValueFrame::List(
                                 values.iter(),
-                                depth.checked_add(1).ok_or_else(depth_overflow)?,
+                                depth
+                                    .checked_add(1)
+                                    .ok_or_else(|| depth_overflow(self.limits.depth().get()))?,
                             ));
                         }
                         ComponentValue::Map(values) if !values.is_empty() => {
                             pending.push(ValueFrame::Map(
                                 values.iter(),
-                                depth.checked_add(1).ok_or_else(depth_overflow)?,
+                                depth
+                                    .checked_add(1)
+                                    .ok_or_else(|| depth_overflow(self.limits.depth().get()))?,
                             ));
                         }
                         ComponentValue::List(_) | ComponentValue::Map(_) => {}
@@ -369,41 +387,50 @@ impl MaterializationBudget {
 
     fn observe_node(&mut self, depth: usize) -> Result<(), ComponentCodecError> {
         if depth > self.limits.depth().get() {
-            return Err(materialization_error(format!(
-                "depth limit {} exceeded",
-                self.limits.depth().get()
-            )));
+            return Err(ComponentCodecError::MaterializationDepthLimit {
+                observed: depth,
+                maximum: self.limits.depth().get(),
+            });
         }
-        self.nodes = self
-            .nodes
-            .checked_add(1)
-            .ok_or_else(|| materialization_error("node count overflow"))?;
+        self.nodes =
+            self.nodes
+                .checked_add(1)
+                .ok_or(ComponentCodecError::MaterializationNodeLimit {
+                    observed: usize::MAX,
+                    maximum: self.limits.nodes().get(),
+                })?;
         if self.nodes > self.limits.nodes().get() {
-            return Err(materialization_error(format!(
-                "node limit {} exceeded",
-                self.limits.nodes().get()
-            )));
+            return Err(ComponentCodecError::MaterializationNodeLimit {
+                observed: self.nodes,
+                maximum: self.limits.nodes().get(),
+            });
         }
         Ok(())
     }
 
     fn observe_bytes(&mut self, bytes: usize) -> Result<(), ComponentCodecError> {
-        self.bytes = self
-            .bytes
-            .checked_add(bytes)
-            .ok_or_else(|| materialization_error("logical byte count overflow"))?;
+        self.bytes =
+            self.bytes
+                .checked_add(bytes)
+                .ok_or(ComponentCodecError::MaterializationByteLimit {
+                    observed: usize::MAX,
+                    maximum: self.limits.bytes().get(),
+                })?;
         if self.bytes > self.limits.bytes().get() {
-            return Err(materialization_error(format!(
-                "logical byte limit {} exceeded",
-                self.limits.bytes().get()
-            )));
+            return Err(ComponentCodecError::MaterializationByteLimit {
+                observed: self.bytes,
+                maximum: self.limits.bytes().get(),
+            });
         }
         Ok(())
     }
 }
 
-fn depth_overflow() -> ComponentCodecError {
-    materialization_error("depth overflow")
+fn depth_overflow(maximum: usize) -> ComponentCodecError {
+    ComponentCodecError::MaterializationDepthLimit {
+        observed: usize::MAX,
+        maximum,
+    }
 }
 
 fn materialization_error(message: impl std::fmt::Display) -> ComponentCodecError {

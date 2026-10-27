@@ -54,6 +54,7 @@ pub struct ImguiEditorSubmission {
 pub(super) enum Recipient {
     Contribution,
     Authoring,
+    PrefabIntent,
 }
 
 #[derive(Clone)]

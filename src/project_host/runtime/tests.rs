@@ -29,6 +29,8 @@ mod image_publication_custody;
 mod owned_reopen;
 #[cfg(feature = "tooling")]
 mod owned_save;
+#[cfg(all(feature = "tooling", feature = "runtime-ui"))]
+mod prefab_revert;
 mod project_scene_requests;
 #[cfg(feature = "tooling")]
 mod source_import_refresh;

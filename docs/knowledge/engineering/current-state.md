@@ -3,7 +3,7 @@ type: "Current State"
 title: "Current Engineering State"
 description: "Derived summary of immutable engineering-memory shards."
 tags: ["engineering-memory", "derived"]
-source_fingerprint: "c06836856eac7e11883f3a4c31d411a35cb78de1d19cda82c4bae71627c6f8f1"
+source_fingerprint: "96cc7cc1ab1b6ffce03fcc129eddeb204aa7055eaa1bf7fa0ae93166b138d548"
 ---
 
 # Current State
@@ -12,8 +12,8 @@ source_fingerprint: "c06836856eac7e11883f3a4c31d411a35cb78de1d19cda82c4bae71627c
 
 This file is derived from immutable shards. Record new facts in shards, then render during integration.
 
-- Source fingerprint: `c06836856eac7e11883f3a4c31d411a35cb78de1d19cda82c4bae71627c6f8f1`
-- Immutable records: 958
+- Source fingerprint: `96cc7cc1ab1b6ffce03fcc129eddeb204aa7055eaa1bf7fa0ae93166b138d548`
+- Immutable records: 961
 - Active lane heads: 1
 
 # Active Registrations
@@ -69,6 +69,9 @@ This file is derived from immutable shards. Record new facts in shards, then ren
 
 # Recent Evidence
 
+- **Verification Evidence**: [Source-owned Prefab intent review and revert qualification](verification/2026-10/2026-10-27T012127Z-source-owned-prefab-intent-review-and-revert-qualification-4b14705bceb545e79f34b7afbc5144bf.md) - Qualifies bounded declaration observation, reviewed exact Revert, rejected composition fencing and explicit property value limits with independent and selected Windows evidence.
+- **Work Progress**: [Caller-owned property value budget correction in progress](progress/2026-10/2026-10-27T003831Z-caller-owned-property-value-budget-correction-in-progress-97d2113cb1104680bf471d7d3b7f036f.md) - Source Revert cohorts pass; final review found an implicit property payload ceiling and a shared resolver budget correction is being implemented.
+- **Work Progress**: [Source-owned Prefab Revert integration and review corrections](progress/2026-10/2026-10-26T234134Z-source-owned-prefab-revert-integration-and-review-corrections-c8fb754f923b49de9812cb196b66a3d7.md) - Bounded source observation, exact Revert and retained rejected composition are integrated; source and UI review corrections await combined qualification.
 - **Verification Evidence**: [Captured Editor Scene preview and ordered Image publication qualification](verification/2026-10/2026-10-26T221436Z-captured-editor-scene-preview-and-ordered-image-publication-qualification-bd36086e52524bb1b227dbd21da81056.md) - Actual working-copy capture, source receipts, native content and selection fences, and ordered Image observations have complete scoped owner, public, independent, and selected Windows evidence.
 - **Work Progress**: [Editor capture regression and ordered Image observation corrections in progress](progress/2026-10/2026-10-26T211738Z-editor-capture-regression-and-ordered-image-observation-corrections-in-progress-0e0a11438b61465db4dd9818d1f0ee2a.md) - Preview cohort passes 60 cases; complete root and Editor run finds five failures, with source selection and Image evidence corrections still being integrated.
 - **Work Progress**: [Editor background Scene capture and native content stamp integration in progress](progress/2026-10/2026-10-26T201651Z-editor-background-scene-capture-and-native-content-stamp-integration-in-progress-068027a8af994642921dff01067fe9e6.md) - Actual Editor capture, persistence receipts, Image hydration and native stamp fencing are being integrated; review found publication and Image races, with fresh product verification pending.
@@ -78,9 +81,6 @@ This file is derived from immutable shards. Record new facts in shards, then ren
 - **Work Progress**: [Shared authoring Prefab compilation and actual-demand capture integration checkpoint](progress/2026-10/2026-10-26T155605Z-shared-authoring-prefab-compilation-and-actual-demand-capture-integration-checkpoint-97e0cc8be0f24b7e8856ea8f88e7dbc4.md) - Uncommitted shared compiler and Host capture integration; structural-demand and early semantic admission counterexamples remain open.
 - **Work Progress**: [Production declarative Prefab overlay replacement integration in progress](progress/2026-10/2026-10-26T114409Z-production-declarative-prefab-overlay-replacement-integration-in-progress-b0111148a8964507912918f46ac2dace.md) - Breaking production replacement is in progress; do not commit or claim qualification until the complete owner/Host integration passes.
 - **Verification Evidence**: [Nested instance repair baseline and effective source-demand replacement design](verification/2026-10/2026-10-26T103859Z-nested-instance-repair-baseline-and-effective-source-demand-replacement-design-a6dbd3843c104c40b6ba817e428478f7.md) - Current exact nested replacement avoids discarded sources; the Proposed successor now separates source preservation, selection, activation and ordering.
-- **Verification Evidence**: [Canonical source identity codec and complete nested overlay round trips](verification/2026-10/2026-10-26T103001Z-canonical-source-identity-codec-and-complete-nested-overlay-round-trips-3ce62b507a1a445582c811954dac28c6.md) - Strict source-owned JSON/RON identity claims preserve all kind/origin axes without granting source admission.
-- **Verification Evidence**: [Source-owned field asset facts and actual Authoring closure capture](verification/2026-10/2026-10-26T092102Z-source-owned-field-asset-facts-and-actual-authoring-closure-capture-198247ca51f4465880fb2cb1f3240ccb.md) - Current Schema field/default references join complete record facts for bounded source dependency publication and real Host capture.
-- **Verification Evidence**: [Exact source-owned Prefab instance transactions and complete snapshot custody](verification/2026-10/2026-10-26T083507Z-exact-source-owned-prefab-instance-transactions-and-complete-snapshot-custody-85b9ca4381b94cad9c61fb829f479247.md) - Source instance declaration replacement through existing preparation/history and real Host consumers; durable declarative overlay storage remains separate.
 
 # Integration Notes
 

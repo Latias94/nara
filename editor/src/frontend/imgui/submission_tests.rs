@@ -30,7 +30,7 @@ pub(super) struct Evidence {
     pub(super) paint: Option<Box<dyn FnMut(&mut ImguiEditorPanelContext<'_, '_>)>>,
     close_resolution: Option<nara::tooling::EditorCloseDecision>,
     queued: Vec<PanelSubmissionId>,
-    finished: Vec<(PanelSubmissionId, PanelActionDispatch)>,
+    pub(super) finished: Vec<(PanelSubmissionId, PanelActionDispatch)>,
 }
 
 struct Probe(Rc<RefCell<Evidence>>);
@@ -1488,6 +1488,33 @@ impl Harness {
     pub(super) fn submit(&mut self, candidate: ImguiEditorSubmission) {
         self.frontend
             .submit_and_drive(&mut self.application, candidate, Duration::ZERO);
+    }
+
+    pub(super) fn click_control(&mut self, label: &str) {
+        let rect = super::ui_interaction_tests::control_rect(label)
+            .unwrap_or_else(|| panic!("the real ImGui control {label:?} was not painted"));
+        let clip = super::ui_interaction_tests::control_clip(label).unwrap();
+        let min = [rect.min[0].max(clip.min[0]), rect.min[1].max(clip.min[1])];
+        let max = [rect.max[0].min(clip.max[0]), rect.max[1].min(clip.max[1])];
+        assert!(max[0] > min[0] && max[1] > min[1], "{label:?} is clipped");
+        let point = [(min[0] + max[0]) * 0.5, (min[1] + max[1]) * 0.5];
+        self.context.io_mut().add_mouse_pos_event(point);
+        let candidate = self.draw();
+        self.submit(candidate);
+        self.context
+            .io_mut()
+            .add_mouse_button_event(dear_imgui_rs::MouseButton::Left, true);
+        let candidate = self.draw();
+        self.submit(candidate);
+        self.context
+            .io_mut()
+            .add_mouse_button_event(dear_imgui_rs::MouseButton::Left, false);
+        let candidate = self.draw();
+        self.submit(candidate);
+        for _ in 0..3 {
+            let candidate = self.draw();
+            self.submit(candidate);
+        }
     }
 
     fn close_dirty_document(&mut self) -> nara::tooling::EditorDocumentId {

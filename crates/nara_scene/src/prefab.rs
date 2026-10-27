@@ -31,16 +31,22 @@ use crate::provenance::provenance_string_bytes;
 
 #[cfg(test)]
 use crate::SourceDocumentKind;
+mod declaration;
 mod overlay;
 
+pub use declaration::{
+    PrefabDeclarationSource, PrefabExpansionFailure, PrefabExpansionFailureKind,
+    PrefabInstanceLocation, PrefabInstancePath, PrefabInstancePathSegment, PrefabOverlaySlot,
+    PrefabRevert,
+};
 #[cfg(feature = "serde")]
 pub(crate) use overlay::cost::{PrefabOverlayCostError, PrefabOverlayCostKind};
 pub(crate) use overlay::cost::{PrefabOverlayCostLimits, prefab_instance_cost};
 pub use overlay::{
     PrefabAddition, PrefabComponentIntent, PrefabComponentSetMode, PrefabEntityOrigin,
-    PrefabEntityTarget, PrefabInstanceClaim, PrefabInstanceHop, PrefabOverlay,
-    PrefabOverlayConflict, PrefabPlacement, PrefabPlacementParent, PrefabPlacementSlot,
-    PrefabPropertyClaim, PrefabPropertyIntent, PrefabReferenceBinding,
+    PrefabEntityTarget, PrefabInstanceClaim, PrefabInstanceHop, PrefabOverlay, PrefabPlacement,
+    PrefabPlacementParent, PrefabPlacementSlot, PrefabPropertyClaim, PrefabPropertyIntent,
+    PrefabReferenceBinding,
 };
 
 #[derive(Debug, Default, Clone, PartialEq)]
@@ -686,6 +692,8 @@ pub struct PrefabExpansionReport {
     /// not infer that source or claim a runtime occurrence.
     pub candidate: Option<ExpandedSceneDocument>,
     pub diagnostics: DiagnosticReport,
+    /// The first rejected compiler step, independent of source Schema classification.
+    pub failure: Option<PrefabExpansionFailure>,
     source_upgrade_required: bool,
 }
 
@@ -695,6 +703,7 @@ pub struct PrefabExpansionReport {
 pub struct AuthoringPrefabExpansionReport {
     pub candidate: Option<ExpandedSceneDocument>,
     pub diagnostics: DiagnosticReport,
+    pub failure: Option<PrefabExpansionFailure>,
     pub omissions: Vec<AuthoringPrefabOmission>,
     asset_references: Vec<nara_reflect::DeclaredAssetReference>,
     work_bytes: Option<usize>,
@@ -791,6 +800,7 @@ where
     Ok(AuthoringPrefabExpansionReport {
         candidate: report.candidate,
         diagnostics: report.diagnostics,
+        failure: report.failure,
         omissions: context.omissions,
         asset_references: context.asset_references,
         work_bytes,
@@ -1048,19 +1058,18 @@ where
             return PrefabExpansionReport {
                 candidate: None,
                 diagnostics: std::mem::take(&mut self.diagnostics),
+                failure: Some(PrefabExpansionFailureKind::WorkLimit.into()),
                 source_upgrade_required: false,
             };
         }
         let mut expanded = match overlay::compile::expand_document(self, document) {
             Ok(document) => document,
-            Err(conflict) => {
-                let anchor = document.roots.first().cloned().unwrap_or_else(|| {
-                    SceneEntityId::new("scene").expect("valid internal diagnostic locator")
-                });
-                self.push_overlay_conflict(&anchor, conflict);
+            Err(failure) => {
+                self.push_expansion_failure(&failure);
                 return PrefabExpansionReport {
                     candidate: None,
                     diagnostics: std::mem::take(&mut self.diagnostics),
+                    failure: Some(failure),
                     source_upgrade_required: false,
                 };
             }
@@ -1081,6 +1090,7 @@ where
             return PrefabExpansionReport {
                 candidate: None,
                 diagnostics: std::mem::take(&mut self.diagnostics),
+                failure: None,
                 source_upgrade_required: false,
             };
         }
@@ -1100,6 +1110,7 @@ where
         PrefabExpansionReport {
             candidate,
             diagnostics: std::mem::take(&mut self.diagnostics),
+            failure: None,
             source_upgrade_required: self.source_upgrade_required,
         }
     }
@@ -1107,7 +1118,6 @@ where
     fn allocate_projected_entity_ids(
         &mut self,
         document: &SceneDocument,
-        anchor_id: &SceneEntityId,
     ) -> Option<BTreeMap<SceneEntityId, SceneEntityId>> {
         let mut entity_ids = BTreeMap::new();
         for entity in &document.entities {
@@ -1128,7 +1138,7 @@ where
                         .get(),
                     self.options.limits.generated_identifier_bytes().get(),
                 ) {
-                    self.fail_prefab_remap_budget(error, anchor_id);
+                    self.fail_prefab_remap_budget(error, None);
                     return None;
                 }
                 self.next_projected_entity = ordinal
@@ -1138,7 +1148,7 @@ where
                 next_usage.generated_identifier_bytes = next_usage
                     .generated_identifier_bytes
                     .checked_add(generated_bytes)?;
-                if !self.admit_working_usage(next_usage, Some(anchor_id), None) {
+                if !self.admit_working_usage(next_usage, None, None) {
                     return None;
                 }
                 let candidate = SceneEntityId::new(format!("prefab_{ordinal}"))
@@ -1351,7 +1361,7 @@ where
     fn fail_prefab_remap_budget(
         &mut self,
         error: PrefabReferenceRemapError,
-        anchor_id: &SceneEntityId,
+        entity: Option<&SceneEntityId>,
     ) -> bool {
         let (kind, observed, maximum) = match error {
             PrefabReferenceRemapError::SingleGeneratedIdentifier { observed, maximum } => (
@@ -1371,7 +1381,7 @@ where
             ),
             PrefabReferenceRemapError::MissingSourceEntity => return false,
         };
-        self.fail_budget(kind, observed, maximum, Some(anchor_id), None);
+        self.fail_budget(kind, observed, maximum, entity, None);
         true
     }
 

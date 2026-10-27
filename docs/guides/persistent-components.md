@@ -433,6 +433,13 @@ mutation authority. Retired member declaration paths stay in the root field's `m
 retiring a parent protects descendants, and the metadata survives intermediate shape changes.
 Wire renames still require explicit component value migration while retaining semantic IDs.
 
+Use `resolve_component_property_with_limits` when a document or compiler owner admits a value
+larger than the standalone arbitrary-value profile. It accepts that owner's
+`ComponentValueMaterializationLimits` for logical node, byte and depth admission while retaining
+the same selector and complete value semantics. Schema/selector admission remains independent.
+Keep typed resource refusals distinct from invalid selectors and replacement values; a budget
+failure does not establish a conflicting source intent.
+
 For editing, pass ordered `AuthoringPropertyEdit` replacements to
 `prepare_authoring_property_edit` on a Scene/Prefab session, Workspace, project session or Editor
 Application, then use the existing `commit_authoring_edit`. The owner coalesces writes to each root
@@ -441,7 +448,7 @@ replacement payload are admitted before coalescing; final root patches and inver
 existing limits. Exact source revision/Schema checks, unavailable-record preservation and one Undo
 remain unchanged. This path replaces existing stored targets; root omission/default reset still
 uses the existing root-field operations. It is not a complete document/Prefab-occurrence address
-or the future declarative Prefab overlay format.
+and remains separate from the declarative Prefab overlay namespace and actual composition.
 
 Resolution failures retain `operation-index`, a static `property-error-kind`, and a
 `property-step-index` when the failing selector step is known. Tools can distinguish missing

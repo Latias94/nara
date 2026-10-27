@@ -15,7 +15,7 @@ use nara_reflect::{
 
 use crate::SceneEntityId;
 
-use super::{PrefabEntityTarget, PrefabOverlayConflict, PrefabReferenceBinding};
+use super::{PrefabEntityTarget, PrefabExpansionFailureKind, PrefabReferenceBinding};
 
 /// Reserves growth before default materialization or property/base copying. Taking only
 /// positive deltas is conservative when another slot shrinks; no payload is copied here.
@@ -23,15 +23,15 @@ pub(super) fn binding_growth(
     bindings: &[PrefabReferenceBinding],
     targets: &BTreeMap<PrefabEntityTarget, SceneEntityId>,
     limits: ComponentValueMaterializationLimits,
-) -> Result<usize, PrefabOverlayConflict> {
+) -> Result<usize, PrefabExpansionFailureKind> {
     if bindings.len() > limits.nodes().get() {
-        return Err(PrefabOverlayConflict::WorkLimit);
+        return Err(PrefabExpansionFailureKind::WorkLimit);
     }
     let mut growth = 0usize;
     for binding in bindings {
         let target = targets
             .get(&binding.target)
-            .ok_or_else(|| PrefabOverlayConflict::MissingTarget(binding.target.clone()))?;
+            .ok_or(PrefabExpansionFailureKind::MissingTarget)?;
         growth = growth
             .checked_add(
                 target
@@ -40,7 +40,7 @@ pub(super) fn binding_growth(
                     .saturating_sub(binding.expected.as_str().len()),
             )
             .filter(|growth| *growth <= limits.bytes().get())
-            .ok_or(PrefabOverlayConflict::WorkLimit)?;
+            .ok_or(PrefabExpansionFailureKind::WorkLimit)?;
     }
     Ok(growth)
 }
@@ -51,10 +51,11 @@ pub(super) fn bind_references(
     bindings: &[PrefabReferenceBinding],
     targets: &BTreeMap<PrefabEntityTarget, SceneEntityId>,
     limits: ComponentValueMaterializationLimits,
-) -> Result<ComponentValue, PrefabOverlayConflict> {
+) -> Result<ComponentValue, PrefabExpansionFailureKind> {
     let traversal = traversal_limits(limits, schema.fields().iter())?;
-    let plan = plan_declared_entity_references::<PrefabOverlayConflict>(schema, value, traversal)
-        .map_err(reference_error)?;
+    let plan =
+        plan_declared_entity_references::<PrefabExpansionFailureKind>(schema, value, traversal)
+            .map_err(reference_error)?;
     bind_plan(plan, value, bindings, targets, limits)
 }
 
@@ -65,10 +66,10 @@ pub(super) fn bind_property_references(
     bindings: &[PrefabReferenceBinding],
     targets: &BTreeMap<PrefabEntityTarget, SceneEntityId>,
     limits: ComponentValueMaterializationLimits,
-) -> Result<ComponentValue, PrefabOverlayConflict> {
+) -> Result<ComponentValue, PrefabExpansionFailureKind> {
     let traversal = traversal_limits(limits, std::iter::once(field))?;
     // Reflect roots this plan at the selected payload, including an empty scalar slot.
-    let plan = plan_declared_value_entity_references::<PrefabOverlayConflict>(
+    let plan = plan_declared_value_entity_references::<PrefabExpansionFailureKind>(
         field, shape, payload, traversal,
     )
     .map_err(reference_error)?;
@@ -79,8 +80,8 @@ pub(super) fn validate_references(
     schema: &ComponentSchema,
     value: &ComponentValue,
     limits: ComponentValueMaterializationLimits,
-) -> Result<(), PrefabOverlayConflict> {
-    plan_declared_entity_references::<PrefabOverlayConflict>(
+) -> Result<(), PrefabExpansionFailureKind> {
+    plan_declared_entity_references::<PrefabExpansionFailureKind>(
         schema,
         value,
         traversal_limits(limits, schema.fields().iter())?,
@@ -92,7 +93,7 @@ pub(super) fn validate_references(
 fn traversal_limits<'field>(
     limits: ComponentValueMaterializationLimits,
     fields: impl Iterator<Item = &'field ComponentFieldSchema>,
-) -> Result<EntityReferenceTraversalLimits, PrefabOverlayConflict> {
+) -> Result<EntityReferenceTraversalLimits, PrefabExpansionFailureKind> {
     // Reflect charges plan entries and their paths in addition to the payload. A payload
     // allowance must not charge that metadata twice. Bound it by admitted field identities,
     // payload size and depth while retaining separate exact candidate-value checks below.
@@ -114,24 +115,24 @@ fn traversal_limits<'field>(
         .saturating_mul(path_factor)
         .saturating_add(limits.nodes().get().saturating_mul(id_bytes));
     Ok(EntityReferenceTraversalLimits::new(
-        ItemLimit::new(nodes).ok_or(PrefabOverlayConflict::WorkLimit)?,
-        ByteLimit::new(bytes).ok_or(PrefabOverlayConflict::WorkLimit)?,
+        ItemLimit::new(nodes).ok_or(PrefabExpansionFailureKind::WorkLimit)?,
+        ByteLimit::new(bytes).ok_or(PrefabExpansionFailureKind::WorkLimit)?,
         limits.depth(),
     ))
 }
 
 fn reference_error(
-    error: ComponentEntityReferenceRewriteError<PrefabOverlayConflict>,
-) -> PrefabOverlayConflict {
+    error: ComponentEntityReferenceRewriteError<PrefabExpansionFailureKind>,
+) -> PrefabExpansionFailureKind {
     match error {
         ComponentEntityReferenceRewriteError::NodeLimit { .. }
         | ComponentEntityReferenceRewriteError::ByteLimit { .. }
         | ComponentEntityReferenceRewriteError::DepthLimit { .. }
         | ComponentEntityReferenceRewriteError::PathIndexOverflow => {
-            PrefabOverlayConflict::WorkLimit
+            PrefabExpansionFailureKind::WorkLimit
         }
         ComponentEntityReferenceRewriteError::Rewrite { error, .. } => error,
-        _ => PrefabOverlayConflict::Reference,
+        _ => PrefabExpansionFailureKind::Reference,
     }
 }
 
@@ -141,21 +142,21 @@ fn bind_plan(
     bindings: &[PrefabReferenceBinding],
     targets: &BTreeMap<PrefabEntityTarget, SceneEntityId>,
     limits: ComponentValueMaterializationLimits,
-) -> Result<ComponentValue, PrefabOverlayConflict> {
+) -> Result<ComponentValue, PrefabExpansionFailureKind> {
     if bindings.len() > limits.nodes().get() {
-        return Err(PrefabOverlayConflict::WorkLimit);
+        return Err(PrefabExpansionFailureKind::WorkLimit);
     }
     let mut pending = BTreeMap::new();
     for binding in bindings {
         if binding.slot.segments().len() > limits.depth().get()
             || binding.target.through.len() > limits.depth().get()
         {
-            return Err(PrefabOverlayConflict::WorkLimit);
+            return Err(PrefabExpansionFailureKind::WorkLimit);
         }
         // The compiler admits raw binding metadata before calling this helper. Its cost
         // belongs to that work budget, not to this component's candidate-value allowance.
         if pending.insert(&binding.slot, binding).is_some() {
-            return Err(PrefabOverlayConflict::Reference);
+            return Err(PrefabExpansionFailureKind::Reference);
         }
     }
 
@@ -166,43 +167,46 @@ fn bind_plan(
         if let EntityReference::SceneLocal { entity } = reference {
             let binding = pending
                 .remove(slot)
-                .ok_or(PrefabOverlayConflict::Reference)?;
+                .ok_or(PrefabExpansionFailureKind::Reference)?;
             if entity != &binding.expected {
-                return Err(PrefabOverlayConflict::Reference);
+                return Err(PrefabExpansionFailureKind::Reference);
             }
             let target = targets
                 .get(&binding.target)
-                .ok_or_else(|| PrefabOverlayConflict::MissingTarget(binding.target.clone()))?;
+                .ok_or(PrefabExpansionFailureKind::MissingTarget)?;
             original_reference_bytes =
                 original_reference_bytes.saturating_add(entity.as_str().len());
             resolved_reference_bytes =
                 resolved_reference_bytes.saturating_add(target.as_str().len());
             resolved.insert(slot.clone(), target);
         }
-        Ok::<_, PrefabOverlayConflict>(())
+        Ok::<_, PrefabExpansionFailureKind>(())
     })
     .map_err(reference_error)?;
     // Persistent, Null, asset and non-reference slots never consume local bindings.
     if !pending.is_empty() {
-        return Err(PrefabOverlayConflict::Reference);
+        return Err(PrefabExpansionFailureKind::Reference);
     }
     let cost = value
         .cost_up_to(limits.nodes().get(), limits.bytes().get())
-        .ok_or(PrefabOverlayConflict::WorkLimit)?;
+        .ok_or(PrefabExpansionFailureKind::WorkLimit)?;
     let candidate_bytes = cost
         .logical_bytes()
         .checked_sub(original_reference_bytes)
         .and_then(|bytes| bytes.checked_add(resolved_reference_bytes))
-        .ok_or(PrefabOverlayConflict::WorkLimit)?;
+        .ok_or(PrefabExpansionFailureKind::WorkLimit)?;
     if candidate_bytes > limits.bytes().get() {
-        return Err(PrefabOverlayConflict::WorkLimit);
+        return Err(PrefabExpansionFailureKind::WorkLimit);
     }
 
     let mut candidate = value.clone();
     plan.rewrite_in_place(&mut candidate, |slot, reference| {
-        Ok::<_, PrefabOverlayConflict>(match reference {
+        Ok::<_, PrefabExpansionFailureKind>(match reference {
             EntityReference::SceneLocal { .. } => EntityReference::SceneLocal {
-                entity: (*resolved.get(slot).ok_or(PrefabOverlayConflict::Reference)?).clone(),
+                entity: (*resolved
+                    .get(slot)
+                    .ok_or(PrefabExpansionFailureKind::Reference)?)
+                .clone(),
             },
             EntityReference::Persistent { .. } => reference.clone(),
         })
@@ -265,19 +269,19 @@ mod tests {
         );
         assert_eq!(
             bind(&local("socket"), &[]),
-            Err(PrefabOverlayConflict::Reference)
+            Err(PrefabExpansionFailureKind::Reference)
         );
         assert_eq!(
             bind(&local("stale"), std::slice::from_ref(&binding)),
-            Err(PrefabOverlayConflict::Reference)
+            Err(PrefabExpansionFailureKind::Reference)
         );
         assert_eq!(
             bind(&local("socket"), &[binding.clone(), binding.clone()]),
-            Err(PrefabOverlayConflict::Reference)
+            Err(PrefabExpansionFailureKind::Reference)
         );
         assert_eq!(
             bind(&ComponentValue::Null, &[binding]),
-            Err(PrefabOverlayConflict::Reference)
+            Err(PrefabExpansionFailureKind::Reference)
         );
     }
 
@@ -300,7 +304,7 @@ mod tests {
                 &targets,
                 limits
             ),
-            Err(PrefabOverlayConflict::WorkLimit),
+            Err(PrefabExpansionFailureKind::WorkLimit),
         );
     }
 }

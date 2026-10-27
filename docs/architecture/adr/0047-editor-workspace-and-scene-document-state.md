@@ -104,6 +104,11 @@ Rules:
   develops the paged inventory/finite-read interface; its presence is not implementation evidence.
 - Prepared edits remain owned by the document session. Workspace/Editor adapters carry their
   exact target and operation result without rebuilding validation, inverse or history logic.
+- Prefab declaration observation is selection-independent and bound to the same exact document
+  query basis. It includes structural and dormant intent, not only unavailable component facts.
+  Bound scanning and copied declarations before allocation. Declaration review focus is local
+  tool state, not a second selected-entity owner. A prepared source repair may commit while
+  composition remains rejected; source, composition, native preview and Save outcomes are separate.
 - Retained construction uses that same source owner. Workspace routes an explicit document plus
   the draft's exact basis, and carries a nominal prepared construction with its fixed local mapping.
   No navigation change or generated-entity selection is implicit. Success returns the actual

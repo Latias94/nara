@@ -991,6 +991,7 @@ impl PreparedAuthoringProject {
             source_facts,
             usage,
             preview: startup_preview,
+            composition_failure: _,
             root_revision: _,
             authority: _,
         } = capture;

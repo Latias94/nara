@@ -1668,7 +1668,7 @@ mod tests {
                 .startup_compilation_diagnostics()
                 .iter()
                 .any(|diagnostic| {
-                    diagnostic.code().as_str() == "scene.prefab-overlay-conflict"
+                    diagnostic.code().as_str() == "scene.prefab-compilation-failed"
                 })
         );
         assert_eq!(
@@ -2026,7 +2026,7 @@ mod tests {
                 .startup_compilation_diagnostics()
                 .iter()
                 .any(|diagnostic| {
-                    diagnostic.code().as_str() == "scene.prefab-overlay-conflict"
+                    diagnostic.code().as_str() == "scene.prefab-compilation-failed"
                 })
         );
         let expected_sources = std::collections::BTreeSet::from([

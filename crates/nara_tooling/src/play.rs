@@ -870,6 +870,51 @@ fn with_codec_error(
             ),
             "message",
         ),
+        ComponentCodecError::MaterializationNodeLimit { observed, maximum } => {
+            diagnostic::with_public_u64(
+                diagnostic::with_public_u64(
+                    diagnostic::with_public_identifier(
+                        entry,
+                        "codec_reason",
+                        "materialization_node_limit",
+                    ),
+                    "observed",
+                    u64::try_from(*observed).unwrap_or(u64::MAX),
+                ),
+                "maximum",
+                u64::try_from(*maximum).unwrap_or(u64::MAX),
+            )
+        }
+        ComponentCodecError::MaterializationByteLimit { observed, maximum } => {
+            diagnostic::with_public_u64(
+                diagnostic::with_public_u64(
+                    diagnostic::with_public_identifier(
+                        entry,
+                        "codec_reason",
+                        "materialization_byte_limit",
+                    ),
+                    "observed",
+                    u64::try_from(*observed).unwrap_or(u64::MAX),
+                ),
+                "maximum",
+                u64::try_from(*maximum).unwrap_or(u64::MAX),
+            )
+        }
+        ComponentCodecError::MaterializationDepthLimit { observed, maximum } => {
+            diagnostic::with_public_u64(
+                diagnostic::with_public_u64(
+                    diagnostic::with_public_identifier(
+                        entry,
+                        "codec_reason",
+                        "materialization_depth_limit",
+                    ),
+                    "observed",
+                    u64::try_from(*observed).unwrap_or(u64::MAX),
+                ),
+                "maximum",
+                u64::try_from(*maximum).unwrap_or(u64::MAX),
+            )
+        }
         ComponentCodecError::EntityMissing => {
             diagnostic::with_public_identifier(entry, "codec_reason", "entity_missing")
         }

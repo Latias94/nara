@@ -373,6 +373,27 @@ close/reopen the dependency, and reject stale or externally changed captures. Na
 input authorization need separate execution evidence. Domain capture tests alone cannot qualify
 the Editor coordinator, image publication or UI indication.
 
+## Source-Intent Repair Follow-Up (2026-10-27)
+
+The Unity 6.3 English Manual's
+[Unused overrides](https://docs.unity.com/en-us/engine/6000.3/manual/working-with-gameobjects/prefabs/override/unused-overrides)
+page was retrieved on 2026-10-27. The service returned no content for the older selected 6.0 URL
+during this follow-up; that does not invalidate the earlier retrieval or establish a change
+between Editor versions. The 6.3 page explicitly describes retained unused overrides and an
+Overrides-menu cleanup action with confirmation. It warns that the stored value is deleted by
+cleanup and describes reapplying retained values when a field returns.
+
+**Nara inference:** make preserved intent discoverable even when preview cannot activate. Offer
+an explicit source-owned Revert with a reviewable candidate and one history operation. Retain
+unselected unknown intent, including siblings in the same anchor. This is a bounded Nara repair
+contract, not a claim that Unity's bulk cleanup has identical semantics.
+
+The pinned Godot Inspector's `_property_pinned` uses `EditorUndoRedoManager` to record both the
+pin change and its inverse. `EditorPropertyRevert::get_property_revert_value` asks the object
+for its contextual revert value before falling back to the property-default utility. These
+owners support the distinction between stored pin intent, inherited/default values and history;
+they do not specify Nara's fail-fast conflict locations or snapshot array selectors.
+
 ## Limits
 
 - Unity documentation and the bounded C# follow-up supply public intent and selected Editor

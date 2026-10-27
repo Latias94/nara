@@ -484,8 +484,13 @@ fn descendant_claims_bind_the_selected_replacement_base_instead_of_the_old_sourc
             );
         } else {
             assert!(report.candidate.is_none());
-            assert!(report.diagnostics.iter().any(|diagnostic|
-                diagnostic.code().as_str() == "scene.prefab-overlay-conflict"));
+            assert!(
+                report
+                    .diagnostics
+                    .iter()
+                    .any(|diagnostic| diagnostic.code().as_str()
+                        == "scene.prefab-compilation-failed")
+            );
         }
         assert_eq!(*resolver.requests.borrow(), [source("p"), source("r")]);
         assert_eq!(document, before);

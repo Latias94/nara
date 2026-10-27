@@ -13,6 +13,8 @@ use crate::project_host::authoring::tests::independent_capture::{
     independent_project, open_second_scene,
 };
 
+mod composition_failure;
+
 const SECOND_SCENE: &str = "scenes/second.scene.json";
 
 fn unavailable_scene(entities: usize, payload_bytes: usize) -> SceneDocument {

@@ -32,6 +32,12 @@ pub use construction::{
 };
 
 #[cfg(feature = "serde")]
+mod prefab_declarations;
+#[cfg(feature = "serde")]
+pub use prefab_declarations::{
+    PrefabDeclarationError, PrefabDeclarationLimits, PrefabInstanceObservation,
+};
+#[cfg(feature = "serde")]
 mod prepared;
 #[cfg(feature = "serde")]
 pub use prepared::{PreparedPrefabAuthoringEdit, PreparedSceneAuthoringEdit};

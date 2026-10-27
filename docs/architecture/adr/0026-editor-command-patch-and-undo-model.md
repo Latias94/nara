@@ -2,7 +2,7 @@
 
 **Status**: Accepted
 **Date**: 2026-07-08
-**Last Revised**: 2026-10-26
+**Last Revised**: 2026-10-27
 **Amended**: 2026-08-15 to require exact mutation preconditions and independently bounded,
 branch-aware authoring history
 **Refined By**: ADR 0043: Scene, Prefab, and Patch Document Migration Policy; ADR 0047:
@@ -106,14 +106,24 @@ Rules:
   ordinary revision/Schema, complete forward/reverse replay and history admission still apply.
   It can attach, replace or detach that declaration while preserving the entity's local components,
   children and placement. Detaching does not convert generated projection records to local data.
-  Preparation does not resolve or activate a Prefab, and unavailable-record preservation remains
-  a barrier to destructive replacement; this operation does not grant implicit repair authority.
+  Preparation does not resolve or activate a Prefab. Complete explicit replacement is the
+  anchor-local repair boundary in ADR 0038; unrelated unavailable declarations and direct records
+  remain protected. A generic field edit does not acquire that repair authority.
   Borrowed programmatic input must satisfy bounded declaration/value depth before recursive
   equality, cloning or serialization; post-copy file validation is not allocation admission.
 - Exact patches edit a containing source's complete optional `PrefabInstance`, including its
   declarative overlay, through one prepared transaction and inverse. Durable overlay claims do
   not carry old-value or placement snapshots and are not produced by persisting root-field
   coalescing. Projection compilation creates no source session, history or dirty transition.
+- Source-owned Prefab Revert preparation reads the exact current declaration and lowers one
+  requested snapshot path/intent change to `SetPrefabInstance`. It returns the existing prepared
+  source token with one owner-created inverse. A caller does not reconstruct unavailable payloads
+  or supply a second inverse. This narrower helper must preserve every unselected declaration,
+  including unavailable siblings within the same anchor; the whole-anchor repair exception alone
+  does not prove that footprint. Revert performs no implicit reference cleanup or structural cascade.
+  Hosts may admit that immutable source-owned repair candidate for a UI Prefab without admitting
+  arbitrary raw structural patches. The dedicated preparation origin is not caller-set metadata,
+  and commit still checks the source owner, revision and Schema admission.
 
 ```mermaid
 flowchart TD

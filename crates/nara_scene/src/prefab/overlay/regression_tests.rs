@@ -7,7 +7,7 @@ use nara_reflect::{
 
 use super::*;
 use super::{
-    PrefabOverlayConflict as Conflict, PrefabPropertyClaim as PropertyClaim,
+    PrefabExpansionFailureKind as Conflict, PrefabPropertyClaim as PropertyClaim,
     PrefabPropertyIntent as PropertyIntent,
 };
 
@@ -897,7 +897,7 @@ mod reference_regressions {
                         &rebound,
                         Default::default()
                     ),
-                    Err(PrefabOverlayConflict::MissingTarget(right))
+                    Err(PrefabExpansionFailureKind::MissingTarget)
                 );
             }
         }
@@ -915,20 +915,23 @@ mod reference_regressions {
         stale.expected = id("old-local");
         let missing = PrefabEntityTarget::addition(id("missing"));
         let cases = [
-            (vec![], PrefabOverlayConflict::Reference),
-            (vec![first.clone()], PrefabOverlayConflict::Reference),
+            (vec![], PrefabExpansionFailureKind::Reference),
+            (vec![first.clone()], PrefabExpansionFailureKind::Reference),
             (
                 vec![first.clone(), first.clone(), second.clone()],
-                PrefabOverlayConflict::Reference,
+                PrefabExpansionFailureKind::Reference,
             ),
             (
                 vec![first.clone(), second, binding(slot(2), target.clone())],
-                PrefabOverlayConflict::Reference,
+                PrefabExpansionFailureKind::Reference,
             ),
-            (vec![first.clone(), stale], PrefabOverlayConflict::Reference),
+            (
+                vec![first.clone(), stale],
+                PrefabExpansionFailureKind::Reference,
+            ),
             (
                 vec![first, binding(slot(1), missing.clone())],
-                PrefabOverlayConflict::MissingTarget(missing),
+                PrefabExpansionFailureKind::MissingTarget,
             ),
         ];
         for (bindings, expected) in cases {
@@ -1063,7 +1066,7 @@ mod reference_regressions {
                     &targets,
                     Default::default()
                 ),
-                Err(PrefabOverlayConflict::Reference)
+                Err(PrefabExpansionFailureKind::Reference)
             );
         }
         let replacement =
@@ -1076,7 +1079,7 @@ mod reference_regressions {
                 &targets,
                 Default::default()
             ),
-            Err(PrefabOverlayConflict::Reference)
+            Err(PrefabExpansionFailureKind::Reference)
         );
         let rebound = bind_references(
             &schema,
@@ -1102,7 +1105,7 @@ mod reference_regressions {
             ComponentValue::map([("links", ComponentValue::map([("hidden", local("socket"))]))]);
         assert_eq!(
             bind_references(&opaque, &hidden, &[], &targets, Default::default()),
-            Err(PrefabOverlayConflict::Reference)
+            Err(PrefabExpansionFailureKind::Reference)
         );
         let required = schema(ComponentValueShape::EntityRef);
         for invalid in [
@@ -1112,7 +1115,7 @@ mod reference_regressions {
         ] {
             assert_eq!(
                 bind_references(&required, &invalid, &[], &targets, Default::default()),
-                Err(PrefabOverlayConflict::Reference)
+                Err(PrefabExpansionFailureKind::Reference)
             );
         }
         let limits = ComponentValueMaterializationLimits::new(
@@ -1130,7 +1133,7 @@ mod reference_regressions {
             ComponentValue::map([("links", ComponentValue::List(vec![local("socket"); 9]))]);
         assert_eq!(
             bind_references(&list, &excessive_value, &excessive, &targets, limits),
-            Err(PrefabOverlayConflict::WorkLimit)
+            Err(PrefabExpansionFailureKind::WorkLimit)
         );
         let nullable = schema(ComponentValueShape::list(ComponentValueShape::optional(
             ComponentValueShape::EntityRef,
@@ -1139,7 +1142,7 @@ mod reference_regressions {
             ComponentValue::map([("links", ComponentValue::List(vec![ComponentValue::Null; 9]))]);
         assert_eq!(
             bind_references(&nullable, &oversized, &[], &targets, limits),
-            Err(PrefabOverlayConflict::WorkLimit)
+            Err(PrefabExpansionFailureKind::WorkLimit)
         );
     }
 }
@@ -2625,9 +2628,19 @@ mod expansion {
                 ComponentValue::map([("note", ComponentValue::String("hi".into()))]),
             );
         }
-        for limits in [
-            exact.with_materialized_value_nodes(ItemLimit::new(3).unwrap()),
-            exact.with_materialized_value_bytes(ByteLimit::new(11).unwrap()),
+        for (limits, kind, observed, maximum) in [
+            (
+                exact.with_materialized_value_nodes(ItemLimit::new(3).unwrap()),
+                "materialized-value-nodes",
+                2,
+                1,
+            ),
+            (
+                exact.with_materialized_value_bytes(ByteLimit::new(11).unwrap()),
+                "materialized-value-bytes",
+                6,
+                5,
+            ),
         ] {
             let report = source.expand_prefabs_with_options(
                 &registry,
@@ -2636,20 +2649,33 @@ mod expansion {
             );
             assert!(report.candidate.is_none());
             assert!(report.provenance().is_none());
-            assert!(
-                report.diagnostics.iter().any(|diagnostic| {
-                    diagnostic.code().as_str() == "scene.prefab-default-materialization-failed"
-                        && diagnostic.fields().iter().any(|field| {
-                            field.key().as_str() == "entity-id"
-                                && matches!(
-                                    field.value(),
-                                    nara_diagnostic::DiagnosticValueRef::Identifier("last")
-                                )
-                        })
-                }),
-                "{:?}",
-                report.diagnostics
+            let diagnostic = report
+                .diagnostics
+                .iter()
+                .find(|diagnostic| {
+                    diagnostic.code().as_str() == "scene.prefab-expansion-budget-exceeded"
+                })
+                .expect("default materialization retains its typed budget refusal");
+            let field = |key: &str| {
+                diagnostic
+                    .fields()
+                    .iter()
+                    .find(|field| field.key().as_str() == key)
+                    .unwrap()
+                    .value()
+            };
+            use nara_diagnostic::DiagnosticValueRef;
+            assert_eq!(field("budget-kind"), DiagnosticValueRef::Identifier(kind));
+            assert_eq!(field("observed"), DiagnosticValueRef::Unsigned(observed));
+            assert_eq!(field("maximum"), DiagnosticValueRef::Unsigned(maximum));
+            assert_eq!(field("entity-id"), DiagnosticValueRef::Identifier("last"));
+            let failure = report.failure.as_ref().unwrap();
+            assert_eq!(
+                failure.reason(),
+                &crate::PrefabExpansionFailureKind::WorkLimit,
             );
+            assert!(failure.location().is_none());
+            assert!(failure.slot().is_none());
             assert_eq!((&source, &resolver), (&before.0, &before.1));
         }
         assert!(base.entities.iter().all(|entity| {

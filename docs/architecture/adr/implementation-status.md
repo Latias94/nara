@@ -430,6 +430,19 @@ These are overlapping scoped cohorts, not full foundation or all-platform qualif
 Conversion, structured conflict repair, inherited Inspector selection, the direct UI Canvas path
 and repeated Schema descriptor work remain open; this checkpoint does not merge the branch.
 
+The [source-intent review/Revert successor](../../knowledge/engineering/verification/2026-10/2026-10-27T012127Z-source-owned-prefab-intent-review-and-revert-qualification-4b14705bceb545e79f34b7afbc5144bf.md)
+qualifies bounded source declaration observations, exact source-owned Revert, actual failing-source
+locations, rejected composition observations and the Inspector's selection-independent Prefab
+Intent review/cancel/commit path. ADRs 0026/0038/0047/0090 adopt that narrow repair; 0011/0038
+separate explicit owner value limits from selector admission. Reflect/Scene/Tooling pass 912 cases,
+root/Editor libraries pass 770, independent consumers pass 19 and the selected Reference Game
+passes 13. Six selected actual Windows/DX12 trajectories, minimal Scene and workspace target
+checks pass. The cohorts overlap. Inspector mouse controls have owned ImGui-host evidence, not
+the complete native nested Revert/history/persistence chain. Canonical foreign-source navigation,
+convert-to-local, cross-source Apply, shared Canvas capture, inherited Inspector selection and
+aggregate repeated Schema/value work remain open. Earlier checkpoints keep their original scope;
+this successor does not complete R5 or the full foundation Goal.
+
 The [R5c custody qualification](../../knowledge/engineering/verification/2026-10/2026-10-23T163942Z-per-document-persistence-custody-qualification-30cc4d7af3a445d18d9adf5b795886e2.md)
 implements typed per-document Scene/Prefab file custody under ADRs 0047/0118. Save retains its
 admission-time Host through acknowledgement/uncertainty; Reopen validates exact retained Host

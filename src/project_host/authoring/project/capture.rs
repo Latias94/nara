@@ -165,6 +165,7 @@ pub(crate) struct AuthoringDocumentCapture {
     pub(super) source_facts: Arc<[Arc<AuthoringSourceFact>]>,
     pub(super) usage: AuthoringProjectAdmissionUsage,
     pub(super) preview: Option<CapturedAuthoringPreview>,
+    pub(super) composition_failure: Option<nara_scene::PrefabExpansionFailure>,
     pub(super) root_revision: Option<nara_scene::SceneAuthoringRevision>,
     pub(super) authority: Arc<AuthoringSchemaReceipt>,
 }
@@ -243,6 +244,14 @@ impl AuthoringDocumentCapture {
     }
     pub(crate) fn take_preview(&mut self) -> Option<CapturedAuthoringPreview> {
         self.preview.take()
+    }
+
+    pub(crate) fn composition_failure(&self) -> Option<&nara_scene::PrefabExpansionFailure> {
+        self.composition_failure.as_ref()
+    }
+
+    pub(crate) fn requires_recapture(&self) -> bool {
+        !self.unresolved_dependencies.is_empty()
     }
 
     pub(crate) const fn root_revision(&self) -> Option<nara_scene::SceneAuthoringRevision> {
@@ -523,6 +532,10 @@ pub(super) fn capture_scene(
     )?;
     let diagnostics = std::mem::take(&mut compiled.diagnostics);
     budget.charge_source_bytes(0, 0, 0, diagnostics.retained_bytes())?;
+    if let Some(failure) = &compiled.failure {
+        budget.charge_source_bytes(0, 0, 0, composition_failure_retained_bytes(failure)?)?;
+    }
+    let composition_failure = compiled.failure.take();
     let preview = if compiled.candidate.is_some() {
         let key_bytes = containing_native_source.key().retained_bytes();
         budget.charge_source_bytes(0, 0, 0, key_bytes)?;
@@ -796,9 +809,34 @@ pub(super) fn capture_scene(
         source_facts: source_facts.into(),
         usage,
         preview,
+        composition_failure,
         root_revision: None,
         authority: Arc::clone(schema),
     })
+}
+
+fn composition_failure_retained_bytes(
+    failure: &nara_scene::PrefabExpansionFailure,
+) -> Result<usize, AuthoringProjectSourceAdmissionError> {
+    let mut bytes = size_of::<nara_scene::PrefabExpansionFailure>();
+    if let Some(location) = failure.location() {
+        checked_add_to(
+            &mut bytes,
+            crate::scene_retention::string_retained_bytes(location.path().anchor.as_str())
+                .map_err(|_| AuthoringProjectSourceAdmissionError::AccountingOverflow)?,
+        )?;
+        checked_add_to(
+            &mut bytes,
+            checked_product(
+                location.path().steps.capacity(),
+                size_of::<nara_scene::PrefabInstancePathSegment>(),
+            )?,
+        )?;
+        if let nara_scene::PrefabDeclarationSource::Prefab(key) = location.source() {
+            checked_add_to(&mut bytes, key.retained_bytes())?;
+        }
+    }
+    Ok(bytes)
 }
 
 fn schema_source_facts(schema: &AuthoringSchemaReceipt) -> [AuthoringSourceFact; 2] {

@@ -1,8 +1,9 @@
 //! Public prepared authoring keeps document publication in its existing owner.
 
 use nara_scene::{
-    AuthoringConstructionDraft, AuthoringPropertyEdit, SceneAuthoringRevision, ScenePatchDocument,
-    ScenePatchOperation,
+    AuthoringConstructionDraft, AuthoringPropertyEdit, PrefabDeclarationLimits,
+    PrefabInstanceObservation, PrefabInstancePath, PrefabRevert, SceneAuthoringRevision,
+    ScenePatchDocument, ScenePatchOperation,
 };
 use nara_tooling::{
     CommittedEditorDocumentConstruction, EditorActionOutcome, EditorActionRejection,
@@ -58,6 +59,33 @@ impl EditorProjectSession {
         request: nara_tooling::EditorPropertyRead,
     ) -> Result<nara_tooling::EditorPropertyObservation, EditorDocumentQueryRejection> {
         self.workspace.read_document_property(request)
+    }
+
+    /// Reads stored instance intent without requiring a successful composition or selection.
+    pub fn observe_prefab_instance(
+        &self,
+        basis: &EditorDocumentQueryBasis,
+        path: &PrefabInstancePath,
+        limits: PrefabDeclarationLimits,
+    ) -> Result<PrefabInstanceObservation, EditorDocumentQueryRejection> {
+        self.workspace.observe_prefab_instance(basis, path, limits)
+    }
+
+    /// Removes selected source intent through its existing prepared transaction owner.
+    ///
+    /// This narrowly admitted repair also works for UI Prefabs whose composition cannot be
+    /// activated. The immutable candidate origin distinguishes it from arbitrary structural edits.
+    pub fn prepare_prefab_revert(
+        &self,
+        basis: &EditorDocumentQueryBasis,
+        path: &PrefabInstancePath,
+        action: PrefabRevert,
+        limits: PrefabDeclarationLimits,
+    ) -> Result<PreparedEditorDocumentEdit, EditorEditPreparationError> {
+        self.validate_authoring_query_basis(basis)?;
+        self.workspace
+            .prepare_prefab_revert(basis, path, action, limits)
+            .map_err(|report| EditorEditPreparationError::Document(Box::new(report)))
     }
 
     /// Validates a retained observation before source-owned preparation, without refreshing it.
@@ -182,8 +210,9 @@ impl EditorProjectSession {
                 "project.editor.workspace-intent-pending",
             ));
         }
-        if let Err(rejection) =
-            self.verify_prepared_patch_contract(prepared.document(), prepared.patch())
+        if !prepared.is_prefab_revert()
+            && let Err(rejection) =
+                self.verify_prepared_patch_contract(prepared.document(), prepared.patch())
         {
             return EditorActionOutcome::Rejected(rejection);
         }

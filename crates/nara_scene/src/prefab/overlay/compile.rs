@@ -2,13 +2,14 @@
 
 use super::{
     PrefabComponentIntent, PrefabComponentSetMode, PrefabEntityOrigin, PrefabEntityTarget,
-    PrefabInstanceHop, PrefabOverlay, PrefabOverlayConflict, PrefabPlacementParent,
+    PrefabExpansionFailureKind, PrefabInstanceHop, PrefabOverlay, PrefabPlacementParent,
     PrefabPlacementSlot, layout,
 };
 use crate::{
-    PrefabInstance, PrefabProjectionPath, PrefabProjectionStep, ResolvedPrefabSource,
-    SceneDocument, SceneEntityId, SceneEntityProvenance, SceneEntityRecord, SourceDocumentKey,
-    SourceDocumentKind,
+    PrefabDeclarationSource, PrefabExpansionFailure, PrefabInstance, PrefabInstanceLocation,
+    PrefabInstancePath, PrefabInstancePathSegment, PrefabOverlaySlot, PrefabProjectionPath,
+    PrefabProjectionStep, ResolvedPrefabSource, SceneDocument, SceneEntityId,
+    SceneEntityProvenance, SceneEntityRecord, SourceDocumentKey, SourceDocumentKind,
     diagnostics::{
         error as diagnostic_error, usize_to_u64, with_asset_ref, with_public_locator,
         with_public_u64,
@@ -31,7 +32,7 @@ mod staged;
 pub(crate) fn expand_document<F, E>(
     context: &mut PrefabExpansionContext<'_, F, E>,
     document: &SceneDocument,
-) -> Result<SceneDocument, PrefabOverlayConflict>
+) -> Result<SceneDocument, PrefabExpansionFailure>
 where
     F: FnMut(
         &nara_asset::AssetRef,
@@ -41,25 +42,6 @@ where
     staged::expand(context, document)
 }
 
-/// Source declaration identity, independent of clone addresses and lookup aliases.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) enum DeclarationRoot {
-    Scene(SceneEntityId),
-    Prefab(SourceDocumentKey, SceneEntityId),
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum DeclarationSegment {
-    Addition(usize),
-    InstanceClaim(usize),
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) struct DeclarationAddress {
-    root: DeclarationRoot,
-    segments: Vec<DeclarationSegment>,
-}
-
 impl<'a, F, E> PrefabExpansionContext<'a, F, E>
 where
     F: FnMut(
@@ -67,12 +49,8 @@ where
         &mut crate::prefab::PrefabExpansionWorkingSet,
     ) -> Result<Option<ResolvedPrefabSource>, E>,
 {
-    pub(crate) fn push_overlay_conflict(
-        &mut self,
-        anchor: &SceneEntityId,
-        conflict: PrefabOverlayConflict,
-    ) {
-        if conflict == PrefabOverlayConflict::WorkLimit {
+    pub(crate) fn push_expansion_failure(&mut self, failure: &PrefabExpansionFailure) {
+        if failure.reason == PrefabExpansionFailureKind::WorkLimit {
             self.budget_failed = true;
         }
         // Source declarations remain untouched. Diagnostics describe a rejected projection;
@@ -80,26 +58,27 @@ where
         if self.diagnostics.has_errors() {
             return;
         }
-        self.diagnostics.push(with_public_locator(
-            with_public_locator(
-                diagnostic_error(
-                    "scene.prefab-overlay-conflict",
-                    "Prefab intent conflicts with its selected immutable bases",
-                ),
-                "entity-id",
-                anchor.as_str(),
+        let mut diagnostic = with_public_locator(
+            diagnostic_error(
+                "scene.prefab-compilation-failed",
+                "Prefab composition was rejected before publication",
             ),
-            "conflict-kind",
-            match conflict {
-                PrefabOverlayConflict::SourceChanged => "source-changed",
-                PrefabOverlayConflict::MissingTarget(_) => "missing-target",
-                PrefabOverlayConflict::DuplicateIntent => "duplicate-intent",
-                PrefabOverlayConflict::Placement => "placement",
-                PrefabOverlayConflict::Component => "component",
-                PrefabOverlayConflict::Reference => "reference",
-                PrefabOverlayConflict::OwnerAdmission => "owner-admission",
-                PrefabOverlayConflict::WorkLimit => "work-limit",
+            "failure-kind",
+            match failure.reason {
+                PrefabExpansionFailureKind::SourceChanged => "source-changed",
+                PrefabExpansionFailureKind::MissingTarget => "missing-target",
+                PrefabExpansionFailureKind::DuplicateIntent => "duplicate-intent",
+                PrefabExpansionFailureKind::Placement => "placement",
+                PrefabExpansionFailureKind::Component => "component",
+                PrefabExpansionFailureKind::Reference => "reference",
+                PrefabExpansionFailureKind::OwnerAdmission => "owner-admission",
+                PrefabExpansionFailureKind::WorkLimit => "work-limit",
             },
-        ));
+        );
+        if let Some(location) = &failure.location {
+            diagnostic =
+                with_public_locator(diagnostic, "entity-id", location.path.anchor.as_str());
+        }
+        self.diagnostics.push(diagnostic);
     }
 }

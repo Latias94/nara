@@ -1,5 +1,8 @@
 //! Component value programs exercised through public expansion and complete source namespaces.
 
+#[path = "component_program_tests/property_limits.rs"]
+mod property_limits;
+
 use nara_asset::AssetRef;
 use nara_core::{ByteLimit, ItemLimit};
 use nara_diagnostic::{Diagnostic, DiagnosticValueRef};
@@ -238,8 +241,8 @@ fn rejected<'a>(report: &'a PrefabExpansionReport, code: &str) -> &'a Diagnostic
 fn conflict(report: &PrefabExpansionReport, expected: &str) {
     assert_eq!(
         field(
-            rejected(report, "scene.prefab-overlay-conflict"),
-            "conflict-kind"
+            rejected(report, "scene.prefab-compilation-failed"),
+            "failure-kind"
         ),
         DiagnosticValueRef::Identifier(expected),
     );
@@ -437,6 +440,162 @@ fn missing_native_noncurrent_and_foreign_owner_records_refuse_activation() {
     }
 }
 
+fn assert_omitted_default_node_budget(
+    document: &SceneDocument,
+    sources: &InMemoryPrefabSourceResolver,
+) {
+    let registry = registry(true);
+    let exact =
+        PrefabExpansionLimits::default().with_materialized_value_nodes(ItemLimit::new(4).unwrap());
+    let report = expand(&registry, document, sources, exact);
+    assert!(!expanded(&report).entities.is_empty());
+    let limits =
+        PrefabExpansionLimits::default().with_materialized_value_nodes(ItemLimit::new(3).unwrap());
+    let report = expand(&registry, document, sources, limits);
+    let diagnostic = rejected(&report, "scene.prefab-expansion-budget-exceeded");
+    assert_eq!(
+        field(diagnostic, "budget-kind"),
+        DiagnosticValueRef::Identifier("materialized-value-nodes"),
+    );
+    // The earlier component occupies two nodes. Reflect admits the second effective
+    // component against the remaining one, and reports that exact local boundary.
+    assert_eq!(
+        field(diagnostic, "observed"),
+        DiagnosticValueRef::Unsigned(2)
+    );
+    assert_eq!(
+        field(diagnostic, "maximum"),
+        DiagnosticValueRef::Unsigned(1)
+    );
+    let failure = report.failure.as_ref().unwrap();
+    assert_eq!(
+        failure.reason(),
+        &crate::PrefabExpansionFailureKind::WorkLimit
+    );
+    assert!(failure.location().is_none());
+    assert!(failure.slot().is_none());
+
+    #[cfg(feature = "serde")]
+    {
+        use crate::{
+            __private::{AuthoringAdapterReceipt, try_expand_authoring_prefabs_with_loader},
+            AuthoringSchemaBasis, PrefabSourceResolver, ResolvedPrefabSource,
+        };
+        use nara_reflect::{AuthoringSchemaBundle, AuthoringSchemaBundleOwner};
+        use std::{convert::Infallible, sync::Arc};
+
+        let bundle = AuthoringSchemaBundle::new([AuthoringSchemaBundleOwner::new(
+            owner(),
+            ComponentSchemaCatalog {
+                components: vec![schema().with_capabilities([ComponentCapability::Inspect])],
+                ..Default::default()
+            },
+            None,
+        )])
+        .unwrap();
+        let adapter =
+            AuthoringAdapterReceipt::from_schema_owner(&bundle.owners()[0], &Default::default())
+                .unwrap();
+        let basis = AuthoringSchemaBasis::admit(&bundle, &[adapter]).unwrap();
+        let report = try_expand_authoring_prefabs_with_loader(
+            document,
+            &basis,
+            PrefabExpansionOptions::default().with_limits(limits),
+            None,
+            |reference, _| {
+                Ok::<_, Infallible>(sources.resolve_prefab(reference).map(|source| {
+                    ResolvedPrefabSource::bound_authoring_source(
+                        Arc::new(source.document().clone()),
+                        basis.clone(),
+                        source.key().clone(),
+                    )
+                }))
+            },
+        )
+        .unwrap();
+        assert!(report.candidate.is_none());
+        assert!(report.budget_exceeded());
+        let failure = report.failure.as_ref().unwrap();
+        assert_eq!(
+            failure.reason(),
+            &crate::PrefabExpansionFailureKind::WorkLimit
+        );
+        assert!(failure.location().is_none());
+        assert!(failure.slot().is_none());
+        let diagnostic = report.diagnostics.iter().next().unwrap();
+        assert_eq!(
+            diagnostic.code().as_str(),
+            "scene.prefab-expansion-budget-exceeded"
+        );
+        assert_eq!(
+            field(diagnostic, "observed"),
+            DiagnosticValueRef::Unsigned(2)
+        );
+        assert_eq!(
+            field(diagnostic, "maximum"),
+            DiagnosticValueRef::Unsigned(1)
+        );
+    }
+}
+
+#[test]
+fn set_omitted_default_aggregate_node_refusal_has_no_repair_location() {
+    let mut overlay = PrefabOverlay::new(key("base"));
+    overlay.components.push(set(
+        PrefabComponentSetMode::Add,
+        PrefabEntityTarget::source(id("socket")),
+    ));
+    assert_omitted_default_node_budget(&scene(overlay), &fixture());
+}
+
+#[test]
+fn addition_omitted_default_aggregate_node_refusal_has_no_repair_location() {
+    let mut addition = PrefabAddition::new(id("new"));
+    addition.components.insert(component(), record(empty()));
+    addition.bindings.insert(
+        component(),
+        vec![binding(ComponentFieldPath::from_fields(["target"]))],
+    );
+    let mut overlay = PrefabOverlay::new(key("base"));
+    add(&mut overlay, addition);
+    assert_omitted_default_node_budget(&scene(overlay), &fixture());
+}
+
+#[test]
+fn semantic_default_materialization_failure_keeps_its_component_intent_location() {
+    let mut intent = set(
+        PrefabComponentSetMode::Add,
+        PrefabEntityTarget::source(id("socket")),
+    );
+    let PrefabComponentIntent::Set { record, .. } = &mut intent else {
+        unreachable!()
+    };
+    record.value = ComponentValue::Bool(false);
+    let mut overlay = PrefabOverlay::new(key("base"));
+    overlay.components.push(intent);
+    let report = expand(
+        &registry(true),
+        &scene(overlay),
+        &fixture(),
+        Default::default(),
+    );
+    let diagnostic = rejected(&report, "scene.prefab-default-materialization-failed");
+    assert_eq!(
+        field(diagnostic, "codec-error-kind"),
+        DiagnosticValueRef::Identifier("invalid-field"),
+    );
+    let failure = report.failure.as_ref().unwrap();
+    assert_eq!(
+        failure.reason(),
+        &crate::PrefabExpansionFailureKind::Component
+    );
+    assert_eq!(failure.location().unwrap().path().anchor, id("instance"));
+    assert_eq!(
+        failure.slot(),
+        Some(crate::PrefabOverlaySlot::Component { index: 0 })
+    );
+}
+
 #[test]
 fn two_record_defaults_and_bindings_share_exact_value_and_generated_id_allowances() {
     let registry = registry(true);
@@ -498,19 +657,44 @@ fn two_record_defaults_and_bindings_share_exact_value_and_generated_id_allowance
                 limits(limited_nodes, limited_bytes, generated),
             );
             if second_uses_default {
-                let diagnostic = rejected(&report, "scene.prefab-default-materialization-failed");
+                let diagnostic = rejected(&report, "scene.prefab-expansion-budget-exceeded");
                 assert_eq!(
-                    field(diagnostic, "component-id"),
-                    DiagnosticValueRef::Identifier(component().as_str())
+                    field(diagnostic, "budget-kind"),
+                    DiagnosticValueRef::Identifier(if limited_nodes < nodes {
+                        "materialized-value-nodes"
+                    } else {
+                        "materialized-value-bytes"
+                    }),
+                );
+                let (observed, maximum) = if limited_nodes < nodes {
+                    (2, limited_nodes - 2)
+                } else {
+                    let default_bytes = payload(&id("socket")).cost().logical_bytes();
+                    let binding_growth = final_value.logical_bytes() - default_bytes;
+                    (
+                        default_bytes,
+                        limited_bytes - final_value.logical_bytes() - binding_growth,
+                    )
+                };
+                assert_eq!(
+                    field(diagnostic, "observed"),
+                    DiagnosticValueRef::Unsigned(observed as u64),
                 );
                 assert_eq!(
-                    field(diagnostic, "codec-error-kind"),
-                    DiagnosticValueRef::Identifier("message")
+                    field(diagnostic, "maximum"),
+                    DiagnosticValueRef::Unsigned(maximum as u64),
                 );
                 assert_eq!(
                     field(diagnostic, "entity-id"),
                     DiagnosticValueRef::Identifier("second")
                 );
+                let failure = report.failure.as_ref().unwrap();
+                assert_eq!(
+                    failure.reason(),
+                    &crate::PrefabExpansionFailureKind::WorkLimit
+                );
+                assert!(failure.location().is_none());
+                assert!(failure.slot().is_none());
             } else if limited_nodes < nodes {
                 let diagnostic = rejected(&report, "scene.prefab-expansion-budget-exceeded");
                 assert_eq!(

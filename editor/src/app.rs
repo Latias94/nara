@@ -1000,6 +1000,55 @@ impl EditorApplication {
             .prepare_authoring_edit(document, base_revision, patch)
     }
 
+    /// Captures a named source's current read basis without changing navigation.
+    pub fn document_query_basis(
+        &self,
+        document: nara::tooling::EditorDocumentId,
+    ) -> Result<nara::tooling::EditorDocumentQueryBasis, nara::tooling::EditorDocumentQueryRejection>
+    {
+        self.authoring_query_session()?
+            .document_query_basis(document)
+    }
+
+    /// Observes bounded stored Prefab intent even when its preview cannot activate.
+    pub fn observe_prefab_instance(
+        &self,
+        basis: &nara::tooling::EditorDocumentQueryBasis,
+        path: &nara::scene::PrefabInstancePath,
+        limits: nara::scene::PrefabDeclarationLimits,
+    ) -> Result<nara::scene::PrefabInstanceObservation, nara::tooling::EditorDocumentQueryRejection>
+    {
+        self.authoring_query_session()?
+            .observe_prefab_instance(basis, path, limits)
+    }
+
+    /// Returns a current verified composition failure, not an activation-success proof.
+    pub fn prefab_composition_failure(
+        &self,
+        basis: &nara::tooling::EditorDocumentQueryBasis,
+    ) -> Result<
+        Option<&nara::scene::PrefabExpansionFailure>,
+        nara::tooling::EditorDocumentQueryRejection,
+    > {
+        self.authoring_query_session()?
+            .prefab_composition_failure(basis)
+    }
+
+    /// Prepares selected intent removal through the named source's ordinary history owner.
+    pub fn prepare_prefab_revert(
+        &self,
+        basis: &nara::tooling::EditorDocumentQueryBasis,
+        path: &nara::scene::PrefabInstancePath,
+        action: nara::scene::PrefabRevert,
+        limits: nara::scene::PrefabDeclarationLimits,
+    ) -> Result<
+        nara::tooling::PreparedEditorDocumentEdit,
+        nara::project_host::EditorEditPreparationError,
+    > {
+        self.authoring_edit_session()?
+            .prepare_prefab_revert(basis, path, action, limits)
+    }
+
     /// Starts construction in the exact named source, independently of selection and active tabs.
     pub fn begin_authoring_construction(
         &self,
@@ -1047,6 +1096,20 @@ impl EditorApplication {
         nara::project_host::EditorEditPreparationError,
     > {
         Self::authoring_edit_session_for(&self.state, self.session_retirement.is_some())
+    }
+
+    fn authoring_query_session(
+        &self,
+    ) -> Result<
+        &nara::project_host::EditorProjectSession,
+        nara::tooling::EditorDocumentQueryRejection,
+    > {
+        self.authoring_edit_session().map_err(|error| match error {
+            nara::project_host::EditorEditPreparationError::Closing => {
+                nara::tooling::EditorDocumentQueryRejection::Closing
+            }
+            _ => nara::tooling::EditorDocumentQueryRejection::WorkspaceUnavailable,
+        })
     }
 
     fn authoring_edit_session_for(

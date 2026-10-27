@@ -6,9 +6,9 @@ use std::mem::size_of;
 use nara_asset::AssetRef;
 use nara_reflect::__private::plan_declared_entity_references;
 use nara_reflect::{
-    ComponentEntityReferenceRewriteError, ComponentFieldPathSegment, ComponentSchema,
-    ComponentTypeId, ComponentValue, ComponentValueCost, ComponentValueMaterializationLimits,
-    EntityReference, effective_component_value_owned,
+    ComponentCodecError, ComponentEntityReferenceRewriteError, ComponentFieldPathSegment,
+    ComponentSchema, ComponentTypeId, ComponentValue, ComponentValueCost,
+    ComponentValueMaterializationLimits, EntityReference, effective_component_value_owned,
 };
 
 use super::{Compiler, Program, Record, ScopeId};
@@ -21,9 +21,9 @@ use crate::prefab::{
 };
 use crate::provenance::provenance_string_bytes;
 use crate::{
-    PrefabComponentIntent, PrefabEntityOrigin, PrefabEntityTarget, PrefabOverlayConflict,
-    PrefabPropertyIntent, PrefabReferenceBinding, ResolvedPrefabSource, SceneComponentRecord,
-    SceneDocument, SceneEntityId,
+    PrefabComponentIntent, PrefabEntityOrigin, PrefabEntityTarget, PrefabExpansionFailure,
+    PrefabExpansionFailureKind, PrefabOverlaySlot, PrefabPropertyIntent, PrefabReferenceBinding,
+    ResolvedPrefabSource, SceneComponentRecord, SceneDocument, SceneEntityId,
 };
 
 type Targets = BTreeMap<PrefabEntityTarget, SceneEntityId>;
@@ -42,16 +42,16 @@ where
     pub(super) fn materialize_components(
         &mut self,
         document: &mut SceneDocument,
-    ) -> Result<(), PrefabOverlayConflict> {
+    ) -> Result<(), PrefabExpansionFailure> {
         let mut namespaces = ValueNamespaces::default();
 
         for entity in &mut document.entities {
             let node = *self
                 .locators
                 .get(&entity.id)
-                .ok_or(PrefabOverlayConflict::OwnerAdmission)?;
+                .ok_or(PrefabExpansionFailureKind::OwnerAdmission)?;
             if !entity.components.is_empty() {
-                return Err(PrefabOverlayConflict::OwnerAdmission);
+                return Err(PrefabExpansionFailureKind::OwnerAdmission.into());
             }
             let count = self
                 .context
@@ -63,14 +63,14 @@ where
                     Some(&entity.id),
                     None,
                 )
-                .ok_or(PrefabOverlayConflict::WorkLimit)?;
+                .ok_or(PrefabExpansionFailureKind::WorkLimit)?;
             let mut usage = self.context.usage;
             usage.materialized_components = count;
             if !self
                 .context
                 .admit_working_usage(usage, Some(&entity.id), None)
             {
-                return Err(PrefabOverlayConflict::WorkLimit);
+                return Err(PrefabExpansionFailureKind::WorkLimit.into());
             }
             self.context.usage.materialized_components = count;
 
@@ -79,8 +79,9 @@ where
             let programs = std::mem::take(&mut self.nodes[node].programs);
             let source_entity = self.nodes[node].origin.entity().clone();
             for (component, program) in &programs {
-                let record =
-                    self.materialize_program(component, program, &source_entity, &mut namespaces)?;
+                let record = self
+                    .materialize_program(component, program, &source_entity, &mut namespaces)
+                    .map_err(|failure| self.record_failure(program.record, failure))?;
                 entity.components.insert(component.clone(), record);
             }
             self.nodes[node].programs = programs;
@@ -94,7 +95,7 @@ where
         program: &Program,
         entity: &SceneEntityId,
         namespaces: &mut ValueNamespaces,
-    ) -> Result<SceneComponentRecord, PrefabOverlayConflict> {
+    ) -> Result<SceneComponentRecord, PrefabExpansionFailure> {
         let authority = self.context.authority;
         let original = self.component(program.record, component);
         #[cfg(feature = "serde")]
@@ -104,10 +105,10 @@ where
         let opaque = false;
 
         if opaque && !program.properties.is_empty() {
-            return Err(PrefabOverlayConflict::Component);
+            return Err(PrefabExpansionFailureKind::Component.into());
         }
         if !opaque && !authority.owner_matches(component, original) {
-            return Err(PrefabOverlayConflict::OwnerAdmission);
+            return Err(PrefabExpansionFailureKind::OwnerAdmission.into());
         }
         if !matches!(program.record, Record::Source { .. }) {
             authority.current_schema(component, original)?;
@@ -120,7 +121,7 @@ where
         {
             self.context
                 .fail_budget(kind, observed, maximum, Some(entity), None);
-            return Err(PrefabOverlayConflict::WorkLimit);
+            return Err(PrefabExpansionFailureKind::WorkLimit.into());
         }
         let cost = match original
             .value
@@ -143,7 +144,7 @@ where
                     };
                 self.context
                     .fail_budget(kind, observed, maximum, Some(entity), None);
-                return Err(PrefabOverlayConflict::WorkLimit);
+                return Err(PrefabExpansionFailureKind::WorkLimit.into());
             }
         };
         let metadata = provenance_string_bytes(component.as_str())
@@ -183,7 +184,7 @@ where
                         ),
                         &error,
                     ));
-                    return Err(PrefabOverlayConflict::Component);
+                    return Err(PrefabExpansionFailureKind::Component.into());
                 }
             };
             if authority.native_registry().is_some() && migrated.version != previous_version {
@@ -231,7 +232,7 @@ where
             let predicted_bytes = old_cost
                 .logical_bytes()
                 .checked_add(growth)
-                .ok_or(PrefabOverlayConflict::WorkLimit)?;
+                .ok_or(PrefabExpansionFailureKind::WorkLimit)?;
             self.context
                 .preflight_materialized_value_cost(
                     old_cost.nodes(),
@@ -240,7 +241,7 @@ where
                     predicted_bytes,
                     entity,
                 )
-                .ok_or(PrefabOverlayConflict::WorkLimit)?;
+                .ok_or(PrefabExpansionFailureKind::WorkLimit)?;
             let bound = references::bind_references(
                 schema,
                 &record.value,
@@ -257,16 +258,20 @@ where
         for &(scope, index) in &program.properties {
             let intent = &self
                 .overlay(scope)
-                .ok_or(PrefabOverlayConflict::OwnerAdmission)?
+                .ok_or(PrefabExpansionFailureKind::OwnerAdmission)?
                 .components[index];
             let PrefabComponentIntent::Properties {
                 version, claims, ..
             } = intent
             else {
-                return Err(PrefabOverlayConflict::OwnerAdmission);
+                return Err(PrefabExpansionFailureKind::OwnerAdmission.into());
             };
             if *version != record.version {
-                return Err(PrefabOverlayConflict::Component);
+                return Err(self.scope_failure(
+                    scope,
+                    Some(PrefabOverlaySlot::Component { index }),
+                    PrefabExpansionFailureKind::Component.into(),
+                ));
             }
             let old_cost = record.value.cost();
             let limits = self.value_program_limits(old_cost)?;
@@ -299,7 +304,8 @@ where
                     }
                 },
             );
-            let (claim_bytes, claim_values) = claim_work.ok_or(PrefabOverlayConflict::WorkLimit)?;
+            let (claim_bytes, claim_values) =
+                claim_work.ok_or(PrefabExpansionFailureKind::WorkLimit)?;
             self.admit(Some(claim_bytes))?;
             self.ensure_value_targets(scope, namespaces)?;
             // apply_claims keeps an immutable base and an isolated candidate; its default
@@ -309,7 +315,7 @@ where
                     .context
                     .reserve_component_temporary(schema, old_cost, Some(entity))
                 {
-                    return Err(PrefabOverlayConflict::WorkLimit);
+                    return Err(PrefabExpansionFailureKind::WorkLimit.into());
                 }
             }
             self.reserve_value_reference_work(schema, old_cost, limits)?;
@@ -318,7 +324,7 @@ where
                 version, claims, ..
             } = &self.overlay(scope).unwrap().components[index]
             else {
-                return Err(PrefabOverlayConflict::OwnerAdmission);
+                return Err(PrefabExpansionFailureKind::OwnerAdmission.into());
             };
             let value = properties::apply_claims(
                 schema,
@@ -327,7 +333,14 @@ where
                 claims,
                 &namespaces.targets[&scope],
                 limits,
-            )?;
+            )
+            .map_err(|reason| {
+                self.scope_failure(
+                    scope,
+                    Some(PrefabOverlaySlot::Component { index }),
+                    reason.into(),
+                )
+            })?;
             self.reserve_value_reference_work(schema, value.cost(), limits)?;
             references::validate_references(schema, &value, limits)?;
             self.replace_value_cost(old_cost, value.cost(), entity)?;
@@ -359,31 +372,31 @@ where
     fn value_program_limits(
         &self,
         replaced: ComponentValueCost,
-    ) -> Result<ComponentValueMaterializationLimits, PrefabOverlayConflict> {
+    ) -> Result<ComponentValueMaterializationLimits, PrefabExpansionFailure> {
         let usage = self.context.usage;
         let limits = self.context.materialization_limits();
-        components::reserve_cost(
+        Ok(components::reserve_cost(
             limits,
             usage
                 .materialized_value_nodes
                 .checked_sub(replaced.nodes())
-                .ok_or(PrefabOverlayConflict::WorkLimit)?,
+                .ok_or(PrefabExpansionFailureKind::WorkLimit)?,
             usage
                 .materialized_value_bytes
                 .checked_sub(replaced.logical_bytes())
-                .ok_or(PrefabOverlayConflict::WorkLimit)?,
-        )
+                .ok_or(PrefabExpansionFailureKind::WorkLimit)?,
+        )?)
     }
 
     fn bounded_value_cost(
         &self,
         value: &ComponentValue,
         replaced: ComponentValueCost,
-    ) -> Result<ComponentValueCost, PrefabOverlayConflict> {
+    ) -> Result<ComponentValueCost, PrefabExpansionFailure> {
         let limits = self.value_program_limits(replaced)?;
         value
             .cost_up_to(limits.nodes().get(), limits.bytes().get())
-            .ok_or(PrefabOverlayConflict::WorkLimit)
+            .ok_or_else(|| PrefabExpansionFailureKind::WorkLimit.into())
     }
 
     fn replace_value_cost(
@@ -391,7 +404,7 @@ where
         original: ComponentValueCost,
         replacement: ComponentValueCost,
         entity: &SceneEntityId,
-    ) -> Result<(), PrefabOverlayConflict> {
+    ) -> Result<(), PrefabExpansionFailure> {
         let (nodes, bytes) = self
             .context
             .preflight_materialized_value_cost(
@@ -401,7 +414,7 @@ where
                 replacement.logical_bytes(),
                 entity,
             )
-            .ok_or(PrefabOverlayConflict::WorkLimit)?;
+            .ok_or(PrefabExpansionFailureKind::WorkLimit)?;
         self.context.usage.materialized_value_nodes = nodes;
         self.context.usage.materialized_value_bytes = bytes;
         Ok(())
@@ -413,7 +426,7 @@ where
         record: &mut SceneComponentRecord,
         entity: &SceneEntityId,
         binding_growth: usize,
-    ) -> Result<(), PrefabOverlayConflict> {
+    ) -> Result<(), PrefabExpansionFailure> {
         let old_cost = record.value.cost();
         self.context
             .preflight_materialized_value_cost(
@@ -423,22 +436,45 @@ where
                 old_cost
                     .logical_bytes()
                     .checked_add(binding_growth)
-                    .ok_or(PrefabOverlayConflict::WorkLimit)?,
+                    .ok_or(PrefabExpansionFailureKind::WorkLimit)?,
                 entity,
             )
-            .ok_or(PrefabOverlayConflict::WorkLimit)?;
+            .ok_or(PrefabExpansionFailureKind::WorkLimit)?;
         let limits =
             components::reserve_cost(self.value_program_limits(old_cost)?, 0, binding_growth)?;
         if !self
             .context
             .reserve_component_temporary(schema, old_cost, Some(entity))
         {
-            return Err(PrefabOverlayConflict::WorkLimit);
+            return Err(PrefabExpansionFailureKind::WorkLimit.into());
         }
         let value = std::mem::replace(&mut record.value, ComponentValue::Null);
         record.value = match effective_component_value_owned(schema, value, limits) {
             Ok(value) => value,
             Err(error) => {
+                let budget = match &error {
+                    ComponentCodecError::MaterializationNodeLimit { observed, maximum } => Some((
+                        PrefabExpansionBudgetKind::MaterializedValueNodes,
+                        *observed,
+                        *maximum,
+                    )),
+                    ComponentCodecError::MaterializationByteLimit { observed, maximum } => Some((
+                        PrefabExpansionBudgetKind::MaterializedValueBytes,
+                        *observed,
+                        *maximum,
+                    )),
+                    ComponentCodecError::MaterializationDepthLimit { observed, maximum } => Some((
+                        PrefabExpansionBudgetKind::MaterializedValueDepth,
+                        *observed,
+                        *maximum,
+                    )),
+                    _ => None,
+                };
+                if let Some((kind, observed, maximum)) = budget {
+                    self.context
+                        .fail_budget(kind, observed, maximum, Some(entity), None);
+                    return Err(PrefabExpansionFailureKind::WorkLimit.into());
+                }
                 self.context.diagnostics.push(with_codec_error(
                     with_public_locator(
                         with_public_locator(
@@ -455,7 +491,7 @@ where
                     &error,
                     Some(schema),
                 ));
-                return Err(PrefabOverlayConflict::Component);
+                return Err(PrefabExpansionFailureKind::Component.into());
             }
         };
         let cost = self.bounded_value_cost(&record.value, old_cost)?;
@@ -466,7 +502,7 @@ where
         &mut self,
         scope: ScopeId,
         namespaces: &mut ValueNamespaces,
-    ) -> Result<(), PrefabOverlayConflict> {
+    ) -> Result<(), PrefabExpansionFailure> {
         if namespaces.sources.contains_key(&scope) {
             return Ok(());
         }
@@ -505,7 +541,7 @@ where
         &mut self,
         scope: ScopeId,
         namespaces: &mut ValueNamespaces,
-    ) -> Result<(), PrefabOverlayConflict> {
+    ) -> Result<(), PrefabExpansionFailure> {
         if !namespaces.targets.contains_key(&scope) {
             self.admit(Some(128))?;
             self.admit(self.target_index_bytes(scope))?;
@@ -526,7 +562,7 @@ where
         schema: &ComponentSchema,
         cost: ComponentValueCost,
         limits: ComponentValueMaterializationLimits,
-    ) -> Result<(), PrefabOverlayConflict> {
+    ) -> Result<(), PrefabExpansionFailure> {
         let bytes = value_work_bytes(cost)
             .and_then(|bytes| bytes.checked_mul(limits.depth().get().saturating_add(2)))
             .and_then(|bytes| {
@@ -547,7 +583,7 @@ where
         namespace: &SourceNamespace,
         entity: &SceneEntityId,
         component: &ComponentTypeId,
-    ) -> Result<(), PrefabOverlayConflict> {
+    ) -> Result<(), PrefabExpansionFailure> {
         let cost = value.cost();
         let limits = self.value_program_limits(cost)?;
         self.reserve_value_reference_work(schema, cost, limits)?;
@@ -582,7 +618,7 @@ where
             .logical_bytes()
             .checked_sub(before)
             .and_then(|bytes| bytes.checked_add(after))
-            .ok_or(PrefabOverlayConflict::WorkLimit)?;
+            .ok_or(PrefabExpansionFailureKind::WorkLimit)?;
         self.admit(Some(after))?;
         let (nodes, bytes) = self
             .context
@@ -593,7 +629,7 @@ where
                 bytes,
                 entity,
             )
-            .ok_or(PrefabOverlayConflict::WorkLimit)?;
+            .ok_or(PrefabExpansionFailureKind::WorkLimit)?;
         plan.rewrite_in_place(value, |_, reference| {
             Ok(match reference {
                 EntityReference::SceneLocal { entity } => EntityReference::SceneLocal {
@@ -616,7 +652,7 @@ where
         entity: &SceneEntityId,
         component: &ComponentTypeId,
         error: &ComponentEntityReferenceRewriteError<PrefabReferenceRemapError>,
-    ) -> PrefabOverlayConflict {
+    ) -> PrefabExpansionFailureKind {
         self.context
             .push_prefab_reference_rewrite_error(entity, component.as_str(), error);
         match error {
@@ -627,8 +663,8 @@ where
             | ComponentEntityReferenceRewriteError::Rewrite {
                 error: PrefabReferenceRemapError::MaterializedValue { .. },
                 ..
-            } => PrefabOverlayConflict::WorkLimit,
-            _ => PrefabOverlayConflict::Reference,
+            } => PrefabExpansionFailureKind::WorkLimit,
+            _ => PrefabExpansionFailureKind::Reference,
         }
     }
 }

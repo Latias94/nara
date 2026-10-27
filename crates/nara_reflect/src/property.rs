@@ -11,12 +11,13 @@ use crate::{
     ComponentCodecError, ComponentFieldId, ComponentFieldPath, ComponentFieldPathError,
     ComponentFieldPathSegment, ComponentFieldSchema, ComponentMemberPath,
     ComponentMemberPathSegment, ComponentSchema, ComponentSchemaVersion, ComponentShapeError,
-    ComponentValue, ComponentValueKind, ComponentValueShape,
+    ComponentValue, ComponentValueKind, ComponentValueMaterializationLimits, ComponentValueShape,
+    effective::validate_value_materialization_budget,
     schema::{
         MAX_SHAPE_BYTES, MAX_SHAPE_DEPTH, keyed_list_member, validate_component_shape_budget,
         validate_component_value_budget,
     },
-    validate_component_value,
+    validate_component_value, validate_component_value_with_limits,
 };
 
 /// Exact logical identity within a keyed list. Reusing a key asserts identity continuity;
@@ -169,9 +170,31 @@ impl ComponentPropertyPath {
         mut value: ComponentValue,
         replacement: ComponentValue,
     ) -> Result<ComponentValue, ComponentPropertyError> {
-        let (resolved, storage) = resolve_location(schema, version, &value, self)?;
-        validate_property_replacement(resolved.shape, self, &replacement)?;
-        replace_prepared_property(&mut value, &storage, replacement)?;
+        let (resolved, storage) = resolve_location(schema, version, &value, self, None)?;
+        validate_property_replacement(resolved.shape, self, &replacement, None)?;
+        replace_prepared_property(&mut value, &storage, replacement, None)?;
+        Ok(value)
+    }
+
+    /// Replaces a property in an isolated candidate under its owner's explicit value limits.
+    ///
+    /// Unlike the arbitrary-value entry point, this uses the supplied logical node, byte and
+    /// depth limits for the original, replacement and complete resulting value. It retains the
+    /// same selector, replacement shape and storage semantics. The candidate is consumed on
+    /// failure; complete candidate semantics, defaults and keyed-list uniqueness remain the
+    /// owner's responsibility before publication. No sibling or rollback copy is allocated.
+    #[doc(hidden)]
+    pub fn replace_in_owned_value_with_limits(
+        &self,
+        schema: &ComponentSchema,
+        version: ComponentSchemaVersion,
+        mut value: ComponentValue,
+        replacement: ComponentValue,
+        limits: ComponentValueMaterializationLimits,
+    ) -> Result<ComponentValue, ComponentPropertyError> {
+        let (resolved, storage) = resolve_location(schema, version, &value, self, Some(limits))?;
+        validate_property_replacement(resolved.shape, self, &replacement, Some(limits))?;
+        replace_prepared_property(&mut value, &storage, replacement, Some(limits))?;
         Ok(value)
     }
 }
@@ -342,8 +365,27 @@ pub fn resolve_component_property<'schema, 'value>(
     value: &'value ComponentValue,
     path: &ComponentPropertyPath,
 ) -> Result<ResolvedComponentProperty<'schema, 'value>, ComponentPropertyError> {
-    let (resolved, _) = resolve_location(schema, version, value, path)?;
+    let (resolved, _) = resolve_location(schema, version, value, path, None)?;
     validate_component_value(schema, value).map_err(ComponentPropertyError::InvalidValue)?;
+    Ok(resolved)
+}
+
+/// Resolves a property using the caller's explicit logical value-admission limits.
+///
+/// The caller supplies an admitted current schema. This checks the whole value's node, byte
+/// and depth cost using `limits`, then shares the ordinary selector and semantic validation.
+/// It neither selects a Schema authority nor materializes a missing property. Arbitrary-value
+/// callers that need Reflect's fixed default admission should use [`resolve_component_property`].
+pub fn resolve_component_property_with_limits<'schema, 'value>(
+    schema: &'schema ComponentSchema,
+    version: ComponentSchemaVersion,
+    value: &'value ComponentValue,
+    path: &ComponentPropertyPath,
+    limits: ComponentValueMaterializationLimits,
+) -> Result<ResolvedComponentProperty<'schema, 'value>, ComponentPropertyError> {
+    let (resolved, _) = resolve_location(schema, version, value, path, Some(limits))?;
+    validate_component_value_with_limits(schema, value, limits)
+        .map_err(ComponentPropertyError::InvalidValue)?;
     Ok(resolved)
 }
 
@@ -412,11 +454,11 @@ pub fn replace_component_property(
     path: &ComponentPropertyPath,
     replacement: ComponentValue,
 ) -> Result<ComponentValue, ComponentPropertyError> {
-    let (resolved, storage) = resolve_location(schema, version, value, path)?;
+    let (resolved, storage) = resolve_location(schema, version, value, path, None)?;
     validate_component_value(schema, value).map_err(ComponentPropertyError::InvalidValue)?;
-    validate_property_replacement(resolved.shape, path, &replacement)?;
+    validate_property_replacement(resolved.shape, path, &replacement, None)?;
     let mut candidate = value.clone();
-    let previous = replace_prepared_property(&mut candidate, &storage, replacement)?;
+    let previous = replace_prepared_property(&mut candidate, &storage, replacement, None)?;
     validate_component_value(schema, &candidate)
         .map_err(ComponentPropertyError::InvalidReplacement)?;
     *value = candidate;
@@ -427,8 +469,9 @@ fn validate_property_replacement(
     shape: &ComponentValueShape,
     path: &ComponentPropertyPath,
     replacement: &ComponentValue,
+    limits: Option<ComponentValueMaterializationLimits>,
 ) -> Result<(), ComponentPropertyError> {
-    validate_component_value_budget(replacement).map_err(ComponentPropertyError::ValueBudget)?;
+    admit_property_value(replacement, limits)?;
     shape.validate_value(replacement).map_err(|error| {
         if error.kind == crate::ComponentShapeErrorKind::NumericInterval {
             ComponentPropertyError::InvalidReplacement(crate::registry::numeric_range_error(
@@ -444,12 +487,24 @@ fn replace_prepared_property(
     candidate: &mut ComponentValue,
     storage: &ComponentFieldPath,
     replacement: ComponentValue,
+    limits: Option<ComponentValueMaterializationLimits>,
 ) -> Result<ComponentValue, ComponentPropertyError> {
     let previous = candidate
         .replace_path(storage, replacement)
         .map_err(ComponentPropertyError::ValueUnavailable)?;
-    validate_component_value_budget(candidate).map_err(ComponentPropertyError::ValueBudget)?;
+    admit_property_value(candidate, limits)?;
     Ok(previous)
+}
+
+fn admit_property_value(
+    value: &ComponentValue,
+    limits: Option<ComponentValueMaterializationLimits>,
+) -> Result<(), ComponentPropertyError> {
+    match limits {
+        Some(limits) => validate_value_materialization_budget(value, limits)
+            .map_err(ComponentPropertyError::InvalidValue),
+        None => validate_component_value_budget(value).map_err(ComponentPropertyError::ValueBudget),
+    }
 }
 
 fn resolve_location<'schema, 'value>(
@@ -457,6 +512,7 @@ fn resolve_location<'schema, 'value>(
     version: ComponentSchemaVersion,
     value: &'value ComponentValue,
     path: &ComponentPropertyPath,
+    limits: Option<ComponentValueMaterializationLimits>,
 ) -> Result<
     (
         ResolvedComponentProperty<'schema, 'value>,
@@ -473,7 +529,7 @@ fn resolve_location<'schema, 'value>(
     path.validate()?;
     validate_component_shape_budget(schema)
         .map_err(|(_, error)| ComponentPropertyError::InvalidSchema(error))?;
-    validate_component_value_budget(value).map_err(ComponentPropertyError::ValueBudget)?;
+    admit_property_value(value, limits)?;
     let root = resolve_root_field(schema, &path.root, None)?;
     let current = value
         .get_path(&root.path)

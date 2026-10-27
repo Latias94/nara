@@ -35,7 +35,8 @@ mod tests;
 pub use authoring::{
     AuthoringConstructionDraft, AuthoringPropertyEdit, AuthoringSessionReplacementError,
     CommittedAuthoringConstruction, ConstructionEntity, ConstructionEntityMap,
-    ConstructionPlacement, LocalConstructionEntity, PreparedPrefabAuthoringConstruction,
+    ConstructionPlacement, LocalConstructionEntity, PrefabDeclarationError,
+    PrefabDeclarationLimits, PrefabInstanceObservation, PreparedPrefabAuthoringConstruction,
     PreparedPrefabAuthoringEdit, PreparedSceneAuthoringConstruction, PreparedSceneAuthoringEdit,
 };
 pub use authoring::{
@@ -80,12 +81,14 @@ pub use patch::{
 };
 pub use prefab::{
     InMemoryPrefabSourceResolver, PrefabAddition, PrefabComponentIntent, PrefabComponentSetMode,
-    PrefabDocument, PrefabEntityOrigin, PrefabEntityTarget, PrefabExpansionBudgetKind,
+    PrefabDeclarationSource, PrefabDocument, PrefabEntityOrigin, PrefabEntityTarget,
+    PrefabExpansionBudgetKind, PrefabExpansionFailure, PrefabExpansionFailureKind,
     PrefabExpansionLimits, PrefabExpansionOptions, PrefabExpansionReport,
     PrefabExpansionWorkingSet, PrefabInstance, PrefabInstanceClaim, PrefabInstanceHop,
-    PrefabInstantiationReport, PrefabOverlay, PrefabOverlayConflict, PrefabPlacement,
+    PrefabInstanceLocation, PrefabInstancePath, PrefabInstancePathSegment,
+    PrefabInstantiationReport, PrefabOverlay, PrefabOverlaySlot, PrefabPlacement,
     PrefabPlacementParent, PrefabPlacementSlot, PrefabPropertyClaim, PrefabPropertyIntent,
-    PrefabReferenceBinding, PrefabSourceResolver, ResolvedPrefabSource,
+    PrefabReferenceBinding, PrefabRevert, PrefabSourceResolver, ResolvedPrefabSource,
 };
 pub use provenance::{
     PrefabProjectionPath, PrefabProjectionStep, SceneEntityProvenance, SceneEntityProvenanceMap,

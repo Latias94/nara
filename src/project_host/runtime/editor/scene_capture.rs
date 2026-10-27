@@ -9,6 +9,7 @@ use nara_scene::SceneAuthoringRevision;
 use nara_tasks::{
     TaskDomainKey, TaskHandle, TaskPoolKind, TaskReturnState, TaskSpawnRequest, TaskTerminal,
 };
+use nara_tooling::{EditorDocumentQueryBasis, EditorDocumentQueryRejection};
 
 use crate::project_host::authoring::{
     AuthoringDocumentCapture, AuthoringPrefabSessionSnapshot, AuthoringSourceValidation,
@@ -32,6 +33,7 @@ mod tests;
 struct SourceSelection {
     document: EditorDocumentId,
     revision: SceneAuthoringRevision,
+    schema: Option<nara_scene::AuthoringSchemaBasis>,
     source_key: nara_scene::SourceDocumentKey,
     receipt: Option<AuthoringDocumentSourceFact>,
 }
@@ -50,6 +52,8 @@ struct CapturedScene {
     unsaved_dependencies: usize,
     sources: Vec<(nara_scene::SourceDocumentKey, Option<SourceSelection>)>,
     source_capture: Option<AuthoringDocumentCapture>,
+    native_ready: bool,
+    requires_recapture: bool,
     verified: bool,
 }
 
@@ -184,6 +188,7 @@ impl EditorProjectSession {
         let root = SourceSelection {
             document,
             revision: slot.revision(),
+            schema: slot.session().authoring_schema_basis(),
             source_key: lane.source_key.clone(),
             receipt,
         };
@@ -205,6 +210,7 @@ impl EditorProjectSession {
                 Some(SourceSelection {
                     document,
                     revision: slot.revision(),
+                    schema: slot.session().authoring_schema_basis(),
                     source_key: lane.source_key.clone(),
                     receipt,
                 })
@@ -244,6 +250,8 @@ impl EditorProjectSession {
                 unsaved_dependencies: 0,
                 sources,
                 source_capture: None,
+                native_ready: true,
+                requires_recapture: false,
                 verified: false,
             });
             self.scene_capture.validate_at = Some(Instant::now());
@@ -258,6 +266,9 @@ impl EditorProjectSession {
             return;
         }
         self.authoring_runtime.invalidate_preview_content();
+        // Release the predecessor before another budgeted capture owns its sources.
+        self.scene_capture.captured = None;
+        self.scene_capture.failure = None;
         self.scene_capture.selection = Some(selection.clone());
         self.scene_capture.retry_at = None;
         self.scene_capture.validate_at = None;
@@ -381,10 +392,18 @@ impl EditorProjectSession {
             ));
             return;
         }
-        let Some(preview) = capture.take_preview() else {
-            self.reject_scene_capture(capture.diagnostics().clone());
-            return;
-        };
+        let requires_recapture = capture.requires_recapture();
+        let preview = capture.take_preview();
+        let native_ready = preview.is_some();
+        let projection = Some(match preview {
+            Some(preview) => projection(
+                selection.root.document,
+                selection.root.revision,
+                preview,
+                capture.asset_database(),
+            ),
+            None => EditorPreviewProjection::rejected(capture.diagnostics().clone()),
+        });
         let mut participants = Vec::new();
         let mut unsaved = 0;
         let mut sources = Vec::new();
@@ -412,25 +431,21 @@ impl EditorProjectSession {
             unsaved += usize::from(self.workspace.document_is_dirty(document) == Some(true));
         }
         let validation = capture.source_validation();
-        let database = capture.asset_database();
         if !self.scene_capture.next_generation() {
             return;
         }
         let dependencies =
             EditorPreviewDependencies::captured(self.scene_capture.generation, participants.into());
         let prepared = CapturedScene {
-            projection: Some(projection(
-                selection.root.document,
-                selection.root.revision,
-                preview,
-                database,
-            )),
+            projection,
             selection,
             dependencies,
             validation,
             unsaved_dependencies: unsaved,
             sources,
             source_capture: Some(capture),
+            native_ready,
+            requires_recapture,
             verified: true,
         };
         if !self
@@ -447,7 +462,7 @@ impl EditorProjectSession {
             }
             return;
         }
-        if let EditorExecutionLane::Authoring(project) = &self.execution {
+        if native_ready && let EditorExecutionLane::Authoring(project) = &self.execution {
             self.image_import.enqueue_authoring_capture(
                 project,
                 prepared
@@ -610,23 +625,30 @@ impl EditorProjectSession {
                 .is_some_and(|deadline| deadline <= now)
                 && let Some(capture) = &self.scene_capture.captured
             {
-                let validation = capture.validation.clone();
-                self.scene_capture.validate_at = None;
-                match self
-                    .authoring_runtime
-                    .persistence_tasks()
-                    .spawn(
-                        TaskPoolKind::Io,
-                        TaskSpawnRequest::new(self.scene_capture.generation, CAPTURE_DOMAIN),
-                        move |_| validation.validate(),
-                    )
-                    .into_handle()
-                    .ok()
-                {
-                    Some(task) => self.scene_capture.pending = Some(CaptureWork::Validate(task)),
-                    None => self.reject_scene_capture(capture_error(
-                        "project.editor.scene-validation-task-rejected",
-                    )),
+                if capture.requires_recapture {
+                    // Successful receipts cannot observe a previously missing dependency.
+                    self.start_scene_capture(selection.clone());
+                } else {
+                    let validation = capture.validation.clone();
+                    self.scene_capture.validate_at = None;
+                    match self
+                        .authoring_runtime
+                        .persistence_tasks()
+                        .spawn(
+                            TaskPoolKind::Io,
+                            TaskSpawnRequest::new(self.scene_capture.generation, CAPTURE_DOMAIN),
+                            move |_| validation.validate(),
+                        )
+                        .into_handle()
+                        .ok()
+                    {
+                        Some(task) => {
+                            self.scene_capture.pending = Some(CaptureWork::Validate(task))
+                        }
+                        None => self.reject_scene_capture(capture_error(
+                            "project.editor.scene-validation-task-rejected",
+                        )),
+                    }
                 }
             }
         }
@@ -652,6 +674,40 @@ impl EditorProjectSession {
         })
     }
 
+    /// Reads the first typed composition failure for the selected Scene's verified capture.
+    ///
+    /// `None` means no current typed failure is available, including while capture is pending
+    /// or the queried document is not the selected Scene. It never proves successful composition
+    /// or native activation. This query neither reads files nor drives preparation.
+    pub fn prefab_composition_failure(
+        &self,
+        basis: &EditorDocumentQueryBasis,
+    ) -> Result<Option<&nara_scene::PrefabExpansionFailure>, EditorDocumentQueryRejection> {
+        if !self.accepts_new_work() || self.pending_workspace_intent.is_some() {
+            return Err(EditorDocumentQueryRejection::Closing);
+        }
+        self.workspace.validate_document_query_basis(basis)?;
+        let Some(capture) = self.scene_capture.captured.as_ref().filter(|capture| {
+            capture.verified
+                && capture.selection.root.document == basis.document
+                && capture.selection.root.revision == basis.revision
+                && capture.selection.root.schema == basis.schema
+        }) else {
+            return Ok(None);
+        };
+        if !self
+            .capture_selection()
+            .as_ref()
+            .is_some_and(|current| capture.matches(current))
+        {
+            return Ok(None);
+        }
+        Ok(capture
+            .source_capture
+            .as_ref()
+            .and_then(AuthoringDocumentCapture::composition_failure))
+    }
+
     /// Reads only accepted owner state; it neither reads files nor drives preparation.
     #[doc(hidden)]
     pub fn current_editor_preview_content_stamp(&self) -> Option<EditorPreviewContentStamp> {
@@ -660,7 +716,7 @@ impl EditorProjectSession {
         }
         if self.authoring_project().is_some() {
             let capture = self.scene_capture.captured.as_ref()?;
-            if !capture.verified {
+            if !capture.verified || !capture.native_ready {
                 return None;
             }
             if !self
@@ -690,6 +746,7 @@ impl EditorProjectSession {
             .current_preview_content_stamp()
             .is_some()
             && let Some(capture) = &mut self.scene_capture.captured
+            && capture.native_ready
         {
             capture.source_capture = None;
         }

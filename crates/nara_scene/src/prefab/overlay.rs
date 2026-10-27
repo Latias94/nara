@@ -7,7 +7,10 @@ use nara_reflect::{
     ComponentValue,
 };
 
-use crate::{PrefabInstance, SceneComponentRecord, SceneEntityId, SourceDocumentKey};
+use crate::{
+    PrefabExpansionFailureKind, PrefabInstance, SceneComponentRecord, SceneEntityId,
+    SourceDocumentKey,
+};
 
 pub(super) mod compile;
 mod components;
@@ -18,19 +21,6 @@ mod references;
 
 #[cfg(all(test, feature = "serde"))]
 mod regression_tests;
-
-/// A preserved declaration which could not be compiled against the selected immutable bases.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum PrefabOverlayConflict {
-    SourceChanged,
-    MissingTarget(PrefabEntityTarget),
-    DuplicateIntent,
-    Placement,
-    Component,
-    Reference,
-    OwnerAdmission,
-    WorkLimit,
-}
 
 /// An entity in one Prefab layer's inherited or instance-addition namespace.
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]

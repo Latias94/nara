@@ -75,6 +75,7 @@ pub use property::{
     ComponentPropertyReadBudget, ComponentPropertySchemaClaim, ComponentPropertyStep,
     ResolvedComponentProperty, replace_component_property, resolve_component_property,
     resolve_component_property_in_root, resolve_component_property_schema_claim,
+    resolve_component_property_with_limits,
 };
 pub use provider::{
     ComponentSchemaContributionReceipt, ComponentSchemaOwnerContributionReceipt,
@@ -181,8 +182,8 @@ pub mod prelude {
         ResolvedComponentProperty, collect_declared_asset_references,
         collect_declared_value_asset_references_with_limits, remap_declared_entity_references,
         replace_component_property, resolve_component_property, resolve_component_property_in_root,
-        resolve_component_property_schema_claim, rewrite_declared_entity_references,
-        validate_component_value,
+        resolve_component_property_schema_claim, resolve_component_property_with_limits,
+        rewrite_declared_entity_references, validate_component_value,
     };
     pub use bevy_reflect::prelude::*;
 }

@@ -27,9 +27,10 @@ use nara_scene::{
     AuthoringDocumentReadiness, AuthoringOverlayPathSegment, AuthoringOverlayRecordSlot,
     AuthoringPropertyEdit, AuthoringRecordLocation, AuthoringRecordReadiness,
     InMemoryPrefabSourceResolver, PrefabAddition, PrefabComponentIntent, PrefabComponentSetMode,
-    PrefabDocument, PrefabDocumentCandidate, PrefabEntityOrigin, PrefabEntityTarget,
-    PrefabInstance, PrefabInstanceHop, PrefabOverlay, PrefabPlacement, PrefabPlacementParent,
-    PrefabPlacementSlot, PrefabPropertyClaim, PrefabPropertyIntent, PrefabReferenceBinding,
+    PrefabDeclarationLimits, PrefabDocument, PrefabDocumentCandidate, PrefabEntityOrigin,
+    PrefabEntityTarget, PrefabInstance, PrefabInstanceHop, PrefabInstancePath, PrefabOverlay,
+    PrefabOverlaySlot, PrefabPlacement, PrefabPlacementParent, PrefabPlacementSlot,
+    PrefabPropertyClaim, PrefabPropertyIntent, PrefabReferenceBinding, PrefabRevert,
     PrefabSourceResolver, SceneAuthoringRevision, SceneComponentRecord, SceneDocument,
     SceneDocumentCandidate, SceneEntityId, SceneEntityRecord, ScenePatchDocument,
     ScenePatchOperation, ScenePlacement, ScenePlacementOwner, SourceDocumentKey,
@@ -1371,6 +1372,161 @@ fn exact_instance_mismatch_is_atomic_and_unknown_override_repair_has_exact_histo
     assert_eq!(repaired_manifest.total_count(), 2);
     save_and_reopen(&mut editor, &project, PREFAB, &expected, &repaired_manifest);
     close_editor(&mut editor);
+}
+
+#[test]
+fn observed_prefab_intent_revert_preserves_unknown_siblings_and_round_trips_both_sources() {
+    for source in [SCENE, PREFAB] {
+        let project = Project::new();
+        let mut local = records(initial());
+        let lookup = AssetRef::path(BASE_PREFAB).unwrap();
+        let base = base_prefab_resolver().resolve_prefab(&lookup).unwrap();
+        let mut overlay = PrefabOverlay::new(base.key().clone());
+        overlay.components.push(PrefabComponentIntent::Suppress {
+            target: PrefabEntityTarget::source(id("removed-in-base")),
+            component: ComponentTypeId::new(COMPONENT),
+        });
+        overlay.components.push(PrefabComponentIntent::Set {
+            mode: PrefabComponentSetMode::Add,
+            target: PrefabEntityTarget::source(id("actor")),
+            component: ComponentTypeId::new(UNKNOWN),
+            record: local[0].components[&ComponentTypeId::new(UNKNOWN)].clone(),
+            bindings: Vec::new(),
+        });
+        local[0].prefab = Some(PrefabInstance {
+            source: lookup,
+            overrides: Some(overlay),
+        });
+        let mut expected = SceneDocument::from_ordered_roots(local);
+        fs::write(project.root.join(source), source_bytes(source, &expected)).unwrap();
+        let mut editor = open_project(&project);
+        let document = open_source(&mut editor, source);
+        select(&mut editor, document, "observer");
+        let before = editor.current_frame().workspace().clone();
+        let basis = editor.document_query_basis(document).unwrap();
+        let path = PrefabInstancePath::new(id("actor"));
+        let limits = PrefabDeclarationLimits::default();
+        let observed = editor
+            .observe_prefab_instance(&basis, &path, limits)
+            .unwrap();
+        let original = observed.instance.as_ref().unwrap();
+        assert_eq!(observed.revision, basis.revision);
+        assert_eq!(Some(&observed.schema), basis.schema.as_ref());
+        assert_eq!(original.overrides.as_ref().unwrap().components.len(), 2);
+        let action = PrefabRevert::Intent(PrefabOverlaySlot::Component { index: 0 });
+        let cancelled = editor
+            .prepare_prefab_revert(&basis, &observed.path, action, limits)
+            .unwrap();
+        assert!(cancelled.is_prefab_revert());
+        drop(cancelled);
+        editor.drive_editor_frame(Duration::ZERO);
+        assert_eq!(editor.current_frame().workspace(), &before);
+
+        let prepared = editor
+            .prepare_prefab_revert(&basis, &observed.path, action, limits)
+            .unwrap();
+        let stale = editor
+            .prepare_prefab_revert(&basis, &observed.path, action, limits)
+            .unwrap();
+        let mut retained = original.clone();
+        retained.overrides.as_mut().unwrap().components.remove(0);
+        assert_eq!(
+            prepared.patch(),
+            &instance_patch(Some(original.clone()), Some(retained.clone())),
+        );
+        assert_applied(editor.commit_authoring_edit(prepared));
+        editor.drive_editor_frame(Duration::ZERO);
+        let current = editor.document_query_basis(document).unwrap();
+        assert_eq!(
+            editor
+                .observe_prefab_instance(&current, &path, limits)
+                .unwrap()
+                .instance,
+            Some(retained.clone()),
+        );
+        assert!(
+            editor
+                .observe_prefab_instance(&basis, &path, limits)
+                .is_err()
+        );
+        assert!(
+            editor
+                .prepare_prefab_revert(&basis, &path, action, limits)
+                .is_err()
+        );
+        assert!(matches!(editor.commit_authoring_edit(stale),
+                EditorActionOutcome::Workspace(report) if !report.applied),);
+        assert_eq!(
+            editor
+                .current_frame()
+                .workspace()
+                .document(document)
+                .unwrap()
+                .history
+                .undo_depth,
+            1,
+        );
+        for (redo, instance) in [(false, original), (true, &retained)] {
+            let base_revision = revision(&editor, document);
+            let mutation = if redo {
+                EditorDocumentMutation::Redo {
+                    document,
+                    base_revision,
+                }
+            } else {
+                EditorDocumentMutation::Undo {
+                    document,
+                    base_revision,
+                }
+            };
+            assert_applied(dispatch(&mut editor, EditorAction::Mutate(mutation)));
+            let current = editor.document_query_basis(document).unwrap();
+            assert_eq!(
+                editor
+                    .observe_prefab_instance(&current, &path, limits)
+                    .unwrap()
+                    .instance
+                    .as_ref(),
+                Some(instance),
+            );
+        }
+        expected
+            .entities
+            .iter_mut()
+            .find(|entity| entity.id == id("actor"))
+            .unwrap()
+            .prefab = Some(retained);
+        let retained_manifest = editor
+            .active_authoring_unavailable_record_manifest()
+            .unwrap()
+            .clone();
+        assert_eq!(retained_manifest.total_count(), 3);
+        assert!(retained_manifest.entries().iter().any(|entry| matches!(
+            entry,
+            UnavailableRecordManifestEntry::Record(record)
+                if record.component().as_str() == UNKNOWN
+                    && matches!(record.location(), AuthoringRecordLocation::OverlayComponent {
+                        anchor,
+                        slot: AuthoringOverlayRecordSlot::Component { index: 0 },
+                        ..
+                    } if anchor == &id("actor")),
+        )));
+        save_and_reopen(&mut editor, &project, source, &expected, &retained_manifest);
+        let current = editor.document_query_basis(document).unwrap();
+        let repaired = editor
+            .observe_prefab_instance(&current, &path, limits)
+            .unwrap();
+        assert_eq!(
+            repaired.instance,
+            expected
+                .entities
+                .iter()
+                .find(|entity| entity.id == id("actor"))
+                .unwrap()
+                .prefab,
+        );
+        close_editor(&mut editor);
+    }
 }
 
 fn revision(editor: &EditorProjectSession, document: EditorDocumentId) -> SceneAuthoringRevision {

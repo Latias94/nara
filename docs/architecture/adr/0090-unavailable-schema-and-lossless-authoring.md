@@ -142,6 +142,12 @@ field edit or readmission cannot acquire this repair permission. An unresolved l
 not prevent storing a syntactically understood declaration, and preparation does not resolve or
 execute it. Source equality and activation readiness remain distinct.
 
+A selected-intent Revert uses that existing complete-declaration transaction through a narrower
+source-owned preparation path. It preserves the unselected portion of the same embedded overlay,
+as well as the other protected records. Unresolved Schema classification and an effective target
+or base conflict are different observations. A source declaration may be inspected or deliberately
+removed without an inherited entity selection, native binding or successful composition.
+
 Unavailable component-targeting field writes retain their complete replacement payload, including
 canonical asset-reference values. Preserving only the target/field identity does not preserve the
 operation. Payload-free removal and an explicit Null replacement remain different declarations.
@@ -201,9 +207,13 @@ Document readiness is `Rejected | Degraded | Complete`. Record readiness is:
 | `UnknownSchema` | Stable component ID/version has no current catalog declaration |
 | `Unmigratable` | Schema is known but no complete migration reaches the current version |
 | `FutureSchema` | Record schema version is newer than the current catalog declaration |
+| `UnresolvedOverlay` | A stored overlay record cannot be interpreted by its source-only Schema admission; its complete intent remains preserved without resolving or activating a base |
 
 These are generation-local authoring/runtime classifications, not persistent ECS components,
 placeholder Rust types, or a second schema authority.
+`UnresolvedOverlay` is not evidence of a missing effective target or changed base. Those facts
+require actual composition under the selected source closure, and a first compilation failure
+does not classify unvisited declarations.
 
 ### Preservation Boundary
 

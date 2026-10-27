@@ -13,7 +13,7 @@ where
     pub(super) fn materialize(
         &mut self,
         mut document: SceneDocument,
-    ) -> Result<SceneDocument, PrefabOverlayConflict> {
+    ) -> Result<SceneDocument, PrefabExpansionFailure> {
         self.admit(self.nodes.len().checked_mul(256))?;
         self.admit(self.root.entities.iter().try_fold(0usize, |bytes, record| {
             bytes
@@ -32,13 +32,10 @@ where
                 .cloned()
                 .collect(),
         };
-        let anchor = self.root.roots.first().cloned().unwrap_or_else(|| {
-            SceneEntityId::new("scene").expect("valid internal diagnostic locator")
-        });
         let mut identifiers = self
             .context
-            .allocate_projected_entity_ids(&projected, &anchor)
-            .ok_or(PrefabOverlayConflict::WorkLimit)?;
+            .allocate_projected_entity_ids(&projected)
+            .ok_or(PrefabExpansionFailureKind::WorkLimit)?;
         for &node in self.scopes[0].nodes.values() {
             identifiers.insert(
                 self.nodes[node].locator.clone(),
@@ -67,7 +64,7 @@ where
                         .expect("valid unpublished reference locator");
                     ordinal = ordinal
                         .checked_add(1)
-                        .ok_or(PrefabOverlayConflict::WorkLimit)?;
+                        .ok_or(PrefabExpansionFailureKind::WorkLimit)?;
                     if used.insert(id.clone()) {
                         break id;
                     }
@@ -103,7 +100,7 @@ where
                     None,
                 )
             {
-                return Err(PrefabOverlayConflict::WorkLimit);
+                return Err(PrefabExpansionFailureKind::WorkLimit.into());
             }
             let provenance = if self.nodes[node].scope == 0 {
                 SceneEntityProvenance::local(self.nodes[node].origin.entity().clone())
@@ -126,8 +123,8 @@ where
                         limits.generated_identifier_bytes().get(),
                     )
                     .map_err(|error| {
-                        self.context.fail_prefab_remap_budget(error, &anchor);
-                        PrefabOverlayConflict::WorkLimit
+                        self.context.fail_prefab_remap_budget(error, Some(id));
+                        PrefabExpansionFailureKind::WorkLimit
                     })?;
                 }
             }
@@ -139,12 +136,12 @@ where
                     .context
                     .authority
                     .schema(component)
-                    .ok_or(PrefabOverlayConflict::Component)?;
+                    .ok_or(PrefabExpansionFailureKind::Component)?;
                 if !self
                     .context
                     .reserve_component_temporary(schema, payload.value.cost(), Some(id))
                 {
-                    return Err(PrefabOverlayConflict::WorkLimit);
+                    return Err(PrefabExpansionFailureKind::WorkLimit.into());
                 }
                 let plan = plan_declared_entity_references::<PrefabReferenceRemapError>(
                     schema,
@@ -157,7 +154,7 @@ where
                         component.as_str(),
                         &error,
                     );
-                    PrefabOverlayConflict::Reference
+                    PrefabExpansionFailureKind::Reference
                 })?;
                 let mut old_bytes = 0usize;
                 let mut new_bytes = 0usize;
@@ -184,23 +181,23 @@ where
                     if let nara_reflect::ComponentEntityReferenceRewriteError::Rewrite {
                         error, ..
                     } = &error
-                        && self.context.fail_prefab_remap_budget(*error, id)
+                        && self.context.fail_prefab_remap_budget(*error, Some(id))
                     {
-                        return PrefabOverlayConflict::WorkLimit;
+                        return PrefabExpansionFailureKind::WorkLimit;
                     }
                     self.context.push_prefab_reference_rewrite_error(
                         id,
                         component.as_str(),
                         &error,
                     );
-                    PrefabOverlayConflict::Reference
+                    PrefabExpansionFailureKind::Reference
                 })?;
                 let cost = payload.value.cost();
                 let bytes = cost
                     .logical_bytes()
                     .checked_sub(old_bytes)
                     .and_then(|bytes| bytes.checked_add(new_bytes))
-                    .ok_or(PrefabOverlayConflict::WorkLimit)?;
+                    .ok_or(PrefabExpansionFailureKind::WorkLimit)?;
                 let (nodes, bytes) = self
                     .context
                     .preflight_materialized_value_cost(
@@ -210,16 +207,16 @@ where
                         bytes,
                         id,
                     )
-                    .ok_or(PrefabOverlayConflict::WorkLimit)?;
+                    .ok_or(PrefabExpansionFailureKind::WorkLimit)?;
                 let mut usage = self.context.usage;
                 usage.materialized_value_nodes = nodes;
                 usage.materialized_value_bytes = bytes;
                 usage.generated_identifier_bytes = usage
                     .generated_identifier_bytes
                     .checked_add(generated)
-                    .ok_or(PrefabOverlayConflict::WorkLimit)?;
+                    .ok_or(PrefabExpansionFailureKind::WorkLimit)?;
                 if !self.context.admit_working_usage(usage, Some(id), None) {
-                    return Err(PrefabOverlayConflict::WorkLimit);
+                    return Err(PrefabExpansionFailureKind::WorkLimit.into());
                 }
                 plan.rewrite_in_place(&mut payload.value, |_, reference| {
                     Ok::<_, PrefabReferenceRemapError>(match reference {
@@ -232,7 +229,7 @@ where
                         EntityReference::Persistent { .. } => reference.clone(),
                     })
                 })
-                .map_err(|_| PrefabOverlayConflict::Reference)?;
+                .map_err(|_| PrefabExpansionFailureKind::Reference)?;
                 self.context.usage.materialized_value_nodes = nodes;
                 self.context.usage.materialized_value_bytes = bytes;
             }
@@ -240,9 +237,9 @@ where
             usage.generated_identifier_bytes = usage
                 .generated_identifier_bytes
                 .checked_add(generated)
-                .ok_or(PrefabOverlayConflict::WorkLimit)?;
+                .ok_or(PrefabExpansionFailureKind::WorkLimit)?;
             if !self.context.admit_working_usage(usage, Some(id), None) {
-                return Err(PrefabOverlayConflict::WorkLimit);
+                return Err(PrefabExpansionFailureKind::WorkLimit.into());
             }
             self.context.usage = usage;
             record.id = id.clone();
@@ -256,7 +253,7 @@ where
         Ok(document)
     }
 
-    fn projection_cost(&self, mut node: NodeId) -> Result<usize, PrefabOverlayConflict> {
+    fn projection_cost(&self, mut node: NodeId) -> Result<usize, PrefabExpansionFailure> {
         if self.nodes[node].scope == 0 {
             return Ok(0);
         }
@@ -267,9 +264,9 @@ where
                 return bytes
                     .checked_add(
                         provenance_string_bytes(self.nodes[node].origin.entity().as_str())
-                            .ok_or(PrefabOverlayConflict::WorkLimit)?,
+                            .ok_or(PrefabExpansionFailureKind::WorkLimit)?,
                     )
-                    .ok_or(PrefabOverlayConflict::WorkLimit);
+                    .ok_or_else(|| PrefabExpansionFailureKind::WorkLimit.into());
             }
             let step = match &self.nodes[node].origin {
                 PrefabEntityOrigin::SourceEntity(entity) => {
@@ -283,15 +280,15 @@ where
                     PrefabProjectionStep::addition_allocation_bytes(entity)
                 }
             }
-            .ok_or(PrefabOverlayConflict::WorkLimit)?;
+            .ok_or(PrefabExpansionFailureKind::WorkLimit)?;
             bytes = bytes
                 .checked_add(step)
-                .ok_or(PrefabOverlayConflict::WorkLimit)?;
+                .ok_or(PrefabExpansionFailureKind::WorkLimit)?;
             node = scope.anchor.unwrap();
         }
     }
 
-    fn projection(&self, mut node: NodeId) -> Result<PrefabProjectionPath, PrefabOverlayConflict> {
+    fn projection(&self, mut node: NodeId) -> Result<PrefabProjectionPath, PrefabExpansionFailure> {
         let mut steps = Vec::new();
         loop {
             let scope = &self.scopes[self.nodes[node].scope];

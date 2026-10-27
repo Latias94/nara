@@ -607,7 +607,7 @@ fn declarative_property_constraints_are_preserved_until_activation_without_nativ
             error
                 .diagnostics
                 .iter()
-                .any(|diagnostic| diagnostic.code().as_str() == "scene.prefab-overlay-conflict"),
+                .any(|diagnostic| diagnostic.code().as_str() == "scene.prefab-compilation-failed"),
             "{:?}",
             error.diagnostics
         );

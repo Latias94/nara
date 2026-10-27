@@ -5,7 +5,7 @@ use nara_reflect::{
     ComponentTypeId, ComponentValue, MigratedComponentValue,
 };
 
-use crate::{PrefabOverlayConflict, SceneComponentRecord};
+use crate::{PrefabExpansionFailureKind, SceneComponentRecord};
 
 #[derive(Clone, Copy)]
 pub(crate) enum SchemaAuthority<'a> {
@@ -72,24 +72,24 @@ impl<'a> SchemaAuthority<'a> {
         self,
         component: &ComponentTypeId,
         record: &SceneComponentRecord,
-    ) -> Result<&'a ComponentSchema, PrefabOverlayConflict> {
+    ) -> Result<&'a ComponentSchema, PrefabExpansionFailureKind> {
         let schema = self
             .schema(component)
-            .ok_or(PrefabOverlayConflict::Component)?;
+            .ok_or(PrefabExpansionFailureKind::Component)?;
         if !self.owner_matches(component, record) {
-            return Err(PrefabOverlayConflict::OwnerAdmission);
+            return Err(PrefabExpansionFailureKind::OwnerAdmission);
         }
         if !self.can_interpret(component, record) {
-            return Err(PrefabOverlayConflict::Component);
+            return Err(PrefabExpansionFailureKind::Component);
         }
         match self {
             Self::Native(registry) => {
                 if registry.native_rust_type_path(component).is_none() {
-                    return Err(PrefabOverlayConflict::Component);
+                    return Err(PrefabExpansionFailureKind::Component);
                 }
                 registry
                     .validate_whole_value_capabilities(component, [ComponentCapability::Scene])
-                    .map_err(|_| PrefabOverlayConflict::Component)?;
+                    .map_err(|_| PrefabExpansionFailureKind::Component)?;
             }
             #[cfg(feature = "serde")]
             Self::Authoring(_) => {
@@ -97,7 +97,7 @@ impl<'a> SchemaAuthority<'a> {
                     schema,
                     [ComponentCapability::Scene],
                 )
-                .map_err(|_| PrefabOverlayConflict::Component)?;
+                .map_err(|_| PrefabExpansionFailureKind::Component)?;
             }
         }
         Ok(schema)

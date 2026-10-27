@@ -9,6 +9,7 @@ and complete Runtime/Canvas logical-key lowering
 **Amended**: 2026-10-26 by explicit instance-addition origin throughout projection ancestry
 and exact containing-source instance-declaration transactions, plus source-owned identity encoding
 **Amended**: 2026-10-26 by declarative instance intent and selection before recursive activation
+**Amended**: 2026-10-27 by source-owned declaration observation and exact selected-intent Revert
 **Refines**: ADR 0006: Scene and Prefab Data Model
 **Refined By**: ADR 0043: Scene, Prefab, and Patch Document Migration Policy; ADR 0047:
 Editor Workspace and Scene Document State; ADR 0058: Stable Runtime Identity and Entity References;
@@ -86,6 +87,24 @@ Scene/prefab authoring identity is document-relative and provenance-aware.
   cannot acquire this repair authority by changing derived projection data.
 - Cross-document references should use `AssetRef` plus document-relative `SceneEntityId` when they
   become necessary. They must not rely on runtime entity IDs or backend handles.
+- Compilation failures retain their actual source declaration when established: the containing
+  input or a resolved canonical Prefab, its local anchor, and the nested addition/instance-claim
+  path. Declaration-array indices address one immutable snapshot, not durable entity identity.
+  They require the owning source's current revision and Schema basis before editing. A canonical
+  Prefab key alone cannot authorize a repair against another document's revision.
+- A failure observation describes the first rejected compilation step, not an exhaustive conflict
+  inventory. Its intent slot is present only when the compiler establishes that slot. Budget,
+  loading and authority failures must not acquire a fabricated anchor or a guessed repair target.
+  Source declaration discovery remains available independently of successful expansion.
+- Property resolution and owned replacement receive the compiler's admitted residual value limits.
+  Reflection's standalone arbitrary-value defaults do not impose a second hidden payload ceiling
+  on a component that the composition owner already admitted. Selector/Schema admission and
+  complete final value/reference validation remain mandatory under ADR 0011.
+- Reverting one claim removes its authored intent rather than writing the current effective value.
+  Removing the final property claim removes its empty property-intent container, but preserves an
+  explicit empty overlay and its base pin. Explicit overlay removal sets `overrides` to `None`
+  while retaining the source link. Reverting an instance claim restores inheritance; writing
+  `None` into that claim remains explicit detachment. None of these operations is conversion.
 
 ```mermaid
 flowchart TD

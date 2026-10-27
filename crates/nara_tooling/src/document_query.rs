@@ -1,7 +1,9 @@
 use std::{error::Error, fmt, sync::Arc};
 
 use crate::{EditorDocumentId, EditorDocumentKind};
-use nara_scene::{AuthoringReadError, AuthoringSchemaBasis, SceneAuthoringRevision};
+use nara_scene::{
+    AuthoringReadError, AuthoringSchemaBasis, PrefabDeclarationError, SceneAuthoringRevision,
+};
 
 /// Exact open-document facts used to begin enumeration or describe an owned page.
 ///
@@ -57,6 +59,8 @@ pub enum EditorDocumentQueryRejection {
     ValueBudgetExceeded,
     /// Actual presence/readability/default interpretation is rejected by the source owner.
     Source(AuthoringReadError),
+    /// Bounded source Prefab declaration observation is rejected by its owning session.
+    PrefabDeclaration(PrefabDeclarationError),
 }
 
 impl fmt::Display for EditorDocumentQueryRejection {
@@ -100,6 +104,7 @@ impl fmt::Display for EditorDocumentQueryRejection {
             }
             Self::ValueBudgetExceeded => formatter.write_str("property read value budget exceeded"),
             Self::Source(error) => error.fmt(formatter),
+            Self::PrefabDeclaration(error) => error.fmt(formatter),
         }
     }
 }
@@ -108,6 +113,7 @@ impl Error for EditorDocumentQueryRejection {
     fn source(&self) -> Option<&(dyn Error + 'static)> {
         match self {
             Self::Source(error) => Some(error),
+            Self::PrefabDeclaration(error) => Some(error),
             _ => None,
         }
     }
@@ -116,6 +122,12 @@ impl Error for EditorDocumentQueryRejection {
 impl From<AuthoringReadError> for EditorDocumentQueryRejection {
     fn from(error: AuthoringReadError) -> Self {
         Self::Source(error)
+    }
+}
+
+impl From<PrefabDeclarationError> for EditorDocumentQueryRejection {
+    fn from(error: PrefabDeclarationError) -> Self {
+        Self::PrefabDeclaration(error)
     }
 }
 

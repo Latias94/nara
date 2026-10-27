@@ -35,9 +35,11 @@ whose entities do not survive. Metadata revalidation alone does not revalidate P
 
 The Unity/Godot study supports explicit source/instance context, retained unresolved intent and
 source-owned history. These observations do not justify copying either engine's mutable object
-model. This section specifies the selected integration direction; shared Authoring compilation,
-actual-demand source admission and staged composition have bounded owner qualification. Reusable
-Editor capture, nested native preview and closure fencing still require complete consumer qualification.
+model. Shared Authoring compilation, actual-demand source admission and staged composition have
+bounded owner qualification. The
+[Editor capture qualification](../knowledge/engineering/verification/2026-10/2026-10-26T221436Z-captured-editor-scene-preview-and-ordered-image-publication-qualification-bd36086e52524bb1b227dbd21da81056.md)
+adds reusable working-copy capture, closure fencing and selected native preview evidence. Each
+record defines its executed scope; conversion and inherited Inspector selection remain separate.
 
 The reusable Host responsibility is a bounded capture for the selected source document, rather
 than a startup-only resolver. Startup Open, another Scene's preview and conversion must call the
@@ -171,10 +173,10 @@ changing the materialized value allowance. Duplicate/overlapping property declar
 before a later complete replacement can discard their interpretation. Selected programmatic values
 must pass depth admission before their first recursive clone.
 
-Reusable capture, preview fencing and native Editor consumers remain in progress. Properties still
-interpret their retained base; this does not promise arbitrary leaf-level repair of an invalid
-complete value. Verification records own the exact executed scope; this document change adds no
-native, performance or full foundation completion claim.
+Reusable capture, preview fencing and selected native Editor consumers have the qualification
+linked above. Properties still interpret their retained base; this does not promise arbitrary
+leaf-level repair of an invalid complete value. Verification records own the exact executed scope;
+this document change adds no native, performance or full foundation completion claim.
 
 The [private comparison evidence](../knowledge/engineering/verification/2026-10/2026-10-26T025005Z-private-prefab-property-intent-comparison-and-next-owner-replacement-70ca642be09045ab909751b87ed5164d.md)
 records six executed scalar cases and independent review corrections. That evidence does not
@@ -757,9 +759,39 @@ separates observed behavior from these proposed Nara consequences:
 - Unresolved overrides stay visible and savable with explicit repair/removal. Unity's documented
   unused-override behavior is useful product precedent, not proof of our proposed implementation.
 
-These are design requirements for the later public/native workflow, not implemented UI features.
-Current Accepted ADR 0038 and the current narrow Apply Changes scope remain authoritative until
-the owning contracts and complete replacement are reconciled.
+These requirements span the source observation/Revert integration and later workflows such as
+cross-source Apply and multi-object editing. The owning ADRs and
+[implementation ledger](adr/implementation-status.md) distinguish implemented scope and execution
+evidence from remaining design. The current narrow Apply Changes contract remains authoritative.
+
+## Source Conflict Observation And Repair
+
+The source-observation integration exposes declarations independently of expanded entities. The
+Scene compiler returns its first failure with an actual containing/resolved-source declaration
+location and an intent slot only where established. It does not label every unvisited row a
+conflict, turn a budget or loader failure into a source repair, or substitute the first root.
+Locations are snapshot selectors: canonical source identity does not replace a content receipt,
+and nested array indices do not survive a different source revision.
+
+Scene/Prefab sessions own bounded declaration observation and Revert preparation. The Workspace,
+Session and panel facades bind those operations to the existing non-active document query basis.
+Revert lowers to the existing complete `SetPrefabInstance` transaction and prepared token; it has
+no second document store, history or publication authority. Its exact change footprint preserves
+unselected unavailable intent even inside the anchor covered by the broader repair exception.
+An empty overlay keeps its base pin; explicit overlay removal, claim removal, detachment and
+conversion remain distinct.
+
+The Editor's `Prefab Intent` entry reviews a named source anchor without requiring inherited
+selection or native materialization. Display stored intent, source classification and actual
+composition observations separately. Inspect the same prepared forward/inverse before Commit or
+Cancel; stale basis rejects. Recompile after an accepted source repair, allow a still-conflicting
+source to Save/Reopen, and retain its exact prior declaration for one Undo/Redo.
+
+Acceptance includes a second-anchor conflict, nested addition and instance-claim locations,
+resolved-source ownership, unavailable sibling preservation, last-property Revert, explicit empty
+base binding, cancellation, stale/wrong-owner/Schema rejection, bounded observation and source
+Save/Reopen. Independent/public and affected native controls must consume these same owners.
+Compilation remains fail-fast; full conflict enumeration and cross-file Apply are separate work.
 
 ## Ordered Implementation
 
@@ -815,9 +847,12 @@ owners. A compiler-only or wire-only switch cannot establish that workflow:
   be saved as source IDs. Existing generic authoring intentionally disallows arbitrary whole-record
   replacement and Prefab-anchor deletion, so conversion must not bypass those boundaries.
 
-The Authoring Scene preview now connects reusable actual-demand capture to background composition,
-source revalidation and complete native content stamps. Its integration and qualification remain
-in progress; a format switch alone does not qualify the ordinary Inspector or inherited selection.
+The Authoring Scene preview connects reusable actual-demand capture to background composition,
+source revalidation and complete native content stamps under the qualification linked above.
+The [source-intent successor](../knowledge/engineering/verification/2026-10/2026-10-27T012127Z-source-owned-prefab-intent-review-and-revert-qualification-4b14705bceb545e79f34b7afbc5144bf.md)
+adds bounded declaration observation, actual rejected-composition locations and source-owned
+Revert through the existing history owner. Its Inspector workflow is selection-independent and
+does not imply inherited entity editing, automatic foreign-source navigation or conversion.
 The UI Canvas still uses the separate direct Prefab preview helper and needs the shared capture
 path. Existing Play Apply Changes remains limited to ordinary Scene entities; extending
 cross-document Apply is a separate workflow and is not required to preserve that supported scope.
@@ -830,8 +865,8 @@ The source classifier now publishes dependencies from complete records and curre
 including recursive assets, both exact snapshot sides and defaults exposed by RemoveField. The
 Authoring Host consumes the borrowed document projection through its existing closure capture and
 receipts; partial writes do not masquerade as complete component records. Unknown/incompatible
-Schema payloads remain preserved without guessed references. This closes that current source-fact
-gap, not the future overlay codec/activation fence or arbitrary unavailable payload interpretation.
+Schema payloads remain preserved without guessed references. Source inventory remains distinct
+from the compiler's selected dependency graph and does not interpret arbitrary unavailable payloads.
 
 ## Experiment Gates And Risks
 

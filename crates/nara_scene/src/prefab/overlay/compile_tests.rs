@@ -1,5 +1,8 @@
 //! Regression cases through the production declaration-selection and expansion owner.
 
+#[path = "compile/failure_tests.rs"]
+mod failure_tests;
+
 use std::{convert::Infallible, sync::Arc};
 
 use nara_asset::AssetRef;
@@ -738,13 +741,13 @@ fn complete_outer_repair_cannot_erase_inner_duplicate_property_declarations() {
             let diagnostic = report
                 .diagnostics
                 .iter()
-                .find(|diagnostic| diagnostic.code().as_str() == "scene.prefab-overlay-conflict")
+                .find(|diagnostic| diagnostic.code().as_str() == "scene.prefab-compilation-failed")
                 .unwrap();
             assert!(
                 diagnostic
                     .fields()
                     .iter()
-                    .any(|field| field.key().as_str() == "conflict-kind"
+                    .any(|field| field.key().as_str() == "failure-kind"
                         && field.value() == DiagnosticValueRef::Identifier("duplicate-intent")),
                 "{diagnostic:?}"
             );

@@ -5736,7 +5736,7 @@ fn failed_nested_prefab_override_does_not_poison_a_sibling_source_expansion() {
         expansion
             .diagnostics
             .iter()
-            .any(|diagnostic| { diagnostic.code().as_str() == "scene.prefab-overlay-conflict" })
+            .any(|diagnostic| { diagnostic.code().as_str() == "scene.prefab-compilation-failed" })
     );
     assert!(
         !expansion

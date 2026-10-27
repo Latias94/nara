@@ -2,9 +2,9 @@
 
 **Status**: Accepted
 **Date**: 2026-07-08
-**Last Revised**: 2026-10-24
+**Last Revised**: 2026-10-27
 **Amended**: 2026-07-12 by RGF-U1 for stable field identity and registry freeze; 2026-10-24 by
-R5a for scoped Schema-relative property selectors
+R5a for scoped Schema-relative property selectors; 2026-10-27 for caller-owned property value budgets
 **Refined By**: ADR 0043: Scene, Prefab, and Patch Document Migration Policy; ADR 0045: Component
 Schema Capability Metadata; ADR 0049: Untrusted Project Input and Parse Budget Policy; ADR 0051:
 Persistent File Envelope, Migration, and Golden Fixtures; ADR 0081: Schema Source, Stable Identity,
@@ -50,6 +50,13 @@ Rules:
   value already migrated to its current version. `ComponentFieldPath` remains a current storage
   locator. A nested shape change, split/merge, or semantic replacement follows the existing
   component-version/migration rules; address resolution never guesses a replacement.
+- Schema declaration/selector admission and actual value-work admission are distinct. A bounded
+  arbitrary-value property API may use its documented defaults; a document/compiler owner that
+  already admits larger values must pass its explicit value limits through resolution and owned
+  replacement. A hidden declaration-size default must not become another whole-component value
+  ceiling. Both paths share the same selector, storage and keyed-identity semantics, and retain
+  pre-copy depth/cost checks. This does not bypass Schema or selector admission. Resource-budget
+  refusal remains distinguishable from an invalid selector or replacement value.
 
 ```mermaid
 flowchart TD

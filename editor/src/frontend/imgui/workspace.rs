@@ -2,7 +2,11 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use dear_imgui_rs::Ui;
 use nara::project_host::{EditorEditPreparationError, EditorProjectSession};
-use nara::scene::{AuthoringConstructionDraft, AuthoringPropertyEdit, ScenePatchDocument};
+use nara::scene::{
+    AuthoringConstructionDraft, AuthoringPropertyEdit, PrefabDeclarationLimits,
+    PrefabExpansionFailure, PrefabInstanceObservation, PrefabInstancePath, PrefabRevert,
+    ScenePatchDocument,
+};
 use nara::tooling::{
     EditorAction, EditorActionOutcome, EditorActionRejection, EditorDocumentId,
     EditorDocumentQueryBasis, EditorGestureAction, EditorGestureCancelReason, EditorGestureId,
@@ -71,6 +75,37 @@ impl ImguiEditorPanelContext<'_, '_> {
         query: nara::tooling::EditorEntityQuery,
     ) -> Result<nara::tooling::EditorEntityPage, nara::tooling::EditorDocumentQueryRejection> {
         self.query_preparation()?.query_document_entities(query)
+    }
+
+    /// Observes bounded stored instance intent without requiring an entity selection.
+    pub fn observe_prefab_instance(
+        &self,
+        basis: &EditorDocumentQueryBasis,
+        path: &PrefabInstancePath,
+        limits: PrefabDeclarationLimits,
+    ) -> Result<PrefabInstanceObservation, nara::tooling::EditorDocumentQueryRejection> {
+        self.query_preparation()?
+            .observe_prefab_instance(basis, path, limits)
+    }
+
+    /// Returns only a composition failure established for this exact document basis.
+    pub fn prefab_composition_failure(
+        &self,
+        basis: &EditorDocumentQueryBasis,
+    ) -> Result<Option<&PrefabExpansionFailure>, nara::tooling::EditorDocumentQueryRejection> {
+        self.query_preparation()?.prefab_composition_failure(basis)
+    }
+
+    /// Prepares a source-owned Revert; this does not detach or convert the instance.
+    pub fn prepare_prefab_revert(
+        &self,
+        basis: &EditorDocumentQueryBasis,
+        path: &PrefabInstancePath,
+        action: PrefabRevert,
+        limits: PrefabDeclarationLimits,
+    ) -> Result<PreparedEditorDocumentEdit, EditorEditPreparationError> {
+        self.authoring_preparation()?
+            .prepare_prefab_revert(basis, path, action, limits)
     }
 
     /// Discovers bounded component/root/member metadata without copying values.
@@ -165,7 +200,22 @@ impl ImguiEditorPanelContext<'_, '_> {
         &mut self,
         prepared: PreparedEditorDocumentEdit,
     ) -> Result<PanelSubmissionId, (PanelSubmitError, PreparedEditorDocumentEdit)> {
-        match self.enqueue_submission(Recipient::Contribution) {
+        self.commit_edit_to(prepared, Recipient::Contribution)
+    }
+
+    pub(super) fn commit_prefab_revert(
+        &mut self,
+        prepared: PreparedEditorDocumentEdit,
+    ) -> Result<PanelSubmissionId, (PanelSubmitError, PreparedEditorDocumentEdit)> {
+        self.commit_edit_to(prepared, Recipient::PrefabIntent)
+    }
+
+    fn commit_edit_to(
+        &mut self,
+        prepared: PreparedEditorDocumentEdit,
+        recipient: Recipient,
+    ) -> Result<PanelSubmissionId, (PanelSubmitError, PreparedEditorDocumentEdit)> {
+        match self.enqueue_submission(recipient) {
             Ok(id) => {
                 self.actions
                     .push(EditorAction::CommitAuthoringEdit(prepared));
@@ -247,7 +297,16 @@ pub(super) struct ImguiPanelWidgets {
     pub ui_authoring: super::ui_authoring::ImguiUiAuthoringPanels,
     pub scene_view: super::view::ImguiSceneView,
     pub game_view: super::game::ImguiGameView,
-    pub project_inspector: bool,
+    pub prefab_intent: super::prefab_intent::ImguiPrefabIntent,
+    pub inspector_tab: InspectorTab,
+}
+
+#[derive(Clone, Copy, Default, PartialEq, Eq)]
+pub(super) enum InspectorTab {
+    #[default]
+    Document,
+    SourceAsset,
+    PrefabIntent,
 }
 
 struct PendingPanelGesture {

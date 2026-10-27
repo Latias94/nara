@@ -506,7 +506,7 @@ fn outer_replace_cannot_legalize_an_earlier_invalid_add_or_replace_presence() {
         assert_rejected(&report);
         assert!(
             report.diagnostics.iter().any(|diagnostic| {
-                diagnostic.code().as_str() == "scene.prefab-overlay-conflict"
+                diagnostic.code().as_str() == "scene.prefab-compilation-failed"
             }),
             "invalid {mode:?} presence must remain a conflict: {:?}",
             report.diagnostics

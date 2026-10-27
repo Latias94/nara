@@ -1,5 +1,7 @@
 //! Actual indexed documents qualify composition and publication through the Editor owner.
 
+mod composition_failure;
+
 use std::{
     fs,
     panic::{AssertUnwindSafe, catch_unwind, resume_unwind},

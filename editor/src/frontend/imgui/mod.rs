@@ -14,6 +14,7 @@ mod interaction_tests;
 #[cfg(all(test, target_os = "windows"))]
 pub(crate) use interaction_tests::InteractionProject;
 mod layout;
+mod prefab_intent;
 mod project;
 mod submission;
 #[cfg(test)]
@@ -510,6 +511,9 @@ impl ImguiEditorFrontend {
                 submission::Recipient::Authoring => {
                     widgets.authoring.action_finished(submission.id, &result)
                 }
+                submission::Recipient::PrefabIntent => {
+                    widgets.prefab_intent.action_finished(submission.id, result)
+                }
             }
         }
     }
@@ -815,7 +819,7 @@ impl ImguiEditorFrontend {
                 action_origins
                     .extend((first_action..actions.len()).map(|slot| (slot, origin.clone())));
                 panels.push(origin);
-                if !widgets.project_inspector {
+                if widgets.inspector_tab == workspace::InspectorTab::Document {
                     self.presentation.painted.insert(instance.id());
                 }
                 self.presentation.observe_panel_actions(
@@ -855,7 +859,7 @@ impl ImguiEditorFrontend {
                     .widgets
                     .entry(instance.id())
                     .or_default()
-                    .project_inspector = true;
+                    .inspector_tab = workspace::InspectorTab::SourceAsset;
             }
         }
         show_dirty_close_dialog(ui, &frame, &mut actions);
@@ -996,20 +1000,28 @@ fn paint_project_browser(ui: &Ui, context: &mut ImguiEditorPanelContext<'_, '_>)
 }
 
 fn paint_inspector(ui: &Ui, context: &mut ImguiEditorPanelContext<'_, '_>) {
-    if ui
-        .selectable_config("Document")
-        .selected(!context.widgets.project_inspector)
-        .build()
+    use workspace::InspectorTab;
+    for (index, (label, tab)) in [
+        ("Document", InspectorTab::Document),
+        ("Source asset", InspectorTab::SourceAsset),
+        ("Prefab Intent", InspectorTab::PrefabIntent),
+    ]
+    .into_iter()
+    .enumerate()
     {
-        context.widgets.project_inspector = false;
-    }
-    ui.same_line();
-    if ui
-        .selectable_config("Source asset")
-        .selected(context.widgets.project_inspector)
-        .build()
-    {
-        context.widgets.project_inspector = true;
+        if index != 0 {
+            ui.same_line();
+        }
+        if ui
+            .selectable_config(label)
+            .selected(context.widgets.inspector_tab == tab)
+            .size([ui.calc_text_size(label)[0], 0.0])
+            .build()
+        {
+            context.widgets.inspector_tab = tab;
+        }
+        #[cfg(test)]
+        ui_interaction_tests::record_control(ui, format!("Inspector tab: {label}"));
     }
     ui.separator();
     context
@@ -1020,7 +1032,17 @@ fn paint_inspector(ui: &Ui, context: &mut ImguiEditorPanelContext<'_, '_>) {
         .widgets
         .ui_authoring
         .synchronize(context.input.ui_authoring);
-    if context.widgets.project_inspector {
+    if context.widgets.inspector_tab == InspectorTab::PrefabIntent {
+        context.widgets.authoring.retire();
+        if let Some(authoring) = context.input.ui_authoring {
+            context.widgets.ui_authoring.cancel_interaction(
+                authoring,
+                nara::tooling::EditorGestureCancelReason::TargetRetired,
+                context.actions,
+            );
+        }
+        prefab_intent::show(ui, context);
+    } else if context.widgets.inspector_tab == InspectorTab::SourceAsset {
         context.widgets.authoring.retire();
         if let Some(authoring) = context.input.ui_authoring {
             context.widgets.ui_authoring.cancel_interaction(

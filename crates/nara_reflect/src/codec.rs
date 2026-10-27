@@ -35,6 +35,21 @@ pub enum ComponentCodecError {
         asset_ref: String,
         message: String,
     },
+    /// The first expanded-value node count rejected before materialization.
+    MaterializationNodeLimit {
+        observed: usize,
+        maximum: usize,
+    },
+    /// The first expanded-value logical byte count rejected before materialization.
+    MaterializationByteLimit {
+        observed: usize,
+        maximum: usize,
+    },
+    /// The first expanded-value depth rejected before materialization.
+    MaterializationDepthLimit {
+        observed: usize,
+        maximum: usize,
+    },
     WrongWorld,
     AssetServerChanged,
     EntityMissing,
@@ -121,6 +136,18 @@ impl Display for ComponentCodecError {
                     "invalid asset reference in '{field}' ('{asset_ref}'): {message}"
                 )
             }
+            Self::MaterializationNodeLimit { observed, maximum } => write!(
+                formatter,
+                "effective component value materialization observed {observed} nodes, maximum is {maximum}"
+            ),
+            Self::MaterializationByteLimit { observed, maximum } => write!(
+                formatter,
+                "effective component value materialization observed {observed} logical bytes, maximum is {maximum}"
+            ),
+            Self::MaterializationDepthLimit { observed, maximum } => write!(
+                formatter,
+                "effective component value materialization observed depth {observed}, maximum is {maximum}"
+            ),
             Self::WrongWorld => formatter.write_str("component batch belongs to a different world"),
             Self::AssetServerChanged => {
                 formatter.write_str("asset server changed after the component batch was created")

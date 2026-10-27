@@ -41,6 +41,7 @@ use crate::{
 mod authoring_query;
 mod construction;
 mod extension;
+mod prefab_declarations;
 mod prepared_edit;
 pub use construction::{CommittedEditorDocumentConstruction, PreparedEditorDocumentConstruction};
 pub use extension::{
@@ -3454,6 +3455,7 @@ fn prefab_field_value<'a>(
 #[cfg(test)]
 mod tests {
     mod generic_structure;
+    mod prefab_declarations;
 
     use super::*;
     use nara_asset::AssetRef;
