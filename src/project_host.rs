@@ -2,6 +2,10 @@ mod composition;
 mod ingest;
 mod product_launch;
 
+#[cfg(windows)]
+#[doc(hidden)]
+pub mod process_image;
+
 #[cfg(all(
     feature = "runtime-2d",
     feature = "serde",

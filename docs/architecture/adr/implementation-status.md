@@ -69,6 +69,14 @@ There is no implicit or public orphan deletion path. The
 [local lifecycle plan](../../plans/2026-10-28-local-source-tool-release-plan.md) keeps installed
 graph/ownership recovery, approved runtime custody, evolved-Schema integration, durable selection
 and safe dependent-aware removal in progress. Artifact publication alone is not a Package lifecycle.
+The [installed runtime authority study](../../research/2026-10-28-installed-tool-runtime-authority.md)
+selects a Host-approved machine runtime prerequisite and a captured-managed-image bootstrap
+experiment, retaining the package artifact/input boundary. The root Host's narrow Windows
+`ExactProcessImage` replaces the private Play copy of native path/mapped-stream evidence;
+Play retains suspended spawn, resume, Job containment and physical retirement. This extraction
+does not implement the managed bootstrap, installed activation or durable enablement. Its actual
+native tests and retained scope belong to the
+[shared image evidence](../../knowledge/engineering/verification/2026-10/2026-10-27T213708Z-shared-windows-process-image-evidence-and-explicit-installed-tool-runtime-trust-partition-814f24baa3964ef5ae5708602aaca655.md).
 The [documentation verification](../../knowledge/engineering/verification/2026-10/2026-10-23T115037Z-foundation-architecture-rebaseline-documentation-checks-and-adversarial-closure-33c8c794baf142ee964468a01248af17.md)
 records inventory/link/status checks and the scoped adversarial correction/recheck. No Cargo,
 performance or native trajectory was re-executed for this design-only unit.

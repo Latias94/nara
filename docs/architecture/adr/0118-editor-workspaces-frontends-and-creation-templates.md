@@ -483,6 +483,16 @@ cleanup does not prove unchanged/adopted content. A persisted receipt supports b
 inspection only: it cannot recover creation custody, select a Package graph, admit open-document
 metadata, approve executable code or grant deletion. Those product lifecycle owners remain separate.
 
+The initial framework-dependent installed-tool design admits a Host-approved machine runtime as
+an explicit trusted platform prerequisite. Approval names its configured launcher/root, requested
+framework/version and loading policy; finite observations support admission and drift reporting.
+They do not attest immutable transitive runtime bytes or every machine servicing/OS dependency.
+Tool artifacts, configuration and unknown installation siblings remain outside that platform trust
+baseline and require the actual captured-input execution boundary. The
+[runtime authority study](../../research/2026-10-28-installed-tool-runtime-authority.md) records
+the alternatives and unqualified artifact/namespace obligations. This selects a bounded trust
+partition; it does not establish installed execution, enablement or runtime support evidence.
+
 A component schema may publish one optional complete `authoring_initial_value` in the existing bounded generic value grammar.
 It is creation-only data, validated through the canonical complete schema/value validator at catalog admission and copied for an explicit creation transaction.
 Its presence grants neither native execution nor project-specific invariants absent from the descriptor.

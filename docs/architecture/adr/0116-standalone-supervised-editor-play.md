@@ -118,6 +118,12 @@ receipts match, Restart launches the exact same generation under a fresh nonce a
 cleanup. A new successful Play build publishes a successor generation and cannot mutate an active
 one. Build completion alone does not make a generation last-good.
 
+The root project Host owns the narrow Windows image evidence shared with other concrete Host
+consumers: restrictive executable/directory leases, bounded native path association and mapped
+image stream comparison. Play retains its generation/manifest custody, suspended startup,
+primary-thread resume, containment, bootstrap and physical retirement. Sharing that evidence
+does not create a process supervisor Interface or attest transitive managed/native dependencies.
+
 After the child publishes its strict Runtime, it arms one value-only activation observer. The
 observer emits exactly one bounded READY attestation only after the primary window and surface
 exist and the first playable frame has been presented. READY echoes the source, generation,

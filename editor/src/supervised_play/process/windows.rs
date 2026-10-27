@@ -8,7 +8,7 @@ use std::{
         io::{AsRawHandle, FromRawHandle, OwnedHandle, RawHandle},
         process::ExitStatusExt,
     },
-    path::{Path, PathBuf},
+    path::Path,
     ptr::{null, null_mut},
     sync::{
         Arc, Mutex, MutexGuard,
@@ -18,12 +18,13 @@ use std::{
 };
 
 use nara::fs::RestrictiveCapabilityHandleLease;
+use nara::project_host::process_image::ExactProcessImage;
 use windows_sys::Win32::{
     Foundation::{
         CloseHandle, ERROR_ACCESS_DENIED, ERROR_BROKEN_PIPE, ERROR_HANDLE_EOF, ERROR_IO_PENDING,
         ERROR_NOT_FOUND, ERROR_OPERATION_ABORTED, ERROR_PIPE_CONNECTED, ERROR_PIPE_NOT_CONNECTED,
         GENERIC_READ, GENERIC_WRITE, HANDLE, HANDLE_FLAG_INHERIT, INVALID_HANDLE_VALUE,
-        RtlNtStatusToDosError, SetHandleInformation, WAIT_FAILED, WAIT_OBJECT_0,
+        SetHandleInformation, WAIT_FAILED, WAIT_OBJECT_0,
     },
     Globalization::{CSTR_EQUAL, CSTR_GREATER_THAN, CSTR_LESS_THAN, CompareStringOrdinal},
     Security::{
@@ -32,8 +33,7 @@ use windows_sys::Win32::{
     },
     Storage::FileSystem::{
         CreateFileW, FILE_ATTRIBUTE_NORMAL, FILE_FLAG_FIRST_PIPE_INSTANCE, FILE_FLAG_OVERLAPPED,
-        FILE_NAME_NORMALIZED, GetFinalPathNameByHandleW, OPEN_EXISTING, PIPE_ACCESS_DUPLEX,
-        PIPE_ACCESS_INBOUND, ReadFile, VOLUME_NAME_DOS, WriteFile,
+        OPEN_EXISTING, PIPE_ACCESS_DUPLEX, PIPE_ACCESS_INBOUND, ReadFile, WriteFile,
     },
     System::{
         IO::{CancelIoEx, GetOverlappedResult, OVERLAPPED},
@@ -74,19 +74,6 @@ const OUTPUT_POLL_RECORD_BUDGET: usize = 64;
 const PIPE_NAME_ATTEMPTS: usize = 4;
 const TERMINATE_EXIT_CODE: u32 = 0x4e41_5201;
 const FORCE_KILL_EXIT_CODE: u32 = 0x4e41_5202;
-const PROCESS_IMAGE_FILE_MAPPING_INFORMATION_CLASS: i32 = 44;
-
-#[link(name = "ntdll")]
-unsafe extern "system" {
-    fn NtQueryInformationProcess(
-        process_handle: HANDLE,
-        process_information_class: i32,
-        process_information: *mut c_void,
-        process_information_length: u32,
-        return_length: *mut u32,
-    ) -> i32;
-}
-
 pub(super) struct SpawnedProcess {
     pub(super) process: PlatformProcess,
     pub(super) bootstrap: Option<BootstrapChannel>,
@@ -100,12 +87,10 @@ pub(super) struct SpawnedProcess {
 /// image shares the guarded executable's underlying file stream.
 pub(super) struct ExactGenerationLaunchAuthority {
     guards: ExactGenerationLaunchGuards,
-    executable_path: PathBuf,
 }
 
 struct ExactGenerationLaunchGuards {
-    _directory: RestrictiveCapabilityHandleLease,
-    executable: RestrictiveCapabilityHandleLease,
+    image: ExactProcessImage,
     _launch_manifest: RestrictiveCapabilityHandleLease,
 }
 
@@ -115,24 +100,11 @@ impl ExactGenerationLaunchAuthority {
         generation_directory: RestrictiveCapabilityHandleLease,
         launch_manifest: RestrictiveCapabilityHandleLease,
     ) -> io::Result<Self> {
-        let generation_directory_path = final_path(&generation_directory, "generation directory")?;
-        let executable_path = final_path(&executable, "generation executable")?;
-        let expected_parent = executable_path.parent().ok_or_else(|| {
-            io::Error::other("the exact generation executable has no parent directory")
-        })?;
-        if !paths_equal(expected_parent, &generation_directory_path) {
-            return Err(io::Error::other(
-                "the exact generation executable is no longer bound to its verified directory",
-            ));
-        }
-
         Ok(Self {
             guards: ExactGenerationLaunchGuards {
-                _directory: generation_directory,
-                executable,
+                image: ExactProcessImage::from_verified_handles(executable, generation_directory)?,
                 _launch_manifest: launch_manifest,
             },
-            executable_path,
         })
     }
 }
@@ -364,10 +336,8 @@ pub(super) fn spawn_exact_generation(
     wake: crate::supervised_play::wake::SupervisedPlayWake,
 ) -> io::Result<SpawnedProcess> {
     let environment = product_environment_block(command.environment_policy())?;
-    let ExactGenerationLaunchAuthority {
-        guards,
-        executable_path,
-    } = authority;
+    let ExactGenerationLaunchAuthority { guards } = authority;
+    let executable_path = guards.image.path().to_owned();
     spawn_windows(
         &executable_path,
         command.working_directory(),
@@ -543,7 +513,8 @@ fn spawn_windows(
     drop(attributes);
 
     if let Some(exact_generation) = exact_generation.as_ref() {
-        if let Err(error) = verify_process_image_mapping(&process, &exact_generation.executable) {
+        use std::os::windows::io::AsHandle as _;
+        if let Err(error) = exact_generation.image.verify_mapping(process.as_handle()) {
             let cleanup =
                 rollback_created_process(&job, &process, &mut stdout_reader, &mut stderr_reader);
             return Err(merge_spawn_rollback_error(error, cleanup.err()));
@@ -1416,87 +1387,6 @@ fn compare_environment_names(left: &OsStr, right: &OsStr) -> Ordering {
         CSTR_GREATER_THAN => Ordering::Greater,
         _ => left.cmp(&right),
     }
-}
-
-fn final_path<T: AsRawHandle + ?Sized>(handle: &T, label: &'static str) -> io::Result<PathBuf> {
-    let flags = FILE_NAME_NORMALIZED | VOLUME_NAME_DOS;
-    // SAFETY: the null buffer and zero length form the documented sizing query.
-    let required = unsafe { GetFinalPathNameByHandleW(raw_handle(handle), null_mut(), 0, flags) };
-    if required == 0 {
-        return Err(last_os_error("GetFinalPathNameByHandleW(size query)"));
-    }
-    let capacity = required
-        .checked_add(1)
-        .and_then(|length| usize::try_from(length).ok())
-        .ok_or_else(|| io::Error::other(format!("the Windows {label} path is too large")))?;
-    let mut path = vec![0_u16; capacity];
-    let length = u32::try_from(path.len()).map_err(|_| {
-        io::Error::other(format!(
-            "the Windows {label} path exceeds the platform limit"
-        ))
-    })?;
-    // SAFETY: `path` is writable for `length` UTF-16 code units and the exact handle remains live.
-    let written =
-        unsafe { GetFinalPathNameByHandleW(raw_handle(handle), path.as_mut_ptr(), length, flags) };
-    if written == 0 {
-        return Err(last_os_error("GetFinalPathNameByHandleW"));
-    }
-    let written = usize::try_from(written)
-        .map_err(|_| io::Error::other(format!("the Windows {label} path is too large")))?;
-    if written >= path.len() {
-        return Err(io::Error::other(format!(
-            "the Windows {label} path changed during its bounded handle query"
-        )));
-    }
-    path.truncate(written);
-    use std::os::windows::ffi::OsStringExt as _;
-    Ok(PathBuf::from(OsString::from_wide(&path)))
-}
-
-fn paths_equal(left: &Path, right: &Path) -> bool {
-    environment_names_equal(left.as_os_str(), right.as_os_str())
-}
-
-fn verify_process_image_mapping(
-    process: &OwnedHandle,
-    exact_executable: &RestrictiveCapabilityHandleLease,
-) -> io::Result<()> {
-    verify_process_image_mapping_handle(raw_handle(process), exact_executable)
-}
-
-fn verify_process_image_mapping_handle(
-    process: HANDLE,
-    exact_executable: &RestrictiveCapabilityHandleLease,
-) -> io::Result<()> {
-    let mut executable_handle = raw_handle(exact_executable);
-    let mut returned = 0_u32;
-    // SAFETY: the newly created process is contained and suspended. The input buffer contains the
-    // live guarded executable handle required by ProcessImageFileMapping. The native contract
-    // compares the process image section and candidate handle through their shared underlying file
-    // stream's SectionObjectPointer; it does not claim FileObject pointer identity.
-    let status = unsafe {
-        NtQueryInformationProcess(
-            process,
-            PROCESS_IMAGE_FILE_MAPPING_INFORMATION_CLASS,
-            (&mut executable_handle as *mut HANDLE).cast(),
-            u32::try_from(size_of::<HANDLE>()).expect("HANDLE size fits in u32"),
-            &mut returned,
-        )
-    };
-    if status == 0 {
-        return Ok(());
-    }
-    // SAFETY: the returned NTSTATUS value is accepted by the documented conversion routine.
-    let code = unsafe { RtlNtStatusToDosError(status) };
-    if code == 0 {
-        return Err(io::Error::other(format!(
-            "NtQueryInformationProcess(ProcessImageFileMapping) returned non-success NTSTATUS {status:#x}"
-        )));
-    }
-    Err(with_operation(
-        "NtQueryInformationProcess(ProcessImageFileMapping)",
-        io::Error::from_raw_os_error(code as i32),
-    ))
 }
 
 fn resume_verified_primary_thread(thread: &OwnedHandle) -> io::Result<()> {

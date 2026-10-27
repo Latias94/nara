@@ -71,11 +71,22 @@ local relationships are checked; unsupported sources, roles, migration and targe
    rollback. File deletion needs exact owning proof; directory publication alone cannot grant it.
 3. **Approved activation and update.** Host approval binds the selected release and external
    runtime prerequisite. Installed files and persistent enablement never approve themselves.
+   The [runtime authority study](../research/2026-10-28-installed-tool-runtime-authority.md) selects
+   an explicitly approved machine-managed runtime baseline, with configured root/framework/version
+   and finite drift observations. It does not promise immutable transitive runtime bytes or a
+   reproducible native dependency closure. Keep package-controlled inputs outside that baseline.
+   First move the existing exact Windows image evidence into its root Host owner and reuse it
+   from Play; do not move the Play supervisor, generation store or cleanup policy with it.
+   Qualify a concrete managed bootstrap receiving captured images by a bounded stream envelope
+   before the unchanged source-tool request. Do not execute package images by probing their mutable
+   installation directory. Check metadata/reference identities before load and refuse unknown
+   dependencies without default-context fallback. This is a finite C# adapter experiment, not a
+   second source proposal owner, official SDK or universal language Host.
    Prepare exact artifact custody before invoking the existing probe; same-Schema V2 coexists
    with the predecessor until readiness and the chosen publication cut. Define receipt versus
    routing order inside the actual Session/coordinator boundary. Candidate failure preserves V1;
-   post-switch retirement debt stays visible. Do not claim complete executable identity while
-   the launcher/runtime prerequisite is only an unchecked path.
+   post-switch retirement debt stays visible. Validate the approved launcher and runtime policy;
+   an unchecked path or ordinary read-handle inventory is not installed execution custody.
 4. **Disable, removal and recovery.** Revalidate installed required-dependent closure before any
    mutation. Ordinary removal blocks; an explicit confirmed cascade withdraws the affected
    routes and retains physical custody. A conservative whole-tool-lane return check is acceptable
