@@ -25,5 +25,18 @@ applies it. Calls are synchronous and serial. No borrowed World data crosses the
 The transport does not support asynchronous results or validate a reusable snapshot read-set.
 Managed code remains loaded for the test process lifetime; Drop does not prove CLR unload.
 
-See the [plan](../../../docs/plans/2026-10-27-behavior-language-workflow-plan.md) and
+The current successor loads `data/behaviors.catalog.json` through the existing catalog decoder
+and `data/game.scene.json` through existing source admission. Callback registration lives in
+`managed/SchemaBehaviors.cs` and `lua/schema_behaviors.lua`. Stable root fields are resolved
+generically through the existing property resolver; declared references use the existing walker.
+The Host does not switch over authored Schema IDs to extract different fields.
+
+To add a Behavior for this trial, declare its Schema and source record, then register its
+language callback. A complete authoring creation template is required for Attach. Native Name
+is the sole command domain; a new native domain still requires its own actual binding.
+Callback IDs and versions are checked against the complete catalog before fresh activation.
+The fixed generation-one comparison is not a catalog migration or production owner protocol.
+
+See the [successor plan](../../../docs/plans/2026-10-27-schema-driven-behavior-plan.md),
+[initial plan](../../../docs/plans/2026-10-27-behavior-language-workflow-plan.md) and
 [hosting study](../../../docs/research/2026-10-27-dotnet-behavior-hosting-feasibility.md).

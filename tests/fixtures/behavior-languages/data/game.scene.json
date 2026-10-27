@@ -1,0 +1,125 @@
+{
+  "kind": "scene",
+  "format_version": 1,
+  "engine_min_version": "0.1.0",
+  "generator": {
+    "name": "nara",
+    "version": "0.1.0"
+  },
+  "payload": {
+    "roots": [
+      "actor",
+      "friend",
+      "label"
+    ],
+    "entities": [
+      {
+        "id": "actor",
+        "children": [],
+        "components": {
+          "nara.scene.Name": {
+            "version": 1,
+            "value": {
+              "type": "string",
+              "value": "Actor"
+            }
+          },
+          "trial.behavior.Mover": {
+            "owner": "trial.behaviors",
+            "version": 1,
+            "value": {
+              "type": "map",
+              "value": {
+                "amount": {
+                  "type": "f64",
+                  "value": 2.0
+                }
+              }
+            }
+          },
+          "trial.behavior.Sensor": {
+            "owner": "trial.behaviors",
+            "version": 1,
+            "value": {
+              "type": "map",
+              "value": {
+                "images": {
+                  "type": "list",
+                  "value": [
+                    {
+                      "type": "map",
+                      "value": {
+                        "kind": {
+                          "type": "string",
+                          "value": "path"
+                        },
+                        "value": {
+                          "type": "string",
+                          "value": "textures/sensor.png"
+                        }
+                      }
+                    }
+                  ]
+                },
+                "targets": {
+                  "type": "list",
+                  "value": [
+                    {
+                      "type": "entity_ref",
+                      "value": {
+                        "kind": "scene_local",
+                        "entity": "friend"
+                      }
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                }
+              }
+            }
+          }
+        }
+      },
+      {
+        "id": "friend",
+        "children": [],
+        "components": {
+          "nara.scene.Name": {
+            "version": 1,
+            "value": {
+              "type": "string",
+              "value": "Friend"
+            }
+          }
+        }
+      },
+      {
+        "id": "label",
+        "children": [],
+        "components": {
+          "nara.scene.Name": {
+            "version": 1,
+            "value": {
+              "type": "string",
+              "value": "Original label"
+            }
+          },
+          "trial.behavior.Label": {
+            "owner": "trial.behaviors",
+            "version": 1,
+            "value": {
+              "type": "map",
+              "value": {
+                "wire_text": {
+                  "type": "string",
+                  "value": "Authored label"
+                }
+              }
+            }
+          }
+        }
+      }
+    ]
+  }
+}

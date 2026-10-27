@@ -190,8 +190,12 @@ choice: if enabled, use stable attachment identity, never array position or VM h
 
 The [first language slice](../research/2026-10-27-behavior-language-workflow-comparison.md)
 executes a fixed admitted Scene/Prefab task through actual in-process C# and Lua calls.
-It removes a hosting feasibility uncertainty, not the need for Schema-driven binding, measured
-domain access, author iteration and VM ownership. The private DTO harness is not a selected SDK.
+It removes a hosting feasibility uncertainty. The
+[Schema-driven successor](../research/2026-10-27-schema-driven-behavior-comparison.md) then
+loads an external catalog, admits explicit callback bindings and generically resolves fields and
+references for three authored Schemas. Complete selected source/history/Prefab workflows have
+private evidence; measured domain access, author code iteration and VM ownership remain open.
+The private DTO harness is not a selected SDK.
 
 ## D03: Immutable Publications And Reload
 

@@ -44,7 +44,7 @@ def main():
     subprocess.run(
         [
             "cargo", "+1.95.0", "nextest", "run", "--manifest-path", str(fixture / "Cargo.toml"),
-            "--locked", "--test", "languages", "--test-threads=1",
+            "--locked", "--test", "languages", "--test-threads=1", "--no-fail-fast",
             "--status-level", "fail", "--final-status-level", "fail",
         ],
         cwd=root, env=environment, check=True,

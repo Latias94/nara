@@ -212,7 +212,7 @@ into durable allocated identities merely to complete the first consumer.
 ## R3: Behavior Representation And Immutable Module Publications
 
 **Design:** D02, D03, D06. **State:** private representation comparison and first in-process
-C#/Lua snapshot workflow executed; production representation, complete language workflow and
+C#/Lua Schema-driven workflow executed; production representation, complete language workflow and
 replacement remain open. **Owners:** Schema, Scene materialization,
 concrete language adapter and executable Host; Proposed 0120.
 
@@ -238,6 +238,13 @@ passes the same Scene/Prefab task through real hostfxr and Lua calls with exact 
 authority. It is a fixed DTO/event harness, not generic Schema binding, an optimized domain-call
 comparison or a language/SDK selection. Author iteration, data/VM authority and concrete owner
 lifetime remain required before production integration.
+
+The [Schema-driven successor](../research/2026-10-27-schema-driven-behavior-comparison.md)
+replaces the fixed extraction path with external catalog admission and complete callback
+availability checks. Three authored Schemas, stable/wire field mapping, Attach/Edit/history,
+disk persistence and repeated Prefab identity have private evidence. Fresh catalog admission
+is not successor migration; author code iteration, domain-call cost and physical VM ownership
+remain open before selecting or integrating a production owner.
 
 **R3c replacement:** qualify only the modes needed by the selected owner, after its native
 completion/retirement proof in R4a. Defining coexist-and-switch and Stop-first semantics does not

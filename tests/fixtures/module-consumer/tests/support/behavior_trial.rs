@@ -107,21 +107,38 @@ impl Definition {
                     ]),
                 ]),
         ];
+        Self::from_catalog(
+            ComponentSchemaCatalog {
+                components: schemas.to_vec(),
+                ..Default::default()
+            },
+            available,
+        )
+        .unwrap()
+    }
+
+    pub fn from_catalog(
+        catalog: ComponentSchemaCatalog,
+        available: bool,
+    ) -> Result<Arc<Self>, Error> {
         let native = AuthoringSchemaBundle::from_trusted_provider_definitions([
             nara_scene::SCENE_COMPONENTS_SCHEMA_PROVIDER,
         ])
         .unwrap();
-        let bundle = AuthoringSchemaBundle::new(native.owners().iter().cloned().chain([
-            AuthoringSchemaBundleOwner::new(
-                owner(),
-                ComponentSchemaCatalog {
-                    components: schemas.to_vec(),
-                    ..Default::default()
-                },
-                None,
-            ),
-        ]))
-        .unwrap();
+        let bundle = AuthoringSchemaBundle::new(
+            native
+                .owners()
+                .iter()
+                .cloned()
+                .chain([AuthoringSchemaBundleOwner::new(owner(), catalog, None)]),
+        )
+        .map_err(|_| Error::Source)?;
+        let schemas = bundle
+            .owner(&owner())
+            .ok_or(Error::Source)?
+            .current()
+            .components
+            .clone();
         let native_provider = nara_reflect::__private::resolve_schema_provider(
             nara_scene::SCENE_COMPONENTS_SCHEMA_PROVIDER,
         )
@@ -152,15 +169,15 @@ impl Definition {
             )
             .unwrap(),
         );
-        let basis = AuthoringSchemaBasis::admit(&bundle, &adapters).unwrap();
-        Arc::new(Self {
+        let basis = AuthoringSchemaBasis::admit(&bundle, &adapters).map_err(|_| Error::Source)?;
+        Ok(Arc::new(Self {
             basis,
             schemas: schemas
                 .into_iter()
                 .map(|schema| (schema.id().clone(), schema))
                 .collect(),
             available,
-        })
+        }))
     }
 
     fn validate(

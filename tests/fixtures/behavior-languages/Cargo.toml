@@ -17,3 +17,4 @@ nara_reflect = { path = "../../../crates/nara_reflect" }
 nara_scene = { path = "../../../crates/nara_scene", default-features = false, features = ["serde"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
+tempfile = "3"

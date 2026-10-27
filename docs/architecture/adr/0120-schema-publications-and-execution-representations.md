@@ -51,8 +51,12 @@ adequate design.
 The [first in-process language slice](../../research/2026-10-27-behavior-language-workflow-comparison.md)
 executes the same fixed Mover/Sensor task through actual C#/.NET and Lua calls. Exact native
 tokens guard returned Name batches; no World borrow crosses the call. This qualifies that
-private snapshot workflow only. Compiled field extraction/event cases, copied DTO costs,
-language iteration, generic Schema binding and VM instance/code custody still need evidence.
+private snapshot workflow only; it does not select the copied DTO interface or qualify VM custody.
+The [Schema-driven successor](../../research/2026-10-27-schema-driven-behavior-comparison.md)
+replaces fixed field extraction with external catalog admission, generic existing property/reference
+resolution and actual callback registration. It proves three authored Schemas, complete selected
+source/history/persistence and repeated Prefab identity without a per-Schema native dispatch branch.
+Binding availability checks are not publication dependency/ABI compatibility or VM lifetime proof.
 Neither this JSON bridge nor either language is selected as the production interface.
 
 ### Publication Scope

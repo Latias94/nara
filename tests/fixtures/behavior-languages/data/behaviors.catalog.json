@@ -1,0 +1,188 @@
+{
+  "kind": "component_schema_catalog",
+  "format_version": 1,
+  "engine_min_version": "0.1.0",
+  "generator": {
+    "name": "nara",
+    "version": "0.1.0"
+  },
+  "payload": {
+    "generation": 1,
+    "components": [
+      {
+        "id": "trial.behavior.Label",
+        "aliases": [
+          "Label"
+        ],
+        "version": 1,
+        "capabilities": [
+          "scene",
+          "inspect",
+          "edit"
+        ],
+        "fields": [
+          {
+            "id": "text",
+            "aliases": [
+              "Text"
+            ],
+            "path": [
+              {
+                "kind": "field",
+                "value": "wire_text"
+              }
+            ],
+            "shape": {
+              "shape": "scalar",
+              "kind": "string"
+            },
+            "required": true,
+            "capabilities": [
+              "scene",
+              "inspect",
+              "edit"
+            ]
+          }
+        ],
+        "field_tombstones": [],
+        "authoring_initial_value": {
+          "type": "map",
+          "value": {
+            "wire_text": {"type": "string", "value": "Authored label"}
+          }
+        }
+      },
+      {
+        "id": "trial.behavior.Mover",
+        "aliases": [
+          "Mover"
+        ],
+        "version": 1,
+        "capabilities": [
+          "scene",
+          "inspect",
+          "edit"
+        ],
+        "fields": [
+          {
+            "id": "amount",
+            "aliases": [
+              "amount"
+            ],
+            "path": [
+              {
+                "kind": "field",
+                "value": "amount"
+              }
+            ],
+            "shape": {
+              "shape": "scalar",
+              "kind": "f64"
+            },
+            "required": true,
+            "capabilities": [
+              "scene",
+              "inspect",
+              "edit"
+            ]
+          },
+          {
+            "id": "gain",
+            "aliases": [
+              "Gain"
+            ],
+            "path": [
+              {
+                "kind": "field",
+                "value": "wire_gain"
+              }
+            ],
+            "shape": {
+              "shape": "optional",
+              "value": {
+                "shape": "scalar",
+                "kind": "f64"
+              }
+            },
+            "required": false,
+            "capabilities": [
+              "scene",
+              "inspect",
+              "edit"
+            ]
+          }
+        ],
+        "field_tombstones": []
+      },
+      {
+        "id": "trial.behavior.Sensor",
+        "aliases": [
+          "Sensor"
+        ],
+        "version": 1,
+        "capabilities": [
+          "scene",
+          "inspect",
+          "edit"
+        ],
+        "fields": [
+          {
+            "id": "images",
+            "aliases": [
+              "images"
+            ],
+            "path": [
+              {
+                "kind": "field",
+                "value": "images"
+              }
+            ],
+            "shape": {
+              "shape": "list",
+              "item": {
+                "shape": "asset_ref"
+              }
+            },
+            "required": true,
+            "capabilities": [
+              "scene",
+              "inspect",
+              "edit",
+              "asset_ref"
+            ]
+          },
+          {
+            "id": "targets",
+            "aliases": [
+              "targets"
+            ],
+            "path": [
+              {
+                "kind": "field",
+                "value": "targets"
+              }
+            ],
+            "shape": {
+              "shape": "list",
+              "item": {
+                "shape": "optional",
+                "value": {
+                  "shape": "entity_ref"
+                }
+              }
+            },
+            "required": true,
+            "capabilities": [
+              "scene",
+              "inspect",
+              "edit",
+              "entity_ref"
+            ]
+          }
+        ],
+        "field_tombstones": []
+      }
+    ],
+    "type_tombstones": []
+  }
+}

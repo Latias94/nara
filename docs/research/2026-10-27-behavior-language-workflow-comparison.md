@@ -3,6 +3,10 @@
 **Date:** 2026-10-27. **Status:** Executed private C#/Lua slice; full language comparison and
 production selection remain open.
 
+The [Schema-driven successor](2026-10-27-schema-driven-behavior-comparison.md) replaces this
+fixed-field fixture in place. This report retains the first slice's executed scope and limits;
+it does not describe the current harness as still requiring native field switches.
+
 ## What Was Executed
 
 The [plan](../plans/2026-10-27-behavior-language-workflow-plan.md) follows the
