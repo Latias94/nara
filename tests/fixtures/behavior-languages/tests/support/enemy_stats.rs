@@ -1,334 +1,43 @@
-//! A concrete trusted tool consumer, independent of a window or drawing toolkit.
+//! Actual standalone C# proposals through the production, window-free Project Session.
 
-use std::{cell::RefCell, fmt, rc::Rc, sync::Arc, time::Duration};
+use std::{
+    collections::BTreeMap,
+    ffi::OsString,
+    path::PathBuf,
+    sync::Arc,
+    time::{Duration, Instant},
+};
 
-use nara_engine::project_host::{EditorEditPreparationError, EditorProjectSession};
+use nara_engine::project_host::{
+    EditorProjectSession, EditorSourceToolCommand, EditorSourceToolCommit,
+    EditorSourceToolDefinition, EditorSourceToolError, EditorSourceToolIntent,
+    EditorSourceToolRequestId, EditorSourceToolView,
+};
 use nara_reflect::{
-    ComponentFieldId, ComponentPropertyPath, ComponentSchemaVersion, ComponentTypeId,
-    ComponentValue, resolve_component_property,
+    ComponentFieldId, ComponentPropertyPath, ComponentSchemaCatalog, ComponentSchemaVersion,
+    ComponentTypeId, ComponentValue,
 };
 use nara_scene::{
-    ConstructionEntity, LocalConstructionEntity, SceneComponentRecord, SceneDocument,
-    SceneEntityId, SceneEntityRecord, ScenePlacement, ScenePlacementOwner,
+    AuthoringPropertyEdit, SceneComponentRecord, SceneDocument, SceneEntityId, SceneEntityRecord,
 };
 use nara_tooling::{
-    CommittedEditorDocumentConstruction, EditorActionOutcome, EditorDocumentId,
-    EditorDocumentQueryBasis, EditorDocumentQueryRejection, EditorEntityQuery,
-    EditorEntityQueryLimits, EditorEntityQueryPosition, EditorPropertyRead,
-    EditorPropertyReadLimits, EditorPropertyTarget, EditorPropertyValue,
-    PreparedEditorDocumentConstruction,
+    EditorDocumentId, EditorDocumentQueryBasis, EditorDocumentQueryRejection, EditorEntityQuery,
+    EditorEntityQueryLimits, EditorEntityQueryPosition,
 };
 
 use super::{
     authoring_project::{
-        Project, assert_history, assert_value, close, replay, save, schema_bundle,
+        Project, applied, assert_history, assert_value, close, replay, save, schema_bundle,
     },
-    dotnet::{DotnetProgram, EnemyStatsProposal, EnemyStatsRequest},
     scene_runtime::{Definition, Runtime, id},
 };
 
 const STATS: &str = "trial.enemy.EnemyStats";
 const NAME: &str = "nara.scene.Name";
+const TIMEOUT: Duration = Duration::from_secs(30);
 
 fn kind(value: &str) -> ComponentTypeId {
     ComponentTypeId::new(value)
-}
-
-fn property(field: &str) -> ComponentPropertyPath {
-    ComponentPropertyPath::new(ComponentFieldId::new(field))
-}
-
-#[derive(Debug)]
-enum ToolError {
-    Inactive,
-    StalePublication,
-    StaleRequest,
-    InvalidObservation,
-    SchemaMismatch,
-    InvalidProposal,
-    Managed(String),
-    Owner(Box<EditorEditPreparationError>),
-    Draft(String),
-    Commit(Box<EditorActionOutcome>),
-}
-
-impl fmt::Display for ToolError {
-    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            Self::Managed(error) | Self::Draft(error) => formatter.write_str(error),
-            Self::Owner(error) => error.fmt(formatter),
-            Self::Commit(outcome) => write!(formatter, "{outcome:?}"),
-            error => write!(formatter, "{error:?}"),
-        }
-    }
-}
-
-impl From<EditorEditPreparationError> for ToolError {
-    fn from(error: EditorEditPreparationError) -> Self {
-        Self::Owner(Box::new(error))
-    }
-}
-
-enum Command {
-    Attach(SceneEntityId),
-    Edit(SceneEntityId),
-    Spawn(String),
-}
-
-struct Proposal {
-    publication: Rc<()>,
-    request: Rc<()>,
-    basis: EditorDocumentQueryBasis,
-    command: Command,
-    output: EnemyStatsProposal,
-}
-
-struct ReviewedEdit {
-    publication: Rc<()>,
-    request: Rc<()>,
-    basis: EditorDocumentQueryBasis,
-    title: String,
-    created: Option<LocalConstructionEntity>,
-    prepared: PreparedEditorDocumentConstruction,
-}
-
-/// Owns only tool routing. Document candidates, IDs, inverse and history remain Session-owned.
-struct EnemyStatsTool {
-    program: Option<DotnetProgram>,
-    publication: Rc<()>,
-    request: RefCell<Rc<()>>,
-    definition: Arc<Definition>,
-}
-
-impl EnemyStatsTool {
-    fn new(program: DotnetProgram) -> Self {
-        let catalog = program.enemy_stats_catalog().unwrap();
-        let definition = Definition::from_catalog("trial.enemy-stats", catalog).unwrap();
-        Self {
-            program: Some(program),
-            publication: Rc::new(()),
-            request: RefCell::new(Rc::new(())),
-            definition,
-        }
-    }
-
-    fn validate_request(&self, request: &Rc<()>) -> Result<(), ToolError> {
-        if !Rc::ptr_eq(&self.request.borrow(), request) {
-            return Err(ToolError::StaleRequest);
-        }
-        Ok(())
-    }
-
-    fn validate_publication(&self, publication: &Rc<()>) -> Result<(), ToolError> {
-        if self.program.is_none() {
-            return Err(ToolError::Inactive);
-        }
-        if !Rc::ptr_eq(&self.publication, publication) {
-            return Err(ToolError::StalePublication);
-        }
-        Ok(())
-    }
-
-    fn propose(
-        &self,
-        editor: &EditorProjectSession,
-        document: EditorDocumentId,
-        command: Command,
-        bonus: i64,
-        fault: &str,
-    ) -> Result<Proposal, ToolError> {
-        let program = self.program.as_ref().ok_or(ToolError::Inactive)?;
-        let request = Rc::new(());
-        *self.request.borrow_mut() = Rc::clone(&request);
-        let basis = editor.document_query_basis(document).map_err(|error| {
-            ToolError::Owner(Box::new(EditorEditPreparationError::QueryBasis(error)))
-        })?;
-        editor.validate_authoring_query_basis(&basis)?;
-        let schema = self.definition.owner.schema(&kind(STATS)).unwrap();
-        let admitted = basis.schema.as_ref().ok_or(ToolError::SchemaMismatch)?;
-        if admitted.component_schema_owner(&kind(STATS)) != Some(self.definition.owner.owner_id())
-            || admitted.schema(&kind(STATS)) != Some(schema)
-        {
-            return Err(ToolError::SchemaMismatch);
-        }
-        let read = |field: &str| -> Result<i64, ToolError> {
-            let value = match &command {
-                Command::Edit(entity) => editor
-                    .read_document_property(EditorPropertyRead {
-                        target: EditorPropertyTarget {
-                            basis: basis.clone(),
-                            entity: entity.clone(),
-                            component: kind(STATS),
-                            property: property(field),
-                        },
-                        limits: EditorPropertyReadLimits::new(4096, 64, 4096).unwrap(),
-                    })
-                    .map(|observation| observation.value)
-                    .map_err(|error| {
-                        ToolError::Owner(Box::new(EditorEditPreparationError::QueryBasis(error)))
-                    })?,
-                Command::Attach(_) | Command::Spawn(_) => EditorPropertyValue::Present(
-                    resolve_component_property(
-                        schema,
-                        schema.version(),
-                        schema.authoring_initial_value().unwrap(),
-                        &property(field),
-                    )
-                    .unwrap()
-                    .value
-                    .clone(),
-                ),
-            };
-            let EditorPropertyValue::Present(ComponentValue::I64(value)) = value else {
-                return Err(ToolError::InvalidObservation);
-            };
-            Ok(value)
-        };
-        let input = EnemyStatsRequest {
-            operation: match &command {
-                Command::Attach(_) => "attach",
-                Command::Edit(_) => "edit",
-                Command::Spawn(_) => "spawn",
-            }
-            .into(),
-            name: match &command {
-                Command::Spawn(name) => name.clone(),
-                _ => String::new(),
-            },
-            health: read("health")?,
-            armor: read("armor")?,
-            bonus,
-            fault: fault.into(),
-        };
-        let output = program
-            .propose_enemy_stats(&input)
-            .map_err(ToolError::Managed)?;
-        Ok(Proposal {
-            publication: Rc::clone(&self.publication),
-            request,
-            basis,
-            command,
-            output,
-        })
-    }
-
-    fn prepare(
-        &self,
-        editor: &EditorProjectSession,
-        proposal: Proposal,
-    ) -> Result<ReviewedEdit, ToolError> {
-        self.validate_publication(&proposal.publication)?;
-        let mut draft = editor.begin_authoring_construction(&proposal.basis)?;
-        self.validate_request(&proposal.request)?;
-        let output = proposal.output;
-        if output.writes.is_empty() || output.writes.len() > 8 {
-            return Err(ToolError::InvalidProposal);
-        }
-        let mut bytes = output.title.len().saturating_add(output.name.len());
-        let mut nodes: usize = 0;
-        for write in &output.writes {
-            bytes = bytes.saturating_add(write.field.len());
-            let cost = write
-                .value
-                .cost_up_to(
-                    128_usize.saturating_sub(nodes),
-                    4096_usize.saturating_sub(bytes),
-                )
-                .ok_or(ToolError::InvalidProposal)?;
-            nodes += cost.nodes();
-            bytes = bytes.saturating_add(cost.logical_bytes());
-        }
-        if bytes > 4096 {
-            return Err(ToolError::InvalidProposal);
-        }
-        let created = match &proposal.command {
-            Command::Spawn(_) => Some(
-                draft
-                    .create_entity(ScenePlacement::last(ScenePlacementOwner::Root))
-                    .map_err(|report| ToolError::Draft(format!("{report:?}")))?,
-            ),
-            _ => None,
-        };
-        let entity = match &proposal.command {
-            Command::Attach(entity) | Command::Edit(entity) => {
-                ConstructionEntity::Existing(entity.clone())
-            }
-            Command::Spawn(_) => ConstructionEntity::Local(created.clone().unwrap()),
-        };
-        if !matches!(proposal.command, Command::Edit(_)) {
-            draft
-                .add_component(entity.clone(), kind(STATS))
-                .map_err(|report| ToolError::Draft(format!("{report:?}")))?;
-        }
-        if created.is_some() {
-            draft
-                .add_component(entity.clone(), kind(NAME))
-                .map_err(|report| ToolError::Draft(format!("{report:?}")))?;
-            draft
-                .set_property(
-                    entity.clone(),
-                    kind(NAME),
-                    property("value"),
-                    ComponentValue::String(output.name),
-                )
-                .map_err(|report| ToolError::Draft(format!("{report:?}")))?;
-        }
-        for write in output.writes {
-            draft
-                .set_property(
-                    entity.clone(),
-                    kind(STATS),
-                    property(&write.field),
-                    write.value,
-                )
-                .map_err(|report| ToolError::Draft(format!("{report:?}")))?;
-        }
-        let prepared = editor.prepare_authoring_construction(&proposal.basis, &draft)?;
-        Ok(ReviewedEdit {
-            publication: proposal.publication,
-            request: proposal.request,
-            basis: proposal.basis,
-            title: output.title,
-            created,
-            prepared,
-        })
-    }
-
-    fn commit(
-        &self,
-        editor: &mut EditorProjectSession,
-        reviewed: ReviewedEdit,
-    ) -> Result<CommittedEditorDocumentConstruction, ToolError> {
-        self.validate_publication(&reviewed.publication)?;
-        editor.validate_authoring_query_basis(&reviewed.basis)?;
-        self.validate_request(&reviewed.request)?;
-        editor
-            .commit_authoring_construction(reviewed.prepared)
-            .map_err(|outcome| ToolError::Commit(Box::new(outcome)))
-    }
-
-    fn replace(
-        &mut self,
-        candidate: DotnetProgram,
-    ) -> Result<DotnetProgram, (DotnetProgram, String)> {
-        let catalog = match candidate.enemy_stats_catalog() {
-            Ok(catalog) => catalog,
-            Err(error) => return Err((candidate, error)),
-        };
-        if catalog != *self.definition.owner.current() {
-            return Err((
-                candidate,
-                "body replacement requires the same complete EnemyStats catalog".into(),
-            ));
-        }
-        self.publication = Rc::new(());
-        Ok(self.program.replace(candidate).unwrap())
-    }
-
-    fn disable(&mut self) -> DotnetProgram {
-        self.publication = Rc::new(());
-        self.program.take().unwrap()
-    }
 }
 
 fn original() -> SceneDocument {
@@ -350,15 +59,164 @@ fn original() -> SceneDocument {
     ])
 }
 
-fn edit(
-    tool: &EnemyStatsTool,
-    editor: &EditorProjectSession,
-    document: EditorDocumentId,
-    command: Command,
+fn tool_directory(variant: &str) -> PathBuf {
+    std::env::var_os(format!("NARA_SOURCE_TOOL_{variant}_DIR"))
+        .expect("Run python tests/fixtures/behavior-languages/run.py")
+        .into()
+}
+
+fn definition() -> Arc<Definition> {
+    let bytes = std::fs::read(tool_directory("V1").join("enemy-stats.catalog.json")).unwrap();
+    let catalog = ComponentSchemaCatalog::from_json_bytes(&bytes).unwrap();
+    Definition::from_catalog("trial.enemy-stats", catalog).unwrap()
+}
+
+fn tool_definition(
+    definition: &Definition,
+    variant: &str,
+    fault: Option<&str>,
+    timeout: Duration,
+) -> EditorSourceToolDefinition {
+    let directory = tool_directory(variant);
+    let executable = PathBuf::from(
+        std::env::var_os("NARA_SOURCE_TOOL_DOTNET")
+            .expect("Runner selects the absolute dotnet executable"),
+    );
+    assert!(executable.is_absolute());
+    assert!(directory.is_absolute());
+    let mut arguments = vec![directory.join("EnemyStatsTool.dll").into_os_string()];
+    if let Some(fault) = fault {
+        arguments.extend([OsString::from("--fault"), OsString::from(fault)]);
+    }
+    let command = EditorSourceToolCommand::new(executable, arguments, directory, timeout).unwrap();
+    EditorSourceToolDefinition::new(command, definition.owner.clone(), kind(STATS)).unwrap()
+}
+
+fn parameters(bonus: i64, fault: Option<&str>) -> BTreeMap<String, ComponentValue> {
+    let mut parameters = BTreeMap::from([("bonus".into(), ComponentValue::I64(bonus))]);
+    if let Some(fault) = fault {
+        parameters.insert("fault".into(), ComponentValue::String(fault.into()));
+    }
+    parameters
+}
+
+fn settle(editor: &mut EditorProjectSession) -> EditorSourceToolView {
+    let deadline = Instant::now() + TIMEOUT;
+    loop {
+        editor.drive_editor_frame(Duration::ZERO);
+        let view = editor.source_tool_view();
+        if !view.probing && !view.working && !view.retiring {
+            return view;
+        }
+        assert!(
+            Instant::now() < deadline,
+            "Source child or its physical IO custody did not return: {view:?}",
+        );
+        std::thread::sleep(Duration::from_millis(1));
+    }
+}
+
+fn probe(
+    editor: &mut EditorProjectSession,
+    definition: EditorSourceToolDefinition,
+) -> EditorSourceToolView {
+    let attempt = editor.enable_source_tool(definition).unwrap();
+    assert_eq!(editor.source_tool_view().attempt.as_ref(), Some(&attempt));
+    let view = settle(editor);
+    assert_eq!(view.attempt.as_ref(), Some(&attempt));
+    view
+}
+
+fn enable(editor: &mut EditorProjectSession, definition: &Definition, fault: Option<&str>) {
+    let view = probe(editor, tool_definition(definition, "V1", fault, TIMEOUT));
+    assert!(
+        view.enabled && view.attempt_error.is_none() && view.request_error.is_none(),
+        "{view:?}",
+    );
+}
+
+fn finish_request(
+    editor: &mut EditorProjectSession,
+    request: &EditorSourceToolRequestId,
+) -> EditorSourceToolView {
+    let view = settle(editor);
+    assert_eq!(view.request.as_ref(), Some(request));
+    view
+}
+
+fn request_review(
+    editor: &mut EditorProjectSession,
+    basis: &EditorDocumentQueryBasis,
+    intent: EditorSourceToolIntent,
     bonus: i64,
-) -> ReviewedEdit {
-    let proposal = tool.propose(editor, document, command, bonus, "").unwrap();
-    tool.prepare(editor, proposal).unwrap()
+) -> EditorSourceToolRequestId {
+    let retained_attempt_failure = editor.source_tool_view().attempt_error.is_some();
+    let request = editor
+        .request_source_tool(basis, intent, parameters(bonus, None))
+        .unwrap();
+    let view = finish_request(editor, &request);
+    assert!(
+        view.enabled && view.review_ready && view.request_error.is_none(),
+        "{view:?}",
+    );
+    assert_eq!(
+        view.attempt_error.is_some(),
+        retained_attempt_failure,
+        "{view:?}"
+    );
+    assert_eq!(editor.source_tool_review().unwrap().request(), &request);
+    request
+}
+
+fn accept_review(
+    editor: &mut EditorProjectSession,
+    document: EditorDocumentId,
+    request: &EditorSourceToolRequestId,
+) -> EditorSourceToolCommit {
+    let (inverse, created) = {
+        let review = editor.source_tool_review().unwrap();
+        assert_eq!(review.request(), request);
+        assert!(!review.title().is_empty());
+        assert!(!review.patch().operations.is_empty());
+        assert!(!review.inverse().operations.is_empty());
+        (review.inverse().clone(), review.created_entity().cloned())
+    };
+    let committed = editor.accept_source_tool_review(request).unwrap();
+    assert!(committed.report.applied, "{:?}", committed.report);
+    assert_eq!(committed.report.document, Some(document));
+    assert_eq!(committed.created_entity, created);
+    assert_eq!(
+        committed
+            .report
+            .patch_report
+            .as_ref()
+            .unwrap()
+            .inverse
+            .as_ref(),
+        Some(&inverse),
+    );
+    assert!(editor.source_tool_review().is_none());
+    editor.drive_editor_frame(Duration::ZERO);
+    committed
+}
+
+fn attach(editor: &mut EditorProjectSession, document: EditorDocumentId) {
+    let basis = editor.document_query_basis(document).unwrap();
+    let request = request_review(
+        editor,
+        &basis,
+        EditorSourceToolIntent::Attach {
+            entity: id("enemy"),
+        },
+        0,
+    );
+    assert!(
+        accept_review(editor, document, &request)
+            .created_entity
+            .is_none()
+    );
+    assert_stats(editor, document, "enemy", 100);
+    assert_history(editor, document, 1, 0);
 }
 
 fn assert_stats(
@@ -379,177 +237,221 @@ fn assert_stats(
     }
 }
 
-fn attach(tool: &EnemyStatsTool, editor: &mut EditorProjectSession, document: EditorDocumentId) {
-    let reviewed = edit(tool, editor, document, Command::Attach(id("enemy")), 0);
-    let committed = tool.commit(editor, reviewed).unwrap();
-    assert!(committed.report().applied, "{:?}", committed.report());
-    assert_eq!(committed.report().document, Some(document));
+fn entities(editor: &EditorProjectSession, document: EditorDocumentId) -> Vec<SceneEntityId> {
+    let page = editor
+        .query_document_entities(EditorEntityQuery {
+            position: EditorEntityQueryPosition::Start(
+                editor.document_query_basis(document).unwrap(),
+            ),
+            limits: EditorEntityQueryLimits::new(16, 16).unwrap(),
+        })
+        .unwrap();
+    assert!(page.next.is_none());
+    page.entities
+}
+
+fn assert_unchanged(
+    editor: &EditorProjectSession,
+    project: &Project,
+    basis: &EditorDocumentQueryBasis,
+    history: (usize, usize),
+    disk: &[u8],
+) {
+    assert_eq!(&editor.document_query_basis(basis.document).unwrap(), basis);
+    assert_history(editor, basis.document, history.0, history.1);
+    assert_eq!(std::fs::read(project.scene_path()).unwrap(), disk);
+}
+
+fn rename(editor: &mut EditorProjectSession, document: EditorDocumentId, name: &str) {
+    let basis = editor.document_query_basis(document).unwrap();
+    let prepared = editor
+        .prepare_authoring_property_edit(
+            &basis,
+            &[AuthoringPropertyEdit {
+                entity: id("enemy"),
+                component: kind(NAME),
+                component_version: ComponentSchemaVersion::ONE,
+                property: ComponentPropertyPath::new(ComponentFieldId::new("value")),
+                value: ComponentValue::String(name.into()),
+            }],
+        )
+        .unwrap();
+    applied(editor.commit_authoring_edit(prepared));
     editor.drive_editor_frame(Duration::ZERO);
+    assert_ne!(
+        editor.document_query_basis(document).unwrap().revision,
+        basis.revision
+    );
+    assert_value(
+        editor,
+        document,
+        "enemy",
+        NAME,
+        "value",
+        ComponentValue::String(name.into()),
+    );
 }
 
 #[test]
-fn csharp_enemy_stats_review_commit_history_persistence_and_rust_data_access() {
-    let tool = EnemyStatsTool::new(DotnetProgram::load_default());
+fn csharp_source_tool_review_history_save_reopen_and_public_rust_data_access() {
+    let definition = definition();
     for extension in ["json", "ron"] {
-        let project = Project::new(
-            &schema_bundle(&tool.definition.owner),
-            &original(),
-            extension,
-        );
-        let before = std::fs::read(project.scene_path()).unwrap();
+        let project = Project::new(&schema_bundle(&definition.owner), &original(), extension);
+        let disk = std::fs::read(project.scene_path()).unwrap();
         let mut editor = project.open();
         let document = editor.current_frame().workspace().active_document.unwrap();
-        attach(&tool, &mut editor, document);
+        assert!(!editor.source_tool_view().enabled);
+        assert!(editor.source_tool_review().is_none());
+        enable(&mut editor, &definition, None);
+
+        let basis = editor.document_query_basis(document).unwrap();
+        let request = request_review(
+            &mut editor,
+            &basis,
+            EditorSourceToolIntent::Attach {
+                entity: id("enemy"),
+            },
+            0,
+        );
+        assert!(
+            editor
+                .source_tool_review()
+                .unwrap()
+                .created_entity()
+                .is_none()
+        );
+        assert_unchanged(&editor, &project, &basis, (0, 0), &disk);
+        assert!(
+            accept_review(&mut editor, document, &request)
+                .created_entity
+                .is_none()
+        );
         assert_stats(&editor, document, "enemy", 100);
         assert_history(&editor, document, 1, 0);
 
         let basis = editor.document_query_basis(document).unwrap();
-        let reviewed = edit(&tool, &editor, document, Command::Edit(id("enemy")), 25);
-        assert!(!reviewed.title.is_empty());
-        assert_eq!(reviewed.prepared.base_revision(), basis.revision);
-        let patch = reviewed.prepared.patch().clone();
-        let inverse = reviewed.prepared.inverse().clone();
-        assert!(!patch.operations.is_empty());
-        assert!(!inverse.operations.is_empty());
-        assert_eq!(editor.document_query_basis(document).unwrap(), basis);
-        assert_stats(&editor, document, "enemy", 100);
-        assert_history(&editor, document, 1, 0);
-        let committed = tool.commit(&mut editor, reviewed).unwrap();
-        assert!(committed.report().applied);
-        assert_eq!(committed.report().document, Some(document));
-        assert_eq!(
-            committed
-                .report()
-                .patch_report
-                .as_ref()
-                .unwrap()
-                .inverse
-                .as_ref(),
-            Some(&inverse)
+        let request = request_review(
+            &mut editor,
+            &basis,
+            EditorSourceToolIntent::Edit {
+                entity: id("enemy"),
+            },
+            25,
         );
-        editor.drive_editor_frame(Duration::ZERO);
+        assert_unchanged(&editor, &project, &basis, (1, 0), &disk);
+        assert_stats(&editor, document, "enemy", 100);
+        accept_review(&mut editor, document, &request);
         assert_stats(&editor, document, "enemy", 125);
         assert_history(&editor, document, 2, 0);
         replay(&mut editor, document, false);
         assert_stats(&editor, document, "enemy", 100);
+        assert_history(&editor, document, 1, 1);
         replay(&mut editor, document, true);
         assert_stats(&editor, document, "enemy", 125);
+        assert_history(&editor, document, 2, 0);
 
-        let reviewed = edit(
-            &tool,
-            &editor,
-            document,
-            Command::Spawn("Reinforcement".into()),
+        let basis = editor.document_query_basis(document).unwrap();
+        let request = request_review(
+            &mut editor,
+            &basis,
+            EditorSourceToolIntent::Spawn {
+                name: "Reinforcement".into(),
+            },
             50,
         );
-        let local = reviewed.created.clone().unwrap();
-        let prepared_id = reviewed.prepared.entity(&local).unwrap().clone();
-        assert_history(&editor, document, 2, 0);
-        let committed = tool.commit(&mut editor, reviewed).unwrap();
-        assert!(committed.report().applied);
-        assert_eq!(committed.entity(&local), Some(&prepared_id));
-        editor.drive_editor_frame(Duration::ZERO);
-        assert_history(&editor, document, 3, 0);
+        let prepared_id = editor
+            .source_tool_review()
+            .unwrap()
+            .created_entity()
+            .unwrap()
+            .clone();
+        assert_unchanged(&editor, &project, &basis, (2, 0), &disk);
+        assert_eq!(entities(&editor, document), vec![id("enemy"), id("guide")]);
+        let committed = accept_review(&mut editor, document, &request);
+        assert_eq!(committed.created_entity.as_ref(), Some(&prepared_id));
         assert_stats(&editor, document, prepared_id.as_str(), 150);
+        assert_history(&editor, document, 3, 0);
         replay(&mut editor, document, false);
         assert_history(&editor, document, 2, 1);
-        let page = editor
-            .query_document_entities(EditorEntityQuery {
-                position: EditorEntityQueryPosition::Start(
-                    editor.document_query_basis(document).unwrap(),
-                ),
-                limits: EditorEntityQueryLimits::new(16, 16).unwrap(),
-            })
-            .unwrap();
-        assert!(page.next.is_none());
-        assert_eq!(page.entities, vec![id("enemy"), id("guide")]);
+        assert_eq!(entities(&editor, document), vec![id("enemy"), id("guide")]);
         assert_stats(&editor, document, "enemy", 125);
-        assert_value(
-            &editor,
-            document,
-            "enemy",
-            NAME,
-            "value",
-            ComponentValue::String("Guard".into()),
-        );
-        assert_value(
-            &editor,
-            document,
-            "guide",
-            NAME,
-            "value",
-            ComponentValue::String("Guide".into()),
-        );
         replay(&mut editor, document, true);
+        assert_history(&editor, document, 3, 0);
+        let mut expected_ids = vec![id("enemy"), id("guide"), prepared_id.clone()];
+        expected_ids.sort();
+        assert_eq!(entities(&editor, document), expected_ids);
         assert_stats(&editor, document, prepared_id.as_str(), 150);
-        assert_value(
-            &editor,
-            document,
-            "enemy",
-            NAME,
-            "value",
-            ComponentValue::String("Guard".into()),
-        );
-        assert_value(
-            &editor,
-            document,
-            "guide",
-            NAME,
-            "value",
-            ComponentValue::String("Guide".into()),
-        );
-        assert_eq!(std::fs::read(project.scene_path()).unwrap(), before);
+        for (entity, name) in [
+            ("enemy", "Guard"),
+            ("guide", "Guide"),
+            (prepared_id.as_str(), "Reinforcement"),
+        ] {
+            assert_value(
+                &editor,
+                document,
+                entity,
+                NAME,
+                "value",
+                ComponentValue::String(name.into()),
+            );
+        }
+        assert_eq!(std::fs::read(project.scene_path()).unwrap(), disk);
         save(&mut editor, document);
         let saved = project.read();
         assert_eq!(saved.entities.len(), 3);
+        assert_eq!(
+            saved.roots,
+            vec![id("enemy"), id("guide"), prepared_id.clone()]
+        );
         for entity in &saved.entities {
             if let Some(stats) = entity.components.get(&kind(STATS)) {
-                assert_eq!(stats.owner(), Some(tool.definition.owner.owner_id()));
+                assert_eq!(stats.owner(), Some(definition.owner.owner_id()));
             }
         }
-        let original = original();
-        for entity in &original.entities {
-            let saved_entity = saved
+        for entity in &original().entities {
+            let persisted = saved
                 .entities
                 .iter()
                 .find(|saved| saved.id == entity.id)
                 .unwrap();
             assert_eq!(
-                saved_entity.components[&kind(NAME)],
+                persisted.components[&kind(NAME)],
                 entity.components[&kind(NAME)]
             );
             if entity.id == id("guide") {
-                assert_eq!(
-                    saved_entity, entity,
-                    "the unrelated entity must survive Save exactly"
-                );
+                assert_eq!(persisted, entity);
             }
         }
         close(&mut editor);
+        let closed = editor.source_tool_view();
+        assert!(!closed.enabled && !closed.probing && !closed.working && !closed.retiring);
         drop(editor);
 
         let mut reopened = project.open();
-        let reopened_document = reopened
+        let document = reopened
             .current_frame()
             .workspace()
             .active_document
             .unwrap();
-        assert_history(&reopened, reopened_document, 0, 0);
-        assert_stats(&reopened, reopened_document, "enemy", 125);
-        assert_stats(&reopened, reopened_document, prepared_id.as_str(), 150);
+        assert!(!reopened.source_tool_view().enabled);
+        assert!(reopened.source_tool_review().is_none());
+        assert_history(&reopened, document, 0, 0);
+        assert_stats(&reopened, document, "enemy", 125);
+        assert_stats(&reopened, document, prepared_id.as_str(), 150);
         assert_value(
             &reopened,
-            reopened_document,
+            document,
             prepared_id.as_str(),
             NAME,
             "value",
             ComponentValue::String("Reinforcement".into()),
         );
         assert_eq!(project.read(), saved);
-        let mut runtime = Runtime::materialize(Arc::clone(&tool.definition), &saved, None).unwrap();
+        let mut runtime = Runtime::materialize(Arc::clone(&definition), &saved, None).unwrap();
         for (entity, health) in [(id("enemy"), 125), (prepared_id, 150)] {
             let target = runtime.target(&entity);
             let record = runtime.read(&target, &kind(STATS)).unwrap().unwrap();
+            assert_eq!(record.owner(), Some(definition.owner.owner_id()));
             assert_eq!(
                 record.value.field("wire_health").unwrap(),
                 &ComponentValue::I64(health)
@@ -565,229 +467,558 @@ fn csharp_enemy_stats_review_commit_history_persistence_and_rust_data_access() {
 }
 
 #[test]
-fn csharp_enemy_stats_rejects_late_invalid_write_and_retained_document_results() {
-    let tool = EnemyStatsTool::new(DotnetProgram::load_default());
-    let project = Project::new(&schema_bundle(&tool.definition.owner), &original(), "json");
-    let mut editor = project.open();
-    let document = editor.current_frame().workspace().active_document.unwrap();
-    attach(&tool, &mut editor, document);
-    let basis = editor.document_query_basis(document).unwrap();
-    let workspace = editor.current_frame().workspace().clone();
-    let disk = std::fs::read(project.scene_path()).unwrap();
-    for fault in ["bad_last_value", "too_many_writes", "throw"] {
-        let result = tool
-            .propose(&editor, document, Command::Edit(id("enemy")), 30, fault)
-            .and_then(|proposal| tool.prepare(&editor, proposal));
-        assert!(result.is_err());
-        assert_eq!(editor.document_query_basis(document).unwrap(), basis);
-        assert_stats(&editor, document, "enemy", 100);
-        assert_history(&editor, document, 1, 0);
-        assert_eq!(editor.current_frame().workspace(), &workspace);
-        assert_eq!(std::fs::read(project.scene_path()).unwrap(), disk);
-    }
-    let invalid_spawn = tool
-        .propose(
-            &editor,
-            document,
-            Command::Spawn("Rejected".into()),
-            10,
-            "bad_last_value",
-        )
-        .unwrap();
-    assert!(matches!(
-        tool.prepare(&editor, invalid_spawn),
-        Err(ToolError::Owner(_))
-    ));
-    assert_eq!(editor.document_query_basis(document).unwrap(), basis);
-    assert_eq!(editor.current_frame().workspace(), &workspace);
-    assert_eq!(std::fs::read(project.scene_path()).unwrap(), disk);
-    let older = tool
-        .propose(&editor, document, Command::Edit(id("enemy")), 2, "")
-        .unwrap();
-    let newest = tool
-        .propose(&editor, document, Command::Edit(id("enemy")), 3, "")
-        .unwrap();
-    assert!(matches!(
-        tool.prepare(&editor, older),
-        Err(ToolError::StaleRequest)
-    ));
-    let older_review = tool.prepare(&editor, newest).unwrap();
-    let cancelled = tool
-        .propose(&editor, document, Command::Edit(id("enemy")), 4, "")
-        .unwrap();
-    assert!(matches!(
-        tool.commit(&mut editor, older_review),
-        Err(ToolError::StaleRequest)
-    ));
-    drop(cancelled);
-    let before_failed_read = tool
-        .propose(&editor, document, Command::Edit(id("enemy")), 5, "")
-        .unwrap();
-    assert!(matches!(
-        tool.propose(&editor, document, Command::Edit(id("guide")), 1, ""),
-        Err(ToolError::Owner(_))
-    ));
-    assert!(matches!(
-        tool.prepare(&editor, before_failed_read),
-        Err(ToolError::StaleRequest)
-    ));
-    let before_failed_read = edit(&tool, &editor, document, Command::Edit(id("enemy")), 6);
-    assert!(matches!(
-        tool.propose(&editor, document, Command::Edit(id("guide")), 1, ""),
-        Err(ToolError::Owner(_))
-    ));
-    assert!(matches!(
-        tool.commit(&mut editor, before_failed_read),
-        Err(ToolError::StaleRequest)
-    ));
-    assert_eq!(editor.document_query_basis(document).unwrap(), basis);
-    assert_stats(&editor, document, "enemy", 100);
-    assert_history(&editor, document, 1, 0);
-    let stale_proposal = tool
-        .propose(&editor, document, Command::Edit(id("enemy")), 40, "")
-        .unwrap();
-    let stale_prepared = edit(&tool, &editor, document, Command::Edit(id("enemy")), 50);
-    let current = edit(&tool, &editor, document, Command::Edit(id("enemy")), 1);
-    assert!(tool.commit(&mut editor, current).unwrap().report().applied);
-    editor.drive_editor_frame(Duration::ZERO);
-    for result in [
-        tool.prepare(&editor, stale_proposal).map(|_| ()),
-        tool.commit(&mut editor, stale_prepared).map(|_| ()),
-    ] {
-        assert!(
-            matches!(result, Err(ToolError::Owner(ref error)) if matches!(error.as_ref(),
-            EditorEditPreparationError::QueryBasis(EditorDocumentQueryRejection::StaleRevision)))
-        );
-    }
-    assert_stats(&editor, document, "enemy", 101);
-    assert_history(&editor, document, 2, 0);
-    close(&mut editor);
-}
-
-#[test]
-fn csharp_enemy_stats_rejects_another_sessions_owner_or_complete_declaration() {
-    let tool = EnemyStatsTool::new(DotnetProgram::load_default());
-    let catalog = tool.definition.owner.current().clone();
-    let mut changed = catalog.clone();
-    changed.components[0].authoring_initial_value = Some(ComponentValue::map([
-        ("wire_health", ComponentValue::I64(999)),
-        ("wire_armor", ComponentValue::I64(10)),
-    ]));
-    for (owner, catalog) in [
-        ("trial.another-owner", catalog),
-        ("trial.enemy-stats", changed),
-    ] {
-        let definition = Definition::from_catalog(owner, catalog).unwrap();
-        let project = Project::new(&schema_bundle(&definition.owner), &original(), "json");
-        let disk = std::fs::read(project.scene_path()).unwrap();
+fn csharp_source_tool_rejects_complete_invalid_proposals_without_a_valid_prefix() {
+    let definition = definition();
+    for extension in ["json", "ron"] {
+        let project = Project::new(&schema_bundle(&definition.owner), &original(), extension);
         let mut editor = project.open();
         let document = editor.current_frame().workspace().active_document.unwrap();
+        enable(&mut editor, &definition, None);
+        attach(&mut editor, document);
         let basis = editor.document_query_basis(document).unwrap();
+        let disk = std::fs::read(project.scene_path()).unwrap();
+        for intent in [
+            EditorSourceToolIntent::Edit {
+                entity: id("enemy"),
+            },
+            EditorSourceToolIntent::Spawn {
+                name: "Rejected".into(),
+            },
+        ] {
+            for fault in ["bad_last_value", "too_many_writes", "throw"] {
+                let request = editor
+                    .request_source_tool(&basis, intent.clone(), parameters(30, Some(fault)))
+                    .unwrap();
+                let view = finish_request(&mut editor, &request);
+                assert!(view.enabled && !view.review_ready, "{view:?}");
+                assert!(view.attempt_error.is_none(), "{view:?}");
+                assert!(
+                    matches!(
+                        (fault, view.request_error.as_ref()),
+                        (
+                            "bad_last_value",
+                            Some(
+                                EditorSourceToolError::Preparation(_)
+                                    | EditorSourceToolError::Draft
+                            )
+                        ) | ("too_many_writes", Some(EditorSourceToolError::Limit))
+                            | (
+                                "throw",
+                                Some(EditorSourceToolError::Process("nonzero-exit"))
+                            )
+                    ),
+                    "{fault}: {view:?}",
+                );
+                assert!(editor.source_tool_review().is_none());
+                assert!(matches!(
+                    editor.accept_source_tool_review(&request),
+                    Err(EditorSourceToolError::Busy)
+                ));
+                assert_unchanged(&editor, &project, &basis, (1, 0), &disk);
+                assert_stats(&editor, document, "enemy", 100);
+                assert_eq!(entities(&editor, document), vec![id("enemy"), id("guide")]);
+            }
+        }
+        let request = editor
+            .request_source_tool(
+                &basis,
+                EditorSourceToolIntent::Edit {
+                    entity: id("enemy"),
+                },
+                parameters(i64::MAX, None),
+            )
+            .unwrap();
+        let view = finish_request(&mut editor, &request);
+        assert!(view.attempt_error.is_none(), "{view:?}");
         assert!(matches!(
-            tool.propose(&editor, document, Command::Attach(id("enemy")), 1, ""),
-            Err(ToolError::SchemaMismatch)
+            view.request_error,
+            Some(EditorSourceToolError::Process("nonzero-exit"))
         ));
-        assert_eq!(editor.document_query_basis(document).unwrap(), basis);
-        assert_history(&editor, document, 0, 0);
-        assert_eq!(std::fs::read(project.scene_path()).unwrap(), disk);
-        assert_eq!(project.read(), original());
+        assert!(!view.review_ready);
+        assert_unchanged(&editor, &project, &basis, (1, 0), &disk);
+        assert_stats(&editor, document, "enemy", 100);
+        let request = request_review(
+            &mut editor,
+            &basis,
+            EditorSourceToolIntent::Edit {
+                entity: id("enemy"),
+            },
+            1,
+        );
+        accept_review(&mut editor, document, &request);
+        assert_stats(&editor, document, "enemy", 101);
         close(&mut editor);
     }
 }
 
 #[test]
-fn csharp_enemy_stats_replacement_and_disable_fence_both_review_stages() {
-    let mut tool = EnemyStatsTool::new(DotnetProgram::load_default());
-    let project = Project::new(&schema_bundle(&tool.definition.owner), &original(), "json");
-    let mut editor = project.open();
-    let document = editor.current_frame().workspace().active_document.unwrap();
-    attach(&tool, &mut editor, document);
-    let rejected = tool
-        .program
-        .as_ref()
-        .unwrap()
-        .candidate(&module_path("NARA_BEHAVIOR_MODULE_INVALID"))
-        .unwrap();
-    let (mut rejected, error) = match tool.replace(rejected) {
-        Err(rejected) => rejected,
-        Ok(_) => panic!("an incompatible tool Schema must preserve its predecessor"),
-    };
-    assert!(error.contains("same complete EnemyStats catalog"));
-    let rejected_retirement = rejected.retire();
-    drop(rejected);
-    let predecessor = edit(&tool, &editor, document, Command::Edit(id("enemy")), 1);
-    assert!(
-        tool.commit(&mut editor, predecessor)
-            .unwrap()
-            .report()
-            .applied
-    );
-    editor.drive_editor_frame(Duration::ZERO);
-    assert_stats(&editor, document, "enemy", 101);
-    let proposal = tool
-        .propose(&editor, document, Command::Edit(id("enemy")), 40, "")
-        .unwrap();
-    let reviewed = edit(&tool, &editor, document, Command::Edit(id("enemy")), 50);
-    let candidate = tool
-        .program
-        .as_ref()
-        .unwrap()
-        .candidate(&module_path("NARA_BEHAVIOR_MODULE_V2"))
-        .unwrap();
-    let mut previous = tool
-        .replace(candidate)
-        .unwrap_or_else(|(_, error)| panic!("{error}"));
-    let retirement = previous.retire();
-    drop(previous);
-    assert!(matches!(
-        tool.prepare(&editor, proposal),
-        Err(ToolError::StalePublication)
-    ));
-    assert!(matches!(
-        tool.commit(&mut editor, reviewed),
-        Err(ToolError::StalePublication)
-    ));
-    let successor = edit(&tool, &editor, document, Command::Edit(id("enemy")), 1);
-    assert!(
-        tool.commit(&mut editor, successor)
-            .unwrap()
-            .report()
-            .applied
-    );
-    editor.drive_editor_frame(Duration::ZERO);
-    assert_stats(&editor, document, "enemy", 103);
-    let proposal = tool
-        .propose(&editor, document, Command::Edit(id("enemy")), 60, "")
-        .unwrap();
-    let reviewed = edit(&tool, &editor, document, Command::Edit(id("enemy")), 70);
-    let mut disabled = tool.disable();
-    let disabled_retirement = disabled.retire();
-    drop(disabled);
-    assert!(matches!(
-        tool.prepare(&editor, proposal),
-        Err(ToolError::Inactive)
-    ));
-    assert!(matches!(
-        tool.commit(&mut editor, reviewed),
-        Err(ToolError::Inactive)
-    ));
-    assert!(matches!(
-        tool.propose(&editor, document, Command::Edit(id("enemy")), 1, ""),
-        Err(ToolError::Inactive)
-    ));
-    assert_stats(&editor, document, "enemy", 103);
-    assert_history(&editor, document, 3, 0);
-    for retirement in [rejected_retirement, retirement, disabled_retirement] {
-        assert!(
-            (0..16).any(|_| retirement.complete()),
-            "actual managed retirement remains pending"
+fn csharp_source_tool_fences_newest_request_original_basis_disable_and_physical_close() {
+    let definition = definition();
+    for extension in ["json", "ron"] {
+        let project = Project::new(&schema_bundle(&definition.owner), &original(), extension);
+        let mut editor = project.open();
+        let document = editor.current_frame().workspace().active_document.unwrap();
+        enable(&mut editor, &definition, None);
+        attach(&mut editor, document);
+        let basis = editor.document_query_basis(document).unwrap();
+        let disk = std::fs::read(project.scene_path()).unwrap();
+
+        let older = request_review(
+            &mut editor,
+            &basis,
+            EditorSourceToolIntent::Edit {
+                entity: id("enemy"),
+            },
+            2,
         );
+        let newer = editor
+            .request_source_tool(
+                &basis,
+                EditorSourceToolIntent::Edit {
+                    entity: id("enemy"),
+                },
+                parameters(3, None),
+            )
+            .unwrap();
+        assert_ne!(older, newer);
+        assert!(matches!(
+            editor.accept_source_tool_review(&older),
+            Err(EditorSourceToolError::StaleRequest)
+        ));
+        let view = finish_request(&mut editor, &newer);
+        assert!(
+            view.review_ready && view.attempt_error.is_none() && view.request_error.is_none(),
+            "{view:?}",
+        );
+        assert_eq!(editor.source_tool_review().unwrap().request(), &newer);
+
+        let failed_read = editor.request_source_tool(
+            &basis,
+            EditorSourceToolIntent::Edit {
+                entity: id("guide"),
+            },
+            parameters(1, None),
+        );
+        assert!(matches!(
+            failed_read,
+            Err(EditorSourceToolError::Schema | EditorSourceToolError::QueryBasis(_))
+        ));
+        let failed = editor.source_tool_view();
+        assert!(failed.request.is_some());
+        assert_ne!(failed.request.as_ref(), Some(&newer));
+        assert!(!failed.review_ready);
+        assert!(
+            failed.attempt_error.is_none() && failed.request_error.is_some(),
+            "{failed:?}"
+        );
+        assert!(matches!(
+            editor.accept_source_tool_review(&newer),
+            Err(EditorSourceToolError::StaleRequest)
+        ));
+        assert_unchanged(&editor, &project, &basis, (1, 0), &disk);
+
+        enable(&mut editor, &definition, Some("hold"));
+        let pending = editor
+            .request_source_tool(
+                &basis,
+                EditorSourceToolIntent::Edit {
+                    entity: id("enemy"),
+                },
+                parameters(10, None),
+            )
+            .unwrap();
+        assert!(editor.source_tool_view().working);
+        assert!(
+            editor
+                .request_source_tool(
+                    &basis,
+                    EditorSourceToolIntent::Edit {
+                        entity: id("guide")
+                    },
+                    parameters(1, None),
+                )
+                .is_err()
+        );
+        assert!(matches!(
+            editor.accept_source_tool_review(&pending),
+            Err(EditorSourceToolError::StaleRequest)
+        ));
+        let failed = settle(&mut editor);
+        assert!(
+            !failed.review_ready
+                && failed.attempt_error.is_none()
+                && failed.request_error.is_some(),
+            "{failed:?}",
+        );
+        assert_ne!(failed.request.as_ref(), Some(&pending));
+        assert_unchanged(&editor, &project, &basis, (1, 0), &disk);
+
+        let pending = editor
+            .request_source_tool(
+                &basis,
+                EditorSourceToolIntent::Edit {
+                    entity: id("enemy"),
+                },
+                parameters(40, None),
+            )
+            .unwrap();
+        assert!(editor.source_tool_view().working);
+        rename(&mut editor, document, "Owner changed");
+        let changed = editor.document_query_basis(document).unwrap();
+        assert_ne!(changed.revision, basis.revision);
+        let view = finish_request(&mut editor, &pending);
+        assert!(view.attempt_error.is_none(), "{view:?}");
+        assert!(matches!(
+            view.request_error,
+            Some(EditorSourceToolError::QueryBasis(
+                EditorDocumentQueryRejection::StaleRevision
+            ))
+        ));
+        assert!(!view.review_ready);
+        assert_unchanged(&editor, &project, &changed, (2, 0), &disk);
+        assert_stats(&editor, document, "enemy", 100);
+        assert_value(
+            &editor,
+            document,
+            "enemy",
+            NAME,
+            "value",
+            ComponentValue::String("Owner changed".into()),
+        );
+
+        let reviewed = request_review(
+            &mut editor,
+            &changed,
+            EditorSourceToolIntent::Edit {
+                entity: id("enemy"),
+            },
+            50,
+        );
+        rename(&mut editor, document, "Owner changed again");
+        assert!(matches!(
+            editor.accept_source_tool_review(&reviewed),
+            Err(EditorSourceToolError::QueryBasis(
+                EditorDocumentQueryRejection::StaleRevision
+            ))
+        ));
+        let basis = editor.document_query_basis(document).unwrap();
+        assert_unchanged(&editor, &project, &basis, (3, 0), &disk);
+        assert_stats(&editor, document, "enemy", 100);
+
+        let pending = editor
+            .request_source_tool(
+                &basis,
+                EditorSourceToolIntent::Edit {
+                    entity: id("enemy"),
+                },
+                parameters(60, None),
+            )
+            .unwrap();
+        assert!(editor.source_tool_view().working);
+        editor.disable_source_tool();
+        assert!(!editor.source_tool_view().enabled);
+        assert!(editor.source_tool_review().is_none());
+        assert!(matches!(
+            editor.accept_source_tool_review(&pending),
+            Err(EditorSourceToolError::Disabled)
+        ));
+        assert!(matches!(
+            editor.request_source_tool(
+                &basis,
+                EditorSourceToolIntent::Edit {
+                    entity: id("enemy")
+                },
+                parameters(1, None),
+            ),
+            Err(EditorSourceToolError::Disabled)
+        ));
+        let disabled = settle(&mut editor);
+        assert!(!disabled.enabled && !disabled.review_ready);
+        assert!(disabled.request.is_none() && disabled.request_error.is_none());
+        assert!(disabled.attempt_error.is_none());
+        assert_unchanged(&editor, &project, &basis, (3, 0), &disk);
+        assert_stats(&editor, document, "enemy", 100);
+
+        enable(&mut editor, &definition, Some("hold"));
+        let reviewed = request_review(
+            &mut editor,
+            &basis,
+            EditorSourceToolIntent::Edit {
+                entity: id("enemy"),
+            },
+            70,
+        );
+        editor.disable_source_tool();
+        assert!(matches!(
+            editor.accept_source_tool_review(&reviewed),
+            Err(EditorSourceToolError::Disabled)
+        ));
+        assert!(!settle(&mut editor).review_ready);
+        assert_unchanged(&editor, &project, &basis, (3, 0), &disk);
+        assert_stats(&editor, document, "enemy", 100);
+
+        enable(&mut editor, &definition, Some("hold"));
+        let pending = editor
+            .request_source_tool(
+                &basis,
+                EditorSourceToolIntent::Spawn {
+                    name: "Late spawn".into(),
+                },
+                parameters(80, None),
+            )
+            .unwrap();
+        assert!(editor.source_tool_view().working);
+        close(&mut editor);
+        let closed = editor.source_tool_view();
+        assert!(!closed.enabled && !closed.probing && !closed.working && !closed.retiring);
+        assert!(closed.request.is_none() && closed.request_error.is_none());
+        assert!(closed.attempt_error.is_none());
+        assert!(editor.source_tool_review().is_none());
+        assert!(matches!(
+            editor.accept_source_tool_review(&pending),
+            Err(EditorSourceToolError::Closing)
+        ));
+        assert!(matches!(
+            editor.request_source_tool(
+                &basis,
+                EditorSourceToolIntent::Edit {
+                    entity: id("enemy")
+                },
+                parameters(1, None),
+            ),
+            Err(EditorSourceToolError::Closing)
+        ));
+        assert_eq!(std::fs::read(project.scene_path()).unwrap(), disk);
+        assert_eq!(project.read(), original());
     }
-    close(&mut editor);
 }
 
-fn module_path(variable: &str) -> std::path::PathBuf {
-    std::env::var_os(variable)
-        .expect("the runner builds every tested module variant")
-        .into()
+#[test]
+fn csharp_source_tool_requires_the_exact_document_admission_and_selected_owner() {
+    let definition = definition();
+    for extension in ["json", "ron"] {
+        let project = Project::new(&schema_bundle(&definition.owner), &original(), extension);
+        let mut editor = project.open();
+        let document = editor.current_frame().workspace().active_document.unwrap();
+        enable(&mut editor, &definition, None);
+        let basis = editor.document_query_basis(document).unwrap();
+        let disk = std::fs::read(project.scene_path()).unwrap();
+
+        let mut independently_opened = project.open();
+        let other_document = independently_opened
+            .current_frame()
+            .workspace()
+            .active_document
+            .unwrap();
+        let other = independently_opened
+            .document_query_basis(other_document)
+            .unwrap();
+        assert_ne!(basis.schema, other.schema);
+        assert_eq!(
+            basis.schema.as_ref().unwrap().schema(&kind(STATS)),
+            other.schema.as_ref().unwrap().schema(&kind(STATS)),
+        );
+        assert_eq!(
+            basis
+                .schema
+                .as_ref()
+                .unwrap()
+                .component_schema_owner(&kind(STATS)),
+            other
+                .schema
+                .as_ref()
+                .unwrap()
+                .component_schema_owner(&kind(STATS)),
+        );
+        close(&mut independently_opened);
+        let mut missing = basis.clone();
+        missing.schema = None;
+        let mut equivalent = basis.clone();
+        equivalent.schema = other.schema;
+        for rejected in [missing, equivalent] {
+            assert!(matches!(
+                editor.request_source_tool(
+                    &rejected,
+                    EditorSourceToolIntent::Attach {
+                        entity: id("enemy")
+                    },
+                    parameters(1, None),
+                ),
+                Err(EditorSourceToolError::QueryBasis(
+                    EditorDocumentQueryRejection::StaleSchema
+                ))
+            ));
+            assert!(!editor.source_tool_view().working);
+            assert!(editor.source_tool_review().is_none());
+            assert_unchanged(&editor, &project, &basis, (0, 0), &disk);
+        }
+        close(&mut editor);
+
+        let catalog = definition.owner.current().clone();
+        let mut changed = catalog.clone();
+        changed.components[0].authoring_initial_value = Some(ComponentValue::map([
+            ("wire_health", ComponentValue::I64(999)),
+            ("wire_armor", ComponentValue::I64(10)),
+        ]));
+        for (owner, catalog) in [
+            ("trial.another-owner", catalog),
+            ("trial.enemy-stats", changed),
+        ] {
+            let admitted = Definition::from_catalog(owner, catalog).unwrap();
+            let project = Project::new(&schema_bundle(&admitted.owner), &original(), extension);
+            let disk = std::fs::read(project.scene_path()).unwrap();
+            let mut editor = project.open();
+            let document = editor.current_frame().workspace().active_document.unwrap();
+            enable(&mut editor, &definition, None);
+            let basis = editor.document_query_basis(document).unwrap();
+            assert!(matches!(
+                editor.request_source_tool(
+                    &basis,
+                    EditorSourceToolIntent::Attach {
+                        entity: id("enemy")
+                    },
+                    parameters(1, None),
+                ),
+                Err(EditorSourceToolError::Schema)
+            ));
+            assert!(!editor.source_tool_view().working);
+            assert!(editor.source_tool_review().is_none());
+            assert_unchanged(&editor, &project, &basis, (0, 0), &disk);
+            assert_eq!(project.read(), original());
+            close(&mut editor);
+        }
+    }
+}
+
+#[test]
+fn csharp_source_tool_failed_candidates_preserve_the_predecessor_and_v2_revokes_old_review() {
+    let definition = definition();
+    for extension in ["json", "ron"] {
+        let project = Project::new(&schema_bundle(&definition.owner), &original(), extension);
+        let mut editor = project.open();
+        let document = editor.current_frame().workspace().active_document.unwrap();
+        enable(&mut editor, &definition, None);
+        attach(&mut editor, document);
+        let basis = editor.document_query_basis(document).unwrap();
+        let disk = std::fs::read(project.scene_path()).unwrap();
+        let reviewed = request_review(
+            &mut editor,
+            &basis,
+            EditorSourceToolIntent::Edit {
+                entity: id("enemy"),
+            },
+            1,
+        );
+        let mut previous_attempt = editor.source_tool_view().attempt;
+        for (variant, fault, timeout, expected) in [
+            ("INVALID", None, TIMEOUT, "declaration"),
+            ("V1", Some("malformed"), TIMEOUT, "protocol"),
+            ("V1", Some("stdout_limit"), TIMEOUT, "stdout-limit"),
+            ("V1", Some("stderr_limit"), TIMEOUT, "stderr-limit"),
+            ("V1", Some("nonzero"), TIMEOUT, "nonzero-exit"),
+            ("V1", Some("hold"), Duration::from_millis(60), "timed-out"),
+        ] {
+            let view = probe(
+                &mut editor,
+                tool_definition(&definition, variant, fault, timeout),
+            );
+            assert_ne!(view.attempt, previous_attempt);
+            previous_attempt = view.attempt.clone();
+            assert!(view.enabled && view.review_ready, "{view:?}");
+            assert!(view.request_error.is_none(), "{view:?}");
+            assert!(
+                match (expected, view.attempt_error.as_ref()) {
+                    ("declaration", Some(EditorSourceToolError::Declaration))
+                    | ("protocol", Some(EditorSourceToolError::Protocol)) => true,
+                    (expected, Some(EditorSourceToolError::Process(actual))) => expected == *actual,
+                    _ => false,
+                },
+                "{variant}/{fault:?}: {view:?}",
+            );
+            assert_eq!(view.request.as_ref(), Some(&reviewed));
+            assert_eq!(editor.source_tool_review().unwrap().request(), &reviewed);
+            assert_unchanged(&editor, &project, &basis, (1, 0), &disk);
+            assert_stats(&editor, document, "enemy", 100);
+        }
+        accept_review(&mut editor, document, &reviewed);
+        assert_stats(&editor, document, "enemy", 101);
+        let basis = editor.document_query_basis(document).unwrap();
+        let failed = editor
+            .request_source_tool(
+                &basis,
+                EditorSourceToolIntent::Edit {
+                    entity: id("enemy"),
+                },
+                parameters(1, Some("throw")),
+            )
+            .unwrap();
+        let view = finish_request(&mut editor, &failed);
+        assert!(matches!(
+            view.attempt_error,
+            Some(EditorSourceToolError::Process("timed-out"))
+        ));
+        assert!(matches!(
+            view.request_error,
+            Some(EditorSourceToolError::Process("nonzero-exit"))
+        ));
+        assert_unchanged(&editor, &project, &basis, (2, 0), &disk);
+        assert_stats(&editor, document, "enemy", 101);
+        let request = request_review(
+            &mut editor,
+            &basis,
+            EditorSourceToolIntent::Edit {
+                entity: id("enemy"),
+            },
+            1,
+        );
+        let view = editor.source_tool_view();
+        assert!(matches!(
+            view.attempt_error,
+            Some(EditorSourceToolError::Process("timed-out"))
+        ));
+        assert!(view.request_error.is_none());
+        accept_review(&mut editor, document, &request);
+        assert_stats(&editor, document, "enemy", 102);
+        assert_history(&editor, document, 3, 0);
+
+        let basis = editor.document_query_basis(document).unwrap();
+        let old_review = request_review(
+            &mut editor,
+            &basis,
+            EditorSourceToolIntent::Edit {
+                entity: id("enemy"),
+            },
+            40,
+        );
+        let view = probe(
+            &mut editor,
+            tool_definition(&definition, "V2", None, TIMEOUT),
+        );
+        assert!(
+            view.enabled && view.attempt_error.is_none() && view.request_error.is_none(),
+            "{view:?}",
+        );
+        assert_ne!(view.attempt, previous_attempt);
+        assert!(view.request.is_none() && !view.review_ready);
+        assert!(editor.source_tool_review().is_none());
+        assert!(matches!(
+            editor.accept_source_tool_review(&old_review),
+            Err(EditorSourceToolError::StaleRequest)
+        ));
+        assert_unchanged(&editor, &project, &basis, (3, 0), &disk);
+        let request = request_review(
+            &mut editor,
+            &basis,
+            EditorSourceToolIntent::Edit {
+                entity: id("enemy"),
+            },
+            1,
+        );
+        assert_ne!(request, old_review);
+        accept_review(&mut editor, document, &request);
+        assert_stats(&editor, document, "enemy", 104);
+        assert_history(&editor, document, 4, 0);
+        assert_eq!(std::fs::read(project.scene_path()).unwrap(), disk);
+        close(&mut editor);
+    }
 }

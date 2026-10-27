@@ -92,6 +92,204 @@ fn settle_background_imports(application: &mut EditorApplication) {
     }
 }
 
+#[cfg(windows)]
+#[test]
+fn application_source_tool_reviews_commits_and_revokes_old_requests() {
+    use nara::{
+        project_host::{
+            EditorSourceToolCommand, EditorSourceToolDefinition, EditorSourceToolError,
+            EditorSourceToolIntent,
+        },
+        reflect::{AuthoringSchemaBundle, ComponentTypeId},
+    };
+    use std::{collections::BTreeMap, ffi::OsString};
+
+    let fixture = PersistenceFixture::trusted();
+    let bundle = AuthoringSchemaBundle::from_json_bytes(
+        &fs::read(fixture.root.join("catalogs/authoring.bundle.json")).unwrap(),
+    )
+    .unwrap();
+    let component = ComponentTypeId::new("nara.scene.Name");
+    let owner = bundle.owner_for_component(&component).unwrap().clone();
+    let source_document = SceneDocument::from_ordered_roots([SceneEntityRecord::new(
+        SceneEntityId::new("signal-node").unwrap(),
+    )
+    .with_component(
+        component.clone(),
+        nara::scene::SceneComponentRecord::new(
+            nara::reflect::ComponentSchemaVersion::ONE,
+            nara::reflect::ComponentValue::String("Original source name".into()),
+        )
+        .with_owner(owner.owner_id().clone()),
+    )]);
+    fs::write(
+        fixture.root.join("worlds/entry.scene.json"),
+        source_document.to_json_string().unwrap(),
+    )
+    .unwrap();
+    let catalog: serde_json::Value = serde_json::from_str(
+        &owner
+            .current()
+            .to_json_string_with_predecessor(owner.predecessor())
+            .unwrap(),
+    )
+    .unwrap();
+    let description = serde_json::json!({ "kind": "description", "catalog": catalog }).to_string();
+    let proposal = serde_json::json!({
+        "kind": "proposal",
+        "title": "Rename the source entity",
+        "writes": [{
+            "property": { "root": "value", "steps": [] },
+            "value": { "type": "string", "value": "Reviewed source name" }
+        }]
+    })
+    .to_string();
+    let script = format!(
+        "$m = [Console]::In.ReadToEnd() | ConvertFrom-Json; \
+         $result = if ($m.operation -eq 'describe') {{ '{}' }} else {{ '{}' }}; \
+         [Console]::Out.Write('{{\"protocol_version\":1,\"request\":' + \
+         $m.request + ',\"result\":' + $result + '}}')",
+        description.replace('\'', "''"),
+        proposal.replace('\'', "''"),
+    );
+    let executable = PathBuf::from(std::env::var_os("SystemRoot").unwrap())
+        .join("System32/WindowsPowerShell/v1.0/powershell.exe");
+    let command = EditorSourceToolCommand::new(
+        executable,
+        ["-NoLogo", "-NoProfile", "-NonInteractive", "-Command"]
+            .map(OsString::from)
+            .into_iter()
+            .chain([OsString::from(script)])
+            .collect(),
+        fixture.root.clone(),
+        Duration::from_secs(10),
+    )
+    .unwrap();
+    let definition = EditorSourceToolDefinition::new(command, owner, component).unwrap();
+    let mut application = fixture.open_with_expected_state(EditorApplicationState::AuthoringReady);
+    settle_background_imports(&mut application);
+    let document = application
+        .current_frame()
+        .unwrap()
+        .workspace()
+        .active_document
+        .unwrap();
+    let basis = application.document_query_basis(document).unwrap();
+    let source = fs::read(fixture.root.join("worlds/entry.scene.json")).unwrap();
+    assert!(!application.source_tool_view().unwrap().enabled);
+    application.enable_source_tool(definition).unwrap();
+    let view = application.source_tool_view().unwrap();
+    assert_eq!(
+        application
+            .current_frame()
+            .unwrap()
+            .source_tool_work_pending(),
+        view.probing || view.working || view.retiring
+    );
+    let settle_tool = |application: &mut EditorApplication| {
+        let deadline = Instant::now() + Duration::from_secs(15);
+        loop {
+            let before = application.source_tool_view().unwrap();
+            let update = application.advance(Duration::ZERO);
+            let after = application.source_tool_view().unwrap();
+            if before != after {
+                assert!(update.actions_observed());
+            }
+            if !after.probing && !after.working && !after.retiring {
+                assert!(
+                    after.attempt_error.is_none() && after.request_error.is_none(),
+                    "{after:?}"
+                );
+                break;
+            }
+            assert!(
+                Instant::now() < deadline,
+                "source tool did not return: {after:?}"
+            );
+            std::thread::sleep(Duration::from_millis(1));
+        }
+    };
+    settle_tool(&mut application);
+    let request = application
+        .request_source_tool(
+            &basis,
+            EditorSourceToolIntent::Edit {
+                entity: SceneEntityId::new("signal-node").unwrap(),
+            },
+            BTreeMap::new(),
+        )
+        .unwrap();
+    let view = application.source_tool_view().unwrap();
+    assert_eq!(
+        application
+            .current_frame()
+            .unwrap()
+            .source_tool_work_pending(),
+        view.probing || view.working || view.retiring
+    );
+    settle_tool(&mut application);
+    let review = application.source_tool_review().unwrap().unwrap();
+    assert_eq!(review.request(), &request);
+    let expected = review.patch().clone();
+    assert_eq!(application.document_query_basis(document).unwrap(), basis);
+    assert_eq!(
+        fs::read(fixture.root.join("worlds/entry.scene.json")).unwrap(),
+        source
+    );
+    let submitted = application.accept_source_tool_review(&request, Duration::ZERO);
+    assert!(submitted.update().actions_observed());
+    assert!(submitted.result().as_ref().unwrap().report.applied);
+    assert!(submitted.into_result().unwrap().created_entity.is_none());
+    assert_ne!(application.document_query_basis(document).unwrap(), basis);
+    assert!(!expected.operations.is_empty());
+    assert!(matches!(
+        application
+            .accept_source_tool_review(&request, Duration::ZERO)
+            .into_result(),
+        Err(EditorSourceToolError::Busy),
+    ));
+    let frame = application.current_frame().unwrap();
+    application.submit_and_drive(
+        EditorActionBatch::new(
+            frame.revision(),
+            [EditorAction::Mutate(EditorDocumentMutation::Undo {
+                document,
+                base_revision: application.document_query_basis(document).unwrap().revision,
+            })],
+        ),
+        Duration::ZERO,
+    );
+    let current = application.document_query_basis(document).unwrap();
+    let request = application
+        .request_source_tool(
+            &current,
+            EditorSourceToolIntent::Edit {
+                entity: SceneEntityId::new("signal-node").unwrap(),
+            },
+            BTreeMap::new(),
+        )
+        .unwrap();
+    settle_tool(&mut application);
+    application.disable_source_tool().unwrap();
+    assert!(application.source_tool_review().unwrap().is_none());
+    assert!(matches!(
+        application
+            .accept_source_tool_review(&request, Duration::ZERO)
+            .into_result(),
+        Err(EditorSourceToolError::Disabled),
+    ));
+    assert_eq!(application.document_query_basis(document).unwrap(), current);
+    assert_eq!(
+        fs::read(fixture.root.join("worlds/entry.scene.json")).unwrap(),
+        source
+    );
+    close(&mut application);
+    assert!(matches!(
+        application.source_tool_view(),
+        Err(EditorSourceToolError::WorkspaceUnavailable | EditorSourceToolError::Closing),
+    ));
+}
+
 #[test]
 fn failed_initial_open_retains_cleanup_across_retry_manager_and_exit() {
     for return_to_manager in [false, true] {
@@ -1126,7 +1324,7 @@ fn queue_reopen(application: &mut EditorApplication) {
     );
 }
 
-fn close(application: &mut EditorApplication) {
+pub(in crate::app) fn close(application: &mut EditorApplication) {
     let mut exited = application.request_exit().exit_ready();
     let deadline = Instant::now() + Duration::from_secs(10);
     while !exited && Instant::now() < deadline {
@@ -1136,8 +1334,8 @@ fn close(application: &mut EditorApplication) {
     assert!(exited, "the persistence fixture retained its session");
 }
 
-struct PersistenceFixture {
-    root: PathBuf,
+pub(in crate::app) struct PersistenceFixture {
+    pub(in crate::app) root: PathBuf,
 }
 
 impl PersistenceFixture {
@@ -1174,7 +1372,7 @@ impl PersistenceFixture {
         .unwrap()
     }
 
-    fn new() -> Self {
+    pub(in crate::app) fn new() -> Self {
         let root = std::env::temp_dir().join(format!(
             "nara-editor-persistence-{}-{}",
             std::process::id(),
@@ -1206,6 +1404,13 @@ impl PersistenceFixture {
     }
 
     fn open(&self) -> EditorApplication {
+        self.open_with_expected_state(EditorApplicationState::AuthoringDegraded)
+    }
+
+    pub(in crate::app) fn open_with_expected_state(
+        &self,
+        expected: EditorApplicationState,
+    ) -> EditorApplication {
         let mut application =
             EditorApplication::new(EditorLaunchOptions::new(&self.root).with_profile("desktop"));
         application.native_shell_ready();
@@ -1217,10 +1422,7 @@ impl PersistenceFixture {
             application.advance_project_open();
             std::thread::sleep(Duration::from_millis(1));
         }
-        assert_eq!(
-            application.state(),
-            EditorApplicationState::AuthoringDegraded
-        );
+        assert_eq!(application.state(), expected);
         application
     }
 }

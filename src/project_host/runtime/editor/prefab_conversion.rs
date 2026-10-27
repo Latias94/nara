@@ -106,8 +106,6 @@ pub(super) struct EditorPrefabConversionHost {
     next_prepare_gate: Option<Box<dyn FnOnce() + Send>>,
     #[cfg(test)]
     next_validation_gate: Option<Box<dyn FnOnce() + Send>>,
-    #[cfg(test)]
-    pub(super) next_close_poll_gate: Option<Box<dyn FnOnce(&mut EditorProjectSession) + Send>>,
 }
 
 impl EditorPrefabConversionHost {

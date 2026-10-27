@@ -77,6 +77,12 @@ original source/Schema observations, executable publication and newest-request i
 and acceptance use one owner-prepared candidate. Actual JSON/RON Attach/edit/Spawn, history,
 persistence and Rust data reads remain bounded consumer evidence. This does not adopt a generic
 language interface, installed-tool lifecycle or dependency/cohort publication.
+The [finite source-tool successor](../../plans/2026-10-28-finite-source-tool-owner-plan.md)
+subsequently moves the concrete proposal owner into production Project Session/Application,
+using explicitly enabled child commands and existing Tasks custody under ADRs 0047/0118.
+Actual C# Session and Application consumers qualify that finite operation. Its activation is
+not an executable gameplay cohort, catalog migration or native/managed unload contract; this
+ADR remains Proposed. Inline tool facets and installation retain their separate workflows.
 Backend-free owner admission and explicit native/data source compilation now have scoped
 production evidence in the [implementation ledger](implementation-status.md); complete runtime
 materialization and managed data ownership now have their narrow closed-family contract in

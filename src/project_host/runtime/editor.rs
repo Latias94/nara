@@ -30,6 +30,7 @@ mod project_browser;
 mod scene_capture;
 mod source_admission;
 mod source_asset_import;
+mod source_tools;
 #[cfg(test)]
 mod test_fixtures;
 mod trusted_play;
@@ -77,6 +78,11 @@ pub use presentation::{
 #[cfg(feature = "presentation-2d")]
 pub use preview::{EditorPreviewCandidate, EditorPreviewContentStamp, EditorPreviewHit};
 pub use source_asset_import::{EditorSourceAssetDomain, EditorSourceAssetImporters};
+pub use source_tools::{
+    EditorSourceToolAttemptId, EditorSourceToolCommand, EditorSourceToolCommit,
+    EditorSourceToolDefinition, EditorSourceToolError, EditorSourceToolIntent,
+    EditorSourceToolRequestId, EditorSourceToolReview, EditorSourceToolView,
+};
 #[cfg(feature = "runtime-ui")]
 use ui_authoring::EditorUiAuthoringProjectionCache;
 #[cfg(feature = "runtime-ui")]
@@ -860,6 +866,9 @@ pub struct EditorProjectSession {
     image_import: image_import::EditorImageImportHost,
     source_asset_import: source_asset_import::EditorSourceAssetImportHost,
     prefab_conversion: prefab_conversion::EditorPrefabConversionHost,
+    source_tools: source_tools::EditorSourceTools,
+    #[cfg(test)]
+    next_close_poll_gate: Option<Box<dyn FnOnce(&mut Self) + Send>>,
     authoring_prefab_source_observations:
         BTreeMap<nara_asset::AssetPath, AuthoringPrefabSourceObservation>,
     #[cfg(test)]
@@ -997,6 +1006,7 @@ impl Drop for EditorProjectSession {
         self.image_import.cancel_pending();
         self.source_asset_import.cancel();
         self.prefab_conversion.cancel();
+        self.source_tools.cancel();
         self.cancel_pending_document_open();
     }
 }
@@ -1011,10 +1021,12 @@ impl EditorProjectSession {
     #[doc(hidden)]
     pub fn advance_close(&mut self) -> EditorProjectCloseProgress {
         self.closing = true;
+        self.source_tools.cancel();
+        self.advance_source_tools();
         self.prefab_conversion.cancel();
         self.advance_prefab_conversion();
         #[cfg(test)]
-        if let Some(gate) = self.prefab_conversion.next_close_poll_gate.take() {
+        if let Some(gate) = self.next_close_poll_gate.take() {
             gate(self);
         }
         #[cfg(feature = "presentation-2d")]
@@ -1048,6 +1060,7 @@ impl EditorProjectSession {
             }
             authoring_runtime::EditorAuthoringRuntimeCloseProgress::Complete(task_shutdown) => {
                 self.advance_prefab_conversion();
+                self.advance_source_tools();
                 let task_shutdown = self.session_task_shutdown(&task_shutdown);
                 if files_closed && !self.authoring_retirements.is_pending() && play_closed {
                     EditorProjectCloseProgress::Complete(EditorProjectCloseReceipt::new(
@@ -1576,6 +1589,9 @@ impl EditorProjectSession {
                 image_import,
                 source_asset_import: source_asset_import::EditorSourceAssetImportHost::default(),
                 prefab_conversion: Default::default(),
+                source_tools: Default::default(),
+                #[cfg(test)]
+                next_close_poll_gate: None,
                 authoring_prefab_source_observations: BTreeMap::new(),
                 #[cfg(test)]
                 reject_next_prefab_source_binding: false,
@@ -1827,6 +1843,9 @@ impl EditorProjectSession {
                 image_import: image_import::EditorImageImportHost::default(),
                 source_asset_import: source_asset_import::EditorSourceAssetImportHost::default(),
                 prefab_conversion: Default::default(),
+                source_tools: Default::default(),
+                #[cfg(test)]
+                next_close_poll_gate: None,
                 authoring_prefab_source_observations: BTreeMap::new(),
                 #[cfg(test)]
                 reject_next_prefab_source_binding: false,

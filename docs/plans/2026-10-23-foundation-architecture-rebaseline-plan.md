@@ -164,9 +164,17 @@ and project workflow adapters; no new Automation crate.
   transport findings at their owning boundaries; do not manufacture a disk-loss claim for F2.
 - Follow with a finite explicitly enabled child-process tool returning a proposal to the same
   owner, only after its bounded input/output and trust are stated. No sandbox or stable wire SDK
-  claim follows from it.
+  claim follows from it. The [finite source-tool owner plan](2026-10-28-finite-source-tool-owner-plan.md)
+  places this concrete operation in Project Session/Application, using existing Tasks custody and
+  source preparation rather than retaining the EnemyStats fixture's parallel proposal owner.
 
 **R1b placement and local lifecycle** is a separate deliverable beyond that proposal experiment.
+The next complete consumer is one real EnemyStats `health` property customization plus a small
+tool panel, using the same Session request/review and source transaction. Qualify exact property
+matching, draft ownership, disabled/replaced route refusal and default-field fallback before
+packaging that tool. Keep the facet finite and UI-neutral; the incumbent frontend supplies
+interaction evidence while Nara's own custom-drawn runtime remains the destination. This does
+not select a recursive widget-description protocol, toolkit callback ABI or an official C# SDK.
 Use the same useful command plus inline Inspector customization to compare source-built companion,
 replaceable semantic tool Host and a narrowly trusted native SDK. Establish selection from native
 authority, author concepts, update/diagnostic/recovery behavior and measured calls/latency, without
@@ -214,9 +222,10 @@ into durable allocated identities merely to complete the first consumer.
 
 ## R3: Behavior Representation And Immutable Module Publications
 
-**Design:** D02, D03, D06. **State:** private representation comparison and first in-process
-C#/Lua Schema-driven workflow plus bounded body/lifetime comparison executed; production
-representation, complete language workflow and replacement remain open. **Owners:** Schema, Scene materialization,
+**Design:** D02, D03, D06. **State:** the closed native/data Scene family is adopted under ADR 0006
+and qualified through public, managed and product consumers. C#/Lua Schema-driven execution and
+body/lifetime comparisons remain bounded experiments; complete language workflow, executable
+publication and replacement remain open. **Owners:** Schema, Scene materialization,
 concrete language adapter and executable Host; Proposed 0120.
 
 **R3a representation:** compare an explicit attachments envelope and owner-managed rows with one
@@ -228,9 +237,10 @@ known-to-be-displaced operation-patch format.
 The [executed comparison](../research/2026-10-27-behavior-representation-comparison.md) selects
 the data-only entity envelope provisionally for R3b. Rows reduce inspected records for selective
 queries but require explicit cleanup on ordinary destruction. VM instance/code custody and real
-dispatch costs remain unproved and may reverse the selection. The private fixture uses hidden
-authoring integration, not a public Runtime representation; its transformed version-two data is
-not an owner-catalog migration transaction.
+dispatch costs may change the choice for a future executable adapter. The original private
+fixture's hidden authoring/materialization Runtime has been removed; current language consumers
+use the adopted public Scene family and real Project Sessions. The comparison's transformed
+version-two data is not an owner-catalog migration transaction.
 
 **R3b language workflow:** fix the representation enough to compare the same gameplay task with
 C# and Lua feasibility adapters. Choose a production candidate on author workflow, targets,
@@ -245,6 +255,8 @@ and Editor assemblies/deployment separate. This prioritizes a candidate, not an 
 announcement or a second maintained SDK. Rust remains complete without a VM. A universal
 language-backend trait, native binary ABI or replacement package resolver is not a prerequisite.
 Coordinate this tool with R1b rather than creating a second install/lifecycle mechanism.
+The finite child-tool successor establishes the shared Session/Application owner. Its next
+inline-property consumer is the same R1b workflow above, not a second language-tool lifecycle.
 
 The [first executable slice](../research/2026-10-27-behavior-language-workflow-comparison.md)
 passes the same Scene/Prefab task through real hostfxr and Lua calls with exact native command
@@ -271,10 +283,12 @@ held callback/instance roots have private evidence. This informs language-owner 
 completion of R3c: arbitrary in-flight work, dependency cohorts, Stop-first, catalog migration,
 post-publication cleanup failure and public integration remain open.
 
-The next production prerequisite is the [Scene-owned data representation
-plan](2026-10-27-scene-data-representation-plan.md), not promotion of the private preview helper.
-The mixed compiler/materializer/export family remains Proposed until its public independent and
-managed consumers pass. Its implementation proceeds independently of the future owned UI.
+The [Scene-owned data representation plan](2026-10-27-scene-data-representation-plan.md) has
+qualified its closed compiler/materializer/export family under ADR 0006, including public
+independent, managed and product consumers. That adopted data storage does not promote
+Proposed 0120's executable publications, migration or dependency cohorts. The obsolete private
+preview helper is removed. Remaining execution and tool facets proceed independently of the
+future owned UI.
 
 Acceptance: independent attach/edit/Undo/Prefab/source round-trip, recursive refs, one-record
 migration, missing-module preservation, mixed native materialization, exact absence/export/retire

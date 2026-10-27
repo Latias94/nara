@@ -36,19 +36,3 @@ public interface IBehaviorModule
     SchemaBinding[] Describe();
     List<NameCommand> Invoke(SchemaSnapshot snapshot);
 }
-
-public sealed record EnemyStatsRequest(
-    string Operation,
-    string Name,
-    long Health,
-    long Armor,
-    long Bonus,
-    string Fault);
-public sealed record EnemyStatsWrite(string Field, JsonElement Value);
-public sealed record EnemyStatsProposal(string Title, string Name, EnemyStatsWrite[] Writes);
-
-public interface IEnemyStatsTool
-{
-    JsonElement DescribeEnemyStats();
-    EnemyStatsProposal ProposeEnemyStats(EnemyStatsRequest request);
-}

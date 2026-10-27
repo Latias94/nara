@@ -4,7 +4,7 @@ using Nara.BehaviorTrial;
 
 namespace Nara.AuthoredBehaviors;
 
-public sealed partial class Module : IBehaviorModule
+public sealed class Module : IBehaviorModule
 {
     private readonly Dictionary<string, Func<SchemaSnapshot, List<NameCommand>>> callbacks =
         new(StringComparer.Ordinal)

@@ -8,6 +8,7 @@ receipt-backed content state
 **Amended**: 2026-10-27 to capture actual open Prefab working copies for authoring Scene preview
 with independent file evidence and complete content authorization
 **Amended**: 2026-10-28 to require complete retained observations at public authoring preparation ingress
+**Amended**: 2026-10-28 to retain finite trusted tool execution and review in the Project Session
 **Refines**: ADR 0015, ADR 0026, ADR 0034, ADR 0038, ADR 0043
 **Refined By**: [ADR 0104](0104-host-owned-editor-workspace-installation.md): Host-Owned Editor
 Workspace Installation
@@ -132,6 +133,21 @@ Rules:
   A caller must not refresh the basis of an older proposal. The source-local Scene/Prefab APIs
   retain their own revision/candidate contracts; tool code-publication/request identity is
   separately owned by the concrete tool.
+- Finite trusted source tools supplied explicitly by a Host are Project Session operations.
+  The Session probes the actual child against the complete selected owner catalog, captures the
+  original document/Schema observation and copied inputs, and retains the exact owner-prepared
+  candidate for review and acceptance. The child supplies bounded property proposals; it cannot
+  choose a document, entity target, operation, source basis or publication identity. One accepted
+  proposal is one ordinary source transaction with its existing inverse/history.
+  An unsuccessful activation preserves the active predecessor. Successful replacement, disable
+  and Session Close revoke old request/review authority independently of document revision.
+  Attempt and request failures retain separate fixed observation slots with their exact IDs;
+  a concurrent replacement probe cannot overwrite the predecessor request's outcome.
+  Cancellation is logical: the existing Tasks activity retains late child acquisition, process
+  reaping and pipe-worker completion until physical return. Owner-thread polling does not wait
+  for a child or join its IO. The first implementation supervises a trusted direct child, not
+  descendants or a sandbox. A launch path is explicit Host configuration, not an immutable
+  executable package, automatic project-code authorization or install/update support.
 - Retained construction uses that same source owner. Workspace routes the original complete
   query basis plus the draft's exact source/Schema basis, and carries a nominal prepared
   construction with its fixed local mapping. A new query cannot authorize an obsolete draft.

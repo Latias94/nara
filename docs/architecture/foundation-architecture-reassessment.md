@@ -936,6 +936,24 @@ query, executable-publication and newest-request identities. This precedes produ
 unknown-data disable/re-enable, inline Inspector and the Nara-owned drawing runtime; those remain
 required evidence for the complete discriminator above.
 
+The [finite source-tool successor](../plans/2026-10-28-finite-source-tool-owner-plan.md) moves
+that proposal/review authority into the ordinary Project Session and Application. It replaces the
+shared in-process tool bridge with an explicitly enabled standalone command, exact catalog probe
+and existing Tasks physical custody. It deletes the displaced fixture-owned proposal executor;
+it does not select automatic installation, a gameplay language or the Editor drawing runtime.
+ADRs 0047/0118 own this finite operation independently of Proposed 0120's executable cohorts.
+
+The next discriminator is a real inline `health` property customization and a small panel sharing
+that Session request/review. It precedes local installation because packaging cannot establish
+whether the tool can participate in ordinary property editing. Match the exact owner/component/
+field, preserve frontend-owned drafts, reject old routes after disable/replacement and restore
+the default field renderer when metadata remains admitted. Use only the finite presentation and
+operation semantics required by this consumer. Godot's separate Inspector property contribution
+and default editor paths inform this division; its `Object`/`Control` model and global plugin
+list are not selected. The incumbent frontend provides behavior evidence, while Nara's own UI
+runtime remains separate implementation work. Gameplay executable publications remain an
+independent R3 contract rather than a prerequisite for this tool facet.
+
 Do not implement the conversation's suggested crate list as a new central extension manager.
 Schema, document, command, UI, execution and native-resource owners retain their own admission
 and physical retirement. A concrete product may coordinate an exact required contribution set;

@@ -69,6 +69,9 @@ mod editor;
 #[cfg(feature = "tooling")]
 pub use editor::{
     EditorExtensionDocumentHostError, EditorSourceAssetDomain, EditorSourceAssetImporters,
+    EditorSourceToolAttemptId, EditorSourceToolCommand, EditorSourceToolCommit,
+    EditorSourceToolDefinition, EditorSourceToolError, EditorSourceToolIntent,
+    EditorSourceToolRequestId, EditorSourceToolReview, EditorSourceToolView,
 };
 
 mod plugin_diagnostics;

@@ -59,6 +59,7 @@ impl EditorProjectSession {
         self.advance_workspace_persistence();
         self.advance_workspace_retirement();
         self.advance_prefab_conversion();
+        self.advance_source_tools();
         if drive_runtime && self.trusted_compiled().is_some() {
             self.drive_play_owner(real_delta);
         }
@@ -151,6 +152,7 @@ impl EditorProjectSession {
                     self.field_feedback.clone(),
                 )
                 .with_image_import(image_import_view, image_import_work_pending)
+                .with_source_tool_work_pending(self.source_tools.has_pending_work())
                 .with_source_asset_import(
                     source_asset_import,
                     self.source_asset_import.has_pending_work(),

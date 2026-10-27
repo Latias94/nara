@@ -8,8 +8,9 @@ pub mod workspace;
 
 pub use app::{
     EditorApplication, EditorApplicationActionDispatch, EditorApplicationActionNotDispatched,
-    EditorApplicationConstructionSubmission, EditorApplicationOpenError, EditorApplicationState,
-    EditorApplicationSubmission, EditorApplicationUpdate, EditorLaunchOptions, EditorProjectAction,
+    EditorApplicationConstructionSubmission, EditorApplicationOpenError,
+    EditorApplicationSourceToolSubmission, EditorApplicationState, EditorApplicationSubmission,
+    EditorApplicationUpdate, EditorLaunchOptions, EditorProjectAction,
 };
 pub use frontend::{
     ImguiEditorFrontend, ImguiEditorPanel, ImguiEditorPanelContext, ImguiEditorSubmission,

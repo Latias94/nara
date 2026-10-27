@@ -3,7 +3,6 @@ use std::{
     rc::Rc,
 };
 
-use nara_reflect::{ComponentSchemaCatalog, ComponentValue};
 use serde::{Deserialize, Serialize, de::DeserializeOwned};
 use serde_json::json;
 
@@ -84,31 +83,6 @@ struct Completion {
     complete: bool,
 }
 
-#[derive(Debug, Clone, Serialize)]
-pub(super) struct EnemyStatsRequest {
-    pub(super) operation: String,
-    pub(super) name: String,
-    pub(super) health: i64,
-    pub(super) armor: i64,
-    pub(super) bonus: i64,
-    pub(super) fault: String,
-}
-
-#[derive(Debug, Clone, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub(super) struct EnemyStatsProposal {
-    pub(super) title: String,
-    pub(super) name: String,
-    pub(super) writes: Vec<EnemyStatsWrite>,
-}
-
-#[derive(Debug, Clone, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub(super) struct EnemyStatsWrite {
-    pub(super) field: String,
-    pub(super) value: ComponentValue,
-}
-
 pub(super) struct DotnetProgram {
     bridge: Rc<Bridge>,
     module: u64,
@@ -180,23 +154,6 @@ impl DotnetProgram {
 
     pub(super) fn candidate(&self, path: &Path) -> Result<Self, String> {
         Self::load_with_bridge(Rc::clone(&self.bridge), path)
-    }
-
-    pub(super) fn enemy_stats_catalog(&self) -> Result<ComponentSchemaCatalog, String> {
-        let catalog: serde_json::Value = self
-            .bridge
-            .call(&json!({"operation":"enemy_stats_catalog", "module":self.module}))?;
-        let encoded = serde_json::to_vec(&catalog).map_err(|error| error.to_string())?;
-        ComponentSchemaCatalog::from_json_bytes(&encoded).map_err(|error| error.to_string())
-    }
-
-    pub(super) fn propose_enemy_stats(
-        &self,
-        request: &EnemyStatsRequest,
-    ) -> Result<EnemyStatsProposal, String> {
-        self.bridge.call(&json!({
-            "operation":"enemy_stats_propose", "module":self.module, "enemyStats":request,
-        }))
     }
 
     pub(super) fn retain_callback(&self) -> CallbackLease {

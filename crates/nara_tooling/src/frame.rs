@@ -118,6 +118,7 @@ impl EditorFrameClock {
             image_import_work_pending: false,
             source_asset_import: None,
             source_asset_import_work_pending: false,
+            source_tool_work_pending: false,
             prefab_conversion: Default::default(),
             document_open: Default::default(),
             scene_preview_document: None,
@@ -289,6 +290,7 @@ pub struct EditorFrameModel {
     image_import_work_pending: bool,
     source_asset_import: Option<crate::EditorSourceAssetImportView>,
     source_asset_import_work_pending: bool,
+    source_tool_work_pending: bool,
     prefab_conversion: crate::EditorPrefabConversionView,
     document_open: crate::EditorDocumentOpenView,
     scene_preview_document: Option<EditorDocumentId>,
@@ -299,6 +301,19 @@ pub struct EditorFrameModel {
 }
 
 impl EditorFrameModel {
+    /// The project owns a finite tool invocation or its physical retirement.
+    #[must_use]
+    pub const fn source_tool_work_pending(&self) -> bool {
+        self.source_tool_work_pending
+    }
+
+    #[doc(hidden)]
+    #[must_use]
+    pub fn with_source_tool_work_pending(mut self, pending: bool) -> Self {
+        self.source_tool_work_pending = pending;
+        self
+    }
+
     #[must_use]
     pub fn prefab_conversion(&self) -> &crate::EditorPrefabConversionView {
         &self.prefab_conversion

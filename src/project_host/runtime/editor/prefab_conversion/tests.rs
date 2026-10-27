@@ -1381,7 +1381,7 @@ fn whole_session_close_retains_physical_prepare_and_validation_custody_until_ret
             assert!(editor.prefab_conversion_view().result.is_none());
             assert_eq!(source_state(&editor, root), before);
         }
-        editor.prefab_conversion.next_close_poll_gate = Some(Box::new(move |editor| {
+        editor.next_close_poll_gate = Some(Box::new(move |editor| {
             assert_eq!(editor.prefab_conversion_view().phase, Phase::Cancelling);
             assert!(editor.prefab_conversion.pending.is_some());
             gate.release();

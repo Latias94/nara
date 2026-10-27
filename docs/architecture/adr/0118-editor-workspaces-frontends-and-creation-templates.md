@@ -2,7 +2,7 @@
 
 **Status**: Accepted
 **Date**: 2026-10-16
-**Last Revised**: 2026-10-28 (complete-observation preparation; Nara-owned frontend direction retained)
+**Last Revised**: 2026-10-28 (finite Session-owned tools and complete-observation preparation)
 **Owner**: Private Editor product, tooling, reflection and document-domain owners
 **Refines**: [0015](0015-editor-tooling-and-dogfooding-boundary.md), [0081](0081-schema-source-stable-identity-catalog-and-runtime-binding.md), [0090](0090-unavailable-schema-and-lossless-authoring.md), [0107](0107-shared-ui-foundation-and-independent-product-layers.md), [0113](0113-editor-ui-prefab-authoring-and-canvas-authority.md), [0114](0114-standalone-generic-editor-authoring-and-execution-boundary.md)
 **Related**: [0117](0117-2d-foundation-ownership-and-authoring-contracts.md)
@@ -419,6 +419,23 @@ owned dispatch observation and subsequent drive together with IDs only for succe
 NotDispatched lifecycle refusal remains distinct from a dispatched domain rejection. The mapping
 is an immutable observation of that publication, not current existence after Undo/Reopen/retirement.
 These direct hooks do not imply registered-panel prepared hooks or installable-tool qualification.
+
+Finite trusted source-tool execution is a separate Project Session operation exposed by the same
+UI-neutral Application. Host configuration explicitly supplies a command and complete admitted
+component owner; ordinary project Open does not execute it. A successful probe establishes an
+activation, while failed replacement leaves the predecessor active. A request retains its original
+source/Schema basis and newest-request identity. Review borrows the same prepared candidate that
+acceptance consumes, including its fixed created-entity mapping. The child cannot return document
+authority or silently retarget the operation.
+
+The existing Tasks owner performs process acquisition and bounded pipe IO. Logical cancellation
+revokes proposal authority immediately and leaves physical custody pending until the direct child
+and pipe workers return. A frame exposes pending work for native maintenance; status transitions
+must invalidate observations even when another retired invocation remains pending. This owns no
+widgets or second transaction store and can be consumed by Nara's future custom-drawn frontend.
+The [finite source-tool plan](../../plans/2026-10-28-finite-source-tool-owner-plan.md) scopes the
+first concrete contract; package discovery, installation, executable byte pinning, descendant
+containment and an official language SDK are separate designs.
 
 A component schema may publish one optional complete `authoring_initial_value` in the existing bounded generic value grammar.
 It is creation-only data, validated through the canonical complete schema/value validator at catalog admission and copied for an explicit creation transaction.
