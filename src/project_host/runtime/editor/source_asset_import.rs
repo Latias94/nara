@@ -4,7 +4,7 @@ use nara_asset::{
     AssetMeta, AssetMetaFileLimits, AssetMetaIdentity, AssetMetaIdentityCandidate, AssetPath,
     AssetSourceKind,
 };
-use nara_fs::{FileIdentity, RelativePath};
+use nara_fs::{ContentDigest, FileIdentity, RelativePath};
 use nara_tooling::{
     EditorSourceAssetDomainView, EditorSourceAssetImportAction,
     EditorSourceAssetImportActionOutcome, EditorSourceAssetImportAttempt,
@@ -329,21 +329,46 @@ impl EditorProjectSession {
             Some(candidate) => {
                 if candidate.identity().source_kind()
                     != &AssetSourceKind::Other(provider.kind().to_owned())
-                    || provider.settings(candidate).is_none()
                 {
                     return Err(Rejection::InvalidMetadata);
                 }
-                let (identity, digest) =
-                    catalog.binding(&path).ok_or(Rejection::InvalidMetadata)?;
+                let digest = catalog
+                    .observed_digest(&path)
+                    .ok_or(Rejection::InvalidMetadata)?;
+                // The catalog is discovery data. Establish a new admission from a live leaf;
+                // its historical native identity cannot prove continuous object custody.
+                let relative = RelativePath::new(&metadata_path)
+                    .map_err(|_| Rejection::PublicationUnavailable)?;
+                let file = root
+                    .open_file_exact(&relative)
+                    .map_err(|_| Rejection::PublicationUnavailable)?;
+                let bytes = file
+                    .read_to_end_bounded(byte_limit as u64)
+                    .map_err(|_| Rejection::PublicationUnavailable)?;
+                if ContentDigest::of_bytes(&bytes) != digest {
+                    return Err(Rejection::PublicationUnavailable);
+                }
+                let current = AssetMetaIdentityCandidate::decode_json_bytes_owned_with_limits(
+                    bytes.into_boxed_slice(),
+                    AssetMetaFileLimits::default(),
+                )
+                .map_err(|_| Rejection::InvalidMetadata)?;
+                if current.identity().path() != &path
+                    || current.identity().source_kind() != candidate.identity().source_kind()
+                    || current.identity().stable_id() != candidate.identity().stable_id()
+                    || provider.settings(&current).is_none()
+                {
+                    return Err(Rejection::InvalidMetadata);
+                }
                 let publication = FilePublicationHost::bind_existing(
                     &root,
                     &metadata_path,
-                    identity,
+                    &file,
                     digest,
                     byte_limit as u64,
                 )
                 .map_err(|_| Rejection::PublicationUnavailable)?;
-                (candidate.identity().stable_id(), publication)
+                (current.identity().stable_id(), publication)
             }
             None => {
                 if index.entry(&metadata_path).is_some() {

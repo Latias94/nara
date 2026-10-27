@@ -39,6 +39,66 @@ impl editor::EditorSourceAssetDomain for SettingsDomain {
 }
 
 #[test]
+fn source_metadata_import_freshly_admits_equal_bytes_and_refuses_changed_catalog_content() {
+    for changed in [false, true] {
+        with_runtime_cleanup(|| {
+            let project = TestProject::new("source-import-fresh-admission");
+            let stable_id = StableAssetId::try_random().unwrap();
+            fs::write(project.root.join("assets/value.blob"), b"source").unwrap();
+            let target = project.root.join("assets/value.blob.meta");
+            let original = AssetMeta::new(
+                AssetMetaIdentity::new(
+                    stable_id,
+                    AssetPath::new("value.blob").unwrap(),
+                    AssetSourceKind::Other(SettingsDomain::SOURCE_KIND.to_owned()),
+                ),
+                64_u32,
+            )
+            .to_json_string()
+            .unwrap();
+            fs::write(&target, &original).unwrap();
+            let mut editor = open(&project);
+            let root = project.capability();
+            let relative = RelativePath::new("assets/value.blob.meta").unwrap();
+            let original_identity = root.open_file(&relative).unwrap().identity();
+            // Keep the original object named elsewhere so this probe does not rely on ID reuse.
+            fs::rename(&target, project.root.join("assets/previous.meta")).unwrap();
+            let replacement = if changed {
+                format!("{original}\n")
+            } else {
+                original
+            };
+            fs::write(&target, &replacement).unwrap();
+            assert_ne!(
+                root.open_file(&relative).unwrap().identity(),
+                original_identity
+            );
+
+            let outcome = submit(&mut editor, 128);
+            if changed {
+                assert_eq!(
+                    outcome,
+                    EditorSourceAssetImportActionOutcome::Rejected(
+                        EditorSourceAssetImportRejection::PublicationUnavailable
+                    )
+                );
+                assert_eq!(fs::read_to_string(&target).unwrap(), replacement);
+            } else {
+                assert_eq!(outcome, EditorSourceAssetImportActionOutcome::Started);
+                wait_for_preparation(&mut editor);
+                drive_image_import_host_until_idle(&mut editor);
+                let candidate = nara_asset::AssetMetaIdentityCandidate::decode_json_bytes(
+                    &fs::read(&target).unwrap(),
+                )
+                .unwrap();
+                assert_eq!(candidate.identity().stable_id(), stable_id);
+                assert_eq!(*candidate.admit::<u32>().unwrap().settings(), 128);
+            }
+        });
+    }
+}
+
+#[test]
 fn source_metadata_publication_rejects_current_frame_reimport_until_its_catalog_refreshes() {
     with_runtime_cleanup(|| {
         let project = TestProject::new("source-import-refresh");

@@ -4,14 +4,13 @@ use std::{
 };
 
 use nara_asset::{
-    AssetId, AssetMeta, AssetMetaIdentity, AssetPath, AssetRecord, AssetSourceKind, AssetVersion,
-    SourceHash, StableAssetId,
+    AssetId, AssetMeta, AssetMetaCandidate, AssetMetaIdentity, AssetPath, AssetRecord,
+    AssetSourceKind, AssetVersion, SourceHash, StableAssetId,
 };
-use nara_fs::{FileIdentity, RelativePath};
+use nara_fs::{ContentDigest, FileIdentity, RelativePath};
 use nara_image::ImageImportSettings;
 use nara_tilemap::{TileSetSource, TileSetSourceFileLimits};
 
-use crate::project_host::file_publication::FilePublicationReadSource;
 #[cfg(test)]
 use crate::project_host::persistence::CleanupTestControl;
 use crate::project_host::{
@@ -43,6 +42,9 @@ use crate::project_host::runtime::editor::persistence::RetainedHost;
 
 mod publication;
 use publication::MetadataPublication;
+
+#[cfg(all(test, any(windows, target_os = "linux")))]
+mod tests;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub(crate) struct EditorImageImportGeneration(u64);
@@ -110,8 +112,7 @@ struct PendingImageImport {
     asset_path: AssetPath,
     stable_id: StableAssetId,
     source_identity: FileIdentity,
-    metadata_source: FilePublicationReadSource,
-    metadata_binding: FilePublicationBinding,
+    metadata: RetainedHost<FilePublicationHost>,
     settings: ImageImportSettings,
     task: EditorImageRuntimeTask,
 }
@@ -400,7 +401,9 @@ impl EditorImageImportHost {
     }
 
     pub(crate) fn cancel_pending(&mut self) {
-        self.pending = None;
+        if let Some(pending) = self.pending.take() {
+            self.retire_metadata(pending.metadata);
+        }
         self.hydration.cancel_pending();
     }
 
@@ -604,11 +607,56 @@ impl EditorImageImportHost {
                     return self
                         .fail_request(generation, EditorImageImportFailure::MetadataInvalid);
                 }
+                // A catalog receipt is a historical data observation. Admit the current
+                // leaf afresh, and keep it alive until the publisher owns that same object.
+                let metadata = match RelativePath::new(entry.metadata_project_relative_path())
+                    .ok()
+                    .and_then(|path| project_root.open_file(&path).ok())
+                {
+                    Some(metadata) => metadata,
+                    None => {
+                        return self.fail_request(
+                            generation,
+                            EditorImageImportFailure::MetadataPublicationRejected,
+                        );
+                    }
+                };
+                let bytes = match metadata.read_to_end_bounded(metadata_byte_limit()) {
+                    Ok(bytes) => bytes,
+                    Err(_) => {
+                        return self.fail_request(
+                            generation,
+                            EditorImageImportFailure::MetadataPublicationRejected,
+                        );
+                    }
+                };
+                let admitted = AssetMetaCandidate::<ImageImportSettings>::decode_json_bytes(&bytes);
+                let admitted = match admitted {
+                    Ok(admitted)
+                        if admitted.identity().path() == entry.asset_path()
+                            && admitted.identity().source_kind() == &AssetSourceKind::Image
+                            && admitted.identity().stable_id() == receipt.stable_id()
+                            && *admitted.settings() == receipt.settings() =>
+                    {
+                        admitted
+                    }
+                    _ => {
+                        return self
+                            .fail_request(generation, EditorImageImportFailure::MetadataInvalid);
+                    }
+                };
+                let digest = ContentDigest::of_bytes(&bytes);
+                if digest != receipt.digest() {
+                    return self.fail_request(
+                        generation,
+                        EditorImageImportFailure::MetadataPublicationRejected,
+                    );
+                }
                 let publication = match FilePublicationHost::bind_existing(
                     &project_root,
                     entry.metadata_project_relative_path(),
-                    receipt.identity(),
-                    receipt.digest(),
+                    &metadata,
+                    digest,
                     metadata_byte_limit(),
                 ) {
                     Ok(publication) => publication,
@@ -619,7 +667,11 @@ impl EditorImageImportHost {
                         );
                     }
                 };
-                (receipt.stable_id(), Some(receipt.settings()), publication)
+                (
+                    admitted.identity().stable_id(),
+                    Some(*admitted.settings()),
+                    publication,
+                )
             }
             EditorImageMetadataStatus::Invalid(_)
             | EditorImageMetadataStatus::IdentityConflict { .. } => {
@@ -650,9 +702,9 @@ impl EditorImageImportHost {
         let metadata_changed = previous_settings != Some(settings);
         self.hydration.surrender_source(entry.asset_path());
         let mut detail_revision = source_index.generation().get();
-        let (metadata_source, metadata_binding) = if metadata_changed {
+        let metadata = if metadata_changed {
             match self.publish_metadata(runtime, publication, encoded.as_bytes()) {
-                MetadataPublication::Published { source, binding } => {
+                MetadataPublication::Published(publication) => {
                     let target_generation = self.schedule_refresh(project);
                     detail_revision = target_generation.map_or_else(
                         || source_index.generation().get().saturating_add(1),
@@ -670,7 +722,7 @@ impl EditorImageImportHost {
                         self.require_reconciliation(generation, detail_revision);
                         return EditorImageImportRequestResult::Completed(self.state());
                     };
-                    (source, binding)
+                    publication
                 }
                 MetadataPublication::Failed(failure) => {
                     return self.fail_request(generation, failure);
@@ -693,14 +745,11 @@ impl EditorImageImportHost {
                 }
             }
         } else {
-            (publication.read_source(), publication.binding())
+            match self.retain_metadata(runtime, publication) {
+                Ok(publication) => publication,
+                Err(failure) => return self.fail_request(generation, failure),
+            }
         };
-        if !matches!(metadata_binding, FilePublicationBinding::Existing { .. }) {
-            return self.fail_request(
-                generation,
-                EditorImageImportFailure::MetadataPublicationUncertain,
-            );
-        }
         self.remember_latest_detail(
             project_relative_path,
             detail_revision,
@@ -736,11 +785,13 @@ impl EditorImageImportHost {
             asset_path: entry.asset_path().clone(),
             stable_id,
             source_identity,
-            metadata_source,
-            metadata_binding,
+            metadata,
             settings,
             task,
         });
+        // The pending attempt now owns the complete registered Host. The independent
+        // cleanup latch covered every earlier return and unwind before this transfer.
+        self.publication_cleanup = None;
         self.set_latest_state(EditorImageImportState::Pending { generation });
         EditorImageImportRequestResult::Started(generation)
     }
@@ -815,6 +866,7 @@ impl EditorImageImportHost {
                         generation: pending.generation,
                         failure: EditorImageImportFailure::MetadataInvalid,
                     });
+                    self.retire_metadata(pending.metadata);
                 }
                 let deferred = self
                     .hydration
@@ -964,6 +1016,7 @@ impl EditorImageImportHost {
             },
         };
         self.set_latest_state(state);
+        self.retire_metadata(pending.metadata);
     }
 
     fn validate_completion(
@@ -982,24 +1035,28 @@ impl EditorImageImportHost {
         {
             return Err(EditorImageImportFailure::SourceChanged);
         }
-        let FilePublicationBinding::Existing {
-            identity: metadata_identity,
-            digest: metadata_digest,
-        } = pending.metadata_binding
-        else {
-            return Err(EditorImageImportFailure::MetadataPublicationUncertain);
-        };
-        let metadata = pending
-            .metadata_source
-            .open()
-            .map_err(|_| EditorImageImportFailure::MetadataPublicationRejected)?;
-        if metadata.identity() != metadata_identity
-            || metadata
-                .verify_digest(metadata_digest, metadata_byte_limit())
-                .is_err()
-        {
-            return Err(EditorImageImportFailure::MetadataPublicationRejected);
-        }
+        pending
+            .metadata
+            .try_with(|host| {
+                let FilePublicationBinding::Existing { identity, digest } = host.binding() else {
+                    return Err(EditorImageImportFailure::MetadataPublicationUncertain);
+                };
+                // Keep the accepted leaf pinned while checking the current name for drift.
+                let metadata = host
+                    .read_source()
+                    .open()
+                    .map_err(|_| EditorImageImportFailure::MetadataPublicationRejected)?;
+                if host.uncertain()
+                    || metadata.identity() != identity
+                    || metadata
+                        .verify_digest(digest, metadata_byte_limit())
+                        .is_err()
+                {
+                    return Err(EditorImageImportFailure::MetadataPublicationRejected);
+                }
+                Ok(())
+            })
+            .unwrap_or(Err(EditorImageImportFailure::MetadataPublicationRejected))?;
         if imported.image().source().stable_id() != pending.stable_id
             || imported.image().source().path() != &pending.asset_path
             || imported.artifact().key().settings_hash() != pending.settings.settings_hash()
@@ -1117,6 +1174,7 @@ impl EditorImageImportHost {
         attempt_generation: EditorImageImportGeneration,
         target_generation: u64,
     ) {
+        self.retry_publication_cleanup();
         self.reconciliation = Some(ReconciliationObligation { target_generation });
         self.set_latest_state(EditorImageImportState::ReconcileRequired {
             generation: attempt_generation,
@@ -1174,6 +1232,7 @@ impl EditorImageImportHost {
         generation: EditorImageImportGeneration,
         failure: EditorImageImportFailure,
     ) -> EditorImageImportRequestResult {
+        self.retry_publication_cleanup();
         self.set_latest_state(EditorImageImportState::Failed {
             generation,
             failure,

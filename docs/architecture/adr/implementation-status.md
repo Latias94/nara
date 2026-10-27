@@ -86,6 +86,15 @@ Actual installed V1/V2 and native Editor scopes belong to that linked evidence, 
 real failure and platform limits. The first admitted subset has preexisting project metadata,
 generation-one catalogs and no unresolved installed requirements. Durable selection, fresh-project
 metadata adoption, evolved lineage, dependent-aware update/removal and full Package UI remain open.
+The [continuous source-custody successor](../../knowledge/engineering/verification/2026-10/2026-10-27T233313Z-continuous-file-publication-and-editor-source-custody-qualification-d9a0d6253fc3473ab82093b446048d9c.md)
+qualifies the shared file Host's accepted leaf lifetime, temporary reader handoff, actual
+authoring/Reopen handles and pending Image metadata custody under ADRs 0047/0070/0115. Historical
+catalog data now enters through fresh domain admission. The old bare-ID interfaces, unused receipt
+cache and redundant startup transfer wrapper are removed. Root/public persistence 672, independent
+language 22, actual managed/Application and three selected Windows/DX12 native trajectories pass.
+Read handles remain mutable-content observations; existing replacement remains detect-only.
+Windows parent-directory rename can require physical Close. This prerequisite does not implement
+durable tool selection, all source-capture identity lifetimes or complete the local lifecycle plan.
 The [documentation verification](../../knowledge/engineering/verification/2026-10/2026-10-23T115037Z-foundation-architecture-rebaseline-documentation-checks-and-adversarial-closure-33c8c794baf142ee964468a01248af17.md)
 records inventory/link/status checks and the scoped adversarial correction/recheck. No Cargo,
 performance or native trajectory was re-executed for this design-only unit.

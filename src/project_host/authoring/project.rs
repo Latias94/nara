@@ -530,35 +530,31 @@ impl AuthoringProjectReceipt {
         self.snapshot.attempt_generation()
     }
 
-    pub(crate) fn into_session_parts(
+    pub(crate) fn into_session_snapshot(
         self,
-    ) -> Result<AuthoringProjectSessionParts, AuthoringProjectReceiptUseError> {
+    ) -> Result<AuthoringProjectSessionSnapshot, AuthoringProjectReceiptUseError> {
         let inner = Arc::try_unwrap(self.snapshot.inner)
             .map_err(|_| AuthoringProjectReceiptUseError::SnapshotAliased)?;
-        let startup_scene = fork_published_authoring_scene_document(&inner.startup_scene);
         let mut source_index = ProjectSourceIndexState::new(&inner.schema);
         let _ = source_index.request_refresh();
-        Ok(AuthoringProjectSessionParts {
-            snapshot: AuthoringProjectSessionSnapshot {
-                schema: inner.schema,
-                adapters: Arc::from(inner.adapters),
-                scene_limits: inner.scene_limits,
-                readiness: inner.readiness,
-                startup_compilation_diagnostics: inner.startup_compilation_diagnostics,
-                startup_preview: inner.startup_preview,
-                startup_source: inner.startup_source,
-                startup_native_source: inner.startup_native_source,
-                startup_scene: inner.startup_scene,
-                prefabs: inner.prefabs,
-                assets: inner.assets,
-                asset_database: inner.asset_database,
-                unresolved_dependencies: inner.unresolved_dependencies,
-                source_facts: inner.source_facts,
-                stable_lookups: inner.stable_lookups,
-                usage: inner.usage,
-                source_index,
-            },
-            startup_scene,
+        Ok(AuthoringProjectSessionSnapshot {
+            schema: inner.schema,
+            adapters: Arc::from(inner.adapters),
+            scene_limits: inner.scene_limits,
+            readiness: inner.readiness,
+            startup_compilation_diagnostics: inner.startup_compilation_diagnostics,
+            startup_preview: inner.startup_preview,
+            startup_source: inner.startup_source,
+            startup_native_source: inner.startup_native_source,
+            startup_scene: inner.startup_scene,
+            prefabs: inner.prefabs,
+            assets: inner.assets,
+            asset_database: inner.asset_database,
+            unresolved_dependencies: inner.unresolved_dependencies,
+            source_facts: inner.source_facts,
+            stable_lookups: inner.stable_lookups,
+            usage: inner.usage,
+            source_index,
         })
     }
 }
@@ -589,11 +585,6 @@ impl Display for AuthoringProjectReceiptUseError {
 
 impl Error for AuthoringProjectReceiptUseError {}
 
-pub(crate) struct AuthoringProjectSessionParts {
-    pub(crate) snapshot: AuthoringProjectSessionSnapshot,
-    pub(crate) startup_scene: PublishedAuthoringSceneDocument,
-}
-
 pub(crate) struct AuthoringProjectSessionSnapshot {
     schema: Arc<AuthoringSchemaReceipt>,
     adapters: Arc<[AuthoringAdapterReceipt]>,
@@ -615,6 +606,21 @@ pub(crate) struct AuthoringProjectSessionSnapshot {
 }
 
 impl AuthoringProjectSessionSnapshot {
+    pub(crate) fn admit_startup_document(
+        &self,
+    ) -> Result<super::AdmittedAuthoringDocument, super::AuthoringDocumentAdmissionError> {
+        let source = super::document::AuthoringDocumentSourceFact::from_captured_source(
+            &self.startup_source,
+            &self.startup_native_source,
+        )?;
+        super::document::admit_captured_startup_scene(
+            &self.schema.project_root(),
+            &source,
+            &self.startup_scene.schema_basis(),
+            self.scene_limits,
+        )
+    }
+
     pub(crate) fn take_startup_preview(&mut self) -> Option<CapturedAuthoringPreview> {
         self.startup_preview.take()
     }

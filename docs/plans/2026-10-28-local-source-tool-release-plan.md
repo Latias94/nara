@@ -133,6 +133,15 @@ no project destination and by itself grants no overwrite or deletion permission.
 
 ## Contract And Verification Scope
 
+Before durable selection reuses the shared file publisher, its accepted source must retain the
+actual leaf handle rather than only an ID/digest pair. Read preparation transfers the same object
+through admission; temporary publication acquires its retained read handle before consuming the
+writer. This is the existing ADR 0070 live-object contract applied to the shared Host, not a new
+storage service, lock tier or predecessor CAS guarantee. Scene, Prefab, extension documents and
+metadata consumers use the same corrected handoff. Windows parent-directory rename may be refused
+until the relevant file custody physically closes. Qualify these shared consumers before building
+the durable selection record on that publisher.
+
 ADRs 0047/0118 adopt release preparation and the receipt-last artifact publication boundary.
 Installed graph selection, durable enablement, metadata adoption and removal require their owning
 amendments when designed. ADRs 0020/0035/0114/0098 retain current source, execution and Schema
@@ -177,3 +186,51 @@ Fresh receipt inspection checks a caller-selected receipt digest, decodes the bo
 reuses release capture plus complete inventory. It does not reconstruct created-file provenance,
 admit a project Schema, satisfy dependencies or approve execution. Full local Package selection,
 enable/update/removal, evolved metadata, reclaimer and UI workflow remain in progress above.
+
+## Next Concrete Selection Unit
+
+Use the existing single active tool slot and the real installed EnemyStats V1/invalid/V2 consumer.
+Keep exact installed requirements rejected until a graph owner binds each declaration to a
+particular installation. Do not use this slot's selection as an inventory of all installed tools
+or as evidence that disabled dependents can be removed.
+
+The selected design direction is a bounded project-local lifecycle record at
+`.nara/source-tools/selection.json`, separate from the artifact's ready receipt. Before
+implementation, reconcile ADR 0035's settings authority explicitly: this record owns the local
+installed selection and desired enabled/disabled state, with no duplicate `nara.toml` setting.
+It is not a source dependency specification, an execution grant or a machine-independent package
+lock. Project-external destinations remain usable by explicit session-only approval; durable
+reopening outside the caller-issued project capability needs a separate concrete contract.
+
+The canonical format starts at 1 and is bounded to 4 KiB. A selected record binds a project-relative
+installation directory, nonzero installation ID, exact ready-receipt digest, manifest digest and
+package identity, plus desired enabled/disabled state. Resolve those relationships through actual
+code-free inspection. Do not store a native `FileIdentity`, active invocation ID, launcher path,
+approval flag or deletion authority. Missing means unselected; corrupt, unsupported, oversized
+and inaccessible records are distinct failures that block blind overwrite. Disabled retains the
+selected installation. Fresh Open observes data and leaves enabled selections awaiting explicit
+Host approval; it starts no describe probe.
+
+Split the existing successful probe path into a private ready candidate and one route-promotion
+helper. Session-only enable uses that same helper directly. Durable enable first fixes the ready
+candidate, original selection observation and predecessor route, then publishes desired selection
+through the existing finite Tasks and shared file Host. Record an actual published disk result
+before checking whether current Session, attempt, route and Schema admission still allow promotion.
+Only then replace the active route and retire its previous request/review through the existing
+owner. An unready or failed candidate never writes selection. A known unpublished failure retains
+V1; an uncertain publication requires explicit reconciliation. A published V2 whose promotion is
+refused remains truthfully visible as disk V2 / active V1, without an automatic disk rollback.
+
+Durable disable revokes execution and review immediately, then publishes Disabled separately.
+Write failure must not restart the tool. Its result distinguishes stopped execution from a failed
+durable update, and physical child/pipe retirement remains pending until the existing owner proves
+return. Session Close does not rewrite the desired state. Late IO after Disable or Close may
+report actual publication and cleanup facts but cannot recover route-promotion authority.
+Reconciliation only admits disk data; it never grants approval or starts execution.
+
+The complete unit needs original-observation refusal, two installations of identical release bytes,
+changed receipt/content, held publication, disk/route divergence, Disable/Close during publication,
+write failure while stopped, and fresh Open without execution. Extend the independent Session,
+Application and selected native Inspector/panel consumer. Preserve one executor, proposal owner,
+history and physical close path; evolve the owning ADRs and implementation ledger with actual
+results. This design direction does not establish durable selection or close the lifecycle plan.

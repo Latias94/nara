@@ -138,9 +138,9 @@ use nara_tooling::{EditorApplyChangesRejection, EditorApplyChangesResult};
 
 use crate::ProductRecipe;
 use crate::project_host::authoring::{
-    AuthoringProjectReadiness, AuthoringProjectReceipt, AuthoringProjectSessionSnapshot,
-    ProjectSourceIndexFailure, ProjectSourceIndexSnapshot, ProjectSourceIndexStateKind,
-    first_party_authoring_preview_registry,
+    AuthoringDocumentAdmissionError, AuthoringProjectReadiness, AuthoringProjectReceipt,
+    AuthoringProjectSessionSnapshot, ProjectSourceIndexFailure, ProjectSourceIndexSnapshot,
+    ProjectSourceIndexStateKind, first_party_authoring_preview_registry,
 };
 use crate::project_host::composition::{
     built_in_schema_providers, editor_play_runtime_plugins_with_recipe,
@@ -884,7 +884,6 @@ pub struct EditorProjectSession {
     next_save_gate: Option<persistence::SaveTestGate>,
     #[cfg(test)]
     next_reopen_gate: Option<persistence::ReopenTestGate>,
-    last_persistence_receipt: Option<EditorPersistenceReceipt>,
     diagnostics: DiagnosticReport,
     field_feedback: Option<EditorFieldFeedback>,
     play_result: Option<EditorPlayOperationResult>,
@@ -1465,16 +1464,14 @@ impl EditorProjectSession {
             Box<dyn FnOnce(&authoring_runtime::EditorAuthoringRuntime)>,
         >,
     ) -> Result<Self, EditorProjectOpenError> {
-        let parts = receipt.into_session_parts().map_err(|_| {
+        let snapshot = receipt.into_session_snapshot().map_err(|_| {
             editor_open_error("project.editor.authoring-receipt-consumption-failed")
         })?;
         let preview_registry = first_party_authoring_preview_registry(built_in_schema_providers())
             .map_err(|_| editor_open_error("project.editor.authoring-preview-registry-invalid"))?;
-        let authoring_runtime = authoring_runtime::EditorAuthoringRuntime::new_authoring(
-            &parts.snapshot,
-            &preview_registry,
-        )
-        .map_err(EditorProjectOpenError::from)?;
+        let authoring_runtime =
+            authoring_runtime::EditorAuthoringRuntime::new_authoring(&snapshot, &preview_registry)
+                .map_err(EditorProjectOpenError::from)?;
         #[cfg(test)]
         if let Some(hook) = publication_hook {
             hook(&authoring_runtime);
@@ -1485,7 +1482,7 @@ impl EditorProjectSession {
                 .as_ref()
                 .expect("the unpublished authoring owner is retained");
             let mut image_import = image_import::EditorImageImportHost::default();
-            image_import.initialize_authoring_hydration(&parts.snapshot);
+            image_import.initialize_authoring_hydration(&snapshot);
             #[cfg(feature = "runtime-ui")]
             let authoring_images = authoring_images::EditorAuthoringImageHost::capture_selected(
                 &authoring_runtime,
@@ -1496,8 +1493,8 @@ impl EditorProjectSession {
             let ui_preview = ui_preview::EditorUiPreviewSession::new().map_err(|_error| {
                 editor_open_error("project.editor.authoring-ui-preview-init-failed")
             })?;
-            let project_root = parts.snapshot.project_root();
-            let settings = parts.snapshot.settings();
+            let project_root = snapshot.project_root();
+            let settings = snapshot.settings();
             let scenes_path = RelativePath::new(settings.paths.scenes.as_str())
                 .map_err(|_| editor_open_error("project.editor.scenes-path-invalid"))?;
             let scenes = project_root
@@ -1514,33 +1511,37 @@ impl EditorProjectSession {
                 settings.paths.scenes.as_str(),
                 startup.as_str()
             ));
-            let startup_source = parts.snapshot.startup_source();
-            parts
-                .snapshot
-                .startup_native_source()
-                .revalidate(&project_root)
-                .map_err(|error| editor_open_error(error.code()))?;
-            let startup_source_key = parts.snapshot.startup_native_source().key().clone();
-            let startup_authoring_source =
-                crate::project_host::authoring::document::AuthoringDocumentSourceFact::from_captured_source(
-                    startup_source,
-                    parts.snapshot.startup_native_source(),
-                ).map_err(|error| editor_open_error(error.code()))?;
+            let startup_source_key = snapshot.startup_native_source().key().clone();
+            let crate::project_host::authoring::AdmittedAuthoringDocument::Scene {
+                source: startup_authoring_source,
+                file: startup_file,
+                document: startup_scene,
+            } = snapshot
+                .admit_startup_document()
+                .map_err(|error| match error {
+                    AuthoringDocumentAdmissionError::SourceIdentityChanged => {
+                        editor_persistence_open_error(EditorPersistenceFailureStage::Validate)
+                    }
+                    error => editor_open_error(error.code()),
+                })?
+            else {
+                unreachable!("startup admission retains its Scene kind");
+            };
             let (persistence, opened_digest) = ScenePersistenceHost::bind_authoring_source(
                 &scenes,
                 startup.as_str(),
-                startup_source.identity(),
-                startup_source.digest(),
+                startup_file,
+                startup_authoring_source.digest(),
             )
             .map_err(editor_persistence_open_error)?;
-            let mut diagnostics = parts.startup_scene.diagnostics().clone();
-            diagnostics.extend(parts.snapshot.startup_compilation_diagnostics().clone());
+            let mut diagnostics = startup_scene.diagnostics().clone();
+            diagnostics.extend(snapshot.startup_compilation_diagnostics().clone());
             let (mut workspace, mut persistence_authority) = EditorWorkspace::new_hosted();
             let report = workspace
                 .open_authoring_scene_document(
                     startup_title.clone(),
                     nara_tooling::EditorDocumentSourceBinding::new(startup_title.clone()),
-                    parts.startup_scene,
+                    startup_scene,
                 )
                 .map_err(|_| editor_open_error("project.editor.scene-publication-failed"))?;
             let document = report
@@ -1579,7 +1580,7 @@ impl EditorProjectSession {
                 scene_preview_document: Some(document),
                 #[cfg(feature = "presentation-2d")]
                 scene_capture: Default::default(),
-                execution: EditorExecutionLane::Authoring(parts.snapshot),
+                execution: EditorExecutionLane::Authoring(snapshot),
                 project_content: EditorProjectContentView::NotInstalled,
                 next_project_content_generation: 1,
                 prefab_content_refresh: BTreeMap::new(),
@@ -1606,7 +1607,6 @@ impl EditorProjectSession {
                 next_save_gate: None,
                 #[cfg(test)]
                 next_reopen_gate: None,
-                last_persistence_receipt: None,
                 diagnostics,
                 field_feedback: None,
                 play_result: None,
@@ -1860,7 +1860,6 @@ impl EditorProjectSession {
                 next_save_gate: None,
                 #[cfg(test)]
                 next_reopen_gate: None,
-                last_persistence_receipt: None,
                 diagnostics,
                 field_feedback: None,
                 play_result: None,

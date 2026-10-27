@@ -2,9 +2,7 @@
 
 use std::{any::TypeId, collections::BTreeMap};
 
-use nara_fs::{
-    ContentDigest, DirectoryCapability, FileCapability, FileIdentity, FsError, RelativePath,
-};
+use nara_fs::{ContentDigest, DirectoryCapability, FileCapability, FsError, RelativePath};
 use nara_tooling::{
     EditorDocumentId, EditorDocumentSourceBinding, EditorExtensionDocument,
     EditorExtensionDocumentCandidate, EditorExtensionDocumentError, EditorPersistenceCheckpoint,
@@ -227,7 +225,7 @@ fn open_source<D: EditorExtensionDocument>(
     let publication = FilePublicationHost::bind_existing(
         root,
         source,
-        file.identity(),
+        file,
         digest,
         EXTENSION_DOCUMENT_BYTE_LIMIT,
     )
@@ -307,7 +305,7 @@ impl ExtensionReopenRequest {
         let candidate = (self.decode)(&bytes).map_err(ExtensionReopenFailure::Decode)?;
         Ok(PreparedExtensionReopen {
             candidate,
-            identity: file.identity(),
+            file,
             digest: ContentDigest::of_bytes(&bytes),
         })
     }
@@ -315,7 +313,7 @@ impl ExtensionReopenRequest {
 
 pub(super) struct PreparedExtensionReopen {
     candidate: EditorExtensionDocumentCandidate,
-    identity: FileIdentity,
+    file: FileCapability,
     digest: ContentDigest,
 }
 
@@ -366,7 +364,7 @@ impl EditorProjectSession {
                     editor_digest(prepared.digest),
                 );
             if report.as_ref().is_ok_and(|report| report.applied) {
-                host.commit_reconciled(prepared.identity, prepared.digest);
+                host.commit_reconciled(prepared.file, prepared.digest);
             }
             report
         }) else {

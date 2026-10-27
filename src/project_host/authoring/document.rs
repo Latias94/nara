@@ -6,7 +6,8 @@ use nara_diagnostic::{
     SafeSummary,
 };
 use nara_fs::{
-    ContentDigest, DirectoryCapability, FileIdentity, FsError, PathValidationError, RelativePath,
+    ContentDigest, DirectoryCapability, FileCapability, FileIdentity, FsError, PathValidationError,
+    RelativePath,
 };
 use nara_project::{ProjectPath, ProjectPathError};
 use nara_scene::{
@@ -31,6 +32,7 @@ pub(crate) enum AuthoringDocumentKind {
     Prefab,
 }
 
+/// Historical source observations; live file custody belongs to admission results and Hosts.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) struct AuthoringDocumentSourceFact {
     relative_path: Arc<str>,
@@ -182,13 +184,16 @@ fn validate_native_source_receipt(
     Ok(())
 }
 
+/// Keeps the actual read object alive until the caller transfers or rejects its admission.
 pub(crate) enum AdmittedAuthoringDocument {
     Scene {
         source: AuthoringDocumentSourceFact,
+        file: FileCapability,
         document: PublishedAuthoringSceneDocument,
     },
     Prefab {
         source: AuthoringDocumentSourceFact,
+        file: FileCapability,
         document: PublishedAuthoringPrefabDocument,
     },
 }
@@ -381,14 +386,7 @@ fn admit_indexed_document(
     if capability.identity() != expected_identity {
         return Err(AuthoringDocumentAdmissionError::SourceIdentityChanged);
     }
-    let bytes = capability
-        .read_to_end_bounded(u64::try_from(limits.encoded_bytes().get()).unwrap_or(u64::MAX))
-        .map_err(|error| match error {
-            FsError::ByteLimitExceeded { limit } => {
-                AuthoringDocumentAdmissionError::SourceTooLarge { maximum: limit }
-            }
-            error => AuthoringDocumentAdmissionError::ReadSource(error),
-        })?;
+    let bytes = read_document_bytes(&capability, limits)?;
     let source = AuthoringDocumentSourceFact {
         relative_path: Arc::from(relative_path),
         identity: capability.identity(),
@@ -408,15 +406,67 @@ fn admit_indexed_document(
     match expected_kind {
         AuthoringDocumentKind::Scene => Ok(AdmittedAuthoringDocument::Scene {
             source,
+            file: capability,
             document: admit_scene_bytes_with_basis(&path, &bytes, limits, basis)
                 .map_err(AuthoringDocumentAdmissionError::Document)?,
         }),
         AuthoringDocumentKind::Prefab => Ok(AdmittedAuthoringDocument::Prefab {
             source,
+            file: capability,
             document: admit_prefab_bytes_with_basis(&path, &bytes, limits, basis)
                 .map_err(AuthoringDocumentAdmissionError::Document)?,
         }),
     }
+}
+
+/// Admits a fresh read of the captured startup source before its file Host takes custody.
+///
+/// Captured facts only reject stale observations. They do not keep the original read alive;
+/// these newly read bytes must independently pass document admission under the captured basis.
+pub(super) fn admit_captured_startup_scene(
+    root: &DirectoryCapability,
+    source: &AuthoringDocumentSourceFact,
+    basis: &AuthoringSchemaBasis,
+    limits: SceneFileLimits,
+) -> Result<AdmittedAuthoringDocument, AuthoringDocumentAdmissionError> {
+    if source.source_key().kind() != SourceDocumentKind::Scene {
+        return Err(AuthoringDocumentAdmissionError::DocumentKindMismatch);
+    }
+    let path = ProjectPath::new(source.relative_path().to_owned())
+        .map_err(AuthoringDocumentAdmissionError::ProjectPath)?;
+    let relative = RelativePath::new(source.relative_path())
+        .map_err(AuthoringDocumentAdmissionError::RelativePath)?;
+    let file = root
+        .open_file_exact(&relative)
+        .map_err(AuthoringDocumentAdmissionError::OpenSource)?;
+    let bytes = read_document_bytes(&file, limits)?;
+    if file.identity() != source.identity()
+        || file.parent_identity() != source.parent_identity()
+        || ContentDigest::of_bytes(&bytes) != source.digest()
+    {
+        return Err(AuthoringDocumentAdmissionError::SourceIdentityChanged);
+    }
+    source.revalidate_native_source(root)?;
+    let document = admit_scene_bytes_with_basis(&path, &bytes, limits, basis)
+        .map_err(AuthoringDocumentAdmissionError::Document)?;
+    Ok(AdmittedAuthoringDocument::Scene {
+        source: source.clone(),
+        file,
+        document,
+    })
+}
+
+fn read_document_bytes(
+    file: &FileCapability,
+    limits: SceneFileLimits,
+) -> Result<Vec<u8>, AuthoringDocumentAdmissionError> {
+    file.read_to_end_bounded(u64::try_from(limits.encoded_bytes().get()).unwrap_or(u64::MAX))
+        .map_err(|error| match error {
+            FsError::ByteLimitExceeded { limit } => {
+                AuthoringDocumentAdmissionError::SourceTooLarge { maximum: limit }
+            }
+            error => AuthoringDocumentAdmissionError::ReadSource(error),
+        })
 }
 
 pub(super) fn admit_scene_bytes_with_basis(

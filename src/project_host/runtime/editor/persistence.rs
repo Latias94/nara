@@ -494,10 +494,36 @@ impl EditorProjectSession {
                 );
             }
         };
+        let source_path = match RelativePath::new(source_binding.locator()) {
+            Ok(path) => path,
+            Err(_) => {
+                return editor_workspace_command_rejected(
+                    self.workspace.active_document(),
+                    "project.editor.prefab-source-path-invalid",
+                );
+            }
+        };
+        // The captured observation is historical. Acquire a live leaf and keep it in the
+        // candidate Host while the fresh bytes pass authoring readmission below.
+        let source_file = match prefabs.open_file_exact(&source_path) {
+            Ok(file) if file.identity() == observation.identity => file,
+            Ok(_) => {
+                return editor_workspace_command_rejected(
+                    self.workspace.active_document(),
+                    prefab_open_failure_code(EditorPersistenceFailureStage::Validate),
+                );
+            }
+            Err(_) => {
+                return editor_workspace_command_rejected(
+                    self.workspace.active_document(),
+                    prefab_open_failure_code(EditorPersistenceFailureStage::OpenTarget),
+                );
+            }
+        };
         let (mut host, _) = match PrefabPersistenceHost::bind_authoring_source(
             &prefabs,
             source_binding.clone(),
-            observation.identity,
+            source_file,
             observation.digest,
         ) {
             Ok(bound) => bound,
@@ -538,10 +564,11 @@ impl EditorProjectSession {
         let OpenedPrefabReopen {
             session,
             digest: opened_digest,
-            identity,
+            file,
             content_digest,
         } = *reopened;
-        host.commit_reopen(identity, content_digest);
+        let identity = file.identity();
+        host.commit_reopen(file, content_digest);
         let project_path: Arc<str> = Arc::from(format!(
             "{}/{}",
             prefab_directory.as_str(),
@@ -786,12 +813,6 @@ impl EditorProjectSession {
     /// Immediate read-only Host state, including an admitted operation before frame publication.
     pub const fn persistence_view(&self) -> EditorPersistenceView {
         self.persistence.view()
-    }
-
-    #[cfg(test)]
-    #[must_use]
-    pub(super) const fn last_persistence_receipt(&self) -> Option<EditorPersistenceReceipt> {
-        self.last_persistence_receipt
     }
 
     pub(crate) fn request_persistence(
@@ -1084,14 +1105,12 @@ impl EditorProjectSession {
                     .commit(&mut self.workspace, commit);
                 if !report.applied {
                     lane.mark_uncertain();
-                    self.last_persistence_receipt = Some(evidence);
                     return EditorPersistenceResult::PersistenceUncertain {
                         document: evidence.document(),
                         revision: evidence.revision(),
                         digest: evidence.digest(),
                     };
                 }
-                self.last_persistence_receipt = Some(evidence);
                 if refresh_runtime_content {
                     self.schedule_prefab_content_refresh(evidence);
                 } else if matches!(lane, PersistenceLane::Prefab(_)) {
@@ -1115,7 +1134,6 @@ impl EditorProjectSession {
                 stage,
             },
             PersistenceSaveOutcome::PersistenceUncertain { evidence } => {
-                self.last_persistence_receipt = Some(evidence);
                 EditorPersistenceResult::PersistenceUncertain {
                     document: evidence.document(),
                     revision: evidence.revision(),
@@ -1138,9 +1156,10 @@ impl EditorProjectSession {
                 let OpenedSceneReopen {
                     session,
                     digest,
-                    identity,
+                    file,
                     content_digest,
                 } = *opened;
+                let identity = file.identity();
                 if let Err(reason) = self.validate_reopened_native_source(
                     &lane.project_path,
                     &lane.source_key,
@@ -1185,7 +1204,7 @@ impl EditorProjectSession {
                         digest,
                     );
                     if report.is_ok() {
-                        host.commit_reopen(identity, content_digest);
+                        host.commit_reopen(file, content_digest);
                     }
                     report
                 });
@@ -1246,9 +1265,10 @@ impl EditorProjectSession {
                 let OpenedPrefabReopen {
                     session,
                     digest,
-                    identity,
+                    file,
                     content_digest,
                 } = *opened;
+                let identity = file.identity();
                 if let Err(reason) = self.validate_reopened_native_source(
                     &lane.project_path,
                     &lane.source_key,
@@ -1294,7 +1314,7 @@ impl EditorProjectSession {
                         digest,
                     );
                     if report.is_ok() {
-                        host.commit_reopen(identity, content_digest);
+                        host.commit_reopen(file, content_digest);
                     }
                     report
                 });

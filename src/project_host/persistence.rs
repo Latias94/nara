@@ -7,7 +7,7 @@ pub(super) use super::file_publication::{
 pub(super) use super::file_publication::CleanupTestControl;
 
 use nara_fs::{
-    ContentDigest, DirectoryCapability, DurabilityProgress, FileIdentity, FsError,
+    ContentDigest, DirectoryCapability, DurabilityProgress, FileCapability, FileIdentity, FsError,
     PublicationAtomicity, PublicationIdentityEvidence, RelativePath, StageStatus,
 };
 use nara_reflect::ComponentRegistry;
@@ -113,14 +113,14 @@ pub(super) enum PrefabReopenOutcome {
 pub(super) struct OpenedSceneReopen {
     pub(super) session: SceneAuthoringSession,
     pub(super) digest: EditorDocumentDigest,
-    pub(super) identity: FileIdentity,
+    pub(super) file: FileCapability,
     pub(super) content_digest: ContentDigest,
 }
 
 pub(super) struct OpenedPrefabReopen {
     pub(super) session: PrefabAuthoringSession,
     pub(super) digest: EditorDocumentDigest,
-    pub(super) identity: FileIdentity,
+    pub(super) file: FileCapability,
     pub(super) content_digest: ContentDigest,
 }
 
@@ -211,7 +211,6 @@ impl PersistenceFileState {
         let file = parent
             .open_child_file(&target)
             .map_err(|_| EditorPersistenceFailureStage::OpenTarget)?;
-        let identity = file.identity();
         let bytes = file
             .read_to_end_bounded(file_byte_limit(limits))
             .map_err(|_| EditorPersistenceFailureStage::ReadTarget)?;
@@ -221,7 +220,7 @@ impl PersistenceFileState {
                 publication: FilePublicationHost::from_existing(
                     parent,
                     target,
-                    identity,
+                    file,
                     digest,
                     file_byte_limit(limits),
                 ),
@@ -241,7 +240,7 @@ impl PersistenceFileState {
         root: &DirectoryCapability,
         path: &str,
         limits: SceneFileLimits,
-        expected_identity: FileIdentity,
+        file: FileCapability,
         expected_digest: ContentDigest,
     ) -> Result<Self, EditorPersistenceFailureStage> {
         let encoding = document_encoding(path).ok_or(EditorPersistenceFailureStage::Decode)?;
@@ -250,10 +249,12 @@ impl PersistenceFileState {
         let (parent, target) = root
             .resolve_file_parent(&path)
             .map_err(|_| EditorPersistenceFailureStage::OpenTarget)?;
-        let file = parent
+        // Keep the actual read leaf alive while resolving its current name. The copied
+        // digest remains an observation; retaining the handle does not freeze its bytes.
+        let current = parent
             .open_child_file(&target)
             .map_err(|_| EditorPersistenceFailureStage::OpenTarget)?;
-        if file.identity() != expected_identity {
+        if current.identity() != file.identity() {
             return Err(EditorPersistenceFailureStage::Validate);
         }
         file.verify_digest(expected_digest, file_byte_limit(limits))
@@ -265,7 +266,7 @@ impl PersistenceFileState {
             publication: FilePublicationHost::from_existing(
                 parent,
                 target,
-                expected_identity,
+                file,
                 expected_digest,
                 file_byte_limit(limits),
             ),
@@ -312,8 +313,8 @@ impl PersistenceFileState {
         )
     }
 
-    fn commit_reopen(&mut self, identity: FileIdentity, digest: ContentDigest) {
-        self.publication.commit_reconciled(identity, digest);
+    fn commit_reopen(&mut self, file: FileCapability, digest: ContentDigest) {
+        self.publication.commit_reconciled(file, digest);
         self.validated_authoring_digest = None;
     }
 
@@ -402,14 +403,14 @@ impl ScenePersistenceHost {
     pub(super) fn bind_authoring_source(
         scenes: &DirectoryCapability,
         scene_path: &str,
-        identity: FileIdentity,
+        source_file: FileCapability,
         digest: ContentDigest,
     ) -> Result<(Self, EditorDocumentDigest), EditorPersistenceFailureStage> {
         let file = PersistenceFileState::bind_existing(
             scenes,
             scene_path,
             SceneFileLimits::default(),
-            identity,
+            source_file,
             digest,
         )?;
         Ok((
@@ -475,8 +476,8 @@ impl ScenePersistenceHost {
         outcome
     }
 
-    pub(super) fn commit_reopen(&mut self, identity: FileIdentity, digest: ContentDigest) {
-        self.file.commit_reopen(identity, digest);
+    pub(super) fn commit_reopen(&mut self, file: FileCapability, digest: ContentDigest) {
+        self.file.commit_reopen(file, digest);
     }
 
     pub(super) fn mark_uncertain(&mut self) {
@@ -510,11 +511,6 @@ impl PrefabPersistenceHost {
         self.file.publication.test_fail_after_write()
     }
 
-    #[cfg(test)]
-    pub(super) fn test_allow_cleanup(&mut self) {
-        self.file.publication.test_allow_cleanup();
-    }
-
     pub(super) fn retry_cleanup(&mut self) -> bool {
         self.file.publication.retry_cleanup()
     }
@@ -541,14 +537,14 @@ impl PrefabPersistenceHost {
     pub(super) fn bind_authoring_source(
         prefabs: &DirectoryCapability,
         source_binding: nara_tooling::EditorDocumentSourceBinding,
-        identity: FileIdentity,
+        source_file: FileCapability,
         digest: ContentDigest,
     ) -> Result<(Self, EditorDocumentDigest), EditorPersistenceFailureStage> {
         let file = PersistenceFileState::bind_existing(
             prefabs,
             source_binding.locator(),
             SceneFileLimits::default(),
-            identity,
+            source_file,
             digest,
         )?;
         Ok((
@@ -624,22 +620,12 @@ impl PrefabPersistenceHost {
         matches!(self.lane, PersistenceDocumentLane::Native)
     }
 
-    pub(super) fn commit_reopen(&mut self, identity: FileIdentity, digest: ContentDigest) {
-        self.file.commit_reopen(identity, digest);
+    pub(super) fn commit_reopen(&mut self, file: FileCapability, digest: ContentDigest) {
+        self.file.commit_reopen(file, digest);
     }
 
     pub(super) fn mark_uncertain(&mut self) {
         self.file.mark_uncertain();
-    }
-
-    #[cfg(test)]
-    pub(super) fn test_reject_next_valid_receipt(&mut self) {
-        self.file.test_reject_next_valid_receipt();
-    }
-
-    #[cfg(test)]
-    pub(super) fn test_fail_next_save(&mut self, stage: EditorPersistenceFailureStage) {
-        self.file.test_fail_next_save(stage);
     }
 }
 
@@ -803,7 +789,7 @@ pub(super) fn publish_editor_checkpoint(
         publication.mark_uncertain();
         return PersistenceSaveOutcome::PersistenceUncertain { evidence };
     }
-    let (publication_evidence, binding) = accepted.into_parts();
+    let (publication_evidence, source) = accepted.into_parts();
     let (receipt, _) = publication_evidence.into_parts();
     let Some(commit) =
         EditorPersistenceCommit::from_publication(checkpoint, previous_identity, receipt)
@@ -811,7 +797,7 @@ pub(super) fn publish_editor_checkpoint(
         publication.mark_uncertain();
         return PersistenceSaveOutcome::PersistenceUncertain { evidence };
     };
-    publication.commit_published(binding);
+    publication.commit_published(source);
     PersistenceSaveOutcome::Saved { commit, evidence }
 }
 
@@ -865,6 +851,7 @@ const fn editor_publication_failure(
             EditorPersistenceFailureStage::WriteTemporary
         }
         FilePublicationFailureStage::SyncTemporary => EditorPersistenceFailureStage::SyncTemporary,
+        FilePublicationFailureStage::ValidateTemporary => EditorPersistenceFailureStage::Validate,
         FilePublicationFailureStage::ReplaceTarget => EditorPersistenceFailureStage::ReplaceTarget,
     }
 }
@@ -1086,14 +1073,14 @@ mod tests {
         let (mut scene_host, _) = ScenePersistenceHost::bind_authoring_source(
             &directory,
             "startup.scene.json",
-            scene_file.identity(),
+            scene_file,
             ContentDigest::of_bytes(&scene_bytes),
         )
         .unwrap();
         let (mut prefab_host, _) = PrefabPersistenceHost::bind_authoring_source(
             &directory,
             EditorDocumentSourceBinding::new("reference-ui.prefab.json"),
-            prefab_file.identity(),
+            prefab_file,
             ContentDigest::of_bytes(&prefab_bytes),
         )
         .unwrap();
@@ -1115,8 +1102,8 @@ mod tests {
         };
         assert!(scene_host.file.uncertain());
         assert!(prefab_host.file.uncertain());
-        scene_host.commit_reopen(scene.identity, scene.content_digest);
-        prefab_host.commit_reopen(prefab.identity, prefab.content_digest);
+        scene_host.commit_reopen(scene.file, scene.content_digest);
+        prefab_host.commit_reopen(prefab.file, prefab.content_digest);
         assert!(!scene_host.file.uncertain());
         assert!(!prefab_host.file.uncertain());
         assert_eq!(fs::read(root.scene_path()).unwrap(), scene_bytes);
@@ -1183,8 +1170,8 @@ mod tests {
             panic!("an absent target must accept one expected-missing publication");
         };
         assert_eq!(accepted.evidence().receipt().previous_identity(), None);
-        let (_, binding) = accepted.into_parts();
-        publication.commit_published(binding);
+        let (_, source) = accepted.into_parts();
+        publication.commit_published(source);
         assert_eq!(fs::read(&target).unwrap(), first);
 
         let FilePublicationOutcome::Published(accepted) = publication.publish(second) else {
@@ -1194,8 +1181,8 @@ mod tests {
             accepted.evidence().receipt().previous_identity(),
             publication.binding().identity()
         );
-        let (_, binding) = accepted.into_parts();
-        publication.commit_published(binding);
+        let (_, source) = accepted.into_parts();
+        publication.commit_published(source);
         assert_eq!(fs::read(&target).unwrap(), second);
 
         let raced_target = root.path.join("raced-image.png.meta");
@@ -1218,11 +1205,9 @@ mod tests {
         let target = root.path.join(target_name);
         fs::write(&target, b"catalog metadata").unwrap();
         let opened = capability.open_file(&target_path).unwrap();
-        let identity = opened.identity();
         let digest = opened.digest(1024).unwrap();
-        drop(opened);
         let mut publication =
-            FilePublicationHost::bind_existing(&capability, target_name, identity, digest, 1024)
+            FilePublicationHost::bind_existing(&capability, target_name, &opened, digest, 1024)
                 .unwrap();
 
         fs::write(&target, b"externally changed metadata").unwrap();
@@ -1300,14 +1285,14 @@ mod tests {
         };
         let OpenedSceneReopen {
             session,
-            identity,
+            file,
             content_digest,
             ..
         } = *opened;
         assert_eq!(session.document(), &first);
         assert!(host.file.uncertain());
 
-        host.commit_reopen(identity, content_digest);
+        host.commit_reopen(file, content_digest);
         assert!(!host.file.uncertain());
         assert!(matches!(
             host.save_owned(
@@ -1344,15 +1329,13 @@ mod tests {
         let authoring_target = prefabs
             .open_file(&RelativePath::new("reference-ui.prefab.json").unwrap())
             .unwrap();
-        let authoring_identity = authoring_target.identity();
         let authoring_digest = authoring_target
             .digest(file_byte_limit(SceneFileLimits::default()))
             .unwrap();
-        drop(authoring_target);
         let (authoring_host, _) = PrefabPersistenceHost::bind_authoring_source(
             &prefabs,
             EditorDocumentSourceBinding::new("reference-ui.prefab.json"),
-            authoring_identity,
+            authoring_target,
             authoring_digest,
         )
         .unwrap();
@@ -1420,7 +1403,7 @@ mod tests {
             panic!("the saved Prefab source should reopen through its own lane");
         };
         assert_eq!(reopened.session.document(), &expected);
-        host.commit_reopen(reopened.identity, reopened.content_digest);
+        host.commit_reopen(reopened.file, reopened.content_digest);
     }
 
     #[test]
@@ -1454,9 +1437,7 @@ mod tests {
         let target = scenes
             .open_file(&RelativePath::new("startup.scene.json").unwrap())
             .unwrap();
-        let identity = target.identity();
         let content_digest = ContentDigest::of_bytes(encoded.as_bytes());
-        drop(target);
         let (bundle, adapter) = scene_bundle_and_name_adapter();
         let published = SceneDocumentCandidate::decode_json_bytes(encoded.as_bytes())
             .unwrap()
@@ -1475,7 +1456,7 @@ mod tests {
         let (mut host, opened_digest) = ScenePersistenceHost::bind_authoring_source(
             &scenes,
             "startup.scene.json",
-            identity,
+            target,
             content_digest,
         )
         .unwrap();
@@ -1575,7 +1556,7 @@ mod tests {
                 .value,
             ComponentValue::String("Renamed".to_owned())
         );
-        host.commit_reopen(reopened.identity, reopened.content_digest);
+        host.commit_reopen(reopened.file, reopened.content_digest);
 
         let observed_identity = host.file.observed_identity();
         let observed_digest = host.file.observed_digest();

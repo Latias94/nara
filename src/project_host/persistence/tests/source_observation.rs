@@ -12,9 +12,9 @@ fn missing_and_uncommitted_publications_have_no_accepted_observation() {
         panic!("a missing target must accept its first publication");
     };
     assert_eq!(publication.accepted_source_observation(), None);
-    let (_, binding) = accepted.into_parts();
-    let identity = binding.identity().unwrap();
-    publication.commit_published(binding);
+    let (_, source) = accepted.into_parts();
+    let identity = source.identity();
+    publication.commit_published(source);
     let observation = Some((
         identity,
         Some(directory.identity()),
@@ -23,7 +23,8 @@ fn missing_and_uncommitted_publications_have_no_accepted_observation() {
     assert_eq!(publication.accepted_source_observation(), observation);
     publication.mark_uncertain();
     assert_eq!(publication.accepted_source_observation(), None);
-    publication.commit_reconciled(identity, ContentDigest::of_bytes(bytes));
+    let file = publication.read_source().open().unwrap();
+    publication.commit_reconciled(file, ContentDigest::of_bytes(bytes));
     assert_eq!(publication.accepted_source_observation(), observation);
 }
 
@@ -41,7 +42,7 @@ fn accepted_observation_uses_the_retained_parent_and_does_not_reopen_the_target(
     let parent = file.parent_identity();
     let digest = file.digest(65_536).unwrap();
     let publication =
-        FilePublicationHost::bind_existing(&directory, path, identity, digest, 65_536).unwrap();
+        FilePublicationHost::bind_existing(&directory, path, &file, digest, 65_536).unwrap();
     assert_ne!(parent, Some(directory.identity()));
     drop(file);
     fs::remove_file(root.path.join(path)).unwrap();
@@ -97,8 +98,8 @@ fn scene_and_prefab_hosts_expose_only_their_accepted_persistence_observation() {
     let scene_digest = scene_file.digest(65_536).unwrap();
     let prefab_identity = prefab_file.identity();
     let prefab_digest = prefab_file.digest(65_536).unwrap();
-    scene.commit_reopen(scene_identity, scene_digest);
-    prefab.commit_reopen(prefab_identity, prefab_digest);
+    scene.commit_reopen(scene_file, scene_digest);
+    prefab.commit_reopen(prefab_file, prefab_digest);
     assert_eq!(
         scene.accepted_source_observation(),
         Some((scene_identity, Some(directory.identity()), scene_digest)),

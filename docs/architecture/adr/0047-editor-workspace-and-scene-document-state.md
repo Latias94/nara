@@ -209,6 +209,14 @@ Rules:
   revision, content-state identity, exact Scene snapshot, canonical content digest,
   post-publication content observation, and required guarantee tier. A UI/tooling command or an
   unhosted `EditorWorkspace` cannot advance saved state.
+- Concrete file Hosts retain the accepted leaf capability alongside its observed digest. Open and
+  Reopen preparation carry the actually read handle through owner admission; successful publication
+  transfers the candidate's retained handle into the Host. Neither handoff leaves a bare native ID
+  as the continuing source proof. An uncertain publication preserves the prior accepted object's
+  custody but exposes no accepted observation until reconciliation. Ordinary read handles preserve
+  object lifetime, not immutable bytes or stronger predecessor conflict protection. Native sharing
+  rules can consequently refuse parent-directory rename while a document remains open; physical
+  Close releases its custody before that operation is retried.
 - Save is an owned operation across frames. Admission captures the checkpoint and the matching
   authoring re-admission basis together. Encoding, preservation validation and file publication
   may run on the existing task pools; only the Workspace owner consumes the resulting receipt.

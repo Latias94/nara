@@ -1478,7 +1478,7 @@ fn source_exclusion_refuses_busy_or_retired_hosts_in_every_domain() {
 }
 
 #[test]
-fn source_exclusion_observes_atomic_replacement_and_retained_parent_rename() {
+fn source_exclusion_observes_replacement_and_preserves_live_source_custody() {
     for kind in [EditorDocumentKind::Scene, EditorDocumentKind::Prefab] {
         let fixture = Fixture::new();
         let mut editor = fixture.editor();
@@ -1511,12 +1511,20 @@ fn source_exclusion_observes_atomic_replacement_and_retained_parent_rename() {
             .capability()
             .open_file(&RelativePath::new("current.json").unwrap())
             .unwrap();
-        fs::rename(fixture.root.join(directory), fixture.root.join("moved")).unwrap();
+        let renamed = fs::rename(fixture.root.join(directory), fixture.root.join("moved"));
+        // Windows refuses this directory rename while its accepted leaf remains open.
+        // Retain the source proof rather than dropping it to make the rename succeed.
+        #[cfg(windows)]
+        assert_eq!(renamed.unwrap_err().raw_os_error(), Some(5));
+        #[cfg(not(windows))]
+        renamed.unwrap();
         assert_eq!(
             editor.exclude_source_aliases("current.json", &current),
             Err(SourceAdmissionError::AlreadyOpen)
         );
         close(&mut editor);
+        #[cfg(windows)]
+        fs::rename(fixture.root.join(directory), fixture.root.join("moved")).unwrap();
     }
 }
 

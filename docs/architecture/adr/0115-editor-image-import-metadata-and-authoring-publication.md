@@ -2,7 +2,7 @@
 
 **Status**: Accepted
 **Date**: 2026-08-20
-**Last Revised**: 2026-10-27 (captured-source evidence and ordered catalog reconciliation)
+**Last Revised**: 2026-10-28 (continuous admitted metadata custody and fresh import admission)
 **Owner**: `nara_asset`, `nara_image`, the project Host, UI-neutral tooling, and private Editor
 authoring adapters
 **Refines**: [ADR 0033](0033-asset-import-and-render-resource-preparation-seam.md),
@@ -111,10 +111,19 @@ incomplete until that registered cleanup retires, including after the Editor cal
 New publication is rejected after close admission shuts. This registration uses the existing
 finite file-retirement owner; it does not retain the entire image catalog or add a job framework.
 
-Once publication has no cleanup obligation, the transaction retires its mutable Host. Pending
-image decoding retains only the exact parent/name read capability and accepted metadata binding.
-Completion opens that source afresh and verifies its identity and digest before admitting pixels.
-Retiring write authority therefore does not weaken late source/metadata replacement detection.
+Pending image decoding retains its concrete metadata Host, including the accepted leaf capability,
+through the existing runtime custody owner. Completion also opens the current name and verifies
+its identity and digest before admitting pixels; this freshness check does not replace the live
+accepted object. Cancellation, completion or catalog revocation retires that Host, with pending
+temporary cleanup remaining a physical-close obligation. The unchanged-settings path has the same
+custody, even though no metadata write is needed.
+
+A catalog metadata entry is historical discovery data. Starting an import freshly reads and
+decodes the current leaf, validates its domain settings and identity fields against the displayed
+content observation, and transfers continuous custody into its publication Host. An equal-content
+replacement can pass this new admission; a copied old native ID alone cannot prove continuity.
+This avoids retaining every catalog file while preserving the lifetime of the source actually
+admitted for the pending import.
 
 Before metadata publication, the Host binds the request to the current project session and attempt,
 selected logical source, source-index generation, metadata-catalog generation, exact capability,

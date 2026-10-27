@@ -69,8 +69,8 @@ impl PendingSourceImport {
                 writer
                     .with_worker(|host| match host.publish(encoded.as_bytes()) {
                         FilePublicationOutcome::Published(receipt) => {
-                            let (_, binding) = receipt.into_parts();
-                            host.commit_published(binding);
+                            let (_, source) = receipt.into_parts();
+                            host.commit_published(source);
                             EditorSourceAssetImportAttempt::MetadataPublished { stable_id }
                         }
                         FilePublicationOutcome::Uncertain(_) => {

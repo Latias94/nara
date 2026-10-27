@@ -165,9 +165,8 @@ pub(in crate::project_host::authoring) fn open_second_scene(
         .admit_startup_closure()
         .unwrap()
         .publish()
-        .into_session_parts()
-        .unwrap()
-        .snapshot;
+        .into_session_snapshot()
+        .unwrap();
     let worker = ItemLimit::new(1).unwrap();
     let pools =
         TaskPools::try_new(TaskPoolConfig::threaded(worker, worker, worker).unwrap()).unwrap();
@@ -188,7 +187,9 @@ pub(in crate::project_host::authoring) fn open_second_scene(
         index.entry(SECOND_SCENE).unwrap().open_capability(),
         ProjectSourceOpenCapability::Scene,
     );
-    let AdmittedAuthoringDocument::Scene { source, document } = snapshot
+    let AdmittedAuthoringDocument::Scene {
+        source, document, ..
+    } = snapshot
         .capture_indexed_document(index, Arc::from(SECOND_SCENE), AuthoringDocumentKind::Scene)
         .unwrap()
         .prepare()
@@ -216,7 +217,9 @@ fn open_prefab(
         index.entry(relative_path).unwrap().open_capability(),
         ProjectSourceOpenCapability::Prefab,
     );
-    let AdmittedAuthoringDocument::Prefab { source, document } = snapshot
+    let AdmittedAuthoringDocument::Prefab {
+        source, document, ..
+    } = snapshot
         .capture_indexed_document(
             index,
             Arc::from(relative_path),
@@ -1065,6 +1068,7 @@ fn scene_request_rejects_same_basis_wrong_source_even_when_documents_are_identic
     let AdmittedAuthoringDocument::Scene {
         source: other_source,
         document,
+        ..
     } = snapshot
         .capture_indexed_document(
             snapshot.source_index_snapshot().unwrap(),

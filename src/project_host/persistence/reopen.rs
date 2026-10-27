@@ -14,7 +14,7 @@ struct ReopenSource {
 
 struct ReopenedFile {
     bytes: Vec<u8>,
-    identity: FileIdentity,
+    file: FileCapability,
     content_digest: ContentDigest,
 }
 
@@ -63,7 +63,7 @@ impl ReopenSource {
         let content_digest = ContentDigest::of_bytes(&bytes);
         Ok(ReopenedFile {
             bytes,
-            identity: file.identity(),
+            file,
             content_digest,
         })
     }
@@ -83,11 +83,11 @@ enum PrefabAdmission {
 }
 
 pub(in crate::project_host) struct PreparedSceneReopen {
-    result: Result<(SceneAdmission, FileIdentity, ContentDigest), ReopenFailure>,
+    result: Result<(SceneAdmission, FileCapability, ContentDigest), ReopenFailure>,
 }
 
 pub(in crate::project_host) struct PreparedPrefabReopen {
-    result: Result<(PrefabAdmission, FileIdentity, ContentDigest), ReopenFailure>,
+    result: Result<(PrefabAdmission, FileCapability, ContentDigest), ReopenFailure>,
 }
 
 impl SceneReopenRequest {
@@ -97,7 +97,9 @@ impl SceneReopenRequest {
         }
     }
 
-    fn prepare_inner(self) -> Result<(SceneAdmission, FileIdentity, ContentDigest), ReopenFailure> {
+    fn prepare_inner(
+        self,
+    ) -> Result<(SceneAdmission, FileCapability, ContentDigest), ReopenFailure> {
         let reopened = self.0.read()?;
         let admitted_source = self.0.admits_source_bytes(reopened.content_digest);
         let candidate = match self.0.encoding {
@@ -126,7 +128,7 @@ impl SceneReopenRequest {
             }
             None => SceneAdmission::Native(candidate),
         };
-        Ok((admission, reopened.identity, reopened.content_digest))
+        Ok((admission, reopened.file, reopened.content_digest))
     }
 }
 
@@ -136,7 +138,7 @@ impl PreparedSceneReopen {
         &self,
     ) -> Result<FileIdentity, ReopenFailure> {
         match &self.result {
-            Ok((_, identity, _)) => Ok(*identity),
+            Ok((_, file, _)) => Ok(file.identity()),
             Err(failure) => Err(*failure),
         }
     }
@@ -145,7 +147,7 @@ impl PreparedSceneReopen {
         self,
         registry: Option<&ComponentRegistry>,
     ) -> SceneReopenOutcome {
-        let (admission, identity, content_digest) = match self.result {
+        let (admission, file, content_digest) = match self.result {
             Ok(result) => result,
             Err(ReopenFailure::Rejected(reason)) => return SceneReopenOutcome::Rejected(reason),
             Err(ReopenFailure::Failed(stage)) => return SceneReopenOutcome::Failed(stage),
@@ -169,7 +171,7 @@ impl PreparedSceneReopen {
         SceneReopenOutcome::Opened(Box::new(OpenedSceneReopen {
             session,
             digest: editor_digest(content_digest),
-            identity,
+            file,
             content_digest,
         }))
     }
@@ -184,7 +186,7 @@ impl PrefabReopenRequest {
 
     fn prepare_inner(
         self,
-    ) -> Result<(PrefabAdmission, FileIdentity, ContentDigest), ReopenFailure> {
+    ) -> Result<(PrefabAdmission, FileCapability, ContentDigest), ReopenFailure> {
         let reopened = self.0.read()?;
         let admitted_source = self.0.admits_source_bytes(reopened.content_digest);
         let candidate = match self.0.encoding {
@@ -212,7 +214,7 @@ impl PrefabReopenRequest {
             }
             None => PrefabAdmission::Native(candidate),
         };
-        Ok((admission, reopened.identity, reopened.content_digest))
+        Ok((admission, reopened.file, reopened.content_digest))
     }
 }
 
@@ -222,7 +224,7 @@ impl PreparedPrefabReopen {
         &self,
     ) -> Result<FileIdentity, ReopenFailure> {
         match &self.result {
-            Ok((_, identity, _)) => Ok(*identity),
+            Ok((_, file, _)) => Ok(file.identity()),
             Err(failure) => Err(*failure),
         }
     }
@@ -231,7 +233,7 @@ impl PreparedPrefabReopen {
         self,
         registry: Option<&ComponentRegistry>,
     ) -> PrefabReopenOutcome {
-        let (admission, identity, content_digest) = match self.result {
+        let (admission, file, content_digest) = match self.result {
             Ok(result) => result,
             Err(ReopenFailure::Rejected(reason)) => return PrefabReopenOutcome::Rejected(reason),
             Err(ReopenFailure::Failed(stage)) => return PrefabReopenOutcome::Failed(stage),
@@ -257,7 +259,7 @@ impl PreparedPrefabReopen {
         PrefabReopenOutcome::Opened(Box::new(OpenedPrefabReopen {
             session,
             digest: editor_digest(content_digest),
-            identity,
+            file,
             content_digest,
         }))
     }

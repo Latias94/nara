@@ -2,7 +2,7 @@
 
 **Status**: Accepted
 **Date**: 2026-07-10
-**Last Revised**: 2026-10-24
+**Last Revised**: 2026-10-28
 **Refines**: [ADR 0035](0035-project-manifest-and-runtime-settings-authority.md),
 [ADR 0049](0049-untrusted-project-input-and-parse-budget-policy.md),
 [ADR 0050](0050-asset-root-symlink-junction-and-package-trust-policy.md)
@@ -143,6 +143,13 @@ this cursor contract.
   leaf handle is the access object; callers never reopen by name.
 - Treat object identity as scoped to the live handle/session and capability generation. Native file
   IDs or inode values may be reused after deletion/close and must not become persistent trust IDs.
+  A domain retaining an expected-object identity must retain the observed leaf or transfer custody
+  continuously to another handle for that same object before closing it. Keeping only its parent
+  or a copied identity does not extend the leaf's lifetime. A temporary publication consumer that
+  needs the candidate identity after writer consumption must acquire and compare its retained
+  handle while the original writer remains alive.
+  Historical identity/digest observations may reject stale input; after their leaf has closed,
+  subsequent publication needs a fresh read and domain admission, not asserted object continuity.
 - Exclusive temporary creation occurs in the verified target directory and returns a handle.
 - Cleanup must be bound to that same temporary handle. Unix has no portable unlink-by-handle
   primitive, so the foundation never emulates it with `stat(name)` followed by `unlink(name)`: explicit discard

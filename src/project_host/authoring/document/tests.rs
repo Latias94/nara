@@ -33,6 +33,222 @@ const PREFAB_PATH: &str = "prefabs/external.prefab.ron";
 static TEMP_SEQUENCE: AtomicU64 = AtomicU64::new(0);
 
 #[test]
+fn prepared_documents_keep_the_actual_read_leaf_until_host_admission_or_rejection() {
+    use crate::project_host::persistence::{PrefabPersistenceHost, ScenePersistenceHost};
+    use nara_tooling::{EditorDocumentSourceBinding, EditorPersistenceFailureStage};
+
+    let project = TestProject::new();
+    project.write(
+        PREFAB_PATH,
+        PrefabDocument::default()
+            .to_ron_string()
+            .unwrap()
+            .as_bytes(),
+    );
+    let (schema, index) = project.admission();
+    let schema_basis = AuthoringSchemaBasis::admit(schema.bundle(), &[]).unwrap();
+    let basis =
+        AuthoringDocumentAdmissionBasis::new(&schema, &schema_basis, SceneFileLimits::default());
+    for (path, kind) in [
+        (SCENE_PATH, AuthoringDocumentKind::Scene),
+        (PREFAB_PATH, AuthoringDocumentKind::Prefab),
+    ] {
+        for reject in [false, true] {
+            assert_source_open(&project.path(path), false);
+            let request = basis
+                .capture(Arc::clone(&index), Arc::from(path), kind)
+                .unwrap();
+            let admitted = thread::spawn(move || request.prepare().unwrap())
+                .join()
+                .unwrap();
+            assert_source_open(&project.path(path), true);
+            let expected = admitted.source().clone();
+            let digest = if reject {
+                ContentDigest::of_bytes(b"a different observation")
+            } else {
+                expected.digest()
+            };
+            match admitted {
+                AdmittedAuthoringDocument::Scene { source, file, .. } => {
+                    let bound = ScenePersistenceHost::bind_authoring_source(
+                        &schema.project_root(),
+                        source.relative_path(),
+                        file,
+                        digest,
+                    );
+                    if reject {
+                        assert!(matches!(
+                            bound,
+                            Err(EditorPersistenceFailureStage::Validate)
+                        ));
+                    } else {
+                        let (host, _) = bound.unwrap();
+                        assert_eq!(
+                            host.accepted_source_observation(),
+                            Some((expected.identity(), expected.parent_identity(), digest)),
+                        );
+                        assert_source_open(&project.path(path), true);
+                        drop(host);
+                    }
+                }
+                AdmittedAuthoringDocument::Prefab { source, file, .. } => {
+                    let bound = PrefabPersistenceHost::bind_authoring_source(
+                        &schema.project_root(),
+                        EditorDocumentSourceBinding::new(source.relative_path()),
+                        file,
+                        digest,
+                    );
+                    if reject {
+                        assert!(matches!(
+                            bound,
+                            Err(EditorPersistenceFailureStage::Validate)
+                        ));
+                    } else {
+                        let (host, _) = bound.unwrap();
+                        assert_eq!(
+                            host.accepted_source_observation(),
+                            Some((expected.identity(), expected.parent_identity(), digest)),
+                        );
+                        assert_source_open(&project.path(path), true);
+                        drop(host);
+                    }
+                }
+            }
+            assert_source_open(&project.path(path), false);
+            // Historical facts can outlive custody without retaining a native object.
+            assert_eq!(expected.relative_path(), path);
+        }
+    }
+}
+
+#[test]
+fn binding_rejects_a_replaced_name_while_the_prepared_read_object_is_still_alive() {
+    use crate::project_host::persistence::{PrefabPersistenceHost, ScenePersistenceHost};
+    use nara_tooling::{EditorDocumentSourceBinding, EditorPersistenceFailureStage};
+
+    let project = TestProject::new();
+    project.write(
+        PREFAB_PATH,
+        PrefabDocument::default()
+            .to_ron_string()
+            .unwrap()
+            .as_bytes(),
+    );
+    let (schema, index) = project.admission();
+    let schema_basis = AuthoringSchemaBasis::admit(schema.bundle(), &[]).unwrap();
+    let basis =
+        AuthoringDocumentAdmissionBasis::new(&schema, &schema_basis, SceneFileLimits::default());
+    for (path, kind) in [
+        (SCENE_PATH, AuthoringDocumentKind::Scene),
+        (PREFAB_PATH, AuthoringDocumentKind::Prefab),
+    ] {
+        let admitted = basis
+            .capture(Arc::clone(&index), Arc::from(path), kind)
+            .unwrap()
+            .prepare()
+            .unwrap();
+        let original = project.path(path);
+        let retained = original.with_extension("retained");
+        let bytes = fs::read(&original).unwrap();
+        fs::rename(&original, &retained).unwrap();
+        project.write(path, &bytes);
+        assert_source_open(&retained, true);
+        assert_source_open(&original, false);
+        let rejected = match admitted {
+            AdmittedAuthoringDocument::Scene { source, file, .. } => {
+                ScenePersistenceHost::bind_authoring_source(
+                    &schema.project_root(),
+                    source.relative_path(),
+                    file,
+                    source.digest(),
+                )
+                .map(|_| ())
+            }
+            AdmittedAuthoringDocument::Prefab { source, file, .. } => {
+                PrefabPersistenceHost::bind_authoring_source(
+                    &schema.project_root(),
+                    EditorDocumentSourceBinding::new(source.relative_path()),
+                    file,
+                    source.digest(),
+                )
+                .map(|_| ())
+            }
+        };
+        assert_eq!(rejected, Err(EditorPersistenceFailureStage::Validate));
+        assert_source_open(&retained, false);
+        assert_source_open(&original, false);
+    }
+}
+
+#[test]
+fn discarding_prepared_documents_closes_their_read_leaves() {
+    let project = TestProject::new();
+    project.write(
+        PREFAB_PATH,
+        PrefabDocument::default()
+            .to_ron_string()
+            .unwrap()
+            .as_bytes(),
+    );
+    let (schema, index) = project.admission();
+    let schema_basis = AuthoringSchemaBasis::admit(schema.bundle(), &[]).unwrap();
+    let basis =
+        AuthoringDocumentAdmissionBasis::new(&schema, &schema_basis, SceneFileLimits::default());
+    for (path, kind) in [
+        (SCENE_PATH, AuthoringDocumentKind::Scene),
+        (PREFAB_PATH, AuthoringDocumentKind::Prefab),
+    ] {
+        let admitted = basis
+            .capture(Arc::clone(&index), Arc::from(path), kind)
+            .unwrap()
+            .prepare()
+            .unwrap();
+        assert_source_open(&project.path(path), true);
+        drop(admitted);
+        assert_source_open(&project.path(path), false);
+        project.write(path, b"{");
+        assert!(
+            basis
+                .capture(Arc::clone(&index), Arc::from(path), kind)
+                .unwrap()
+                .prepare()
+                .is_err()
+        );
+        assert_source_open(&project.path(path), false);
+    }
+}
+
+fn assert_source_open(path: &Path, expected: bool) {
+    #[cfg(windows)]
+    {
+        use std::os::windows::fs::OpenOptionsExt;
+        let exclusive = fs::OpenOptions::new().read(true).share_mode(0).open(path);
+        if expected {
+            assert_eq!(
+                exclusive
+                    .err()
+                    .expect("the read leaf must remain open")
+                    .raw_os_error(),
+                Some(32),
+                "the live read leaf must cause a sharing violation",
+            );
+        } else {
+            drop(exclusive.expect("the read leaf must be physically closed"));
+        }
+    }
+    #[cfg(target_os = "linux")]
+    {
+        let path = fs::canonicalize(path).unwrap();
+        let open = fs::read_dir("/proc/self/fd")
+            .unwrap()
+            .filter_map(Result::ok)
+            .filter_map(|entry| fs::read_link(entry.path()).ok())
+            .any(|target| target == path);
+        assert_eq!(open, expected, "read-leaf descriptor lifetime differs");
+    }
+}
+
+#[test]
 fn owned_requests_share_the_basis_and_prepare_both_kinds_after_the_owner_is_dropped() {
     let project = TestProject::new();
     let record = SceneEntityRecord::new(SceneEntityId::new("opaque").unwrap()).with_component(
@@ -88,7 +304,9 @@ fn owned_requests_share_the_basis_and_prepare_both_kinds_after_the_owner_is_drop
     .join()
     .unwrap();
     match scene_admitted {
-        AdmittedAuthoringDocument::Scene { source, document } => {
+        AdmittedAuthoringDocument::Scene {
+            source, document, ..
+        } => {
             assert_eq!(source.relative_path(), SCENE_PATH);
             assert_eq!(
                 source.digest(),
@@ -100,7 +318,9 @@ fn owned_requests_share_the_basis_and_prepare_both_kinds_after_the_owner_is_drop
         _ => panic!("the captured Scene request changed kind"),
     }
     match prefab_admitted {
-        AdmittedAuthoringDocument::Prefab { source, document } => {
+        AdmittedAuthoringDocument::Prefab {
+            source, document, ..
+        } => {
             assert_eq!(source.relative_path(), PREFAB_PATH);
             assert_eq!(
                 source.digest(),

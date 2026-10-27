@@ -139,9 +139,8 @@ preset = "local-headless"
             .admit_startup_closure()
             .unwrap()
             .publish()
-            .into_session_parts()
+            .into_session_snapshot()
             .unwrap()
-            .snapshot
     }
 
     fn source(&self, project: &AuthoringProjectSessionSnapshot) -> EditorImageHydrationSource {

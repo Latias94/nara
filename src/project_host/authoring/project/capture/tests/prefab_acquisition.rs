@@ -32,7 +32,9 @@ fn open_prefab(
     snapshot: &AuthoringProjectSessionSnapshot,
     path: &str,
 ) -> (AuthoringDocumentSourceFact, PrefabAuthoringSession) {
-    let AdmittedAuthoringDocument::Prefab { source, document } = snapshot
+    let AdmittedAuthoringDocument::Prefab {
+        source, document, ..
+    } = snapshot
         .capture_indexed_document(
             snapshot.source_index_snapshot().unwrap(),
             Arc::from(path),

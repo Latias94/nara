@@ -58,13 +58,11 @@ impl EditorAssetMetadataSnapshot {
             .map(|entry| entry.candidate.as_ref())
     }
 
-    /// Returns the observed metadata binding, including conflicting identities.
-    /// Callers must check `conflict` before using this binding for publication.
+    /// Returns a historical content observation, including conflicting identities.
+    /// Callers must check `conflict` and freshly admit a live leaf before publication.
     #[must_use]
-    pub(super) fn binding(&self, path: &AssetPath) -> Option<(FileIdentity, ContentDigest)> {
-        self.admitted
-            .get(path)
-            .map(|entry| (entry.identity, entry.digest))
+    pub(super) fn observed_digest(&self, path: &AssetPath) -> Option<ContentDigest> {
+        self.admitted.get(path).map(|entry| entry.digest)
     }
 
     #[must_use]

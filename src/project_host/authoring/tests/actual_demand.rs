@@ -602,31 +602,27 @@ fn complete_outer_repair_skips_bad_available_source_values_but_standalone_open_s
             record.value == ComponentValue::map([("flag", ComponentValue::Bool(true))])
         }));
         drop(snapshot);
-        let parts = receipt.into_session_parts().unwrap();
+        let snapshot = receipt.into_session_snapshot().unwrap();
         assert!(matches!(
-            parts
-                .snapshot
-                .fork_prefab(&AssetPath::new("p.prefab.json").unwrap()),
+            snapshot.fork_prefab(&AssetPath::new("p.prefab.json").unwrap()),
             Err(AuthoringDocumentDataError::Publication(_))
         ));
         assert!(
-            parts
-                .snapshot
+            snapshot
                 .fork_prefab(&AssetPath::new("uncaptured.prefab.json").unwrap())
                 .unwrap()
                 .is_none()
         );
-        let standalone_r = parts
-            .snapshot
+        let standalone_r = snapshot
             .fork_prefab(&AssetPath::new("r.prefab.json").unwrap())
             .unwrap()
             .unwrap();
         assert_eq!(standalone_r.document(), &fixture.r);
         assert_eq!(
             standalone_r.schema_basis(),
-            parts.startup_scene.schema_basis()
+            snapshot.fork_startup_scene().schema_basis()
         );
-        drop(parts);
+        drop(snapshot);
 
         // Removing the repair changes effective demand, without changing source admission.
         for anchor in &mut fixture.scene.entities {

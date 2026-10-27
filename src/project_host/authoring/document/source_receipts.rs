@@ -12,6 +12,82 @@ const SCENE_STABLE_ID: &str = "bf136559-bc6e-41b9-9171-e46e176576a8";
 const PREFAB_STABLE_ID: &str = "74773fbe-6783-4324-9300-50a23804bcbc";
 
 #[test]
+fn startup_fresh_admission_transfers_its_read_leaf_without_retaining_the_catalogue() {
+    use crate::project_host::persistence::ScenePersistenceHost;
+
+    for stable in [false, true] {
+        let (project, snapshot) = captured_project(stable);
+        assert_source_open(&project.path(SCENE_PATH), false);
+        assert_source_open(&project.path(PREFAB_PATH), false);
+        let admitted = snapshot.admit_startup_document().unwrap();
+        assert_source_open(&project.path(SCENE_PATH), true);
+        assert_source_open(&project.path(PREFAB_PATH), false);
+        let AdmittedAuthoringDocument::Scene {
+            source,
+            file,
+            document,
+        } = admitted
+        else {
+            panic!("startup admission must retain its Scene kind");
+        };
+        assert_eq!(
+            document.document(),
+            snapshot.fork_startup_scene().document()
+        );
+        let (host, _) = ScenePersistenceHost::bind_authoring_source(
+            &snapshot.project_root(),
+            source.relative_path(),
+            file,
+            source.digest(),
+        )
+        .unwrap();
+        assert_source_open(&project.path(SCENE_PATH), true);
+        assert_source_open(&project.path(PREFAB_PATH), false);
+        drop(host);
+        assert_source_open(&project.path(SCENE_PATH), false);
+
+        let mut changed = fs::read(project.path(SCENE_PATH)).unwrap();
+        changed.extend_from_slice(b"\n ");
+        project.write(SCENE_PATH, &changed);
+        assert!(matches!(
+            snapshot.admit_startup_document(),
+            Err(AuthoringDocumentAdmissionError::SourceIdentityChanged),
+        ));
+        assert_source_open(&project.path(SCENE_PATH), false);
+    }
+}
+
+#[test]
+fn captured_observations_cannot_bypass_fresh_startup_byte_admission() {
+    let (project, snapshot) = captured_project(false);
+    let original = AuthoringDocumentSourceFact::from_captured_source(
+        snapshot.startup_source(),
+        snapshot.startup_native_source(),
+    )
+    .unwrap();
+    project.write(SCENE_PATH, b"{");
+    let observation = original
+        .with_persistence_observation(
+            original.identity(),
+            original.parent_identity(),
+            ContentDigest::of_bytes(b"{"),
+        )
+        .unwrap();
+    assert!(matches!(
+        admit_captured_startup_scene(
+            &snapshot.project_root(),
+            &observation,
+            &snapshot.fork_startup_scene().schema_basis(),
+            SceneFileLimits::default(),
+        ),
+        Err(AuthoringDocumentAdmissionError::Document(
+            AuthoringDocumentDataError::Format(_)
+        )),
+    ));
+    assert_source_open(&project.path(SCENE_PATH), false);
+}
+
+#[test]
 fn captured_scene_and_prefab_receipts_retain_admitted_observations_without_reads() {
     for stable in [false, true] {
         let (project, snapshot) = captured_project(stable);
@@ -134,10 +210,14 @@ fn accepted_publication_advances_only_file_observation_and_preserves_old_receipt
         snapshot.startup_native_source(),
     )
     .unwrap();
+    let file = snapshot
+        .project_root()
+        .open_file_exact(&RelativePath::new(original.relative_path()).unwrap())
+        .unwrap();
     let mut publication = FilePublicationHost::bind_existing(
         &snapshot.project_root(),
         original.relative_path(),
-        original.identity(),
+        &file,
         original.digest(),
         65_536,
     )
@@ -182,10 +262,13 @@ fn native_refresh_requires_current_file_and_same_canonical_identity() {
         snapshot.startup_native_source(),
     )
     .unwrap();
+    let file = root
+        .open_file_exact(&RelativePath::new(original.relative_path()).unwrap())
+        .unwrap();
     let mut publication = FilePublicationHost::bind_existing(
         &root,
         original.relative_path(),
-        original.identity(),
+        &file,
         original.digest(),
         65_536,
     )
@@ -329,9 +412,8 @@ fn captured_project(stable: bool) -> (TestProject, AuthoringProjectSessionSnapsh
         .admit_startup_closure()
         .unwrap()
         .publish()
-        .into_session_parts()
-        .unwrap()
-        .snapshot;
+        .into_session_snapshot()
+        .unwrap();
     (project, snapshot)
 }
 

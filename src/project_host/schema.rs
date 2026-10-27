@@ -68,7 +68,7 @@ pub(crate) fn execute(
             let bytes = file
                 .read_to_end_bounded(limit)
                 .map_err(|_| SchemaRefreshError::BundleRead)?;
-            Some((file.identity(), bytes))
+            Some((file, bytes))
         }
         Err(FsError::Io { source, .. }) if source.kind() == io::ErrorKind::NotFound => None,
         Err(_) => return Err(SchemaRefreshError::BundleOpen),
@@ -80,10 +80,10 @@ pub(crate) fn execute(
         return Err(SchemaRefreshError::Stale);
     }
     let mut publication = match current {
-        Some((identity, current)) => FilePublicationHost::bind_existing(
+        Some((file, current)) => FilePublicationHost::bind_existing(
             root,
             path.as_str(),
-            identity,
+            &file,
             ContentDigest::of_bytes(&current),
             limit,
         )
@@ -352,7 +352,7 @@ requested = ["runtime-2d"]
         let mut publication = FilePublicationHost::bind_existing(
             &root,
             "schema/authoring.bundle.json",
-            original_identity,
+            &file,
             ContentDigest::of_bytes(prior),
             1024,
         )

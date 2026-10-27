@@ -15,6 +15,23 @@ use nara_fs::{
 static NEXT_TEMPORARY_NAME: AtomicU64 = AtomicU64::new(1);
 const TEMPORARY_NAME_ATTEMPTS: usize = 16;
 
+/// Keeps the exact accepted leaf alive; its digest records an observation, not frozen content.
+#[derive(Debug)]
+pub(in crate::project_host) struct FilePublicationSource {
+    file: FileCapability,
+    digest: ContentDigest,
+}
+
+impl FilePublicationSource {
+    pub(in crate::project_host) const fn identity(&self) -> FileIdentity {
+        self.file.identity()
+    }
+
+    pub(in crate::project_host) const fn digest(&self) -> ContentDigest {
+        self.digest
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(in crate::project_host) enum FilePublicationBinding {
     Missing,
@@ -47,6 +64,7 @@ pub(in crate::project_host) enum FilePublicationFailureStage {
     CreateTemporary,
     WriteTemporary,
     SyncTemporary,
+    ValidateTemporary,
     ReplaceTarget,
 }
 
@@ -92,7 +110,7 @@ impl FilePublicationEvidence {
 #[must_use = "a published candidate must be committed or the host marked uncertain"]
 pub(in crate::project_host) struct AcceptedFilePublication {
     evidence: FilePublicationEvidence,
-    binding: FilePublicationBinding,
+    source: FilePublicationSource,
 }
 
 impl AcceptedFilePublication {
@@ -102,8 +120,8 @@ impl AcceptedFilePublication {
 
     pub(in crate::project_host) fn into_parts(
         self,
-    ) -> (FilePublicationEvidence, FilePublicationBinding) {
-        (self.evidence, self.binding)
+    ) -> (FilePublicationEvidence, FilePublicationSource) {
+        (self.evidence, self.source)
     }
 }
 
@@ -111,7 +129,7 @@ impl AcceptedFilePublication {
 pub(in crate::project_host) struct FilePublicationHost {
     parent: DirectoryCapability,
     target: RelativeComponent,
-    binding: FilePublicationBinding,
+    source: Option<FilePublicationSource>,
     byte_limit: u64,
     uncertain: bool,
     cleanup: Option<TemporaryFileCleanup>,
@@ -160,14 +178,14 @@ impl FilePublicationHost {
     pub(in crate::project_host) fn from_existing(
         parent: DirectoryCapability,
         target: RelativeComponent,
-        identity: FileIdentity,
+        file: FileCapability,
         digest: ContentDigest,
         byte_limit: u64,
     ) -> Self {
         Self {
             parent,
             target,
-            binding: FilePublicationBinding::Existing { identity, digest },
+            source: Some(FilePublicationSource { file, digest }),
             byte_limit,
             uncertain: false,
             cleanup: None,
@@ -178,10 +196,11 @@ impl FilePublicationHost {
         }
     }
 
+    /// Rebinds a live observed leaf by name without leaving its object lifetime unprotected.
     pub(in crate::project_host) fn bind_existing(
         root: &DirectoryCapability,
         path: &str,
-        expected_identity: FileIdentity,
+        observed: &FileCapability,
         expected_digest: ContentDigest,
         byte_limit: u64,
     ) -> Result<Self, FilePublicationFailureStage> {
@@ -189,21 +208,21 @@ impl FilePublicationHost {
         let (parent, target) = root
             .resolve_file_parent(&path)
             .map_err(|_| FilePublicationFailureStage::OpenTarget)?;
-        Ok(Self {
+        let file = parent
+            .open_child_file(&target)
+            .map_err(|_| FilePublicationFailureStage::OpenTarget)?;
+        if file.identity() != observed.identity() {
+            return Err(FilePublicationFailureStage::OpenTarget);
+        }
+        file.verify_digest(expected_digest, byte_limit)
+            .map_err(|_| FilePublicationFailureStage::OpenTarget)?;
+        Ok(Self::from_existing(
             parent,
             target,
-            binding: FilePublicationBinding::Existing {
-                identity: expected_identity,
-                digest: expected_digest,
-            },
+            file,
+            expected_digest,
             byte_limit,
-            uncertain: false,
-            cleanup: None,
-            #[cfg(test)]
-            fail_after_write: false,
-            #[cfg(test)]
-            block_cleanup: None,
-        })
+        ))
     }
 
     pub(in crate::project_host) fn bind_missing(
@@ -219,7 +238,7 @@ impl FilePublicationHost {
         Ok(Self {
             parent,
             target,
-            binding: FilePublicationBinding::Missing,
+            source: None,
             byte_limit,
             uncertain: false,
             cleanup: None,
@@ -231,7 +250,13 @@ impl FilePublicationHost {
     }
 
     pub(in crate::project_host) const fn binding(&self) -> FilePublicationBinding {
-        self.binding
+        match &self.source {
+            Some(source) => FilePublicationBinding::Existing {
+                identity: source.identity(),
+                digest: source.digest(),
+            },
+            None => FilePublicationBinding::Missing,
+        }
     }
 
     pub(in crate::project_host) const fn uncertain(&self) -> bool {
@@ -245,16 +270,26 @@ impl FilePublicationHost {
         if self.uncertain {
             return None;
         }
-        match self.binding {
-            FilePublicationBinding::Missing => None,
-            FilePublicationBinding::Existing { identity, digest } => {
-                Some((identity, Some(self.parent.identity()), digest))
-            }
-        }
+        self.source.as_ref().map(|source| {
+            (
+                source.identity(),
+                Some(self.parent.identity()),
+                source.digest(),
+            )
+        })
     }
 
     pub(in crate::project_host) fn has_cleanup(&self) -> bool {
         self.cleanup.is_some()
+    }
+
+    #[cfg(test)]
+    pub(in crate::project_host) fn test_accepted_source_bytes(&self) -> Option<Vec<u8>> {
+        self.source
+            .as_ref()?
+            .file
+            .read_to_end_bounded(self.byte_limit)
+            .ok()
     }
 
     pub(in crate::project_host) fn retry_cleanup(&mut self) -> bool {
@@ -310,7 +345,7 @@ impl FilePublicationHost {
             return Err(FilePublicationRejection::RequiresReconcile);
         }
         self.parent
-            .preflight_replace(self.binding.expected_target())
+            .preflight_replace(self.binding().expected_target())
             .map_err(|_| FilePublicationRejection::UnsupportedGuarantee)
     }
 
@@ -342,16 +377,15 @@ impl FilePublicationHost {
 
     pub(in crate::project_host) fn commit_reconciled(
         &mut self,
-        identity: FileIdentity,
+        file: FileCapability,
         digest: ContentDigest,
     ) {
-        self.binding = FilePublicationBinding::Existing { identity, digest };
+        self.source = Some(FilePublicationSource { file, digest });
         self.uncertain = false;
     }
 
-    pub(in crate::project_host) fn commit_published(&mut self, binding: FilePublicationBinding) {
-        debug_assert!(matches!(binding, FilePublicationBinding::Existing { .. }));
-        self.binding = binding;
+    pub(in crate::project_host) fn commit_published(&mut self, source: FilePublicationSource) {
+        self.source = Some(source);
         self.uncertain = false;
     }
 
@@ -362,7 +396,8 @@ impl FilePublicationHost {
         if u64::try_from(bytes.len()).unwrap_or(u64::MAX) > self.byte_limit {
             return FilePublicationOutcome::Failed(FilePublicationFailureStage::PayloadTooLarge);
         }
-        let target = match self.binding {
+        let binding = self.binding();
+        let target = match binding {
             FilePublicationBinding::Missing => None,
             FilePublicationBinding::Existing { .. } => {
                 let target = match self.parent.open_child_file(&self.target) {
@@ -391,7 +426,7 @@ impl FilePublicationHost {
             },
             None => None,
         };
-        if let FilePublicationBinding::Existing { identity, digest } = self.binding {
+        if let FilePublicationBinding::Existing { identity, digest } = binding {
             let target = target
                 .as_ref()
                 .expect("an existing publication binding opened one target before locking");
@@ -402,7 +437,7 @@ impl FilePublicationHost {
             }
         }
 
-        let mut temporary = match create_temporary(&self.parent) {
+        let (temporary_name, mut temporary) = match create_temporary(&self.parent) {
             Ok(temporary) => temporary,
             Err(failure) => {
                 self.retain_failed_cleanup(failure);
@@ -436,10 +471,28 @@ impl FilePublicationHost {
             );
         }
 
+        // Pin the exact candidate before replace_temp consumes and closes its writer.
+        let digest = ContentDigest::of_bytes(bytes);
+        let file = match self.parent.open_child_file(&temporary_name) {
+            Ok(file)
+                if file.identity() == temporary.identity()
+                    && file.verify_digest(digest, self.byte_limit).is_ok() =>
+            {
+                file
+            }
+            _ => {
+                self.discard_candidate(temporary);
+                return FilePublicationOutcome::Failed(
+                    FilePublicationFailureStage::ValidateTemporary,
+                );
+            }
+        };
+        let source = FilePublicationSource { file, digest };
+
         let receipt =
             match self
                 .parent
-                .replace_temp(temporary, &self.target, self.binding.expected_target())
+                .replace_temp(temporary, &self.target, binding.expected_target())
             {
                 Ok(receipt) => receipt,
                 Err(failure) => match self.retain_failed_cleanup(failure) {
@@ -469,16 +522,28 @@ impl FilePublicationHost {
             receipt,
             parent_directory_sync,
         };
-        if !publication_is_accepted(self.binding, &evidence.receipt) {
+        if !publication_is_accepted(binding, &evidence.receipt)
+            || evidence.receipt.candidate_identity() != source.identity()
+            || evidence.receipt.written_content_digest() != source.digest()
+            || source
+                .file
+                .verify_digest(source.digest(), self.byte_limit)
+                .is_err()
+            || !self
+                .parent
+                .open_child_file(&self.target)
+                .is_ok_and(|current| {
+                    current.identity() == source.identity()
+                        && current
+                            .verify_digest(source.digest(), self.byte_limit)
+                            .is_ok()
+                })
+        {
             self.uncertain = true;
             return FilePublicationOutcome::Uncertain(evidence);
         }
 
-        let binding = FilePublicationBinding::Existing {
-            identity: evidence.receipt.candidate_identity(),
-            digest: evidence.receipt.written_content_digest(),
-        };
-        FilePublicationOutcome::Published(AcceptedFilePublication { evidence, binding })
+        FilePublicationOutcome::Published(AcceptedFilePublication { evidence, source })
     }
 }
 
@@ -501,7 +566,7 @@ fn publication_is_accepted(binding: FilePublicationBinding, receipt: &ReplaceRec
 
 fn create_temporary(
     parent: &DirectoryCapability,
-) -> Result<nara_fs::TemporaryFile, TemporaryFileFailure> {
+) -> Result<(RelativeComponent, nara_fs::TemporaryFile), TemporaryFileFailure> {
     for _ in 0..TEMPORARY_NAME_ATTEMPTS {
         let sequence = NEXT_TEMPORARY_NAME.fetch_add(1, Ordering::Relaxed);
         let name = RelativeComponent::new(format!(
@@ -510,7 +575,7 @@ fn create_temporary(
         ))
         .expect("the engine-owned temporary filename is valid");
         match parent.create_temp(&name) {
-            Ok(temporary) => return Ok(temporary),
+            Ok(temporary) => return Ok((name, temporary)),
             Err(error) if matches!(error.error(), FsError::AlreadyExists { .. }) => continue,
             Err(error) => return Err(error),
         }
@@ -530,5 +595,248 @@ fn open_target_failure(error: FsError) -> FilePublicationOutcome {
             FilePublicationOutcome::Rejected(FilePublicationRejection::UnsupportedGuarantee)
         }
         _ => FilePublicationOutcome::Failed(FilePublicationFailureStage::OpenTarget),
+    }
+}
+
+#[cfg(all(test, any(windows, target_os = "linux")))]
+mod tests {
+    #[cfg(target_os = "linux")]
+    use std::fs::File;
+    use std::{
+        fs,
+        path::PathBuf,
+        time::{SystemTime, UNIX_EPOCH},
+    };
+
+    use nara_fs::{CapabilityRights, HostCapabilityOptions, TrustMode};
+
+    use super::*;
+
+    const TARGET: &str = "source.json";
+    const MOVED: &str = "moved.json";
+    const BYTE_LIMIT: u64 = 1024;
+
+    struct Fixture {
+        directory: PathBuf,
+    }
+
+    impl Fixture {
+        fn new() -> Self {
+            let stamp = SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap()
+                .as_nanos();
+            let sequence = NEXT_TEMPORARY_NAME.fetch_add(1, Ordering::Relaxed);
+            let directory = std::env::temp_dir().join(format!(
+                "nara-file-publication-custody-{}-{stamp}-{sequence}",
+                std::process::id()
+            ));
+            // Exclusive creation makes every fixture path below owned by this test.
+            fs::create_dir(&directory).unwrap();
+            Self { directory }
+        }
+
+        fn capability(&self) -> DirectoryCapability {
+            #[cfg(windows)]
+            let directory = {
+                use std::os::windows::fs::OpenOptionsExt;
+                use windows_sys::Win32::Storage::FileSystem::{
+                    FILE_FLAG_BACKUP_SEMANTICS, FILE_FLAG_OPEN_REPARSE_POINT, FILE_SHARE_DELETE,
+                    FILE_SHARE_READ, FILE_SHARE_WRITE,
+                };
+
+                fs::OpenOptions::new()
+                    .read(true)
+                    .share_mode(FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE)
+                    .custom_flags(FILE_FLAG_BACKUP_SEMANTICS | FILE_FLAG_OPEN_REPARSE_POINT)
+                    .open(&self.directory)
+                    .unwrap()
+            };
+            #[cfg(target_os = "linux")]
+            let directory = File::open(&self.directory).unwrap();
+
+            DirectoryCapability::from_host_handle(
+                directory,
+                HostCapabilityOptions::new(CapabilityRights::ReadWrite, TrustMode::TrustedLocal),
+            )
+            .unwrap()
+        }
+    }
+
+    impl Drop for Fixture {
+        fn drop(&mut self) {
+            // Remove only the known fixture leaves, never recursively traverse a path.
+            for name in [TARGET, MOVED] {
+                match fs::remove_file(self.directory.join(name)) {
+                    Ok(()) => {}
+                    Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+                    Err(error) => panic!("failed to remove fixture leaf {name}: {error}"),
+                }
+            }
+            fs::remove_dir(&self.directory).unwrap();
+        }
+    }
+
+    #[test]
+    fn existing_source_remains_readable_after_rename_and_unlink() {
+        let fixture = Fixture::new();
+        let bytes = b"accepted original";
+        fs::write(fixture.directory.join(TARGET), bytes).unwrap();
+        let root = fixture.capability();
+        let target = RelativeComponent::new(TARGET).unwrap();
+        let file = root.open_child_file(&target).unwrap();
+        let identity = file.identity();
+        let digest = ContentDigest::of_bytes(&file.read_to_end_bounded(BYTE_LIMIT).unwrap());
+        let mut host = FilePublicationHost::from_existing(root, target, file, digest, BYTE_LIMIT);
+
+        fs::rename(
+            fixture.directory.join(TARGET),
+            fixture.directory.join(MOVED),
+        )
+        .unwrap();
+        fs::write(fixture.directory.join(TARGET), b"different current name").unwrap();
+        let source = host.source.as_ref().unwrap();
+        assert_eq!(source.identity(), identity);
+        assert_eq!(source.digest(), digest);
+        assert_eq!(source.file.read_to_end_bounded(BYTE_LIMIT).unwrap(), bytes);
+        fs::remove_file(fixture.directory.join(MOVED)).unwrap();
+        assert_eq!(source.file.read_to_end_bounded(BYTE_LIMIT).unwrap(), bytes);
+        assert_eq!(
+            host.binding(),
+            FilePublicationBinding::Existing { identity, digest }
+        );
+        assert_eq!(
+            host.accepted_source_observation(),
+            Some((identity, Some(host.parent.identity()), digest))
+        );
+
+        host.mark_uncertain();
+        assert_eq!(host.accepted_source_observation(), None);
+        assert_eq!(
+            host.binding(),
+            FilePublicationBinding::Existing { identity, digest }
+        );
+        assert_eq!(
+            host.source
+                .as_ref()
+                .unwrap()
+                .file
+                .read_to_end_bounded(BYTE_LIMIT)
+                .unwrap(),
+            bytes
+        );
+    }
+
+    #[test]
+    fn bind_existing_validates_and_retains_the_observed_leaf() {
+        let fixture = Fixture::new();
+        let bytes = b"observed source";
+        fs::write(fixture.directory.join(TARGET), bytes).unwrap();
+        fs::write(fixture.directory.join(MOVED), bytes).unwrap();
+        let root = fixture.capability();
+        let file = root
+            .open_child_file(&RelativeComponent::new(TARGET).unwrap())
+            .unwrap();
+        let identity = file.identity();
+        let other = root
+            .open_child_file(&RelativeComponent::new(MOVED).unwrap())
+            .unwrap();
+        let digest = ContentDigest::of_bytes(bytes);
+        for (observed, expected_digest, limit) in [
+            (&other, digest, BYTE_LIMIT),
+            (&file, ContentDigest::of_bytes(b"wrong digest"), BYTE_LIMIT),
+            (&file, digest, 1),
+        ] {
+            assert!(matches!(
+                FilePublicationHost::bind_existing(&root, TARGET, observed, expected_digest, limit,),
+                Err(FilePublicationFailureStage::OpenTarget)
+            ));
+        }
+        let host =
+            FilePublicationHost::bind_existing(&root, TARGET, &file, digest, BYTE_LIMIT).unwrap();
+        drop((file, other));
+        fs::remove_file(fixture.directory.join(TARGET)).unwrap();
+        let source = host.source.as_ref().unwrap();
+        assert_eq!(source.identity(), identity);
+        assert_eq!(source.file.read_to_end_bounded(BYTE_LIMIT).unwrap(), bytes);
+    }
+
+    #[test]
+    fn reconciled_source_retains_the_fresh_read_handle() {
+        let fixture = Fixture::new();
+        let root = fixture.capability();
+        let mut host = FilePublicationHost::bind_missing(&root, TARGET, BYTE_LIMIT).unwrap();
+        assert_eq!(host.binding(), FilePublicationBinding::Missing);
+        assert_eq!(host.accepted_source_observation(), None);
+        host.mark_uncertain();
+        let bytes = b"freshly decoded source";
+        fs::write(fixture.directory.join(TARGET), bytes).unwrap();
+        let file = host.read_source().open().unwrap();
+        let identity = file.identity();
+        let digest = ContentDigest::of_bytes(&file.read_to_end_bounded(BYTE_LIMIT).unwrap());
+        host.commit_reconciled(file, digest);
+        fs::remove_file(fixture.directory.join(TARGET)).unwrap();
+
+        assert!(!host.uncertain());
+        assert_eq!(
+            host.accepted_source_observation(),
+            Some((identity, Some(root.identity()), digest))
+        );
+        assert_eq!(
+            host.source
+                .as_ref()
+                .unwrap()
+                .file
+                .read_to_end_bounded(BYTE_LIMIT)
+                .unwrap(),
+            bytes
+        );
+    }
+
+    #[test]
+    fn published_source_retains_candidate_after_writer_consumption_before_host_commit() {
+        let fixture = Fixture::new();
+        let root = fixture.capability();
+        let mut host = FilePublicationHost::bind_missing(&root, TARGET, BYTE_LIMIT).unwrap();
+        let bytes = b"published candidate";
+        let accepted = match host.publish(bytes) {
+            FilePublicationOutcome::Published(accepted) => accepted,
+            FilePublicationOutcome::Rejected(reason) => panic!("publication rejected: {reason:?}"),
+            FilePublicationOutcome::Failed(stage) => panic!("publication failed: {stage:?}"),
+            FilePublicationOutcome::Uncertain(evidence) => {
+                panic!("publication uncertain: {evidence:?}")
+            }
+        };
+        // The receipt identifies the original TemporaryFile, whose writer publish consumed.
+        let identity = accepted.evidence().receipt().candidate_identity();
+        let (evidence, source) = accepted.into_parts();
+        assert_eq!(source.identity(), identity);
+        assert_eq!(source.digest(), ContentDigest::of_bytes(bytes));
+        assert_eq!(evidence.receipt().published_identity(), Some(identity));
+        assert_eq!(host.binding(), FilePublicationBinding::Missing);
+        assert!(host.source.is_none());
+
+        fs::rename(
+            fixture.directory.join(TARGET),
+            fixture.directory.join(MOVED),
+        )
+        .unwrap();
+        fs::write(fixture.directory.join(TARGET), b"unrelated replacement").unwrap();
+        assert_eq!(source.file.read_to_end_bounded(BYTE_LIMIT).unwrap(), bytes);
+        fs::remove_file(fixture.directory.join(MOVED)).unwrap();
+        assert_eq!(source.file.read_to_end_bounded(BYTE_LIMIT).unwrap(), bytes);
+
+        host.commit_published(source);
+        let source = host.source.as_ref().unwrap();
+        assert_eq!(source.identity(), identity);
+        assert_eq!(source.file.read_to_end_bounded(BYTE_LIMIT).unwrap(), bytes);
+        assert_eq!(
+            host.accepted_source_observation(),
+            Some((
+                identity,
+                Some(root.identity()),
+                ContentDigest::of_bytes(bytes)
+            ))
+        );
     }
 }

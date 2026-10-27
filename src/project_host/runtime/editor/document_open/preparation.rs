@@ -150,11 +150,15 @@ fn bind_document_open(
     let path: Arc<str> = Arc::from(admitted.source().relative_path());
     let digest = editor_document_digest(admitted.source().digest());
     let (document, host) = match admitted {
-        AdmittedAuthoringDocument::Scene { source, document } => {
+        AdmittedAuthoringDocument::Scene {
+            source,
+            file,
+            document,
+        } => {
             let (host, observed) = ScenePersistenceHost::bind_authoring_source(
                 root,
                 source.relative_path(),
-                source.identity(),
+                file,
                 source.digest(),
             )
             .map_err(document_open_failure_code)?;
@@ -175,11 +179,15 @@ fn bind_document_open(
                 PreparedHost::Scene(host),
             )
         }
-        AdmittedAuthoringDocument::Prefab { source, document } => {
+        AdmittedAuthoringDocument::Prefab {
+            source,
+            file,
+            document,
+        } => {
             let (host, observed) = PrefabPersistenceHost::bind_authoring_source(
                 root,
                 EditorDocumentSourceBinding::new(source.relative_path()),
-                source.identity(),
+                file,
                 source.digest(),
             )
             .map_err(document_open_failure_code)?;

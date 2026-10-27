@@ -1,30 +1,48 @@
 use super::*;
 
 pub(super) enum MetadataPublication {
-    Published {
-        source: FilePublicationReadSource,
-        binding: FilePublicationBinding,
-    },
+    Published(RetainedHost<FilePublicationHost>),
     Uncertain,
     Failed(EditorImageImportFailure),
 }
 
 impl EditorImageImportHost {
+    pub(super) fn retain_metadata(
+        &mut self,
+        runtime: &EditorAuthoringRuntime,
+        publication: FilePublicationHost,
+    ) -> Result<RetainedHost<FilePublicationHost>, EditorImageImportFailure> {
+        let publication = runtime
+            .host_custody()
+            .retain_publication(publication)
+            .ok_or(EditorImageImportFailure::Runtime(
+                EditorImageRuntimeFailure::RuntimeUnavailable,
+            ))?;
+        debug_assert!(self.publication_cleanup.is_none());
+        // The latch survives every early return and unwind until pending takes ownership.
+        self.publication_cleanup = Some(publication.clone());
+        Ok(publication)
+    }
+
+    pub(super) fn retire_metadata(&mut self, publication: RetainedHost<FilePublicationHost>) {
+        if !publication.retire() {
+            debug_assert!(self.publication_cleanup.is_none());
+            self.publication_cleanup = Some(publication);
+        }
+    }
+
     pub(super) fn publish_metadata(
         &mut self,
         runtime: &EditorAuthoringRuntime,
         publication: FilePublicationHost,
         bytes: &[u8],
     ) -> MetadataPublication {
-        let Some(publication) = runtime.host_custody().retain_publication(publication) else {
-            return MetadataPublication::Failed(EditorImageImportFailure::Runtime(
-                EditorImageRuntimeFailure::RuntimeUnavailable,
-            ));
+        let publication = match self.retain_metadata(runtime, publication) {
+            Ok(publication) => publication,
+            Err(failure) => return MetadataPublication::Failed(failure),
         };
-        debug_assert!(self.publication_cleanup.is_none());
         // Register the complete Host before mutation. This independent latch also survives
         // unwinding between publication and its normal cleanup/receipt handling.
-        self.publication_cleanup = Some(publication.clone());
         let prepared = publication.try_with(|host| {
             #[cfg(test)]
             if let Some(control) = self.fail_next_metadata_after_write.take() {
@@ -50,12 +68,9 @@ impl EditorImageImportHost {
                         host.mark_uncertain();
                         return (MetadataPublication::Uncertain, false);
                     }
-                    let (_, binding) = candidate.into_parts();
-                    host.commit_published(binding);
-                    MetadataPublication::Published {
-                        source: host.read_source(),
-                        binding: host.binding(),
-                    }
+                    let (_, source) = candidate.into_parts();
+                    host.commit_published(source);
+                    MetadataPublication::Published(publication.clone())
                 }
                 FilePublicationOutcome::Rejected(reason) => {
                     MetadataPublication::Failed(map_publication_rejection(reason))
@@ -76,8 +91,11 @@ impl EditorImageImportHost {
             return MetadataPublication::Failed(EditorImageImportFailure::Busy);
         };
         // Custody/retirement calls must not run while borrowing the publication Host.
-        // Pending imports need only fresh-read authority and the accepted exact binding.
-        if !cleanup_pending && publication.retire() {
+        // Successful publication keeps its accepted leaf continuously alive through pending.
+        if !matches!(&outcome, MetadataPublication::Published(_))
+            && !cleanup_pending
+            && publication.retire()
+        {
             self.publication_cleanup = None;
         }
         outcome
