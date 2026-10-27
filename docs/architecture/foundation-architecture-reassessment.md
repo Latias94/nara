@@ -85,9 +85,11 @@ ECS component, while a gameplay system need not cross a document transaction for
 The selected direction is document-first authoring plus native ECS execution, Schema-first
 metadata plus complete representation families, scoped logical activity plus Host-owned physical
 resources, immutable content products, and typed contributions with explicit placement. Start
-dynamic Behavior work with owner-managed rows as the leading design; compare an explicit
-attachment envelope on the same task and keep only the winning production path. Start ordinary
-installable tools with bounded semantic contributions; do not make all gameplay/native calls IPC.
+dynamic Behavior language work with a data-only entity envelope as the provisional candidate,
+following the [private representation comparison](../research/2026-10-27-behavior-representation-comparison.md).
+Rows retain a selective-query advantage and an additional retirement obligation; actual VM
+custody and dispatch evidence can reverse that choice. Keep only the winning production path.
+Start ordinary installable tools with bounded semantic contributions; do not make all gameplay/native calls IPC.
 Start rendering composition with typed Features and a finite resource plan, preserving one
 physical execution Host. None of those intended interfaces is qualified merely by this paragraph.
 
@@ -160,9 +162,12 @@ consumer already work without `Reflect`; Bevy `TypeRegistry` is not the semantic
 **Direction.** Make Nara Schema the semantic metadata authority; Bevy reflection is an optional
 native inspection adapter. Preserve the native one-to-one binding proof. Admit a *design* for
 other complete representations instead of weakening the native bijection into a multimap.
-Owner-managed rows are the leading semantic fit for independently addressable Behavior records;
-compare an explicit envelope using the same workflow before selecting it. Dynamic descriptors
-are a bounded query/storage counterfactual, not the first mandatory implementation.
+The [private comparison](../research/2026-10-27-behavior-representation-comparison.md) revises
+the earlier Rows preference: independently addressable Behavior records work with either store.
+Use the entity envelope for the next bounded language workflow because its data inherits entity
+lifetime without another cleanup path. This does not settle VM custody, scheduler access or
+dispatch performance. Dynamic descriptors remain a bounded query/storage counterfactual,
+not the first mandatory implementation.
 
 Each executable Schema needs a complete admitted representation: enumerate/read, explicit
 Absent versus Unavailable, Schema/reference validation, grouped prepare/commit, encode and exact

@@ -211,7 +211,8 @@ into durable allocated identities merely to complete the first consumer.
 
 ## R3: Behavior Representation And Immutable Module Publications
 
-**Design:** D02, D03, D06. **State:** not started. **Owners:** Schema, Scene materialization,
+**Design:** D02, D03, D06. **State:** private representation comparison executed; production
+representation, language workflow and replacement remain open. **Owners:** Schema, Scene materialization,
 concrete language adapter and executable Host; Proposed 0120.
 
 **R3a representation:** compare an explicit attachments envelope and owner-managed rows with one
@@ -219,6 +220,13 @@ bounded adapter and two distinct Behavior Schemas, not two Rust component types.
 build each representation in each language. Runtime-independent address semantics come from
 R5a; final Prefab compatibility waits for the selected R5b overlay, not qualification of a
 known-to-be-displaced operation-patch format.
+
+The [executed comparison](../research/2026-10-27-behavior-representation-comparison.md) selects
+the data-only entity envelope provisionally for R3b. Rows reduce inspected records for selective
+queries but require explicit cleanup on ordinary destruction. VM instance/code custody and real
+dispatch costs remain unproved and may reverse the selection. The private fixture uses hidden
+authoring integration, not a public Runtime representation; its transformed version-two data is
+not an owner-catalog migration transaction.
 
 **R3b language workflow:** fix the representation enough to compare the same gameplay task with
 C# and Lua feasibility adapters. Choose a production candidate on author workflow, targets,

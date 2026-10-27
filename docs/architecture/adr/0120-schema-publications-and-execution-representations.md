@@ -32,11 +32,21 @@ representation, if selected, must independently prove:
 - exact row/membership retirement and export, without deleting unrelated rows in one carrier;
 - native/VM reconciliation as an explicit fallible lifecycle, not arbitrary reversible World work.
 
-Compare an attachment envelope, owner-managed rows and dynamic Bevy descriptors using the same
-consumer. Owner-managed rows are the leading semantic candidate; the final storage/API choice
-is open. An envelope must expose typed inner Schema/reference/migration semantics, not an opaque
-properties blob. A descriptor implementation must own layout/drop/by-ID safety, not synthesize
-arbitrary Rust layouts from file data. No duplicate Rust `TypeId` exception is an adequate design.
+The [executed private comparison](../../research/2026-10-27-behavior-representation-comparison.md)
+uses the same authored records and compiler for an attachment envelope and owner-managed rows.
+Use the data-only entity envelope as the initial candidate for the language workflow trial,
+revising the earlier Rows preference. Independent semantic Schema identity does not require
+independent physical storage. Rows inspect fewer records for a selective query, but ordinary
+entity/Scene destruction leaves owner rows unless a separate cleanup path participates.
+This is a bounded candidate choice, not a selected public representation or a speed claim.
+
+An envelope must expose typed inner Schema/reference/migration semantics, not an opaque
+properties blob. Its data cleanup does not prove VM instance, callback or code lifetime.
+Actual language custody and dispatch costs may reverse the candidate choice. Compare dynamic
+Bevy descriptors against a named requirement for first-class per-Behavior query presence or
+independent scheduler access; their implementation must own layout/drop/by-ID safety, not
+synthesize arbitrary Rust layouts from file data. No duplicate Rust `TypeId` exception is an
+adequate design.
 
 ### Publication Scope
 

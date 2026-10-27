@@ -3,7 +3,7 @@ type: "Current State"
 title: "Current Engineering State"
 description: "Derived summary of immutable engineering-memory shards."
 tags: ["engineering-memory", "derived"]
-source_fingerprint: "dbd68448f0af52d5d0fd1fab6d84a8d00b6457ecef9ce9bc0a1e406250dc7802"
+source_fingerprint: "583314dc2bce3cd7dc41246b1d78180c74dc865755665202beede240d2b03409"
 ---
 
 # Current State
@@ -12,8 +12,8 @@ source_fingerprint: "dbd68448f0af52d5d0fd1fab6d84a8d00b6457ecef9ce9bc0a1e406250d
 
 This file is derived from immutable shards. Record new facts in shards, then render during integration.
 
-- Source fingerprint: `dbd68448f0af52d5d0fd1fab6d84a8d00b6457ecef9ce9bc0a1e406250dc7802`
-- Immutable records: 968
+- Source fingerprint: `583314dc2bce3cd7dc41246b1d78180c74dc865755665202beede240d2b03409`
+- Immutable records: 969
 - Active lane heads: 1
 
 # Active Registrations
@@ -69,6 +69,7 @@ This file is derived from immutable shards. Record new facts in shards, then ren
 
 # Recent Evidence
 
+- **Verification Evidence**: [Private Behavior representation comparison and revised language-trial candidate](verification/2026-10/2026-10-27T073822Z-private-behavior-representation-comparison-and-revised-language-trial-candidate-0025928de9064bb3b64bfcf4630d397d.md) - Records data-only envelope versus Rows evidence, review corrections and remaining public Runtime and VM lifecycle scope.
 - **Verification Evidence**: [Complete Editor Prefab conversion and source admission qualification](verification/2026-10/2026-10-27T064545Z-complete-editor-prefab-conversion-and-source-admission-qualification-bc6d938e4ea5421fa42d0028230a11dc.md) - Qualifies Source pre-copy admission, reviewed Editor conversion, actual dependency fences, public consumers and selected Windows/DX12 workflows.
 - **Work Progress**: [Editor conversion source admission fixes pass full foundation cohort](progress/2026-10/2026-10-27T061533Z-editor-conversion-source-admission-fixes-pass-full-foundation-cohort-33359bf2b64a4517acffb1e0d41eb554.md) - Work Progress for Editor conversion source admission fixes pass full foundation cohort.
 - **Work Progress**: [Editor complete Prefab conversion integration and pre-copy budget corrections](progress/2026-10/2026-10-27T053151Z-editor-complete-prefab-conversion-integration-and-pre-copy-budget-corrections-394c727d98ae4d55846b93f121fd416b.md) - Shared actual-demand acquisition and Editor conversion custody are integrated; source pre-copy budget fixes, independent consumers and native qualification remain in progress.
@@ -80,7 +81,6 @@ This file is derived from immutable shards. Record new facts in shards, then ren
 - **Work Progress**: [Caller-owned property value budget correction in progress](progress/2026-10/2026-10-27T003831Z-caller-owned-property-value-budget-correction-in-progress-97d2113cb1104680bf471d7d3b7f036f.md) - Source Revert cohorts pass; final review found an implicit property payload ceiling and a shared resolver budget correction is being implemented.
 - **Work Progress**: [Source-owned Prefab Revert integration and review corrections](progress/2026-10/2026-10-26T234134Z-source-owned-prefab-revert-integration-and-review-corrections-c8fb754f923b49de9812cb196b66a3d7.md) - Bounded source observation, exact Revert and retained rejected composition are integrated; source and UI review corrections await combined qualification.
 - **Verification Evidence**: [Captured Editor Scene preview and ordered Image publication qualification](verification/2026-10/2026-10-26T221436Z-captured-editor-scene-preview-and-ordered-image-publication-qualification-bd36086e52524bb1b227dbd21da81056.md) - Actual working-copy capture, source receipts, native content and selection fences, and ordered Image observations have complete scoped owner, public, independent, and selected Windows evidence.
-- **Work Progress**: [Editor capture regression and ordered Image observation corrections in progress](progress/2026-10/2026-10-26T211738Z-editor-capture-regression-and-ordered-image-observation-corrections-in-progress-0e0a11438b61465db4dd9818d1f0ee2a.md) - Preview cohort passes 60 cases; complete root and Editor run finds five failures, with source selection and Image evidence corrections still being integrated.
 
 # Integration Notes
 
