@@ -6,7 +6,6 @@ mod trial;
 
 use std::{collections::BTreeMap, path::Path, sync::Arc};
 
-use mlua::LuaSerdeExt;
 use nara_reflect::{
     ComponentFieldId, ComponentFieldPath, ComponentPropertyError, ComponentPropertyPath,
     ComponentSchemaCatalog, ComponentSchemaVersion, ComponentTypeId, ComponentValue,
@@ -16,7 +15,7 @@ use nara_scene::{
     Name, PrefabDocument, PrefabInstance, SceneDocument, SceneDocumentCandidate, SceneEntityId,
     SceneEntityRecord, ScenePatchDocument, ScenePatchOperation,
 };
-use serde::{Deserialize, Serialize, de::DeserializeOwned};
+use serde::{Deserialize, Serialize};
 use trial::{Definition, PreparedRuntime, Runtime, StorageKind, id, mover, sensor};
 
 #[derive(Clone, Serialize)]
@@ -562,125 +561,14 @@ fn workflow(program: &dyn Language) {
     no_gain.retire().unwrap();
 }
 
-struct LuaProgram {
-    lua: mlua::Lua,
-    module: mlua::Table,
-}
-
-impl LuaProgram {
-    fn compile(source: &str) -> mlua::Result<Self> {
-        let lua = mlua::Lua::new();
-        let module = lua.load(source).set_name("schema_behaviors.lua").eval()?;
-        Ok(Self { lua, module })
-    }
-}
-
-impl Language for LuaProgram {
-    fn describe(&self) -> Result<Vec<Binding>, String> {
-        self.module
-            .get::<mlua::Value>("bindings")
-            .and_then(|value| self.lua.from_value(value))
-            .map_err(|error| error.to_string())
-    }
-    fn invoke(&self, input: &Snapshot) -> Result<Vec<NameCommand>, String> {
-        let input = self
-            .lua
-            .to_value(input)
-            .map_err(|error| error.to_string())?;
-        let callback: mlua::Function = self
-            .module
-            .get("invoke")
-            .map_err(|error| error.to_string())?;
-        let output = callback
-            .call::<mlua::Value>(input)
-            .map_err(|error| error.to_string())?;
-        self.lua
-            .from_value(output)
-            .map_err(|error| error.to_string())
-    }
-}
-
-type ManagedEntry = unsafe extern "system" fn(*const u8, i32, *mut u8, i32) -> i32;
-struct DotnetProgram {
-    callback: netcorehost::hostfxr::ManagedFunction<ManagedEntry>,
-    describe: netcorehost::hostfxr::ManagedFunction<ManagedEntry>,
-    _loader: netcorehost::hostfxr::AssemblyDelegateLoader,
-    _context:
-        netcorehost::hostfxr::HostfxrContext<netcorehost::hostfxr::InitializedForRuntimeConfig>,
-}
-
-impl DotnetProgram {
-    fn load() -> Self {
-        use netcorehost::{hostfxr::Hostfxr, pdcstr, pdcstring::PdCString};
-        let directory = std::path::PathBuf::from(
-            std::env::var_os("NARA_BEHAVIOR_MANAGED_DIR")
-                .expect("Run python tests/fixtures/behavior-languages/run.py"),
-        );
-        let hostfxr = Hostfxr::load_from_path(
-            std::env::var_os("NARA_BEHAVIOR_HOSTFXR").expect("Runner selects hostfxr"),
-        )
-        .unwrap();
-        let config =
-            PdCString::from_os_str(directory.join("Nara.BehaviorTrial.runtimeconfig.json"))
-                .unwrap();
-        let assembly = PdCString::from_os_str(directory.join("Nara.BehaviorTrial.dll")).unwrap();
-        let context = hostfxr.initialize_for_runtime_config(&config).unwrap();
-        let loader = context.get_delegate_loader_for_assembly(assembly).unwrap();
-        let callback = loader
-            .get_function_with_unmanaged_callers_only::<ManagedEntry>(
-                pdcstr!("Nara.BehaviorTrial.Bridge, Nara.BehaviorTrial"),
-                pdcstr!("Invoke"),
-            )
-            .unwrap();
-        let describe = loader
-            .get_function_with_unmanaged_callers_only::<ManagedEntry>(
-                pdcstr!("Nara.BehaviorTrial.Bridge, Nara.BehaviorTrial"),
-                pdcstr!("Describe"),
-            )
-            .unwrap();
-        Self {
-            callback,
-            describe,
-            _loader: loader,
-            _context: context,
-        }
-    }
-
-    fn call<T: Serialize, R: DeserializeOwned>(
-        &self,
-        callback: &netcorehost::hostfxr::ManagedFunction<ManagedEntry>,
-        input: &T,
-    ) -> Result<R, String> {
-        let input = serde_json::to_vec(input).map_err(|error| error.to_string())?;
-        let length = i32::try_from(input.len()).map_err(|error| error.to_string())?;
-        let mut output = vec![0_u8; 64 * 1024];
-        // SAFETY: Both Bridge entries use this exact platform ABI/signature, copy input,
-        // bound output and catch managed exceptions. Buffers and owners span the call.
-        let count = unsafe {
-            callback(
-                input.as_ptr(),
-                length,
-                output.as_mut_ptr(),
-                output.len() as i32,
-            )
-        };
-        let count =
-            usize::try_from(count).map_err(|_| format!("Managed callback failed: {count}"))?;
-        if count > output.len() {
-            return Err("Invalid managed buffer length".into());
-        }
-        serde_json::from_slice(&output[..count]).map_err(|error| error.to_string())
-    }
-}
-
-impl Language for DotnetProgram {
-    fn describe(&self) -> Result<Vec<Binding>, String> {
-        self.call(&self.describe, &())
-    }
-    fn invoke(&self, input: &Snapshot) -> Result<Vec<NameCommand>, String> {
-        self.call(&self.callback, input)
-    }
-}
+#[path = "support/dotnet.rs"]
+mod dotnet;
+#[path = "support/lifetime.rs"]
+mod lifetime;
+#[path = "support/lua.rs"]
+mod lua;
+use dotnet::DotnetProgram;
+use lua::LuaProgram;
 
 #[test]
 fn lua_executes_external_schemas_without_native_field_or_type_dispatch() {
@@ -695,7 +583,7 @@ fn lua_executes_external_schemas_without_native_field_or_type_dispatch() {
 
 #[test]
 fn csharp_executes_external_schemas_without_native_field_or_type_dispatch() {
-    workflow(&DotnetProgram::load());
+    workflow(&DotnetProgram::load_default());
 }
 
 #[test]

@@ -197,6 +197,13 @@ references for three authored Schemas. Complete selected source/history/Prefab w
 private evidence; measured domain access, author code iteration and VM ownership remain open.
 The private DTO harness is not a selected SDK.
 
+The [code-lifetime comparison](../research/2026-10-27-behavior-code-iteration-and-lifetime.md)
+adds actual same-World body routing and retained old-code probes. Lua requires explicit VM
+ownership beside its weak function handle; C# requires removing external roots before collectible
+context completion. Neither implies that data-only Schema captures should pin code, or that a
+global generation can replace these separate owner facts. Complete production integration and
+the wider publication/dependency proof remain open.
+
 ## D03: Immutable Publications And Reload
 
 Topics: T09, T11, T13, T35. ADRs: 0046, 0079, 0081, 0082, 0084, 0090, 0093, 0098.

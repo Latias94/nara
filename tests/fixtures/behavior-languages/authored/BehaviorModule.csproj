@@ -1,0 +1,16 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <AssemblyName>Nara.AuthoredBehaviors</AssemblyName>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <CopyLocalLockFileAssemblies>false</CopyLocalLockFileAssemblies>
+    <TrialRevision Condition="'$(TrialRevision)' == ''">1</TrialRevision>
+    <TrialContractProject Condition="'$(TrialContractProject)' == ''">../managed/BehaviorTrial.csproj</TrialContractProject>
+    <DefineConstants Condition="'$(TrialRevision)' == '2'">$(DefineConstants);REVISION_TWO</DefineConstants>
+    <DefineConstants Condition="'$(TrialRevision)' == 'invalid'">$(DefineConstants);REVISION_INVALID</DefineConstants>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="$(TrialContractProject)" Private="false" />
+  </ItemGroup>
+</Project>

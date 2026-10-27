@@ -1,20 +1,12 @@
 using System.Globalization;
 using System.Text.Json;
+using Nara.BehaviorTrial;
 
-namespace Nara.BehaviorTrial;
+namespace Nara.AuthoredBehaviors;
 
-public sealed record SchemaNativeTarget(string Id, string Name);
-public sealed record SchemaSnapshot(
-    string Schema,
-    string Actor,
-    Dictionary<string, JsonElement> Fields,
-    SchemaNativeTarget[] Targets,
-    string Fault);
-public sealed record SchemaBinding(string Schema, uint Version);
-
-public static class SchemaBehaviors
+public sealed class Module : IBehaviorModule
 {
-    private static readonly Dictionary<string, Func<SchemaSnapshot, List<NameCommand>>> Callbacks =
+    private readonly Dictionary<string, Func<SchemaSnapshot, List<NameCommand>>> callbacks =
         new(StringComparer.Ordinal)
         {
             ["trial.behavior.Mover"] = Move,
@@ -22,16 +14,20 @@ public static class SchemaBehaviors
             ["trial.behavior.Label"] = Label,
         };
 
-    public static SchemaBinding[] Describe() => Callbacks.Keys
+    public SchemaBinding[] Describe() => callbacks.Keys
         .OrderBy(schema => schema, StringComparer.Ordinal)
+#if REVISION_INVALID
+        .Select(schema => new SchemaBinding(schema, schema == "trial.behavior.Sensor" ? 2u : 1u))
+#else
         .Select(schema => new SchemaBinding(schema, 1))
+#endif
         .ToArray();
 
-    public static List<NameCommand> Invoke(SchemaSnapshot input)
+    public List<NameCommand> Invoke(SchemaSnapshot input)
     {
         if (input.Fault == "throw")
             throw new InvalidOperationException("Trial callback failure");
-        if (!Callbacks.TryGetValue(input.Schema, out var callback))
+        if (!callbacks.TryGetValue(input.Schema, out var callback))
             throw new InvalidOperationException($"Unknown schema '{input.Schema}'");
 
         List<NameCommand> commands = callback(input);
@@ -44,7 +40,11 @@ public static class SchemaBehaviors
     {
         double amount = Number(input, "amount");
         double gain = input.Fields.ContainsKey("gain") ? Number(input, "gain") : 1.0;
-        string value = (amount * gain).ToString("G17", CultureInfo.InvariantCulture);
+        double result = amount * gain;
+#if REVISION_TWO
+        result *= 2;
+#endif
+        string value = result.ToString("G17", CultureInfo.InvariantCulture);
         return [new(input.Actor, $"Moved {value}")];
     }
 

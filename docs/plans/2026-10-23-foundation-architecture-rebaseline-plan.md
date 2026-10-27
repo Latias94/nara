@@ -212,8 +212,8 @@ into durable allocated identities merely to complete the first consumer.
 ## R3: Behavior Representation And Immutable Module Publications
 
 **Design:** D02, D03, D06. **State:** private representation comparison and first in-process
-C#/Lua Schema-driven workflow executed; production representation, complete language workflow and
-replacement remain open. **Owners:** Schema, Scene materialization,
+C#/Lua Schema-driven workflow plus bounded body/lifetime comparison executed; production
+representation, complete language workflow and replacement remain open. **Owners:** Schema, Scene materialization,
 concrete language adapter and executable Host; Proposed 0120.
 
 **R3a representation:** compare an explicit attachments envelope and owner-managed rows with one
@@ -250,6 +250,13 @@ remain open before selecting or integrating a production owner.
 completion/retirement proof in R4a. Defining coexist-and-switch and Stop-first semantics does not
 require every Host to implement both. Shared facilities and general phase-plan work are not
 automatic prerequisites to the fresh-Runtime representation trial.
+
+The [body/lifetime comparison](../research/2026-10-27-behavior-code-iteration-and-lifetime.md)
+adds one-owner unchanged-Schema replacement at a synchronous safe point. Actual same-path managed
+rebuild, Lua source edits, rejected last binding, native World continuity, old-result fences and
+held callback/instance roots have private evidence. This informs language-owner selection, not
+completion of R3c: arbitrary in-flight work, dependency cohorts, Stop-first, catalog migration,
+post-publication cleanup failure and public integration remain open.
 
 Acceptance: independent attach/edit/Undo/Prefab/source round-trip, recursive refs, one-record
 migration, missing-module preservation, mixed native materialization, exact absence/export/retire

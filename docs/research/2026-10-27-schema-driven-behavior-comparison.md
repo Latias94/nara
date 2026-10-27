@@ -2,6 +2,10 @@
 
 **Date:** 2026-10-27. **Status:** Private fresh-Runtime comparison; ADR 0120 remains Proposed.
 
+The [code-lifetime successor](2026-10-27-behavior-code-iteration-and-lifetime.md) later adds a
+bounded same-World body switch and explicit retained-code probes. This report keeps its original
+generation-one data/Schema evidence; later code replacement does not imply catalog migration.
+
 ## Why Replace The First Harness
 
 The [first language experiment](2026-10-27-behavior-language-workflow-comparison.md) proves

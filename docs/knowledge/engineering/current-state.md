@@ -3,7 +3,7 @@ type: "Current State"
 title: "Current Engineering State"
 description: "Derived summary of immutable engineering-memory shards."
 tags: ["engineering-memory", "derived"]
-source_fingerprint: "6a99f6e4470ddee09cc43e213157753b3c53aea39655dedf8ed37beeaabc079a"
+source_fingerprint: "1224440ee63d69be5d664d4417b4a4741e420205c98f716c0032d29f8ba7fccb"
 ---
 
 # Current State
@@ -12,8 +12,8 @@ source_fingerprint: "6a99f6e4470ddee09cc43e213157753b3c53aea39655dedf8ed37beeaab
 
 This file is derived from immutable shards. Record new facts in shards, then render during integration.
 
-- Source fingerprint: `6a99f6e4470ddee09cc43e213157753b3c53aea39655dedf8ed37beeaabc079a`
-- Immutable records: 971
+- Source fingerprint: `1224440ee63d69be5d664d4417b4a4741e420205c98f716c0032d29f8ba7fccb`
+- Immutable records: 972
 - Active lane heads: 1
 
 # Active Registrations
@@ -69,6 +69,7 @@ This file is derived from immutable shards. Record new facts in shards, then ren
 
 # Recent Evidence
 
+- **Verification Evidence**: [Actual authored code iteration with retained Lua VM and collectible managed code](verification/2026-10/2026-10-27T091400Z-actual-authored-code-iteration-with-retained-lua-vm-and-collectible-managed-code-060183fe1373441980ece9733ef76f57.md) - Qualifies unchanged-World body routing, rejected candidates, exact old-result fencing and actual physical code/VM retention in the private two-language comparison.
 - **Verification Evidence**: [Schema driven authored Behavior dispatch and complete source workflows](verification/2026-10/2026-10-27T084702Z-schema-driven-authored-behavior-dispatch-and-complete-source-workflows-cec09063db0d4d8a85b838302985bb97.md) - Records external catalog admission, three authored callback bindings, prepared source Attach/history/disk persistence and repeated Prefab identity proof.
 - **Verification Evidence**: [First actual in-process CSharp and Lua Behavior snapshot workflow](verification/2026-10/2026-10-27T080553Z-first-actual-in-process-csharp-and-lua-behavior-snapshot-workflow-81c67c84e2fa47b38b7848f642dae81c.md) - Qualifies the bounded two-language Scene and Prefab command workflow without selecting a production language or claiming VM reload.
 - **Verification Evidence**: [Private Behavior representation comparison and revised language-trial candidate](verification/2026-10/2026-10-27T073822Z-private-behavior-representation-comparison-and-revised-language-trial-candidate-0025928de9064bb3b64bfcf4630d397d.md) - Records data-only envelope versus Rows evidence, review corrections and remaining public Runtime and VM lifecycle scope.
@@ -80,7 +81,6 @@ This file is derived from immutable shards. Record new facts in shards, then ren
 - **Work Progress**: [Selected Prefab semantic compilation and exact history footprint comparison in progress](progress/2026-10/2026-10-27T021313Z-selected-prefab-semantic-compilation-and-exact-history-footprint-comparison-in-progress-d4d8d5cf51814d6aa3eb72e85e3d84f3.md) - Private selected-demand and same-owner replay implementations are integrated; first test build exposed fixture API errors and executable qualification is pending.
 - **Work Progress**: [Complete Prefab conversion source constraints and comparison plan](progress/2026-10/2026-10-27T014146Z-complete-prefab-conversion-source-constraints-and-comparison-plan-48bc7f5499704cd39c2f617a29916625.md) - Records the merged source-intent checkpoint, three executed conversion-basis probes and the next selected-demand/history comparison without claiming a conversion implementation.
 - **Verification Evidence**: [Source-owned Prefab intent review and revert qualification](verification/2026-10/2026-10-27T012127Z-source-owned-prefab-intent-review-and-revert-qualification-4b14705bceb545e79f34b7afbc5144bf.md) - Qualifies bounded declaration observation, reviewed exact Revert, rejected composition fencing and explicit property value limits with independent and selected Windows evidence.
-- **Work Progress**: [Caller-owned property value budget correction in progress](progress/2026-10/2026-10-27T003831Z-caller-owned-property-value-budget-correction-in-progress-97d2113cb1104680bf471d7d3b7f036f.md) - Source Revert cohorts pass; final review found an implicit property payload ceiling and a shared resolver budget correction is being implemented.
 
 # Integration Notes
 

@@ -86,6 +86,15 @@ cannot submit through the new route. Data-only Schema captures need not pin code
 also storing callbacks is not data-only. Untracked escaped language objects require process
 replacement/restart rather than a fictional unload proof.
 
+The [private body/lifetime comparison](../../research/2026-10-27-behavior-code-iteration-and-lifetime.md)
+executes unchanged-Schema, same-World routing through actual Lua VMs and collectible authored
+C# contexts. Retained callback/instance leases keep physical code alive with no active invocation;
+old prepared and post-switch leased results cannot submit through the successor route. Lua's
+lease explicitly owns its VM because the pinned Function only holds WeakLua. C# collection is
+observed separately from `Unload`, not inferred from hostfxr context closure. This is bounded
+single-owner evidence, not qualification of dependency cohorts, arbitrary escaping objects,
+Stop-first, in-flight asynchronous work or public production replacement.
+
 Coexist-and-switch can preserve old active routing until a complete candidate is Ready, retiring
 old owners after publication. Exclusive-authority Stop-first instead keeps a compatible
 restartable last-good executable/data/recipe, exposes interruption/recovery and publishes only
