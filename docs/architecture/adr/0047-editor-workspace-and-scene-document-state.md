@@ -162,6 +162,12 @@ Rules:
   rights. Installation selection and executable approval must bind to that same candidate before
   a future installed route may invoke the existing Session probe. Preparation alone does not
   register metadata into an open document or acquire a second request/review owner.
+  A confirmed release artifact may publish its unready directory before committing a no-replace
+  installation receipt last. Filesystem publication and successful artifact inspection remain
+  separate from active tool routing. An incomplete or reconciliable artifact never becomes an
+  activation through directory/receipt existence, and publication failure never changes document
+  source, history or the current tool's authority. Installed execution still requires its future
+  Host approval and the existing Session probe/preparation boundary.
 - Retained construction uses that same source owner. Workspace routes the original complete
   query basis plus the draft's exact source/Schema basis, and carries a nominal prepared
   construction with its fixed local mapping. A new query cannot authorize an obsolete draft.

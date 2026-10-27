@@ -34,6 +34,10 @@ use super::{EditorEditPreparationError, EditorProjectSession};
 mod process;
 mod release;
 pub use release::{
+    EditorSourceToolInstallation, EditorSourceToolInstallationError,
+    EditorSourceToolInstallationInspection, EditorSourceToolInstallationOrphan,
+    EditorSourceToolInstallationOutcome, EditorSourceToolInstallationPlan,
+    EditorSourceToolInstallationReceipt, EditorSourceToolInstalledMember,
     EditorSourceToolReleaseError, EditorSourceToolReleaseMember, EditorSourceToolReleaseMemberKind,
     EditorSourceToolReleaseRequirement, PreparedEditorSourceToolRelease,
 };

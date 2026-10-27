@@ -44,6 +44,43 @@ input to the subsequent [local lifecycle plan](../plans/2026-10-28-local-source-
 not an installation receipt, executable approval or immutable launch proof. Installation and
 execution need the later publication and runtime-custody boundaries before they can use it.
 
+## Publish And Inspect A Local Artifact
+
+Create `EditorSourceToolInstallationPlan::new(parent, destination, captured)` with a Host-issued
+read-write parent capability and one validated destination component. `release()` lends the same
+immutable candidate for preview; `cancel()` returns it without writing. `publish()` explicitly
+confirms this artifact publication. It reserves an absent empty candidate directory, writes and
+checks declared members, then commits `.nara-installation.json` with no-replace file publication
+last. The root can therefore be visible before it is ready. No existing destination or unowned
+receipt is overwritten or adopted, even when its bytes match.
+
+Handle the complete `EditorSourceToolInstallationOutcome`:
+
+- `Published` retains the admitted artifact and live created-member provenance. Its `verify()`
+  rechecks the selected destination, identities, digests and complete directory inventory.
+- `Incomplete` retains a published but unready directory, original plan and acquired custody.
+  Keep these recovery facts; the attempt has not committed its ready receipt.
+- `PublishedUnverified` retains both completed publication receipts plus the actual admission
+  refusal. It cannot be presented as an unpublished failure or silently selected for execution.
+- `Failed` retains its original plan and actual pre-ready filesystem error/orphan facts.
+
+`publication()` reports the empty-root naming operation; `receipt_publication()` reports the
+ready-receipt commit. Member `sync_receipt()` values record actual file synchronization. These
+facts neither combine into whole-tree atomicity nor prove crash durability. In particular,
+Windows parent-directory synchronization is unsupported. Later writes remain possible through
+ordinary read sharing and must be revalidated by an execution or content consumer.
+
+After closing an artifact owner, reopen its directory through a strict capability and call
+`EditorSourceToolInstallationInspection::read(&directory, expected_receipt_digest)`. Inspection
+verifies the selected receipt and recaptures the full declared release; unknown, missing or changed
+files reject. This returns data observations, not recovered creation provenance or deletion rights.
+Unready custody has no automatic/public deletion operation until stable-content reclamation is
+qualified; dropping it closes handles and preserves files for reconciliation.
+
+This is an artifact preparation/publication API, not the complete Package Manager. It does not
+select an installed graph, satisfy declared requirements, adopt project Schema, approve a launcher,
+enable a tool or complete update/removal. Those operations remain in the local lifecycle plan.
+
 ## Configure And Probe
 
 Build an admitted `ComponentSchemaOwnerSnapshot` using the existing catalog API. Supply that

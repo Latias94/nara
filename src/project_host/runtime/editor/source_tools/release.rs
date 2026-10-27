@@ -8,7 +8,15 @@ use nara_reflect::{
     PersistentComponentSchemaOwnerId,
 };
 
+mod installation;
 mod manifest;
+
+pub use installation::{
+    EditorSourceToolInstallation, EditorSourceToolInstallationError,
+    EditorSourceToolInstallationInspection, EditorSourceToolInstallationOrphan,
+    EditorSourceToolInstallationOutcome, EditorSourceToolInstallationPlan,
+    EditorSourceToolInstallationReceipt, EditorSourceToolInstalledMember,
+};
 
 use manifest::{MANIFEST_NAME, MAX_MANIFEST_BYTES, Manifest, MemberKind};
 
@@ -87,31 +95,36 @@ impl fmt::Debug for EditorSourceToolReleaseMember {
 /// checked before this candidate is returned. Subsequent changes to the original directory do
 /// not alter the candidate. The host runtime itself is outside this release's artifact closure.
 pub struct PreparedEditorSourceToolRelease {
+    metadata: ReleaseMetadata,
+    source_root: FileIdentity,
+    manifest_bytes: Box<[u8]>,
+    members: Vec<EditorSourceToolReleaseMember>,
+}
+
+#[derive(Debug)]
+struct ReleaseMetadata {
     package: String,
     release: String,
     host_target: String,
-    source_root: FileIdentity,
     manifest_digest: ContentDigest,
-    manifest_bytes: Box<[u8]>,
     owner: ComponentSchemaOwnerSnapshot,
     component: ComponentTypeId,
     entry: String,
     requires: Vec<EditorSourceToolReleaseRequirement>,
-    members: Vec<EditorSourceToolReleaseMember>,
 }
 
 impl fmt::Debug for PreparedEditorSourceToolRelease {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         formatter
             .debug_struct("PreparedEditorSourceToolRelease")
-            .field("package", &self.package)
-            .field("release", &self.release)
-            .field("host_target", &self.host_target)
-            .field("manifest_digest", &self.manifest_digest)
-            .field("schema_owner", self.owner.owner_id())
-            .field("component", &self.component)
-            .field("entry", &self.entry)
-            .field("requires", &self.requires)
+            .field("package", &self.metadata.package)
+            .field("release", &self.metadata.release)
+            .field("host_target", &self.metadata.host_target)
+            .field("manifest_digest", &self.metadata.manifest_digest)
+            .field("schema_owner", self.metadata.owner.owner_id())
+            .field("component", &self.metadata.component)
+            .field("entry", &self.metadata.entry)
+            .field("requires", &self.metadata.requires)
             .field("member_count", &self.members.len())
             .finish_non_exhaustive()
     }
@@ -153,12 +166,7 @@ impl PreparedEditorSourceToolRelease {
         root: &DirectoryCapability,
         expected_manifest: ContentDigest,
     ) -> Result<Self, EditorSourceToolReleaseError> {
-        if !matches!(
-            root.options().trust(),
-            TrustMode::Untrusted | TrustMode::Recovery
-        ) {
-            return Err(EditorSourceToolReleaseError::SourceTrust);
-        }
+        require_strict_source(root)?;
         if expected_manifest.length() == 0 || expected_manifest.length() > MAX_MANIFEST_BYTES {
             return Err(EditorSourceToolReleaseError::ManifestLimit);
         }
@@ -203,40 +211,42 @@ impl PreparedEditorSourceToolRelease {
             .map_err(|_| EditorSourceToolReleaseError::Schema)?;
 
         Ok(Self {
-            package: manifest.package,
-            release: manifest.release,
-            host_target: manifest.host_target,
             source_root: root.identity(),
-            manifest_digest: expected_manifest,
             manifest_bytes,
-            owner,
-            component,
-            entry: manifest.entry,
-            requires: manifest
-                .requires
-                .into_iter()
-                .map(|requirement| EditorSourceToolReleaseRequirement {
-                    package: requirement.package,
-                    manifest: requirement.manifest,
-                })
-                .collect(),
+            metadata: ReleaseMetadata {
+                package: manifest.package,
+                release: manifest.release,
+                host_target: manifest.host_target,
+                manifest_digest: expected_manifest,
+                owner,
+                component,
+                entry: manifest.entry,
+                requires: manifest
+                    .requires
+                    .into_iter()
+                    .map(|requirement| EditorSourceToolReleaseRequirement {
+                        package: requirement.package,
+                        manifest: requirement.manifest,
+                    })
+                    .collect(),
+            },
             members,
         })
     }
 
     #[must_use]
     pub fn package(&self) -> &str {
-        &self.package
+        &self.metadata.package
     }
 
     #[must_use]
     pub fn release(&self) -> &str {
-        &self.release
+        &self.metadata.release
     }
 
     #[must_use]
     pub fn host_target(&self) -> &str {
-        &self.host_target
+        &self.metadata.host_target
     }
 
     /// Source observation only; this is not a durable trust ID or authority over installed files.
@@ -247,7 +257,7 @@ impl PreparedEditorSourceToolRelease {
 
     #[must_use]
     pub const fn manifest_digest(&self) -> ContentDigest {
-        self.manifest_digest
+        self.metadata.manifest_digest
     }
 
     #[must_use]
@@ -257,27 +267,38 @@ impl PreparedEditorSourceToolRelease {
 
     #[must_use]
     pub fn schema_owner(&self) -> &ComponentSchemaOwnerSnapshot {
-        &self.owner
+        &self.metadata.owner
     }
 
     #[must_use]
     pub fn component(&self) -> &ComponentTypeId {
-        &self.component
+        &self.metadata.component
     }
 
     #[must_use]
     pub fn entry(&self) -> &str {
-        &self.entry
+        &self.metadata.entry
     }
 
     #[must_use]
     pub fn requires(&self) -> &[EditorSourceToolReleaseRequirement] {
-        &self.requires
+        &self.metadata.requires
     }
 
     #[must_use]
     pub fn members(&self) -> &[EditorSourceToolReleaseMember] {
         &self.members
+    }
+}
+
+fn require_strict_source(root: &DirectoryCapability) -> Result<(), EditorSourceToolReleaseError> {
+    if matches!(
+        root.options().trust(),
+        TrustMode::Untrusted | TrustMode::Recovery
+    ) {
+        Ok(())
+    } else {
+        Err(EditorSourceToolReleaseError::SourceTrust)
     }
 }
 

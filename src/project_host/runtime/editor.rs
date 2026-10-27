@@ -79,9 +79,13 @@ pub use presentation::{
 pub use preview::{EditorPreviewCandidate, EditorPreviewContentStamp, EditorPreviewHit};
 pub use source_asset_import::{EditorSourceAssetDomain, EditorSourceAssetImporters};
 pub use source_tools::{
-    EditorSourceToolCommand, EditorSourceToolDefinition, EditorSourceToolReleaseError,
-    EditorSourceToolReleaseMember, EditorSourceToolReleaseMemberKind,
-    EditorSourceToolReleaseRequirement, PreparedEditorSourceToolRelease,
+    EditorSourceToolCommand, EditorSourceToolDefinition, EditorSourceToolInstallation,
+    EditorSourceToolInstallationError, EditorSourceToolInstallationInspection,
+    EditorSourceToolInstallationOrphan, EditorSourceToolInstallationOutcome,
+    EditorSourceToolInstallationPlan, EditorSourceToolInstallationReceipt,
+    EditorSourceToolInstalledMember, EditorSourceToolReleaseError, EditorSourceToolReleaseMember,
+    EditorSourceToolReleaseMemberKind, EditorSourceToolReleaseRequirement,
+    PreparedEditorSourceToolRelease,
 };
 #[cfg(feature = "runtime-ui")]
 use ui_authoring::EditorUiAuthoringProjectionCache;

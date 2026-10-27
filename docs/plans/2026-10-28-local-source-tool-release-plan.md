@@ -42,8 +42,10 @@ a universal Package kernel, merged source resolver, second activation owner or s
 validator. `nara_tooling` carries pure installed/enablement observations and actions when those
 operations exist; it does not own processes, filesystem capabilities or file deletion.
 
-The installation receipt records selected manifest digest, provenance, managed payloads and
-ownership/adoption facts. Desired enablement is a durable request, not an executable trust grant.
+The artifact receipt records a nonzero installation identifier and the selected manifest digest.
+Live installation custody separately retains created members, content observations and publication
+receipts. A future installed ownership/adoption ledger must not infer its authority from that
+persisted artifact receipt. Desired enablement is a durable request, not an executable trust grant.
 Runtime activation IDs remain nominal Session identities. Package, Schema owner, component,
 release, installed file and active invocation are distinct identities with explicit relationships.
 Cargo and NuGet/MSBuild retain source resolution and build authority. Only already selected exact
@@ -59,7 +61,11 @@ local relationships are checked; unsupported sources, roles, migration and targe
    metadata or construct a command from the mutable source directory. This is preparation only.
 2. **Installation publication and ownership.** Preview and explicitly confirm the candidate's
    destination, content, trust, target and required relationships. Stage through the filesystem
-   owner and publish no-replace release directories plus a truthful selection/ownership receipt.
+   owner: first publish an empty no-replace candidate directory, write/verify its finite payload,
+   then atomically commit an installation receipt last. Keep the candidate unready until that
+   commit; this is not whole-directory-tree atomicity. Retain actual root and receipt publication
+   facts, continuous created-file custody and per-file sync evidence. Installed graph selection
+   and its ownership/adoption ledger remain separate from artifact publication.
    Refuse existing unowned files even when their bytes match. Modified, adopted and ambiguous
    content survive updates/removal. Handle staging or publication uncertainty without claiming
    rollback. File deletion needs exact owning proof; directory publication alone cannot grant it.
@@ -111,9 +117,10 @@ no project destination and by itself grants no overwrite or deletion permission.
 
 ## Contract And Verification Scope
 
-ADRs 0047/0118 adopt only the preparation boundary first. Installation publication/selection,
-durable enablement, metadata adoption and removal require their owning amendments when designed;
-ADRs 0020/0035/0114/0098 retain current source, execution and Schema identity authority. ADRs
+ADRs 0047/0118 adopt release preparation and the receipt-last artifact publication boundary.
+Installed graph selection, durable enablement, metadata adoption and removal require their owning
+amendments when designed. ADRs 0020/0035/0114/0098 retain current source, execution and Schema
+identity authority. ADRs
 0050/0070 supply the filesystem rules; a new required primitive needs its own proved contract.
 The July Package plan remains requirements-only beyond explicitly adopted slices. Change its
 P1 wording to the selected concrete finite child rather than duplicating the tool in Rust just
@@ -123,3 +130,34 @@ No compatibility aliases, old release readers, install scripts, uninstall callba
 guide. Keep historical research clearly historical and delete superseded active mechanisms when
 their replacement is qualified. Record implementation/verification in immutable engineering
 evidence; this plan is not proof that installation or activation has shipped.
+
+## Artifact Publication Boundary
+
+`EditorSourceToolInstallationPlan` retains the exact captured input and caller-issued parent/
+destination for preview. Cancel performs no writes. Confirm publishes an empty, unready candidate
+directory, then exclusively creates and synchronizes declared members. Every exact read capability
+is opened and compared while its original created handle remains alive. The owner commits the
+bounded `.nara-installation.json` through the existing no-replace temporary-file publication
+primitive last; its read capability also spans that publication. This sequence replaces an
+experimentally invalid whole-tree rename boundary: actual Windows rejects the populated directory
+rename with writable descendants and with only retained read descendants. Do not close those
+handles and pretend bare native IDs still prove creation provenance.
+
+Before and after receipt commit, resolve the selected destination again from its original parent,
+compare its continuously held root identity, and verify member names, identities and digests.
+A bounded inventory rejects unknown or aliased members. Root publication, ready-receipt publication,
+individual file sync and later observations remain distinct facts. Ordinary read capabilities
+do not freeze writes or prove crash durability; Windows parent-directory sync remains unsupported.
+
+`Failed` retains actual pre-ready directory-begin/publication error and any native orphan.
+`Incomplete` means the empty candidate directory was published but this attempt did not commit
+its ready receipt; it retains original input, root publication and acquired file custody.
+`PublishedUnverified` retains both completed publications when subsequent admission fails.
+No branch silently claims rollback. Unready candidates have no automatic/public deletion path:
+temporary cleanup does not prove stable content or adoption status. Dropping custody closes
+handles and leaves bytes for explicit reconciliation; qualified exact reclamation remains work.
+
+Fresh receipt inspection checks a caller-selected receipt digest, decodes the bounded data and
+reuses release capture plus complete inventory. It does not reconstruct created-file provenance,
+admit a project Schema, satisfy dependencies or approve execution. Full local Package selection,
+enable/update/removal, evolved metadata, reclaimer and UI workflow remain in progress above.

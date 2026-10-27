@@ -465,6 +465,24 @@ project state nor probes a child, grants command execution, establishes an insta
 grants deletion authority. The [local release plan](../../plans/2026-10-28-local-source-tool-release-plan.md)
 orders those subsequent owners; the concrete first format has no old reader or compatibility path.
 
+Confirmed artifact publication retains that original candidate and a Host-issued parent/destination.
+It reserves an absent directory with the filesystem's no-replace operation, writes a finite unready
+candidate there, and commits a bounded installation receipt by no-replace file publication last.
+This is not a whole-tree atomic switch: the qualified Windows filesystem rejects directory rename
+with retained descendant handles, while closing them would lose continuous object provenance.
+Acquire each read capability while its created handle still lives, then retain it across receipt
+commit and post-publication validation. Rebind the selected root from its parent before/after commit;
+check exact member names, live identities, digests and a bounded complete inventory. A successful
+observation is not an immutable installed namespace or a crash-durability guarantee.
+
+Directory publication before a ready receipt is explicitly Incomplete on failure. Once the ready
+receipt publishes, later admission failure remains PublishedUnverified with both publication facts.
+Per-file sync receipts remain distinct from root/receipt naming and parent durability. Retain
+unready file custody and unknown content without recursive or implicit deletion; ordinary temporary
+cleanup does not prove unchanged/adopted content. A persisted receipt supports bounded code-free
+inspection only: it cannot recover creation custody, select a Package graph, admit open-document
+metadata, approve executable code or grant deletion. Those product lifecycle owners remain separate.
+
 A component schema may publish one optional complete `authoring_initial_value` in the existing bounded generic value grammar.
 It is creation-only data, validated through the canonical complete schema/value validator at catalog admission and copied for an explicit creation transaction.
 Its presence grants neither native execution nor project-specific invariants absent from the descriptor.

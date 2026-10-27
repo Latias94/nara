@@ -1,4 +1,4 @@
-//! Data-only capture of the actual C# tool release, without installation or execution.
+//! Data-only capture, installation publication and inspection of the actual C# tool release.
 
 #![cfg(any(
     all(target_os = "windows", target_arch = "x86_64", target_env = "msvc"),
@@ -186,4 +186,176 @@ fn csharp_local_release_rejects_manifest_drift_from_the_selected_raw_digest() {
         PreparedEditorSourceToolRelease::capture(&root, expected_manifest),
         Err(EditorSourceToolReleaseError::Digest { member }) if member == "nara-tool.json"
     ));
+}
+
+#[cfg(all(target_os = "windows", target_arch = "x86_64", target_env = "msvc"))]
+#[test]
+fn csharp_local_release_installs_frozen_bytes_and_fresh_inspection_rejects_content_drift() {
+    use std::{fs, os::windows::fs::OpenOptionsExt};
+
+    use nara_engine::{
+        fs::{
+            DirectoryCapability, HostCapabilityOptions, RelativeComponent, RelativePath,
+            StageStatus,
+        },
+        project_host::{
+            EditorSourceToolInstallationError, EditorSourceToolInstallationInspection,
+            EditorSourceToolInstallationOutcome, EditorSourceToolInstallationPlan,
+        },
+    };
+
+    let release = LocalRelease::new();
+    let source = open_explicit_product_project_root(release.directory.path()).unwrap();
+    let expected_manifest = ContentDigest::of_bytes(&release.manifest);
+    let captured = PreparedEditorSourceToolRelease::capture(&source, expected_manifest).unwrap();
+    let parent_directory = tempfile::tempdir().unwrap();
+    let parent_handle = fs::OpenOptions::new()
+        .read(true)
+        .share_mode(7)
+        .custom_flags(0x0200_0000 | 0x0020_0000)
+        .open(parent_directory.path())
+        .unwrap();
+    let parent = DirectoryCapability::from_host_handle(
+        parent_handle,
+        HostCapabilityOptions::new(CapabilityRights::ReadWrite, TrustMode::Untrusted),
+    )
+    .unwrap();
+    let destination = RelativeComponent::new("installed").unwrap();
+    let preview =
+        EditorSourceToolInstallationPlan::new(parent.share(), destination.clone(), captured)
+            .unwrap();
+    assert_eq!(preview.release().manifest_digest(), expected_manifest);
+    assert_eq!(
+        preview.release().manifest_bytes(),
+        release.manifest.as_slice()
+    );
+    assert_eq!(fs::read_dir(parent_directory.path()).unwrap().count(), 0);
+    let captured = preview.cancel();
+    assert_eq!(captured.manifest_digest(), expected_manifest);
+    assert_eq!(fs::read_dir(parent_directory.path()).unwrap().count(), 0);
+
+    // Only the temporary source copy changes; publication must use the captured actual DLL.
+    let mut changed_dll = release.payloads["EnemyStatsTool.dll"].clone();
+    changed_dll[0] ^= 1;
+    fs::write(
+        release.directory.path().join("EnemyStatsTool.dll"),
+        &changed_dll,
+    )
+    .unwrap();
+    assert!(matches!(
+        PreparedEditorSourceToolRelease::capture(&source, expected_manifest),
+        Err(EditorSourceToolReleaseError::Digest { member }) if member == "EnemyStatsTool.dll"
+    ));
+    let plan = EditorSourceToolInstallationPlan::new(parent, destination, captured).unwrap();
+    let installation = match plan.publish() {
+        EditorSourceToolInstallationOutcome::Published(installation) => installation,
+        other => panic!("Expected actual C# release publication: {other:?}"),
+    };
+    assert_eq!(installation.package(), "trial.enemy-stats");
+    assert_eq!(installation.release(), "1");
+    assert_eq!(installation.receipt().manifest_digest(), expected_manifest);
+    let installation_id = *installation.receipt().installation_id();
+    assert_ne!(installation_id, [0; 32]);
+    let expected_receipt = installation.receipt_digest();
+    let receipt_bytes = installation
+        .directory()
+        .open_file_exact(&RelativePath::new(".nara-installation.json").unwrap())
+        .unwrap()
+        .read_to_end_bounded(expected_receipt.length())
+        .unwrap();
+    assert_eq!(ContentDigest::of_bytes(&receipt_bytes), expected_receipt);
+    let mut expected_files = release.payloads.clone();
+    assert_eq!(expected_files.len(), 5);
+    expected_files.insert("nara-tool.json", release.manifest.clone());
+    expected_files.insert(".nara-installation.json", receipt_bytes);
+    assert_eq!(installation.members().len(), 7);
+    for (&path, expected) in &expected_files {
+        let member = installation
+            .members()
+            .iter()
+            .find(|member| member.path() == path)
+            .unwrap_or_else(|| panic!("Installation lost member {path}"));
+        assert_eq!(member.digest(), ContentDigest::of_bytes(expected), "{path}");
+        assert_eq!(
+            member.kind(),
+            match path {
+                "nara-tool.json" | ".nara-installation.json" => None,
+                SAMPLE => Some(EditorSourceToolReleaseMemberKind::Content),
+                _ => Some(EditorSourceToolReleaseMemberKind::Tool),
+            },
+            "{path}",
+        );
+        assert_eq!(
+            member.sync_receipt().progress().data_synced(),
+            StageStatus::Achieved,
+            "{path}",
+        );
+        let installed_bytes = installation
+            .directory()
+            .open_file_exact(&RelativePath::new(path).unwrap())
+            .unwrap()
+            .read_to_end_bounded(member.digest().length())
+            .unwrap();
+        assert_eq!(&installed_bytes, expected, "{path}");
+    }
+    assert_eq!(
+        installation
+            .publication()
+            .durability()
+            .parent_directory_synced(),
+        StageStatus::Unsupported,
+    );
+    installation.verify().unwrap();
+    drop(installation);
+    drop(source);
+
+    // Fresh inspection recovers persisted facts, not the closed owner's live-file provenance.
+    let reopened_parent = open_explicit_product_project_root(parent_directory.path()).unwrap();
+    let reopened = reopened_parent
+        .open_directory_exact(&RelativePath::new("installed").unwrap())
+        .unwrap();
+    let inspected =
+        EditorSourceToolInstallationInspection::read(&reopened, expected_receipt).unwrap();
+    assert_eq!(inspected.receipt().installation_id(), &installation_id);
+    assert_eq!(inspected.receipt().manifest_digest(), expected_manifest);
+    assert_eq!(inspected.release().package(), "trial.enemy-stats");
+    assert_eq!(inspected.release().release(), "1");
+    assert_eq!(inspected.release().manifest_digest(), expected_manifest);
+    assert_eq!(
+        inspected.release().manifest_bytes(),
+        release.manifest.as_slice()
+    );
+    assert_eq!(inspected.release().members().len(), release.payloads.len());
+    for (&path, expected) in &release.payloads {
+        let member = inspected
+            .release()
+            .members()
+            .iter()
+            .find(|member| member.path() == path)
+            .unwrap_or_else(|| panic!("Fresh inspection lost member {path}"));
+        assert_eq!(member.bytes(), expected.as_slice(), "{path}");
+        assert_eq!(member.digest(), ContentDigest::of_bytes(expected), "{path}");
+    }
+
+    let mut changed_sample = release.payloads[SAMPLE].clone();
+    changed_sample[0] ^= 1;
+    fs::write(
+        parent_directory.path().join("installed").join(SAMPLE),
+        changed_sample,
+    )
+    .unwrap();
+    assert!(matches!(
+        EditorSourceToolInstallationInspection::read(&reopened, expected_receipt),
+        Err(EditorSourceToolInstallationError::Inspection(
+            EditorSourceToolReleaseError::Digest { member }
+        )) if member == SAMPLE
+    ));
+    assert_eq!(
+        reopened
+            .open_file_exact(&RelativePath::new(".nara-installation.json").unwrap())
+            .unwrap()
+            .digest(expected_receipt.length())
+            .unwrap(),
+        expected_receipt,
+    );
 }
