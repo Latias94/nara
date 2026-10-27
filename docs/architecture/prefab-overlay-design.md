@@ -856,6 +856,9 @@ does not imply inherited entity editing, automatic foreign-source navigation or 
 The UI Canvas still uses the separate direct Prefab preview helper and needs the shared capture
 path. Existing Play Apply Changes remains limited to ordinary Scene entities; extending
 cross-document Apply is a separate workflow and is not required to preserve that supported scope.
+The [complete-conversion plan](../plans/2026-10-27-prefab-conversion-plan.md) compares selected
+semantic compilation and source-owned replay admission before exposing a conversion interface.
+Native preview filtering is not an acceptable source-data authority for that operation.
 
 The exact declaration transaction counts both snapshots and retains their unmodified comparison
 semantics. Native canonicalization rejects a snapshot requiring component migration; an equality

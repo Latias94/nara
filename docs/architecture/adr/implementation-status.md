@@ -443,6 +443,14 @@ convert-to-local, cross-source Apply, shared Canvas capture, inherited Inspector
 aggregate repeated Schema/value work remain open. Earlier checkpoints keep their original scope;
 this successor does not complete R5 or the full foundation Goal.
 
+The [complete-conversion comparison](../../plans/2026-10-27-prefab-conversion-plan.md) now has
+[three executed source-constraint probes](../../knowledge/engineering/progress/2026-10/2026-10-27T014146Z-complete-prefab-conversion-source-constraints-and-comparison-plan-48bc7f5499704cd39c2f617a29916625.md):
+semantic/native component retention differs, unavailable records already have omission facts,
+and an unrelated missing instance rejects whole-document expansion after a healthy-anchor
+control. Independent review clarified selected-data refusal and unchanged history eviction.
+No production conversion, selected-demand entry, replay footprint or checkpoint is implemented
+by those tests. ADR amendments and the complete public/native workflow remain open.
+
 The [R5c custody qualification](../../knowledge/engineering/verification/2026-10/2026-10-23T163942Z-per-document-persistence-custody-qualification-30cc4d7af3a445d18d9adf5b795886e2.md)
 implements typed per-document Scene/Prefab file custody under ADRs 0047/0118. Save retains its
 admission-time Host through acknowledgement/uncertainty; Reopen validates exact retained Host

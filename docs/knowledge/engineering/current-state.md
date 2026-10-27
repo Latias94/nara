@@ -3,7 +3,7 @@ type: "Current State"
 title: "Current Engineering State"
 description: "Derived summary of immutable engineering-memory shards."
 tags: ["engineering-memory", "derived"]
-source_fingerprint: "96cc7cc1ab1b6ffce03fcc129eddeb204aa7055eaa1bf7fa0ae93166b138d548"
+source_fingerprint: "a3ca147bd979a94dbef303840d2011bee8174b3878b384393f239b9a952b6c77"
 ---
 
 # Current State
@@ -12,8 +12,8 @@ source_fingerprint: "96cc7cc1ab1b6ffce03fcc129eddeb204aa7055eaa1bf7fa0ae93166b13
 
 This file is derived from immutable shards. Record new facts in shards, then render during integration.
 
-- Source fingerprint: `96cc7cc1ab1b6ffce03fcc129eddeb204aa7055eaa1bf7fa0ae93166b138d548`
-- Immutable records: 961
+- Source fingerprint: `a3ca147bd979a94dbef303840d2011bee8174b3878b384393f239b9a952b6c77`
+- Immutable records: 962
 - Active lane heads: 1
 
 # Active Registrations
@@ -69,6 +69,7 @@ This file is derived from immutable shards. Record new facts in shards, then ren
 
 # Recent Evidence
 
+- **Work Progress**: [Complete Prefab conversion source constraints and comparison plan](progress/2026-10/2026-10-27T014146Z-complete-prefab-conversion-source-constraints-and-comparison-plan-48bc7f5499704cd39c2f617a29916625.md) - Records the merged source-intent checkpoint, three executed conversion-basis probes and the next selected-demand/history comparison without claiming a conversion implementation.
 - **Verification Evidence**: [Source-owned Prefab intent review and revert qualification](verification/2026-10/2026-10-27T012127Z-source-owned-prefab-intent-review-and-revert-qualification-4b14705bceb545e79f34b7afbc5144bf.md) - Qualifies bounded declaration observation, reviewed exact Revert, rejected composition fencing and explicit property value limits with independent and selected Windows evidence.
 - **Work Progress**: [Caller-owned property value budget correction in progress](progress/2026-10/2026-10-27T003831Z-caller-owned-property-value-budget-correction-in-progress-97d2113cb1104680bf471d7d3b7f036f.md) - Source Revert cohorts pass; final review found an implicit property payload ceiling and a shared resolver budget correction is being implemented.
 - **Work Progress**: [Source-owned Prefab Revert integration and review corrections](progress/2026-10/2026-10-26T234134Z-source-owned-prefab-revert-integration-and-review-corrections-c8fb754f923b49de9812cb196b66a3d7.md) - Bounded source observation, exact Revert and retained rejected composition are integrated; source and UI review corrections await combined qualification.
@@ -80,7 +81,6 @@ This file is derived from immutable shards. Record new facts in shards, then ren
 - **Session Handoff**: [Shared Prefab compiler owner and Host verification before staged structural-demand replacement](sessions/2026-10/2026-10-26T163304Z-shared-prefab-compiler-owner-and-host-verification-before-staged-structural-demand-replacement-45d427ddb20d40b0acde05d288566775.md) - Shared Schema/Host integration has bounded passing evidence; one production structural-demand regression is intentionally unresolved, with the staged replacement selected.
 - **Work Progress**: [Shared authoring Prefab compilation and actual-demand capture integration checkpoint](progress/2026-10/2026-10-26T155605Z-shared-authoring-prefab-compilation-and-actual-demand-capture-integration-checkpoint-97e0cc8be0f24b7e8856ea8f88e7dbc4.md) - Uncommitted shared compiler and Host capture integration; structural-demand and early semantic admission counterexamples remain open.
 - **Work Progress**: [Production declarative Prefab overlay replacement integration in progress](progress/2026-10/2026-10-26T114409Z-production-declarative-prefab-overlay-replacement-integration-in-progress-b0111148a8964507912918f46ac2dace.md) - Breaking production replacement is in progress; do not commit or claim qualification until the complete owner/Host integration passes.
-- **Verification Evidence**: [Nested instance repair baseline and effective source-demand replacement design](verification/2026-10/2026-10-26T103859Z-nested-instance-repair-baseline-and-effective-source-demand-replacement-design-a6dbd3843c104c40b6ba817e428478f7.md) - Current exact nested replacement avoids discarded sources; the Proposed successor now separates source preservation, selection, activation and ordering.
 
 # Integration Notes
 
