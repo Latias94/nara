@@ -267,7 +267,7 @@ fn open_document(
 }
 
 fn edit_rotation(editor: &mut EditorProjectSession, document: EditorDocumentId, rotation: f32) {
-    let revision = editor.workspace.document_revision(document).unwrap();
+    let basis = editor.document_query_basis(document).unwrap();
     let patch = ScenePatchDocument::new([ScenePatchOperation::SetField {
         entity: SceneEntityId::new("body").unwrap(),
         component: transform_component(),
@@ -275,9 +275,7 @@ fn edit_rotation(editor: &mut EditorProjectSession, document: EditorDocumentId, 
         field: ComponentFieldId::new("rotation"),
         value: ComponentValue::f64(f64::from(rotation)).unwrap(),
     }]);
-    let prepared = editor
-        .prepare_authoring_edit(document, revision, &patch)
-        .unwrap();
+    let prepared = editor.prepare_authoring_edit(&basis, &patch).unwrap();
     let outcome = editor.commit_authoring_edit(prepared);
     let EditorActionOutcome::Workspace(report) = outcome else {
         panic!("a source-owned property edit must report its publication: {outcome:?}");

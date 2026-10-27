@@ -134,6 +134,10 @@ owner/declaration and stale-result counterexamples. Concrete language/tool produ
 remains. The [fixed-baseline review](../audits/2026-10-27-scene-runtime-and-extension-plan-review.md)
 records owning-contract corrections and concrete subsequent cleanups. No official C# SDK was
 selected. Complete-tool evaluation and owned-UI implementation remain independent.
+The [observation-bound preparation plan](../plans/2026-10-27-observation-bound-preparation-plan.md)
+owns the exposed preparation ergonomics correction: complete original query bases pass through
+Workspace, Session, Application and Panel while source-local Scene candidates keep their own
+revision/Schema contract.
 
 The [per-document persistence-custody design](editor-document-persistence-custody-design.md)
 specifies R5c's concrete replacement for the integrated Host's per-kind file lanes. It separates

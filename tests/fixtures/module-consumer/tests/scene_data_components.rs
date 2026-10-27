@@ -292,10 +292,8 @@ fn source_attach_edit_undo_save_reopen_then_runtime_replace_and_retire() {
             value: sensor(id("friend")).value.field("targets").unwrap().clone(),
         },
     ]);
-    let revision = editor.document_query_basis(document).unwrap().revision;
-    let prepared = editor
-        .prepare_authoring_edit(document, revision, &attach)
-        .unwrap();
+    let basis = editor.document_query_basis(document).unwrap();
+    let prepared = editor.prepare_authoring_edit(&basis, &attach).unwrap();
     applied(editor.commit_authoring_edit(prepared));
     editor.drive_editor_frame(Duration::ZERO);
     assert_eq!(
@@ -320,10 +318,8 @@ fn source_attach_edit_undo_save_reopen_then_runtime_replace_and_retire() {
         field: ComponentFieldId::new("amount"),
         value: ComponentValue::U64(7),
     }]);
-    let revision = editor.document_query_basis(document).unwrap().revision;
-    let prepared = editor
-        .prepare_authoring_edit(document, revision, &edit)
-        .unwrap();
+    let basis = editor.document_query_basis(document).unwrap();
+    let prepared = editor.prepare_authoring_edit(&basis, &edit).unwrap();
     let ScenePatchOperation::SetField { value, .. } = &prepared.inverse().operations[0] else {
         panic!("the source owner must prepare an exact field inverse");
     };
@@ -344,13 +340,8 @@ fn source_attach_edit_undo_save_reopen_then_runtime_replace_and_retire() {
             }
         };
         applied(dispatch(&mut editor, EditorAction::Mutate(mutation)));
-        let inverse = editor
-            .prepare_authoring_edit(
-                document,
-                editor.document_query_basis(document).unwrap().revision,
-                &edit,
-            )
-            .unwrap();
+        let basis = editor.document_query_basis(document).unwrap();
+        let inverse = editor.prepare_authoring_edit(&basis, &edit).unwrap();
         let ScenePatchOperation::SetField { value, .. } = &inverse.inverse().operations[0] else {
             panic!("the source owner must prepare an exact field inverse");
         };
@@ -416,9 +407,9 @@ fn source_attach_edit_undo_save_reopen_then_runtime_replace_and_retire() {
             .undo_depth,
         0
     );
-    let reopened_revision = editor.document_query_basis(reopened).unwrap().revision;
+    let reopened_basis = editor.document_query_basis(reopened).unwrap();
     let observed = editor
-        .prepare_authoring_edit(reopened, reopened_revision, &edit)
+        .prepare_authoring_edit(&reopened_basis, &edit)
         .unwrap();
     assert_eq!(observed.inverse(), &edit);
     drop(observed);

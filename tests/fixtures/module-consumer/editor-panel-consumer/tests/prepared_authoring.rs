@@ -706,10 +706,10 @@ impl ImguiEditorPanel for ConstructionPanel {
                     .unwrap();
             }
             let prepared = context
-                .prepare_authoring_construction(self.basis.document, &draft)
+                .prepare_authoring_construction(&self.basis, &draft)
                 .unwrap();
             let stale = context
-                .prepare_authoring_construction(self.basis.document, &draft)
+                .prepare_authoring_construction(&self.basis, &draft)
                 .unwrap();
             assert_eq!(prepared.base_revision(), self.basis.revision);
             assert_eq!(stale.base_revision(), prepared.base_revision());
@@ -1340,28 +1340,18 @@ fn an_independent_tool_edits_two_scenes_and_two_prefabs_without_selection_choreo
 
         let patch = construction(&schemas, 9);
         assert!(
-            app.prepare_authoring_edit(
-                document,
-                query_basis.revision,
-                &construction(&schemas, 256)
-            )
-            .is_err()
+            app.prepare_authoring_edit(&query_basis, &construction(&schemas, 256))
+                .is_err()
         );
         assert_eq!(frame(&app).workspace().documents, tabs);
-        let cancelled = app
-            .prepare_authoring_edit(document, query_basis.revision, &patch)
-            .unwrap();
+        let cancelled = app.prepare_authoring_edit(&query_basis, &patch).unwrap();
         assert_eq!(cancelled.patch(), &patch);
         assert_eq!(cancelled.inverse().operations.len(), 10);
         drop(cancelled);
         assert_eq!(frame(&app).workspace().documents, tabs);
         assert_untargeted(&app);
-        let prepared = app
-            .prepare_authoring_edit(document, query_basis.revision, &patch)
-            .unwrap();
-        let stale = app
-            .prepare_authoring_edit(document, query_basis.revision, &patch)
-            .unwrap();
+        let prepared = app.prepare_authoring_edit(&query_basis, &patch).unwrap();
+        let stale = app.prepare_authoring_edit(&query_basis, &patch).unwrap();
         let result = app.commit_authoring_edit(prepared, Duration::ZERO);
         assert!(
             matches!(result.actions(), [EditorApplicationActionDispatch::Dispatched(EditorActionOutcome::Workspace(report))] if report.applied)
@@ -1466,11 +1456,11 @@ fn an_independent_tool_edits_two_scenes_and_two_prefabs_without_selection_choreo
                 .unwrap()
             );
         }
-        let revision = basis(&app, document).revision;
+        let captured = basis(&app, document);
+        let revision = captured.revision;
         let old = app
             .prepare_authoring_edit(
-                document,
-                revision,
+                &captured,
                 &ScenePatchDocument::new([ScenePatchOperation::AddEntity {
                     entity: SceneEntityRecord::new(id("must-not-publish")),
                     placement: ScenePlacement::last(ScenePlacementOwner::Root),
@@ -1616,11 +1606,10 @@ fn an_independent_tool_edits_two_scenes_and_two_prefabs_without_selection_choreo
             .filter(|candidate| **candidate != source)
             .map(|candidate| (*candidate, fs::read(project.root.join(candidate)).unwrap()))
             .collect();
-        let revision = basis(&app, document).revision;
+        let captured = basis(&app, document);
         let prepared = app
             .prepare_authoring_edit(
-                document,
-                revision,
+                &captured,
                 &ScenePatchDocument::new([ScenePatchOperation::AddEntity {
                     entity: SceneEntityRecord::new(id("survivor-saved")),
                     placement: ScenePlacement::last(ScenePlacementOwner::Root),
@@ -1771,10 +1760,9 @@ fn retained_construction_publishes_exact_ids_through_non_active_public_documents
             );
         }
         let before = frame(&app);
-        let revision = basis(&app, document).revision;
-        let mut invalid = app
-            .begin_authoring_construction(document, revision)
-            .unwrap();
+        let captured = basis(&app, document);
+        let revision = captured.revision;
+        let mut invalid = app.begin_authoring_construction(&captured).unwrap();
         invalid
             .add_component(id("anchor"), ComponentTypeId::new("consumer.Link"))
             .unwrap();
@@ -1787,16 +1775,14 @@ fn retained_construction_publishes_exact_ids_through_non_active_public_documents
             )
             .unwrap();
         assert!(
-            app.prepare_authoring_construction(document, &invalid)
+            app.prepare_authoring_construction(&captured, &invalid)
                 .is_err()
         );
         assert_eq!(
             frame(&app).workspace().documents,
             before.workspace().documents
         );
-        let mut draft = app
-            .begin_authoring_construction(document, revision)
-            .unwrap();
+        let mut draft = app.begin_authoring_construction(&captured).unwrap();
         let first = draft
             .create_entity(ScenePlacement::last(ScenePlacementOwner::Root))
             .unwrap();
@@ -1829,7 +1815,7 @@ fn retained_construction_publishes_exact_ids_through_non_active_public_documents
                 .unwrap();
         }
         let cancelled = app
-            .prepare_authoring_construction(document, &draft)
+            .prepare_authoring_construction(&captured, &draft)
             .unwrap();
         assert_eq!(cancelled.document(), document);
         assert_eq!(cancelled.document_kind(), kind);
@@ -1852,10 +1838,10 @@ fn retained_construction_publishes_exact_ids_through_non_active_public_documents
         );
 
         let prepared = app
-            .prepare_authoring_construction(document, &draft)
+            .prepare_authoring_construction(&captured, &draft)
             .unwrap();
         let stale = app
-            .prepare_authoring_construction(document, &draft)
+            .prepare_authoring_construction(&captured, &draft)
             .unwrap();
         let first_id = prepared.entity(&first).unwrap().clone();
         let second_id = prepared.entity(&second).unwrap().clone();
@@ -1972,14 +1958,13 @@ fn retained_construction_publishes_exact_ids_through_non_active_public_documents
                 .unwrap()
             );
         }
-        let mut obsolete = app
-            .begin_authoring_construction(document, revision)
-            .unwrap();
+        let obsolete_basis = basis(&app, document);
+        let mut obsolete = app.begin_authoring_construction(&obsolete_basis).unwrap();
         let obsolete_local = obsolete
             .create_entity(ScenePlacement::last(ScenePlacementOwner::Root))
             .unwrap();
         let old = app
-            .prepare_authoring_construction(document, &obsolete)
+            .prepare_authoring_construction(&obsolete_basis, &obsolete)
             .unwrap();
         let attempt = frame(&app)
             .persistence()
@@ -2003,10 +1988,12 @@ fn retained_construction_publishes_exact_ids_through_non_active_public_documents
             basis(&app, document).revision.source_id(),
             revision.source_id()
         );
-        assert!(
-            app.prepare_authoring_construction(document, &obsolete)
-                .is_err()
-        );
+        assert!(matches!(
+            app.prepare_authoring_construction(&obsolete_basis, &obsolete),
+            Err(nara::project_host::EditorEditPreparationError::QueryBasis(
+                EditorDocumentQueryRejection::StaleIncarnation
+            ))
+        ));
         let rejected = app.commit_authoring_construction(old, Duration::ZERO);
         assert!(rejected.entity(&obsolete_local).is_none());
         let (rejection, mapping) = rejected.into_parts();
@@ -2078,8 +2065,9 @@ fn property_preparation_obeys_document_close_project_replacement_and_retirement(
             value: ComponentValue::U64(2),
         }];
         let before = frame(&app);
+        let captured = basis(&app, document);
         let prepared = app
-            .prepare_authoring_property_edit(document, basis(&app, document).revision, &edits)
+            .prepare_authoring_property_edit(&captured, &edits)
             .unwrap();
         assert_eq!(prepared.patch().operations.len(), 1);
         assert_eq!(
@@ -2091,18 +2079,16 @@ fn property_preparation_obeys_document_close_project_replacement_and_retirement(
             matches!(committed.actions(), [EditorApplicationActionDispatch::Dispatched(EditorActionOutcome::Workspace(report))] if report.applied)
         );
         edits[0].value = ComponentValue::U64(3);
-        let revision = basis(&app, document).revision;
+        let captured = basis(&app, document);
         let prepared = app
-            .prepare_authoring_property_edit(document, revision, &edits)
+            .prepare_authoring_property_edit(&captured, &edits)
             .unwrap();
-        let mut draft = app
-            .begin_authoring_construction(document, revision)
-            .unwrap();
+        let mut draft = app.begin_authoring_construction(&captured).unwrap();
         let local = draft
             .create_entity(ScenePlacement::last(ScenePlacementOwner::Root))
             .unwrap();
         let construction = app
-            .prepare_authoring_construction(document, &draft)
+            .prepare_authoring_construction(&captured, &draft)
             .unwrap();
         let documents = frame(&app).workspace().documents.clone();
         match guard {
@@ -2141,17 +2127,17 @@ fn property_preparation_obeys_document_close_project_replacement_and_retirement(
         }
         assert!(
             matches!(
-                app.prepare_authoring_property_edit(document, revision, &edits),
+                app.prepare_authoring_property_edit(&captured, &edits),
                 Err(EditorEditPreparationError::Closing)
             ),
             "{guard} admitted preparation"
         );
         assert!(matches!(
-            app.begin_authoring_construction(document, revision),
+            app.begin_authoring_construction(&captured),
             Err(EditorEditPreparationError::Closing)
         ));
         assert!(matches!(
-            app.prepare_authoring_construction(document, &draft),
+            app.prepare_authoring_construction(&captured, &draft),
             Err(EditorEditPreparationError::Closing)
         ));
         let rejected_construction = app.commit_authoring_construction(construction, Duration::ZERO);
@@ -2183,7 +2169,7 @@ fn property_preparation_obeys_document_close_project_replacement_and_retirement(
         let deadline = Instant::now() + Duration::from_secs(15);
         loop {
             if app
-                .prepare_authoring_property_edit(document, revision, &edits)
+                .prepare_authoring_property_edit(&captured, &edits)
                 .is_ok()
             {
                 break;
@@ -2203,7 +2189,7 @@ fn property_preparation_obeys_document_close_project_replacement_and_retirement(
             EditorAction::WorkspaceIntent(EditorWorkspaceIntentAction::AcknowledgeResult),
         );
         let obsolete = app
-            .prepare_authoring_construction(document, &draft)
+            .prepare_authoring_construction(&captured, &draft)
             .unwrap();
         if guard == "retirement" {
             assert!(app.close());
@@ -2249,10 +2235,9 @@ fn property_preparation_obeys_document_close_project_replacement_and_retirement(
                     let retired = if guard == "document-close" {
                         current.workspace().document(document).is_none()
                     } else {
-                        current
-                            .workspace()
-                            .document(document)
-                            .is_some_and(|tab| tab.revision.source_id() != revision.source_id())
+                        current.workspace().document(document).is_some_and(|tab| {
+                            tab.revision.source_id() != captured.revision.source_id()
+                        })
                     };
                     if retired {
                         break;
@@ -2363,7 +2348,8 @@ fn browser_prefab_persistence_round_trips_through_a_fresh_anchored_document() {
                     request,
                 }),
             );
-            let revision = basis(&app, document).revision;
+            let captured = basis(&app, document);
+            let revision = captured.revision;
             let action = if reopen_source {
                 fs::write(
                     &prefab_path,
@@ -2384,8 +2370,7 @@ fn browser_prefab_persistence_round_trips_through_a_fresh_anchored_document() {
             } else {
                 let prepared = app
                     .prepare_authoring_edit(
-                        document,
-                        revision,
+                        &captured,
                         &ScenePatchDocument::new([ScenePatchOperation::AddEntity {
                             entity: SceneEntityRecord::new(id("published")),
                             placement: ScenePlacement::last(ScenePlacementOwner::Root),

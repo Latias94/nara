@@ -2,11 +2,12 @@
 
 **Status**: Accepted
 **Date**: 2026-07-09
-**Last Revised**: 2026-10-27
+**Last Revised**: 2026-10-28
 **Amended**: 2026-08-15 to make selection single-owner and separate monotonic revision from
 receipt-backed content state
 **Amended**: 2026-10-27 to capture actual open Prefab working copies for authoring Scene preview
 with independent file evidence and complete content authorization
+**Amended**: 2026-10-28 to require complete retained observations at public authoring preparation ingress
 **Refines**: ADR 0015, ADR 0026, ADR 0034, ADR 0038, ADR 0043
 **Refined By**: [ADR 0104](0104-host-owned-editor-workspace-installation.md): Host-Owned Editor
 Workspace Installation
@@ -125,8 +126,15 @@ Rules:
   physical return; a cancellation acknowledgement alone cannot release the candidate or publish
   a conversion result. Review text, participant observations and source preparation copies are
   admitted against their owning budgets before the corresponding allocations.
-- Retained construction uses that same source owner. Workspace routes an explicit document plus
-  the draft's exact basis, and carries a nominal prepared construction with its fixed local mapping.
+- Observation-driven patch, property and construction preparation in Workspace, Project Session
+  and Application accepts the complete retained document-query basis. These ingress points
+  validate source incarnation, revision and exact Schema admission before interpreting intent.
+  A caller must not refresh the basis of an older proposal. The source-local Scene/Prefab APIs
+  retain their own revision/candidate contracts; tool code-publication/request identity is
+  separately owned by the concrete tool.
+- Retained construction uses that same source owner. Workspace routes the original complete
+  query basis plus the draft's exact source/Schema basis, and carries a nominal prepared
+  construction with its fixed local mapping. A new query cannot authorize an obsolete draft.
   No navigation change or generated-entity selection is implicit. Success returns the actual
   source IDs and exact report; rejection returns no successful mapping, including after Close,
   Reopen or replacement by another project's numerically equal document slot.

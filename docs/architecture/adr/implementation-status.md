@@ -359,6 +359,15 @@ described an internal headless panel test as independent; the successor and the
 correct that claim without rewriting historical evidence. This is not recursive/collection
 discovery, Prefab-overlay, native-window or full R2 qualification.
 
+The [observation-bound preparation successor](../../knowledge/engineering/verification/2026-10/2026-10-27T155752Z-complete-observation-bases-at-public-authoring-preparation-ingress-d45451eaca544ad2b50a55a66a0ce496.md)
+replaces revision-only Workspace/Session/Application preparation with complete retained query
+bases, including construction preparation. Panel adapters delegate that check to the common
+ingress; source-local Scene/Prefab candidates and commit-time admission remain unchanged.
+Real public negative consumers distinguish equal document/revision with missing or independently
+readmitted equivalent Schema, and preserve source/history/navigation/disk on refusal. Current
+observations cannot authorize an obsolete construction draft. Evidence and native scope belong
+to that successor; the complete foundation and extension workflows remain open.
+
 The [private Prefab intent comparison](../../knowledge/engineering/verification/2026-10/2026-10-26T025005Z-private-prefab-property-intent-comparison-and-next-owner-replacement-70ca642be09045ab909751b87ed5164d.md)
 separately demonstrates the difference between real root-patch lowering and retained scalar leaf
 intent. Its six test-private cases and Proposed design do not replace ADR 0038's current overlay

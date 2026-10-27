@@ -1,10 +1,13 @@
 #![cfg(feature = "snap-child-experiment")]
 
-use nara::{project_host::EditorProjectSession, scene::SceneDocumentCandidate};
+use nara::{
+    project_host::{EditorEditPreparationError, EditorProjectSession},
+    scene::SceneDocumentCandidate,
+};
 use nara_editor_panel_module_consumer::snap_local_position::{SnapInput, SnapPlan, read_requests};
 use nara_tooling::{
-    EditorAction, EditorDocumentMutation, EditorNavigationAction, EditorPersistenceAction,
-    EditorPersistenceResult, EditorReopenTarget,
+    EditorAction, EditorDocumentMutation, EditorDocumentQueryRejection, EditorNavigationAction,
+    EditorPersistenceAction, EditorPersistenceResult, EditorReopenTarget,
 };
 use std::{
     fs,
@@ -117,15 +120,8 @@ fn real_child_proposal_uses_inactive_source_owner_history_and_exact_persistence(
     };
     assert_eq!(proposal.before(), [23.0, -25.0]);
     assert_eq!(proposal.after(), [16.0, -32.0]);
-    session
-        .validate_authoring_query_basis(proposal.basis())
-        .unwrap();
     let candidate = session
-        .prepare_authoring_property_edit(
-            document,
-            proposal.basis().revision,
-            &proposal.property_edits(),
-        )
+        .prepare_authoring_property_edit(proposal.basis(), &proposal.property_edits())
         .unwrap();
     assert_eq!(candidate.patch(), &expected_patch(false));
     assert_eq!(candidate.inverse(), &expected_patch(true));
@@ -410,7 +406,7 @@ fn original_basis_refuses_a_real_child_response_after_edit_and_reopen() {
     ready(&cwd);
     let local = proposal(&session, document);
     let candidate = session
-        .prepare_authoring_property_edit(document, local.basis().revision, &local.property_edits())
+        .prepare_authoring_property_edit(local.basis(), &local.property_edits())
         .unwrap();
     applied(session.commit_authoring_edit(candidate));
     session.drive_editor_frame(Duration::ZERO);
@@ -426,15 +422,12 @@ fn original_basis_refuses_a_real_child_response_after_edit_and_reopen() {
             .is_err()
     );
     let before = session.current_frame();
-    assert!(
-        session
-            .prepare_authoring_property_edit(
-                document,
-                result.basis().revision,
-                &result.property_edits()
-            )
-            .is_err()
-    );
+    assert!(matches!(
+        session.prepare_authoring_property_edit(result.basis(), &result.property_edits()),
+        Err(EditorEditPreparationError::QueryBasis(
+            EditorDocumentQueryRejection::StaleRevision
+        ))
+    ));
     assert_eq!(session.current_frame().workspace(), before.workspace());
     let revision = basis(&session, document).revision;
     applied(dispatch(
@@ -479,15 +472,12 @@ fn original_basis_refuses_a_real_child_response_after_edit_and_reopen() {
             .validate_authoring_query_basis(late.basis())
             .is_err()
     );
-    assert!(
-        session
-            .prepare_authoring_property_edit(
-                document,
-                late.basis().revision,
-                &late.property_edits()
-            )
-            .is_err()
-    );
+    assert!(matches!(
+        session.prepare_authoring_property_edit(late.basis(), &late.property_edits()),
+        Err(EditorEditPreparationError::QueryBasis(
+            EditorDocumentQueryRejection::StaleIncarnation
+        ))
+    ));
     assert_eq!(session.current_frame().workspace(), reopened.workspace());
     assert!(session.validate_authoring_query_basis(&old_basis).is_err());
     assert_eq!(position(&session, document), [23.0, -25.0]);

@@ -3495,8 +3495,8 @@ mod tests {
                 .unwrap()
                 .opened_document
                 .unwrap();
-            let basis = editor.workspace.prefab(target).unwrap().revision();
-            let mut draft = editor.begin_authoring_construction(target, basis).unwrap();
+            let basis = editor.document_query_basis(target).unwrap();
+            let mut draft = editor.begin_authoring_construction(&basis).unwrap();
             let local = draft
                 .create_entity(nara_scene::ScenePlacement::last(
                     nara_scene::ScenePlacementOwner::Root,
@@ -3506,18 +3506,18 @@ mod tests {
                 draft.add_component(&local, ui_component.clone()).unwrap();
             }
             assert!(
-                matches!(editor.prepare_authoring_construction(target, &draft),
+                matches!(editor.prepare_authoring_construction(&basis, &draft),
                 Err(EditorEditPreparationError::StructureContractMismatch { document }) if document == target)
             );
             let bypass = editor
                 .workspace
-                .prepare_authoring_construction(target, &draft)
+                .prepare_authoring_construction(&basis, &draft)
                 .unwrap();
             assert!(matches!(editor.commit_authoring_construction(bypass),
                 Err(EditorActionOutcome::Rejected(nara_tooling::EditorActionRejection::StructureContractMismatch { document })) if document == target));
             let slot = editor.workspace.prefab(target).unwrap();
             assert_eq!(slot.session().document(), &source);
-            assert_eq!(slot.revision(), basis);
+            assert_eq!(slot.revision(), basis.revision);
             assert_eq!(slot.session().history_status().undo_depth, 0);
         }
         let deadline = Instant::now() + Duration::from_secs(5);

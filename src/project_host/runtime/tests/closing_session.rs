@@ -80,16 +80,15 @@ fn closing_session_rejects_retained_construction_at_owning_ingress() {
                 matches!(&selected.outcomes()[0], EditorActionOutcome::Workspace(report) if report.applied)
             );
             let revision = editor.workspace().document_revision(document).unwrap();
-            let mut draft = editor
-                .begin_authoring_construction(document, revision)
-                .unwrap();
+            let basis = editor.document_query_basis(document).unwrap();
+            let mut draft = editor.begin_authoring_construction(&basis).unwrap();
             let local = draft
                 .create_entity(nara_scene::ScenePlacement::last(
                     nara_scene::ScenePlacementOwner::Root,
                 ))
                 .unwrap();
             let prepared = editor
-                .prepare_authoring_construction(document, &draft)
+                .prepare_authoring_construction(&basis, &draft)
                 .unwrap();
             assert!(prepared.entity(&local).is_some());
             let before = document_state(&editor, document);
@@ -119,8 +118,8 @@ fn closing_session_rejects_retained_construction_at_owning_ingress() {
                 editor.workspace().document_revision(document),
                 Some(revision)
             );
-            let began = editor.begin_authoring_construction(document, revision);
-            let preparation = editor.prepare_authoring_construction(document, &draft);
+            let began = editor.begin_authoring_construction(&basis);
+            let preparation = editor.prepare_authoring_construction(&basis, &draft);
             let committed = editor.commit_authoring_construction(prepared);
             let after = document_state(&editor, document);
             let active_after = editor.workspace().active_document();

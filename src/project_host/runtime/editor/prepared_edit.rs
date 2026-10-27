@@ -2,8 +2,8 @@
 
 use nara_scene::{
     AuthoringConstructionDraft, AuthoringPropertyEdit, PrefabDeclarationLimits,
-    PrefabInstanceObservation, PrefabInstancePath, PrefabRevert, SceneAuthoringRevision,
-    ScenePatchDocument, ScenePatchOperation,
+    PrefabInstanceObservation, PrefabInstancePath, PrefabRevert, ScenePatchDocument,
+    ScenePatchOperation,
 };
 use nara_tooling::{
     CommittedEditorDocumentConstruction, EditorActionOutcome, EditorActionRejection,
@@ -88,8 +88,11 @@ impl EditorProjectSession {
             .map_err(|report| EditorEditPreparationError::Document(Box::new(report)))
     }
 
-    /// Validates a retained observation before source-owned preparation, without refreshing it.
-    /// Commit still revalidates the actual candidate and the current lifecycle independently.
+    /// Validates a retained observation for tool reads or results without refreshing it.
+    ///
+    /// Preparation entries already perform this check. Concrete tools may also need it before
+    /// interpreting external results or accepting a reviewed result; commit independently checks
+    /// its actual candidate and current lifecycle.
     pub fn validate_authoring_query_basis(
         &self,
         basis: &EditorDocumentQueryBasis,
@@ -102,32 +105,28 @@ impl EditorProjectSession {
             .map_err(EditorEditPreparationError::QueryBasis)
     }
 
-    /// Captures source-owned construction intent; no IDs or document state are published.
+    /// Captures intent at the complete retained observation; no IDs or state are published.
     pub fn begin_authoring_construction(
         &self,
-        document: EditorDocumentId,
-        base_revision: SceneAuthoringRevision,
+        basis: &EditorDocumentQueryBasis,
     ) -> Result<AuthoringConstructionDraft, EditorEditPreparationError> {
-        if !self.accepts_new_work() || self.pending_workspace_intent.is_some() {
-            return Err(EditorEditPreparationError::Closing);
-        }
+        self.validate_authoring_query_basis(basis)?;
         self.workspace
-            .begin_authoring_construction(document, base_revision)
+            .begin_authoring_construction(basis)
             .map_err(|report| EditorEditPreparationError::Document(Box::new(report)))
     }
 
     /// Keeps specialized Prefab admission after lowering, without a second transaction executor.
     pub fn prepare_authoring_construction(
         &self,
-        document: EditorDocumentId,
+        basis: &EditorDocumentQueryBasis,
         draft: &AuthoringConstructionDraft,
     ) -> Result<PreparedEditorDocumentConstruction, EditorEditPreparationError> {
-        if !self.accepts_new_work() || self.pending_workspace_intent.is_some() {
-            return Err(EditorEditPreparationError::Closing);
-        }
+        self.validate_authoring_query_basis(basis)?;
+        let document = basis.document;
         let prepared = self
             .workspace
-            .prepare_authoring_construction(document, draft)
+            .prepare_authoring_construction(basis, draft)
             .map_err(|report| EditorEditPreparationError::Document(Box::new(report)))?;
         self.verify_prepared_patch_contract(document, prepared.patch())
             .map_err(|_| EditorEditPreparationError::StructureContractMismatch { document })?;
@@ -163,39 +162,35 @@ impl EditorProjectSession {
         }
     }
 
-    /// Prepares stable-property edits in one source owner, independently of selection and tabs.
+    /// Prepares properties against the retained source/Schema observation, without navigation.
     pub fn prepare_authoring_property_edit(
         &self,
-        document: EditorDocumentId,
-        base_revision: SceneAuthoringRevision,
+        basis: &EditorDocumentQueryBasis,
         edits: &[AuthoringPropertyEdit],
     ) -> Result<PreparedEditorDocumentEdit, EditorEditPreparationError> {
-        if !self.accepts_new_work() || self.pending_workspace_intent.is_some() {
-            return Err(EditorEditPreparationError::Closing);
-        }
+        self.validate_authoring_query_basis(basis)?;
+        let document = basis.document;
         let prepared = self
             .workspace
-            .prepare_authoring_property_edit(document, base_revision, edits)
+            .prepare_authoring_property_edit(basis, edits)
             .map_err(|report| EditorEditPreparationError::Document(Box::new(report)))?;
         self.verify_prepared_patch_contract(document, prepared.patch())
             .map_err(|_| EditorEditPreparationError::StructureContractMismatch { document })?;
         Ok(prepared)
     }
 
-    /// Prepares an explicitly targeted data-authoring transaction without changing the frame.
+    /// Prepares an edit from the complete original observation without refreshing its basis.
     pub fn prepare_authoring_edit(
         &self,
-        document: EditorDocumentId,
-        base_revision: SceneAuthoringRevision,
+        basis: &EditorDocumentQueryBasis,
         patch: &ScenePatchDocument,
     ) -> Result<PreparedEditorDocumentEdit, EditorEditPreparationError> {
-        if !self.accepts_new_work() || self.pending_workspace_intent.is_some() {
-            return Err(EditorEditPreparationError::Closing);
-        }
+        self.validate_authoring_query_basis(basis)?;
+        let document = basis.document;
         self.verify_prepared_patch_contract(document, patch)
             .map_err(|_| EditorEditPreparationError::StructureContractMismatch { document })?;
         self.workspace
-            .prepare_authoring_edit(document, base_revision, patch)
+            .prepare_authoring_edit(basis, patch)
             .map_err(|report| EditorEditPreparationError::Document(Box::new(report)))
     }
 

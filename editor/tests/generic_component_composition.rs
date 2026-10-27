@@ -208,12 +208,12 @@ fn ordinary_prefab_composition_cannot_bypass_specialized_ui_structure_admission(
     assert!(app.current_ui_authoring_frame().is_some());
     let document = model.document;
     let revision = model.revision;
+    let basis = app.document_query_basis(document).unwrap();
     let history = model.editor.inspector.history;
     let source = fs::read(project.source(EditorDocumentKind::Prefab)).unwrap();
     assert!(matches!(
         app.prepare_authoring_edit(
-            document,
-            revision,
+            &basis,
             &ScenePatchDocument::new([ScenePatchOperation::AddEntity {
                 entity: SceneEntityRecord::new(SceneEntityId::new("unqualified-ui-node").unwrap()),
                 placement: ScenePlacement::last(ScenePlacementOwner::Root),

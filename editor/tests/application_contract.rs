@@ -215,16 +215,13 @@ fn prepared_application_commits_are_not_dispatched_during_close_or_after_retirem
     dirty_active_scene(&mut application);
     let before = current_frame(&application);
     let scene = before.workspace().active_scene.as_ref().unwrap();
+    let basis = application.document_query_basis(scene.document).unwrap();
     let patch = ScenePatchDocument::new([ScenePatchOperation::AddEntity {
         entity: SceneEntityRecord::new(SceneEntityId::new("never-published").unwrap()),
         placement: ScenePlacement::last(ScenePlacementOwner::Root),
     }]);
-    let closing = application
-        .prepare_authoring_edit(scene.document, scene.revision, &patch)
-        .unwrap();
-    let retired = application
-        .prepare_authoring_edit(scene.document, scene.revision, &patch)
-        .unwrap();
+    let closing = application.prepare_authoring_edit(&basis, &patch).unwrap();
+    let retired = application.prepare_authoring_edit(&basis, &patch).unwrap();
     application.request_exit();
     let blocked = application.commit_authoring_edit(closing, Duration::ZERO);
     let after_blocked = current_frame(&application);
@@ -912,11 +909,22 @@ fn reference_game_opens_through_the_same_ordinary_editor_api() {
     assert!(has_diagnostic(&frame, "scene.authoring-known-unbound"));
     assert!(!has_diagnostic(&frame, "scene.authoring-unknown-schema"));
     application.set_scene_preview_extent(Some(Extent2d::new(640, 360).unwrap()));
-    let _ =
-        application.submit_and_drive(EditorActionBatch::new(frame.revision(), []), Duration::ZERO);
-    let scene_candidate = application
-        .take_scene_preview_candidate()
-        .expect("ordinary Generic Open must publish one Scene preview candidate");
+    let deadline = Instant::now() + Duration::from_secs(10);
+    let scene_candidate = loop {
+        let revision = current_frame(&application).revision();
+        application.submit_and_drive(EditorActionBatch::new(revision, []), Duration::ZERO);
+        if let Some(candidate) = application.take_scene_preview_candidate() {
+            break candidate;
+        }
+        if Instant::now() >= deadline {
+            let diagnostics = current_frame(&application).diagnostics().clone();
+            close_direct_application(&mut application);
+            panic!(
+                "ordinary Generic Open did not finish Scene preview preparation: {diagnostics:?}"
+            );
+        }
+        std::thread::sleep(Duration::from_millis(1));
+    };
     let active_scene = frame.workspace().active_scene.as_ref().unwrap();
     assert_eq!(scene_candidate.document(), active_scene.document);
     assert_eq!(scene_candidate.revision(), active_scene.revision);
@@ -927,11 +935,44 @@ fn reference_game_opens_through_the_same_ordinary_editor_api() {
             .any(|hit| hit.entity().as_str() == "player-weapon"),
         "ordinary Generic Open must preserve one known renderable Sprite"
     );
-    assert!(!scene_candidate.preview_omissions().is_empty());
-    assert!(has_diagnostic(
-        &current_frame(&application),
-        "project.editor.authoring-scene-preview-source-omitted"
-    ));
+    use nara::scene::__private::{
+        AuthoringPreviewOmissionLocation, AuthoringPreviewOmissionReason,
+    };
+    for (expected_component, expected_reason) in [
+        (
+            "reference_game.EnemyRole",
+            AuthoringPreviewOmissionReason::RecordUnavailable(
+                nara::scene::AuthoringRecordReadiness::KnownUnbound,
+            ),
+        ),
+        (
+            "reference_game.WaveSpawn",
+            AuthoringPreviewOmissionReason::NativeBindingUnavailable,
+        ),
+    ] {
+        let mut anchors = scene_candidate
+            .preview_omissions()
+            .iter()
+            .filter_map(|omission| {
+                let AuthoringPreviewOmissionLocation::ProjectedEntityComponent {
+                    provenance,
+                    component,
+                    ..
+                } = omission.location()
+                else {
+                    return None;
+                };
+                (component.as_str() == expected_component && omission.reason() == expected_reason)
+                    .then(|| provenance.projection_path().unwrap().root_anchor().as_str())
+            })
+            .collect::<Vec<_>>();
+        anchors.sort_unstable();
+        assert_eq!(
+            anchors,
+            ["enemy-anchor", "enemy-anchor-2", "enemy-anchor-3"],
+            "every actual Prefab occurrence must retain its typed {expected_component} omission"
+        );
+    }
 
     let frame = current_frame(&application);
     let scene = frame.workspace().active_scene.as_ref().unwrap();
@@ -1009,6 +1050,7 @@ fn reference_game_opens_through_the_same_ordinary_editor_api() {
             .revision,
         ui_frame.revision()
     );
+    close_direct_application(&mut application);
 }
 
 #[test]

@@ -2,10 +2,7 @@
 
 use nara_scene::{PrefabDeclarationLimits, PrefabInstanceObservation, PrefabInstancePath};
 
-use super::{
-    EditorDocumentSlot, EditorWorkspace, EditorWorkspaceCommandReport, WorkspaceDocumentContext,
-    authoring_command_error_report, workspace_document_error_report, workspace_error_report,
-};
+use super::{EditorDocumentSlot, EditorWorkspace};
 use crate::{EditorDocumentQueryBasis, EditorDocumentQueryRejection};
 
 impl EditorWorkspace {
@@ -31,37 +28,4 @@ impl EditorWorkspace {
         };
         observation.map_err(EditorDocumentQueryRejection::PrefabDeclaration)
     }
-}
-
-pub(super) fn rejected_basis_report(
-    workspace: &EditorWorkspace,
-    basis: &EditorDocumentQueryBasis,
-    rejection: EditorDocumentQueryRejection,
-) -> EditorWorkspaceCommandReport {
-    let context = WorkspaceDocumentContext::new(workspace.active_document, Some(basis.document));
-    let (code, summary) = match rejection {
-        EditorDocumentQueryRejection::DocumentNotOpen { document } => {
-            return workspace_document_error_report(context, document);
-        }
-        EditorDocumentQueryRejection::UnsupportedDocumentKind { .. } => {
-            return authoring_command_error_report(workspace.active_document, basis.document);
-        }
-        EditorDocumentQueryRejection::StaleIncarnation => (
-            "tooling.workspace-stale-document-incarnation",
-            "Prefab Revert targets a different source incarnation",
-        ),
-        EditorDocumentQueryRejection::StaleRevision => (
-            "tooling.workspace-stale-document-revision",
-            "Prefab Revert targets a stale document revision",
-        ),
-        EditorDocumentQueryRejection::StaleSchema => (
-            "tooling.workspace-stale-schema-basis",
-            "Prefab Revert requires the exact current Schema admission",
-        ),
-        _ => (
-            "tooling.workspace-prefab-revert-basis-rejected",
-            "Prefab Revert requires a current Scene or Prefab document query basis",
-        ),
-    };
-    workspace_error_report(context, code, summary)
 }

@@ -150,14 +150,13 @@ fn feature_off_editor_preserves_ui_structure_gate_for_retained_data_catalogs() {
     let document = model.document;
     let revision = model.revision;
     let history = model.editor.inspector.history;
-    let mut draft = editor
-        .begin_authoring_construction(document, revision)
-        .unwrap();
+    let basis = editor.document_query_basis(document).unwrap();
+    let mut draft = editor.begin_authoring_construction(&basis).unwrap();
     draft
         .create_entity(ScenePlacement::last(ScenePlacementOwner::Root))
         .unwrap();
     assert!(
-        matches!(editor.prepare_authoring_construction(document, &draft),
+        matches!(editor.prepare_authoring_construction(&basis, &draft),
         Err(nara::project_host::EditorEditPreparationError::StructureContractMismatch { document: rejected }) if rejected == document)
     );
     let report = editor

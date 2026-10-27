@@ -5,7 +5,10 @@ use nara_reflect::{
 };
 use nara_scene::{AuthoringEntityView, AuthoringPropertyValue, AuthoringRecordFact, SceneEntityId};
 
-use super::{EditorDocumentSlot, EditorWorkspace};
+use super::{
+    EditorDocumentSlot, EditorWorkspace, EditorWorkspaceCommandReport, WorkspaceDocumentContext,
+    authoring_command_error_report, workspace_document_error_report, workspace_error_report,
+};
 use crate::{
     EditorAuthoringCursor, EditorAuthoringMemberStatus, EditorAuthoringPage,
     EditorAuthoringProjection, EditorAuthoringQuery, EditorAuthoringQueryPosition,
@@ -14,8 +17,42 @@ use crate::{
     authoring_query::AuthoringPagePosition,
 };
 
+pub(super) fn rejected_basis_report(
+    workspace: &EditorWorkspace,
+    basis: &EditorDocumentQueryBasis,
+    rejection: EditorDocumentQueryRejection,
+) -> EditorWorkspaceCommandReport {
+    let context = WorkspaceDocumentContext::new(workspace.active_document, Some(basis.document));
+    let (code, summary) = match rejection {
+        EditorDocumentQueryRejection::DocumentNotOpen { document } => {
+            return workspace_document_error_report(context, document);
+        }
+        EditorDocumentQueryRejection::UnsupportedDocumentKind { .. } => {
+            return authoring_command_error_report(workspace.active_document, basis.document);
+        }
+        EditorDocumentQueryRejection::StaleIncarnation => (
+            "tooling.workspace-stale-document-incarnation",
+            "Authoring operation targets a different source incarnation",
+        ),
+        EditorDocumentQueryRejection::StaleRevision => (
+            "tooling.workspace-stale-document-revision",
+            "Authoring operation targets a stale document revision",
+        ),
+        EditorDocumentQueryRejection::StaleSchema => (
+            "tooling.workspace-stale-schema-basis",
+            "Authoring operation requires the exact current Schema admission",
+        ),
+        _ => (
+            "tooling.workspace-authoring-basis-rejected",
+            "Authoring operation requires a current Scene or Prefab document query basis",
+        ),
+    };
+    workspace_error_report(context, code, summary)
+}
+
 impl EditorWorkspace {
-    /// Checks a captured read basis before an adapter prepares an edit from its observation.
+    /// Checks a captured observation for read/result processing without refreshing it.
+    /// Prepared-authoring entry points already require and validate this complete basis.
     /// This does not reserve a revision or replace the candidate's commit-time admission.
     pub fn validate_document_query_basis(
         &self,

@@ -223,9 +223,8 @@ work to 64 entries/4096 logical bytes. A budget refusal is a tool error, not per
 the complete Inspector or component. The pure planner checks the two observations' exact target
 and basis; it neither checks current liveness nor mutates a document.
 
-The panel uses context preparation to validate that basis. A window-free Session consumer must
-explicitly call `validate_authoring_query_basis(proposal.basis())` before
-`prepare_authoring_property_edit(document, proposal.basis().revision, &proposal.property_edits())`,
+The panel and window-free Session use the same complete-observation preparation contract:
+`prepare_authoring_property_edit(proposal.basis(), &proposal.property_edits())`,
 then consume the prepared edit through `commit_authoring_edit`. Only changed axes enter one
 Source-owned transaction and one Undo entry. No adapter constructs its own inverse or history.
 An intervening edit rejects the stale candidate rather than silently rebasing it. The panel retains
@@ -284,8 +283,8 @@ Direct Application consumers can preview an edit of an explicitly named open Sce
 without changing its tab or selection:
 
 ```rust,ignore
-let tab = frame.workspace().document(document).unwrap();
-let prepared = application.prepare_authoring_edit(document, tab.revision, &patch)?;
+let basis = application.document_query_basis(document)?;
+let prepared = application.prepare_authoring_edit(&basis, &patch)?;
 preview_changes(prepared.patch(), prepared.inverse());
 let submission = application.commit_authoring_edit(prepared, Duration::ZERO);
 observe_dispatch(submission.actions());
@@ -296,6 +295,9 @@ inverse inspected by the caller. Dropping the value publishes nothing. Commit re
 original document/session, revision and Schema admission; an edit, Undo/Redo, Reopen or project
 replacement cannot silently rebase it. Specialized UI Prefab structure still requires its domain
 contract. The result uses the existing owned Application submission, not a result ticket.
+Preparation itself validates that complete original observation, including exact Schema admission,
+before interpreting intent. A freshly captured basis cannot replace the observation underlying an
+older proposal. Tool publication and request identity remain the concrete tool owner's obligations.
 
 Mixed construction admits one bounded ordered patch: create empty direct entities, add admitted
 component templates and edit their fields/references. Final classification and forward/inverse
@@ -411,7 +413,7 @@ self.prepared = Some(prepared);
 
 `prepare_authoring_edit(&basis, &patch)` supports an existing atomic patch.
 `begin_authoring_construction(&basis)` and
-`prepare_authoring_construction(document, &draft)` reuse the existing source-owned draft and
+`prepare_authoring_construction(&basis, &draft)` reuse the existing source-owned draft and
 fixed local-reference mapping. The source owners retain validation, inverse and history authority.
 Preparing, inspecting or retaining a candidate changes no document, selection or dirty state.
 Drop it to cancel before submission; changing tool inputs should replace the candidate rather
@@ -478,7 +480,8 @@ The direct Application experiment allows multiple new entities and references wi
 persistent IDs or copying creation-template owner/version metadata into caller-built records:
 
 ```rust,ignore
-let mut draft = application.begin_authoring_construction(document, tab.revision)?;
+let basis = application.document_query_basis(document)?;
+let mut draft = application.begin_authoring_construction(&basis)?;
 let first = draft.create_entity(ScenePlacement::last(ScenePlacementOwner::Root))?;
 let second = draft.create_entity(ConstructionPlacement::ChildOf((&first).into()))?;
 for local in [&first, &second] {
@@ -487,7 +490,7 @@ for local in [&first, &second] {
 let target = ComponentPropertyPath::new(ComponentFieldId::new("target"));
 draft.set_entity_reference(&first, ComponentTypeId::new("game.Link"), target.clone(), &second)?;
 draft.set_entity_reference(&second, ComponentTypeId::new("game.Link"), target, &first)?;
-let prepared = application.prepare_authoring_construction(document, &draft)?;
+let prepared = application.prepare_authoring_construction(&basis, &draft)?;
 preview_changes(prepared.patch(), prepared.inverse());
 let result = application.commit_authoring_construction(prepared, Duration::ZERO);
 observe_dispatch(result.submission().actions());

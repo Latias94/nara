@@ -477,7 +477,7 @@ fn a_workspace_panel_can_retain_and_drop_preparation_for_a_nonactive_source_with
             .create_entity(ScenePlacement::last(ScenePlacementOwner::Root))
             .unwrap();
         let construction = context
-            .prepare_authoring_construction(basis.document, &draft)
+            .prepare_authoring_construction(&basis, &draft)
             .unwrap();
         assert!(construction.entity(&local).is_some());
         assert_eq!(construction.patch().operations.len(), 1);
@@ -508,6 +508,13 @@ fn panel_preparation_checks_the_complete_schema_basis_before_lowering_any_edit()
 
     let mut harness = Harness::new(1);
     let mut basis = authoring_basis(&harness);
+    let mut draft = harness
+        .application
+        .begin_authoring_construction(&basis)
+        .unwrap();
+    draft
+        .create_entity(ScenePlacement::last(ScenePlacementOwner::Root))
+        .unwrap();
     assert!(basis.schema.take().is_some());
     let before = harness.application.current_frame().unwrap();
     let painted = Rc::new(RefCell::new(false));
@@ -521,6 +528,9 @@ fn panel_preparation_checks_the_complete_schema_basis_before_lowering_any_edit()
                 .prepare_authoring_property_edit(&basis, &[])
                 .unwrap_err(),
             context.begin_authoring_construction(&basis).unwrap_err(),
+            context
+                .prepare_authoring_construction(&basis, &draft)
+                .unwrap_err(),
         ];
         for error in errors {
             assert_eq!(
@@ -687,7 +697,7 @@ fn panel_construction_delivers_the_owner_mapping_and_supports_a_followup_propert
             )
             .unwrap();
         let prepared = context
-            .prepare_authoring_construction(basis.document, &draft)
+            .prepare_authoring_construction(&basis, &draft)
             .unwrap();
         let entity = prepared.entity(&local).unwrap().clone();
         let id = context.commit_authoring_construction(prepared).unwrap();
@@ -786,7 +796,7 @@ fn panel_queue_refusal_preserves_both_owned_candidates_without_a_commit_callback
             .create_entity(ScenePlacement::last(ScenePlacementOwner::Root))
             .unwrap();
         let construction = context
-            .prepare_authoring_construction(basis.document, &draft)
+            .prepare_authoring_construction(&basis, &draft)
             .unwrap();
         let entity = construction.entity(&local).unwrap().clone();
         for _ in 0..super::submission::MAX_PANEL_SUBMISSIONS {
@@ -942,7 +952,7 @@ fn the_same_capacity_refused_construction_keeps_its_preview_mapping_on_retry() {
             .create_entity(ScenePlacement::last(ScenePlacementOwner::Root))
             .unwrap();
         let construction = context
-            .prepare_authoring_construction(document, &draft)
+            .prepare_authoring_construction(&basis, &draft)
             .unwrap();
         let preview = construction.entity(&local).unwrap().clone();
         for _ in 0..super::submission::MAX_PANEL_SUBMISSIONS {
@@ -1046,7 +1056,7 @@ fn queue_both_prepared_candidates(
             .create_entity(ScenePlacement::last(ScenePlacementOwner::Root))
             .unwrap();
         let construction = context
-            .prepare_authoring_construction(basis.document, &draft)
+            .prepare_authoring_construction(&basis, &draft)
             .unwrap();
         assert!(construction.entity(&local).is_some());
         *captured.borrow_mut() = Some([
@@ -1300,7 +1310,7 @@ fn closing_filter_refuses_both_candidates_around_an_allowed_close_resolution() {
             .create_entity(ScenePlacement::last(ScenePlacementOwner::Root))
             .unwrap();
         let construction = context
-            .prepare_authoring_construction(document, &draft)
+            .prepare_authoring_construction(&basis, &draft)
             .unwrap();
         *captured.borrow_mut() = Some((edit, construction));
     }));

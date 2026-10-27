@@ -218,7 +218,7 @@ impl EnemyStatsTool {
         proposal: Proposal,
     ) -> Result<ReviewedEdit, ToolError> {
         self.validate_publication(&proposal.publication)?;
-        editor.validate_authoring_query_basis(&proposal.basis)?;
+        let mut draft = editor.begin_authoring_construction(&proposal.basis)?;
         self.validate_request(&proposal.request)?;
         let output = proposal.output;
         if output.writes.is_empty() || output.writes.len() > 8 {
@@ -241,8 +241,6 @@ impl EnemyStatsTool {
         if bytes > 4096 {
             return Err(ToolError::InvalidProposal);
         }
-        let mut draft = editor
-            .begin_authoring_construction(proposal.basis.document, proposal.basis.revision)?;
         let created = match &proposal.command {
             Command::Spawn(_) => Some(
                 draft
@@ -285,7 +283,7 @@ impl EnemyStatsTool {
                 )
                 .map_err(|report| ToolError::Draft(format!("{report:?}")))?;
         }
-        let prepared = editor.prepare_authoring_construction(proposal.basis.document, &draft)?;
+        let prepared = editor.prepare_authoring_construction(&proposal.basis, &draft)?;
         Ok(ReviewedEdit {
             publication: proposal.publication,
             request: proposal.request,

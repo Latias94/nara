@@ -7,7 +7,7 @@ use nara::{
         ComponentPropertyError, ComponentPropertyKey, ComponentPropertyStep, ComponentShapeMember,
         ComponentValueShape,
     },
-    scene::AuthoringReadError,
+    scene::{AuthoringReadError, AuthoringSchemaBasis},
 };
 
 const COMPONENT: &str = "consumer.property.PanelSettings";
@@ -471,6 +471,101 @@ fn property_fixture(kind: EditorDocumentKind, source: &str) -> PropertyFixture {
         contents,
         active,
         document,
+    }
+}
+
+#[test]
+fn application_preparation_checks_the_retained_schema_admission_before_lowering_intent() {
+    use nara::project_host::EditorEditPreparationError;
+
+    for (kind, source) in [
+        (EditorDocumentKind::Scene, "scenes/schema-basis.scene.json"),
+        (
+            EditorDocumentKind::Prefab,
+            "prefabs/schema-basis.prefab.json",
+        ),
+    ] {
+        let PropertyFixture {
+            project,
+            mut app,
+            startup,
+            contents,
+            document,
+            ..
+        } = property_fixture(kind, source);
+        let before = frame(&app);
+        let captured = app.document_query_basis(document).unwrap();
+        let independent = AuthoringSchemaBasis::admit(&schemas(), &[]).unwrap();
+        let component = ComponentTypeId::new(COMPONENT);
+        assert_ne!(captured.schema.as_ref(), Some(&independent));
+        assert_eq!(
+            captured.schema.as_ref().unwrap().schema(&component),
+            independent.schema(&component)
+        );
+        let patch = ScenePatchDocument::new([ScenePatchOperation::AddEntity {
+            entity: SceneEntityRecord::new(id("schema-basis-candidate")),
+            placement: ScenePlacement::last(ScenePlacementOwner::Root),
+        }]);
+        let edits = [AuthoringPropertyEdit {
+            entity: id("anchor"),
+            component,
+            component_version: ComponentSchemaVersion::ONE,
+            property: score_path(ROW_KEY),
+            value: ComponentValue::U64(ORIGINAL + 2),
+        }];
+        let mut draft = app.begin_authoring_construction(&captured).unwrap();
+        draft
+            .create_entity(ScenePlacement::last(ScenePlacementOwner::Root))
+            .unwrap();
+        for schema in [None, Some(independent)] {
+            let wrong_schema = EditorDocumentQueryBasis {
+                schema,
+                ..captured.clone()
+            };
+            assert_eq!(wrong_schema.document, captured.document);
+            assert_eq!(wrong_schema.revision, captured.revision);
+            for error in [
+                app.prepare_authoring_edit(&wrong_schema, &patch)
+                    .unwrap_err(),
+                app.prepare_authoring_property_edit(&wrong_schema, &edits)
+                    .unwrap_err(),
+                app.begin_authoring_construction(&wrong_schema).unwrap_err(),
+                app.prepare_authoring_construction(&wrong_schema, &draft)
+                    .unwrap_err(),
+            ] {
+                assert_eq!(
+                    error,
+                    EditorEditPreparationError::QueryBasis(
+                        EditorDocumentQueryRejection::StaleSchema
+                    )
+                );
+            }
+            assert!(std::sync::Arc::ptr_eq(&before, &frame(&app)));
+            assert_eq!(
+                frame(&app).workspace().documents,
+                before.workspace().documents
+            );
+            assert_navigation(&app, document, &before);
+        }
+        drop(app.prepare_authoring_edit(&captured, &patch).unwrap());
+        drop(
+            app.prepare_authoring_property_edit(&captured, &edits)
+                .unwrap(),
+        );
+        drop(
+            app.prepare_authoring_construction(&captured, &draft)
+                .unwrap(),
+        );
+        assert!(std::sync::Arc::ptr_eq(&before, &frame(&app)));
+        assert_eq!(
+            fs::read_to_string(project.root.join(source)).unwrap(),
+            contents
+        );
+        assert_eq!(
+            fs::read_to_string(project.root.join("scenes/startup.scene.json")).unwrap(),
+            startup
+        );
+        assert!(app.close());
     }
 }
 
@@ -1055,12 +1150,8 @@ fn a_panel_first_writes_a_defaulted_leaf_and_undo_restores_absent_source_storage
             };
             let mut missing_item = edit.clone();
             missing_item.property = score_path("absent");
-            let Err(EditorEditPreparationError::Document(rejected)) = app
-                .prepare_authoring_property_edit(
-                    document,
-                    captured.revision,
-                    &[edit.clone(), missing_item],
-                )
+            let Err(EditorEditPreparationError::Document(rejected)) =
+                app.prepare_authoring_property_edit(&captured, &[edit.clone(), missing_item])
             else {
                 panic!("the late missing-item edit must reject the entire default-write batch");
             };
@@ -1080,6 +1171,27 @@ fn a_panel_first_writes_a_defaulted_leaf_and_undo_restores_absent_source_storage
                                 )
                     })
             }));
+            let read_only = AuthoringPropertyEdit {
+                entity: id("anchor"),
+                component: ComponentTypeId::new("consumer.Unknown"),
+                component_version: ComponentSchemaVersion(7),
+                property: ComponentPropertyPath::new(ComponentFieldId::new("opaque")),
+                value: ComponentValue::String("must not publish".into()),
+            };
+            let Err(EditorEditPreparationError::Document(rejected)) =
+                app.prepare_authoring_property_edit(&captured, &[edit.clone(), read_only])
+            else {
+                panic!("the late read-only edit must reject the entire default-write batch");
+            };
+            assert!(!rejected.applied);
+            assert!(rejected.patch_report.as_ref().unwrap().inverse.is_none());
+            assert!(rejected.diagnostics.iter().any(|diagnostic| {
+                diagnostic.code().as_str() == "scene.authoring-property-edit-rejected"
+                    && diagnostic.fields().iter().any(|field| {
+                        field.key().as_str() == "operation-index"
+                            && field.value() == nara::diagnostic::DiagnosticValueRef::Unsigned(1)
+                    })
+            }));
             assert_default_score(
                 &mut app,
                 document,
@@ -1089,16 +1201,13 @@ fn a_panel_first_writes_a_defaulted_leaf_and_undo_restores_absent_source_storage
                 frame(&app).workspace().documents,
                 initial.workspace().documents
             );
+            assert_navigation(&app, document, &initial);
             assert_eq!(
                 fs::read_to_string(project.root.join(source)).unwrap(),
                 contents
             );
             let stale_after_undo = app
-                .prepare_authoring_property_edit(
-                    document,
-                    captured.revision,
-                    std::slice::from_ref(&edit),
-                )
+                .prepare_authoring_property_edit(&captured, std::slice::from_ref(&edit))
                 .unwrap();
 
             let evidence = Rc::new(RefCell::new(PanelEvidence::default()));
@@ -1256,11 +1365,10 @@ fn a_panel_first_writes_a_defaulted_leaf_and_undo_restores_absent_source_storage
                             })
                     ));
                     assert!(matches!(
-                        app.prepare_authoring_property_edit(document, captured.revision, std::slice::from_ref(&edit)),
-                        Err(EditorEditPreparationError::Document(report))
-                            if !report.applied && report.diagnostics.iter().any(|diagnostic| {
-                                diagnostic.code().as_str() == "tooling.workspace-stale-document-revision"
-                            })
+                        app.prepare_authoring_property_edit(&captured, std::slice::from_ref(&edit)),
+                        Err(EditorEditPreparationError::QueryBasis(
+                            EditorDocumentQueryRejection::StaleRevision
+                        ))
                     ));
                     assert_default_score(&mut app, document, value.clone());
                     assert_eq!(

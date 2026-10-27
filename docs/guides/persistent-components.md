@@ -584,6 +584,11 @@ remain unchanged. This path replaces existing stored targets; root omission/defa
 uses the existing root-field operations. It is not a complete document/Prefab-occurrence address
 and remains separate from the declarative Prefab overlay namespace and actual composition.
 
+Workspace, Project Session and Application preparation takes the complete retained
+`EditorDocumentQueryBasis`, including exact Schema admission. Source-local Scene/Prefab
+preparation takes its source revision. Retain the original observation when preparing later;
+capturing a new basis cannot authorize values planned from an older one.
+
 Resolution failures retain `operation-index`, a static `property-error-kind`, and a
 `property-step-index` when the failing selector step is known. Tools can distinguish missing
 optional containers, retired targets and changed list identity policy without reparsing values.

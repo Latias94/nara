@@ -367,7 +367,7 @@ fn run_mode(
             (prepare_ns, Some(enqueue_ns), consume_ns)
         } else {
             let started = Instant::now();
-            let prepared = app.prepare_authoring_property_edit(document, captured.revision, &edits);
+            let prepared = app.prepare_authoring_property_edit(&captured, &edits);
             let prepare_ns = started.elapsed().as_nanos();
             let prepared = prepared.unwrap();
             assert_candidate(&prepared, &captured);

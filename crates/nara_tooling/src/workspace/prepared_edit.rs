@@ -3,9 +3,8 @@
 use super::{
     EditorDocumentId, EditorDocumentKind, EditorDocumentSlot, EditorWorkspace,
     EditorWorkspaceCommandReport, WorkspaceDocumentContext, authoring_command_error_report,
-    authoring_document_error_report, prefab_declarations::rejected_basis_report,
-    report_for_document, report_for_document_patch, workspace_document_error_report,
-    workspace_revision_error_report,
+    authoring_document_error_report, authoring_query::rejected_basis_report, report_for_document,
+    report_for_document_patch, workspace_document_error_report, workspace_revision_error_report,
 };
 use crate::EditorDocumentQueryBasis;
 use nara_scene::{
@@ -92,24 +91,22 @@ impl PreparedEditorDocumentEdit {
 }
 
 impl EditorWorkspace {
-    /// Prepares a data-authoring edit without changing navigation, selection or saved state.
+    /// Prepares an edit against the complete retained observation without changing navigation.
     pub fn prepare_authoring_edit(
         &self,
-        document: EditorDocumentId,
-        base_revision: SceneAuthoringRevision,
+        basis: &EditorDocumentQueryBasis,
         patch: &ScenePatchDocument,
     ) -> Result<PreparedEditorDocumentEdit, EditorWorkspaceCommandReport> {
-        self.prepare_edit(document, base_revision, EditRequest::Patch(patch))
+        self.prepare_edit(basis, EditRequest::Patch(patch))
     }
 
     /// Prepares ordered stable-property edits without making the requested document active.
     pub fn prepare_authoring_property_edit(
         &self,
-        document: EditorDocumentId,
-        base_revision: SceneAuthoringRevision,
+        basis: &EditorDocumentQueryBasis,
         edits: &[AuthoringPropertyEdit],
     ) -> Result<PreparedEditorDocumentEdit, EditorWorkspaceCommandReport> {
-        self.prepare_edit(document, base_revision, EditRequest::Properties(edits))
+        self.prepare_edit(basis, EditRequest::Properties(edits))
     }
 
     /// Prepares one source-owned Revert without activating its document or changing selection.
@@ -124,11 +121,8 @@ impl EditorWorkspace {
         action: PrefabRevert,
         limits: PrefabDeclarationLimits,
     ) -> Result<PreparedEditorDocumentEdit, EditorWorkspaceCommandReport> {
-        self.validate_document_query_basis(basis)
-            .map_err(|error| rejected_basis_report(self, basis, error))?;
         self.prepare_edit(
-            basis.document,
-            basis.revision,
+            basis,
             EditRequest::PrefabRevert {
                 path,
                 action,
@@ -139,10 +133,13 @@ impl EditorWorkspace {
 
     fn prepare_edit(
         &self,
-        document: EditorDocumentId,
-        base_revision: SceneAuthoringRevision,
+        basis: &EditorDocumentQueryBasis,
         request: EditRequest<'_>,
     ) -> Result<PreparedEditorDocumentEdit, EditorWorkspaceCommandReport> {
+        self.validate_document_query_basis(basis)
+            .map_err(|error| rejected_basis_report(self, basis, error))?;
+        let document = basis.document;
+        let base_revision = basis.revision;
         let slot = self.resolve_authoring_preparation_slot(document, base_revision)?;
         let origin = match &request {
             EditRequest::PrefabRevert { .. } => PreparedEditOrigin::PrefabRevert,

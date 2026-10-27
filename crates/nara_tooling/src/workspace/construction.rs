@@ -6,8 +6,10 @@ use nara_scene::{
 
 use super::{
     EditorDocumentId, EditorDocumentKind, EditorDocumentSlot, EditorWorkspace,
-    EditorWorkspaceCommandReport, authoring_command_error_report, report_for_document_patch,
+    EditorWorkspaceCommandReport, authoring_command_error_report,
+    authoring_query::rejected_basis_report, report_for_document_patch,
 };
+use crate::EditorDocumentQueryBasis;
 
 /// One source-owned candidate and fixed local mapping, without selection or Workspace custody.
 #[derive(Debug)]
@@ -97,9 +99,12 @@ impl EditorWorkspace {
     /// Starts bounded intent at the exact source basis without publishing or changing navigation.
     pub fn begin_authoring_construction(
         &self,
-        document: EditorDocumentId,
-        base_revision: SceneAuthoringRevision,
+        basis: &EditorDocumentQueryBasis,
     ) -> Result<AuthoringConstructionDraft, EditorWorkspaceCommandReport> {
+        self.validate_document_query_basis(basis)
+            .map_err(|error| rejected_basis_report(self, basis, error))?;
+        let document = basis.document;
+        let base_revision = basis.revision;
         let slot = self.resolve_authoring_preparation_slot(document, base_revision)?;
         let result = match slot {
             EditorDocumentSlot::Scene(slot) => {
@@ -121,9 +126,12 @@ impl EditorWorkspace {
     /// Resolves locals once using the original document's templates, candidate and inverse owner.
     pub fn prepare_authoring_construction(
         &self,
-        document: EditorDocumentId,
+        basis: &EditorDocumentQueryBasis,
         draft: &AuthoringConstructionDraft,
     ) -> Result<PreparedEditorDocumentConstruction, EditorWorkspaceCommandReport> {
+        self.validate_document_query_basis(basis)
+            .map_err(|error| rejected_basis_report(self, basis, error))?;
+        let document = basis.document;
         let slot = self.resolve_authoring_preparation_slot(document, draft.base_revision())?;
         let result = match slot {
             EditorDocumentSlot::Scene(slot) => slot

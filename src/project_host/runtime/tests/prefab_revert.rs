@@ -62,12 +62,12 @@ fn ui_prefab_revert_uses_source_owner_proof_and_keeps_one_undo() {
         .unwrap();
     assert!(prepared.is_prefab_revert());
     assert!(matches!(
-        editor.prepare_authoring_edit(document, basis.revision, prepared.patch()),
+        editor.prepare_authoring_edit(&basis, prepared.patch()),
         Err(editor::EditorEditPreparationError::StructureContractMismatch { .. }),
     ));
     let lookalike = editor
         .workspace()
-        .prepare_authoring_edit(document, basis.revision, prepared.patch())
+        .prepare_authoring_edit(&basis, prepared.patch())
         .unwrap();
     assert!(!lookalike.is_prefab_revert());
     assert!(matches!(

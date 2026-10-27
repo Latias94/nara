@@ -210,16 +210,9 @@ fn window_free_session_snaps_an_inactive_source_with_one_undo_and_exact_save_reo
     assert_eq!(intent.before(), [23.0, -25.0]);
     assert_eq!(intent.after(), [16.0, -32.0]);
     assert_eq!(intent.grid(), DEFAULT_GRID);
-    session
-        .validate_authoring_query_basis(intent.basis())
-        .unwrap();
     let prepare = || {
         session
-            .prepare_authoring_property_edit(
-                document,
-                intent.basis().revision,
-                &intent.property_edits(),
-            )
+            .prepare_authoring_property_edit(intent.basis(), &intent.property_edits())
             .unwrap()
     };
     let cancelled = prepare();
@@ -298,7 +291,8 @@ fn window_free_session_snaps_an_inactive_source_with_one_undo_and_exact_save_reo
         no_change_frame.workspace()
     );
     assert_eq!(fs::read(project.root.join(SOURCE)).unwrap(), original);
-    let saving = basis(&session, document).revision;
+    let saving_basis = basis(&session, document);
+    let saving = saving_basis.revision;
     let save = accepted(dispatch(
         &mut session,
         EditorAction::Persistence(EditorPersistenceAction::Save {
@@ -318,11 +312,11 @@ fn window_free_session_snaps_an_inactive_source_with_one_undo_and_exact_save_reo
     assert_eq!(disk, scene([16.0, -32.0]).to_json_string().unwrap());
     acknowledge(&mut session, save);
     // An old candidate/observation cannot acquire the incarnation produced by Reopen.
-    let old_reads = read_requests(&basis(&session, document), &id("actor")).unwrap();
+    let old_reads = read_requests(&saving_basis, &id("actor")).unwrap();
     let mut later_edits = intent.property_edits();
     later_edits[0].value = ComponentValue::f64(48.0).unwrap();
     let changed = session
-        .prepare_authoring_property_edit(document, saving, &later_edits)
+        .prepare_authoring_property_edit(&saving_basis, &later_edits)
         .unwrap();
     let reopen = accepted(dispatch(
         &mut session,
@@ -411,7 +405,7 @@ fn stale_reads_refuse_preparation_and_no_change_does_not_create_a_candidate() {
         value: ComponentValue::f64(23.0).unwrap(),
     }];
     let prepared = session
-        .prepare_authoring_property_edit(document, captured.revision, &edits)
+        .prepare_authoring_property_edit(&captured, &edits)
         .unwrap();
     applied(session.commit_authoring_edit(prepared));
     session.drive_editor_frame(Duration::ZERO);
@@ -577,15 +571,8 @@ mod panel {
         let mut session = open(&project);
         let oracle_document = open_source(&mut session);
         let intent = proposal(&session, oracle_document);
-        session
-            .validate_authoring_query_basis(intent.basis())
-            .unwrap();
         let oracle = session
-            .prepare_authoring_property_edit(
-                oracle_document,
-                intent.basis().revision,
-                &intent.property_edits(),
-            )
+            .prepare_authoring_property_edit(intent.basis(), &intent.property_edits())
             .unwrap();
         let patch = oracle.patch().clone();
         let inverse = oracle.inverse().clone();

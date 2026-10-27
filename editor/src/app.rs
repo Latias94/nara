@@ -986,18 +986,18 @@ impl EditorApplication {
         dispatch.into_submission(update)
     }
 
-    /// Prepares an edit of a named open document without changing selection or publishing work.
+    /// Prepares an unpublished edit against the retained source, revision and exact Schema basis.
+    /// Preparation leaves navigation and history unchanged.
     pub fn prepare_authoring_edit(
         &self,
-        document: nara::tooling::EditorDocumentId,
-        base_revision: nara::scene::SceneAuthoringRevision,
+        basis: &nara::tooling::EditorDocumentQueryBasis,
         patch: &nara::scene::ScenePatchDocument,
     ) -> Result<
         nara::tooling::PreparedEditorDocumentEdit,
         nara::project_host::EditorEditPreparationError,
     > {
         self.authoring_edit_session()?
-            .prepare_authoring_edit(document, base_revision, patch)
+            .prepare_authoring_edit(basis, patch)
     }
 
     /// Captures a named source's current read basis without changing navigation.
@@ -1049,44 +1049,45 @@ impl EditorApplication {
             .prepare_prefab_revert(basis, path, action, limits)
     }
 
-    /// Starts construction in the exact named source, independently of selection and active tabs.
+    /// Starts construction against the retained source, revision and exact Schema basis.
+    /// Preparation leaves navigation and history unchanged.
     pub fn begin_authoring_construction(
         &self,
-        document: nara::tooling::EditorDocumentId,
-        base_revision: nara::scene::SceneAuthoringRevision,
+        basis: &nara::tooling::EditorDocumentQueryBasis,
     ) -> Result<
         nara::scene::AuthoringConstructionDraft,
         nara::project_host::EditorEditPreparationError,
     > {
         self.authoring_edit_session()?
-            .begin_authoring_construction(document, base_revision)
+            .begin_authoring_construction(basis)
     }
 
-    /// Resolves a bounded draft into one unpublished source candidate and fixed ID mapping.
+    /// Resolves a retained draft against the complete observation basis and its original draft basis.
+    /// The unpublished candidate retains one fixed ID mapping without changing navigation or history.
     pub fn prepare_authoring_construction(
         &self,
-        document: nara::tooling::EditorDocumentId,
+        basis: &nara::tooling::EditorDocumentQueryBasis,
         draft: &nara::scene::AuthoringConstructionDraft,
     ) -> Result<
         nara::tooling::PreparedEditorDocumentConstruction,
         nara::project_host::EditorEditPreparationError,
     > {
         self.authoring_edit_session()?
-            .prepare_authoring_construction(document, draft)
+            .prepare_authoring_construction(basis, draft)
     }
 
-    /// Prepares stable-property replacements using the same document candidate and Undo owner.
+    /// Prepares stable-property replacements against the complete retained observation basis.
+    /// Preparation leaves navigation and history unchanged.
     pub fn prepare_authoring_property_edit(
         &self,
-        document: nara::tooling::EditorDocumentId,
-        base_revision: nara::scene::SceneAuthoringRevision,
+        basis: &nara::tooling::EditorDocumentQueryBasis,
         edits: &[nara::scene::AuthoringPropertyEdit],
     ) -> Result<
         nara::tooling::PreparedEditorDocumentEdit,
         nara::project_host::EditorEditPreparationError,
     > {
         self.authoring_edit_session()?
-            .prepare_authoring_property_edit(document, base_revision, edits)
+            .prepare_authoring_property_edit(basis, edits)
     }
 
     fn authoring_edit_session(

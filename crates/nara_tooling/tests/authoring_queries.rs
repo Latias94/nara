@@ -2,15 +2,16 @@ use nara_asset::AssetRef;
 use nara_reflect::{
     AuthoringSchemaBundle, AuthoringSchemaBundleOwner, ComponentCapability, ComponentFieldId,
     ComponentFieldPath, ComponentFieldSchema, ComponentMemberPath, ComponentMemberPathSegment,
-    ComponentPropertyStep, ComponentSchema, ComponentSchemaCatalog, ComponentSchemaVersion,
-    ComponentShapeMember, ComponentTypeId, ComponentValue, ComponentValueKind, ComponentValueShape,
-    PersistentComponentSchemaOwnerId,
+    ComponentPropertyPath, ComponentPropertyStep, ComponentSchema, ComponentSchemaCatalog,
+    ComponentSchemaVersion, ComponentShapeMember, ComponentTypeId, ComponentValue,
+    ComponentValueKind, ComponentValueShape, PersistentComponentSchemaOwnerId,
 };
 use nara_scene::{
-    __private::AuthoringAdapterReceipt, AuthoringDocumentSource, AuthoringReadError,
-    AuthoringRecordReadiness, PrefabAuthoringSession, PrefabDocument, PrefabDocumentCandidate,
-    SceneAuthoringSession, SceneComponentRecord, SceneDocument, SceneDocumentCandidate,
-    SceneEntityId, SceneEntityRecord, ScenePatchDocument, ScenePatchOperation,
+    __private::AuthoringAdapterReceipt, AuthoringDocumentSource, AuthoringPropertyEdit,
+    AuthoringReadError, AuthoringRecordReadiness, PrefabAuthoringSession, PrefabDocument,
+    PrefabDocumentCandidate, SceneAuthoringSession, SceneComponentRecord, SceneDocument,
+    SceneDocumentCandidate, SceneEntityId, SceneEntityRecord, ScenePatchDocument,
+    ScenePatchOperation, ScenePlacement, ScenePlacementOwner,
 };
 use nara_tooling::{
     EditorAuthoringMemberStatus, EditorAuthoringPage, EditorAuthoringProjection,
@@ -761,7 +762,7 @@ fn continuations_bind_workspace_target_and_basis_and_charge_the_complete_observa
             value: ComponentValue::U64(9),
         }]);
         let edit = workspace
-            .prepare_authoring_edit(document, old_read.target.basis.revision, &patch)
+            .prepare_authoring_edit(&old_read.target.basis, &patch)
             .unwrap();
         assert!(workspace.commit_authoring_edit(edit).applied);
         assert_eq!(
@@ -826,14 +827,131 @@ fn preparation_basis_reuses_exact_query_admission_without_changing_state() {
             field: ComponentFieldId::new("amount"),
             value: ComponentValue::U64(9),
         }]);
-        let prepared = workspace
-            .prepare_authoring_edit(document, captured.revision, &patch)
-            .unwrap();
+        let prepared = workspace.prepare_authoring_edit(&captured, &patch).unwrap();
         assert!(workspace.commit_authoring_edit(prepared).applied);
         assert_eq!(
             workspace.validate_document_query_basis(&captured),
             Err(EditorDocumentQueryRejection::StaleRevision)
         );
+    }
+}
+
+#[test]
+fn every_preparation_entry_rejects_inexact_observations_and_does_not_rebase_drafts() {
+    for prefab in [false, true] {
+        let (mut workspace, document) = fixture(prefab);
+        let captured = workspace.document_query_basis(document).unwrap();
+        let (other, other_document) = fixture(prefab);
+        let other_basis = other.document_query_basis(other_document).unwrap();
+        assert_ne!(captured.schema, other_basis.schema);
+        let patch = ScenePatchDocument::new([ScenePatchOperation::SetField {
+            entity: id("item"),
+            component: ComponentTypeId::new("game.Data"),
+            component_version: ComponentSchemaVersion::ONE,
+            field: ComponentFieldId::new("amount"),
+            value: ComponentValue::U64(9),
+        }]);
+        let edits = [AuthoringPropertyEdit {
+            entity: id("item"),
+            component: ComponentTypeId::new("game.Data"),
+            component_version: ComponentSchemaVersion::ONE,
+            property: ComponentPropertyPath::new(ComponentFieldId::new("amount")),
+            value: ComponentValue::U64(9),
+        }];
+        let mut draft = workspace.begin_authoring_construction(&captured).unwrap();
+        draft
+            .create_entity(ScenePlacement::last(ScenePlacementOwner::Root))
+            .unwrap();
+        let before = workspace.authoring_model();
+        assert!(workspace.prepare_authoring_edit(&captured, &patch).is_ok());
+        assert!(
+            workspace
+                .prepare_authoring_property_edit(&captured, &edits)
+                .is_ok()
+        );
+        assert!(
+            workspace
+                .prepare_authoring_construction(&captured, &draft)
+                .is_ok()
+        );
+        assert_eq!(workspace.authoring_model(), before);
+
+        let mut missing = captured.clone();
+        missing.schema = None;
+        let mut readmitted = captured.clone();
+        readmitted.schema = other_basis.schema;
+        let mut foreign_incarnation = captured.clone();
+        foreign_incarnation.revision = other_basis.revision;
+        let mut absent = captured.clone();
+        absent.document = EditorDocumentId::from_raw(u64::MAX);
+        for (rejected, expected) in [
+            (missing, "tooling.workspace-stale-schema-basis"),
+            (readmitted, "tooling.workspace-stale-schema-basis"),
+            (
+                foreign_incarnation,
+                "tooling.workspace-stale-document-incarnation",
+            ),
+            (absent, "tooling.workspace-missing-document"),
+        ] {
+            for report in [
+                workspace
+                    .prepare_authoring_edit(&rejected, &patch)
+                    .unwrap_err(),
+                workspace
+                    .prepare_authoring_property_edit(&rejected, &edits)
+                    .unwrap_err(),
+                workspace
+                    .begin_authoring_construction(&rejected)
+                    .unwrap_err(),
+                workspace
+                    .prepare_authoring_construction(&rejected, &draft)
+                    .unwrap_err(),
+            ] {
+                assert!(!report.applied);
+                assert!(
+                    report
+                        .diagnostics
+                        .iter()
+                        .any(|entry| entry.code().as_str() == expected),
+                    "{expected}: {:?}",
+                    report.diagnostics
+                );
+                assert_eq!(workspace.authoring_model(), before);
+            }
+        }
+        let prepared = workspace.prepare_authoring_edit(&captured, &patch).unwrap();
+        assert!(workspace.commit_authoring_edit(prepared).applied);
+        let after = workspace.authoring_model();
+        for report in [
+            workspace
+                .prepare_authoring_edit(&captured, &patch)
+                .unwrap_err(),
+            workspace
+                .prepare_authoring_property_edit(&captured, &edits)
+                .unwrap_err(),
+            workspace
+                .begin_authoring_construction(&captured)
+                .unwrap_err(),
+            workspace
+                .prepare_authoring_construction(&captured, &draft)
+                .unwrap_err(),
+        ] {
+            assert!(
+                report
+                    .diagnostics
+                    .iter()
+                    .any(|entry| entry.code().as_str()
+                        == "tooling.workspace-stale-document-revision")
+            );
+        }
+        let current = workspace.document_query_basis(document).unwrap();
+        assert!(
+            workspace
+                .prepare_authoring_construction(&current, &draft)
+                .is_err(),
+            "a fresh observation must not authorize the old construction intent"
+        );
+        assert_eq!(workspace.authoring_model(), after);
     }
 }
 
@@ -857,9 +975,7 @@ fn document_query_basis_factory_returns_exact_current_facts_and_stales_captures(
             field: ComponentFieldId::new("amount"),
             value: ComponentValue::U64(9),
         }]);
-        let prepared = workspace
-            .prepare_authoring_edit(document, captured.revision, &patch)
-            .unwrap();
+        let prepared = workspace.prepare_authoring_edit(&captured, &patch).unwrap();
         assert!(workspace.commit_authoring_edit(prepared).applied);
         assert_eq!(
             workspace.validate_document_query_basis(&captured),

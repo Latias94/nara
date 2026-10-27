@@ -1313,14 +1313,13 @@ mod tests {
             );
             let frame = harness.application.current_frame().unwrap();
             let document = frame.workspace().active_document.unwrap();
-            let revision = frame.workspace().document(document).unwrap().revision;
+            let basis = harness.application.document_query_basis(document).unwrap();
             // Establish a dirty Prefab before opening the close prompt, without touching the
             // component that the pending structure action will add.
             let edit = harness
                 .application
                 .prepare_authoring_edit(
-                    document,
-                    revision,
+                    &basis,
                     &ScenePatchDocument::new([nara::scene::ScenePatchOperation::AddEntity {
                         entity: nara::scene::SceneEntityRecord::new(
                             SceneEntityId::new("structure-baseline").unwrap(),

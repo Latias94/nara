@@ -199,8 +199,8 @@ impl SnapProposal {
     }
 }
 
-/// Checks observation coherence, not current liveness. A Session adapter must call
-/// validate_authoring_query_basis with proposal.basis() before preparing its edits.
+/// Checks observation coherence, not current liveness. A Session adapter must pass
+/// proposal.basis() to prepare_authoring_property_edit when preparing its edits.
 pub fn plan_snap_local_position(
     x: &EditorPropertyObservation,
     y: &EditorPropertyObservation,

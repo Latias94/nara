@@ -14,7 +14,7 @@ use nara_scene::{
 use super::{
     EditorDocumentId, EditorDocumentKind, EditorDocumentSlot, EditorWorkspace,
     EditorWorkspaceCommandReport, authoring_command_error_report,
-    prefab_declarations::rejected_basis_report, report_for_document_patch,
+    authoring_query::rejected_basis_report, report_for_document_patch,
 };
 use crate::EditorDocumentQueryBasis;
 

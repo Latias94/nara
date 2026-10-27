@@ -38,11 +38,12 @@ use nara_scene::{
 };
 use nara_tooling::{
     EditorAction, EditorActionBatch, EditorActionOutcome, EditorDocumentId, EditorDocumentKind,
-    EditorDocumentMutation, EditorDocumentOpenResult, EditorNavigationAction,
-    EditorPersistenceAction, EditorPersistenceRequestResult, EditorPersistenceResult,
-    EditorProjectBrowserAction, EditorProjectBrowserActionOutcome, PrefabCompositionCommand,
-    PrefabCompositionEntityDraft, PrefabCompositionOutcome, SceneCompositionCommand,
-    SceneCompositionEntityKind,
+    EditorDocumentMutation, EditorDocumentOpenResult, EditorDocumentQueryRejection,
+    EditorNavigationAction, EditorPersistenceAction, EditorPersistenceRequestResult,
+    EditorPersistenceResult, EditorProjectBrowserAction, EditorProjectBrowserActionOutcome,
+    EditorPropertyRead, EditorPropertyReadLimits, EditorPropertyTarget, EditorPropertyValue,
+    PrefabCompositionCommand, PrefabCompositionEntityDraft, PrefabCompositionOutcome,
+    SceneCompositionCommand, SceneCompositionEntityKind,
 };
 
 const COMPONENT: &str = "consumer.property.Settings";
@@ -671,6 +672,121 @@ fn captured_property_survives_explicit_wire_migration_and_keyed_reorder() {
 }
 
 #[test]
+fn session_preparation_requires_the_exact_schema_admission_for_scene_and_prefab() {
+    for source in [SCENE, PREFAB] {
+        let project = Project::new();
+        let mut editor = open_project(&project);
+        let document = open_source(&mut editor, source);
+        select(&mut editor, document, "actor");
+        let basis = editor.document_query_basis(document).unwrap();
+        let manifest = manifest(&editor);
+        let before = editor.current_frame();
+        let disk = [SCENE, PREFAB, BASE_PREFAB]
+            .map(|source| (source, fs::read(project.root.join(source)).unwrap()));
+        let read = EditorPropertyRead {
+            target: EditorPropertyTarget {
+                basis: basis.clone(),
+                entity: id("actor"),
+                component: ComponentTypeId::new(COMPONENT),
+                property: ComponentPropertyPath::new(ComponentFieldId::new("settings")),
+            },
+            limits: EditorPropertyReadLimits::new(4096, 64, 4096).unwrap(),
+        };
+        let observed = editor.read_document_property(read.clone()).unwrap();
+        assert_eq!(observed.value, EditorPropertyValue::Present(initial()));
+
+        let independent_project = Project::new();
+        let mut independent = open_project(&independent_project);
+        let independent_document = open_source(&mut independent, source);
+        let equivalent = independent
+            .document_query_basis(independent_document)
+            .unwrap()
+            .schema
+            .unwrap();
+        let admitted = basis.schema.as_ref().unwrap();
+        assert_ne!(&equivalent, admitted);
+        for component in [COMPONENT, FUTURE, LINKS] {
+            let component = ComponentTypeId::new(component);
+            assert_eq!(equivalent.schema(&component), admitted.schema(&component));
+            assert_eq!(
+                equivalent.component_schema_owner(&component),
+                admitted.component_schema_owner(&component)
+            );
+        }
+        close_editor(&mut independent);
+
+        let change = patch(settings(42, 20, "a", 1, "before"));
+        let edits = [edit([step("stats"), step("hp")], ComponentValue::U64(42))];
+        let mut draft = editor.begin_authoring_construction(&basis).unwrap();
+        draft
+            .set_property(
+                id("actor"),
+                ComponentTypeId::new(COMPONENT),
+                edits[0].property.clone(),
+                edits[0].value.clone(),
+            )
+            .unwrap();
+        drop(editor.prepare_authoring_edit(&basis, &change).unwrap());
+        drop(
+            editor
+                .prepare_authoring_property_edit(&basis, &edits)
+                .unwrap(),
+        );
+        drop(
+            editor
+                .prepare_authoring_construction(&basis, &draft)
+                .unwrap(),
+        );
+
+        for schema in [None, Some(equivalent)] {
+            let mut wrong_schema = basis.clone();
+            wrong_schema.schema = schema;
+            let expected =
+                EditorEditPreparationError::QueryBasis(EditorDocumentQueryRejection::StaleSchema);
+            assert_eq!(
+                editor
+                    .prepare_authoring_edit(&wrong_schema, &change)
+                    .unwrap_err(),
+                expected
+            );
+            assert_eq!(
+                editor
+                    .prepare_authoring_property_edit(&wrong_schema, &edits)
+                    .unwrap_err(),
+                expected
+            );
+            assert_eq!(
+                editor
+                    .begin_authoring_construction(&wrong_schema)
+                    .unwrap_err(),
+                expected
+            );
+            assert_eq!(
+                editor
+                    .prepare_authoring_construction(&wrong_schema, &draft)
+                    .unwrap_err(),
+                expected
+            );
+            editor.drive_editor_frame(Duration::ZERO);
+            assert_eq!(editor.document_query_basis(document).unwrap(), basis);
+            assert_eq!(
+                editor.read_document_property(read.clone()).unwrap(),
+                observed
+            );
+            assert_eq!(editor.current_frame().workspace(), before.workspace());
+            assert_eq!(
+                editor.active_authoring_unavailable_record_manifest(),
+                Some(&manifest)
+            );
+            for (source, bytes) in &disk {
+                assert_eq!(&fs::read(project.root.join(source)).unwrap(), bytes);
+            }
+        }
+        close_editor(&mut editor);
+    }
+}
+
+#[test]
 fn nested_writes_coalesce_and_keep_exact_basis_history_and_saved_records() {
     for source in [SCENE, PREFAB] {
         let project = Project::new();
@@ -679,7 +795,7 @@ fn nested_writes_coalesce_and_keep_exact_basis_history_and_saved_records() {
         select(&mut editor, document, "actor");
         let manifest = manifest(&editor);
         let before = editor.current_frame();
-        let basis = revision(&editor, document);
+        let basis = editor.document_query_basis(document).unwrap();
         let edits = [
             edit([step("stats"), step("hp")], ComponentValue::U64(30)),
             edit([step("stats"), step("mp")], ComponentValue::U64(40)),
@@ -687,7 +803,7 @@ fn nested_writes_coalesce_and_keep_exact_basis_history_and_saved_records() {
         let expected = settings(30, 40, "a", 1, "before");
 
         let cancelled = editor
-            .prepare_authoring_property_edit(document, basis, &edits)
+            .prepare_authoring_property_edit(&basis, &edits)
             .unwrap();
         assert_eq!(cancelled.patch(), &patch(expected.clone()));
         assert_eq!(cancelled.inverse(), &patch(initial()));
@@ -696,10 +812,10 @@ fn nested_writes_coalesce_and_keep_exact_basis_history_and_saved_records() {
         assert_eq!(editor.current_frame().workspace(), before.workspace());
 
         let prepared = editor
-            .prepare_authoring_property_edit(document, basis, &edits)
+            .prepare_authoring_property_edit(&basis, &edits)
             .unwrap();
         let stale = editor
-            .prepare_authoring_property_edit(document, basis, &edits)
+            .prepare_authoring_property_edit(&basis, &edits)
             .unwrap();
         assert_eq!(prepared.document(), document);
         assert_eq!(
@@ -710,7 +826,7 @@ fn nested_writes_coalesce_and_keep_exact_basis_history_and_saved_records() {
                 EditorDocumentKind::Prefab
             }
         );
-        assert_eq!(prepared.base_revision(), basis);
+        assert_eq!(prepared.base_revision(), basis.revision);
         assert_eq!(prepared.patch(), &patch(expected.clone()));
         editor.drive_editor_frame(Duration::ZERO);
         assert_eq!(editor.current_frame().workspace(), before.workspace());
@@ -726,17 +842,18 @@ fn nested_writes_coalesce_and_keep_exact_basis_history_and_saved_records() {
         assert!(tab.dirty);
         assert_eq!(tab.history.undo_depth, 1);
         assert_eq!(tab.history.redo_depth, 0);
-        assert_ne!(tab.revision, basis);
+        assert_ne!(tab.revision, basis.revision);
         assert_eq!(
             fs::read(project.root.join(source)).unwrap(),
             project.original(source)
         );
 
-        assert!(
-            editor
-                .prepare_authoring_property_edit(document, basis, &edits)
-                .is_err()
-        );
+        assert!(matches!(
+            editor.prepare_authoring_property_edit(&basis, &edits),
+            Err(EditorEditPreparationError::QueryBasis(
+                EditorDocumentQueryRejection::StaleRevision
+            ))
+        ));
         let rejected = editor.commit_authoring_edit(stale);
         assert!(
             matches!(rejected, EditorActionOutcome::Workspace(ref report) if !report.applied),
@@ -818,15 +935,16 @@ fn key_changes_resolve_in_order_and_a_final_failure_publishes_nothing() {
             ),
         ];
         let expected = settings(10, 20, "b", 8, "after");
+        let basis = editor.document_query_basis(document).unwrap();
         let prepared = editor
-            .prepare_authoring_property_edit(document, revision(&editor, document), &edits)
+            .prepare_authoring_property_edit(&basis, &edits)
             .unwrap();
         assert_eq!(prepared.patch(), &patch(expected.clone()));
         assert_applied(editor.commit_authoring_edit(prepared));
         editor.drive_editor_frame(Duration::ZERO);
         assert_eq!(root(&editor), expected);
         let accepted = editor.current_frame();
-        let basis = revision(&editor, document);
+        let basis = editor.document_query_basis(document).unwrap();
 
         let failing = [
             edit(
@@ -851,7 +969,7 @@ fn key_changes_resolve_in_order_and_a_final_failure_publishes_nothing() {
             ),
         ];
         let prefix = editor
-            .prepare_authoring_property_edit(document, basis, &failing[..3])
+            .prepare_authoring_property_edit(&basis, &failing[..3])
             .unwrap();
         assert_eq!(
             prefix.patch(),
@@ -860,7 +978,7 @@ fn key_changes_resolve_in_order_and_a_final_failure_publishes_nothing() {
         drop(prefix);
         assert!(
             editor
-                .prepare_authoring_property_edit(document, basis, &failing)
+                .prepare_authoring_property_edit(&basis, &failing)
                 .is_err()
         );
         for (component, version) in [(UNKNOWN, 7), (FUTURE, 9)] {
@@ -873,8 +991,7 @@ fn key_changes_resolve_in_order_and_a_final_failure_publishes_nothing() {
             assert!(
                 editor
                     .prepare_authoring_property_edit(
-                        document,
-                        basis,
+                        &basis,
                         &[
                             edit([step("stats"), step("hp")], ComponentValue::U64(999)),
                             unavailable,
@@ -928,8 +1045,9 @@ fn explicitly_targeted_inactive_scene_and_prefab_keep_tabs_and_selections() {
         );
         let before = editor.current_frame();
         let edits = [edit([step("stats"), step("hp")], ComponentValue::U64(42))];
+        let basis = editor.document_query_basis(document).unwrap();
         let prepared = editor
-            .prepare_authoring_property_edit(document, revision(&editor, document), &edits)
+            .prepare_authoring_property_edit(&basis, &edits)
             .unwrap();
         assert_eq!(prepared.patch(), &patch(settings(42, 20, "a", 1, "before")));
         editor.drive_editor_frame(Duration::ZERO);
@@ -1024,7 +1142,7 @@ fn inactive_source_instance_attach_replace_and_detach_preserve_local_records_and
                 }),
             ));
             let before = editor.current_frame();
-            let basis = revision(&editor, document);
+            let basis = editor.document_query_basis(document).unwrap();
             let change = instance_patch(previous.clone(), value.clone());
             let inverse = instance_patch(value.clone(), previous.clone());
             if let Some(prior) = previous.as_ref() {
@@ -1044,11 +1162,7 @@ fn inactive_source_instance_attach_replace_and_detach_preserve_local_records_and
                     .entity = PrefabEntityOrigin::SourceEntity(id("observer"));
                 for wrong in [wrong_owner, wrong_binding] {
                     let rejection = editor
-                        .prepare_authoring_edit(
-                            document,
-                            basis,
-                            &instance_patch(Some(wrong), value.clone()),
-                        )
+                        .prepare_authoring_edit(&basis, &instance_patch(Some(wrong), value.clone()))
                         .unwrap_err();
                     let EditorEditPreparationError::Document(report) = rejection else {
                         panic!("{rejection:?}");
@@ -1059,18 +1173,14 @@ fn inactive_source_instance_attach_replace_and_detach_preserve_local_records_and
                 }
                 assert_eq!(editor.current_frame().workspace(), before.workspace());
             }
-            let cancelled = editor
-                .prepare_authoring_edit(document, basis, &change)
-                .unwrap();
+            let cancelled = editor.prepare_authoring_edit(&basis, &change).unwrap();
             assert_eq!(cancelled.patch(), &change);
             assert_eq!(cancelled.inverse(), &inverse);
             drop(cancelled);
             editor.drive_editor_frame(Duration::ZERO);
             assert_eq!(editor.current_frame().workspace(), before.workspace());
 
-            let prepared = editor
-                .prepare_authoring_edit(document, basis, &change)
-                .unwrap();
+            let prepared = editor.prepare_authoring_edit(&basis, &change).unwrap();
             assert_eq!(prepared.document(), document);
             assert_eq!(
                 prepared.document_kind(),
@@ -1080,7 +1190,7 @@ fn inactive_source_instance_attach_replace_and_detach_preserve_local_records_and
                     EditorDocumentKind::Prefab
                 }
             );
-            assert_eq!(prepared.base_revision(), basis);
+            assert_eq!(prepared.base_revision(), basis.revision);
             assert_eq!(prepared.patch(), &change);
             assert_eq!(prepared.inverse(), &inverse);
             assert_applied(editor.commit_authoring_edit(prepared));
@@ -1120,11 +1230,8 @@ fn inactive_source_instance_attach_replace_and_detach_preserve_local_records_and
                 assert_applied(dispatch(&mut editor, EditorAction::Mutate(mutation)));
                 // Observe the exact declaration restored by history without publishing a probe.
                 let probe = if redo { &inverse } else { &change };
-                drop(
-                    editor
-                        .prepare_authoring_edit(document, revision(&editor, document), probe)
-                        .unwrap(),
-                );
+                let basis = editor.document_query_basis(document).unwrap();
+                drop(editor.prepare_authoring_edit(&basis, probe).unwrap());
                 let frame = editor.current_frame();
                 assert_eq!(frame.workspace().active_document, Some(active));
                 assert_eq!(
@@ -1181,11 +1288,8 @@ fn inactive_source_instance_attach_replace_and_detach_preserve_local_records_and
             );
             // Compare complete source data: detachment must not synthesize converted records.
             save_and_reopen(&mut editor, &project, source, &expected, &manifest);
-            drop(
-                editor
-                    .prepare_authoring_edit(document, revision(&editor, document), &inverse)
-                    .unwrap(),
-            );
+            let basis = editor.document_query_basis(document).unwrap();
+            drop(editor.prepare_authoring_edit(&basis, &inverse).unwrap());
             previous = value;
         }
         close_editor(&mut editor);
@@ -1241,14 +1345,10 @@ fn exact_instance_mismatch_is_atomic_and_unknown_override_repair_has_exact_histo
         EditorAction::Navigate(EditorNavigationAction::SetActiveDocument { document: scene }),
     ));
     let before = editor.current_frame();
-    let basis = revision(&editor, prefab);
+    let basis = editor.document_query_basis(prefab).unwrap();
     let changed = settings(42, 20, "a", 1, "before");
     let prefix = patch(changed.clone());
-    drop(
-        editor
-            .prepare_authoring_edit(prefab, basis, &prefix)
-            .unwrap(),
-    );
+    drop(editor.prepare_authoring_edit(&basis, &prefix).unwrap());
     let wrong = PrefabInstance {
         overrides: None,
         ..declaration.clone()
@@ -1259,9 +1359,7 @@ fn exact_instance_mismatch_is_atomic_and_unknown_override_repair_has_exact_histo
     failing
         .operations
         .extend(instance_patch(Some(wrong.clone()), Some(declaration.clone())).operations);
-    let rejection = editor
-        .prepare_authoring_edit(prefab, basis, &failing)
-        .unwrap_err();
+    let rejection = editor.prepare_authoring_edit(&basis, &failing).unwrap_err();
     let EditorEditPreparationError::Document(report) = rejection else {
         panic!("{rejection:?}")
     };
@@ -1270,9 +1368,7 @@ fn exact_instance_mismatch_is_atomic_and_unknown_override_repair_has_exact_histo
     }));
     for value in [None, Some(wrong)] {
         let repair = instance_patch(Some(declaration.clone()), value.clone());
-        let prepared = editor
-            .prepare_authoring_edit(prefab, basis, &repair)
-            .unwrap();
+        let prepared = editor.prepare_authoring_edit(&basis, &repair).unwrap();
         assert_eq!(prepared.patch(), &repair);
         assert_eq!(
             prepared.inverse(),
@@ -1284,9 +1380,7 @@ fn exact_instance_mismatch_is_atomic_and_unknown_override_repair_has_exact_histo
     assert_eq!(editor.current_frame().workspace(), before.workspace());
     assert_eq!(fs::read(project.root.join(PREFAB)).unwrap(), original);
 
-    let prepared = editor
-        .prepare_authoring_edit(prefab, basis, &prefix)
-        .unwrap();
+    let prepared = editor.prepare_authoring_edit(&basis, &prefix).unwrap();
     assert_eq!(prepared.inverse(), &patch(initial()));
     assert_applied(editor.commit_authoring_edit(prepared));
     editor.drive_editor_frame(Duration::ZERO);
@@ -1324,9 +1418,8 @@ fn exact_instance_mismatch_is_atomic_and_unknown_override_repair_has_exact_histo
         .value = ComponentValue::map([("payload", changed)]);
     save_and_reopen(&mut editor, &project, PREFAB, &expected, &manifest);
     let repair = instance_patch(Some(declaration.clone()), None);
-    let prepared = editor
-        .prepare_authoring_edit(prefab, revision(&editor, prefab), &repair)
-        .unwrap();
+    let basis = editor.document_query_basis(prefab).unwrap();
+    let prepared = editor.prepare_authoring_edit(&basis, &repair).unwrap();
     assert_eq!(
         prepared.inverse(),
         &instance_patch(None, Some(declaration.clone()))
@@ -1346,11 +1439,8 @@ fn exact_instance_mismatch_is_atomic_and_unknown_override_repair_has_exact_histo
         Some(&manifest)
     );
     // Exact comparison also observes the restored owner/version/payload, not just the lookup.
-    drop(
-        editor
-            .prepare_authoring_edit(prefab, revision(&editor, prefab), &repair)
-            .unwrap(),
-    );
+    let basis = editor.document_query_basis(prefab).unwrap();
+    drop(editor.prepare_authoring_edit(&basis, &repair).unwrap());
     let base_revision = revision(&editor, prefab);
     assert_applied(dispatch(
         &mut editor,

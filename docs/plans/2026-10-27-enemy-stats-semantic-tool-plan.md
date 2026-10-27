@@ -50,10 +50,10 @@ No compatibility reader, alias or migration guide is required for superseded fix
 
 ## Owning Follow-up
 
-The concrete consumer exposes a preparation ergonomics gap: Session methods take document and
-revision, while observation-driven callers must separately retain and validate the complete query
-basis. The Dear panel facade already takes that complete basis. Reconcile the Session/Application
-boundary around complete observations in the next production change; replace superseded entries
-rather than keep aliases. The Scene owner's revision/candidate API remains responsibility-local.
+The concrete consumer exposed a preparation ergonomics gap: Session methods took document and
+revision, while observation-driven callers separately validated the complete query basis. The
+[observation-bound preparation successor](2026-10-27-observation-bound-preparation-plan.md)
+owns its replacement through Workspace/Session/Application and Panel, with no compatibility
+aliases. The Scene owner's revision/candidate API remains responsibility-local.
 Keep executable/request identity in the actual tool owner rather than adding language generations
 to every Scene transaction. Product admission and a standalone tool loader remain separate work.

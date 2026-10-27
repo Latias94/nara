@@ -139,20 +139,19 @@ impl ImguiEditorPanelContext<'_, '_> {
         basis: &EditorDocumentQueryBasis,
         patch: &ScenePatchDocument,
     ) -> Result<PreparedEditorDocumentEdit, EditorEditPreparationError> {
-        let session = self.authoring_preparation()?;
-        session.validate_authoring_query_basis(basis)?;
-        session.prepare_authoring_edit(basis.document, basis.revision, patch)
+        self.authoring_preparation()?
+            .prepare_authoring_edit(basis, patch)
     }
 
-    /// Prepares stable-property replacements without changing active tabs or selection.
+    /// Prepares stable-property replacements against the complete retained observation basis.
+    /// Preparation leaves active tabs and selection unchanged.
     pub fn prepare_authoring_property_edit(
         &self,
         basis: &EditorDocumentQueryBasis,
         edits: &[AuthoringPropertyEdit],
     ) -> Result<PreparedEditorDocumentEdit, EditorEditPreparationError> {
-        let session = self.authoring_preparation()?;
-        session.validate_authoring_query_basis(basis)?;
-        session.prepare_authoring_property_edit(basis.document, basis.revision, edits)
+        self.authoring_preparation()?
+            .prepare_authoring_property_edit(basis, edits)
     }
 
     /// Starts source-owned construction at the exact captured basis without allocating live IDs.
@@ -160,19 +159,19 @@ impl ImguiEditorPanelContext<'_, '_> {
         &self,
         basis: &EditorDocumentQueryBasis,
     ) -> Result<AuthoringConstructionDraft, EditorEditPreparationError> {
-        let session = self.authoring_preparation()?;
-        session.validate_authoring_query_basis(basis)?;
-        session.begin_authoring_construction(basis.document, basis.revision)
+        self.authoring_preparation()?
+            .begin_authoring_construction(basis)
     }
 
-    /// Resolves a retained draft into one unpublished candidate and its fixed local ID mapping.
+    /// Resolves a retained draft against the complete observation basis and its original draft basis.
+    /// The unpublished candidate retains one fixed local ID mapping.
     pub fn prepare_authoring_construction(
         &self,
-        document: EditorDocumentId,
+        basis: &EditorDocumentQueryBasis,
         draft: &AuthoringConstructionDraft,
     ) -> Result<PreparedEditorDocumentConstruction, EditorEditPreparationError> {
         self.authoring_preparation()?
-            .prepare_authoring_construction(document, draft)
+            .prepare_authoring_construction(basis, draft)
     }
 
     fn authoring_preparation(&self) -> Result<&EditorProjectSession, EditorEditPreparationError> {

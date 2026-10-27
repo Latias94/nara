@@ -102,9 +102,9 @@ pub fn edit_save_reopen(
             property: property("amount"),
             value: ComponentValue::f64(7.0).unwrap(),
         };
-        let revision = editor.document_query_basis(document).unwrap().revision;
+        let basis = editor.document_query_basis(document).unwrap();
         let prepared = editor
-            .prepare_authoring_property_edit(document, revision, &[mover])
+            .prepare_authoring_property_edit(&basis, &[mover])
             .unwrap();
         applied(editor.commit_authoring_edit(prepared));
         editor.drive_editor_frame(Duration::ZERO);
@@ -140,14 +140,12 @@ pub fn edit_save_reopen(
         );
         assert_siblings(&editor, document, original);
 
-        let revision = editor.document_query_basis(document).unwrap().revision;
+        let basis = editor.document_query_basis(document).unwrap();
         let remove = ScenePatchDocument::new([ScenePatchOperation::RemoveComponent {
             entity: id("label"),
             component: component(LABEL),
         }]);
-        let prepared = editor
-            .prepare_authoring_edit(document, revision, &remove)
-            .unwrap();
+        let prepared = editor.prepare_authoring_edit(&basis, &remove).unwrap();
         applied(editor.commit_authoring_edit(prepared));
         editor.drive_editor_frame(Duration::ZERO);
         assert_label_present(&editor, document, false);
@@ -165,13 +163,11 @@ pub fn edit_save_reopen(
         assert_label_present(&editor, document, false);
         assert_siblings(&editor, document, original);
 
-        let revision = editor.document_query_basis(document).unwrap().revision;
-        let mut draft = editor
-            .begin_authoring_construction(document, revision)
-            .unwrap();
+        let basis = editor.document_query_basis(document).unwrap();
+        let mut draft = editor.begin_authoring_construction(&basis).unwrap();
         draft.add_component(id("label"), component(LABEL)).unwrap();
         let prepared = editor
-            .prepare_authoring_construction(document, &draft)
+            .prepare_authoring_construction(&basis, &draft)
             .unwrap();
         assert!(matches!(
             prepared.patch().operations.as_slice(),
@@ -196,7 +192,7 @@ pub fn edit_save_reopen(
         assert_label_present(&editor, document, true);
         assert_siblings(&editor, document, original);
 
-        let revision = editor.document_query_basis(document).unwrap().revision;
+        let basis = editor.document_query_basis(document).unwrap();
         let label = AuthoringPropertyEdit {
             entity: id("label"),
             component: component(LABEL),
@@ -205,7 +201,7 @@ pub fn edit_save_reopen(
             value: ComponentValue::String("Edited label".into()),
         };
         let prepared = editor
-            .prepare_authoring_property_edit(document, revision, &[label])
+            .prepare_authoring_property_edit(&basis, &[label])
             .unwrap();
         applied(editor.commit_authoring_edit(prepared));
         editor.drive_editor_frame(Duration::ZERO);

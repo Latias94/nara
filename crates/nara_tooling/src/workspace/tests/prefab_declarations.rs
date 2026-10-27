@@ -462,7 +462,7 @@ fn identical_generic_patch_does_not_acquire_source_owned_revert_origin() {
             )
             .unwrap();
         let lookalike = workspace
-            .prepare_authoring_edit(document, basis.revision, revert.patch())
+            .prepare_authoring_edit(&basis, revert.patch())
             .unwrap();
         assert_eq!(revert.patch(), lookalike.patch());
         assert_eq!(revert.inverse(), lookalike.inverse());

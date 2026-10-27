@@ -547,7 +547,7 @@ fn conversion_commit_rejects_wrong_workspace_reopen_and_undone_edits_before_load
                     }]);
                     let edit = fixture
                         .workspace
-                        .prepare_authoring_edit(fixture.document, old_revision, &patch)
+                        .prepare_authoring_edit(&fixture.basis(), &patch)
                         .unwrap();
                     assert!(fixture.workspace.commit_authoring_edit(edit).applied);
                     fixture.replay(true);
