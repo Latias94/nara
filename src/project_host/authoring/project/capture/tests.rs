@@ -14,6 +14,7 @@ use crate::project_host::authoring::tests::independent_capture::{
 };
 
 mod composition_failure;
+mod stable_lookup;
 
 const SECOND_SCENE: &str = "scenes/second.scene.json";
 

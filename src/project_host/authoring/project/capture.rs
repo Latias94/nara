@@ -163,6 +163,7 @@ pub(crate) struct AuthoringDocumentCapture {
     pub(super) asset_database: Arc<ProjectAssetDatabase>,
     pub(super) unresolved_dependencies: Box<[AuthoringUnresolvedDependency]>,
     pub(super) source_facts: Arc<[Arc<AuthoringSourceFact>]>,
+    pub(super) stable_lookups: Arc<[catalogue::StableLookupObservation]>,
     pub(super) usage: AuthoringProjectAdmissionUsage,
     pub(super) preview: Option<CapturedAuthoringPreview>,
     pub(super) composition_failure: Option<nara_scene::PrefabExpansionFailure>,
@@ -179,6 +180,7 @@ pub(crate) struct CapturedAuthoringPreview {
 pub(crate) struct AuthoringSourceValidation {
     schema: Arc<AuthoringSchemaReceipt>,
     sources: Arc<[Arc<AuthoringSourceFact>]>,
+    stable_lookups: Arc<[catalogue::StableLookupObservation]>,
     retained_capture_bytes: usize,
 }
 
@@ -186,11 +188,13 @@ impl AuthoringSourceValidation {
     pub(super) fn new(
         schema: Arc<AuthoringSchemaReceipt>,
         sources: Arc<[Arc<AuthoringSourceFact>]>,
+        stable_lookups: Arc<[catalogue::StableLookupObservation]>,
         retained_capture_bytes: usize,
     ) -> Self {
         Self {
             schema,
             sources,
+            stable_lookups,
             retained_capture_bytes,
         }
     }
@@ -200,6 +204,10 @@ impl AuthoringSourceValidation {
         let retained = self.sources.iter().try_fold(
             checked_product(self.sources.len(), size_of::<Arc<AuthoringSourceFact>>())?,
             |bytes, source| checked_sum([bytes, source_fact_retained_bytes(source)?]),
+        )?;
+        let retained = self.stable_lookups.iter().try_fold(
+            checked_sum([retained, 2 * size_of::<usize>()])?,
+            |bytes, observation| checked_sum([bytes, observation.retained_bytes()?]),
         )?;
         budget.charge_source_bytes(
             0,
@@ -216,6 +224,15 @@ impl AuthoringSourceValidation {
         for source in schema_source_facts(&self.schema) {
             revalidate_source_fact(&self.schema.project_root, &source, &mut budget)?;
         }
+        ReferenceCatalogue::revalidate_lookups(
+            &self.schema.project_root,
+            [
+                &self.schema.settings.paths.assets,
+                &self.schema.settings.paths.prefabs,
+            ],
+            &self.stable_lookups,
+            &mut budget,
+        )?;
         Ok(())
     }
 }
@@ -262,6 +279,7 @@ impl AuthoringDocumentCapture {
         AuthoringSourceValidation::new(
             Arc::clone(&self.authority),
             Arc::clone(&self.source_facts),
+            Arc::clone(&self.stable_lookups),
             self.usage.retained_candidate_bytes(),
         )
     }
@@ -798,6 +816,7 @@ pub(super) fn capture_scene(
             prefab_path_bytes,
         )?,
     )?;
+    let stable_lookups = catalogue.into_lookup_observations(budget)?;
     let usage = budget.usage();
     Ok(AuthoringDocumentCapture {
         readiness,
@@ -807,6 +826,7 @@ pub(super) fn capture_scene(
         asset_database: Arc::new(asset_database),
         unresolved_dependencies: unresolved_dependencies.into_boxed_slice(),
         source_facts: source_facts.into(),
+        stable_lookups,
         usage,
         preview,
         composition_failure,

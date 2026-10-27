@@ -364,6 +364,7 @@ struct AuthoringProjectSnapshotInner {
     asset_database: Arc<ProjectAssetDatabase>,
     unresolved_dependencies: Box<[AuthoringUnresolvedDependency]>,
     source_facts: Arc<[Arc<AuthoringSourceFact>]>,
+    stable_lookups: Arc<[catalogue::StableLookupObservation]>,
     usage: AuthoringProjectAdmissionUsage,
 }
 
@@ -553,6 +554,7 @@ impl AuthoringProjectReceipt {
                 asset_database: inner.asset_database,
                 unresolved_dependencies: inner.unresolved_dependencies,
                 source_facts: inner.source_facts,
+                stable_lookups: inner.stable_lookups,
                 usage: inner.usage,
                 source_index,
             },
@@ -607,6 +609,7 @@ pub(crate) struct AuthoringProjectSessionSnapshot {
     asset_database: Arc<ProjectAssetDatabase>,
     unresolved_dependencies: Box<[AuthoringUnresolvedDependency]>,
     source_facts: Arc<[Arc<AuthoringSourceFact>]>,
+    stable_lookups: Arc<[catalogue::StableLookupObservation]>,
     usage: AuthoringProjectAdmissionUsage,
     source_index: ProjectSourceIndexState,
 }
@@ -620,6 +623,7 @@ impl AuthoringProjectSessionSnapshot {
         AuthoringSourceValidation::new(
             Arc::clone(&self.schema),
             Arc::clone(&self.source_facts),
+            Arc::clone(&self.stable_lookups),
             self.usage.retained_candidate_bytes(),
         )
     }
@@ -989,6 +993,7 @@ impl PreparedAuthoringProject {
             asset_database,
             unresolved_dependencies,
             source_facts,
+            stable_lookups,
             usage,
             preview: startup_preview,
             composition_failure: _,
@@ -1012,6 +1017,7 @@ impl PreparedAuthoringProject {
                 asset_database,
                 unresolved_dependencies,
                 source_facts,
+                stable_lookups,
                 usage,
             },
         })

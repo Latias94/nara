@@ -1,7 +1,8 @@
-//! Lookup candidates for stable references; loaded metadata remains the closure authority.
+//! Bounded stable lookup observations alongside physical source receipts.
 
 use std::{collections::VecDeque, io::ErrorKind};
 
+use nara_asset::StableAssetId;
 use nara_fs::{DirectoryEnumerationLimits, FileKind};
 
 use super::*;
@@ -9,12 +10,30 @@ use super::*;
 #[cfg(test)]
 mod tests;
 
+/// One demanded query in its source directory, separate from file or working-copy evidence.
+pub(super) struct StableLookupObservation {
+    stable_id: StableAssetId,
+    prefab: bool,
+    // An unresolved result remains provisional; capture still requires recapture.
+    target: Option<AssetPath>,
+}
+
+impl StableLookupObservation {
+    pub(super) fn retained_bytes(&self) -> Result<usize, AuthoringProjectSourceAdmissionError> {
+        checked_sum([
+            size_of::<Self>(),
+            self.target.as_ref().map_or(0, |path| path.as_str().len()),
+        ])
+    }
+}
+
 pub(super) struct ReferenceCatalogue {
     root: DirectoryCapability,
     directories: [ProjectPath; 2],
     indexed: bool,
     database: ProjectAssetDatabase,
     metadata: BTreeMap<AssetPath, (bool, Arc<AuthoringSourceFact>)>,
+    lookups: BTreeMap<(StableAssetId, bool), StableLookupObservation>,
 }
 
 impl ReferenceCatalogue {
@@ -25,6 +44,7 @@ impl ReferenceCatalogue {
             indexed: false,
             database: ProjectAssetDatabase::default(),
             metadata: BTreeMap::new(),
+            lookups: BTreeMap::new(),
         }
     }
 
@@ -42,25 +62,118 @@ impl ReferenceCatalogue {
         prefab: bool,
         budget: &mut AuthoringProjectAdmissionBudget,
     ) -> Result<Option<AssetPath>, AuthoringProjectSourceAdmissionError> {
-        if let AssetRef::Path(path) = reference {
-            return Ok(Some(path.clone()));
+        let stable_id = match reference {
+            AssetRef::Path(path) => return Ok(Some(path.clone())),
+            AssetRef::StableId(stable_id) => *stable_id,
+        };
+        self.ensure_indexed(budget)?;
+        let key = (stable_id, prefab);
+        if !self.lookups.contains_key(&key) {
+            let target = self.resolve_indexed(reference, prefab);
+            budget.charge_source_bytes(
+                0,
+                0,
+                0,
+                checked_sum([
+                    size_of::<((StableAssetId, bool), StableLookupObservation)>(),
+                    target.map_or(0, |path| path.as_str().len()),
+                    64,
+                ])?,
+            )?;
+            let observation = StableLookupObservation {
+                stable_id,
+                prefab,
+                target: target.cloned(),
+            };
+            self.lookups.insert(key, observation);
         }
+        Ok(self.resolve_indexed(reference, prefab).cloned())
+    }
+
+    fn ensure_indexed(
+        &mut self,
+        budget: &mut AuthoringProjectAdmissionBudget,
+    ) -> Result<(), AuthoringProjectSourceAdmissionError> {
         if !self.indexed {
             for prefab in [false, true] {
                 self.index_directory(prefab, budget)?;
             }
             self.indexed = true;
         }
-        Ok(self
-            .database
+        Ok(())
+    }
+
+    fn resolve_indexed(&self, reference: &AssetRef, prefab: bool) -> Option<&AssetPath> {
+        self.database
             .resolve_ref(reference)
             .ok()
             .and_then(|record| {
                 let (indexed_prefab, _) = self.metadata.get(record.path())?;
                 (*indexed_prefab == prefab
                     && (!prefab || record.source_kind() == &AssetSourceKind::Prefab))
-                    .then(|| record.path().clone())
-            }))
+                    .then(|| record.path())
+            })
+    }
+
+    pub(super) fn into_lookup_observations(
+        self,
+        budget: &mut AuthoringProjectAdmissionBudget,
+    ) -> Result<Arc<[StableLookupObservation]>, AuthoringProjectSourceAdmissionError> {
+        // Entries move their paths; the temporary vector and final Arc coexist during transfer.
+        budget.charge_source_bytes(
+            0,
+            0,
+            0,
+            checked_sum([
+                checked_product(self.lookups.len(), 2 * size_of::<StableLookupObservation>())?,
+                2 * size_of::<usize>(),
+            ])?,
+        )?;
+        Ok(self.lookups.into_values().collect::<Vec<_>>().into())
+    }
+
+    pub(super) fn revalidate_lookups(
+        root: &DirectoryCapability,
+        directories: [&ProjectPath; 2],
+        observations: &[StableLookupObservation],
+        budget: &mut AuthoringProjectAdmissionBudget,
+    ) -> Result<(), AuthoringProjectSourceAdmissionError> {
+        if observations.is_empty() {
+            return Ok(());
+        }
+        budget.charge_source_bytes(
+            0,
+            0,
+            0,
+            checked_sum([
+                directories[0].as_str().len(),
+                directories[1].as_str().len(),
+                size_of::<Self>(),
+            ])?,
+        )?;
+        let mut current = Self::new(root.share(), directories.map(Clone::clone));
+        current.ensure_indexed(budget)?;
+        for observation in observations {
+            let target = current.resolve_indexed(
+                &AssetRef::StableId(observation.stable_id),
+                observation.prefab,
+            );
+            if target != observation.target.as_ref() {
+                // None is an observed unresolved lookup, never a durable absence receipt.
+                let path = observation
+                    .target
+                    .as_ref()
+                    .or(target)
+                    .expect("different optional lookup targets include at least one path");
+                return Err(AuthoringProjectSourceAdmissionError::AssetMetadataChanged {
+                    path: path.clone(),
+                });
+            }
+        }
+        for source in current.lookup_sources() {
+            revalidate_source_fact(root, source, budget)?;
+        }
+        Ok(())
     }
 
     fn index_directory(
