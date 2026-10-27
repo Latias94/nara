@@ -17,8 +17,9 @@ retirement remain intact. This is a prerequisite to actual optional-language own
 not proof that R3 or the foundation Goal is complete.
 
 The existing private code-lifetime checkpoint is `65402b9`. Backend-free owner metadata admission
-is the first implementation slice; identifying insertion/export seams does not implement the
-complete runtime family. Detailed verification and continuity belong in engineering memory.
+and closed mixed selection/shared compilation are the first implementation slices; identifying
+insertion/export seams does not implement the complete runtime family. Detailed verification
+and continuity belong in engineering memory.
 Durable contract changes require ADR reconciliation when evidence is ready; ADR 0120 remains
 Proposed during implementation.
 

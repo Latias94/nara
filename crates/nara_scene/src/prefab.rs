@@ -244,7 +244,7 @@ pub struct ResolvedPrefabSource {
 
 #[derive(Debug, Clone)]
 enum ResolvedPrefabDocument {
-    Native(Arc<PrefabDocument>),
+    Raw(Arc<PrefabDocument>),
     #[cfg(feature = "serde")]
     Authoring(Arc<crate::PublishedAuthoringPrefabDocument>),
     #[cfg(feature = "serde")]
@@ -261,7 +261,7 @@ impl ResolvedPrefabSource {
     /// The Host still owns file/metadata receipts and activation-time revalidation.
     pub const fn bound(document: Arc<PrefabDocument>, key: SourceDocumentKey) -> Self {
         Self {
-            document: ResolvedPrefabDocument::Native(document),
+            document: ResolvedPrefabDocument::Raw(document),
             key,
         }
     }
@@ -295,7 +295,7 @@ impl ResolvedPrefabSource {
     #[must_use]
     pub fn document(&self) -> &PrefabDocument {
         match &self.document {
-            ResolvedPrefabDocument::Native(document) => document,
+            ResolvedPrefabDocument::Raw(document) => document,
             #[cfg(feature = "serde")]
             ResolvedPrefabDocument::Authoring(document) => document.document(),
             #[cfg(feature = "serde")]
@@ -311,7 +311,7 @@ impl ResolvedPrefabSource {
             ResolvedPrefabDocument::Authoring(document) => {
                 document.checked_classification_retained_bytes()
             }
-            ResolvedPrefabDocument::Native(_) | ResolvedPrefabDocument::AuthoringSource { .. } => {
+            ResolvedPrefabDocument::Raw(_) | ResolvedPrefabDocument::AuthoringSource { .. } => {
                 Some(0)
             }
         }
@@ -319,7 +319,10 @@ impl ResolvedPrefabSource {
 
     pub(crate) fn matches_authority(&self, authority: SchemaAuthority<'_>) -> bool {
         match (&self.document, authority) {
-            (ResolvedPrefabDocument::Native(_), SchemaAuthority::Native(_)) => true,
+            (
+                ResolvedPrefabDocument::Raw(_),
+                SchemaAuthority::Native(_) | SchemaAuthority::Mixed(_),
+            ) => true,
             #[cfg(feature = "serde")]
             (ResolvedPrefabDocument::Authoring(document), SchemaAuthority::Authoring(basis)) => {
                 document.schema_basis() == *basis
@@ -1125,7 +1128,7 @@ impl SceneDocument {
         registry: &ComponentRegistry,
         options: PrefabExpansionOptions,
         database: Option<&ProjectAssetDatabase>,
-        mut loader: F,
+        loader: F,
     ) -> Result<PrefabExpansionReport, E>
     where
         F: FnMut(
@@ -1133,17 +1136,78 @@ impl SceneDocument {
             &mut PrefabExpansionWorkingSet,
         ) -> Result<Option<ResolvedPrefabSource>, E>,
     {
-        let mut context = PrefabExpansionContext::new(
+        try_expand_with_authority(
+            self,
             SchemaAuthority::Native(registry),
-            &mut loader,
             options,
             database,
-        );
-        let report = context.expand_scene_document(self);
-        match context.load_error {
-            Some(error) => Err(error),
-            None => Ok(report),
+            loader,
+        )
+    }
+}
+
+impl crate::SceneComponentBindings {
+    /// Compiles native and explicitly admitted data records through the ordinary Prefab compiler.
+    /// Data records require an exact durable owner claim and current Schema version. This does
+    /// not install runtime components or establish gameplay callback availability.
+    #[must_use]
+    pub fn expand_prefabs<R: PrefabSourceResolver + ?Sized>(
+        &self,
+        document: &SceneDocument,
+        resolver: &R,
+    ) -> PrefabExpansionReport {
+        match self.try_expand_prefabs_with_loader(
+            document,
+            PrefabExpansionOptions::default(),
+            None,
+            |source, _| Ok::<_, Infallible>(resolver.resolve_prefab(source)),
+        ) {
+            Ok(report) => report,
+            Err(error) => match error {},
         }
+    }
+
+    /// Acquires only effective source demand under this immutable representation selection.
+    /// Loader errors and working-set restrictions follow
+    /// [`SceneDocument::try_expand_prefabs_with_loader`]; no native-preview omission is used.
+    pub fn try_expand_prefabs_with_loader<F, E>(
+        &self,
+        document: &SceneDocument,
+        options: PrefabExpansionOptions,
+        database: Option<&ProjectAssetDatabase>,
+        loader: F,
+    ) -> Result<PrefabExpansionReport, E>
+    where
+        F: FnMut(
+            &AssetRef,
+            &mut PrefabExpansionWorkingSet,
+        ) -> Result<Option<ResolvedPrefabSource>, E>,
+    {
+        try_expand_with_authority(
+            document,
+            SchemaAuthority::Mixed(self),
+            options,
+            database,
+            loader,
+        )
+    }
+}
+
+fn try_expand_with_authority<F, E>(
+    document: &SceneDocument,
+    authority: SchemaAuthority<'_>,
+    options: PrefabExpansionOptions,
+    database: Option<&ProjectAssetDatabase>,
+    mut loader: F,
+) -> Result<PrefabExpansionReport, E>
+where
+    F: FnMut(&AssetRef, &mut PrefabExpansionWorkingSet) -> Result<Option<ResolvedPrefabSource>, E>,
+{
+    let mut context = PrefabExpansionContext::new(authority, &mut loader, options, database);
+    let report = context.expand_scene_document(document);
+    match context.load_error {
+        Some(error) => Err(error),
+        None => Ok(report),
     }
 }
 

@@ -939,6 +939,14 @@ impl ComponentRegistrySnapshot {
         self.0.contributions.values().map(|receipt| receipt.owner())
     }
 
+    /// Enumerates declared durable owners, including a raw owner with only retired types.
+    ///
+    /// Raw standalone registries without an owner have no entries. Owner presence is metadata,
+    /// not a provider receipt or permission to install another executable contribution.
+    pub fn schema_owners(&self) -> impl Iterator<Item = ComponentSchemaOwnerId> + '_ {
+        self.0.contributions.keys().copied().chain(self.0.raw_owner)
+    }
+
     #[must_use]
     pub fn owner_receipt(
         &self,

@@ -20,6 +20,11 @@ a managed tools SDK nor a replacement Editor frontend is implemented by those do
 Its [metadata qualification](../../knowledge/engineering/verification/2026-10/2026-10-27T102723Z-backend-free-owner-schema-snapshots-and-clarified-owned-editor-ui-sequencing-7e4b079a81b64d149b8f031b8b2c84ea.md)
 records no-default admission, bounded bundles, exact identity/content distinctions and migrated
 Scene/root/Editor/independent consumers. It does not qualify mixed runtime materialization.
+The [closed selection/compiler successor](../../knowledge/engineering/verification/2026-10/2026-10-27T105601Z-closed-scene-binding-selection-and-shared-strict-data-compilation-263aa2e60c62429db4a8862d2df6e059.md)
+adds explicit native/data catalog selection, strict owner/version checks and shared production
+Prefab compilation, with nested/default/reference and actual source-demand counterexamples.
+Managed data selection, aggregate runtime preflight, carrier publication/mutation and live export
+remain unimplemented; this is not a complete runtime representation or SDK qualification.
 The [documentation verification](../../knowledge/engineering/verification/2026-10/2026-10-23T115037Z-foundation-architecture-rebaseline-documentation-checks-and-adversarial-closure-33c8c794baf142ee964468a01248af17.md)
 records inventory/link/status checks and the scoped adversarial correction/recheck. No Cargo,
 performance or native trajectory was re-executed for this design-only unit.

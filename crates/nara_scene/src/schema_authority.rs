@@ -5,11 +5,12 @@ use nara_reflect::{
     ComponentTypeId, ComponentValue, MigratedComponentValue,
 };
 
-use crate::{PrefabExpansionFailureKind, SceneComponentRecord};
+use crate::{PrefabExpansionFailureKind, SceneComponentBindings, SceneComponentRecord};
 
 #[derive(Clone, Copy)]
 pub(crate) enum SchemaAuthority<'a> {
     Native(&'a ComponentRegistry),
+    Mixed(&'a SceneComponentBindings),
     #[cfg(feature = "serde")]
     Authoring(&'a crate::AuthoringSchemaBasis),
 }
@@ -18,6 +19,7 @@ impl<'a> SchemaAuthority<'a> {
     pub(crate) fn native_registry(self) -> Option<&'a ComponentRegistry> {
         match self {
             Self::Native(registry) => Some(registry),
+            Self::Mixed(bindings) => Some(bindings.native_registry()),
             #[cfg(feature = "serde")]
             Self::Authoring(_) => None,
         }
@@ -26,6 +28,7 @@ impl<'a> SchemaAuthority<'a> {
     pub(crate) fn schema(self, component: &ComponentTypeId) -> Option<&'a ComponentSchema> {
         match self {
             Self::Native(registry) => registry.schema(component),
+            Self::Mixed(bindings) => bindings.schema(component),
             #[cfg(feature = "serde")]
             Self::Authoring(basis) => basis.schema(component),
         }
@@ -36,11 +39,20 @@ impl<'a> SchemaAuthority<'a> {
         component: &ComponentTypeId,
         record: &SceneComponentRecord,
     ) -> bool {
+        if let Self::Mixed(bindings) = self
+            && let Some(owner) = bindings.data_owner(component)
+        {
+            return record.owner() == Some(owner.owner_id());
+        }
         let Some(declared) = record.owner() else {
             return true;
         };
         match self {
             Self::Native(registry) => registry
+                .component_schema_owner(component)
+                .is_some_and(|owner| declared.matches_executable(owner).unwrap_or(false)),
+            Self::Mixed(bindings) => bindings
+                .native_snapshot()
                 .component_schema_owner(component)
                 .is_some_and(|owner| declared.matches_executable(owner).unwrap_or(false)),
             #[cfg(feature = "serde")]
@@ -62,7 +74,7 @@ impl<'a> SchemaAuthority<'a> {
             return false;
         }
         match self {
-            Self::Native(_) => true,
+            Self::Native(_) | Self::Mixed(_) => true,
             #[cfg(feature = "serde")]
             Self::Authoring(basis) => basis.has_authoring_adapter(component),
         }
@@ -91,6 +103,20 @@ impl<'a> SchemaAuthority<'a> {
                     .validate_whole_value_capabilities(component, [ComponentCapability::Scene])
                     .map_err(|_| PrefabExpansionFailureKind::Component)?;
             }
+            Self::Mixed(bindings) => {
+                if bindings.data_owner(component).is_none() {
+                    bindings
+                        .native_registry()
+                        .validate_whole_value_capabilities(component, [ComponentCapability::Scene])
+                        .map_err(|_| PrefabExpansionFailureKind::Component)?;
+                } else {
+                    nara_reflect::__private::validate_schema_capabilities(
+                        schema,
+                        [ComponentCapability::Scene],
+                    )
+                    .map_err(|_| PrefabExpansionFailureKind::Component)?;
+                }
+            }
             #[cfg(feature = "serde")]
             Self::Authoring(_) => {
                 nara_reflect::__private::validate_schema_capabilities(
@@ -113,25 +139,12 @@ impl<'a> SchemaAuthority<'a> {
             Self::Native(registry) => {
                 registry.migrate_component_value_owned(component, record.version, value)
             }
+            Self::Mixed(bindings) if bindings.data_owner(component).is_none() => bindings
+                .native_registry()
+                .migrate_component_value_owned(component, record.version, value),
+            Self::Mixed(_) => current_version_value(self, component, record, value),
             #[cfg(feature = "serde")]
-            Self::Authoring(_) => {
-                let schema = self.schema(component).ok_or_else(|| {
-                    ComponentMigrationError::UnknownComponentId {
-                        component_id: component.clone(),
-                    }
-                })?;
-                if record.version != schema.version() {
-                    return Err(ComponentMigrationError::UnsupportedVersion {
-                        component_id: component.clone(),
-                        from_version: record.version,
-                        target_version: schema.version(),
-                    });
-                }
-                Ok(MigratedComponentValue {
-                    version: record.version,
-                    value,
-                })
-            }
+            Self::Authoring(_) => current_version_value(self, component, record, value),
         }
     }
 
@@ -161,6 +174,31 @@ impl<'a> SchemaAuthority<'a> {
             None
         }
     }
+}
+
+fn current_version_value(
+    authority: SchemaAuthority<'_>,
+    component: &ComponentTypeId,
+    record: &SceneComponentRecord,
+    value: ComponentValue,
+) -> Result<MigratedComponentValue, ComponentMigrationError> {
+    let schema =
+        authority
+            .schema(component)
+            .ok_or_else(|| ComponentMigrationError::UnknownComponentId {
+                component_id: component.clone(),
+            })?;
+    if record.version != schema.version() {
+        return Err(ComponentMigrationError::UnsupportedVersion {
+            component_id: component.clone(),
+            from_version: record.version,
+            target_version: schema.version(),
+        });
+    }
+    Ok(MigratedComponentValue {
+        version: record.version,
+        value,
+    })
 }
 
 impl<'a> From<&'a ComponentRegistry> for SchemaAuthority<'a> {

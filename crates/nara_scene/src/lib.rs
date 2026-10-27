@@ -7,6 +7,7 @@ mod authoring_decode;
 #[cfg(feature = "serde")]
 mod authoring_preview;
 mod candidate;
+mod component_bindings;
 mod diagnostics;
 mod document;
 mod export;
@@ -63,6 +64,9 @@ pub use authoring_decode::{
     UnavailableRecordManifestEntry, UnavailableValuePathSegment,
 };
 pub use candidate::{ExpandedSceneCandidate, ExpandedSceneDocument};
+pub use component_bindings::{
+    SceneComponentBindingError, SceneComponentBindingLimits, SceneComponentBindings,
+};
 pub use document::{SceneComponentRecord, SceneDocument, SceneEntityRecord};
 pub use export::{
     SceneExportOptions, SceneExportOutput, SceneExportRemap, SceneExportReport, export_scene,

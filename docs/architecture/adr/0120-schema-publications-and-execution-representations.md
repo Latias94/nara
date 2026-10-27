@@ -64,6 +64,9 @@ the first production closed native/data family through the existing compiler, pu
 live export owners. The [updated extension study](../../research/2026-10-27-language-extension-product-boundaries.md)
 adds a complete C# Editor-tool evaluation to the private gameplay evidence. Neither proposal
 changes this ADR's status or makes metadata admission proof of an executable binding.
+Backend-free owner admission and explicit native/data source compilation now have scoped
+production evidence in the [implementation ledger](implementation-status.md); complete runtime
+materialization, managed ownership and replacement remain open.
 
 ### Publication Scope
 

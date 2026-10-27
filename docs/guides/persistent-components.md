@@ -108,6 +108,19 @@ tests](../../crates/nara_reflect/tests/schema_owner.rs) cover these distinctions
 alone does not install dynamic Scene storage, a language module or an executable binding; ordinary
 native materialization still requires its complete frozen native registry.
 
+For source compilation, `SceneComponentBindings::new(native_snapshot, data_owners)` explicitly
+selects disjoint native and data catalogs. Duplicate owners and overlapping active/retired type
+claims reject, including predecessor declarations. `new_with_limits` bounds the data-owner and
+declaration indexes. Data records need a matching owner and the current version; a missing native
+binding never chooses this family implicitly.
+
+Use the selection's `expand_prefabs` or `try_expand_prefabs_with_loader` for the same production
+compiler with data Schemas. Defaults, references, declarative overlays, source demand and bounded
+work retain their existing semantics. See the [public compiler
+tests](../../crates/nara_scene/tests/component_bindings.rs). This is **compilation support only**:
+the selection does not install a managed Runtime definition, materialize a data carrier, or prove
+gameplay callbacks are available. Those production-family paths remain under implementation.
+
 ## Prepare And Materialize A Scene
 
 `spawn_scene(world, registry, candidate, occurrence, database)` is the immediate convenience. Use
