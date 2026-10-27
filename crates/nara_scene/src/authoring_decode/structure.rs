@@ -5,6 +5,10 @@ use super::{
     classify_scene_document, component_allows_composition, diagnostic_error,
     is_authoring_field_operation,
 };
+use crate::authoring::prefab_conversion::{
+    retention,
+    work::{self, ConversionWork},
+};
 use std::{collections::BTreeSet, sync::Arc};
 
 enum StructureAdmission<'a> {
@@ -46,11 +50,65 @@ pub(super) fn prepare_conversion_structure(
     )
 }
 
+pub(super) fn prepare_conversion_structure_with_work(
+    roots: &[crate::SceneEntityId],
+    entities: &[crate::SceneEntityRecord],
+    state: &AuthoringDocumentState,
+    patch: &ScenePatchDocument,
+    footprint: &crate::authoring::prefab_conversion::PrefabConversionFootprint,
+    work: &mut ConversionWork,
+) -> Result<PreparedSceneAuthoringPatch, ScenePatchReport> {
+    footprint.admit_patch(patch)?;
+    if !matches!(
+        patch.operations.first(),
+        Some(ScenePatchOperation::SetPrefabInstance {
+            expected: Some(_),
+            value: None,
+            ..
+        })
+    ) || patch
+        .operations
+        .iter()
+        .skip(1)
+        .any(|operation| !matches!(operation, ScenePatchOperation::AddEntity { .. }))
+    {
+        return Err(authoring_structure_rejection(
+            "Conversion preparation requires its complete forward localization",
+        ));
+    }
+    prepare_structure_from_parts(
+        roots,
+        entities,
+        state,
+        patch,
+        StructureAdmission::PrefabConversion(footprint),
+        Some(work),
+    )
+}
+
 fn prepare_structure(
     document: &SceneDocument,
     state: &AuthoringDocumentState,
     patch: &ScenePatchDocument,
     admission: StructureAdmission<'_>,
+) -> Result<PreparedSceneAuthoringPatch, ScenePatchReport> {
+    prepare_structure_from_parts(
+        &document.roots,
+        &document.entities,
+        state,
+        patch,
+        admission,
+        None,
+    )
+}
+
+fn prepare_structure_from_parts(
+    roots: &[crate::SceneEntityId],
+    entities: &[crate::SceneEntityRecord],
+    state: &AuthoringDocumentState,
+    patch: &ScenePatchDocument,
+    admission: StructureAdmission<'_>,
+    mut work: Option<&mut ConversionWork>,
 ) -> Result<PreparedSceneAuthoringPatch, ScenePatchReport> {
     let history = matches!(admission, StructureAdmission::History);
     if patch.format_version != ScenePatchDocument::CURRENT_FORMAT_VERSION
@@ -77,7 +135,22 @@ fn prepare_structure(
     };
     admit_replay_cost(patch)?;
     let mut fields = fields.iter();
-    let mut candidate = document.clone();
+    if let Some(work) = work.as_deref_mut() {
+        work.reserve(
+            "complete-document",
+            retention::document_dynamic_bytes(roots, entities, state.limits),
+        )?;
+        // Candidate insertions, exact inverse, and retained forward patch coexist.
+        work.reserve(
+            "transaction-copies",
+            retention::patch_dynamic_bytes(patch).and_then(|bytes| bytes.checked_mul(3)),
+        )?;
+        work::copying("complete-document");
+    }
+    let mut candidate = SceneDocument {
+        roots: roots.to_vec(),
+        entities: entities.to_vec(),
+    };
     let mut created = BTreeSet::new();
     let mut inverses = Vec::with_capacity(patch.operations.len());
     for (operation_index, operation) in patch.operations.iter().enumerate() {
@@ -164,45 +237,81 @@ fn prepare_structure(
         }
         inverses.push(inverse);
     }
-    if crate::format::validate_scene_publication_shape(&candidate, state.limits).is_err() {
+    if work.is_none()
+        && crate::format::validate_scene_publication_shape(&candidate, state.limits).is_err()
+    {
         return Err(authoring_structure_rejection(
             "Authoring structure exceeds the persistent format boundary",
         ));
     }
+    if let Some(work) = work.as_deref_mut() {
+        work.reserve(
+            "candidate-order",
+            candidate
+                .entities
+                .len()
+                .checked_mul(std::mem::size_of::<crate::SceneEntityRecord>()),
+        )?;
+    }
     candidate.canonicalize();
-    let candidate_state = classify_scene_document(
-        &candidate,
-        state.source.clone(),
-        state.kind,
-        Arc::clone(&state.basis),
-        state.limits,
-    )
-    .map_err(|error| ScenePatchReport {
-        applied: false,
-        inverse: None,
-        diagnostics: error.into_diagnostics(),
-    })?;
-    let expected_manifest = if patch.operations.iter().any(|operation| {
-        matches!(
-            operation,
-            ScenePatchOperation::AddEntity { .. }
-                | ScenePatchOperation::RemoveEntity { .. }
-                | ScenePatchOperation::RestoreEntity { .. }
-                | ScenePatchOperation::MoveEntity { .. }
+    if let Some(work) = work.as_deref_mut()
+        && state.kind == super::AuthoringDocumentKind::Scene
+    {
+        crate::format::validate_scene_publication_shape_with_admission(
+            &candidate,
+            state.limits,
+            |bytes| work.reserve("publication-buffer", Some(bytes)),
         )
-    }) {
-        manifest_after_topology(&state.unavailable_manifest, &candidate)
+        .map_err(|error| match error {
+            crate::format::PublicationShapeAdmissionError::Admission(report) => report,
+            crate::format::PublicationShapeAdmissionError::Format(_) => {
+                authoring_structure_rejection(
+                    "Authoring structure exceeds the persistent format boundary",
+                )
+            }
+        })?;
+    }
+    let candidate_state = if let Some(work) = work.as_deref_mut() {
+        super::conversion::classify_conversion_document(&candidate, state, patch, work)?
     } else {
-        state.unavailable_manifest.clone()
+        classify_scene_document(
+            &candidate,
+            state.source.clone(),
+            state.kind,
+            Arc::clone(&state.basis),
+            state.limits,
+        )
+        .map_err(|error| ScenePatchReport {
+            applied: false,
+            inverse: None,
+            diagnostics: error.into_diagnostics(),
+        })?
     };
-    if !preserves_unedited_declarations(
-        &expected_manifest,
-        &candidate_state.unavailable_manifest,
-        patch,
-    ) {
-        return Err(authoring_structure_rejection(
-            "Authoring structure changed the complete unavailable-record manifest",
-        ));
+    // The budgeted forward conversion reuses exact admitted facts for untouched records.
+    // It rebases their placement while copying classification; no expected manifest is cloned.
+    if work.is_none() {
+        let expected_manifest = if patch.operations.iter().any(|operation| {
+            matches!(
+                operation,
+                ScenePatchOperation::AddEntity { .. }
+                    | ScenePatchOperation::RemoveEntity { .. }
+                    | ScenePatchOperation::RestoreEntity { .. }
+                    | ScenePatchOperation::MoveEntity { .. }
+            )
+        }) {
+            manifest_after_topology(&state.unavailable_manifest, &candidate)
+        } else {
+            state.unavailable_manifest.clone()
+        };
+        if !preserves_unedited_declarations(
+            &expected_manifest,
+            &candidate_state.unavailable_manifest,
+            patch,
+        ) {
+            return Err(authoring_structure_rejection(
+                "Authoring structure changed the complete unavailable-record manifest",
+            ));
+        }
     }
     let inverse = ScenePatchDocument::new(inverses.into_iter().rev().flatten());
     admit_replay_cost(&inverse)?;

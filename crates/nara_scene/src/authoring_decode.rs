@@ -1,9 +1,13 @@
 //! Registry-free Scene and Prefab admission for persistent authoring.
 
+#[cfg(test)]
+mod asset_budget_tests;
 mod complete_value;
+mod conversion;
 mod field_candidate;
 mod overlay;
 mod read;
+mod retention;
 mod structure;
 
 use complete_value::validate_complete_value;
@@ -11,6 +15,7 @@ pub use read::{
     AuthoringComponentView, AuthoringDirectMembers, AuthoringEntityView, AuthoringPropertyValue,
     AuthoringReadError,
 };
+pub(crate) use retention::asset_references_bytes as retained_asset_references_bytes;
 use structure::{authoring_structure_rejection, prepare_scene_authoring_structure};
 
 use std::{
@@ -22,6 +27,7 @@ use std::{
 };
 
 use nara_asset::AssetRef;
+#[cfg(test)]
 use nara_core::{ByteLimit, ItemLimit};
 use nara_diagnostic::DiagnosticReport;
 use nara_reflect::{
@@ -1268,6 +1274,10 @@ pub struct PublishedAuthoringPrefabDocument {
 }
 
 impl PublishedAuthoringPrefabDocument {
+    pub(crate) fn checked_classification_retained_bytes(&self) -> Option<usize> {
+        self.state.checked_retained_bytes()
+    }
+
     #[must_use]
     pub const fn document(&self) -> &PrefabDocument {
         &self.document
@@ -1329,7 +1339,7 @@ pub(crate) struct AuthoringDocumentState {
     kind: AuthoringDocumentKind,
     readiness: AuthoringDocumentReadiness,
     record_facts: Vec<AuthoringRecordFact>,
-    overlay_asset_references: Vec<DeclaredAssetReference>,
+    overlay_asset_references: BTreeMap<SceneEntityId, Vec<DeclaredAssetReference>>,
     direct_record_facts: BTreeMap<SceneEntityId, BTreeMap<ComponentTypeId, usize>>,
     unavailable_manifest: UnavailableRecordManifest,
     diagnostics: DiagnosticReport,
@@ -1352,15 +1362,21 @@ impl AuthoringComponentTemplate<'_> {
 }
 
 impl AuthoringDocumentState {
+    pub(crate) const fn file_limits(&self) -> SceneFileLimits {
+        self.limits
+    }
+
     pub(crate) fn source(&self) -> &AuthoringDocumentSource {
         &self.source
     }
 
-    fn schema_declared_asset_references(&self) -> impl Iterator<Item = &DeclaredAssetReference> {
+    pub(crate) fn schema_declared_asset_references(
+        &self,
+    ) -> impl Iterator<Item = &DeclaredAssetReference> {
         self.record_facts
             .iter()
             .flat_map(|record| record.schema_declared_asset_references())
-            .chain(&self.overlay_asset_references)
+            .chain(self.overlay_asset_references.values().flatten())
     }
     pub(crate) fn schema_basis(&self) -> AuthoringSchemaBasis {
         AuthoringSchemaBasis(Arc::clone(&self.basis))
@@ -1608,7 +1624,7 @@ impl AuthoringClassificationBasis {
         &self,
         component: &ComponentTypeId,
         record: &SceneComponentRecord,
-    ) -> Result<ClassifiedRecord, AuthoringDocumentPublicationError> {
+    ) -> Result<ClassifiedRecord<'_>, AuthoringDocumentPublicationError> {
         let owner = record
             .owner()
             .map_or(AuthoringRecordOwnerClaim::Unclaimed, |owner| {
@@ -1626,7 +1642,7 @@ impl AuthoringClassificationBasis {
         &self,
         component: &ComponentTypeId,
         record: &SceneComponentRecord,
-    ) -> Result<ClassifiedRecord, AuthoringDocumentPublicationError> {
+    ) -> Result<ClassifiedRecord<'_>, AuthoringDocumentPublicationError> {
         let owner = record
             .owner()
             .map_or(AuthoringRecordOwnerClaim::Unclaimed, |owner| {
@@ -1643,7 +1659,7 @@ impl AuthoringClassificationBasis {
         &self,
         component: &ComponentTypeId,
         version: Option<ComponentSchemaVersion>,
-    ) -> Result<ClassifiedRecord, AuthoringDocumentPublicationError> {
+    ) -> Result<ClassifiedRecord<'_>, AuthoringDocumentPublicationError> {
         let entry = self.schemas.get(component);
         self.classify(
             component,
@@ -1656,14 +1672,14 @@ impl AuthoringClassificationBasis {
         )
     }
 
-    fn classify(
-        &self,
+    fn classify<'schema>(
+        &'schema self,
         component: &ComponentTypeId,
         version: ComponentSchemaVersion,
         owner: AuthoringRecordOwnerClaim,
-        entry: Option<&AuthoringSchemaEntry>,
+        entry: Option<&'schema AuthoringSchemaEntry>,
         require_scene_capability: bool,
-    ) -> Result<ClassifiedRecord, AuthoringDocumentPublicationError> {
+    ) -> Result<ClassifiedRecord<'schema>, AuthoringDocumentPublicationError> {
         let Some(entry) = entry else {
             return Ok(ClassifiedRecord {
                 owner,
@@ -1702,17 +1718,17 @@ impl AuthoringClassificationBasis {
                 .is_available()
                 .then(|| entry.adapter.clone())
                 .flatten(),
-            schema: Some(entry.schema.clone()),
+            schema: Some(&entry.schema),
         })
     }
 }
 
-struct ClassifiedRecord {
+struct ClassifiedRecord<'schema> {
     owner: AuthoringRecordOwnerClaim,
     resolved_owner: Option<PersistentComponentSchemaOwnerId>,
     readiness: AuthoringRecordReadiness,
     adapter: Option<AuthoringAdapterEvidence>,
-    schema: Option<ComponentSchema>,
+    schema: Option<&'schema ComponentSchema>,
 }
 
 struct ClassificationContext<'a> {
@@ -1720,7 +1736,7 @@ struct ClassificationContext<'a> {
     kind: AuthoringDocumentKind,
     basis: &'a AuthoringClassificationBasis,
     record_facts: Vec<AuthoringRecordFact>,
-    overlay_asset_references: Vec<DeclaredAssetReference>,
+    overlay_asset_references: BTreeMap<SceneEntityId, Vec<DeclaredAssetReference>>,
     manifest: Vec<UnavailableRecordManifestEntry>,
     placements: BTreeMap<SceneEntityId, crate::ScenePlacement>,
     namespace: BTreeSet<&'a SceneEntityId>,
@@ -1732,27 +1748,10 @@ struct ClassificationContext<'a> {
 }
 
 impl ClassificationContext<'_> {
-    // Source payload and retained reference projections are separate bounded work. Reserve the
-    // remaining projection allowance before Reflect copies paths/references or supplies defaults.
-    fn asset_reference_limits(
-        &self,
-    ) -> Result<nara_reflect::ComponentValueMaterializationLimits, AuthoringDocumentPublicationError>
-    {
-        let nodes = self
-            .limits
-            .component_value_nodes()
-            .get()
-            .saturating_sub(self.asset_reference_nodes);
-        let bytes = self
-            .limits
-            .component_value_bytes()
-            .get()
-            .saturating_sub(self.asset_reference_bytes);
-        Ok(nara_reflect::ComponentValueMaterializationLimits::new(
-            ItemLimit::new(nodes).ok_or_else(asset_reference_budget_rejection)?,
-            ByteLimit::new(bytes).ok_or_else(asset_reference_budget_rejection)?,
-            self.limits.shape().depth(),
-        ))
+    // Traversal and default materialization use the full per-record limits. Retained output
+    // is reserved separately so an earlier record cannot shrink another record's Schema budget.
+    fn asset_reference_limits(&self) -> nara_reflect::ComponentValueMaterializationLimits {
+        self.limits.component_materialization_limits()
     }
 
     fn reserve_asset_references(
@@ -1766,7 +1765,7 @@ impl ClassificationContext<'_> {
                 .saturating_add(reference.field_id().as_str().len())
                 .saturating_add(match reference.asset_ref() {
                     AssetRef::Path(path) => path.as_str().len(),
-                    AssetRef::StableId(id) => id.to_string().len(),
+                    AssetRef::StableId(_) => 36,
                 });
             for segment in reference.path().segments() {
                 self.asset_reference_bytes =
@@ -1810,7 +1809,7 @@ fn classify_scene_document(
             kind,
             basis: &basis,
             record_facts: Vec::new(),
-            overlay_asset_references: Vec::new(),
+            overlay_asset_references: BTreeMap::new(),
             manifest: Vec::new(),
             placements: crate::patch::authoring_entity_placements(
                 &document.roots,
@@ -2057,7 +2056,7 @@ fn classify_complete_record(
                 .contains_kind(nara_reflect::ComponentValueKind::AssetRef)
         });
         let reference_limits = if has_assets {
-            context.asset_reference_limits()?
+            context.asset_reference_limits()
         } else {
             context.limits.component_materialization_limits()
         };
@@ -2105,7 +2104,7 @@ fn retain_complete_record(
     placement: Option<crate::ScenePlacement>,
     component: &ComponentTypeId,
     record: &SceneComponentRecord,
-    classified: ClassifiedRecord,
+    classified: ClassifiedRecord<'_>,
     schema_declared_asset_references: Vec<DeclaredAssetReference>,
     context: &mut ClassificationContext<'_>,
 ) {
@@ -2293,6 +2292,58 @@ pub(crate) fn prepare_scene_prefab_conversion_patch(
     footprint: &crate::authoring::prefab_conversion::PrefabConversionFootprint,
 ) -> Result<PreparedSceneAuthoringPatch, ScenePatchReport> {
     structure::prepare_conversion_structure(document, state, patch, footprint)
+}
+
+pub(crate) fn prepare_scene_prefab_conversion_patch_with_work(
+    document: &SceneDocument,
+    state: &AuthoringDocumentState,
+    patch: &ScenePatchDocument,
+    footprint: &crate::authoring::prefab_conversion::PrefabConversionFootprint,
+    work: &mut crate::authoring::prefab_conversion::work::ConversionWork,
+) -> Result<PreparedSceneAuthoringPatch, ScenePatchReport> {
+    structure::prepare_conversion_structure_with_work(
+        &document.roots,
+        &document.entities,
+        state,
+        patch,
+        footprint,
+        work,
+    )
+}
+
+pub(crate) fn prepare_prefab_conversion_patch_with_work(
+    document: &PrefabDocument,
+    state: &AuthoringDocumentState,
+    patch: &ScenePatchDocument,
+    footprint: &crate::authoring::prefab_conversion::PrefabConversionFootprint,
+    work: &mut crate::authoring::prefab_conversion::work::ConversionWork,
+) -> Result<PreparedPrefabAuthoringPatch, ScenePatchReport> {
+    let prepared = structure::prepare_conversion_structure_with_work(
+        &document.roots,
+        &document.entities,
+        state,
+        patch,
+        footprint,
+        work,
+    )?;
+    let document = PrefabDocument::new(prepared.document.roots, prepared.document.entities);
+    crate::format::validate_prefab_publication_shape_with_admission(
+        &document,
+        state.limits,
+        |bytes| work.reserve("publication-buffer", Some(bytes)),
+    )
+    .map_err(|error| match error {
+        crate::format::PublicationShapeAdmissionError::Admission(report) => report,
+        crate::format::PublicationShapeAdmissionError::Format(_) => authoring_structure_rejection(
+            "Conversion exceeds the persistent Prefab format boundary",
+        ),
+    })?;
+    Ok(PreparedPrefabAuthoringPatch {
+        document,
+        state: prepared.state,
+        patch: prepared.patch,
+        report: prepared.report,
+    })
 }
 
 pub(crate) fn prepare_prefab_conversion_patch(

@@ -253,6 +253,8 @@ fn real_selected_composition_localizes_mixed_origins_and_replays_exact_source_da
     assert!(report.report().applied, "{:?}", report.report().diagnostics);
     assert_eq!(session.history_status().undo_depth, 1);
     assert_eq!(session.document(), &reviewed);
+    let rebuilt = open_scene(&reviewed, &basis, Default::default());
+    assert_classification_matches(&session, &rebuilt);
     sources.documents.clear();
     let reads = sources.reads.clone();
     let undo = session.undo_authoring();
@@ -672,4 +674,414 @@ fn materialized_persistent_default_keeps_its_namespace_and_identity() {
         ComponentValue::map([("target", ComponentValue::EntityReference(persistent)),])
     );
     assert_eq!(sources.documents[&instance("base").source].1.as_ref(), &raw);
+}
+
+fn copy_stage(report: &ScenePatchReport, stage: &str) -> bool {
+    report.diagnostics.iter().any(|diagnostic| {
+        diagnostic.code().as_str() == "scene.authoring-prefab-conversion-copy-limit"
+            && diagnostic
+                .fields()
+                .iter()
+                .any(|field| field.key().as_str() == "copy-stage" && field.display_value() == stage)
+    })
+}
+
+fn assert_classification_matches(actual: &SceneAuthoringSession, expected: &SceneAuthoringSession) {
+    assert_eq!(
+        actual.authoring_record_facts(),
+        expected.authoring_record_facts()
+    );
+    assert_eq!(
+        actual.unavailable_record_manifest(),
+        expected.unavailable_record_manifest()
+    );
+    assert_eq!(actual.authoring_readiness(), expected.authoring_readiness());
+    assert_eq!(
+        actual.authoring_diagnostics(),
+        expected.authoring_diagnostics()
+    );
+    let actual = actual.authority.published().unwrap();
+    let expected = expected.authority.published().unwrap();
+    assert_eq!(
+        actual
+            .schema_declared_asset_references()
+            .collect::<Vec<_>>(),
+        expected
+            .schema_declared_asset_references()
+            .collect::<Vec<_>>()
+    );
+    assert_eq!(
+        actual.checked_retained_bytes(),
+        expected.checked_retained_bytes()
+    );
+}
+
+#[test]
+fn remaining_conversion_allowance_refuses_large_unrelated_root_before_document_copy() {
+    let basis = basis();
+    let mut document = original();
+    document
+        .entities
+        .iter_mut()
+        .find(|record| record.id == id("other"))
+        .unwrap()
+        .components
+        .insert(
+            nara_reflect::ComponentTypeId::new("test.LargeUnavailable"),
+            SceneComponentRecord::new(
+                ComponentSchemaVersion::ONE,
+                ComponentValue::List(
+                    (0..4)
+                        .map(|_| ComponentValue::String("x".repeat(512 * 1024)))
+                        .collect(),
+                ),
+            ),
+        );
+    let scene = open_scene(&document, &basis, Default::default());
+    let published = PrefabDocumentCandidate::decode_json_str(
+        &PrefabDocument::new(document.roots.clone(), document.entities.clone())
+            .to_json_string()
+            .unwrap(),
+    )
+    .unwrap()
+    .admit_authoring_with_basis(
+        AuthoringDocumentSource::new(AssetRef::path("prefabs/guard.prefab.json").unwrap()),
+        &basis,
+    )
+    .unwrap()
+    .publish();
+    let prefab = PrefabAuthoringSession::from_published_authoring_document(published);
+    let resolved = ResolvedPrefabSource::bound_authoring_source(
+        Arc::new(PrefabDocument::default()),
+        basis,
+        key("base"),
+    );
+    super::super::work::take_copies();
+    let mut request = scene
+        .request_complete_prefab_conversion(scene.revision(), &id("anchor"), Default::default())
+        .unwrap();
+    request.restrict_working_bytes(nara_core::ByteLimit::new(256 * 1024).unwrap());
+    let error = request
+        .prepare_with_loader(None, |_, _| Ok::<_, Infallible>(Some(resolved.clone())))
+        .unwrap_err();
+    let PrefabConversionError::Source(report) = error;
+    assert!(
+        copy_stage(&report, "complete-document"),
+        "{:?}",
+        report.diagnostics
+    );
+    assert!(
+        super::super::work::take_copies().is_empty(),
+        "the guard precedes the complete root clone"
+    );
+
+    let mut request = prefab
+        .request_complete_prefab_conversion(prefab.revision(), &id("anchor"), Default::default())
+        .unwrap();
+    request.restrict_working_bytes(nara_core::ByteLimit::new(256 * 1024).unwrap());
+    let error = request
+        .prepare_with_loader(None, |_, _| Ok::<_, Infallible>(Some(resolved.clone())))
+        .unwrap_err();
+    let PrefabConversionError::Source(report) = error;
+    assert!(
+        copy_stage(&report, "complete-document"),
+        "{:?}",
+        report.diagnostics
+    );
+    assert!(
+        super::super::work::take_copies().is_empty(),
+        "Prefab preparation cannot instantiate before admission"
+    );
+    assert_eq!(scene.document(), &document);
+    assert_eq!(scene.history_usage().records, 0);
+    assert_eq!(prefab.history_usage().records, 0);
+}
+
+#[test]
+fn last_loader_restriction_governs_complete_root_and_classification_copies() {
+    let basis = basis();
+    let mut document = original();
+    document
+        .entities
+        .iter_mut()
+        .find(|record| record.id == id("other"))
+        .unwrap()
+        .components
+        .insert(
+            nara_reflect::ComponentTypeId::new("test.LargeUnavailable"),
+            SceneComponentRecord::new(
+                ComponentSchemaVersion::ONE,
+                ComponentValue::List(
+                    (0..4)
+                        .map(|_| ComponentValue::String("x".repeat(512 * 1024)))
+                        .collect(),
+                ),
+            ),
+        );
+    let session = open_scene(&document, &basis, Default::default());
+    let prefab = PrefabAuthoringSession::from_published_authoring_document(
+        PrefabDocumentCandidate::decode_json_str(
+            &PrefabDocument::new(document.roots.clone(), document.entities.clone())
+                .to_json_string()
+                .unwrap(),
+        )
+        .unwrap()
+        .admit_authoring_with_basis(
+            AuthoringDocumentSource::new(AssetRef::path("prefabs/guard.prefab.json").unwrap()),
+            &basis,
+        )
+        .unwrap()
+        .publish(),
+    );
+    let resolved = ResolvedPrefabSource::bound_authoring_source(
+        Arc::new(PrefabDocument::default()),
+        basis,
+        key("base"),
+    );
+    for (limit, stage, copies) in [
+        (256 * 1024, "complete-document", Vec::new()),
+        (
+            3 * 1024 * 1024,
+            "publication-buffer",
+            vec!["complete-document"],
+        ),
+        (
+            7 * 1024 * 1024,
+            "classification-snapshot",
+            vec!["complete-document"],
+        ),
+    ] {
+        super::super::work::take_copies();
+        let mut reads = 0;
+        let error = session
+            .request_complete_prefab_conversion(
+                session.revision(),
+                &id("anchor"),
+                Default::default(),
+            )
+            .unwrap()
+            .prepare_with_loader(None, |_, working| {
+                reads += 1;
+                working.restrict_working_bytes(nara_core::ByteLimit::new(limit).unwrap());
+                Ok::<_, Infallible>(Some(resolved.clone()))
+            })
+            .unwrap_err();
+        let PrefabConversionError::Source(report) = error;
+        assert!(copy_stage(&report, stage), "{:?}", report.diagnostics);
+        assert_eq!(reads, 1);
+        assert_eq!(
+            super::super::work::take_copies(),
+            copies,
+            "no copy after its owning guard refuses"
+        );
+        assert_eq!(session.document(), &document);
+        assert_eq!(session.history_usage().records, 0);
+    }
+    for (limit, stage, copies) in [
+        (256 * 1024, "complete-document", Vec::new()),
+        (
+            3 * 1024 * 1024,
+            "classification-snapshot",
+            vec!["complete-document"],
+        ),
+        (
+            7 * 1024 * 1024,
+            "publication-buffer",
+            vec!["complete-document", "classification-snapshot"],
+        ),
+    ] {
+        super::super::work::take_copies();
+        let error = prefab
+            .request_complete_prefab_conversion(
+                prefab.revision(),
+                &id("anchor"),
+                Default::default(),
+            )
+            .unwrap()
+            .prepare_with_loader(None, |_, working| {
+                working.restrict_working_bytes(nara_core::ByteLimit::new(limit).unwrap());
+                Ok::<_, Infallible>(Some(resolved.clone()))
+            })
+            .unwrap_err();
+        let PrefabConversionError::Source(report) = error;
+        assert!(copy_stage(&report, stage), "{:?}", report.diagnostics);
+        assert_eq!(super::super::work::take_copies(), copies);
+        assert_eq!(prefab.history_usage().records, 0);
+    }
+}
+
+#[test]
+fn unchanged_missing_large_defaults_are_shared_without_schema_or_value_materialization() {
+    let field = ComponentFieldSchema::optional_with_default(
+        ComponentFieldId::new("payload"),
+        "Payload",
+        ComponentFieldPath::from_fields(["payload"]),
+        ComponentValueKind::String,
+        ComponentValue::String("x".repeat(2 * 1024 * 1024)),
+    )
+    .with_capabilities([ComponentCapability::Scene, ComponentCapability::Inspect]);
+    let basis = admit_schema(
+        ComponentSchema::new(component(), "Default", ComponentSchemaVersion::ONE)
+            .with_capabilities([ComponentCapability::Scene, ComponentCapability::Inspect])
+            .with_fields([field]),
+    );
+    let mut document = original();
+    document
+        .entities
+        .iter_mut()
+        .find(|record| record.id == id("other"))
+        .unwrap()
+        .components
+        .insert(
+            component(),
+            SceneComponentRecord::new(
+                ComponentSchemaVersion::ONE,
+                ComponentValue::Map(Default::default()),
+            )
+            .with_owner(schema_owner()),
+        );
+    let mut session = open_scene(&document, &basis, Default::default());
+    let resolved = ResolvedPrefabSource::bound_authoring_source(
+        Arc::new(PrefabDocument::default()),
+        basis.clone(),
+        key("base"),
+    );
+    let mut request = session
+        .request_complete_prefab_conversion(session.revision(), &id("anchor"), Default::default())
+        .unwrap();
+    request.restrict_working_bytes(nara_core::ByteLimit::new(256 * 1024).unwrap());
+    let prepared = request
+        .prepare_with_loader(None, |_, _| Ok::<_, Infallible>(Some(resolved.clone())))
+        .unwrap();
+    assert!(
+        prepared
+            .document()
+            .entities
+            .iter()
+            .find(|record| record.id == id("other"))
+            .unwrap()
+            .components[&component()]
+            .value
+            .get("payload")
+            .is_none()
+    );
+    let rebuilt = open_scene(prepared.document(), &basis, Default::default());
+    session
+        .commit_complete_prefab_conversion_with_loader(prepared, |_| {
+            Ok::<_, Infallible>(Some(resolved.clone()))
+        })
+        .unwrap();
+    assert_eq!(
+        session.authoring_record_facts(),
+        rebuilt.authoring_record_facts()
+    );
+    assert_eq!(
+        session.unavailable_record_manifest(),
+        rebuilt.unavailable_record_manifest()
+    );
+    assert_eq!(
+        session.authoring_diagnostics(),
+        rebuilt.authoring_diagnostics()
+    );
+}
+
+#[test]
+fn classification_reuse_removes_only_selected_overlay_inventory_and_preserves_default_assets() {
+    use crate::{PrefabComponentIntent, PrefabPropertyClaim, PrefabPropertyIntent};
+    use nara_reflect::ComponentPropertyPath;
+    let default = AssetRef::path("textures/default.png").unwrap();
+    let field = ComponentFieldSchema::optional_with_default(
+        ComponentFieldId::new("image"),
+        "Image",
+        ComponentFieldPath::from_fields(["image"]),
+        ComponentValueKind::AssetRef,
+        crate::patch::asset_ref_value(&default),
+    )
+    .with_capabilities([
+        ComponentCapability::Scene,
+        ComponentCapability::Inspect,
+        ComponentCapability::AssetRef,
+    ]);
+    let basis = admit_schema(
+        ComponentSchema::new(component(), "Image", ComponentSchemaVersion::ONE)
+            .with_capabilities([ComponentCapability::Scene, ComponentCapability::Inspect])
+            .with_fields([field]),
+    );
+    let mut document = original();
+    for (anchor, path, base) in [
+        ("anchor", "textures/converted.png", "base"),
+        ("other", "textures/unrelated.png", "unrelated"),
+    ] {
+        let entity = document
+            .entities
+            .iter_mut()
+            .find(|record| record.id == id(anchor))
+            .unwrap();
+        let mut overlay = PrefabOverlay::new(key(base));
+        overlay.components.push(PrefabComponentIntent::Properties {
+            target: PrefabEntityTarget::source(id("leaf")),
+            component: component(),
+            version: ComponentSchemaVersion::ONE,
+            claims: vec![PrefabPropertyClaim {
+                path: ComponentPropertyPath::new(ComponentFieldId::new("image")),
+                intent: PrefabPropertyIntent::Set(crate::patch::asset_ref_value(
+                    &AssetRef::path(path).unwrap(),
+                )),
+                bindings: Vec::new(),
+            }],
+        });
+        entity.prefab.as_mut().unwrap().overrides = Some(overlay);
+    }
+    document
+        .entities
+        .iter_mut()
+        .find(|record| record.id == id("other"))
+        .unwrap()
+        .components
+        .insert(
+            component(),
+            SceneComponentRecord::new(
+                ComponentSchemaVersion::ONE,
+                ComponentValue::Map(Default::default()),
+            )
+            .with_owner(schema_owner()),
+        );
+    let mut session = open_scene(&document, &basis, Default::default());
+    let resolved = ResolvedPrefabSource::bound_authoring_source(
+        Arc::new(PrefabDocument::from_ordered_roots([
+            crate::SceneEntityRecord::new(id("leaf")).with_component(
+                component(),
+                SceneComponentRecord::new(
+                    ComponentSchemaVersion::ONE,
+                    ComponentValue::Map(Default::default()),
+                )
+                .with_owner(schema_owner()),
+            ),
+        ])),
+        basis.clone(),
+        key("base"),
+    );
+    let prepared = session
+        .request_complete_prefab_conversion(session.revision(), &id("anchor"), Default::default())
+        .unwrap()
+        .prepare_with_loader(None, |_, _| Ok::<_, Infallible>(Some(resolved.clone())))
+        .unwrap();
+    let rebuilt = open_scene(prepared.document(), &basis, Default::default());
+    session
+        .commit_complete_prefab_conversion_with_loader(prepared, |_| {
+            Ok::<_, Infallible>(Some(resolved.clone()))
+        })
+        .unwrap();
+    assert_classification_matches(&session, &rebuilt);
+    let references = session
+        .authority
+        .published()
+        .unwrap()
+        .schema_declared_asset_references()
+        .map(|reference| reference.asset_ref().clone())
+        .collect::<Vec<_>>();
+    assert_eq!(references.len(), 3);
+    assert!(references.contains(&default));
+    assert!(references.contains(&AssetRef::path("textures/converted.png").unwrap()));
+    assert!(references.contains(&AssetRef::path("textures/unrelated.png").unwrap()));
 }

@@ -146,15 +146,22 @@ impl CapturedPrefabSources {
                 .map_err(PrefabConversionError::Loader)?
                 .ok_or_else(|| PrefabConversionError::Source(source_changed()))?;
 
+            if current.key() != key
+                || current.key().kind() != SourceDocumentKind::Prefab
+                || !current.matches_authority(SchemaAuthority::Authoring(basis))
+            {
+                return Err(PrefabConversionError::Source(source_changed()));
+            }
+            // The retained immutable body already crossed raw admission. Hosts which have
+            // freshly validated its physical receipts can reuse that body without another walk.
+            if std::ptr::eq(current.document(), previous.document()) {
+                continue;
+            }
             // Admit the loader's returned body before derived equality, without copying
             // it into this capture. Its acquisition/decoding budget belongs to the loader.
             snapshot_bytes(&current, self.maximum)
                 .ok_or_else(|| PrefabConversionError::Source(source_budget()))?;
-            if current.key() != key
-                || current.key().kind() != SourceDocumentKind::Prefab
-                || !current.matches_authority(SchemaAuthority::Authoring(basis))
-                || current.document() != previous.document()
-            {
+            if current.document() != previous.document() {
                 return Err(PrefabConversionError::Source(source_changed()));
             }
         }
@@ -193,7 +200,8 @@ fn snapshot_bytes(source: &ResolvedPrefabSource, maximum: usize) -> Option<usize
     let bytes = metadata
         .checked_add(cost.operation_count().checked_mul(512)?)?
         .checked_add(cost.value_cost().nodes().checked_mul(96)?)?
-        .checked_add(cost.logical_bytes())?;
+        .checked_add(cost.logical_bytes())?
+        .checked_add(source.checked_classification_retained_bytes()?)?;
     if bytes > maximum {
         return None;
     }
@@ -577,6 +585,58 @@ mod tests {
         assert!(capture.sources.is_empty());
         assert!(capture.requests.is_empty());
         assert_eq!(Arc::strong_count(&document), references);
+    }
+
+    #[test]
+    fn published_classification_crosses_admission_before_retaining_the_source_handle() {
+        let basis = make_basis();
+        let document = PrefabDocument::from_ordered_roots([SceneEntityRecord::new(
+            SceneEntityId::new("unknown").unwrap(),
+        )
+        .with_component(
+            ComponentTypeId::new("test.UnknownPublishedDependency"),
+            SceneComponentRecord::new(
+                ComponentSchemaVersion::ONE,
+                ComponentValue::String("x".repeat(64 * 1024)),
+            ),
+        )]);
+        let published = Arc::new(
+            crate::PrefabDocumentCandidate::decode_json_str(&document.to_json_string().unwrap())
+                .unwrap()
+                .admit_authoring_with_basis(
+                    crate::AuthoringDocumentSource::new(request("published")),
+                    &basis,
+                )
+                .unwrap()
+                .publish(),
+        );
+        let raw = ResolvedPrefabSource::bound_authoring_source(
+            Arc::new(document),
+            basis.clone(),
+            key("canonical"),
+        );
+        let resolved =
+            ResolvedPrefabSource::bound_authoring(Arc::clone(&published), key("canonical"));
+        let classification = resolved.checked_classification_retained_bytes().unwrap();
+        assert_eq!(
+            snapshot_bytes(&resolved, MAXIMUM).unwrap() - snapshot_bytes(&raw, MAXIMUM).unwrap(),
+            classification
+        );
+        assert!(classification > 64 * 1024);
+        let mut working = working(&basis);
+        let maximum = size_of::<CapturedPrefabSources>()
+            + snapshot_bytes(&raw, MAXIMUM).unwrap()
+            + request_binding_bytes(&request("path"), raw.key()).unwrap()
+            + working.checked_work_bytes().unwrap();
+        let mut capture = CapturedPrefabSources::new(maximum);
+        let owners = Arc::strong_count(&published);
+        let error = capture
+            .capture(&request("path"), &resolved, &basis, &mut working)
+            .unwrap_err();
+        assert!(is_budget(&error));
+        assert_eq!(Arc::strong_count(&published), owners);
+        assert!(capture.sources.is_empty());
+        assert!(capture.requests.is_empty());
     }
 
     #[test]

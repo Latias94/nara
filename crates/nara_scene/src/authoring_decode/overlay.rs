@@ -191,7 +191,7 @@ fn classify_record(
                 }
                 continue;
             };
-            let limits = context.asset_reference_limits()?;
+            let limits = context.asset_reference_limits();
             match collect_declared_field_asset_references_with_limits(
                 component,
                 field,
@@ -256,7 +256,7 @@ fn classify_property(
                 if let Some(payload) = payload
                     && selected.shape.contains_kind(ComponentValueKind::AssetRef)
                 {
-                    let limits = context.asset_reference_limits()?;
+                    let limits = context.asset_reference_limits();
                     let traversal_limits = nara_reflect::EntityReferenceTraversalLimits::new(
                         limits.nodes(),
                         limits.bytes(),
@@ -284,7 +284,16 @@ fn classify_property(
                     match references {
                         Ok(references) => {
                             context.reserve_asset_references(&references)?;
-                            context.overlay_asset_references.extend(references);
+                            let AuthoringRecordLocation::OverlayComponent { anchor, .. } =
+                                &location
+                            else {
+                                unreachable!("property inventory belongs to its declaring anchor");
+                            };
+                            context
+                                .overlay_asset_references
+                                .entry(anchor.clone())
+                                .or_default()
+                                .extend(references);
                         }
                         Err(error) => {
                             preserve_reference_error(error)?;

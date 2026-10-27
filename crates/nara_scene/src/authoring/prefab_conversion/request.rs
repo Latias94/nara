@@ -4,15 +4,16 @@ use std::{error::Error, fmt, sync::Arc};
 
 use nara_asset::{AssetRef, ProjectAssetDatabase};
 
-use super::localize::{self, CapturedPrefabSources};
+use super::{
+    localize::{self, CapturedPrefabSources},
+    retention,
+};
 use crate::{
     PrefabAuthoringSession, PrefabDocument, PrefabExpansionOptions, PrefabExpansionWorkingSet,
     PreparedPrefabAuthoringEdit, PreparedSceneAuthoringEdit, ResolvedPrefabSource,
     SceneAuthoringHistoryLimits, SceneAuthoringRevision, SceneAuthoringSession, SceneDocument,
-    SceneEntityId, SceneEntityProvenance, ScenePatchReport,
-    authoring::{AuthoringHistoryScope, prepared::stale_basis},
-    authoring_decode::AuthoringDocumentState,
-    prefab::SelectedInstanceSource,
+    SceneEntityId, SceneEntityProvenance, ScenePatchReport, authoring::prepared::stale_basis,
+    authoring_decode::AuthoringDocumentState, prefab::SelectedInstanceSource,
 };
 
 /// Atomic source refusal or the dependency provider's original acquisition error.
@@ -46,7 +47,7 @@ impl<E: Error + 'static> Error for PrefabConversionError<E> {
 }
 
 /// One complete projected occurrence and its newly allocated persistent source ID.
-#[derive(Debug)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct LocalizedPrefabEntity {
     pub(super) provenance: SceneEntityProvenance,
     pub(super) entity: SceneEntityId,
@@ -81,6 +82,11 @@ impl PrefabConversionReceipt {
     pub fn entities(&self) -> &[LocalizedPrefabEntity] {
         &self.entities
     }
+
+    #[must_use]
+    pub fn into_parts(self) -> (Vec<LocalizedPrefabEntity>, ScenePatchReport) {
+        (self.entities, self.report)
+    }
 }
 
 macro_rules! conversion_owner {
@@ -101,6 +107,37 @@ macro_rules! conversion_owner {
         }
 
         impl $request {
+            /// Returns the logical retention of this immutable request, borrowing its data.
+            ///
+            /// Includes the captured source and classification even when shared with the
+            /// live session. Shared Schema/Adapter catalog contents belong to the Host's
+            /// schema budget; their handles are included. This is not allocator or RSS
+            /// accounting, and does not charge configured capacity limits. Returns `None`
+            /// if checked accounting overflows or the bounded source walk cannot complete.
+            #[must_use]
+            pub fn checked_retained_bytes(&self) -> Option<usize> {
+                std::mem::size_of::<Self>()
+                    .checked_add(std::mem::size_of::<$document>())?
+                    .checked_add(8 * std::mem::size_of::<usize>())?
+                    .checked_add(retention::document_dynamic_bytes(
+                        &self.document.roots,
+                        &self.document.entities,
+                        self.state.file_limits(),
+                    )?)?
+                    .checked_add(self.state.checked_retained_bytes()?)?
+                    .checked_add(crate::provenance::provenance_string_bytes(
+                        self.anchor.as_str(),
+                    )?)
+            }
+
+            /// Tightens preparation before compiler work starts, including Host input retention.
+            pub fn restrict_working_bytes(&mut self, maximum: nara_core::ByteLimit) {
+                let current = self.options.limits.working_bytes();
+                if maximum.get() < current.get() {
+                    self.options.limits = self.options.limits.with_working_bytes(maximum);
+                }
+            }
+
             #[must_use]
             pub const fn base_revision(&self) -> SceneAuthoringRevision {
                 self.revision
@@ -129,7 +166,7 @@ macro_rules! conversion_owner {
                 ) -> Result<Option<ResolvedPrefabSource>, E>,
             {
                 let basis = self.state.schema_basis();
-                let localized = localize::prepare(
+                let mut localized = localize::prepare(
                     SelectedInstanceSource::$kind(&self.document),
                     &self.anchor,
                     &basis,
@@ -138,13 +175,18 @@ macro_rules! conversion_owner {
                     database,
                     loader,
                 )?;
-                let edit = <$edit>::prepare_from_source(
+                localized
+                    .work
+                    .reserve("prepared-token", Some(std::mem::size_of::<$prepared>()))
+                    .map_err(PrefabConversionError::Source)?;
+                let edit = <$edit>::prepare_conversion_from_source(
                     self.revision,
                     &self.document,
                     &self.state,
                     self.history,
                     &localized.patch,
-                    AuthoringHistoryScope::PrefabConversion(localized.footprint),
+                    localized.footprint,
+                    &mut localized.work,
                 )
                 .map_err(PrefabConversionError::Source)?;
                 Ok($prepared {
@@ -173,6 +215,30 @@ macro_rules! conversion_owner {
         }
 
         impl $prepared {
+            /// Returns the logical retention of the complete reviewed source candidate.
+            ///
+            /// Includes classification, exact forward/inverse changes and scope, the
+            /// typed review mapping, effective asset observations and actual dependency
+            /// snapshots. Shared Schema/Adapter catalog contents remain in the Host's
+            /// schema budget; their handles are included. This borrows immutable data
+            /// without serialization and models logical ownership, not allocator or RSS
+            /// usage. Checked overflow or an unsuccessful bounded walk returns `None`.
+            #[must_use]
+            pub fn checked_retained_bytes(&self) -> Option<usize> {
+                std::mem::size_of::<Self>()
+                    .checked_sub(std::mem::size_of::<$edit>())?
+                    .checked_sub(std::mem::size_of::<CapturedPrefabSources>())?
+                    .checked_add(self.edit.checked_retained_bytes()?)?
+                    .checked_add(self.dependencies.retained_bytes())?
+                    .checked_add(crate::provenance::provenance_string_bytes(
+                        self.anchor.as_str(),
+                    )?)?
+                    .checked_add(retention::review_map_bytes(&self.entities)?)?
+                    .checked_add(crate::authoring_decode::retained_asset_references_bytes(
+                        &self.asset_references,
+                    )?)
+            }
+
             #[must_use]
             pub const fn base_revision(&self) -> SceneAuthoringRevision {
                 self.edit.base_revision()

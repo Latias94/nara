@@ -318,7 +318,7 @@ fn inventory_includes_complete_defaults_property_payloads_and_absent_defaults_wi
 fn property_inventory_shares_one_aggregate_reference_budget() {
     let limits = SceneFileLimits::default()
         .with_component_value_nodes(ItemLimit::new(8).unwrap())
-        .with_component_value_bytes(ByteLimit::new(80).unwrap());
+        .with_component_value_bytes(ByteLimit::new(56).unwrap());
     let mut overlay = PrefabOverlay::new(key("base"));
     let claim = property(PrefabPropertyIntent::Set(crate::patch::asset_ref_value(
         &asset("textures/a.png"),
@@ -340,13 +340,20 @@ fn property_inventory_shares_one_aggregate_reference_budget() {
     )
     .unwrap();
     assert_eq!(state.schema_declared_asset_references().count(), 2);
-    // Three selectors need six entries/30 bytes. Two retained assets plus the third traversal
-    // need 38 + 46 bytes, exceeding the independent reference allowance.
+    // Three selectors fit six entries/30 bytes; their payload-relative asset facts need 57 bytes.
     overlay.components.push(claim);
-    let error = classify(&document(instance(overlay)), asset_basis(false), limits).unwrap_err();
+    let document = document(instance(overlay));
+    let error = classify(&document, asset_basis(false), limits).unwrap_err();
     assert!(error.diagnostics().iter().any(|diagnostic| {
         diagnostic.code().as_str() == "scene.authoring-asset-reference-budget-exceeded"
     }));
+    let state = classify(
+        &document,
+        asset_basis(false),
+        limits.with_component_value_bytes(ByteLimit::new(57).unwrap()),
+    )
+    .unwrap();
+    assert_eq!(state.schema_declared_asset_references().count(), 3);
 }
 
 #[test]

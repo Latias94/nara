@@ -25,6 +25,59 @@ pub struct PreparedSceneAuthoringEdit {
 }
 
 impl PreparedSceneAuthoringEdit {
+    pub(super) fn prepare_conversion_from_source(
+        revision: SceneAuthoringRevision,
+        document: &SceneDocument,
+        state: &AuthoringDocumentState,
+        limits: SceneAuthoringHistoryLimits,
+        patch: &ScenePatchDocument,
+        footprint: super::prefab_conversion::PrefabConversionFootprint,
+        work: &mut super::prefab_conversion::work::ConversionWork,
+    ) -> Result<Self, ScenePatchReport> {
+        let scope = AuthoringHistoryScope::PrefabConversion(footprint);
+        AuthoringHistory::admit_input(limits, patch, &scope)?;
+        let AuthoringHistoryScope::PrefabConversion(footprint) = &scope else {
+            unreachable!()
+        };
+        let mut candidate =
+            crate::authoring_decode::prepare_scene_prefab_conversion_patch_with_work(
+                document, state, patch, footprint, work,
+            )?;
+        let (report, history_cost) =
+            AuthoringHistory::admit_report(limits, &candidate.patch, candidate.report, &scope)?;
+        candidate.report = report;
+        Ok(Self {
+            revision,
+            history_cost,
+            candidate,
+            scope,
+        })
+    }
+
+    pub(super) fn checked_retained_bytes(&self) -> Option<usize> {
+        let candidate = &self.candidate;
+        std::mem::size_of::<Self>()
+            .checked_add(super::prefab_conversion::retention::document_dynamic_bytes(
+                &candidate.document.roots,
+                &candidate.document.entities,
+                candidate.state.file_limits(),
+            )?)?
+            .checked_add(
+                candidate
+                    .state
+                    .checked_retained_bytes()?
+                    .checked_sub(std::mem::size_of::<AuthoringDocumentState>())?,
+            )?
+            .checked_add(super::prefab_conversion::retention::patch_dynamic_bytes(
+                &candidate.patch,
+            )?)?
+            .checked_add(super::prefab_conversion::retention::patch_dynamic_bytes(
+                candidate.report.inverse.as_ref()?,
+            )?)?
+            .checked_add(candidate.report.diagnostics.retained_bytes())?
+            .checked_add(self.scope.retained_bytes())
+    }
+
     /// Prepares against the document and classification captured with this source revision.
     pub(super) fn prepare_from_source(
         revision: SceneAuthoringRevision,
@@ -157,6 +210,58 @@ pub struct PreparedPrefabAuthoringEdit {
 }
 
 impl PreparedPrefabAuthoringEdit {
+    pub(super) fn prepare_conversion_from_source(
+        revision: SceneAuthoringRevision,
+        document: &PrefabDocument,
+        state: &AuthoringDocumentState,
+        limits: SceneAuthoringHistoryLimits,
+        patch: &ScenePatchDocument,
+        footprint: super::prefab_conversion::PrefabConversionFootprint,
+        work: &mut super::prefab_conversion::work::ConversionWork,
+    ) -> Result<Self, ScenePatchReport> {
+        let scope = AuthoringHistoryScope::PrefabConversion(footprint);
+        AuthoringHistory::admit_input(limits, patch, &scope)?;
+        let AuthoringHistoryScope::PrefabConversion(footprint) = &scope else {
+            unreachable!()
+        };
+        let mut candidate = crate::authoring_decode::prepare_prefab_conversion_patch_with_work(
+            document, state, patch, footprint, work,
+        )?;
+        let (report, history_cost) =
+            AuthoringHistory::admit_report(limits, &candidate.patch, candidate.report, &scope)?;
+        candidate.report = report;
+        Ok(Self {
+            revision,
+            history_cost,
+            candidate,
+            scope,
+        })
+    }
+
+    pub(super) fn checked_retained_bytes(&self) -> Option<usize> {
+        let candidate = &self.candidate;
+        std::mem::size_of::<Self>()
+            .checked_add(super::prefab_conversion::retention::document_dynamic_bytes(
+                &candidate.document.roots,
+                &candidate.document.entities,
+                candidate.state.file_limits(),
+            )?)?
+            .checked_add(
+                candidate
+                    .state
+                    .checked_retained_bytes()?
+                    .checked_sub(std::mem::size_of::<AuthoringDocumentState>())?,
+            )?
+            .checked_add(super::prefab_conversion::retention::patch_dynamic_bytes(
+                &candidate.patch,
+            )?)?
+            .checked_add(super::prefab_conversion::retention::patch_dynamic_bytes(
+                candidate.report.inverse.as_ref()?,
+            )?)?
+            .checked_add(candidate.report.diagnostics.retained_bytes())?
+            .checked_add(self.scope.retained_bytes())
+    }
+
     /// Prepares against the document and classification captured with this source revision.
     pub(super) fn prepare_from_source(
         revision: SceneAuthoringRevision,

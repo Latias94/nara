@@ -8,6 +8,7 @@ use nara_reflect::{
     ComponentEntityReferenceRewriteError, ComponentValueMaterializationLimits, EntityReference,
 };
 
+use super::work::ConversionWork;
 use super::{LocalizedPrefabEntity, PrefabConversionError, PrefabConversionFootprint};
 use crate::{
     AuthoringSchemaBasis, PrefabExpansionOptions, PrefabProjectionPath, ResolvedPrefabSource,
@@ -32,6 +33,7 @@ pub(super) struct LocalizedConversion {
     pub(super) entities: Vec<LocalizedPrefabEntity>,
     pub(super) dependencies: CapturedPrefabSources,
     pub(super) asset_references: Vec<nara_reflect::DeclaredAssetReference>,
+    pub(super) work: ConversionWork,
 }
 
 pub(super) fn prepare<F, E>(
@@ -67,6 +69,7 @@ where
         SelectedInstanceSource::Prefab(document) => &document.entities,
     };
     let mut dependencies = CapturedPrefabSources::new(limits.working_bytes().get());
+    let mut working_limit = limits.working_bytes();
     let compiler_limit = limits
         .working_bytes()
         .get()
@@ -85,6 +88,10 @@ where
                 .including_retained_working_bytes(dependencies.retained_bytes())
                 .ok_or_else(|| PrefabConversionError::Source(dependencies::source_budget()))?;
             let loaded = loader(request, &mut loading).map_err(PrefabConversionError::Loader)?;
+            working_limit = nara_core::ByteLimit::new(
+                working_limit.get().min(loading.working_byte_limit().get()),
+            )
+            .ok_or_else(|| PrefabConversionError::Source(dependencies::source_budget()))?;
             let remaining = loading
                 .working_byte_limit()
                 .get()
@@ -100,15 +107,40 @@ where
             Ok(loaded)
         },
     )?;
+    if compiled.budget_failed
+        || compiled.work_bytes.is_none()
+        || compiled.failure.is_some()
+        || compiled.diagnostics.has_errors()
+    {
+        return Err(PrefabConversionError::Source(ScenePatchReport {
+            applied: false,
+            inverse: None,
+            diagnostics: compiled.diagnostics,
+        }));
+    }
+    let mut work = ConversionWork::after_compilation(
+        working_limit,
+        compiled
+            .work_bytes
+            .ok_or_else(|| PrefabConversionError::Source(copy_limit()))?,
+        dependencies.retained_bytes(),
+    )
+    .map_err(PrefabConversionError::Source)?;
+    work.reserve(
+        "conversion-result",
+        Some(std::mem::size_of::<LocalizedConversion>()),
+    )
+    .map_err(PrefabConversionError::Source)?;
     let asset_references = std::mem::take(&mut compiled.asset_references);
-    let (patch, footprint, entities) =
-        lower(records, anchor, basis, history, compiled).map_err(PrefabConversionError::Source)?;
+    let (patch, footprint, entities) = lower(records, anchor, basis, history, compiled, &mut work)
+        .map_err(PrefabConversionError::Source)?;
     Ok(LocalizedConversion {
         patch,
         footprint,
         entities,
         dependencies,
         asset_references,
+        work,
     })
 }
 
@@ -118,6 +150,7 @@ fn lower(
     basis: &AuthoringSchemaBasis,
     history: SceneAuthoringHistoryLimits,
     compiled: SelectedInstanceCompilation,
+    conversion_work: &mut ConversionWork,
 ) -> Result<
     (
         ScenePatchDocument,
@@ -197,9 +230,20 @@ fn lower(
     {
         return Err(copy_limit());
     }
-    let mut work = LocalizationWork { bytes: 0, maximum };
+    let mut work = LocalizationWork {
+        bytes: 0,
+        maximum,
+        conversion_work,
+    };
     work.reserve(raw.logical_bytes())?;
     work.reserve(old.logical_bytes().checked_mul(2).ok_or_else(copy_limit)?)?;
+    work.conversion_work.reserve(
+        "localization-declaration",
+        old.nodes
+            .checked_mul(512)
+            .and_then(|bytes| bytes.checked_add(old.value_cost.nodes().checked_mul(96)?))
+            .and_then(|bytes| bytes.checked_mul(2)),
+    )?;
     work.reserve(
         anchor
             .as_str()
@@ -404,17 +448,19 @@ fn lower(
     Ok((ScenePatchDocument::new(operations), footprint, entities))
 }
 
-struct LocalizationWork {
+struct LocalizationWork<'a> {
     bytes: usize,
     maximum: usize,
+    conversion_work: &'a mut ConversionWork,
 }
 
-impl LocalizationWork {
+impl LocalizationWork<'_> {
     fn reserve(&mut self, bytes: usize) -> Result<(), ScenePatchReport> {
         self.bytes = self.bytes.checked_add(bytes).ok_or_else(copy_limit)?;
         if self.bytes > self.maximum {
             return Err(copy_limit());
         }
+        self.conversion_work.reserve("localization", Some(bytes))?;
         Ok(())
     }
 }

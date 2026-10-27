@@ -144,6 +144,16 @@ Rules:
   Undo/Redo replays the accepted records and IDs without loading a newer base or allocating IDs.
   Both directions, retained footprint and pre-copy path/placement work have their owning budgets;
   older history-entry eviction retains the existing capacity policy.
+  The effective conversion work allowance, including the last loader restriction, continues
+  through localization and complete candidate preparation. Admit containing-document,
+  classification, transaction, index and retained format-buffer copies before allocation.
+  Publication-shape validation borrows the prepared nominal document; it does not clone a
+  second canonical document or reserve a configured worst-case encoder capacity.
+  Immutable unchanged classifications may be reused under the exact Schema/source admission;
+  changed placements and newly localized references still require their owning validation.
+  Shared Schema contents
+  do not become a per-record copy, and a published dependency's retained classification cannot
+  be omitted merely because its raw document is already counted.
 
 ```mermaid
 flowchart TD

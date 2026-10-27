@@ -10,6 +10,8 @@ use crate::{
 
 mod localize;
 mod request;
+pub(crate) mod retention;
+pub(crate) mod work;
 pub use request::{
     LocalizedPrefabEntity, PrefabConversionError, PrefabConversionReceipt, PrefabConversionRequest,
     PreparedPrefabConversion, PreparedScenePrefabConversion, ScenePrefabConversionRequest,

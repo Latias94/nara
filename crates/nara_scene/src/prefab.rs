@@ -303,6 +303,20 @@ impl ResolvedPrefabSource {
         }
     }
 
+    /// Classification is retained only by a published authoring allocation. Raw composition
+    /// sources share their Schema catalogue but own no record facts or preservation manifest.
+    #[cfg(feature = "serde")]
+    pub(crate) fn checked_classification_retained_bytes(&self) -> Option<usize> {
+        match &self.document {
+            ResolvedPrefabDocument::Authoring(document) => {
+                document.checked_classification_retained_bytes()
+            }
+            ResolvedPrefabDocument::Native(_) | ResolvedPrefabDocument::AuthoringSource { .. } => {
+                Some(0)
+            }
+        }
+    }
+
     pub(crate) fn matches_authority(&self, authority: SchemaAuthority<'_>) -> bool {
         match (&self.document, authority) {
             (ResolvedPrefabDocument::Native(_), SchemaAuthority::Native(_)) => true,

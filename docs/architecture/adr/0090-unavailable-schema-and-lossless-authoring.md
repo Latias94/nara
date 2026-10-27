@@ -123,6 +123,13 @@ source inventory does not force successful Authoring or Runtime dependency reads
 still cross the file's raw shape, depth and aggregate budgets. Unknown grammar is not preservable
 by guessing, and exact transaction snapshots retain ADR 0043's independent no-reinterpretation rule.
 
+Classification may reuse an unchanged record's admission under the exact immutable source and
+Schema basis. Per-record Schema/value traversal limits and aggregate retained-reference quotas
+are separate: an earlier record's output cannot shrink another record's traversal allowance.
+Retained references, including defaults and overlay inventory, still cross the complete document
+quota. A prepared conversion must classify equivalently to a full readmission and remain
+saveable/reopenable under the same file limits, independently of generated entity ordering.
+
 The composition loader admits bounded decoded dependencies and their complete local structure
 before effective component interpretation. It retains actual canonical source/content evidence
 and the exact authoring basis, but does not claim standalone editable publication. A source payload

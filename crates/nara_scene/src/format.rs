@@ -1020,6 +1020,37 @@ pub(crate) fn validate_prefab_publication_shape(
     validate_publication_shape(document, limits)
 }
 
+#[derive(Debug)]
+pub(crate) enum PublicationShapeAdmissionError<E> {
+    Format(SceneFormatError),
+    Admission(E),
+}
+
+impl<E> Display for PublicationShapeAdmissionError<E> {
+    fn fmt(&self, formatter: &mut Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Format(error) => Display::fmt(error, formatter),
+            Self::Admission(_) => formatter.write_str("publication buffer admission refused"),
+        }
+    }
+}
+
+pub(crate) fn validate_scene_publication_shape_with_admission<E>(
+    document: &SceneDocument,
+    limits: SceneFileLimits,
+    admission: impl FnMut(usize) -> Result<(), E>,
+) -> Result<(), PublicationShapeAdmissionError<E>> {
+    validate_publication_shape_with_admission(document, limits, admission)
+}
+
+pub(crate) fn validate_prefab_publication_shape_with_admission<E>(
+    document: &PrefabDocument,
+    limits: SceneFileLimits,
+    admission: impl FnMut(usize) -> Result<(), E>,
+) -> Result<(), PublicationShapeAdmissionError<E>> {
+    validate_publication_shape_with_admission(document, limits, admission)
+}
+
 pub(crate) fn validate_patch_publication_shape(
     document: &ScenePatchDocument,
     limits: SceneFileLimits,
@@ -1215,16 +1246,51 @@ fn validate_publication_shape<T: SceneFilePayload>(
         .is_some_and(|(roots, entities)| {
             publication_shape::certifies_entity_document(&envelope, roots, entities, limits.shape())
         });
-    validate_json_publication_shape(&envelope, limits, certified)?;
-    validate_ron_publication_shape(&envelope, limits, certified)
+    validate_json_publication_shape(&envelope, limits, certified, None)?;
+    validate_ron_publication_shape(&envelope, limits, certified, None)
+}
+
+fn validate_publication_shape_with_admission<T: SceneFilePayload, E>(
+    payload: &T,
+    limits: SceneFileLimits,
+    mut admission: impl FnMut(usize) -> Result<(), E>,
+) -> Result<(), PublicationShapeAdmissionError<E>> {
+    use PublicationShapeAdmissionError::{Admission, Format};
+    payload.validate_contract().map_err(Format)?;
+    payload
+        .validate_budget(limits)
+        .map_err(|error| Format(error.into()))?;
+    // The owning caller has already ordered its candidate. Shape checks borrow it;
+    // serializing an envelope does not require a second canonical document copy.
+    let envelope = publication_envelope(payload, T::KIND).map_err(Format)?;
+    let certified = payload.entity_document().is_some_and(|(roots, entities)| {
+        publication_shape::certifies_entity_document(&envelope, roots, entities, limits.shape())
+    });
+    let mut refusal = None;
+    let mut admit = |bytes| {
+        admission(bytes).map_err(|error| {
+            refusal = Some(error);
+            io::Error::other("publication buffer admission refused")
+        })
+    };
+    let result = validate_json_publication_shape(&envelope, limits, certified, Some(&mut admit))
+        .and_then(|()| {
+            validate_ron_publication_shape(&envelope, limits, certified, Some(&mut admit))
+        });
+    match refusal {
+        Some(error) => Err(Admission(error)),
+        None => result.map_err(Format),
+    }
 }
 
 fn validate_json_publication_shape<T: Serialize>(
     envelope: &T,
     limits: SceneFileLimits,
     certified: bool,
+    admission: Option<&mut dyn FnMut(usize) -> io::Result<()>>,
 ) -> Result<(), SceneFormatError> {
-    let mut encoded = BoundedEncodedBuffer::new(limits.encoded_bytes().get(), !certified);
+    let mut encoded =
+        BoundedEncodedBuffer::new(limits.encoded_bytes().get(), !certified, admission);
     if let Err(source) = serde_json::to_writer_pretty(&mut encoded, envelope) {
         if let Some(observed) = encoded.exceeded_at() {
             return Err(SceneFormatError::EncodedBytesExceeded {
@@ -1253,8 +1319,10 @@ fn validate_ron_publication_shape<T: Serialize>(
     envelope: &T,
     limits: SceneFileLimits,
     certified: bool,
+    admission: Option<&mut dyn FnMut(usize) -> io::Result<()>>,
 ) -> Result<(), SceneFormatError> {
-    let mut encoded = BoundedEncodedBuffer::new(limits.encoded_bytes().get(), !certified);
+    let mut encoded =
+        BoundedEncodedBuffer::new(limits.encoded_bytes().get(), !certified, admission);
     if let Err(source) =
         ron::ser::to_writer_pretty(&mut encoded, envelope, canonical_ron_pretty_config())
     {
@@ -1291,18 +1359,23 @@ fn canonical_ron_pretty_config() -> ron::ser::PrettyConfig {
     ron::ser::PrettyConfig::default().new_line("\n".to_owned())
 }
 
-struct BoundedEncodedBuffer {
+struct BoundedEncodedBuffer<'a> {
     bytes: Vec<u8>,
     retain_bytes: bool,
     written: usize,
     maximum: usize,
     exceeded_at: Option<usize>,
+    admission: Option<&'a mut dyn FnMut(usize) -> io::Result<()>>,
 }
 
-impl BoundedEncodedBuffer {
-    fn new(maximum: usize, retain_bytes: bool) -> Self {
+impl<'a> BoundedEncodedBuffer<'a> {
+    fn new(
+        maximum: usize,
+        retain_bytes: bool,
+        admission: Option<&'a mut dyn FnMut(usize) -> io::Result<()>>,
+    ) -> Self {
         Self {
-            bytes: if retain_bytes {
+            bytes: if retain_bytes && admission.is_none() {
                 Vec::with_capacity(maximum.min(64 * 1024))
             } else {
                 Vec::new()
@@ -1311,6 +1384,7 @@ impl BoundedEncodedBuffer {
             written: 0,
             maximum,
             exceeded_at: None,
+            admission,
         }
     }
 
@@ -1324,7 +1398,7 @@ impl BoundedEncodedBuffer {
     }
 }
 
-impl Write for BoundedEncodedBuffer {
+impl Write for BoundedEncodedBuffer<'_> {
     fn write(&mut self, buffer: &[u8]) -> io::Result<usize> {
         let observed = self.written.saturating_add(buffer.len());
         if observed > self.maximum {
@@ -1332,6 +1406,9 @@ impl Write for BoundedEncodedBuffer {
             return Err(io::Error::other("persistent encoded byte limit exceeded"));
         }
         if self.retain_bytes {
+            if let Some(admission) = &mut self.admission {
+                admission(buffer.len())?;
+            }
             self.bytes.extend_from_slice(buffer);
         }
         self.written = observed;
@@ -1353,8 +1430,15 @@ fn canonical_envelope<T: SceneFilePayload>(
     payload.validate_budget(limits)?;
     let mut payload = payload.clone();
     payload.canonicalize_payload();
+    publication_envelope(payload, T::KIND)
+}
+
+fn publication_envelope<T>(
+    payload: T,
+    kind: &'static str,
+) -> Result<PersistentFileEnvelope<T>, SceneFormatError> {
     Ok(PersistentFileEnvelope::canonical_v1(
-        format_kind(T::KIND)?,
+        format_kind(kind)?,
         engine_version(CANONICAL_V1_ENGINE_MIN_VERSION)?,
         FormatGenerator::new(
             FORMAT_GENERATOR_NAME,

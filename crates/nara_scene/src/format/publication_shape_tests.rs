@@ -15,14 +15,72 @@ fn reference<T: SceneFilePayload>(
     limits: SceneFileLimits,
 ) -> Result<(), SceneFormatError> {
     let envelope = canonical_envelope(payload, limits)?;
-    validate_json_publication_shape(&envelope, limits, false)?;
-    validate_ron_publication_shape(&envelope, limits, false)
+    validate_json_publication_shape(&envelope, limits, false, None)?;
+    validate_ron_publication_shape(&envelope, limits, false, None)
 }
 
 fn equivalent<T: SceneFilePayload>(payload: &T, limits: SceneFileLimits) {
     let expected = reference(payload, limits).map_err(|error| error.to_string());
     let actual = validate_publication_shape(payload, limits).map_err(|error| error.to_string());
     assert_eq!(actual, expected, "limits: {limits:?}");
+    let mut ordered = payload.clone();
+    ordered.canonicalize_payload();
+    let borrowed = validate_publication_shape_with_admission(&ordered, limits, |_| {
+        Ok::<_, std::convert::Infallible>(())
+    })
+    .map_err(|error| match error {
+        PublicationShapeAdmissionError::Format(error) => error.to_string(),
+        PublicationShapeAdmissionError::Admission(never) => match never {},
+    });
+    assert_eq!(borrowed, expected, "borrowed limits: {limits:?}");
+}
+
+#[test]
+fn borrowed_publication_shape_admits_each_retained_chunk_before_copying() {
+    let mut scene = document(ComponentValue::String("x".repeat(4096)), false);
+    scene.entities[0].prefab = Some(crate::PrefabInstance {
+        source: AssetRef::path("base.prefab.json").unwrap(),
+        overrides: None,
+    });
+    scene.canonicalize();
+    let prefab = PrefabDocument::new(scene.roots.clone(), scene.entities.clone());
+    for maximum in [0, 128, 2048] {
+        for prefab_kind in [false, true] {
+            let mut retained = 0usize;
+            let mut admit = |bytes| {
+                let next = retained + bytes;
+                if next > maximum {
+                    Err(next)
+                } else {
+                    retained = next;
+                    Ok(())
+                }
+            };
+            let result = if prefab_kind {
+                validate_prefab_publication_shape_with_admission(
+                    &prefab,
+                    SceneFileLimits::default(),
+                    &mut admit,
+                )
+            } else {
+                validate_scene_publication_shape_with_admission(
+                    &scene,
+                    SceneFileLimits::default(),
+                    &mut admit,
+                )
+            };
+            assert!(matches!(
+                result,
+                Err(PublicationShapeAdmissionError::Admission(observed)) if observed > maximum
+            ));
+            assert!(retained <= maximum);
+        }
+    }
+    let mut reject = |_| Err(io::Error::other("refused before the first copy"));
+    let mut encoded = BoundedEncodedBuffer::new(1024, true, Some(&mut reject));
+    assert!(encoded.write_all(b"source").is_err());
+    assert!(encoded.bytes.is_empty());
+    assert_eq!(encoded.written, 0);
 }
 
 fn certified<T: SceneFilePayload>(payload: &T, limits: SceneFileLimits) -> bool {

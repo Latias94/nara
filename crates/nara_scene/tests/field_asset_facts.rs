@@ -270,7 +270,7 @@ fn unknown_or_version_incompatible_field_payloads_are_preserved_without_dependen
 }
 
 #[test]
-fn repeated_default_reference_facts_share_the_remaining_traversal_allowance() {
+fn repeated_default_reference_facts_have_separate_traversal_and_retention_limits() {
     let default_path = "p".repeat(512);
     let bundle = AuthoringSchemaBundle::new([AuthoringSchemaBundleOwner::new(
         PersistentComponentSchemaOwnerId::try_new("game.assets").unwrap(),
@@ -295,11 +295,16 @@ fn repeated_default_reference_facts_share_the_remaining_traversal_allowance() {
         None,
     )])
     .unwrap();
-    let document = document([absent("first"), absent("second")]);
+    let document = document([absent("first"), absent("second"), absent("third")]);
     let encoded = document.to_json_string().unwrap();
-    // One default traverses 525 payload + 522 result bytes. The first retained fact
-    // reserves 522 bytes before the second traversal. Raw declarations fit below either limit.
-    for (nodes, bytes, accepted) in [(64, 1569, true), (64, 1568, false)] {
+    // Each traversal fits independently. Three retained facts need exactly 3 * 522 bytes.
+    // Raw declarations fit; aggregate output cannot shrink a later record's traversal budget.
+    for (nodes, bytes, accepted) in [
+        (64, 1569, true),
+        (64, 1568, true),
+        (64, 1566, true),
+        (64, 1565, false),
+    ] {
         let limits = SceneFileLimits::default()
             .with_component_value_nodes(ItemLimit::new(nodes).unwrap())
             .with_component_value_bytes(ByteLimit::new(bytes).unwrap());
@@ -318,10 +323,15 @@ fn repeated_default_reference_facts_share_the_remaining_traversal_allowance() {
                     .publish()
                     .schema_declared_asset_references()
                     .count(),
-                2
+                3
             );
         } else {
-            assert!(result.is_err(), "nodes={nodes}, bytes={bytes}");
+            assert!(
+                result.unwrap_err().diagnostics().iter().any(|diagnostic| {
+                    diagnostic.code().as_str() == "scene.authoring-asset-reference-budget-exceeded"
+                }),
+                "nodes={nodes}, bytes={bytes}",
+            );
         }
     }
 }

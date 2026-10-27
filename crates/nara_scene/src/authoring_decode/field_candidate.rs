@@ -133,7 +133,7 @@ impl PreparedFieldCandidate<'_> {
             kind: state.kind,
             basis: &state.basis,
             record_facts: Vec::with_capacity(targets.len()),
-            overlay_asset_references: Vec::new(),
+            overlay_asset_references: BTreeMap::new(),
             manifest: Vec::new(),
             // Available direct records produce no preservation placement or overlay facts.
             placements: BTreeMap::new(),
