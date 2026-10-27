@@ -43,9 +43,9 @@ const DEFAULT_CLOSE_TIMEOUT: Duration = Duration::from_secs(5);
 
 static NEXT_RUNTIME_GENERATION: AtomicU64 = AtomicU64::new(1);
 
-/// Hidden product plumbing for an engine-owned authority that must be checked at App and managed
-/// runtime safe points. This is intentionally one callback rather than a public event bus or a
-/// general extension registry; the owning domain keeps the identity and fault reporter it needs.
+/// Hidden product plumbing for one engine-owned domain authority checked at App and managed
+/// runtime safe points. App composes domain guards in installation order and stops at the first
+/// fault; each owning domain retains its identity and fault reporter.
 #[doc(hidden)]
 pub type __RuntimeAuthorityValidator =
     dyn Fn(&World, Option<RuntimeGeneration>) -> Result<(), RuntimeFault> + Send + Sync;
@@ -147,14 +147,18 @@ pub(crate) fn validate_managed_runtime_authority(
     expected_handler: Option<ErrorHandler>,
     expected_bridge: Option<RuntimeFaultBridgeIdentity>,
     generation: RuntimeGeneration,
-    authority: Option<&Arc<__RuntimeAuthorityValidator>>,
+    authorities: &[crate::InstalledRuntimeAuthorityValidator],
 ) -> Result<(), RuntimeFault> {
     if let Some(fault) = reporter.fault() {
         return Err(fault);
     }
     let fault = (world.get_resource::<RuntimeGeneration>() != Some(&generation))
         .then(runtime_fault_bridge_authority_fault)
-        .or_else(|| authority.and_then(|validator| validator(world, Some(generation)).err()))
+        .or_else(|| {
+            authorities
+                .iter()
+                .find_map(|owner| (owner.validator)(world, Some(generation)).err())
+        })
         .or_else(|| {
             validate_runtime_fault_bridge_authority(
                 world,

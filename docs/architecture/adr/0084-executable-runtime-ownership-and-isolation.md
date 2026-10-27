@@ -175,6 +175,13 @@ need it.
   but it is not a Host-published runnable session.
 - The executable runtime does not register systems or plugins, expose a second scheduler, or keep a
   second time model. It delegates frame/fixed execution to its `App`.
+- App composition may install one immutable authority guard per owning domain plugin. App finish
+  and every existing managed authority boundary validate all installed guards in deterministic
+  installation order, stopping at the first failure. Duplicate installation for one plugin is
+  rejected. Reflect's native registry and Scene's explicit data selection therefore coexist
+  without replacing each other's guard. Each domain retains its identity proof and fault
+  ownership; the existing runtime reporter retains canonical sticky failure. This hidden engine
+  plumbing is not a mutable extension bus or a second scheduler.
 - The host owns project/edit documents, validated settings, the runtime recipe, and reconstruction
   authority. Those values do not become mutable runtime ECS state.
 - Each runtime has a non-reused generation. Runtime-owned identity domains, time debt, command

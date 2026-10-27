@@ -1141,6 +1141,7 @@ struct InstalledPlugin {
     shutdown_complete: bool,
 }
 
+/// One private domain guard, retained in its owner's deterministic installation order.
 struct InstalledRuntimeAuthorityValidator {
     plugin: PluginId,
     validator: Arc<runtime::__RuntimeAuthorityValidator>,
@@ -1208,12 +1209,12 @@ impl App {
         Ok(&mut self.owner.world)
     }
 
-    /// Installs the one hidden runtime authority validator owned by a domain plugin.
+    /// Installs a hidden runtime authority guard owned by one domain plugin.
     ///
-    /// This is product plumbing rather than a public extension bus. The callback is invoked at
-    /// App and managed schedule boundaries and receives the immutable World view plus an admitted
-    /// runtime generation when one exists. Domain state and fault ownership remain inside the
-    /// registering crate.
+    /// App finish and managed boundaries check domain guards in installation order, stopping at
+    /// the first fault. Each plugin may install only one guard. The callback receives an immutable
+    /// World view and an admitted runtime generation when one exists; domain identity and fault
+    /// ownership remain inside the registering crate.
     #[doc(hidden)]
     pub fn __install_runtime_authority_validator(
         &mut self,
@@ -1221,14 +1222,21 @@ impl App {
         validator: Arc<runtime::__RuntimeAuthorityValidator>,
     ) -> Result<&mut Self, PluginError> {
         self.ensure_mutation_allowed()?;
-        if self.owner.runtime_authority_validator.is_some() {
+        if self
+            .owner
+            .runtime_authority_validators
+            .iter()
+            .any(|owner| owner.plugin == plugin)
+        {
             return Err(PluginError::SetupFailed {
                 plugin,
-                message: "a runtime authority validator is already installed".to_owned(),
+                message: "a runtime authority validator is already installed for this plugin"
+                    .to_owned(),
             });
         }
-        self.owner.runtime_authority_validator =
-            Some(InstalledRuntimeAuthorityValidator { plugin, validator });
+        self.owner
+            .runtime_authority_validators
+            .push(InstalledRuntimeAuthorityValidator { plugin, validator });
         Ok(self)
     }
 
@@ -1583,9 +1591,9 @@ impl App {
             }
             let authority_failure =
                 self.owner
-                    .runtime_authority_validator
-                    .as_ref()
-                    .and_then(|owner| {
+                    .runtime_authority_validators
+                    .iter()
+                    .find_map(|owner| {
                         (owner.validator)(&self.owner.world, None)
                             .err()
                             .map(|fault| (owner.plugin, fault))
@@ -1948,9 +1956,7 @@ impl runtime::RuntimeOwnerState {
             self.runtime_error_handler,
             self.runtime_fault_bridge,
             generation,
-            self.runtime_authority_validator
-                .as_ref()
-                .map(|owner| &owner.validator),
+            &self.runtime_authority_validators,
         )
     }
 
