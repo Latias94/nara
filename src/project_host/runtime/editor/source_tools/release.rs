@@ -110,6 +110,7 @@ struct ReleaseMetadata {
     owner: ComponentSchemaOwnerSnapshot,
     component: ComponentTypeId,
     entry: String,
+    catalog: String,
     requires: Vec<EditorSourceToolReleaseRequirement>,
 }
 
@@ -221,6 +222,7 @@ impl PreparedEditorSourceToolRelease {
                 owner,
                 component,
                 entry: manifest.entry,
+                catalog: manifest.catalog,
                 requires: manifest
                     .requires
                     .into_iter()
@@ -278,6 +280,11 @@ impl PreparedEditorSourceToolRelease {
     #[must_use]
     pub fn entry(&self) -> &str {
         &self.metadata.entry
+    }
+
+    #[must_use]
+    pub fn catalog(&self) -> &str {
+        &self.metadata.catalog
     }
 
     #[must_use]

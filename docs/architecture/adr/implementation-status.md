@@ -77,6 +77,15 @@ Play retains suspended spawn, resume, Job containment and physical retirement. T
 does not implement the managed bootstrap, installed activation or durable enablement. Its actual
 native tests and retained scope belong to the
 [shared image evidence](../../knowledge/engineering/verification/2026-10/2026-10-27T213708Z-shared-windows-process-image-evidence-and-explicit-installed-tool-runtime-trust-partition-814f24baa3964ef5ae5708602aaca655.md).
+The [captured managed tool successor](../../knowledge/engineering/verification/2026-10/2026-10-27T221624Z-captured-managed-tool-images-through-the-session-and-exact-finite-child-custody-b852454a4fe841548bed563ca97d071e.md)
+implements explicit Windows launcher/bootstrap approval, bounded captured managed-image transport
+and strict pre-load reference/entry admission. Approved definitions use the existing Session probe,
+review and source history; one finite process custody handles native suspended startup, mapping,
+resume, cancellation and actual pipe return. Package bytes are not reread from installation paths.
+Actual installed V1/V2 and native Editor scopes belong to that linked evidence, including their
+real failure and platform limits. The first admitted subset has preexisting project metadata,
+generation-one catalogs and no unresolved installed requirements. Durable selection, fresh-project
+metadata adoption, evolved lineage, dependent-aware update/removal and full Package UI remain open.
 The [documentation verification](../../knowledge/engineering/verification/2026-10/2026-10-23T115037Z-foundation-architecture-rebaseline-documentation-checks-and-adversarial-closure-33c8c794baf142ee964468a01248af17.md)
 records inventory/link/status checks and the scoped adversarial correction/recheck. No Cargo,
 performance or native trajectory was re-executed for this design-only unit.

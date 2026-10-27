@@ -38,6 +38,122 @@ const STATS: &str = "trial.enemy.EnemyStats";
 const NAME: &str = "nara.scene.Name";
 const TIMEOUT: Duration = Duration::from_secs(30);
 
+#[cfg(all(target_os = "windows", target_arch = "x86_64", target_env = "msvc"))]
+pub(super) fn approved_managed_host() -> nara_engine::project_host::EditorSourceToolManagedHost {
+    use nara_engine::{
+        fs::ContentDigest,
+        project_host::{
+            EditorSourceToolManagedHost, EditorSourceToolManagedHostDigests,
+            open_explicit_product_project_root,
+        },
+    };
+    let dotnet = PathBuf::from(std::env::var_os("NARA_SOURCE_TOOL_DOTNET").unwrap());
+    let bootstrap = PathBuf::from(std::env::var_os("NARA_SOURCE_TOOL_BOOTSTRAP_DIR").unwrap());
+    let digest = |path: PathBuf| ContentDigest::of_bytes(&std::fs::read(path).unwrap());
+    EditorSourceToolManagedHost::new(
+        open_explicit_product_project_root(dotnet.parent().unwrap()).unwrap(),
+        open_explicit_product_project_root(&bootstrap).unwrap(),
+        EditorSourceToolManagedHostDigests {
+            launcher: digest(dotnet),
+            bootstrap: digest(bootstrap.join("Nara.SourceToolHost.dll")),
+            deps: digest(bootstrap.join("Nara.SourceToolHost.deps.json")),
+            runtimeconfig: digest(bootstrap.join("Nara.SourceToolHost.runtimeconfig.json")),
+        },
+        &std::env::var("NARA_SOURCE_TOOL_FRAMEWORK").unwrap(),
+        TIMEOUT,
+    )
+    .unwrap()
+}
+
+#[cfg(all(target_os = "windows", target_arch = "x86_64", target_env = "msvc"))]
+#[test]
+fn csharp_installed_images_use_original_bytes_and_failed_update_preserves_the_session() {
+    use super::local_release::installed_variant;
+    let definition = definition();
+    let host = approved_managed_host();
+    let project = Project::new(&schema_bundle(&definition.owner), &original(), "json");
+    let mut editor = project.open();
+    let document = editor.current_frame().workspace().active_document.unwrap();
+    let (directory, installation) = installed_variant("V1");
+    let v1 = host.approve_installation(installation).unwrap();
+    // No installation file is needed after approval. The actual child must execute captured
+    // bytes even though none of those package paths still exists during probe or proposal.
+    drop(directory);
+    let view = probe(&mut editor, v1);
+    assert!(view.attempt_error.is_none(), "{view:?}");
+    let activation = active_id(&editor);
+    attach(&mut editor, document);
+    let basis = editor.document_query_basis(document).unwrap();
+    let request = request_review(
+        &mut editor,
+        &basis,
+        EditorSourceToolIntent::Edit {
+            entity: id("enemy"),
+        },
+        1,
+    );
+    let disk = std::fs::read(project.scene_path()).unwrap();
+    let (directory, invalid) = installed_variant("INVALID");
+    let invalid = host.approve_installation(invalid).unwrap();
+    drop(directory);
+    let view = probe(&mut editor, invalid);
+    assert!(
+        matches!(view.attempt_error, Some(EditorSourceToolError::Declaration)),
+        "{view:?}"
+    );
+    assert_eq!(active_id(&editor), activation);
+    assert_eq!(editor.source_tool_review().unwrap().request(), &request);
+    assert_unchanged(&editor, &project, &basis, (1, 0), &disk);
+    accept_review(&mut editor, document, &request);
+    assert_stats(&editor, document, "enemy", 101);
+    let basis = editor.document_query_basis(document).unwrap();
+    let old_review = request_review(
+        &mut editor,
+        &basis,
+        EditorSourceToolIntent::Edit {
+            entity: id("enemy"),
+        },
+        40,
+    );
+    let (directory, v2) = installed_variant("V2");
+    let v2 = host.approve_installation(v2).unwrap();
+    drop(directory);
+    let view = probe(&mut editor, v2);
+    assert!(view.attempt_error.is_none(), "{view:?}");
+    assert_ne!(active_id(&editor), activation);
+    assert!(editor.source_tool_review().is_none());
+    assert!(matches!(
+        editor.accept_source_tool_review(&old_review),
+        Err(EditorSourceToolError::StaleRequest)
+    ));
+    let request = request_review(
+        &mut editor,
+        &basis,
+        EditorSourceToolIntent::Edit {
+            entity: id("enemy"),
+        },
+        1,
+    );
+    accept_review(&mut editor, document, &request);
+    assert_stats(&editor, document, "enemy", 103);
+    assert_history(&editor, document, 3, 0);
+    replay(&mut editor, document, false);
+    assert_stats(&editor, document, "enemy", 101);
+    replay(&mut editor, document, true);
+    assert_stats(&editor, document, "enemy", 103);
+    save(&mut editor, document);
+    close(&mut editor);
+    let mut reopened = project.open();
+    assert!(reopened.source_tool_view().active.is_none());
+    let document = reopened
+        .current_frame()
+        .workspace()
+        .active_document
+        .unwrap();
+    assert_stats(&reopened, document, "enemy", 103);
+    close(&mut reopened);
+}
+
 fn kind(value: &str) -> ComponentTypeId {
     ComponentTypeId::new(value)
 }

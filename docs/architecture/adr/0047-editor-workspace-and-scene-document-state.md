@@ -168,6 +168,13 @@ Rules:
   activation through directory/receipt existence, and publication failure never changes document
   source, history or the current tool's authority. Installed execution still requires its future
   Host approval and the existing Session probe/preparation boundary.
+  The concrete managed installed route passes captured assembly images through a trusted finite
+  bootstrap before the unchanged proposal request. It never refreshes package bytes from an
+  installation path during invocation. The bootstrap performs complete supported metadata and
+  reference admission before package load; the same Session still probes declarations and owns
+  source preparation, review and history. Pending native/input custody spans actual process and
+  pipe return after logical cancellation. Runtime/bootstrap approval is a separate Host-issued
+  prerequisite, not persistent package or document authority.
 - Retained construction uses that same source owner. Workspace routes the original complete
   query basis plus the draft's exact source/Schema basis, and carries a nominal prepared
   construction with its fixed local mapping. A new query cannot authorize an obsolete draft.

@@ -3,7 +3,7 @@ type: "Current State"
 title: "Current Engineering State"
 description: "Derived summary of immutable engineering-memory shards."
 tags: ["engineering-memory", "derived"]
-source_fingerprint: "b6a068f21b03dcb2ddc4928ca3e2713f213626f2c7884cafd51fccee1f891f69"
+source_fingerprint: "833ec5502c3165d56c53716796110c6ba18865022ecfc129eedf95e4a5635c50"
 ---
 
 # Current State
@@ -12,8 +12,8 @@ source_fingerprint: "b6a068f21b03dcb2ddc4928ca3e2713f213626f2c7884cafd51fccee1f8
 
 This file is derived from immutable shards. Record new facts in shards, then render during integration.
 
-- Source fingerprint: `b6a068f21b03dcb2ddc4928ca3e2713f213626f2c7884cafd51fccee1f891f69`
-- Immutable records: 986
+- Source fingerprint: `833ec5502c3165d56c53716796110c6ba18865022ecfc129eedf95e4a5635c50`
+- Immutable records: 987
 - Active lane heads: 1
 
 # Active Registrations
@@ -69,6 +69,7 @@ This file is derived from immutable shards. Record new facts in shards, then ren
 
 # Recent Evidence
 
+- **Verification Evidence**: [Captured managed tool images through the Session and exact finite child custody](verification/2026-10/2026-10-27T221624Z-captured-managed-tool-images-through-the-session-and-exact-finite-child-custody-b852454a4fe841548bed563ca97d071e.md) - Records approved machine runtime and immutable image execution, strict managed graph admission, native cancellation custody, actual installed V1 V2 consumers and qualification limits.
 - **Verification Evidence**: [Shared Windows process image evidence and explicit installed tool runtime trust partition](verification/2026-10/2026-10-27T213708Z-shared-windows-process-image-evidence-and-explicit-installed-tool-runtime-trust-partition-814f24baa3964ef5ae5708602aaca655.md) - Records extraction of exact native image checks from Play, actual process-image and generation tests, and the bounded machine-runtime trust decision without claiming installed execution.
 - **Verification Evidence**: [Local tool artifact publication with a final ready receipt and continuous file custody](verification/2026-10/2026-10-27T210523Z-local-tool-artifact-publication-with-a-final-ready-receipt-and-continuous-file-custody-4443d7b18348430884f7015082c9e304.md) - Records the Windows populated-directory rename counterexample, receipt-last artifact publication, incomplete and post-commit facts, continuous file custody and actual local C# consumers.
 - **Verification Evidence**: [Code-free local finite tool release capture and lifecycle owner design](verification/2026-10/2026-10-27T201403Z-code-free-local-finite-tool-release-capture-and-lifecycle-owner-design-1f12c7706bd44248adec1203402d167e.md) - Qualifies immutable declared artifact capture before installation, records pinned placement findings and the remaining local Package ownership and activation boundaries.
@@ -80,7 +81,6 @@ This file is derived from immutable shards. Record new facts in shards, then ren
 - **Verification Evidence**: [Public Scene language consumer and obsolete representation runtime removal](verification/2026-10/2026-10-27T145608Z-public-scene-language-consumer-and-obsolete-representation-runtime-removal-67783a7cb8514ce9bbb7957670b4ec37.md) - Qualifies public Scene and real Session adoption by experimental languages, preserving physical code custody and removing the displaced Runtime.
 - **Verification Evidence**: [Mixed Scene product selection and content-to-runtime admission qualification](verification/2026-10/2026-10-27T141025Z-mixed-scene-product-selection-and-content-to-runtime-admission-qualification-7c90588821aa4e8da374958ef2e436e4.md) - Qualifies exact mixed definitions through recipes, strict content and managed publication; records remaining language and Editor work.
 - **Verification Evidence**: [Production Scene native-data runtime and managed authority qualification](verification/2026-10/2026-10-27T125421Z-production-scene-native-data-runtime-and-managed-authority-qualification-294f613511bb48e49fed958c05a1a469.md) - Qualifies the closed Scene storage family and records remaining product and language owner integration.
-- **Verification Evidence**: [Closed Scene binding selection and shared strict data compilation](verification/2026-10/2026-10-27T105601Z-closed-scene-binding-selection-and-shared-strict-data-compilation-263aa2e60c62429db4a8862d2df6e059.md) - Qualifies explicit mixed Schema selection and public Prefab compilation while preserving separate runtime authority, data publication and export obligations.
 
 # Integration Notes
 

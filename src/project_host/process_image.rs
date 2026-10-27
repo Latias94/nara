@@ -1,7 +1,7 @@
 //! Bounded Windows image observations backed by restrictive capability leases.
 
 use std::{
-    ffi::{OsString, c_void},
+    ffi::{OsStr, OsString, c_void},
     io,
     mem::size_of,
     os::windows::{
@@ -20,6 +20,7 @@ use windows_sys::Win32::{
 };
 
 const MAX_FINAL_PATH_UNITS: u32 = 32_767;
+const WINDOWS_COMMAND_LINE_LIMIT: usize = 32_767;
 const PROCESS_IMAGE_FILE_MAPPING_INFORMATION_CLASS: i32 = 44;
 
 #[link(name = "ntdll")]
@@ -114,6 +115,81 @@ impl ExactProcessImage {
             io::Error::from_raw_os_error(code as i32),
         ))
     }
+}
+
+/// Observes a capability member's bounded final native path.
+///
+/// This observation is not standalone authority. Retain the lease and validate its current-name
+/// association for the operation that consumes the path.
+#[doc(hidden)]
+pub fn capability_path(lease: &RestrictiveCapabilityHandleLease) -> io::Result<PathBuf> {
+    final_path(lease.as_handle(), "capability member")
+}
+
+/// Encodes an exact argv zero and ordinary arguments for a native Windows process launch.
+///
+/// The result includes its terminating NUL and fits the Windows command-line limit. This encoder
+/// supplies no launch authority; callers must separately retain and verify their executable.
+#[doc(hidden)]
+pub fn encode_command_line(executable: &Path, arguments: &[OsString]) -> io::Result<Vec<u16>> {
+    let mut encoded = Vec::new();
+    append_windows_argument(&mut encoded, executable.as_os_str())?;
+    for argument in arguments {
+        encoded.push(b' ' as u16);
+        append_windows_argument(&mut encoded, argument)?;
+    }
+    if encoded.len() >= WINDOWS_COMMAND_LINE_LIMIT {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            "the encoded Windows command line exceeds 32,767 UTF-16 code units",
+        ));
+    }
+    encoded.push(0);
+    Ok(encoded)
+}
+
+fn append_windows_argument(output: &mut Vec<u16>, argument: &OsStr) -> io::Result<()> {
+    let units = argument.encode_wide().collect::<Vec<_>>();
+    if units.contains(&0) {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            "the Windows process argument contains an interior NUL",
+        ));
+    }
+    let quoted = units.is_empty()
+        || units.iter().any(|unit| {
+            *unit == u16::from(b' ') || *unit == u16::from(b'\t') || *unit == u16::from(b'"')
+        });
+    if !quoted {
+        output.extend(units);
+        return Ok(());
+    }
+
+    output.push(b'"' as u16);
+    let mut backslashes = 0_usize;
+    for unit in units {
+        if unit == b'\\' as u16 {
+            backslashes += 1;
+            continue;
+        }
+        if unit == b'"' as u16 {
+            output.extend(std::iter::repeat_n(
+                b'\\' as u16,
+                backslashes.saturating_mul(2).saturating_add(1),
+            ));
+            output.push(unit);
+        } else {
+            output.extend(std::iter::repeat_n(b'\\' as u16, backslashes));
+            output.push(unit);
+        }
+        backslashes = 0;
+    }
+    output.extend(std::iter::repeat_n(
+        b'\\' as u16,
+        backslashes.saturating_mul(2),
+    ));
+    output.push(b'"' as u16);
+    Ok(())
 }
 
 fn final_path(handle: BorrowedHandle<'_>, label: &'static str) -> io::Result<PathBuf> {

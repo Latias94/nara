@@ -6,6 +6,8 @@ mod authoring_project;
 mod enemy_stats;
 #[path = "support/local_release.rs"]
 mod local_release;
+#[path = "support/managed_bootstrap.rs"]
+mod managed_bootstrap;
 #[path = "support/scene_runtime.rs"]
 mod scene_runtime;
 

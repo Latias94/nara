@@ -81,7 +81,68 @@ This is an artifact preparation/publication API, not the complete Package Manage
 select an installed graph, satisfy declared requirements, adopt project Schema, approve a launcher,
 enable a tool or complete update/removal. Those operations remain in the local lifecycle plan.
 
-## Configure And Probe
+## Approve Captured Managed Images
+
+The concrete managed adapter uses the Host-owned
+[Nara.SourceToolHost](../../tools/source-tool-host/Nara.SourceToolHost.csproj) bootstrap. Build it
+with the .NET 10 SDK into the repository's existing target tree:
+
+```powershell
+dotnet build tools/source-tool-host/Nara.SourceToolHost.csproj --configuration Debug --artifacts-path target/source-tool-host --disable-build-servers -m:1 -p:UseSharedCompilation=false
+```
+
+The trusted Host explicitly selects a strict runtime root containing `dotnet.exe`, a strict
+bootstrap distribution directory, the four expected launcher/bootstrap digests, an exact
+`10.0.patch` framework version and a finite timeout. `EditorSourceToolManagedHost::new` prepares
+that approval without executing package code. The machine runtime, servicing and OS dependencies
+are explicitly trusted platform prerequisites; these observations do not freeze their transitive
+closure. Bootstrap members and the launcher retain restrictive native leases. Startup clears
+ambient environment and supplies only the selected Windows session/temp facts and fixed settings.
+
+After code-free installation inspection, explicit Host approval creates the ordinary Session
+definition:
+
+```rust,ignore
+let host = EditorSourceToolManagedHost::new(
+    runtime_root,
+    bootstrap_root,
+    approved_digests,
+    &approved_framework_version,
+    timeout,
+)?;
+let inspected = EditorSourceToolInstallationInspection::read(
+    &installation_directory,
+    selected_receipt_digest,
+)?;
+let definition = host.approve_installation(inspected)?;
+let attempt = session.enable_source_tool(definition)?;
+```
+
+The Session still probes the complete catalog and finite facet before replacing active routing.
+Every describe/proposal streams the same captured assembly images followed by the existing JSON
+request through one stdin writer. The actual child does not probe package files from the mutable
+installation directory. Pending Tasks retain the approved bytes and native custody through late
+spawn, cancellation, process reaping and all pipe-worker returns. Windows starts the direct child
+suspended, verifies its image and then resumes; unsupported Hosts reject this route explicitly.
+There is no development-command fallback. Existing source-built trusted development commands keep
+their own explicitly configured path below and share the same Session/proposal owner.
+
+The first managed subset is synchronous static `int Main(string[])` with no arguments, including
+a private entry point. Declare the matching `net10.0` one-framework runtimeconfig, project-library
+deps graph, catalog and managed Tool members in the release. The bootstrap admits all package
+metadata/references before loading images, reserves actual framework identities and rejects
+unknown dependencies without default-context fallback. Async/STA entry semantics, original argv/
+assembly location, package native/mixed/ReadyToRun images, file-backed resources, unsupported
+probing/configuration and unresolved installed requirements reject. Content members are not
+implicitly imported or made available as a package filesystem. Fully trusted tool code retains
+ambient process authority; this adapter is not a sandbox.
+
+Approval and successful Session activation are not durable enablement or complete Package
+selection. Fresh Open does not start a tool because its receipt exists. Schema metadata must
+already be admitted in the project; fresh-project adoption, evolved lineage, required-dependent
+selection, update/removal and the installed native UI workflow remain in the lifecycle plan.
+
+## Configure A Trusted Development Command And Probe
 
 Build an admitted `ComponentSchemaOwnerSnapshot` using the existing catalog API. Supply that
 snapshot, the component ID and an `EditorSourceToolCommand` to `EditorSourceToolDefinition::new`.

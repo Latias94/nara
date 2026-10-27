@@ -18,7 +18,7 @@ use std::{
 };
 
 use nara::fs::RestrictiveCapabilityHandleLease;
-use nara::project_host::process_image::ExactProcessImage;
+use nara::project_host::process_image::{ExactProcessImage, encode_command_line};
 use windows_sys::Win32::{
     Foundation::{
         CloseHandle, ERROR_ACCESS_DENIED, ERROR_BROKEN_PIPE, ERROR_HANDLE_EOF, ERROR_IO_PENDING,
@@ -1237,61 +1237,6 @@ impl Drop for ProcThreadAttributeList {
     }
 }
 
-fn encode_command_line(executable: &Path, arguments: &[OsString]) -> io::Result<Vec<u16>> {
-    let mut encoded = Vec::new();
-    append_windows_argument(&mut encoded, executable.as_os_str())?;
-    for argument in arguments {
-        encoded.push(b' ' as u16);
-        append_windows_argument(&mut encoded, argument)?;
-    }
-    if encoded.len() >= WINDOWS_COMMAND_LINE_LIMIT {
-        return Err(io::Error::new(
-            io::ErrorKind::InvalidInput,
-            "the encoded Windows command line exceeds 32,767 UTF-16 code units",
-        ));
-    }
-    encoded.push(0);
-    Ok(encoded)
-}
-
-fn append_windows_argument(output: &mut Vec<u16>, argument: &OsStr) -> io::Result<()> {
-    let units = wide_without_nul(argument, "process argument")?;
-    let quoted = units.is_empty()
-        || units.iter().any(|unit| {
-            *unit == u16::from(b' ') || *unit == u16::from(b'\t') || *unit == u16::from(b'"')
-        });
-    if !quoted {
-        output.extend(units);
-        return Ok(());
-    }
-
-    output.push(b'"' as u16);
-    let mut backslashes = 0_usize;
-    for unit in units {
-        if unit == b'\\' as u16 {
-            backslashes += 1;
-            continue;
-        }
-        if unit == b'"' as u16 {
-            output.extend(std::iter::repeat_n(
-                b'\\' as u16,
-                backslashes.saturating_mul(2).saturating_add(1),
-            ));
-            output.push(unit);
-        } else {
-            output.extend(std::iter::repeat_n(b'\\' as u16, backslashes));
-            output.push(unit);
-        }
-        backslashes = 0;
-    }
-    output.extend(std::iter::repeat_n(
-        b'\\' as u16,
-        backslashes.saturating_mul(2),
-    ));
-    output.push(b'"' as u16);
-    Ok(())
-}
-
 fn inherited_environment_block(overrides: &[(OsString, OsString)]) -> io::Result<Vec<u16>> {
     let mut entries: Vec<(OsString, OsString)> = Vec::new();
     for (name, value) in std::env::vars_os() {
@@ -1788,10 +1733,10 @@ mod tests {
     }
 
     fn encode_argument(argument: &str) -> String {
-        let mut encoded = Vec::new();
-        append_windows_argument(&mut encoded, OsStr::new(argument))
+        let encoded = encode_command_line(Path::new("test.exe"), &[OsString::from(argument)])
             .expect("the test argument is encodable");
-        String::from_utf16(&encoded).expect("the test argument is valid UTF-16")
+        String::from_utf16(&encoded["test.exe ".len()..encoded.len() - 1])
+            .expect("the test argument is valid UTF-16")
     }
 
     fn decode_environment_block(block: &[u16]) -> Vec<String> {

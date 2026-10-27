@@ -1,8 +1,18 @@
-//! Actual independently built C# source proposals through the native Editor widgets.
+//! Actual installed C# images captured and approved for proposals through native Editor widgets.
+
+use std::os::windows::fs::OpenOptionsExt;
 
 use nara::{
+    fs::{
+        CapabilityRights, ContentDigest, DirectoryCapability, HostCapabilityOptions,
+        RelativeComponent, TrustMode,
+    },
     project_host::{
-        EditorSourceToolCommand, EditorSourceToolDefinition, advanced::built_in_schema_providers,
+        EditorSourceToolDefinition, EditorSourceToolInstallationInspection,
+        EditorSourceToolInstallationOutcome, EditorSourceToolInstallationPlan,
+        EditorSourceToolManagedHost, EditorSourceToolManagedHostDigests,
+        PreparedEditorSourceToolRelease, advanced::built_in_schema_providers,
+        open_explicit_product_project_root,
     },
     reflect::{
         AuthoringSchemaBundle, AuthoringSchemaBundleOwner, ComponentRegistry,
@@ -114,16 +124,7 @@ impl SourceToolFixture {
                 .map_err(|error| error.to_string())?,
         )
         .map_err(|error| error.to_string())?;
-        let command = EditorSourceToolCommand::new(
-            executable,
-            vec![directory.join("EnemyStatsTool.dll").into_os_string()],
-            directory,
-            TOOL_TIMEOUT,
-        )
-        .map_err(|error| error.to_string())?;
-        let definition =
-            EditorSourceToolDefinition::new(command, owner.clone(), ComponentTypeId::new(STATS))
-                .map_err(|error| error.to_string())?;
+        let definition = approved_installed_tool(&project, &directory, &executable)?;
         Ok(Self {
             project,
             owner,
@@ -131,6 +132,127 @@ impl SourceToolFixture {
             original,
         })
     }
+}
+
+fn approved_installed_tool(
+    project: &InteractionProject,
+    artifacts: &Path,
+    executable: &Path,
+) -> Result<EditorSourceToolDefinition, String> {
+    let source = project.root.join("tool-release-source");
+    fs::create_dir(&source).map_err(|error| error.to_string())?;
+    let mut files = Vec::new();
+    for member in [
+        "EnemyStatsTool.dll",
+        "EnemyStatsTool.deps.json",
+        "EnemyStatsTool.runtimeconfig.json",
+        "enemy-stats.catalog.json",
+    ] {
+        let bytes = fs::read(artifacts.join(member)).map_err(|error| error.to_string())?;
+        fs::write(source.join(member), &bytes).map_err(|error| error.to_string())?;
+        let digest = ContentDigest::of_bytes(&bytes);
+        let hash: String = digest
+            .as_bytes()
+            .iter()
+            .map(|byte| format!("{byte:02x}"))
+            .collect();
+        files.push(serde_json::json!({
+            "path": member,
+            "length": digest.length(),
+            "blake3": hash,
+            "kind": "tool",
+        }));
+    }
+    let manifest = serde_json::to_vec(&serde_json::json!({
+        "format_version": 1,
+        "package": "trial.enemy-stats",
+        "release": "1",
+        "host_target": "x86_64-pc-windows-msvc",
+        "authority": "trusted_process",
+        "protocol_version": 1,
+        "owner": "trial.enemy-stats",
+        "component": STATS,
+        "catalog": "enemy-stats.catalog.json",
+        "entry": "EnemyStatsTool.dll",
+        "requires": [],
+        "files": files,
+    }))
+    .map_err(|error| error.to_string())?;
+    fs::write(source.join("nara-tool.json"), &manifest).map_err(|error| error.to_string())?;
+    let captured = PreparedEditorSourceToolRelease::capture(
+        &open_explicit_product_project_root(&source).map_err(|error| error.to_string())?,
+        ContentDigest::of_bytes(&manifest),
+    )
+    .map_err(|error| error.to_string())?;
+    let handle = fs::OpenOptions::new()
+        .read(true)
+        .share_mode(7)
+        .custom_flags(0x0200_0000 | 0x0020_0000)
+        .open(&project.root)
+        .map_err(|error| error.to_string())?;
+    let parent = DirectoryCapability::from_host_handle(
+        handle,
+        HostCapabilityOptions::new(CapabilityRights::ReadWrite, TrustMode::Untrusted),
+    )
+    .map_err(|error| error.to_string())?;
+    let plan = EditorSourceToolInstallationPlan::new(
+        parent,
+        RelativeComponent::new("installed-tool").map_err(|error| error.to_string())?,
+        captured,
+    )
+    .map_err(|error| error.to_string())?;
+    let installation = match plan.publish() {
+        EditorSourceToolInstallationOutcome::Published(installation) => installation,
+        other => {
+            return Err(format!(
+                "actual source-tool release publication failed: {other:?}"
+            ));
+        }
+    };
+    let inspection = EditorSourceToolInstallationInspection::read(
+        installation.directory(),
+        installation.receipt_digest(),
+    )
+    .map_err(|error| error.to_string())?;
+    let bootstrap = PathBuf::from(
+        std::env::var_os("NARA_SOURCE_TOOL_BOOTSTRAP_DIR")
+            .ok_or("NARA_SOURCE_TOOL_BOOTSTRAP_DIR must name the actual prebuilt managed Host")?,
+    );
+    let framework = std::env::var("NARA_SOURCE_TOOL_FRAMEWORK").map_err(|error| {
+        format!("NARA_SOURCE_TOOL_FRAMEWORK must select the exact framework: {error}")
+    })?;
+    let digest = |path: &Path| {
+        fs::read(path)
+            .map(|bytes| ContentDigest::of_bytes(&bytes))
+            .map_err(|error| error.to_string())
+    };
+    let host = EditorSourceToolManagedHost::new(
+        open_explicit_product_project_root(
+            executable
+                .parent()
+                .ok_or("the selected dotnet executable has no parent")?,
+        )
+        .map_err(|error| error.to_string())?,
+        open_explicit_product_project_root(&bootstrap).map_err(|error| error.to_string())?,
+        EditorSourceToolManagedHostDigests {
+            launcher: digest(executable)?,
+            bootstrap: digest(&bootstrap.join("Nara.SourceToolHost.dll"))?,
+            deps: digest(&bootstrap.join("Nara.SourceToolHost.deps.json"))?,
+            runtimeconfig: digest(&bootstrap.join("Nara.SourceToolHost.runtimeconfig.json"))?,
+        },
+        &framework,
+        TOOL_TIMEOUT,
+    )
+    .map_err(|error| error.to_string())?;
+    let definition = host
+        .approve_installation(inspection)
+        .map_err(|error| error.to_string())?;
+    drop(installation);
+    // Only this fixture's freshly published DLL is removed. Native probe and proposal must
+    // execute the approved captured images without consulting the installed entry path again.
+    fs::remove_file(project.root.join("installed-tool/EnemyStatsTool.dll"))
+        .map_err(|error| error.to_string())?;
+    Ok(definition)
 }
 
 struct SourceToolObservation {
@@ -146,7 +268,7 @@ struct SourceToolApplication<'a> {
 }
 
 #[test]
-#[ignore = "requires Windows DX12 and the actual prebuilt EnemyStats tool environment"]
+#[ignore = "requires Windows DX12 and actual installed EnemyStats images with managed Host approval"]
 fn native_source_tool_inline_property_and_panel_share_review_history_and_persistence() {
     let fixture = SourceToolFixture::new().unwrap();
     let mut builder = EventLoop::builder();

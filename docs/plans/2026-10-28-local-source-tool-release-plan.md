@@ -82,6 +82,11 @@ local relationships are checked; unsupported sources, roles, migration and targe
    installation directory. Check metadata/reference identities before load and refuse unknown
    dependencies without default-context fallback. This is a finite C# adapter experiment, not a
    second source proposal owner, official SDK or universal language Host.
+   `EditorSourceToolManagedHost` now prepares the explicit Windows launcher/bootstrap approval;
+   `approve_installation` binds an inspection's captured images to an ordinary Session definition.
+   Qualify this implementation with the actual installed V1/V2 consumer, negative metadata/graph
+   probes and held acquisition/IO return. Its presence alone does not close this step or durable
+   selection, and unsupported required relationships still reject.
    Prepare exact artifact custody before invoking the existing probe; same-Schema V2 coexists
    with the predecessor until readiness and the chosen publication cut. Define receipt versus
    routing order inside the actual Session/coordinator boundary. Candidate failure preserves V1;

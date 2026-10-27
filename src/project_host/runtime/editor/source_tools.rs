@@ -31,8 +31,12 @@ use serde::{Deserialize, Serialize};
 
 use super::{EditorEditPreparationError, EditorProjectSession};
 
+mod managed;
 mod process;
 mod release;
+pub use managed::{
+    EditorSourceToolManagedError, EditorSourceToolManagedHost, EditorSourceToolManagedHostDigests,
+};
 pub use release::{
     EditorSourceToolInstallation, EditorSourceToolInstallationError,
     EditorSourceToolInstallationInspection, EditorSourceToolInstallationOrphan,
@@ -59,6 +63,7 @@ pub struct EditorSourceToolCommand {
     arguments: Vec<OsString>,
     working_directory: PathBuf,
     timeout: Duration,
+    approved: Option<Arc<managed::ApprovedManagedLaunch>>,
 }
 
 impl EditorSourceToolCommand {
@@ -87,6 +92,7 @@ impl EditorSourceToolCommand {
             arguments,
             working_directory,
             timeout,
+            approved: None,
         })
     }
 

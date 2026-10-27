@@ -179,6 +179,7 @@ thiserror = { workspace = true, optional = true }
 windows-sys = { workspace = true, features = [
     "Win32_Foundation",
     "Win32_Globalization",
+    "Win32_Security",
     "Win32_Storage_FileSystem",
     "Win32_System_Console",
     "Win32_System_IO",
@@ -256,7 +257,7 @@ presentation-ui = [
     "nara_render_wgpu?/ui-submitter",
     "nara_winit?/platform-accessibility",
 ]
-tooling = ["runtime-core", "dep:nara_tooling"]
+tooling = ["runtime-core", "dep:nara_tooling", "dep:getrandom"]
 asset-watch = ["runtime-core", "dep:nara_asset_watch"]
 desktop-winit = ["runtime-core", "dep:nara_winit"]
 render-wgpu = ["runtime-core", "dep:nara_render", "dep:nara_render_wgpu"]

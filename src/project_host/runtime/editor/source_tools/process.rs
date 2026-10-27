@@ -1,4 +1,4 @@
-//! Bounded IO and physical custody of one trusted direct child.
+//! Bounded IO and physical custody of one trusted or approved exact direct child.
 //!
 //! `run` and its cleanup belong in the existing Tasks IO worker. Cleanup can remain pending
 //! indefinitely; this module provides neither descendant containment nor a hard Drop deadline.
@@ -6,18 +6,22 @@
 use nara_tasks::TaskCancellationToken;
 use std::{
     io::{self, Read, Write},
-    process::{Child, Command, ExitStatus, Stdio},
+    process::{Child, ChildStderr, ChildStdin, ChildStdout, Command, ExitStatus, Stdio},
+    sync::Arc,
     thread::{self, JoinHandle},
     time::{Duration, Instant},
 };
 
 #[cfg(test)]
-use std::sync::{
-    Arc,
-    atomic::{AtomicBool, Ordering},
-};
+use std::sync::atomic::{AtomicBool, Ordering};
+
+#[cfg(windows)]
+mod windows;
+
+use super::managed::ApprovedManagedLaunch;
 
 const REQUEST_BYTES: usize = 64 * 1024;
+const BOOTSTRAP_BYTES: usize = 64 * 1024 * 1024 + 20 + 64 * 8;
 const STDOUT_PROBE_BYTES: usize = 64 * 1024 + 1;
 const STDERR_PROBE_BYTES: usize = 16 * 1024 + 1;
 const POLL_INTERVAL: Duration = Duration::from_millis(2);
@@ -68,32 +72,78 @@ impl ProcessRequest {
             #[cfg(test)]
             gates,
         } = self;
-        // Admission normally enforces this bound. Refuse oversized input before acquiring a child.
-        if input.len() > REQUEST_BYTES {
+        // Admission normally enforces these separate budgets. The bootstrap prefix does not
+        // consume the ordinary request's 64 KiB allowance.
+        if input.len() > REQUEST_BYTES
+            || command
+                .approved
+                .as_ref()
+                .is_some_and(|approved| approved.prefix().len() > BOOTSTRAP_BYTES)
+        {
             return Err(ProcessFailure::Io);
         }
         let timeout = command.timeout();
-        let mut child_command = Command::new(command.executable());
-        child_command
-            .args(command.arguments())
-            .current_dir(command.working_directory())
-            .stdin(Stdio::piped())
-            .stdout(Stdio::piped())
-            .stderr(Stdio::piped());
-        #[cfg(windows)]
-        {
-            use std::os::windows::process::CommandExt;
-            const CREATE_NO_WINDOW: u32 = 0x0800_0000;
-            child_command.creation_flags(CREATE_NO_WINDOW);
-        }
+        let approved = command.approved.clone();
         #[cfg(test)]
         if let Some(gate) = gates.before_spawn {
             gate.wait();
         }
+        if let Some(approved) = approved.as_ref() {
+            approved.verify().map_err(|_| ProcessFailure::Spawn)?;
+        }
         // Even a cancelled held acquisition must transfer its late child into custody.
-        let child = child_command.spawn().map_err(|_| ProcessFailure::Spawn)?;
-        let mut custody = Custody::new(child);
+        let child = if let Some(approved) = approved.as_ref() {
+            #[cfg(windows)]
+            {
+                FiniteChild::Exact(
+                    windows::spawn(
+                        approved.image(),
+                        command.arguments(),
+                        command.working_directory(),
+                        approved.environment(),
+                    )
+                    .map_err(|_| ProcessFailure::Spawn)?,
+                )
+            }
+            #[cfg(not(windows))]
+            {
+                let _ = approved;
+                // Approved execution has no development-command fallback on other platforms.
+                return Err(ProcessFailure::Spawn);
+            }
+        } else {
+            let mut child_command = Command::new(command.executable());
+            child_command
+                .args(command.arguments())
+                .current_dir(command.working_directory())
+                .stdin(Stdio::piped())
+                .stdout(Stdio::piped())
+                .stderr(Stdio::piped());
+            #[cfg(windows)]
+            {
+                use std::os::windows::process::CommandExt;
+                const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+                child_command.creation_flags(CREATE_NO_WINDOW);
+            }
+            FiniteChild::Standard(child_command.spawn().map_err(|_| ProcessFailure::Spawn)?)
+        };
+        let mut custody = Custody::new(child, approved);
         let mut failure = stop_reason(&token, started, timeout);
+        #[cfg(windows)]
+        if failure.is_none()
+            && let FiniteChild::Exact(child) = &mut custody.child
+        {
+            // Every post-create error (and unwind) is now covered by the same finite custody.
+            let image = custody
+                ._approved
+                .as_ref()
+                .expect("exact child authority")
+                .image();
+            if child.verify_and_resume(image).is_err() {
+                failure = Some(ProcessFailure::Spawn);
+            }
+        }
+        failure = failure.or_else(|| stop_reason(&token, started, timeout));
         if failure.is_some() {
             if let Err(error) = custody.stop() {
                 failure.get_or_insert(error);
@@ -105,7 +155,7 @@ impl ProcessRequest {
 
         #[cfg(test)]
         let io_return_gate = gates.before_io_return;
-        custody.stdout = match custody.child.stdout.take() {
+        custody.stdout = match custody.child.take_stdout() {
             Some(pipe) => PipeWorker::spawn("nara-source-stdout", move || {
                 let result = read_bounded::<STDOUT_PROBE_BYTES>(pipe, ProcessFailure::StdoutLimit);
                 #[cfg(test)]
@@ -116,14 +166,20 @@ impl ProcessRequest {
             }),
             None => PipeWorker::absent(),
         };
-        custody.stderr = match custody.child.stderr.take() {
+        custody.stderr = match custody.child.take_stderr() {
             Some(pipe) => PipeWorker::spawn("nara-source-stderr", move || {
                 read_bounded::<STDERR_PROBE_BYTES>(pipe, ProcessFailure::StderrLimit)
             }),
             None => PipeWorker::absent(),
         };
-        custody.stdin = match custody.child.stdin.take() {
+        let stdin_approved = command.approved.clone();
+        custody.stdin = match custody.child.take_stdin() {
             Some(mut pipe) => PipeWorker::spawn("nara-source-stdin", move || {
+                if let Some(approved) = stdin_approved.as_ref() {
+                    pipe.write_all(approved.prefix())
+                        .map_err(|_| ProcessFailure::Io)?;
+                }
+                // Dropping this sole writer sends EOF after both prefix and ordinary input.
                 pipe.write_all(&input).map_err(|_| ProcessFailure::Io)
             }),
             None => PipeWorker::absent(),
@@ -294,18 +350,110 @@ impl<T> Drop for PipeWorker<T> {
     }
 }
 
+enum FiniteChild {
+    Standard(Child),
+    #[cfg(windows)]
+    Exact(windows::ExactChild),
+}
+
+impl FiniteChild {
+    fn take_stdin(&mut self) -> Option<Pipe<ChildStdin>> {
+        match self {
+            Self::Standard(child) => child.stdin.take().map(Pipe::Standard),
+            #[cfg(windows)]
+            Self::Exact(child) => child.stdin.take().map(Pipe::Exact),
+        }
+    }
+
+    fn take_stdout(&mut self) -> Option<Pipe<ChildStdout>> {
+        match self {
+            Self::Standard(child) => child.stdout.take().map(Pipe::Standard),
+            #[cfg(windows)]
+            Self::Exact(child) => child.stdout.take().map(Pipe::Exact),
+        }
+    }
+
+    fn take_stderr(&mut self) -> Option<Pipe<ChildStderr>> {
+        match self {
+            Self::Standard(child) => child.stderr.take().map(Pipe::Standard),
+            #[cfg(windows)]
+            Self::Exact(child) => child.stderr.take().map(Pipe::Exact),
+        }
+    }
+
+    fn try_wait(&mut self) -> io::Result<Option<ExitStatus>> {
+        match self {
+            Self::Standard(child) => child.try_wait(),
+            #[cfg(windows)]
+            Self::Exact(child) => child.try_wait(),
+        }
+    }
+
+    fn wait(&mut self) -> io::Result<ExitStatus> {
+        match self {
+            Self::Standard(child) => child.wait(),
+            #[cfg(windows)]
+            Self::Exact(child) => child.wait(),
+        }
+    }
+
+    fn kill(&mut self) -> io::Result<()> {
+        match self {
+            Self::Standard(child) => child.kill(),
+            #[cfg(windows)]
+            Self::Exact(child) => child.kill(),
+        }
+    }
+}
+
+enum Pipe<T> {
+    Standard(T),
+    #[cfg(windows)]
+    Exact(std::fs::File),
+}
+
+impl<T: Read> Read for Pipe<T> {
+    fn read(&mut self, bytes: &mut [u8]) -> io::Result<usize> {
+        match self {
+            Self::Standard(pipe) => pipe.read(bytes),
+            #[cfg(windows)]
+            Self::Exact(pipe) => pipe.read(bytes),
+        }
+    }
+}
+
+impl<T: Write> Write for Pipe<T> {
+    fn write(&mut self, bytes: &[u8]) -> io::Result<usize> {
+        match self {
+            Self::Standard(pipe) => pipe.write(bytes),
+            #[cfg(windows)]
+            Self::Exact(pipe) => pipe.write(bytes),
+        }
+    }
+
+    fn flush(&mut self) -> io::Result<()> {
+        match self {
+            Self::Standard(pipe) => pipe.flush(),
+            #[cfg(windows)]
+            Self::Exact(pipe) => pipe.flush(),
+        }
+    }
+}
+
 struct Custody {
-    child: Child,
+    child: FiniteChild,
     // Preserve the complete status, including signal exits whose code() is None.
     exit_status: Option<ExitStatus>,
     kill_sent: bool,
     stdout: PipeWorker<Bytes<STDOUT_PROBE_BYTES>>,
     stderr: PipeWorker<Bytes<STDERR_PROBE_BYTES>>,
     stdin: PipeWorker<()>,
+    // Retained through physical return, including unwind cleanup and late held acquisition.
+    _approved: Option<Arc<ApprovedManagedLaunch>>,
 }
 
 impl Custody {
-    fn new(child: Child) -> Self {
+    fn new(child: FiniteChild, approved: Option<Arc<ApprovedManagedLaunch>>) -> Self {
         Self {
             child,
             exit_status: None,
@@ -313,6 +461,7 @@ impl Custody {
             stdout: PipeWorker::absent(),
             stderr: PipeWorker::absent(),
             stdin: PipeWorker::absent(),
+            _approved: approved,
         }
     }
 

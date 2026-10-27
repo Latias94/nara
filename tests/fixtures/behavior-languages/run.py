@@ -43,6 +43,15 @@ def main():
         "libhostfxr.dylib" if sys.platform == "darwin" else "libhostfxr.so"
     )
     environment["NARA_BEHAVIOR_HOSTFXR"] = str(latest / library)
+    framework_versions = [
+        path.name for path in (dotnet.parent / "shared" / "Microsoft.NETCore.App").iterdir()
+        if len(path.name.split(".")) == 3
+        and all(part.isdigit() for part in path.name.split("."))
+        and path.name.startswith("10.0.")
+    ]
+    environment["NARA_SOURCE_TOOL_FRAMEWORK"] = max(
+        framework_versions, key=lambda version: tuple(int(part) for part in version.split("."))
+    )
     print(f"Using hostfxr {latest.name} ({library})", flush=True)
 
     def build(project, destination, **properties):
@@ -54,6 +63,11 @@ def main():
         command.extend(f"-p:{name}={value}" for name, value in properties.items())
         subprocess.run(command, cwd=root, env=environment, check=True)
 
+    bootstrap = root / "target" / "source-tool-host"
+    build(root / "tools" / "source-tool-host" / "Nara.SourceToolHost.csproj", bootstrap)
+    environment["NARA_SOURCE_TOOL_BOOTSTRAP_DIR"] = str(
+        bootstrap / "bin" / "Nara.SourceToolHost" / "debug"
+    )
     build(fixture / "managed" / "BehaviorTrial.csproj", artifacts)
     environment["NARA_BEHAVIOR_MANAGED_DIR"] = str(artifacts / "bin" / "BehaviorTrial" / "debug")
     module_project = fixture / "authored" / "BehaviorModule.csproj"
@@ -75,6 +89,16 @@ def main():
         environment[f"NARA_SOURCE_TOOL_{name.upper()}_DIR"] = str(
             destination / "bin" / "EnemyStatsTool" / "debug"
         )
+    for name, revision, mode in [
+        ("v1", "1", "sync"), ("v2", "2", "sync"),
+        ("async", "1", "async"), ("sta", "1", "sta"),
+    ]:
+        destination = artifacts.parent / "probes" / name
+        build(fixture / "managed-tool-probes" / "Entry" / "Entry.csproj", destination,
+              DependencyRevision=revision, ProbeMode=mode)
+        environment[f"NARA_MANAGED_PROBE_{name.upper()}_DIR"] = str(
+            destination / "bin" / "Entry" / "debug"
+        )
     subprocess.run(
         [
             "cargo", "+1.95.0", "nextest", "run", "--manifest-path", str(fixture / "Cargo.toml"),
@@ -84,6 +108,14 @@ def main():
         cwd=root, env=environment, check=True,
     )
     if os.name == "nt":
+        subprocess.run(
+            [
+                "cargo", "+1.95.0", "nextest", "run", "-p", "nara", "--all-features",
+                "--lib", "--locked", "--run-ignored", "only", "-E",
+                "test(managed_child_cancellation_retains_approved_custody)",
+                "--test-threads=1", "--status-level", "fail", "--final-status-level", "fail",
+            ], cwd=root, env=environment, check=True,
+        )
         subprocess.run(
             [
                 "cargo", "+1.95.0", "nextest", "run", "-p", "nara-editor", "--lib", "--locked",

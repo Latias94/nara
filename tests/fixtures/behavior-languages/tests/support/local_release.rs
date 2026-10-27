@@ -40,8 +40,12 @@ struct LocalRelease {
 
 impl LocalRelease {
     fn new() -> Self {
+        Self::variant("V1")
+    }
+
+    fn variant(variant: &str) -> Self {
         let artifacts = PathBuf::from(
-            std::env::var_os("NARA_SOURCE_TOOL_V1_DIR")
+            std::env::var_os(format!("NARA_SOURCE_TOOL_{variant}_DIR"))
                 .expect("Run python tests/fixtures/behavior-languages/run.py"),
         );
         let directory = tempfile::tempdir().unwrap();
@@ -77,7 +81,7 @@ impl LocalRelease {
         let manifest = serde_json::to_vec(&json!({
             "format_version": 1,
             "package": "trial.enemy-stats",
-            "release": "1",
+            "release": if variant == "V2" { "2" } else { "1" },
             "host_target": HOST_TARGET,
             "authority": "trusted_process",
             "protocol_version": 1,
@@ -95,6 +99,131 @@ impl LocalRelease {
             payloads,
             manifest,
         }
+    }
+}
+
+#[cfg(all(target_os = "windows", target_arch = "x86_64", target_env = "msvc"))]
+pub(super) fn installed_variant(
+    variant: &str,
+) -> (
+    tempfile::TempDir,
+    nara_engine::project_host::EditorSourceToolInstallationInspection,
+) {
+    install(LocalRelease::variant(variant))
+}
+
+#[cfg(all(target_os = "windows", target_arch = "x86_64", target_env = "msvc"))]
+fn install(
+    source: LocalRelease,
+) -> (
+    tempfile::TempDir,
+    nara_engine::project_host::EditorSourceToolInstallationInspection,
+) {
+    use nara_engine::{
+        fs::{DirectoryCapability, HostCapabilityOptions, RelativeComponent},
+        project_host::{
+            EditorSourceToolInstallationInspection, EditorSourceToolInstallationOutcome,
+            EditorSourceToolInstallationPlan,
+        },
+    };
+    use std::{fs, os::windows::fs::OpenOptionsExt};
+    let captured = PreparedEditorSourceToolRelease::capture(
+        &open_explicit_product_project_root(source.directory.path()).unwrap(),
+        ContentDigest::of_bytes(&source.manifest),
+    )
+    .unwrap();
+    let parent = tempfile::tempdir().unwrap();
+    let handle = fs::OpenOptions::new()
+        .read(true)
+        .share_mode(7)
+        .custom_flags(0x0200_0000 | 0x0020_0000)
+        .open(parent.path())
+        .unwrap();
+    let capability = DirectoryCapability::from_host_handle(
+        handle,
+        HostCapabilityOptions::new(CapabilityRights::ReadWrite, TrustMode::Untrusted),
+    )
+    .unwrap();
+    let plan = EditorSourceToolInstallationPlan::new(
+        capability,
+        RelativeComponent::new("installed").unwrap(),
+        captured,
+    )
+    .unwrap();
+    let installation = match plan.publish() {
+        EditorSourceToolInstallationOutcome::Published(installation) => installation,
+        other => panic!("Actual release publication failed: {other:?}"),
+    };
+    let inspection = EditorSourceToolInstallationInspection::read(
+        installation.directory(),
+        installation.receipt_digest(),
+    )
+    .unwrap();
+    drop(installation);
+    (parent, inspection)
+}
+
+#[cfg(all(target_os = "windows", target_arch = "x86_64", target_env = "msvc"))]
+#[test]
+fn csharp_managed_approval_rejects_configuration_probing_native_assets_and_duplicate_keys() {
+    use nara_engine::project_host::EditorSourceToolManagedError;
+    let host = super::enemy_stats::approved_managed_host();
+    for case in ["probing", "native", "duplicate"] {
+        let mut source = LocalRelease::new();
+        let (path, replacement) = if case == "native" {
+            let mut value: serde_json::Value =
+                serde_json::from_slice(&source.payloads["EnemyStatsTool.deps.json"]).unwrap();
+            let libraries = value["targets"][".NETCoreApp,Version=v10.0"]
+                .as_object_mut()
+                .unwrap();
+            libraries.values_mut().next().unwrap()["native"] = json!({"unknown.dll":{}});
+            (
+                "EnemyStatsTool.deps.json",
+                serde_json::to_vec(&value).unwrap(),
+            )
+        } else if case == "duplicate" {
+            ("EnemyStatsTool.runtimeconfig.json", br#"{"runtimeOptions":{"tfm":"net10.0","framework":{"name":"Microsoft.NETCore.App","version":"10.0.0"},"configProperties":{"System.Runtime.Serialization.EnableUnsafeBinaryFormatterSerialization":true,"System.Runtime.Serialization.EnableUnsafeBinaryFormatterSerialization":false}}}"#.to_vec())
+        } else {
+            let mut value: serde_json::Value =
+                serde_json::from_slice(&source.payloads["EnemyStatsTool.runtimeconfig.json"])
+                    .unwrap();
+            value["runtimeOptions"]["additionalProbingPaths"] = json!(["external-packages"]);
+            (
+                "EnemyStatsTool.runtimeconfig.json",
+                serde_json::to_vec(&value).unwrap(),
+            )
+        };
+        std::fs::write(source.directory.path().join(path), &replacement).unwrap();
+        let digest = ContentDigest::of_bytes(&replacement);
+        let mut manifest: serde_json::Value = serde_json::from_slice(&source.manifest).unwrap();
+        let member = manifest["files"]
+            .as_array_mut()
+            .unwrap()
+            .iter_mut()
+            .find(|member| member["path"] == path)
+            .unwrap();
+        member["length"] = json!(digest.length());
+        member["blake3"] = json!(
+            digest
+                .as_bytes()
+                .iter()
+                .map(|byte| format!("{byte:02x}"))
+                .collect::<String>()
+        );
+        source.manifest = serde_json::to_vec(&manifest).unwrap();
+        std::fs::write(
+            source.directory.path().join("nara-tool.json"),
+            &source.manifest,
+        )
+        .unwrap();
+        let (_directory, inspected) = install(source);
+        assert!(
+            matches!(
+                host.approve_installation(inspected),
+                Err(EditorSourceToolManagedError::Contract(_))
+            ),
+            "{case}: unsupported configuration became an executable definition"
+        );
     }
 }
 

@@ -1,0 +1,11 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <AssemblyName>Nara.SourceToolProbeDependency</AssemblyName>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <DependencyRevision Condition="'$(DependencyRevision)' == ''">1</DependencyRevision>
+    <AssemblyVersion>$(DependencyRevision).0.0.0</AssemblyVersion>
+    <DefineConstants Condition="'$(DependencyRevision)' == '2'">$(DefineConstants);DEPENDENCY_REVISION_TWO</DefineConstants>
+  </PropertyGroup>
+</Project>

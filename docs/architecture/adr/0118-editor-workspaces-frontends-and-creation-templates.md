@@ -491,7 +491,17 @@ Tool artifacts, configuration and unknown installation siblings remain outside t
 baseline and require the actual captured-input execution boundary. The
 [runtime authority study](../../research/2026-10-28-installed-tool-runtime-authority.md) records
 the alternatives and unqualified artifact/namespace obligations. This selects a bounded trust
-partition; it does not establish installed execution, enablement or runtime support evidence.
+partition; its implementation and qualified platforms remain separately recorded evidence.
+
+For the bounded managed route, a Host-owned bootstrap receives the already captured managed images
+and then the ordinary finite request on one stdin stream. The trusted baseline determines its
+runtime/deps/environment; package runtime configuration cannot reconfigure that baseline. Package
+metadata, supported entry and complete reference identities are admitted before package loading,
+with explicit framework bindings and no unknown-assembly fallback. No mutable installation
+directory becomes default package probing authority. The Session's existing probe, candidate,
+source transaction and physical retirement remain the only owners. This route has a narrow
+synchronous managed entry contract; it neither adopts an official language SDK nor authorizes
+native package assets, a general Host or persistent enablement.
 
 A component schema may publish one optional complete `authoring_initial_value` in the existing bounded generic value grammar.
 It is creation-only data, validated through the canonical complete schema/value validator at catalog admission and copied for an explicit creation transaction.

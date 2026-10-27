@@ -135,6 +135,7 @@ pub use runtime::{
     EditorSourceToolInstallationInspection, EditorSourceToolInstallationOrphan,
     EditorSourceToolInstallationOutcome, EditorSourceToolInstallationPlan,
     EditorSourceToolInstallationReceipt, EditorSourceToolInstalledMember,
+    EditorSourceToolManagedError, EditorSourceToolManagedHost, EditorSourceToolManagedHostDigests,
     EditorSourceToolReleaseError, EditorSourceToolReleaseMember, EditorSourceToolReleaseMemberKind,
     EditorSourceToolReleaseRequirement, PreparedEditorSourceToolRelease,
     SupervisedDesktopSourceAdmissionError, SupervisedDesktopSourceAuthority,

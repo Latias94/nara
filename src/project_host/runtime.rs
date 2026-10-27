@@ -73,9 +73,10 @@ pub use editor::{
     EditorSourceToolInstallationError, EditorSourceToolInstallationInspection,
     EditorSourceToolInstallationOrphan, EditorSourceToolInstallationOutcome,
     EditorSourceToolInstallationPlan, EditorSourceToolInstallationReceipt,
-    EditorSourceToolInstalledMember, EditorSourceToolReleaseError, EditorSourceToolReleaseMember,
-    EditorSourceToolReleaseMemberKind, EditorSourceToolReleaseRequirement,
-    PreparedEditorSourceToolRelease,
+    EditorSourceToolInstalledMember, EditorSourceToolManagedError, EditorSourceToolManagedHost,
+    EditorSourceToolManagedHostDigests, EditorSourceToolReleaseError,
+    EditorSourceToolReleaseMember, EditorSourceToolReleaseMemberKind,
+    EditorSourceToolReleaseRequirement, PreparedEditorSourceToolRelease,
 };
 
 mod plugin_diagnostics;
