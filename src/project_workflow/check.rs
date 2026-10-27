@@ -198,6 +198,7 @@ impl ProjectStartupSceneIssue {
         &self.selected_scene
     }
 
+    #[cfg(feature = "project-tooling")]
     pub(crate) fn profile(&self) -> Option<&str> {
         self.profile.as_deref()
     }

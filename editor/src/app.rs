@@ -689,7 +689,6 @@ impl EditorApplication {
                 })
             }
             EditorProductState::OpeningInitial(opening) => Some(EditorProjectShellModel::Opening {
-                entry_generation: opening.entry_generation,
                 attempt_generation: opening.attempt_generation,
                 request: &opening.request,
                 phase: opening.phase_label(),
@@ -698,7 +697,6 @@ impl EditorApplication {
             }),
             EditorProductState::OpeningReplacement(replacement) => {
                 Some(EditorProjectShellModel::Opening {
-                    entry_generation: replacement.entry_generation(),
                     attempt_generation: replacement.attempt_generation(),
                     request: replacement.request(),
                     phase: replacement.phase_label(),
@@ -707,7 +705,6 @@ impl EditorApplication {
                 })
             }
             EditorProductState::Recovery(recovery) => Some(EditorProjectShellModel::Recovery {
-                entry_generation: recovery.entry_generation,
                 attempt_generation: recovery.attempt_generation,
                 request: &recovery.request,
                 diagnostics: &recovery.diagnostics,
@@ -746,10 +743,8 @@ impl EditorApplication {
                     EditorProductState::ProjectManager(_) | EditorProductState::Recovery(_)
                         if request.project_root().as_os_str().is_empty() =>
                     {
-                        let entry_generation = self.allocate_entry_generation();
                         let attempt_generation = self.allocate_attempt_generation();
                         self.enter_recovery(RecoveryState::local_failure(
-                            entry_generation,
                             attempt_generation,
                             request,
                             "project.editor.project-path-empty",
@@ -2229,7 +2224,6 @@ impl EditorApplication {
                     Ok(project_root) => project_root,
                     Err(error) => {
                         return OpenStepResult::Rejected(RecoveryState::local_failure(
-                            opening.entry_generation,
                             opening.attempt_generation,
                             opening.request.clone(),
                             root_error_code(&error),
@@ -2267,7 +2261,6 @@ impl EditorApplication {
                     }
                     EditorProjectOpenProgress::Rejected(failure) => {
                         let recovery = RecoveryState::from_host_failure(
-                            opening.entry_generation,
                             opening.attempt_generation,
                             opening.request.clone(),
                             &failure,

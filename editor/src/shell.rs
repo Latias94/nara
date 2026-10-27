@@ -249,7 +249,6 @@ pub(crate) struct RecoveryDiagnostic {
 
 #[derive(Debug)]
 pub(super) struct RecoveryState {
-    pub(super) entry_generation: u64,
     pub(super) attempt_generation: u64,
     pub(super) request: EditorProjectRequest,
     pub(super) diagnostics: Vec<RecoveryDiagnostic>,
@@ -257,7 +256,6 @@ pub(super) struct RecoveryState {
 
 impl RecoveryState {
     pub(super) fn from_host_failure(
-        entry_generation: u64,
         attempt_generation: u64,
         request: EditorProjectRequest,
         failure: &EditorProjectOpenFailure,
@@ -300,7 +298,6 @@ impl RecoveryState {
             });
         }
         Self {
-            entry_generation,
             attempt_generation,
             request,
             diagnostics,
@@ -308,7 +305,6 @@ impl RecoveryState {
     }
 
     pub(super) fn local_failure(
-        entry_generation: u64,
         attempt_generation: u64,
         request: EditorProjectRequest,
         code: &'static str,
@@ -316,7 +312,6 @@ impl RecoveryState {
         repair_hint: &'static str,
     ) -> Self {
         Self {
-            entry_generation,
             attempt_generation,
             request,
             diagnostics: vec![RecoveryDiagnostic {
@@ -434,7 +429,6 @@ pub(crate) enum EditorProjectShellModel<'a> {
         open_available: bool,
     },
     Opening {
-        entry_generation: u64,
         attempt_generation: u64,
         request: &'a EditorProjectRequest,
         phase: &'static str,
@@ -442,7 +436,6 @@ pub(crate) enum EditorProjectShellModel<'a> {
         replacement: bool,
     },
     Recovery {
-        entry_generation: u64,
         attempt_generation: u64,
         request: &'a EditorProjectRequest,
         diagnostics: &'a [RecoveryDiagnostic],

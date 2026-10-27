@@ -380,8 +380,7 @@ impl PlatformProcess {
         #[cfg(all(target_os = "linux", target_arch = "x86_64"))]
         {
             let stopped = self.output_reader_stopped.load(Ordering::Acquire);
-            let pending_output = self.output.has_pending();
-            if !stopped || pending_output {
+            if !stopped || !self.output.is_drained() {
                 return false;
             }
             let Some(reader) = self.output_reader.take() else {

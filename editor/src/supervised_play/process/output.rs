@@ -105,10 +105,6 @@ impl PlatformOutputQueue {
         self.wake.notify();
     }
 
-    pub(super) fn has_pending(&self) -> bool {
-        self.state.lock().map_or(true, |state| !state.is_drained())
-    }
-
     pub(super) fn is_drained(&self) -> bool {
         self.state.lock().is_ok_and(|state| state.is_drained())
     }

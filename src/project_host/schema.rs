@@ -109,11 +109,6 @@ fn publish(
         FilePublicationOutcome::Uncertain(_) => SchemaPublicationFailure::Uncertain,
     };
     let cleanup_pending = !publication.retry_cleanup();
-    if cleanup_pending {
-        let _ = publication
-            .cleanup()
-            .expect("failed cleanup retains its owner");
-    }
     Err(SchemaRefreshError::Publication {
         outcome,
         cleanup_pending,
