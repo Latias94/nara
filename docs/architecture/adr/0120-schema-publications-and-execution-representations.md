@@ -28,17 +28,22 @@ representation, if selected, must independently prove:
 - Schema-complete enumeration/read and explicit Absent, BindingUnavailable and EncodeFailure;
 - owner-grouped per-entity preparation/commit, not repeated replacement of a shared carrier;
 - complete Schema/version/reference validation and exact World/entity-incarnation association;
-- prepared-data custody bound to immutable Schema and execution generation;
+- prepared-data custody bound to immutable Schema admissions, with separate execution-generation
+  custody for representations that actually retain executable artifacts;
 - exact row/membership retirement and export, without deleting unrelated rows in one carrier;
 - native/VM reconciliation as an explicit fallible lifecycle, not arbitrary reversible World work.
 
 The [executed private comparison](../../research/2026-10-27-behavior-representation-comparison.md)
 uses the same authored records and compiler for an attachment envelope and owner-managed rows.
-Use the data-only entity envelope as the initial candidate for the language workflow trial,
-revising the earlier Rows preference. Independent semantic Schema identity does not require
+The data-only entity envelope was selected as the initial candidate for the language workflow
+trial, revising the earlier Rows preference. Independent semantic Schema identity does not require
 independent physical storage. Rows inspect fewer records for a selective query, but ordinary
 entity/Scene destruction leaves owner rows unless a separate cleanup path participates.
-This is a bounded candidate choice, not a selected public representation or a speed claim.
+ADR 0006 subsequently adopted the closed Scene-owned native/data storage family, qualified
+through complete public and product consumers. The original comparison is neither a throughput
+claim nor authority for executable owner publication. Its second Runtime and manual grouped
+materialization/export are removed; two raw storage probes retain the specific query/orphan
+counterpressure without preserving an alternative Scene implementation.
 
 An envelope must expose typed inner Schema/reference/migration semantics, not an opaque
 properties blob. Its data cleanup does not prove VM instance, callback or code lifetime.
@@ -59,11 +64,13 @@ source/history/persistence and repeated Prefab identity without a per-Schema nat
 Binding availability checks are not publication dependency/ABI compatibility or VM lifetime proof.
 Neither this JSON bridge nor either language is selected as the production interface.
 
-The [Scene-owned representation design](../scene-component-representations-design.md) proposes
-the first production closed native/data family through the existing compiler, publication and
-live export owners. The [updated extension study](../../research/2026-10-27-language-extension-product-boundaries.md)
-adds a complete C# Editor-tool evaluation to the private gameplay evidence. Neither proposal
-changes this ADR's status or makes metadata admission proof of an executable binding.
+The [Scene-owned representation design](../scene-component-representations-design.md) describes
+the adopted closed native/data family through the existing compiler, publication and live export
+owners. Its language consumer now uses those public owners and a real metadata-based
+window-free Project Session for editing/history/Save/Reopen. Language bridges and execution
+routing remain experimental. The [updated extension study](../../research/2026-10-27-language-extension-product-boundaries.md)
+adds a complete C# Editor-tool evaluation to the gameplay evidence. Neither storage adoption
+nor that consumer changes this ADR's status or makes metadata admission proof of callback readiness.
 Backend-free owner admission and explicit native/data source compilation now have scoped
 production evidence in the [implementation ledger](implementation-status.md); complete runtime
 materialization and managed data ownership now have their narrow closed-family contract in

@@ -12,8 +12,9 @@ reference traversal and native Name materialization constant. Nara starts at
 The full [foundation plan](../plans/2026-10-23-foundation-architecture-rebaseline-plan.md)
 remains active.
 
-The independently compiled
-[fixture](../../tests/fixtures/module-consumer/tests/behavior_representation.rs) uses the existing
+The independently compiled fixture at `535bbd677bbad6563e0dd9f8436336b97e84038d`
+(`git show 535bbd677bbad6563e0dd9f8436336b97e84038d:tests/fixtures/module-consumer/tests/behavior_representation.rs`)
+uses the existing
 hidden authoring compiler and adapter receipts. A bounded Rust feasibility adapter executes
 runtime-defined Mover and Sensor Schemas without a Rust component type per Behavior. This is
 evidence about representation, not a complete public Runtime consumer. Both alternatives prepare
@@ -129,8 +130,9 @@ without a second cleanup path in the executed fixtures.
 Keep the Rows query result as a counterpressure. A real selected-language dispatch workload,
 frequent Schema-wide queries, safe thread-local VM custody or required scheduler access may
 justify an owner index, Rows or descriptors. Do not add such an index speculatively or advertise
-the envelope as faster. Preserve these private comparison fixtures until the concrete language
-owner replaces them; do not ship two production representation families for optionality.
+the envelope as faster. The later public Scene/data and language consumers replace the private
+grouped materialization/export path. Retain only bounded raw storage counterpressure rather than
+two Scene Runtime implementations. This does not rerun or change the historical measurements.
 
 The envelope currently contains data values only. It has no VM handles, callback pointers or
 language destructors. Their cleanup, safe-point behavior and old-code leases are unproved for
@@ -145,5 +147,15 @@ are not integrated into its export remap. A production owner must derive the cur
 membership and export scope rather than promoting this private roster helper.
 
 [ADR 0120](../architecture/adr/0120-schema-publications-and-execution-representations.md)
-remains Proposed. Its next step is the same gameplay task through bounded C# and Lua adapters,
-with actual toolchain and instance-lifetime evidence before selecting a production owner.
+remains Proposed. The next step selected at this baseline was the same gameplay task through
+bounded C# and Lua adapters, with actual toolchain and instance-lifetime evidence before selecting
+a production owner. Current execution follows the linked Scene plan.
+
+## Historical Source Location
+
+This report describes the executed source at its fixed commits, not a requirement to retain the
+prototype in the current checkout. Recover the complete comparison with the command above.
+The later Schema-driven private helper used by the language study is available as
+`git show 65402b9206b26555787e4da5b7f7abd1a0c048fa:tests/fixtures/module-consumer/tests/support/behavior_trial.rs`.
+The [Scene plan](../plans/2026-10-27-scene-data-representation-plan.md) owns its public replacement;
+the [language consumer](../../tests/fixtures/behavior-languages/README.md) records current scope.

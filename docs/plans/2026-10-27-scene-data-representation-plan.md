@@ -22,7 +22,9 @@ implementation slices. The [runtime evidence](../knowledge/engineering/verificat
 owns actual checks and remaining integration, rather than treating identified seams as execution.
 The [product selection successor](../knowledge/engineering/verification/2026-10/2026-10-27T141025Z-mixed-scene-product-selection-and-content-to-runtime-admission-qualification-7c90588821aa4e8da374958ef2e436e4.md)
 records recipe, strict content and managed startup/replacement integration. The private language
-harness replacement and concrete language-owner workflow remain next.
+harness is replaced by the
+[public Scene language consumer](../knowledge/engineering/verification/2026-10/2026-10-27T145608Z-public-scene-language-consumer-and-obsolete-representation-runtime-removal-67783a7cb8514ce9bbb7957670b4ec37.md).
+The concrete language-owner/tool workflow remains next.
 ADR 0006 adopts the closed native/data storage contract; ADR 0120 remains Proposed for broader
 executable publication, language custody, migration and cohort replacement.
 
@@ -91,18 +93,20 @@ owner claims remain reserved against selected data owners, including inactive to
 immediate predecessor claims. Source declaration compilation precedes effective asset capture;
 rejected surviving records are reported by that compiler rather than an early native-only reader.
 
-After this product checkpoint, replace the existing language fixture's runtime harness with the
-public Scene selection/preparation/access/export path. Keep its concrete C# experiment and actual
+The language fixture now consumes the public Scene selection/preparation/access/export path and
+the real window-free Project Session. Its old preview/post-commit runtime and cached export
+helper are deleted. Keep its concrete C# experiment and actual
 collectible-context/held-callback evidence; existing Lua tests may share the corrected harness
 without becoming a second production SDK program. Preserve complete callback ID/version admission,
 atomic command rejection, execution-publication fencing and physical code-retirement observation.
 Do not use Authoring preview or a fallible post-commit carrier installation for runtime storage.
 
 Use the existing public window-free Project Session for source edits/history and Save/Reopen;
-an empty authoring-adapter receipt list does not make known-unbound fields editable. Remove the
-superseded grouped materialization/export helper after migrating its remaining representation
-correctness consumers. Retain only a bounded storage comparison when it still distinguishes Rows
-from the selected carrier; historical measurements do not justify retaining a second Runtime.
+an empty authoring-adapter receipt list does not make known-unbound fields editable. Superseded
+representation correctness consumers now map to production/public tests, with a new guarded
+setter negative for a retired reference target. Two raw storage probes retain query/orphan
+counterpressure; they do not measure the production carrier or throughput. Historical
+measurements do not justify retaining a second Runtime.
 
 The subsequent concrete `EnemyStats` tool should return limited semantic proposals to that same
 Session owner. The Host retains source basis and executable publication custody, prepares the edit

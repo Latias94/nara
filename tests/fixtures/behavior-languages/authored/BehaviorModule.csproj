@@ -9,6 +9,7 @@
     <TrialContractProject Condition="'$(TrialContractProject)' == ''">../managed/BehaviorTrial.csproj</TrialContractProject>
     <DefineConstants Condition="'$(TrialRevision)' == '2'">$(DefineConstants);REVISION_TWO</DefineConstants>
     <DefineConstants Condition="'$(TrialRevision)' == 'invalid'">$(DefineConstants);REVISION_INVALID</DefineConstants>
+    <DefineConstants Condition="'$(TrialRevision)' == 'missing'">$(DefineConstants);REVISION_MISSING</DefineConstants>
   </PropertyGroup>
   <ItemGroup>
     <ProjectReference Include="$(TrialContractProject)" Private="false" />

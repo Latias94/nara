@@ -10,7 +10,9 @@ public sealed class Module : IBehaviorModule
         new(StringComparer.Ordinal)
         {
             ["trial.behavior.Mover"] = Move,
+#if !REVISION_MISSING
             ["trial.behavior.Sensor"] = Signal,
+#endif
             ["trial.behavior.Label"] = Label,
         };
 

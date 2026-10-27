@@ -3,7 +3,7 @@ type: "Current State"
 title: "Current Engineering State"
 description: "Derived summary of immutable engineering-memory shards."
 tags: ["engineering-memory", "derived"]
-source_fingerprint: "ed5a3aebddd0f2170cbac094ced7b5e02f3a8d5c2bc32d5fe9d3a0a2c1a302f1"
+source_fingerprint: "2cc70fe47902d63b56edc953304bab016d6418a6d4b857d6ff5c82b06ada7838"
 ---
 
 # Current State
@@ -12,8 +12,8 @@ source_fingerprint: "ed5a3aebddd0f2170cbac094ced7b5e02f3a8d5c2bc32d5fe9d3a0a2c1a
 
 This file is derived from immutable shards. Record new facts in shards, then render during integration.
 
-- Source fingerprint: `ed5a3aebddd0f2170cbac094ced7b5e02f3a8d5c2bc32d5fe9d3a0a2c1a302f1`
-- Immutable records: 977
+- Source fingerprint: `2cc70fe47902d63b56edc953304bab016d6418a6d4b857d6ff5c82b06ada7838`
+- Immutable records: 978
 - Active lane heads: 1
 
 # Active Registrations
@@ -69,6 +69,7 @@ This file is derived from immutable shards. Record new facts in shards, then ren
 
 # Recent Evidence
 
+- **Verification Evidence**: [Public Scene language consumer and obsolete representation runtime removal](verification/2026-10/2026-10-27T145608Z-public-scene-language-consumer-and-obsolete-representation-runtime-removal-67783a7cb8514ce9bbb7957670b4ec37.md) - Qualifies public Scene and real Session adoption by experimental languages, preserving physical code custody and removing the displaced Runtime.
 - **Verification Evidence**: [Mixed Scene product selection and content-to-runtime admission qualification](verification/2026-10/2026-10-27T141025Z-mixed-scene-product-selection-and-content-to-runtime-admission-qualification-7c90588821aa4e8da374958ef2e436e4.md) - Qualifies exact mixed definitions through recipes, strict content and managed publication; records remaining language and Editor work.
 - **Verification Evidence**: [Production Scene native-data runtime and managed authority qualification](verification/2026-10/2026-10-27T125421Z-production-scene-native-data-runtime-and-managed-authority-qualification-294f613511bb48e49fed958c05a1a469.md) - Qualifies the closed Scene storage family and records remaining product and language owner integration.
 - **Verification Evidence**: [Closed Scene binding selection and shared strict data compilation](verification/2026-10/2026-10-27T105601Z-closed-scene-binding-selection-and-shared-strict-data-compilation-263aa2e60c62429db4a8862d2df6e059.md) - Qualifies explicit mixed Schema selection and public Prefab compilation while preserving separate runtime authority, data publication and export obligations.
@@ -80,7 +81,6 @@ This file is derived from immutable shards. Record new facts in shards, then ren
 - **Verification Evidence**: [Private Behavior representation comparison and revised language-trial candidate](verification/2026-10/2026-10-27T073822Z-private-behavior-representation-comparison-and-revised-language-trial-candidate-0025928de9064bb3b64bfcf4630d397d.md) - Records data-only envelope versus Rows evidence, review corrections and remaining public Runtime and VM lifecycle scope.
 - **Verification Evidence**: [Complete Editor Prefab conversion and source admission qualification](verification/2026-10/2026-10-27T064545Z-complete-editor-prefab-conversion-and-source-admission-qualification-bc6d938e4ea5421fa42d0028230a11dc.md) - Qualifies Source pre-copy admission, reviewed Editor conversion, actual dependency fences, public consumers and selected Windows/DX12 workflows.
 - **Work Progress**: [Editor conversion source admission fixes pass full foundation cohort](progress/2026-10/2026-10-27T061533Z-editor-conversion-source-admission-fixes-pass-full-foundation-cohort-33359bf2b64a4517acffb1e0d41eb554.md) - Work Progress for Editor conversion source admission fixes pass full foundation cohort.
-- **Work Progress**: [Editor complete Prefab conversion integration and pre-copy budget corrections](progress/2026-10/2026-10-27T053151Z-editor-complete-prefab-conversion-integration-and-pre-copy-budget-corrections-394c727d98ae4d55846b93f121fd416b.md) - Shared actual-demand acquisition and Editor conversion custody are integrated; source pre-copy budget fixes, independent consumers and native qualification remain in progress.
 
 # Integration Notes
 

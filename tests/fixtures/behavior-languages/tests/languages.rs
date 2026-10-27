@@ -1,22 +1,23 @@
-//! Schema-driven private feasibility adapters, not a production language SDK.
+//! Experimental language execution over the public Scene data and source-authoring APIs.
 
-#[allow(dead_code)]
-#[path = "../../module-consumer/tests/support/behavior_trial.rs"]
-mod trial;
+#[path = "support/authoring_project.rs"]
+mod authoring_project;
+#[path = "support/scene_runtime.rs"]
+mod scene_runtime;
 
 use std::{collections::BTreeMap, path::Path, sync::Arc};
 
 use nara_reflect::{
-    ComponentFieldId, ComponentFieldPath, ComponentPropertyError, ComponentPropertyPath,
-    ComponentSchemaCatalog, ComponentSchemaVersion, ComponentTypeId, ComponentValue,
-    EntityReference, resolve_component_property,
+    ComponentFieldPath, ComponentPropertyError, ComponentPropertyPath, ComponentSchemaCatalog,
+    ComponentTypeId, ComponentValue, EntityReference, resolve_component_property,
+    rewrite_declared_entity_references,
 };
 use nara_scene::{
     Name, PrefabDocument, PrefabInstance, SceneDocument, SceneDocumentCandidate, SceneEntityId,
-    SceneEntityRecord, ScenePatchDocument, ScenePatchOperation,
+    SceneEntityRecord,
 };
+use scene_runtime::{Definition, Runtime, id, mover, sensor};
 use serde::{Deserialize, Serialize};
-use trial::{Definition, PreparedRuntime, Runtime, StorageKind, id, mover, sensor};
 
 #[derive(Clone, Serialize)]
 struct NativeTarget {
@@ -54,7 +55,7 @@ trait Language {
 
 struct Invocation {
     snapshot: Snapshot,
-    targets: BTreeMap<String, trial::Target>,
+    targets: BTreeMap<String, scene_runtime::Target>,
 }
 
 fn admit_bindings(definition: &Definition, bindings: &[Binding]) -> Result<(), &'static str> {
@@ -67,14 +68,14 @@ fn admit_bindings(definition: &Definition, bindings: &[Binding]) -> Result<(), &
             return Err("duplicate callback binding");
         }
         let schema = definition
-            .schemas
-            .get(&ComponentTypeId::new(&binding.schema))
+            .owner
+            .schema(&ComponentTypeId::new(&binding.schema))
             .ok_or("binding has no admitted Schema")?;
         if schema.version().get() != binding.version {
             return Err("callback version does not match Schema");
         }
     }
-    if admitted.len() != definition.schemas.len() {
+    if admitted.len() != definition.owner.current().components().len() {
         return Err("missing callback binding");
     }
     Ok(())
@@ -87,14 +88,7 @@ fn prepare(
     prefab: Option<&PrefabDocument>,
 ) -> Result<Runtime, String> {
     admit_bindings(definition, bindings).map_err(str::to_owned)?;
-    PreparedRuntime::prepare(
-        StorageKind::Envelope,
-        Arc::clone(definition),
-        source,
-        prefab,
-    )
-    .and_then(|prepared| prepared.activate(definition))
-    .map_err(|error| format!("{error:?}"))
+    Runtime::materialize(Arc::clone(definition), source, prefab)
 }
 
 fn capture(
@@ -103,13 +97,19 @@ fn capture(
     actor: &SceneEntityId,
     component: &ComponentTypeId,
 ) -> Result<Invocation, String> {
+    if !runtime.matches_definition(definition) {
+        return Err("language observation uses another Scene definition admission".into());
+    }
     let target = runtime.target(actor);
     let mut authority = BTreeMap::from([(actor.as_str().to_owned(), target.clone())]);
     let record = runtime
         .read(&target, component)
         .map_err(|error| format!("{error:?}"))?
         .ok_or("absent Behavior")?;
-    let schema = &definition.schemas[component];
+    let schema = definition
+        .owner
+        .schema(component)
+        .ok_or("unselected data Schema")?;
     let mut fields = BTreeMap::new();
     for field in schema.fields() {
         match resolve_component_property(
@@ -125,15 +125,13 @@ fn capture(
             Err(error) => return Err(error.to_string()),
         }
     }
-    let references = nara_reflect::__private::plan_declared_entity_references::<()>(
+    let mut targets = Vec::new();
+    // Observe through the public bounded reference traversal; keep the rewritten value local.
+    rewrite_declared_entity_references(
         schema,
         &record.value,
         Default::default(),
-    )
-    .map_err(|error| format!("{error:?}"))?;
-    let mut targets = Vec::new();
-    references
-        .visit(&record.value, |_, reference| {
+        |_, reference| {
             let EntityReference::SceneLocal { entity } = reference else {
                 return Err(());
             };
@@ -144,9 +142,10 @@ fn capture(
                 id: entity.as_str().to_owned(),
                 name: runtime.native_name(&target).to_owned(),
             });
-            Ok(())
-        })
-        .map_err(|_| "unresolved native target")?;
+            Ok(reference.clone())
+        },
+    )
+    .map_err(|_| "unresolved native target")?;
     Ok(Invocation {
         snapshot: Snapshot {
             schema: component.as_str().to_owned(),
@@ -210,19 +209,7 @@ fn source() -> SceneDocument {
         &std::fs::read(Path::new(env!("CARGO_MANIFEST_DIR")).join("data/game.scene.json")).unwrap(),
     )
     .unwrap();
-    // Source admission is performed by the real authoring session under the loaded catalog.
-    let definition = Definition::from_catalog(catalog(), true).unwrap();
-    candidate
-        .admit_authoring_with_basis(
-            nara_scene::AuthoringDocumentSource::new(
-                nara_asset::AssetRef::path("game.scene.json").unwrap(),
-            ),
-            &definition.basis,
-        )
-        .unwrap()
-        .publish()
-        .document()
-        .clone()
+    candidate.into_composition_source().unwrap()
 }
 
 fn assert_export(
@@ -230,7 +217,8 @@ fn assert_export(
     definition: &Definition,
     actors: &[SceneEntityId],
     amount: f64,
-) {
+    expected: &SceneDocument,
+) -> SceneDocument {
     // Independent native markers encode the expected original pair, not exported Sensor data.
     for actor in actors {
         let sensor = capture(runtime, definition, actor, &sensor()).unwrap();
@@ -246,7 +234,7 @@ fn assert_export(
         runtime.world.get_mut::<Name>(friend).unwrap().0 = format!("Export friend {actor}");
     }
     let exported = runtime.export().unwrap();
-    assert!(trial::compile(&exported, definition, None).is_ok());
+    assert!(scene_runtime::compile(&exported, definition, None).is_ok());
     assert_eq!(
         exported
             .entities
@@ -271,6 +259,14 @@ fn assert_export(
         let exported_actor = named(format!("Export actor {actor}"));
         let friend = named(format!("Export friend {actor}"));
         assert_eq!(
+            &exported_actor.components[&mover()],
+            expected
+                .entities
+                .iter()
+                .find_map(|entity| entity.components.get(&mover()))
+                .unwrap(),
+        );
+        assert_eq!(
             exported_actor.components[&mover()]
                 .value
                 .get("amount")
@@ -278,18 +274,25 @@ fn assert_export(
                 .as_f64(),
             Some(amount)
         );
-        assert_eq!(
-            exported_actor.components[&sensor()]
-                .value
-                .get("targets")
-                .unwrap(),
-            &ComponentValue::List(vec![
-                ComponentValue::EntityReference(EntityReference::SceneLocal {
-                    entity: friend.id.clone()
-                }),
-                ComponentValue::Null,
-            ])
-        );
+        let mut expected_sensor = expected
+            .entities
+            .iter()
+            .find_map(|entity| entity.components.get(&sensor()))
+            .unwrap()
+            .clone();
+        expected_sensor
+            .value
+            .set_path(
+                &ComponentFieldPath::from_fields(["targets"]),
+                ComponentValue::List(vec![
+                    ComponentValue::EntityReference(EntityReference::SceneLocal {
+                        entity: friend.id.clone(),
+                    }),
+                    ComponentValue::Null,
+                ]),
+            )
+            .unwrap();
+        assert_eq!(exported_actor.components[&sensor()], expected_sensor);
     }
     assert_eq!(
         exported
@@ -301,106 +304,26 @@ fn assert_export(
             .count(),
         actors.len()
     );
+    let label = ComponentTypeId::new("trial.behavior.Label");
+    let expected_label = expected
+        .entities
+        .iter()
+        .find_map(|entity| entity.components.get(&label))
+        .unwrap();
+    for entity in &exported.entities {
+        if let Some(record) = entity.components.get(&label) {
+            assert_eq!(record, expected_label);
+        }
+    }
+    exported
 }
 
 fn workflow(program: &dyn Language) {
-    let definition = Definition::from_catalog(catalog(), true).unwrap();
+    let definition = Definition::from_catalog(catalog()).unwrap();
     let bindings = program.describe().unwrap();
     let original = source();
-    let mut session = trial::session(&original, &definition);
-    let patch = ScenePatchDocument::new([ScenePatchOperation::SetField {
-        entity: id("actor"),
-        component: mover(),
-        component_version: ComponentSchemaVersion::ONE,
-        field: ComponentFieldId::new("amount"),
-        value: ComponentValue::f64(7.0).unwrap(),
-    }]);
-    let edit = session
-        .prepare_authoring_edit(session.revision(), &patch)
-        .unwrap();
-    assert!(session.commit_authoring_edit(edit).applied);
-    assert!(session.undo_authoring().applied);
-    assert!(session.redo_authoring().applied);
+    let edited = authoring_project::edit_save_reopen(&definition.owner, &original);
     let label = ComponentTypeId::new("trial.behavior.Label");
-    let label_record = original
-        .entities
-        .iter()
-        .find(|entity| entity.id == id("label"))
-        .unwrap()
-        .components[&label]
-        .clone();
-    let remove = ScenePatchDocument::new([ScenePatchOperation::RemoveComponent {
-        entity: id("label"),
-        component: label.clone(),
-    }]);
-    let edit = session
-        .prepare_authoring_edit(session.revision(), &remove)
-        .unwrap();
-    assert!(session.commit_authoring_edit(edit).applied);
-    assert!(
-        !session
-            .document()
-            .entities
-            .iter()
-            .find(|entity| entity.id == id("label"))
-            .unwrap()
-            .components
-            .contains_key(&label)
-    );
-    assert!(session.undo_authoring().applied);
-    assert!(session.redo_authoring().applied);
-    let attach = ScenePatchDocument::new([ScenePatchOperation::AddComponent {
-        entity: id("label"),
-        component: label.clone(),
-        value: label_record.clone(),
-    }]);
-    let edit = session
-        .prepare_authoring_edit(session.revision(), &attach)
-        .unwrap();
-    assert!(session.commit_authoring_edit(edit).applied);
-    assert!(session.undo_authoring().applied);
-    assert!(session.redo_authoring().applied);
-    let label_edit = ScenePatchDocument::new([ScenePatchOperation::SetField {
-        entity: id("label"),
-        component: label.clone(),
-        component_version: ComponentSchemaVersion::ONE,
-        field: ComponentFieldId::new("text"),
-        value: ComponentValue::String("Edited label".into()),
-    }]);
-    let edit = session
-        .prepare_authoring_edit(session.revision(), &label_edit)
-        .unwrap();
-    assert!(session.commit_authoring_edit(edit).applied);
-    assert!(session.undo_authoring().applied);
-    assert!(session.redo_authoring().applied);
-    let directory = tempfile::tempdir().unwrap();
-    for json in [true, false] {
-        let path = directory.path().join(if json {
-            "saved.scene.json"
-        } else {
-            "saved.scene.ron"
-        });
-        std::fs::write(
-            &path,
-            if json {
-                session.document().to_json_string().unwrap()
-            } else {
-                session.document().to_ron_string().unwrap()
-            },
-        )
-        .unwrap();
-        let bytes = std::fs::read(&path).unwrap();
-        let candidate = if json {
-            SceneDocumentCandidate::decode_json_bytes(&bytes)
-        } else {
-            SceneDocumentCandidate::decode_ron_bytes(&bytes)
-        }
-        .unwrap();
-        let reopened = session.try_reopen_authoring_candidate(candidate).unwrap();
-        assert_eq!(reopened.document(), session.document());
-        assert_eq!(reopened.history_usage().records, 0);
-    }
-    let edited = session.document();
     let prefab = PrefabDocument::new(edited.roots.clone(), edited.entities.clone());
     let linked = SceneDocument::from_ordered_roots(["first", "second"].map(|anchor| {
         let mut record = SceneEntityRecord::new(id(anchor));
@@ -410,12 +333,48 @@ fn workflow(program: &dyn Language) {
         });
         record
     }));
-    for (source, prefab, count) in [(edited, None, 1), (&linked, Some(&prefab), 2)] {
-        let candidate = trial::compile(source, &definition, prefab)
-            .unwrap()
-            .candidate
-            .unwrap();
+    for (source, prefab, count) in [(&edited, None, 1), (&linked, Some(&prefab), 2)] {
+        let candidate = scene_runtime::compile(source, &definition, prefab).unwrap();
         let mut runtime = prepare(&definition, &bindings, source, prefab).unwrap();
+        if count == 2 {
+            let locate = |anchor: &str, local: &str| {
+                candidate
+                    .provenance()
+                    .iter()
+                    .find(|(_, source)| {
+                        source.local_entity_id() == &id(local)
+                            && source
+                                .projection_path()
+                                .is_some_and(|path| path.root_anchor() == &id(anchor))
+                    })
+                    .unwrap()
+                    .0
+                    .clone()
+            };
+            let actor = locate("first", "actor");
+            let own_friend = runtime.target(&locate("first", "friend"));
+            let other_friend_id = locate("second", "friend");
+            let other_friend = runtime.target(&other_friend_id);
+            let scoped = capture(&runtime, &definition, &actor, &sensor()).unwrap();
+            let mut proposals = program.invoke(&scoped.snapshot).unwrap();
+            assert_eq!(proposals.len(), 1);
+            proposals.push(NameCommand {
+                target: other_friend_id.as_str().into(),
+                value: "Unauthorized other occurrence".into(),
+            });
+            assert_eq!(
+                apply(&mut runtime, &scoped, proposals),
+                Err("foreign target")
+            );
+            assert_eq!(runtime.native_name(&own_friend), "Friend");
+            assert_eq!(runtime.native_name(&other_friend), "Friend");
+            invoke(&mut runtime, &definition, program, &actor, &sensor());
+            assert_eq!(runtime.native_name(&own_friend), "Friend signalled");
+            assert_eq!(runtime.native_name(&other_friend), "Friend");
+            // Restore the independent native observation before ordinary full dispatch.
+            let entity = runtime.entity(&own_friend).unwrap();
+            runtime.world.get_mut::<Name>(entity).unwrap().0 = "Friend".into();
+        }
         // Every present Behavior is dispatched by its admitted ID, not a native type/field switch.
         for entity in &candidate.document().entities {
             let target = runtime.target(&entity.id);
@@ -452,6 +411,12 @@ fn workflow(program: &dyn Language) {
             .id;
         let target = runtime.target(actor);
         let input = capture(&runtime, &definition, actor, &mover()).unwrap();
+        let readmitted = Definition::from_catalog(catalog()).unwrap();
+        assert_eq!(
+            readmitted.bindings.composition_fingerprint(),
+            definition.bindings.composition_fingerprint()
+        );
+        assert!(capture(&runtime, &readmitted, actor, &mover()).is_err());
         for fault in ["throw", "bad_target"] {
             let fault_schema = if fault == "bad_target" {
                 sensor()
@@ -503,9 +468,55 @@ fn workflow(program: &dyn Language) {
             invoke(&mut runtime, &definition, program, actor, &mover());
             assert_eq!(runtime.native_name(&target), "Moved 7");
         }
-        assert_export(&mut runtime, &definition, &actors, 7.0);
+        let exported = assert_export(&mut runtime, &definition, &actors, 7.0, &edited);
+        let mut replay = prepare(&definition, &bindings, &exported, None).unwrap();
+        let named = |name: String| {
+            exported
+                .entities
+                .iter()
+                .find(|entity| {
+                    entity
+                        .components
+                        .get(&ComponentTypeId::new("nara.scene.Name"))
+                        .is_some_and(|record| record.value == ComponentValue::String(name.clone()))
+                })
+                .unwrap()
+                .id
+                .clone()
+        };
+        let replay_actor = named(format!("Export actor {}", actors[0]));
+        invoke(&mut replay, &definition, program, &replay_actor, &sensor());
+        for (index, actor) in actors.iter().enumerate() {
+            let initial = format!("Export friend {actor}");
+            let target = replay.target(&named(initial.clone()));
+            assert_eq!(
+                replay.native_name(&target),
+                if index == 0 {
+                    format!("{initial} signalled")
+                } else {
+                    initial
+                }
+            );
+        }
+        for entity in &exported.entities {
+            if entity.components.contains_key(&label) {
+                invoke(&mut replay, &definition, program, &entity.id, &label);
+                assert_eq!(
+                    replay.native_name(&replay.target(&entity.id)),
+                    "Edited label"
+                );
+            }
+        }
+        replay.retire().unwrap();
         runtime.retire().unwrap();
-        assert_eq!(runtime.retained_rows(), 0);
+        assert_eq!(
+            runtime
+                .world
+                .query::<&nara_scene::SceneDataComponents>()
+                .iter(&runtime.world)
+                .count(),
+            0
+        );
         assert_eq!(
             apply(
                 &mut runtime,
@@ -596,5 +607,5 @@ fn invalid_catalog_and_native_schema_collision_refuse_definition() {
     );
     let mut collision = catalog();
     collision.components[0].id = ComponentTypeId::new("nara.scene.Name");
-    assert!(Definition::from_catalog(collision, true).is_err());
+    assert!(Definition::from_catalog(collision).is_err());
 }

@@ -253,7 +253,7 @@ changes only this report; concurrent design/plan files and all production/other 
 [T4]: ../../tests/fixtures/behavior-languages/Cargo.toml
 [T5]: 2026-10-27-schema-driven-behavior-comparison.md
 [T6]: 2026-10-27-behavior-code-iteration-and-lifetime.md
-[T7]: ../../tests/fixtures/module-consumer/tests/support/behavior_trial.rs
+[T7]: 2026-10-27-behavior-representation-comparison.md#historical-source-location
 [G0]: https://github.com/godotengine/godot/blob/81ab961f91066a63bcbf3ec340962bb1a1ada558/version.py
 [G1]: https://github.com/godotengine/godot/blob/81ab961f91066a63bcbf3ec340962bb1a1ada558/modules/mono/glue/GodotSharp/GodotPlugins/Main.cs#L142
 [G2]: https://github.com/godotengine/godot/blob/81ab961f91066a63bcbf3ec340962bb1a1ada558/modules/mono/glue/GodotSharp/GodotPlugins/PluginLoadContext.cs#L17

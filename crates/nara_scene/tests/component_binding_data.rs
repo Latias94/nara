@@ -389,6 +389,55 @@ fn invalid_payload_and_declared_references_leave_the_complete_group_unchanged() 
 }
 
 #[test]
+fn replacing_a_valid_link_with_a_retired_target_preserves_the_complete_group() {
+    let bindings = bindings();
+    let mut source = document().as_ref().clone();
+    let link = record(ComponentValue::EntityReference(
+        EntityReference::SceneLocal { entity: id("root") },
+    ));
+    source.entities[0]
+        .components
+        .insert(component("game.Link"), link.clone());
+    let mut world = World::new();
+    let instance = spawn(&bindings, &mut world, &candidate(Arc::new(source)));
+    let entity = resolve(&world, &instance, "root");
+    let target = resolve(&world, &instance, "target");
+    retire_and_despawn_scene_entity(&mut world, target).unwrap();
+    assert!(world.get_entity(target).is_err());
+    // The existing self-link remains valid, so refusal must come from the proposed dead target.
+    let before = bindings.export_scene(&world).into_output().unwrap();
+
+    assert!(matches!(
+        bindings.set_data_component(
+            &mut world,
+            entity,
+            &component("game.Link"),
+            ComponentValue::EntityReference(EntityReference::SceneLocal {
+                entity: id("target"),
+            }),
+            None,
+            limits(100, 4096),
+        ),
+        Err(nara_scene::SceneDataComponentError::LocalReferenceInvalid { component: rejected })
+            if rejected == component("game.Link")
+    ));
+    assert_eq!(
+        bindings
+            .data_component(&world, entity, &component("game.Link"))
+            .unwrap(),
+        Some(&link)
+    );
+    assert_eq!(
+        bindings
+            .data_component(&world, entity, &component("game.Score"))
+            .unwrap(),
+        Some(&record(ComponentValue::U64(7)))
+    );
+    assert_eq!(world.get::<Name>(entity), Some(&Name::new("native")));
+    assert_eq!(bindings.export_scene(&world).into_output().unwrap(), before);
+}
+
+#[test]
 fn declared_asset_metadata_is_checked_without_native_handles() {
     let bindings = bindings();
     let mut world = World::new();

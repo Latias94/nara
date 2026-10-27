@@ -58,7 +58,7 @@ fn runtime(definition: &Arc<Definition>, program: &dyn Language) -> Runtime {
 
 #[test]
 fn lua_body_iteration_preserves_world_rejects_old_results_and_leases_actual_vm() {
-    let definition = Definition::from_catalog(catalog(), true).unwrap();
+    let definition = Definition::from_catalog(catalog()).unwrap();
     let directory = tempfile::tempdir().unwrap();
     let path = directory.path().join("schema_behaviors.lua");
     let initial = include_str!("../../lua/schema_behaviors.lua");
@@ -139,7 +139,7 @@ fn await_collection(retirement: &super::dotnet::Retirement) {
 
 #[test]
 fn csharp_body_iteration_preserves_world_rejects_old_results_and_roots_real_code() {
-    let definition = Definition::from_catalog(catalog(), true).unwrap();
+    let definition = Definition::from_catalog(catalog()).unwrap();
     let mut active = Route::admit(
         DotnetProgram::load(&module_path("NARA_BEHAVIOR_MODULE_LIVE")).unwrap(),
         &definition,
@@ -157,15 +157,25 @@ fn csharp_body_iteration_preserves_world_rejects_old_results_and_roots_real_code
             .candidate(Path::new("missing-authored-module.dll"))
             .is_err()
     );
-    let mut invalid = active
-        .program
-        .candidate(&module_path("NARA_BEHAVIOR_MODULE_INVALID"))
-        .unwrap();
-    assert!(admit_bindings(&definition, &invalid.describe().unwrap()).is_err());
-    let rejected_retirement = invalid.retire();
-    drop(invalid);
-    await_collection(&rejected_retirement);
-    active.execute(&mut runtime, &definition, &actor);
+    for (variable, expected) in [
+        (
+            "NARA_BEHAVIOR_MODULE_INVALID",
+            "callback version does not match Schema",
+        ),
+        ("NARA_BEHAVIOR_MODULE_MISSING", "missing callback binding"),
+    ] {
+        let mut candidate = active.program.candidate(&module_path(variable)).unwrap();
+        assert_eq!(
+            admit_bindings(&definition, &candidate.describe().unwrap()),
+            Err(expected)
+        );
+        let rejected_retirement = candidate.retire();
+        drop(candidate);
+        await_collection(&rejected_retirement);
+        active.execute(&mut runtime, &definition, &actor);
+        assert_eq!(runtime.world.id(), world);
+        assert_eq!(runtime.native_name(&target), "Moved 2");
+    }
     let old_result = active.prepare(&runtime, &definition, &actor);
     let old_input = old_result.invocation.snapshot.clone();
     let lease = active.program.retain_callback();

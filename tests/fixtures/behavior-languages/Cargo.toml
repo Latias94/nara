@@ -13,8 +13,11 @@ mlua = { version = "=0.12.2", features = ["lua54", "vendored", "serde"] }
 netcorehost = { version = "=0.22.0", default-features = false, features = ["net10_0"] }
 nara_asset = { path = "../../../crates/nara_asset", default-features = false, features = ["serde"] }
 nara_ecs = { path = "../../../crates/nara_ecs" }
+nara_engine = { package = "nara", path = "../../..", default-features = false, features = ["tooling", "project-workflow"] }
+nara_identity = { path = "../../../crates/nara_identity", features = ["serde"] }
 nara_reflect = { path = "../../../crates/nara_reflect" }
 nara_scene = { path = "../../../crates/nara_scene", default-features = false, features = ["serde"] }
+nara_tooling = { path = "../../../crates/nara_tooling" }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 tempfile = "3"

@@ -10,10 +10,12 @@ The private [representation](../research/2026-10-27-behavior-representation-comp
 [Schema-driven consumer](../research/2026-10-27-schema-driven-behavior-comparison.md) and
 [code-lifetime comparison](../research/2026-10-27-behavior-code-iteration-and-lifetime.md) establish
 that independently authored records do not need independent compiled Rust types. They do not
-qualify a production materializer. The current private consumer takes an Authoring preview,
-commits native values, then installs its data carrier with further fallible entity lookups.
-It exports through a cached initial entity roster. Those are experiment limitations, not code
-to make public or reuse as a second production interpreter.
+qualify a production materializer. The private consumer at that baseline took an Authoring preview,
+committed native values, then installed its data carrier with further fallible entity lookups.
+It exported through a cached initial entity roster. The language successor uses public Scene
+compilation/preparation/access/export and a real Project Session; the superseded second Runtime
+and grouped materialization/export helper are removed. Two raw query/orphan probes retain the
+bounded storage counterpressure. Historical observations do not qualify a production interpreter.
 
 Select a closed Scene-owned representation seam. Native prepared values keep their exact Rust
 type, codec and World ComponentId proof. Explicitly admitted data-only Schemas use one concrete
