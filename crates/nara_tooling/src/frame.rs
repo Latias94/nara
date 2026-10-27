@@ -118,7 +118,7 @@ impl EditorFrameClock {
             image_import_work_pending: false,
             source_asset_import: None,
             source_asset_import_work_pending: false,
-            source_tool_work_pending: false,
+            source_tool: Default::default(),
             prefab_conversion: Default::default(),
             document_open: Default::default(),
             scene_preview_document: None,
@@ -290,7 +290,7 @@ pub struct EditorFrameModel {
     image_import_work_pending: bool,
     source_asset_import: Option<crate::EditorSourceAssetImportView>,
     source_asset_import_work_pending: bool,
-    source_tool_work_pending: bool,
+    source_tool: crate::EditorSourceToolView,
     prefab_conversion: crate::EditorPrefabConversionView,
     document_open: crate::EditorDocumentOpenView,
     scene_preview_document: Option<EditorDocumentId>,
@@ -301,16 +301,16 @@ pub struct EditorFrameModel {
 }
 
 impl EditorFrameModel {
-    /// The project owns a finite tool invocation or its physical retirement.
+    /// Immutable observations from the Session-owned finite tool operation.
     #[must_use]
-    pub const fn source_tool_work_pending(&self) -> bool {
-        self.source_tool_work_pending
+    pub const fn source_tool(&self) -> &crate::EditorSourceToolView {
+        &self.source_tool
     }
 
     #[doc(hidden)]
     #[must_use]
-    pub fn with_source_tool_work_pending(mut self, pending: bool) -> Self {
-        self.source_tool_work_pending = pending;
+    pub fn with_source_tool(mut self, view: crate::EditorSourceToolView) -> Self {
+        self.source_tool = view;
         self
     }
 
@@ -698,6 +698,7 @@ pub enum EditorAction {
     /// Consumes the source owner's construction and retains its exact successful mapping.
     CommitAuthoringConstruction(crate::PreparedEditorDocumentConstruction),
     PrefabConversion(crate::EditorPrefabConversionAction),
+    SourceTool(crate::EditorSourceToolAction),
     Mutate(EditorDocumentMutation),
     Extension(crate::EditorExtensionCommand),
     Persistence(EditorPersistenceAction),
@@ -746,6 +747,7 @@ impl EditorAction {
             | Self::CommitAuthoringEdit(_)
             | Self::CommitAuthoringConstruction(_)
             | Self::PrefabConversion(_)
+            | Self::SourceTool(_)
             | Self::Extension(_)
             | Self::Persistence(_)
             | Self::ProjectContent(_)
@@ -911,6 +913,7 @@ pub enum EditorActionOutcome {
     /// Exact source-owner receipt after successful construction publication.
     AuthoringConstruction(crate::CommittedEditorDocumentConstruction),
     PrefabConversion(crate::EditorPrefabConversionActionOutcome),
+    SourceTool(crate::EditorSourceToolActionOutcome),
     /// Owned read-only page or exact query rejection; not a document mutation result.
     DocumentEntities(Result<crate::EditorEntityPage, crate::EditorDocumentQueryRejection>),
     DocumentAuthoring(Result<crate::EditorAuthoringPage, crate::EditorDocumentQueryRejection>),

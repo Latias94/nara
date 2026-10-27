@@ -169,12 +169,14 @@ and project workflow adapters; no new Automation crate.
   source preparation rather than retaining the EnemyStats fixture's parallel proposal owner.
 
 **R1b placement and local lifecycle** is a separate deliverable beyond that proposal experiment.
-The next complete consumer is one real EnemyStats `health` property customization plus a small
-tool panel, using the same Session request/review and source transaction. Qualify exact property
-matching, draft ownership, disabled/replaced route refusal and default-field fallback before
-packaging that tool. Keep the facet finite and UI-neutral; the incumbent frontend supplies
-interaction evidence while Nara's own custom-drawn runtime remains the destination. This does
-not select a recursive widget-description protocol, toolkit callback ABI or an official C# SDK.
+The [finite inline facet consumer](2026-10-28-inline-source-tool-facet-plan.md) now implements one
+real EnemyStats `health` property customization plus a small tool panel through the same Session
+request/review and source transaction. Its linked qualification records exact property matching,
+independent draft ownership, disabled/replaced route refusal, default fallback and actual native
+Save/physical Close/fresh Open. Broader inline contributions remain separate. Keep the facet
+finite and UI-neutral; the incumbent frontend supplies interaction evidence while Nara's own
+custom-drawn runtime remains the destination. This does not select a recursive widget-description
+protocol, toolkit callback ABI or an official C# SDK.
 Use the same useful command plus inline Inspector customization to compare source-built companion,
 replaceable semantic tool Host and a narrowly trusted native SDK. Establish selection from native
 authority, author concepts, update/diagnostic/recovery behavior and measured calls/latency, without

@@ -16,6 +16,7 @@ pub(crate) use interaction_tests::InteractionProject;
 mod layout;
 mod prefab_intent;
 mod project;
+mod source_tool;
 mod submission;
 #[cfg(test)]
 mod submission_tests;
@@ -514,6 +515,9 @@ impl ImguiEditorFrontend {
                 submission::Recipient::PrefabIntent => {
                     widgets.prefab_intent.action_finished(submission.id, result)
                 }
+                submission::Recipient::SourceTool => {
+                    widgets.source_tool.action_finished(submission.id, &result)
+                }
             }
         }
     }
@@ -780,7 +784,9 @@ impl ImguiEditorFrontend {
                     };
                 }
                 let mut panel = widgets.panel.take().unwrap_or_else(factory);
+                widgets.authoring.source_tool.begin_paint(&frame, document);
                 widgets.authoring.fields.begin_paint(&frame);
+                widgets.source_tool.begin_paint(&frame, document);
                 let first_action = actions.len();
                 let scope = document
                     .and_then(|document| {
@@ -811,6 +817,8 @@ impl ImguiEditorFrontend {
                         output: &mut output,
                     },
                 );
+                widgets.authoring.source_tool.end_paint();
+                widgets.source_tool.end_paint();
                 widgets.panel = Some(panel);
                 let origin = submission::PanelOrigin {
                     instance: instance.id(),
@@ -997,6 +1005,28 @@ fn paint_project_browser(ui: &Ui, context: &mut ImguiEditorPanelContext<'_, '_>)
         &mut context.output.browser_actions,
         &mut context.output.text_owner,
     );
+}
+
+fn paint_source_tool(ui: &Ui, context: &mut ImguiEditorPanelContext<'_, '_>) {
+    let review = context
+        .preparation
+        .as_ref()
+        .ok()
+        .and_then(|session| session.source_tool_review());
+    let actions = context.widgets.source_tool.show_panel(
+        ui,
+        context.input.frame,
+        context.model.document().map(|document| document.document),
+        review.as_ref(),
+        !context.input.read_only && authoring::editing_enabled(context.input.frame),
+    );
+    if let Some(owner) = context.widgets.source_tool.text_owner() {
+        context.output.text_owner = Some(owner);
+    }
+    for action in actions {
+        let result = context.submit_builtin_source_tool(action);
+        context.widgets.source_tool.admitted(result);
+    }
 }
 
 fn paint_inspector(ui: &Ui, context: &mut ImguiEditorPanelContext<'_, '_>) {

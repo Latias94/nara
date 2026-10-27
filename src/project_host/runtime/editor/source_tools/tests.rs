@@ -2,6 +2,11 @@
 
 use super::*;
 
+use nara_tooling::{
+    EditorPropertyTarget, EditorSourceToolActivationId, EditorSourceToolError,
+    EditorSourceToolIntent, EditorSourceToolRequestId,
+};
+
 mod child;
 mod fixture;
 mod lifecycle;

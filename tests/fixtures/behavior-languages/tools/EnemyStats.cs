@@ -84,7 +84,8 @@ internal sealed record ToolRequest
 }
 
 internal sealed record ToolResponse(uint ProtocolVersion, ulong Request, object Result);
-internal sealed record ToolDescription(string Kind, JsonNode Catalog);
+internal sealed record ToolDescription(string Kind, JsonNode Catalog, ToolIntegerProperty? IntegerProperty);
+internal sealed record ToolIntegerProperty(string Field, string Parameter, string Label, long Initial);
 internal sealed record ToolProposal(string Kind, string Title, ToolWrite[] Writes);
 internal sealed record ToolWrite(ToolProperty Property, ToolValue Value);
 internal sealed record ToolProperty(string Root, string[] Steps);

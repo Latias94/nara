@@ -22,6 +22,7 @@ returns an attempt identity. Drive the Session and observe `source_tool_view` un
 The child's complete catalog must equal the selected owner snapshot's current catalog. An invalid
 candidate leaves the previous activation usable. Successful replacement establishes a fresh
 activation and invalidates predecessor requests and review even if the command path is identical.
+Retain `source_tool_view().active`'s exact activation ID for every later request or disable.
 The view retains `attempt_error` with its attempt identity and `request_error` with its newest
 request. Probing a replacement and invoking the active predecessor cannot overwrite each other's
 failures. Starting another operation clears only that operation's result slot.
@@ -32,8 +33,10 @@ remove component definitions or stored data.
 ## Request, Review And Accept
 
 1. Capture `document_query_basis(document)` for the intended open Scene or Prefab.
-2. Call `request_source_tool` with that unchanged basis, a Host-selected `Attach`, `Edit` or `Spawn`
-   intent and copied parameters. The source must select the exact component owner and declaration.
+2. Call `request_source_tool(&activation, &basis, intent, parameters)` with that unchanged basis,
+   the retained activation, a Host-selected `Attach`, `Edit` or `Spawn` intent and copied parameters.
+   The source must select the exact component owner and declaration. A replaced activation rejects
+   before it can invalidate its successor's request or review.
 3. Drive the Session until the request returns. `source_tool_review` borrows the retained title,
    prepared patch, inverse and fixed created-entity ID. Reviewing does not edit source or history.
 4. Accept that request with `accept_source_tool_review`. Acceptance rechecks the original source
@@ -52,6 +55,48 @@ commit result and subsequent application update. Enable, request and disable als
 post-operation frame so native maintenance can observe pending work immediately. A frontend can use these operations without
 owning another document store, process manager or Undo stack.
 
+## Panel And Integer Property Facet
+
+The built-in **Source Tool** panel (`nara.source-tool`, initially closed) observes the same Session
+as the ordinary Inspector. Open it through the workspace panel list after the Host explicitly
+enables a tool. Select an entity to Attach or Edit its component, or enter a name to Spawn a root.
+Preparing a proposal leaves source, history and disk unchanged. The review shows the actual
+document, operation and proposed values; **Accept proposal** publishes one ordinary transaction.
+The panel can accept a proposal prepared from the Inspector, and the Inspector can observe a
+matching proposal prepared from the panel.
+
+A description reply may include one optional finite declaration beside `catalog`:
+
+```json
+"integer_property": {
+  "field": "health",
+  "parameter": "bonus",
+  "label": "Health bonus",
+  "initial": 0
+}
+```
+
+The field must be an editable i64 root of the selected component. With the admitted facet active,
+the Inspector shows its current value and an integer proposal parameter in place of that root's
+generic control. Preparing sends the parameter under the declared key; it does not directly assign
+the displayed property. Other fields retain ordinary editors. A missing or disabled facet restores
+the default field editor while the component's source metadata remains admitted.
+
+The pure observations, IDs, actions and receipts live in `nara::tooling`. `EditorFrameModel::source_tool`
+publishes the full immutable view; `EditorSourceToolReview` borrows the Session's single prepared
+candidate. Source-built panels submit `EditorSourceToolAction` with
+`ImguiEditorPanelContext::submit_source_tool` and receive the matching
+`EditorActionOutcome::SourceTool` through the existing submission ledger. Its Request action
+retains the activation and original query basis; IntegerProperty retains the exact property target.
+Accept retains the request ID. No panel stores or executes a second prepared patch or inverse.
+
+Parameter input belongs to its actual control instance. Source, Schema, selection, activation or
+control retirement cancels that parameter; enter a new one against the current source. Ordinary
+dirty field input hidden by the facet keeps the default editor's explicit recovery path and is
+never reused as the tool parameter or automatically published on fallback. Child labels are display
+text, not widget identities. The finite facet carries no drawing toolkit objects and does not define
+a recursive widget language. Nara's own custom-drawn Editor runtime remains separate work.
+
 ## Finite Protocol
 
 Each invocation reads one JSON request from stdin until EOF and emits one JSON reply to stdout
@@ -59,7 +104,8 @@ before exiting successfully. Protocol version is 1. The reply must echo the requ
 Requests contain `operation`, `name`, `fields` and `parameters`; fields and parameters use the
 existing tagged `ComponentValue` JSON representation.
 
-Description replies return `result.kind = "description"` and the complete `catalog`. Proposal
+Description replies return `result.kind = "description"`, the complete `catalog` and optionally
+the integer property declaration above. Proposal
 replies use this shape:
 
 ```json
@@ -89,7 +135,10 @@ allocation sandbox. Stderr is consumed within its bound and is not published as 
 
 ## Cancellation And Physical Return
 
-Disable revokes routing and retained review immediately. Replacement or a newer request also
+`disable_source_tool(&activation)` revokes that exact activation's routing and retained review
+immediately. `cancel_source_tool_attempt(&attempt)` cancels only that pending probe, preserving an
+unrelated active predecessor. Both remain available during a workspace Close decision; they cannot
+retire a successor through an old event. Replacement or a newer request also
 retires obsolete work. Cancellation does not prove that a spawn, process or pipe worker returned.
 The existing Tasks activity keeps custody until the child is reaped and all acquired pipe workers
 are joined. Close continues polling that same owner; a held physical obligation remains pending.
@@ -104,4 +153,8 @@ The independently built consumer in
 the actual C# EnemyStats executable. Run `python tests/fixtures/behavior-languages/run.py` to build
 the artifacts and execute the Session consumers; Windows additionally runs the selected ignored
 Application consumer with those same artifacts. It is a concrete protocol example, not an official C# SDK.
-The [plan](../plans/2026-10-28-finite-source-tool-owner-plan.md) identifies qualification scope.
+Add `--native-editor` on Windows to select the actual DX12 inline property/panel, history,
+Save and fresh Open trajectory with those artifacts. Ordinary test runs do not execute this
+ignored native case. The [owner plan](../plans/2026-10-28-finite-source-tool-owner-plan.md) and
+[inline facet plan](../plans/2026-10-28-inline-source-tool-facet-plan.md) identify their respective
+qualification scope.

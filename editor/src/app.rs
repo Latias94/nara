@@ -2447,6 +2447,10 @@ fn dispatch_close_resolution_actions(
             EditorAction::WorkspaceIntent(EditorWorkspaceIntentAction::Resolve { .. })
                 | EditorAction::Play(EditorPlayAction::RetryClose)
                 | EditorAction::Play(EditorPlayAction::RetryRetirement)
+                | EditorAction::SourceTool(
+                    nara::tooling::EditorSourceToolAction::Disable { .. }
+                        | nara::tooling::EditorSourceToolAction::CancelAttempt { .. }
+                )
         ) {
             original_slots.push(Some(actions.len()));
             actions.push(action);
@@ -2562,7 +2566,6 @@ fn drive_project_frame(
 ) -> bool {
     let before = project.session.current_frame();
     let preview_before = project.session.current_editor_preview_content_stamp();
-    let tool_before = project.session.source_tool_view();
     let after = project
         .session
         .drive_editor_frame_with_runtime(real_delta, drive_runtime);
@@ -2571,7 +2574,7 @@ fn drive_project_frame(
         || before.source_asset_import() != after.source_asset_import()
         || before.source_asset_import_work_pending() != after.source_asset_import_work_pending()
         || before.prefab_conversion() != after.prefab_conversion()
-        || tool_before != project.session.source_tool_view()
+        || before.source_tool() != after.source_tool()
         || before.image_import_work_pending() != after.image_import_work_pending()
         || before.authoring_retirement_pending() != after.authoring_retirement_pending()
         || before.scene_preview_unsaved_dependencies() != after.scene_preview_unsaved_dependencies()

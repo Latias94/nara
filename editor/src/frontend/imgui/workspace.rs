@@ -267,6 +267,29 @@ impl ImguiEditorPanelContext<'_, '_> {
         )
     }
 
+    /// Queues a finite tool operation in the same ordered batch and instance result ledger.
+    pub fn submit_source_tool(
+        &mut self,
+        action: nara::tooling::EditorSourceToolAction,
+    ) -> Result<PanelSubmissionId, PanelSubmitError> {
+        self.submit_to(EditorAction::SourceTool(action), Recipient::Contribution)
+    }
+
+    /// Borrows the exact Session-owned review; this never prepares another candidate.
+    pub fn source_tool_review(&self) -> Option<nara::tooling::EditorSourceToolReview<'_>> {
+        self.preparation
+            .as_ref()
+            .ok()
+            .and_then(|session| session.source_tool_review())
+    }
+
+    pub(super) fn submit_builtin_source_tool(
+        &mut self,
+        action: nara::tooling::EditorSourceToolAction,
+    ) -> Result<PanelSubmissionId, PanelSubmitError> {
+        self.submit_to(EditorAction::SourceTool(action), Recipient::SourceTool)
+    }
+
     fn submit_to(
         &mut self,
         action: EditorAction,
@@ -307,6 +330,7 @@ pub(super) struct ImguiPanelWidgets {
     pub scene_view: super::view::ImguiSceneView,
     pub game_view: super::game::ImguiGameView,
     pub prefab_intent: super::prefab_intent::ImguiPrefabIntent,
+    pub source_tool: super::source_tool::SourceToolWidgets,
     pub inspector_tab: InspectorTab,
 }
 
@@ -335,13 +359,14 @@ pub(super) struct ImguiPanelPresentation {
 
 impl Default for ImguiPanelPresentation {
     fn default() -> Self {
-        let builtins: [(&str, BuiltinPanelPainter); 6] = [
+        let builtins: [(&str, BuiltinPanelPainter); 7] = [
             ("nara.hierarchy", super::paint_hierarchy),
             ("nara.project-browser", super::paint_project_browser),
             ("nara.authoring-view", super::paint_authoring_view),
             ("nara.game-view", super::paint_game_view),
             ("nara.inspector", super::paint_inspector),
             ("nara.diagnostics", super::paint_diagnostics),
+            ("nara.source-tool", super::paint_source_tool),
         ];
         Self {
             factories: builtins

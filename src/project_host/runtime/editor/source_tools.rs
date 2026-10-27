@@ -14,16 +14,18 @@ use nara_reflect::{
     ComponentTypeId, ComponentValue, resolve_component_property,
 };
 use nara_scene::{
-    ConstructionEntity, LocalConstructionEntity, SceneEntityId, ScenePatchDocument, ScenePlacement,
-    ScenePlacementOwner,
+    ConstructionEntity, LocalConstructionEntity, ScenePlacement, ScenePlacementOwner,
 };
 use nara_tasks::{
     TaskDomainKey, TaskHandle, TaskPoolKind, TaskReturnState, TaskSpawnRequest, TaskTerminal,
 };
 use nara_tooling::{
-    EditorActionOutcome, EditorDocumentQueryBasis, EditorDocumentQueryRejection,
-    EditorPropertyRead, EditorPropertyReadLimits, EditorPropertyTarget, EditorPropertyValue,
-    EditorWorkspaceCommandReport, PreparedEditorDocumentConstruction,
+    EditorDocumentQueryBasis, EditorPropertyRead, EditorPropertyReadLimits, EditorPropertyTarget,
+    EditorPropertyValue, EditorSourceToolActivationId, EditorSourceToolActive,
+    EditorSourceToolAttemptId, EditorSourceToolCommit, EditorSourceToolError,
+    EditorSourceToolIntegerProperty, EditorSourceToolIntent, EditorSourceToolRequestId,
+    EditorSourceToolReview, EditorSourceToolReviewSummary, EditorSourceToolView,
+    PreparedEditorDocumentConstruction,
 };
 use serde::{Deserialize, Serialize};
 
@@ -125,134 +127,23 @@ impl EditorSourceToolDefinition {
     }
 }
 
-macro_rules! operation_id {
-    ($name:ident) => {
-        #[derive(Debug, Clone)]
-        pub struct $name(Arc<()>);
-        impl PartialEq for $name {
-            fn eq(&self, other: &Self) -> bool {
-                Arc::ptr_eq(&self.0, &other.0)
-            }
-        }
-        impl Eq for $name {}
-    };
-}
-operation_id!(EditorSourceToolAttemptId);
-operation_id!(EditorSourceToolRequestId);
-
-/// Source targets and placement remain in the Host; the child cannot return a new target.
-#[derive(Debug, Clone)]
-pub enum EditorSourceToolIntent {
-    Attach { entity: SceneEntityId },
-    Edit { entity: SceneEntityId },
-    Spawn { name: String },
-}
-
-#[derive(Debug, Clone, PartialEq, thiserror::Error)]
-pub enum EditorSourceToolError {
-    #[error("the source tool launch or component declaration is invalid")]
-    Definition,
-    #[error("no Editor workspace is available")]
-    WorkspaceUnavailable,
-    #[error("the project is closing or resolving a workspace intent")]
-    Closing,
-    #[error("no source tool is enabled")]
-    Disabled,
-    #[error("source tool work is still physically pending")]
-    Busy,
-    #[error("the tool request or output exceeded its finite allowance")]
-    Limit,
-    #[error("the source tool task was not admitted")]
-    TaskRejected,
-    #[error("the source tool child failed: {0}")]
-    Process(&'static str),
-    #[error("the source tool response does not match its finite protocol")]
-    Protocol,
-    #[error("the actual child declaration does not match the selected catalog")]
-    Declaration,
-    #[error("the document selects another component owner or declaration")]
-    Schema,
-    #[error("the retained tool activation is no longer active")]
-    StaleActivation,
-    #[error("the retained request is no longer the newest request")]
-    StaleRequest,
-    #[error("the retained source observation was rejected: {0}")]
-    QueryBasis(EditorDocumentQueryRejection),
-    #[error("the source owner rejected tool preparation: {0}")]
-    Preparation(Box<EditorEditPreparationError>),
-    #[error("the source owner rejected construction intent")]
-    Draft,
-    #[error("the source owner rejected tool publication")]
-    Commit(Box<EditorActionOutcome>),
-}
-
 impl From<EditorEditPreparationError> for EditorSourceToolError {
     fn from(error: EditorEditPreparationError) -> Self {
         match error {
             EditorEditPreparationError::Closing => Self::Closing,
             EditorEditPreparationError::WorkspaceUnavailable => Self::WorkspaceUnavailable,
             EditorEditPreparationError::QueryBasis(error) => Self::QueryBasis(error),
-            error => Self::Preparation(Box::new(error)),
+            EditorEditPreparationError::StructureContractMismatch { document } => {
+                Self::StructureContractMismatch { document }
+            }
+            EditorEditPreparationError::Document(report) => Self::Preparation(report),
         }
     }
 }
 
-/// Immutable observation; terminal status does not prove that cancelled work physically returned.
-#[derive(Debug, Clone, PartialEq)]
-pub struct EditorSourceToolView {
-    pub enabled: bool,
-    pub probing: bool,
-    pub working: bool,
-    pub retiring: bool,
-    pub attempt: Option<EditorSourceToolAttemptId>,
-    pub request: Option<EditorSourceToolRequestId>,
-    pub review_ready: bool,
-    /// Failure of the retained activation attempt, independently of predecessor requests.
-    pub attempt_error: Option<EditorSourceToolError>,
-    /// Failure of the retained newest request, independently of activation probes.
-    pub request_error: Option<EditorSourceToolError>,
-}
-
-/// Borrowed review of the same prepared candidate that accepting this request will consume.
-pub struct EditorSourceToolReview<'a> {
-    operation: &'a ReviewedOperation,
-}
-
-impl EditorSourceToolReview<'_> {
-    #[must_use]
-    pub fn request(&self) -> &EditorSourceToolRequestId {
-        &self.operation.request
-    }
-    #[must_use]
-    pub fn title(&self) -> &str {
-        &self.operation.title
-    }
-    #[must_use]
-    pub fn patch(&self) -> &ScenePatchDocument {
-        self.operation.prepared.patch()
-    }
-    #[must_use]
-    pub fn inverse(&self) -> &ScenePatchDocument {
-        self.operation.prepared.inverse()
-    }
-    #[must_use]
-    pub fn created_entity(&self) -> Option<&SceneEntityId> {
-        self.operation
-            .created
-            .as_ref()
-            .and_then(|local| self.operation.prepared.entity(local))
-    }
-}
-
-#[derive(Debug, Clone)]
-pub struct EditorSourceToolCommit {
-    pub report: EditorWorkspaceCommandReport,
-    pub created_entity: Option<SceneEntityId>,
-}
-
 #[derive(Clone)]
 struct Activation {
-    identity: Arc<()>,
+    active: EditorSourceToolActive,
     definition: EditorSourceToolDefinition,
 }
 
@@ -264,10 +155,11 @@ struct Invocation {
 }
 
 struct ReviewedOperation {
-    activation: Arc<()>,
+    activation: EditorSourceToolActivationId,
     request: EditorSourceToolRequestId,
     basis: EditorDocumentQueryBasis,
-    title: String,
+    intent: EditorSourceToolIntent,
+    title: Arc<str>,
     created: Option<LocalConstructionEntity>,
     prepared: PreparedEditorDocumentConstruction,
 }
@@ -275,6 +167,7 @@ struct ReviewedOperation {
 type ProcessTask = TaskHandle<Result<Vec<u8>, process::ProcessFailure>>;
 
 struct Probe {
+    attempt: EditorSourceToolAttemptId,
     sequence: u64,
     definition: EditorSourceToolDefinition,
     task: ProcessTask,
@@ -309,10 +202,6 @@ impl EditorSourceTools {
             + self.retiring.len()
     }
 
-    pub(super) fn has_pending_work(&self) -> bool {
-        self.jobs() != 0
-    }
-
     fn next_sequence(&mut self) -> Result<u64, EditorSourceToolError> {
         self.sequence = self
             .sequence
@@ -341,15 +230,32 @@ impl EditorSourceTools {
         }
     }
 
-    fn view(&self) -> EditorSourceToolView {
+    pub(super) fn view(&self) -> EditorSourceToolView {
+        let review = self
+            .reviewed
+            .as_ref()
+            .map(|review| EditorSourceToolReviewSummary {
+                request: review.request.clone(),
+                basis: review.basis.clone(),
+                intent: review.intent.clone(),
+                title: review.title.clone(),
+                operations: review.prepared.patch().operations.len(),
+                created_entity: review
+                    .created
+                    .as_ref()
+                    .and_then(|local| review.prepared.entity(local).cloned()),
+            });
         EditorSourceToolView {
-            enabled: self.active.is_some(),
+            active: self
+                .active
+                .as_ref()
+                .map(|activation| activation.active.clone()),
             probing: self.probe.is_some(),
             working: self.invocation.is_some(),
             retiring: !self.retiring.is_empty(),
             attempt: self.attempt.clone(),
             request: self.latest.clone(),
-            review_ready: self.reviewed.is_some(),
+            review,
             attempt_error: self.attempt_error.clone(),
             request_error: self.request_error.clone(),
         }
@@ -379,11 +285,22 @@ struct WireReply {
 enum WireResult {
     Description {
         catalog: serde_json::Value,
+        #[serde(default)]
+        integer_property: Option<WireIntegerProperty>,
     },
     Proposal {
         title: String,
         writes: Vec<WireWrite>,
     },
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct WireIntegerProperty {
+    field: String,
+    parameter: String,
+    label: String,
+    initial: i64,
 }
 
 #[derive(Deserialize)]
@@ -401,10 +318,14 @@ impl EditorProjectSession {
 
     #[must_use]
     pub fn source_tool_review(&self) -> Option<EditorSourceToolReview<'_>> {
-        self.source_tools
-            .reviewed
-            .as_ref()
-            .map(|operation| EditorSourceToolReview { operation })
+        self.source_tools.reviewed.as_ref().map(|operation| {
+            EditorSourceToolReview::new(
+                &operation.request,
+                &operation.title,
+                &operation.prepared,
+                operation.created.as_ref(),
+            )
+        })
     }
 
     /// Probes a trusted finite child. Only a matching, exited candidate replaces active routing.
@@ -427,10 +348,11 @@ impl EditorProjectSession {
             parameters: BTreeMap::new(),
         };
         let task = self.spawn_source_tool(&definition.command, &request)?;
-        let attempt = EditorSourceToolAttemptId(Arc::new(()));
+        let attempt = EditorSourceToolAttemptId::issue();
         self.source_tools.attempt = Some(attempt.clone());
         self.source_tools.attempt_error = None;
         self.source_tools.probe = Some(Probe {
+            attempt: attempt.clone(),
             sequence,
             definition,
             task,
@@ -439,26 +361,75 @@ impl EditorProjectSession {
     }
 
     /// Revokes new execution and retained reviews immediately; physical work remains owned.
-    pub fn disable_source_tool(&mut self) {
+    pub fn disable_source_tool(
+        &mut self,
+        activation: &EditorSourceToolActivationId,
+    ) -> Result<(), EditorSourceToolError> {
+        let active = self
+            .source_tools
+            .active
+            .as_ref()
+            .ok_or(EditorSourceToolError::Disabled)?;
+        if active.active.id() != activation {
+            return Err(EditorSourceToolError::StaleActivation);
+        }
         self.source_tools.cancel();
         self.advance_source_tools();
+        Ok(())
+    }
+
+    /// Cancels only the currently pending probe identified by its own attempt token.
+    pub fn cancel_source_tool_attempt(
+        &mut self,
+        attempt: &EditorSourceToolAttemptId,
+    ) -> Result<(), EditorSourceToolError> {
+        let current = self
+            .source_tools
+            .probe
+            .as_ref()
+            .ok_or(EditorSourceToolError::StaleAttempt)?;
+        if &current.attempt != attempt {
+            return Err(EditorSourceToolError::StaleAttempt);
+        }
+        let probe = self
+            .source_tools
+            .probe
+            .take()
+            .expect("the current probe was observed");
+        self.source_tools.attempt_error = Some(EditorSourceToolError::Process("cancelled"));
+        probe.task.cancel();
+        self.source_tools.retiring.push(probe.task);
+        self.advance_source_tools();
+        Ok(())
     }
 
     /// Captures copied input against the original source observation without publishing an edit.
     pub fn request_source_tool(
         &mut self,
+        activation_id: &EditorSourceToolActivationId,
         basis: &EditorDocumentQueryBasis,
         intent: EditorSourceToolIntent,
         parameters: BTreeMap<String, ComponentValue>,
     ) -> Result<EditorSourceToolRequestId, EditorSourceToolError> {
         self.ensure_source_tool_admission()?;
+        let current = self
+            .source_tools
+            .active
+            .clone()
+            .ok_or(EditorSourceToolError::Disabled)?;
+        if current.active.id() != activation_id {
+            return Err(EditorSourceToolError::StaleActivation);
+        }
         self.advance_source_tools();
         let activation = self
             .source_tools
             .active
             .clone()
             .ok_or(EditorSourceToolError::Disabled)?;
-        let request = EditorSourceToolRequestId(Arc::new(()));
+        if activation.active.id() != activation_id {
+            return Err(EditorSourceToolError::StaleActivation);
+        }
+        let request = EditorSourceToolRequestId::issue();
         self.source_tools.latest = Some(request.clone());
         self.source_tools.retire_invocation();
         self.source_tools.request_error = None;
@@ -473,6 +444,53 @@ impl EditorProjectSession {
             self.source_tools.request_error = Some(error.clone());
         }
         result.map(|()| request)
+    }
+
+    /// Requests the admitted integer facet against the exact source target and basis.
+    pub fn request_source_tool_integer_property(
+        &mut self,
+        activation: &EditorSourceToolActivationId,
+        target: EditorPropertyTarget,
+        value: i64,
+    ) -> Result<EditorSourceToolRequestId, EditorSourceToolError> {
+        self.ensure_source_tool_admission()?;
+        let active = self
+            .source_tools
+            .active
+            .as_ref()
+            .ok_or(EditorSourceToolError::Disabled)?;
+        if active.active.id() != activation {
+            return Err(EditorSourceToolError::StaleActivation);
+        }
+        if !active.active.matches_integer_property(&target) {
+            return Err(EditorSourceToolError::PropertyFacet);
+        }
+        self.advance_source_tools();
+        let active = self
+            .source_tools
+            .active
+            .as_ref()
+            .ok_or(EditorSourceToolError::Disabled)?;
+        if active.active.id() != activation {
+            return Err(EditorSourceToolError::StaleActivation);
+        }
+        if !active.active.matches_integer_property(&target) {
+            return Err(EditorSourceToolError::PropertyFacet);
+        }
+        let parameter = active
+            .active
+            .integer_property()
+            .ok_or(EditorSourceToolError::PropertyFacet)?
+            .parameter()
+            .to_owned();
+        self.request_source_tool(
+            activation,
+            &target.basis,
+            EditorSourceToolIntent::Edit {
+                entity: target.entity,
+            },
+            BTreeMap::from([(parameter, ComponentValue::I64(value))]),
+        )
     }
 
     /// Accepts the same reviewed candidate only while its tool, request and source remain current.
@@ -526,7 +544,7 @@ impl EditorProjectSession {
             .source_tools
             .reviewed
             .as_ref()
-            .is_some_and(|review| !Arc::ptr_eq(&review.activation, &active.identity))
+            .is_some_and(|review| review.activation != *active.active.id())
         {
             return Err(EditorSourceToolError::StaleActivation);
         }
@@ -699,7 +717,11 @@ impl EditorProjectSession {
             let mut probe = self.source_tools.probe.take().expect("observed a probe");
             let result = take_reply(&mut probe.task, probe.sequence)
                 .and_then(|reply| {
-                    let WireResult::Description { catalog } = reply else {
+                    let WireResult::Description {
+                        catalog,
+                        integer_property,
+                    } = reply
+                    else {
                         return Err(EditorSourceToolError::Protocol);
                     };
                     let bytes = serde_json::to_vec(&catalog)
@@ -718,15 +740,31 @@ impl EditorProjectSession {
                     if &actual != probe.definition.owner.current() {
                         return Err(EditorSourceToolError::Declaration);
                     }
-                    Ok(())
+                    let integer_property = integer_property
+                        .map(|property| {
+                            EditorSourceToolIntegerProperty::new(
+                                ComponentFieldId::new(property.field),
+                                property.parameter,
+                                property.label,
+                                property.initial,
+                            )
+                        })
+                        .transpose()?;
+                    let active = EditorSourceToolActive::admit(
+                        EditorSourceToolActivationId::issue(),
+                        probe.definition.owner.clone(),
+                        probe.definition.component.clone(),
+                        integer_property,
+                    )?;
+                    Ok(active)
                 })
-                .and_then(|()| self.ensure_source_tool_admission());
+                .and_then(|active| self.ensure_source_tool_admission().map(|()| active));
             match result {
-                Ok(()) => {
+                Ok(active) => {
                     self.source_tools.retire_invocation();
                     self.source_tools.latest = None;
                     self.source_tools.active = Some(Activation {
-                        identity: Arc::new(()),
+                        active,
                         definition: probe.definition,
                     });
                     self.source_tools.request_error = None;
@@ -767,7 +805,7 @@ impl EditorProjectSession {
             .active
             .as_ref()
             .ok_or(EditorSourceToolError::Disabled)?;
-        if !Arc::ptr_eq(&active.identity, &invocation.activation.identity) {
+        if active.active.id() != invocation.activation.active.id() {
             return Err(EditorSourceToolError::StaleActivation);
         }
         if self.source_tools.latest.as_ref() != Some(&invocation.request) {
@@ -780,6 +818,7 @@ impl EditorProjectSession {
         if writes.is_empty() || writes.len() > MAX_WRITES || title.len() > 4096 {
             return Err(EditorSourceToolError::Limit);
         }
+        let title: Arc<str> = title.into();
         let mut bytes = 0;
         let mut nodes = 0;
         for write in &writes {
@@ -807,13 +846,13 @@ impl EditorProjectSession {
             }
             _ => ConstructionEntity::Local(created.clone().expect("a Spawn creates one local")),
         };
-        let component = invocation.activation.definition.component;
+        let component = invocation.activation.definition.component.clone();
         if !matches!(&invocation.intent, EditorSourceToolIntent::Edit { .. }) {
             draft
                 .add_component(entity.clone(), component.clone())
                 .map_err(|_| EditorSourceToolError::Draft)?;
         }
-        if let EditorSourceToolIntent::Spawn { name } = invocation.intent {
+        if let EditorSourceToolIntent::Spawn { name } = &invocation.intent {
             let name_component = ComponentTypeId::new("nara.scene.Name");
             draft
                 .add_component(entity.clone(), name_component.clone())
@@ -823,7 +862,7 @@ impl EditorProjectSession {
                     entity.clone(),
                     name_component,
                     ComponentPropertyPath::new(ComponentFieldId::new("value")),
-                    ComponentValue::String(name),
+                    ComponentValue::String(name.clone()),
                 )
                 .map_err(|_| EditorSourceToolError::Draft)?;
         }
@@ -839,9 +878,10 @@ impl EditorProjectSession {
         }
         let prepared = self.prepare_authoring_construction(&invocation.basis, &draft)?;
         Ok(ReviewedOperation {
-            activation: invocation.activation.identity,
+            activation: invocation.activation.active.id().clone(),
             request: invocation.request,
             basis: invocation.basis,
+            intent: invocation.intent.clone(),
             title,
             created,
             prepared,

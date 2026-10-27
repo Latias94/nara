@@ -77,6 +77,12 @@ the same request. Spawn's name and placement remain Host intent. Existing source
 preparation, generated IDs, history and persistence; the fixture has no second tool publication,
 transaction or retirement authority.
 
+The C# description also advertises one admitted `integer_property` facet: `health` is edited
+through the `bonus` parameter with the `Health bonus` label and initial value `0`. The Session
+validates that capability against the selected owner and editable i64 field. The fixture drives
+the facet and ordinary Request actions through the same ordered `EditorAction::SourceTool`
+ledger, retaining the original activation ID for every deferred action.
+
 The view reports probe failures in `attempt_error` and proposal/request failures in
 `request_error`. Starting a probe clears only its attempt error; starting a request clears only
 its request error. A rejected probe remains observable while the active predecessor handles
@@ -102,6 +108,12 @@ On Windows the runner also selects the ignored window-free Application test agai
 actual C# executable. It exercises Application review, exact successful receipts and source/history
 delegation. This separate test requires the runner's artifact environment; ordinary Editor tests
 do not silently substitute another child or count it as native UI qualification.
+
+Pass `--native-editor` on Windows to append the explicit DX12 native Editor qualification after
+the default language and Application tests. It selects only
+`native_source_tool_inline_property_and_panel_share_review_history_and_persistence` with
+`--all-features`, and sets `WGPU_BACKEND=dx12` for that process. The flag has no effect on other
+platforms.
 
 The old grouped-materialization/export prototype is superseded. The original representation
 comparison remains fixed-commit research; the remaining raw storage probes measure logical query

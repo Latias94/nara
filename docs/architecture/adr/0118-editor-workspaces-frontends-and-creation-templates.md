@@ -2,7 +2,7 @@
 
 **Status**: Accepted
 **Date**: 2026-10-16
-**Last Revised**: 2026-10-28 (finite Session-owned tools and complete-observation preparation)
+**Last Revised**: 2026-10-28 (finite Session-owned tools, integer property facets and complete-observation preparation)
 **Owner**: Private Editor product, tooling, reflection and document-domain owners
 **Refines**: [0015](0015-editor-tooling-and-dogfooding-boundary.md), [0081](0081-schema-source-stable-identity-catalog-and-runtime-binding.md), [0090](0090-unavailable-schema-and-lossless-authoring.md), [0107](0107-shared-ui-foundation-and-independent-product-layers.md), [0113](0113-editor-ui-prefab-authoring-and-canvas-authority.md), [0114](0114-standalone-generic-editor-authoring-and-execution-boundary.md)
 **Related**: [0117](0117-2d-foundation-ownership-and-authoring-contracts.md)
@@ -436,6 +436,23 @@ widgets or second transaction store and can be consumed by Nara's future custom-
 The [finite source-tool plan](../../plans/2026-10-28-finite-source-tool-owner-plan.md) scopes the
 first concrete contract; package discovery, installation, executable byte pinning, descendant
 containment and an official language SDK are separate designs.
+
+The first inline source-tool facet is one admitted integer-parameter proposal control for an
+editable i64 root field. A child description names that stable field, a bounded parameter key,
+label and initial parameter value. The Host validates the facet against the selected owner and
+complete component declaration before activation. The frontend matches exact owner/component/
+field and source/Schema observations, paints the finite control, and queues an existing Editor
+action after painting. The tool never supplies widgets, callbacks, source targets or authority.
+
+Panel and inline observers share the Session's request and retained candidate. Prepared patch,
+inverse and fixed created IDs remain source-owned. Every deferred request/disable carries its
+original activation; source changes, tool replacement/disable and actual panel/control retirement
+cancel tool parameter drafts rather than refreshing and replaying them. Existing ordinary dirty
+field input keeps its independent identity and explicit recovery while the facet hides its default
+control; activation does not delete or convert that input into a tool parameter. An unavailable facet restores
+the default field renderer while admitted metadata still permits ordinary editing. Missing
+metadata follows existing unavailable/read-only rules. Text/caret/IME and widget instances remain
+frontend-local. This finite capability does not select a recursive UI language or a native ABI.
 
 A component schema may publish one optional complete `authoring_initial_value` in the existing bounded generic value grammar.
 It is creation-only data, validated through the canonical complete schema/value validator at catalog admission and copied for an explicit creation transaction.

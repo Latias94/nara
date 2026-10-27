@@ -4,13 +4,13 @@ use std::{
     collections::BTreeMap,
     fs,
     path::PathBuf,
+    sync::Arc,
     time::{Duration, Instant},
 };
 
 use nara::{
     project_host::{
-        EditorSourceToolCommand, EditorSourceToolDefinition, EditorSourceToolError,
-        EditorSourceToolIntent, EditorSourceToolView, advanced::built_in_schema_providers,
+        EditorSourceToolCommand, EditorSourceToolDefinition, advanced::built_in_schema_providers,
     },
     reflect::{
         AuthoringSchemaBundle, AuthoringSchemaBundleOwner, ComponentFieldId, ComponentPropertyPath,
@@ -25,6 +25,8 @@ use nara::{
         EditorAction, EditorActionBatch, EditorActionOutcome, EditorDocumentId,
         EditorDocumentMutation, EditorDocumentQueryRejection, EditorPropertyRead,
         EditorPropertyReadLimits, EditorPropertyTarget, EditorPropertyValue,
+        EditorSourceToolAction, EditorSourceToolActionOutcome, EditorSourceToolError,
+        EditorSourceToolIntent, EditorSourceToolView,
     },
 };
 
@@ -41,8 +43,8 @@ fn settle_tool(application: &mut EditorApplication) -> EditorSourceToolView {
     let deadline = Instant::now() + TIMEOUT;
     loop {
         application.advance(Duration::ZERO);
-        let view = application.source_tool_view().unwrap();
-        if !view.probing && !view.working && !view.retiring {
+        let view = application.current_frame().unwrap().source_tool().clone();
+        if !view.has_pending_work() {
             assert!(
                 view.attempt_error.is_none() && view.request_error.is_none(),
                 "{view:?}"
@@ -55,6 +57,23 @@ fn settle_tool(application: &mut EditorApplication) -> EditorSourceToolView {
         );
         std::thread::sleep(Duration::from_millis(1));
     }
+}
+
+fn source_action(
+    application: &mut EditorApplication,
+    action: EditorSourceToolAction,
+) -> EditorSourceToolActionOutcome {
+    let frame = application.current_frame().unwrap();
+    let submitted = application.submit_and_drive(
+        EditorActionBatch::new(frame.revision(), [EditorAction::SourceTool(action)]),
+        Duration::ZERO,
+    );
+    let [EditorApplicationActionDispatch::Dispatched(EditorActionOutcome::SourceTool(outcome))] =
+        submitted.actions()
+    else {
+        panic!("Application lost the source-tool action outcome: {submitted:?}");
+    };
+    outcome.clone()
 }
 
 fn read_property(
@@ -212,83 +231,78 @@ fn csharp_source_tool_application_preserves_review_and_exact_commit_result() {
             .component_schema_owner(&ComponentTypeId::new(STATS)),
         Some(owner.owner_id()),
     );
-    assert!(!application.source_tool_view().unwrap().enabled);
-    let attempt = application.enable_source_tool(definition).unwrap();
+    assert!(
+        application
+            .current_frame()
+            .unwrap()
+            .source_tool()
+            .active
+            .is_none()
+    );
+    let attempt = application.enable_source_tool(definition.clone()).unwrap();
     let ready = settle_tool(&mut application);
-    assert!(ready.enabled);
-    assert_eq!(ready.attempt.as_ref(), Some(&attempt));
-    let request = application
-        .request_source_tool(
-            &basis,
-            EditorSourceToolIntent::Spawn {
-                name: "Reinforcement".into(),
-            },
-            BTreeMap::from([("bonus".into(), ComponentValue::I64(25))]),
-        )
-        .unwrap();
-    let ready = settle_tool(&mut application);
-    assert!(ready.review_ready);
-    assert_eq!(ready.attempt.as_ref(), Some(&attempt));
-    assert_eq!(ready.request.as_ref(), Some(&request));
-    let (patch, inverse, created) = {
-        let review = application.source_tool_review().unwrap().unwrap();
-        assert_eq!(review.request(), &request);
-        assert_eq!(review.title(), "Spawn Reinforcement with EnemyStats");
-        (
-            review.patch().clone(),
-            review.inverse().clone(),
-            review.created_entity().unwrap().clone(),
-        )
-    };
-    assert_ne!(created, enemy);
-    assert!(!inverse.operations.is_empty());
-    assert_eq!(patch.operations.len(), 6);
-    let mut writes = BTreeMap::new();
-    let mut added_components = Vec::new();
-    for operation in &patch.operations {
-        match operation {
-            ScenePatchOperation::AddEntity { entity, placement } => {
-                assert_eq!(entity.id, created);
-                assert_eq!(placement, &ScenePlacement::last(ScenePlacementOwner::Root));
-            }
-            ScenePatchOperation::AddComponent {
-                entity,
-                component,
-                value,
-            } => {
-                assert_eq!(entity, &created);
-                let expected_owner = bundle.owner_for_component(component).unwrap();
-                assert_eq!(value.owner(), Some(expected_owner.owner_id()));
-                added_components.push(component.as_str());
-            }
-            ScenePatchOperation::SetField {
-                entity,
-                component,
-                field,
-                value,
-                ..
-            } => {
-                assert_eq!(entity, &created);
-                assert!(
-                    writes
-                        .insert((component.as_str(), field.as_str()), value.clone())
-                        .is_none()
-                );
-            }
-            other => panic!("Unexpected reviewed operation: {other:?}"),
-        }
-    }
-    added_components.sort_unstable();
-    assert_eq!(added_components, vec![NAME, STATS]);
+    let active = ready.active.as_ref().unwrap();
+    assert_eq!(active.owner(), owner.owner_id());
+    assert_eq!(active.component(), &ComponentTypeId::new(STATS));
+    let facet = active.integer_property().unwrap();
     assert_eq!(
-        writes,
+        facet.field(),
+        &nara::reflect::ComponentFieldId::new("health")
+    );
+    assert_eq!(facet.parameter(), "bonus");
+    assert_eq!(facet.label(), "Health bonus");
+    assert_eq!(facet.initial(), 0);
+    assert_eq!(ready.attempt.as_ref(), Some(&attempt));
+    let activation = active.id().clone();
+    let facet_target = EditorPropertyTarget {
+        basis: basis.clone(),
+        entity: enemy.clone(),
+        component: ComponentTypeId::new(STATS),
+        property: ComponentPropertyPath::new(ComponentFieldId::new("health")),
+    };
+    let EditorSourceToolActionOutcome::Requested(Ok(facet_request)) = source_action(
+        &mut application,
+        EditorSourceToolAction::IntegerProperty {
+            activation: activation.clone(),
+            target: facet_target.clone(),
+            value: 25,
+        },
+    ) else {
+        panic!("The admitted integer facet did not produce a request");
+    };
+    let ready = settle_tool(&mut application);
+    assert!(ready.active.is_some() && ready.review.is_some());
+    assert_eq!(ready.attempt.as_ref(), Some(&attempt));
+    assert_eq!(ready.request.as_ref(), Some(&facet_request));
+    let (facet_patch, facet_inverse) = {
+        let review = application.source_tool_review().unwrap().unwrap();
+        assert_eq!(review.request(), &facet_request);
+        assert_eq!(review.title(), "Edit EnemyStats for ");
+        (review.patch().clone(), review.inverse().clone())
+    };
+    assert_eq!(facet_patch.operations.len(), 2);
+    assert_eq!(facet_inverse.operations.len(), 2);
+    let mut facet_writes = BTreeMap::new();
+    for operation in &facet_patch.operations {
+        let ScenePatchOperation::SetField {
+            entity,
+            component,
+            field,
+            value,
+            ..
+        } = operation
+        else {
+            panic!("Unexpected facet operation: {operation:?}");
+        };
+        assert_eq!(entity, &enemy);
+        assert_eq!(component, &ComponentTypeId::new(STATS));
+        assert!(facet_writes.insert(field.as_str(), value.clone()).is_none());
+    }
+    assert_eq!(
+        facet_writes,
         BTreeMap::from([
-            (
-                (NAME, "value"),
-                ComponentValue::String("Reinforcement".into())
-            ),
-            ((STATS, "armor"), ComponentValue::I64(10)),
-            ((STATS, "health"), ComponentValue::I64(125)),
+            ("armor", ComponentValue::I64(10)),
+            ("health", ComponentValue::I64(125)),
         ])
     );
     assert_eq!(application.document_query_basis(document).unwrap(), basis);
@@ -304,17 +318,20 @@ fn csharp_source_tool_application_preserves_review_and_exact_commit_result() {
     );
     assert_eq!(fs::read(&scene_path).unwrap(), original_bytes);
     assert!(matches!(
-        read_property(&mut application, document, &created, STATS, "health"),
-        Err(EditorDocumentQueryRejection::Source(
-            AuthoringReadError::EntityNotFound
-        )),
+        read_property(&mut application, document, &enemy, STATS, "health").unwrap(),
+        EditorPropertyValue::Present(ComponentValue::I64(100)),
     ));
-    let submitted = application.accept_source_tool_review(&request, Duration::ZERO);
-    assert!(submitted.update().actions_observed());
-    let committed = submitted.result().as_ref().unwrap();
+    let EditorSourceToolActionOutcome::Accepted(Ok(committed)) = source_action(
+        &mut application,
+        EditorSourceToolAction::Accept {
+            request: facet_request.clone(),
+        },
+    ) else {
+        panic!("The facet review was not accepted");
+    };
     assert!(committed.report.applied, "{:?}", committed.report);
     assert_eq!(committed.report.document, Some(document));
-    assert_eq!(committed.created_entity.as_ref(), Some(&created));
+    assert!(committed.created_entity.is_none());
     assert_eq!(
         committed
             .report
@@ -323,11 +340,7 @@ fn csharp_source_tool_application_preserves_review_and_exact_commit_result() {
             .unwrap()
             .inverse
             .as_ref(),
-        Some(&inverse)
-    );
-    assert_eq!(
-        submitted.into_result().unwrap().created_entity.as_ref(),
-        Some(&created)
+        Some(&facet_inverse)
     );
     assert!(application.source_tool_review().unwrap().is_none());
     assert_eq!(
@@ -341,71 +354,208 @@ fn csharp_source_tool_application_preserves_review_and_exact_commit_result() {
             .undo_depth,
         1,
     );
-    for (entity, health) in [(&enemy, 100), (&created, 125)] {
-        for (field, value) in [("health", health), ("armor", 10)] {
-            assert_eq!(
-                read_property(&mut application, document, entity, STATS, field).unwrap(),
-                EditorPropertyValue::Present(ComponentValue::I64(value)),
-            );
-        }
-    }
+    assert_eq!(
+        read_property(&mut application, document, &enemy, STATS, "health").unwrap(),
+        EditorPropertyValue::Present(ComponentValue::I64(125)),
+    );
+    replay(&mut application, document, false);
+    assert_eq!(
+        read_property(&mut application, document, &enemy, STATS, "health").unwrap(),
+        EditorPropertyValue::Present(ComponentValue::I64(100)),
+    );
+    replay(&mut application, document, true);
+    assert_eq!(
+        read_property(&mut application, document, &enemy, STATS, "health").unwrap(),
+        EditorPropertyValue::Present(ComponentValue::I64(125)),
+    );
+    assert_eq!(fs::read(&scene_path).unwrap(), original_bytes);
+    let observers = (
+        application.current_frame().unwrap(),
+        application.current_frame().unwrap(),
+    );
+    assert!(Arc::ptr_eq(&observers.0, &observers.1));
+    assert_eq!(observers.0.source_tool(), observers.1.source_tool());
+    let spawn_basis = application.document_query_basis(document).unwrap();
+    let EditorSourceToolActionOutcome::Requested(Ok(spawn_request)) = source_action(
+        &mut application,
+        EditorSourceToolAction::Request {
+            activation: activation.clone(),
+            basis: spawn_basis.clone(),
+            intent: EditorSourceToolIntent::Spawn {
+                name: "Reinforcement".into(),
+            },
+            parameters: BTreeMap::from([("bonus".into(), ComponentValue::I64(25))]),
+        },
+    ) else {
+        panic!("The actual C# Spawn request was not admitted");
+    };
+    let ready = settle_tool(&mut application);
+    assert!(ready.review.is_some());
+    let (spawn_patch, spawn_inverse, created) = {
+        let review = application.source_tool_review().unwrap().unwrap();
+        assert_eq!(review.request(), &spawn_request);
+        assert_eq!(review.title(), "Spawn Reinforcement with EnemyStats");
+        assert!(std::ptr::eq(
+            review.patch(),
+            application.source_tool_review().unwrap().unwrap().patch()
+        ));
+        (
+            review.patch().clone(),
+            review.inverse().clone(),
+            review.created_entity().unwrap().clone(),
+        )
+    };
+    assert_ne!(created, enemy);
+    assert_eq!(spawn_patch.operations.len(), 6);
+    assert!(matches!(&spawn_patch.operations[0],
+        ScenePatchOperation::AddEntity { entity, placement }
+            if entity.id == created && placement == &ScenePlacement::last(ScenePlacementOwner::Root)));
+    assert!(!spawn_inverse.operations.is_empty());
+    let observers = (
+        application.current_frame().unwrap(),
+        application.current_frame().unwrap(),
+    );
+    assert_eq!(observers.0.source_tool(), observers.1.source_tool());
+    assert_eq!(
+        observers.0.source_tool().review.as_ref().unwrap().request,
+        spawn_request
+    );
+    let EditorSourceToolActionOutcome::Accepted(Ok(committed)) = source_action(
+        &mut application,
+        EditorSourceToolAction::Accept {
+            request: spawn_request.clone(),
+        },
+    ) else {
+        panic!("The actual C# Spawn review was not accepted");
+    };
+    assert_eq!(committed.created_entity.as_ref(), Some(&created));
+    assert_eq!(
+        committed
+            .report
+            .patch_report
+            .as_ref()
+            .unwrap()
+            .inverse
+            .as_ref(),
+        Some(&spawn_inverse)
+    );
+    assert_eq!(
+        read_property(&mut application, document, &created, STATS, "health").unwrap(),
+        EditorPropertyValue::Present(ComponentValue::I64(125))
+    );
     replay(&mut application, document, false);
     assert!(matches!(
         read_property(&mut application, document, &created, STATS, "health"),
         Err(EditorDocumentQueryRejection::Source(
             AuthoringReadError::EntityNotFound
-        )),
+        ))
     ));
     replay(&mut application, document, true);
     assert_eq!(
         read_property(&mut application, document, &created, STATS, "health").unwrap(),
-        EditorPropertyValue::Present(ComponentValue::I64(125)),
+        EditorPropertyValue::Present(ComponentValue::I64(125))
     );
-    assert_eq!(
-        read_property(&mut application, document, &created, NAME, "value").unwrap(),
-        EditorPropertyValue::Present(ComponentValue::String("Reinforcement".into())),
-    );
-    assert_eq!(fs::read(&scene_path).unwrap(), original_bytes);
-    replay(&mut application, document, false);
     let frame = application.current_frame().unwrap();
     let tab = frame.workspace().document(document).unwrap();
-    assert_eq!(tab.history.undo_depth, 0);
-    assert_eq!(tab.history.redo_depth, 1);
-    assert!(!tab.dirty);
+    assert_eq!(tab.history.undo_depth, 2);
     let unchanged = application.document_query_basis(document).unwrap();
-    let revoked = application
-        .request_source_tool(
-            &unchanged,
-            EditorSourceToolIntent::Edit {
-                entity: enemy.clone(),
-            },
-            BTreeMap::from([("bonus".into(), ComponentValue::I64(50))]),
-        )
-        .unwrap();
+    let deferred_request = EditorSourceToolAction::Request {
+        activation: activation.clone(),
+        basis: unchanged.clone(),
+        intent: EditorSourceToolIntent::Edit {
+            entity: enemy.clone(),
+        },
+        parameters: BTreeMap::from([("bonus".into(), ComponentValue::I64(99))]),
+    };
+    let deferred_property = EditorSourceToolAction::IntegerProperty {
+        activation: activation.clone(),
+        target: EditorPropertyTarget {
+            basis: unchanged.clone(),
+            ..facet_target
+        },
+        value: 99,
+    };
+    let deferred_disable = EditorSourceToolAction::Disable {
+        activation: activation.clone(),
+    };
+    let replacement = application.enable_source_tool(definition).unwrap();
     let ready = settle_tool(&mut application);
-    assert!(ready.review_ready);
-    assert_eq!(ready.request.as_ref(), Some(&revoked));
-    assert_eq!(
-        application.source_tool_review().unwrap().unwrap().request(),
-        &revoked
-    );
-    application.disable_source_tool().unwrap();
-    assert!(!settle_tool(&mut application).enabled);
-    assert!(application.source_tool_review().unwrap().is_none());
+    assert_eq!(ready.attempt.as_ref(), Some(&replacement));
+    let next_activation = ready.active.as_ref().unwrap().id().clone();
+    assert_ne!(next_activation, activation);
+    for deferred in [deferred_request, deferred_property] {
+        assert!(matches!(
+            source_action(&mut application, deferred),
+            EditorSourceToolActionOutcome::Requested(Err(EditorSourceToolError::StaleActivation))
+        ));
+    }
     assert!(matches!(
-        application
-            .accept_source_tool_review(&revoked, Duration::ZERO)
-            .into_result(),
-        Err(EditorSourceToolError::Disabled),
+        source_action(&mut application, deferred_disable),
+        EditorSourceToolActionOutcome::Disabled(Err(EditorSourceToolError::StaleActivation))
     ));
     assert_eq!(
         application.document_query_basis(document).unwrap(),
         unchanged
     );
+    let EditorSourceToolActionOutcome::Requested(Ok(revoked)) = source_action(
+        &mut application,
+        EditorSourceToolAction::IntegerProperty {
+            activation: next_activation.clone(),
+            target: EditorPropertyTarget {
+                basis: unchanged.clone(),
+                entity: enemy.clone(),
+                component: ComponentTypeId::new(STATS),
+                property: ComponentPropertyPath::new(ComponentFieldId::new("health")),
+            },
+            value: 50,
+        },
+    ) else {
+        panic!("The second facet request was not admitted");
+    };
+    assert!(settle_tool(&mut application).review.is_some());
+    assert!(matches!(
+        source_action(
+            &mut application,
+            EditorSourceToolAction::Disable {
+                activation: next_activation,
+            }
+        ),
+        EditorSourceToolActionOutcome::Disabled(Ok(()))
+    ));
+    assert!(
+        application
+            .current_frame()
+            .unwrap()
+            .source_tool()
+            .active
+            .is_none()
+    );
+    assert!(matches!(
+        source_action(
+            &mut application,
+            EditorSourceToolAction::Accept { request: revoked }
+        ),
+        EditorSourceToolActionOutcome::Accepted(Err(EditorSourceToolError::Disabled))
+    ));
     assert_eq!(
-        read_property(&mut application, document, &enemy, STATS, "health").unwrap(),
-        EditorPropertyValue::Present(ComponentValue::I64(100)),
+        application.document_query_basis(document).unwrap(),
+        unchanged
     );
     assert_eq!(fs::read(&scene_path).unwrap(), original_bytes);
+    replay(&mut application, document, false);
+    let frame = application.current_frame().unwrap();
+    let tab = frame.workspace().document(document).unwrap();
+    assert_eq!(tab.history.undo_depth, 1);
+    assert_eq!(tab.history.redo_depth, 1);
+    replay(&mut application, document, false);
+    let frame = application.current_frame().unwrap();
+    let tab = frame.workspace().document(document).unwrap();
+    assert_eq!(tab.history.undo_depth, 0);
+    assert_eq!(tab.history.redo_depth, 2);
+    assert!(!tab.dirty);
+    assert_eq!(
+        read_property(&mut application, document, &enemy, STATS, "health").unwrap(),
+        EditorPropertyValue::Present(ComponentValue::I64(100))
+    );
     close(&mut application);
 }

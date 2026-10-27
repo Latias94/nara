@@ -43,7 +43,8 @@ internal static class Program
             }
 
             object result = request.Operation == "describe"
-                ? new ToolDescription("description", EnemyStats.Describe())
+                ? new ToolDescription("description", EnemyStats.Describe(),
+                    new("health", "bonus", "Health bonus", 0))
                 : EnemyStats.Propose(request);
             byte[] response = JsonSerializer.SerializeToUtf8Bytes(
                 new ToolResponse(1, request.Request, result), Options);

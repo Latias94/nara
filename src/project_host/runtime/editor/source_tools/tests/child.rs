@@ -11,6 +11,7 @@ pub(super) enum Output {
     StdoutLimit,
     StderrLimit,
     ValueBudget,
+    IntegerProposal,
     Nonzero,
     Timeout,
 }
@@ -83,6 +84,14 @@ impl Output {
             Self::Malformed => "[Console]::Out.Write('{')".into(),
             Self::StdoutLimit => "[Console]::Out.Write(('x' * 65537))".into(),
             Self::StderrLimit => "[Console]::Error.Write(('x' * 16385))".into(),
+            Self::IntegerProposal => String::from(
+                "$amount = [long]$message.fields.amount.value + [long]$message.parameters.bonus.value; \
+                 @{ protocol_version = 1; request = $message.request; \
+                    result = @{ kind = 'proposal'; title = 'Apply the admitted bonus'; \
+                        writes = @(@{ property = @{ root = 'amount'; steps = @() }; \
+                            value = @{ type = 'i64'; value = $amount } }) } } \
+                 | ConvertTo-Json -Depth 8 -Compress",
+            ),
             Self::ValueBudget => String::from(
                 "$writes = @(1..5 | ForEach-Object { \
                  @{ property = @{ root = 'amount'; steps = @() }; \
@@ -111,6 +120,13 @@ impl Output {
             Self::Malformed => "printf '%s' '{'".into(),
             Self::StdoutLimit => "printf '%65537s' ''".into(),
             Self::StderrLimit => "printf '%16385s' '' >&2".into(),
+            Self::IntegerProposal => String::from(
+                r#"amount=${input#*'"amount":{"type":"i64","value":'}; amount=${amount%%'}'*};
+bonus=${input#*'"bonus":{"type":"i64","value":'}; bonus=${bonus%%'}'*};
+printf '%s%s%s%s%s' '{"protocol_version":1,"request":' "$sequence" \
+',"result":{"kind":"proposal","title":"Apply the admitted bonus","writes":[{"property":{"root":"amount","steps":[]},"value":{"type":"i64","value":' \
+"$((amount + bonus))" '}}]}}'"#,
+            ),
             Self::ValueBudget => String::from(
                 "printf '%s%s%s' '{\"protocol_version\":1,\"request\":' \"$sequence\" \
                  ',\"result\":{\"kind\":\"proposal\",\"title\":\"Large values\",\"writes\":['; \

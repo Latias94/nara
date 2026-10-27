@@ -2497,6 +2497,7 @@ dependencies = [
  "nara_scene",
  "nara_sprite",
  "nara_transform",
+ "thiserror 2.0.18",
 ]
 
 [[package]]

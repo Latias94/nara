@@ -15,6 +15,7 @@ mod prefab_conversion;
 mod project_browser;
 mod snapshot;
 mod source_asset_import;
+mod source_tools;
 mod workspace;
 
 pub use authoring_query::{
@@ -113,6 +114,13 @@ pub use source_asset_import::{
     EditorSourceAssetDomainView, EditorSourceAssetImportAction,
     EditorSourceAssetImportActionOutcome, EditorSourceAssetImportAttempt,
     EditorSourceAssetImportRejection, EditorSourceAssetImportView, EditorSourceAssetMetadataView,
+};
+pub use source_tools::{
+    EditorSourceToolAction, EditorSourceToolActionOutcome, EditorSourceToolActivationId,
+    EditorSourceToolActive, EditorSourceToolAttemptId, EditorSourceToolCommit,
+    EditorSourceToolError, EditorSourceToolIntegerProperty, EditorSourceToolIntent,
+    EditorSourceToolRequestId, EditorSourceToolReview, EditorSourceToolReviewSummary,
+    EditorSourceToolView,
 };
 pub use workspace::{
     CommittedEditorDocumentConstruction, CommittedEditorPrefabConversion, EditorDocumentDigest,

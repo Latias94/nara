@@ -1,5 +1,6 @@
 """Build gameplay modules and a standalone source tool, then exercise their consumers."""
 
+import argparse
 import os
 from pathlib import Path
 import shutil
@@ -8,6 +9,15 @@ import sys
 
 
 def main():
+    parser = argparse.ArgumentParser(
+        description="Build and qualify the finite behavior-language and source-tool consumers."
+    )
+    parser.add_argument(
+        "--native-editor",
+        action="store_true",
+        help="Run the Windows DX12 native Editor source-tool qualification after the default tests.",
+    )
+    options = parser.parse_args()
     fixture = Path(__file__).resolve().parent
     root = fixture.parents[2]
     artifacts = root / "target" / "behavior-language-trial" / "managed"
@@ -83,6 +93,17 @@ def main():
             ],
             cwd=root, env=environment, check=True,
         )
+        if options.native_editor:
+            native_environment = {**environment, "WGPU_BACKEND": "dx12"}
+            subprocess.run(
+                [
+                    "cargo", "+1.95.0", "nextest", "run", "-p", "nara-editor",
+                    "--all-features", "--lib", "--locked", "--run-ignored", "only", "-E",
+                    "test(native_source_tool_inline_property_and_panel_share_review_history_and_persistence)",
+                    "--test-threads=1", "--status-level", "fail", "--final-status-level", "fail",
+                ],
+                cwd=root, env=native_environment, check=True,
+            )
 
 
 if __name__ == "__main__":

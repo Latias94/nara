@@ -96,11 +96,9 @@ fn settle_background_imports(application: &mut EditorApplication) {
 #[test]
 fn application_source_tool_reviews_commits_and_revokes_old_requests() {
     use nara::{
-        project_host::{
-            EditorSourceToolCommand, EditorSourceToolDefinition, EditorSourceToolError,
-            EditorSourceToolIntent,
-        },
+        project_host::{EditorSourceToolCommand, EditorSourceToolDefinition},
         reflect::{AuthoringSchemaBundle, ComponentTypeId},
+        tooling::{EditorSourceToolError, EditorSourceToolIntent},
     };
     use std::{collections::BTreeMap, ffi::OsString};
 
@@ -176,14 +174,15 @@ fn application_source_tool_reviews_commits_and_revokes_old_requests() {
         .unwrap();
     let basis = application.document_query_basis(document).unwrap();
     let source = fs::read(fixture.root.join("worlds/entry.scene.json")).unwrap();
-    assert!(!application.source_tool_view().unwrap().enabled);
+    assert!(application.source_tool_view().unwrap().active.is_none());
     application.enable_source_tool(definition).unwrap();
     let view = application.source_tool_view().unwrap();
     assert_eq!(
         application
             .current_frame()
             .unwrap()
-            .source_tool_work_pending(),
+            .source_tool()
+            .has_pending_work(),
         view.probing || view.working || view.retiring
     );
     let settle_tool = |application: &mut EditorApplication| {
@@ -210,8 +209,16 @@ fn application_source_tool_reviews_commits_and_revokes_old_requests() {
         }
     };
     settle_tool(&mut application);
+    let activation = application
+        .source_tool_view()
+        .unwrap()
+        .active
+        .unwrap()
+        .id()
+        .clone();
     let request = application
         .request_source_tool(
+            &activation,
             &basis,
             EditorSourceToolIntent::Edit {
                 entity: SceneEntityId::new("signal-node").unwrap(),
@@ -224,7 +231,8 @@ fn application_source_tool_reviews_commits_and_revokes_old_requests() {
         application
             .current_frame()
             .unwrap()
-            .source_tool_work_pending(),
+            .source_tool()
+            .has_pending_work(),
         view.probing || view.working || view.retiring
     );
     settle_tool(&mut application);
@@ -262,6 +270,7 @@ fn application_source_tool_reviews_commits_and_revokes_old_requests() {
     let current = application.document_query_basis(document).unwrap();
     let request = application
         .request_source_tool(
+            &activation,
             &current,
             EditorSourceToolIntent::Edit {
                 entity: SceneEntityId::new("signal-node").unwrap(),
@@ -270,7 +279,7 @@ fn application_source_tool_reviews_commits_and_revokes_old_requests() {
         )
         .unwrap();
     settle_tool(&mut application);
-    application.disable_source_tool().unwrap();
+    application.disable_source_tool(&activation).unwrap();
     assert!(application.source_tool_review().unwrap().is_none());
     assert!(matches!(
         application

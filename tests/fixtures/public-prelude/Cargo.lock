@@ -2178,6 +2178,7 @@ dependencies = [
  "nara_identity",
  "nara_reflect",
  "nara_scene",
+ "thiserror 2.0.18",
 ]
 
 [[package]]

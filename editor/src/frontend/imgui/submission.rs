@@ -55,6 +55,7 @@ pub(super) enum Recipient {
     Contribution,
     Authoring,
     PrefabIntent,
+    SourceTool,
 }
 
 #[derive(Clone)]

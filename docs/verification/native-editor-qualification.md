@@ -106,6 +106,23 @@ requires actual native composite receipts. It does not read back the GPU framebu
 monitor scanout. Host tests separately cover stale source/working-copy refusal and physical
 cancellation/Close; a passing native success path does not establish those failure paths.
 
+For finite source-tool facets, panel/Inspector result routing or parameter retirement, build the
+actual C# consumer and run its explicitly selected native workflow:
+
+```powershell
+python tests/fixtures/behavior-languages/run.py --native-editor
+```
+
+The runner builds the real child artifacts, executes the window-free language/Session consumers
+and the selected Application consumer, then runs
+`native_source_tool_inline_property_and_panel_share_review_history_and_persistence` with DX12.
+That hidden-window trajectory prepares through the health property control and accepts through
+the shared Source Tool panel, verifies a single Undo/Redo, the ordinary armor control, Attach,
+activation/parameter retirement, generic fallback, Save, physical Close and fresh Open. Rust
+materializes the saved component data through public Scene bindings. Both native scopes must
+present. It does not qualify local installation, a language SDK, executable gameplay publications
+or the future custom-drawn UI runtime.
+
 For trusted Play source association and source-local document Close, also execute:
 
 ```powershell

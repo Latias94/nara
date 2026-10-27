@@ -12,7 +12,8 @@ use nara_tooling::{
     EditorGestureOutcome, EditorGestureRejection, EditorImageImportAction,
     EditorImageImportActionOutcome, EditorImageImportActionRejection, EditorNavigationAction,
     EditorPersistenceAction, EditorPersistenceCommand, EditorPlayAction, EditorPlayCommand,
-    EditorReopenTarget, EditorWorkspaceCommand, EditorWorkspaceIntent, EditorWorkspaceIntentAction,
+    EditorReopenTarget, EditorSourceToolAction, EditorSourceToolActionOutcome,
+    EditorWorkspaceCommand, EditorWorkspaceIntent, EditorWorkspaceIntentAction,
 };
 
 use crate::project_host::authoring::ProjectSourceIndexSnapshot;
@@ -108,6 +109,7 @@ impl EditorProjectSession {
             EditorAction::PrefabConversion(action) => {
                 EditorActionOutcome::PrefabConversion(self.request_prefab_conversion(action))
             }
+            EditorAction::SourceTool(action) => self.dispatch_source_tool_action(action),
             EditorAction::Mutate(action) => self.dispatch_document_mutation(action),
             EditorAction::Extension(action) => {
                 if let Err(rejection) =
@@ -368,6 +370,7 @@ impl EditorProjectSession {
             | EditorActionOutcome::DocumentProperty(_)
             | EditorActionOutcome::AuthoringConstruction(_)
             | EditorActionOutcome::PrefabConversion(_)
+            | EditorActionOutcome::SourceTool(_)
             | EditorActionOutcome::Persistence(_)
             | EditorActionOutcome::ProjectBrowser(_)
             | EditorActionOutcome::ImageImport(_)
@@ -379,6 +382,38 @@ impl EditorProjectSession {
             | EditorActionOutcome::RuntimeEdit(_)
             | EditorActionOutcome::ApplyChanges(_)
             | EditorActionOutcome::Acknowledged(_) => {}
+        }
+    }
+
+    fn dispatch_source_tool_action(
+        &mut self,
+        action: EditorSourceToolAction,
+    ) -> EditorActionOutcome {
+        match action {
+            EditorSourceToolAction::Request {
+                activation,
+                basis,
+                intent,
+                parameters,
+            } => EditorActionOutcome::SourceTool(EditorSourceToolActionOutcome::Requested(
+                self.request_source_tool(&activation, &basis, intent, parameters),
+            )),
+            EditorSourceToolAction::IntegerProperty {
+                activation,
+                target,
+                value,
+            } => EditorActionOutcome::SourceTool(EditorSourceToolActionOutcome::Requested(
+                self.request_source_tool_integer_property(&activation, target, value),
+            )),
+            EditorSourceToolAction::Accept { request } => EditorActionOutcome::SourceTool(
+                EditorSourceToolActionOutcome::Accepted(self.accept_source_tool_review(&request)),
+            ),
+            EditorSourceToolAction::Disable { activation } => EditorActionOutcome::SourceTool(
+                EditorSourceToolActionOutcome::Disabled(self.disable_source_tool(&activation)),
+            ),
+            EditorSourceToolAction::CancelAttempt { attempt } => EditorActionOutcome::SourceTool(
+                EditorSourceToolActionOutcome::Cancelled(self.cancel_source_tool_attempt(&attempt)),
+            ),
         }
     }
 

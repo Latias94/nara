@@ -17,7 +17,7 @@ use nara_reflect::{
 };
 use nara_scene::{
     SceneAuthoringHistoryStatus, SceneAuthoringHistoryUsage, SceneAuthoringRevision, SceneDocument,
-    SceneEntityRecord,
+    SceneEntityId, SceneEntityRecord,
 };
 use nara_tasks::TaskReturnObserver;
 use nara_tooling::EditorDocumentId;
@@ -149,6 +149,19 @@ impl Project {
         Output::Result(json!({
             "kind": "description",
             "catalog": catalog_json(self.owner.current(), self.owner.predecessor()),
+        }))
+    }
+
+    pub(super) fn facet_description(&self) -> Output {
+        Output::Result(json!({
+            "kind": "description",
+            "catalog": catalog_json(self.owner.current(), self.owner.predecessor()),
+            "integer_property": {
+                "field": "amount",
+                "parameter": "bonus",
+                "label": "Bonus",
+                "initial": 1,
+            },
         }))
     }
 
@@ -290,19 +303,27 @@ pub(super) fn wait(
     }
 }
 
-pub(super) fn activate(editor: &mut EditorProjectSession, project: &Project) {
+pub(super) fn activate(
+    editor: &mut EditorProjectSession,
+    project: &Project,
+) -> EditorSourceToolActivationId {
     let attempt = editor.enable_source_tool(project.tool()).unwrap();
     wait(editor, |editor| !editor.source_tool_view().probing);
     let view = editor.source_tool_view();
     assert_eq!(view.attempt.as_ref(), Some(&attempt));
-    assert!(view.enabled, "{view:?}");
+    let active = view.active.as_ref().expect("the finite tool must activate");
     assert!(view.attempt_error.is_none(), "{view:?}");
+    active.id().clone()
 }
 
-pub(super) fn attach(editor: &mut EditorProjectSession) -> EditorSourceToolRequestId {
+pub(super) fn attach(
+    editor: &mut EditorProjectSession,
+    activation: &EditorSourceToolActivationId,
+) -> EditorSourceToolRequestId {
     let basis = editor.document_query_basis(document(editor)).unwrap();
     editor
         .request_source_tool(
+            activation,
             &basis,
             EditorSourceToolIntent::Attach { entity: target() },
             BTreeMap::new(),

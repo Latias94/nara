@@ -9,9 +9,7 @@ use std::{
 };
 
 use nara_engine::project_host::{
-    EditorProjectSession, EditorSourceToolCommand, EditorSourceToolCommit,
-    EditorSourceToolDefinition, EditorSourceToolError, EditorSourceToolIntent,
-    EditorSourceToolRequestId, EditorSourceToolView,
+    EditorProjectSession, EditorSourceToolCommand, EditorSourceToolDefinition,
 };
 use nara_reflect::{
     ComponentFieldId, ComponentPropertyPath, ComponentSchemaCatalog, ComponentSchemaVersion,
@@ -21,8 +19,12 @@ use nara_scene::{
     AuthoringPropertyEdit, SceneComponentRecord, SceneDocument, SceneEntityId, SceneEntityRecord,
 };
 use nara_tooling::{
-    EditorDocumentId, EditorDocumentQueryBasis, EditorDocumentQueryRejection, EditorEntityQuery,
-    EditorEntityQueryLimits, EditorEntityQueryPosition,
+    EditorAction, EditorActionBatch, EditorActionOutcome, EditorDocumentId,
+    EditorDocumentQueryBasis, EditorDocumentQueryRejection, EditorEntityQuery,
+    EditorEntityQueryLimits, EditorEntityQueryPosition, EditorPropertyTarget,
+    EditorSourceToolAction, EditorSourceToolActionOutcome, EditorSourceToolActivationId,
+    EditorSourceToolCommit, EditorSourceToolError, EditorSourceToolIntent,
+    EditorSourceToolRequestId, EditorSourceToolView,
 };
 
 use super::{
@@ -130,9 +132,31 @@ fn probe(
 fn enable(editor: &mut EditorProjectSession, definition: &Definition, fault: Option<&str>) {
     let view = probe(editor, tool_definition(definition, "V1", fault, TIMEOUT));
     assert!(
-        view.enabled && view.attempt_error.is_none() && view.request_error.is_none(),
+        view.active.is_some() && view.attempt_error.is_none() && view.request_error.is_none(),
         "{view:?}",
     );
+}
+
+fn active_id(editor: &EditorProjectSession) -> EditorSourceToolActivationId {
+    editor.source_tool_view().active.unwrap().id().clone()
+}
+
+fn source_action(
+    editor: &mut EditorProjectSession,
+    action: EditorSourceToolAction,
+) -> EditorSourceToolActionOutcome {
+    let frame = editor.current_frame();
+    let report = editor
+        .dispatch_editor_actions(EditorActionBatch::new(
+            frame.revision(),
+            [EditorAction::SourceTool(action)],
+        ))
+        .unwrap();
+    editor.drive_editor_frame(Duration::ZERO);
+    let [EditorActionOutcome::SourceTool(outcome)] = report.outcomes() else {
+        panic!("Session lost the source-tool action outcome: {report:?}");
+    };
+    outcome.clone()
 }
 
 fn finish_request(
@@ -151,12 +175,13 @@ fn request_review(
     bonus: i64,
 ) -> EditorSourceToolRequestId {
     let retained_attempt_failure = editor.source_tool_view().attempt_error.is_some();
+    let activation = active_id(editor);
     let request = editor
-        .request_source_tool(basis, intent, parameters(bonus, None))
+        .request_source_tool(&activation, basis, intent, parameters(bonus, None))
         .unwrap();
     let view = finish_request(editor, &request);
     assert!(
-        view.enabled && view.review_ready && view.request_error.is_none(),
+        view.active.is_some() && view.review.is_some() && view.request_error.is_none(),
         "{view:?}",
     );
     assert_eq!(
@@ -300,7 +325,7 @@ fn csharp_source_tool_review_history_save_reopen_and_public_rust_data_access() {
         let disk = std::fs::read(project.scene_path()).unwrap();
         let mut editor = project.open();
         let document = editor.current_frame().workspace().active_document.unwrap();
-        assert!(!editor.source_tool_view().enabled);
+        assert!(editor.source_tool_view().active.is_none());
         assert!(editor.source_tool_review().is_none());
         enable(&mut editor, &definition, None);
 
@@ -424,7 +449,7 @@ fn csharp_source_tool_review_history_save_reopen_and_public_rust_data_access() {
         }
         close(&mut editor);
         let closed = editor.source_tool_view();
-        assert!(!closed.enabled && !closed.probing && !closed.working && !closed.retiring);
+        assert!(closed.active.is_none() && !closed.probing && !closed.working && !closed.retiring);
         drop(editor);
 
         let mut reopened = project.open();
@@ -433,7 +458,7 @@ fn csharp_source_tool_review_history_save_reopen_and_public_rust_data_access() {
             .workspace()
             .active_document
             .unwrap();
-        assert!(!reopened.source_tool_view().enabled);
+        assert!(reopened.source_tool_view().active.is_none());
         assert!(reopened.source_tool_review().is_none());
         assert_history(&reopened, document, 0, 0);
         assert_stats(&reopened, document, "enemy", 125);
@@ -474,6 +499,7 @@ fn csharp_source_tool_rejects_complete_invalid_proposals_without_a_valid_prefix(
         let mut editor = project.open();
         let document = editor.current_frame().workspace().active_document.unwrap();
         enable(&mut editor, &definition, None);
+        let activation = active_id(&editor);
         attach(&mut editor, document);
         let basis = editor.document_query_basis(document).unwrap();
         let disk = std::fs::read(project.scene_path()).unwrap();
@@ -487,10 +513,15 @@ fn csharp_source_tool_rejects_complete_invalid_proposals_without_a_valid_prefix(
         ] {
             for fault in ["bad_last_value", "too_many_writes", "throw"] {
                 let request = editor
-                    .request_source_tool(&basis, intent.clone(), parameters(30, Some(fault)))
+                    .request_source_tool(
+                        &activation,
+                        &basis,
+                        intent.clone(),
+                        parameters(30, Some(fault)),
+                    )
                     .unwrap();
                 let view = finish_request(&mut editor, &request);
-                assert!(view.enabled && !view.review_ready, "{view:?}");
+                assert!(view.active.is_some() && view.review.is_none(), "{view:?}");
                 assert!(view.attempt_error.is_none(), "{view:?}");
                 assert!(
                     matches!(
@@ -521,6 +552,7 @@ fn csharp_source_tool_rejects_complete_invalid_proposals_without_a_valid_prefix(
         }
         let request = editor
             .request_source_tool(
+                &activation,
                 &basis,
                 EditorSourceToolIntent::Edit {
                     entity: id("enemy"),
@@ -534,7 +566,7 @@ fn csharp_source_tool_rejects_complete_invalid_proposals_without_a_valid_prefix(
             view.request_error,
             Some(EditorSourceToolError::Process("nonzero-exit"))
         ));
-        assert!(!view.review_ready);
+        assert!(view.review.is_none());
         assert_unchanged(&editor, &project, &basis, (1, 0), &disk);
         assert_stats(&editor, document, "enemy", 100);
         let request = request_review(
@@ -559,6 +591,7 @@ fn csharp_source_tool_fences_newest_request_original_basis_disable_and_physical_
         let mut editor = project.open();
         let document = editor.current_frame().workspace().active_document.unwrap();
         enable(&mut editor, &definition, None);
+        let activation = active_id(&editor);
         attach(&mut editor, document);
         let basis = editor.document_query_basis(document).unwrap();
         let disk = std::fs::read(project.scene_path()).unwrap();
@@ -573,6 +606,7 @@ fn csharp_source_tool_fences_newest_request_original_basis_disable_and_physical_
         );
         let newer = editor
             .request_source_tool(
+                &activation,
                 &basis,
                 EditorSourceToolIntent::Edit {
                     entity: id("enemy"),
@@ -587,12 +621,13 @@ fn csharp_source_tool_fences_newest_request_original_basis_disable_and_physical_
         ));
         let view = finish_request(&mut editor, &newer);
         assert!(
-            view.review_ready && view.attempt_error.is_none() && view.request_error.is_none(),
+            view.review.is_some() && view.attempt_error.is_none() && view.request_error.is_none(),
             "{view:?}",
         );
         assert_eq!(editor.source_tool_review().unwrap().request(), &newer);
 
         let failed_read = editor.request_source_tool(
+            &activation,
             &basis,
             EditorSourceToolIntent::Edit {
                 entity: id("guide"),
@@ -606,7 +641,7 @@ fn csharp_source_tool_fences_newest_request_original_basis_disable_and_physical_
         let failed = editor.source_tool_view();
         assert!(failed.request.is_some());
         assert_ne!(failed.request.as_ref(), Some(&newer));
-        assert!(!failed.review_ready);
+        assert!(failed.review.is_none());
         assert!(
             failed.attempt_error.is_none() && failed.request_error.is_some(),
             "{failed:?}"
@@ -618,8 +653,10 @@ fn csharp_source_tool_fences_newest_request_original_basis_disable_and_physical_
         assert_unchanged(&editor, &project, &basis, (1, 0), &disk);
 
         enable(&mut editor, &definition, Some("hold"));
+        let activation = active_id(&editor);
         let pending = editor
             .request_source_tool(
+                &activation,
                 &basis,
                 EditorSourceToolIntent::Edit {
                     entity: id("enemy"),
@@ -631,6 +668,7 @@ fn csharp_source_tool_fences_newest_request_original_basis_disable_and_physical_
         assert!(
             editor
                 .request_source_tool(
+                    &activation,
                     &basis,
                     EditorSourceToolIntent::Edit {
                         entity: id("guide")
@@ -645,7 +683,7 @@ fn csharp_source_tool_fences_newest_request_original_basis_disable_and_physical_
         ));
         let failed = settle(&mut editor);
         assert!(
-            !failed.review_ready
+            failed.review.is_none()
                 && failed.attempt_error.is_none()
                 && failed.request_error.is_some(),
             "{failed:?}",
@@ -655,6 +693,7 @@ fn csharp_source_tool_fences_newest_request_original_basis_disable_and_physical_
 
         let pending = editor
             .request_source_tool(
+                &activation,
                 &basis,
                 EditorSourceToolIntent::Edit {
                     entity: id("enemy"),
@@ -674,7 +713,7 @@ fn csharp_source_tool_fences_newest_request_original_basis_disable_and_physical_
                 EditorDocumentQueryRejection::StaleRevision
             ))
         ));
-        assert!(!view.review_ready);
+        assert!(view.review.is_none());
         assert_unchanged(&editor, &project, &changed, (2, 0), &disk);
         assert_stats(&editor, document, "enemy", 100);
         assert_value(
@@ -707,6 +746,7 @@ fn csharp_source_tool_fences_newest_request_original_basis_disable_and_physical_
 
         let pending = editor
             .request_source_tool(
+                &activation,
                 &basis,
                 EditorSourceToolIntent::Edit {
                     entity: id("enemy"),
@@ -715,8 +755,8 @@ fn csharp_source_tool_fences_newest_request_original_basis_disable_and_physical_
             )
             .unwrap();
         assert!(editor.source_tool_view().working);
-        editor.disable_source_tool();
-        assert!(!editor.source_tool_view().enabled);
+        editor.disable_source_tool(&activation).unwrap();
+        assert!(editor.source_tool_view().active.is_none());
         assert!(editor.source_tool_review().is_none());
         assert!(matches!(
             editor.accept_source_tool_review(&pending),
@@ -724,6 +764,7 @@ fn csharp_source_tool_fences_newest_request_original_basis_disable_and_physical_
         ));
         assert!(matches!(
             editor.request_source_tool(
+                &activation,
                 &basis,
                 EditorSourceToolIntent::Edit {
                     entity: id("enemy")
@@ -733,13 +774,14 @@ fn csharp_source_tool_fences_newest_request_original_basis_disable_and_physical_
             Err(EditorSourceToolError::Disabled)
         ));
         let disabled = settle(&mut editor);
-        assert!(!disabled.enabled && !disabled.review_ready);
+        assert!(disabled.active.is_none() && disabled.review.is_none());
         assert!(disabled.request.is_none() && disabled.request_error.is_none());
         assert!(disabled.attempt_error.is_none());
         assert_unchanged(&editor, &project, &basis, (3, 0), &disk);
         assert_stats(&editor, document, "enemy", 100);
 
         enable(&mut editor, &definition, Some("hold"));
+        let activation = active_id(&editor);
         let reviewed = request_review(
             &mut editor,
             &basis,
@@ -748,18 +790,20 @@ fn csharp_source_tool_fences_newest_request_original_basis_disable_and_physical_
             },
             70,
         );
-        editor.disable_source_tool();
+        editor.disable_source_tool(&activation).unwrap();
         assert!(matches!(
             editor.accept_source_tool_review(&reviewed),
             Err(EditorSourceToolError::Disabled)
         ));
-        assert!(!settle(&mut editor).review_ready);
+        assert!(settle(&mut editor).review.is_none());
         assert_unchanged(&editor, &project, &basis, (3, 0), &disk);
         assert_stats(&editor, document, "enemy", 100);
 
         enable(&mut editor, &definition, Some("hold"));
+        let activation = active_id(&editor);
         let pending = editor
             .request_source_tool(
+                &activation,
                 &basis,
                 EditorSourceToolIntent::Spawn {
                     name: "Late spawn".into(),
@@ -770,7 +814,7 @@ fn csharp_source_tool_fences_newest_request_original_basis_disable_and_physical_
         assert!(editor.source_tool_view().working);
         close(&mut editor);
         let closed = editor.source_tool_view();
-        assert!(!closed.enabled && !closed.probing && !closed.working && !closed.retiring);
+        assert!(closed.active.is_none() && !closed.probing && !closed.working && !closed.retiring);
         assert!(closed.request.is_none() && closed.request_error.is_none());
         assert!(closed.attempt_error.is_none());
         assert!(editor.source_tool_review().is_none());
@@ -780,6 +824,7 @@ fn csharp_source_tool_fences_newest_request_original_basis_disable_and_physical_
         ));
         assert!(matches!(
             editor.request_source_tool(
+                &activation,
                 &basis,
                 EditorSourceToolIntent::Edit {
                     entity: id("enemy")
@@ -801,6 +846,7 @@ fn csharp_source_tool_requires_the_exact_document_admission_and_selected_owner()
         let mut editor = project.open();
         let document = editor.current_frame().workspace().active_document.unwrap();
         enable(&mut editor, &definition, None);
+        let activation = active_id(&editor);
         let basis = editor.document_query_basis(document).unwrap();
         let disk = std::fs::read(project.scene_path()).unwrap();
 
@@ -838,6 +884,7 @@ fn csharp_source_tool_requires_the_exact_document_admission_and_selected_owner()
         for rejected in [missing, equivalent] {
             assert!(matches!(
                 editor.request_source_tool(
+                    &activation,
                     &rejected,
                     EditorSourceToolIntent::Attach {
                         entity: id("enemy")
@@ -870,9 +917,11 @@ fn csharp_source_tool_requires_the_exact_document_admission_and_selected_owner()
             let mut editor = project.open();
             let document = editor.current_frame().workspace().active_document.unwrap();
             enable(&mut editor, &definition, None);
+            let activation = active_id(&editor);
             let basis = editor.document_query_basis(document).unwrap();
             assert!(matches!(
                 editor.request_source_tool(
+                    &activation,
                     &basis,
                     EditorSourceToolIntent::Attach {
                         entity: id("enemy")
@@ -898,6 +947,7 @@ fn csharp_source_tool_failed_candidates_preserve_the_predecessor_and_v2_revokes_
         let mut editor = project.open();
         let document = editor.current_frame().workspace().active_document.unwrap();
         enable(&mut editor, &definition, None);
+        let activation = active_id(&editor);
         attach(&mut editor, document);
         let basis = editor.document_query_basis(document).unwrap();
         let disk = std::fs::read(project.scene_path()).unwrap();
@@ -924,7 +974,8 @@ fn csharp_source_tool_failed_candidates_preserve_the_predecessor_and_v2_revokes_
             );
             assert_ne!(view.attempt, previous_attempt);
             previous_attempt = view.attempt.clone();
-            assert!(view.enabled && view.review_ready, "{view:?}");
+            assert!(view.active.is_some() && view.review.is_some(), "{view:?}");
+            assert_eq!(view.active.as_ref().unwrap().id(), &activation);
             assert!(view.request_error.is_none(), "{view:?}");
             assert!(
                 match (expected, view.attempt_error.as_ref()) {
@@ -945,6 +996,7 @@ fn csharp_source_tool_failed_candidates_preserve_the_predecessor_and_v2_revokes_
         let basis = editor.document_query_basis(document).unwrap();
         let failed = editor
             .request_source_tool(
+                &activation,
                 &basis,
                 EditorSourceToolIntent::Edit {
                     entity: id("enemy"),
@@ -995,11 +1047,11 @@ fn csharp_source_tool_failed_candidates_preserve_the_predecessor_and_v2_revokes_
             tool_definition(&definition, "V2", None, TIMEOUT),
         );
         assert!(
-            view.enabled && view.attempt_error.is_none() && view.request_error.is_none(),
+            view.active.is_some() && view.attempt_error.is_none() && view.request_error.is_none(),
             "{view:?}",
         );
         assert_ne!(view.attempt, previous_attempt);
-        assert!(view.request.is_none() && !view.review_ready);
+        assert!(view.request.is_none() && view.review.is_none());
         assert!(editor.source_tool_review().is_none());
         assert!(matches!(
             editor.accept_source_tool_review(&old_review),
@@ -1018,6 +1070,206 @@ fn csharp_source_tool_failed_candidates_preserve_the_predecessor_and_v2_revokes_
         accept_review(&mut editor, document, &request);
         assert_stats(&editor, document, "enemy", 104);
         assert_history(&editor, document, 4, 0);
+        assert_eq!(std::fs::read(project.scene_path()).unwrap(), disk);
+        close(&mut editor);
+    }
+}
+
+#[test]
+fn csharp_source_tool_integer_facet_shares_one_candidate_and_rejects_deferred_activation() {
+    let definition = definition();
+    for extension in ["json", "ron"] {
+        let project = Project::new(&schema_bundle(&definition.owner), &original(), extension);
+        let disk = std::fs::read(project.scene_path()).unwrap();
+        let mut editor = project.open();
+        let document = editor.current_frame().workspace().active_document.unwrap();
+        enable(&mut editor, &definition, None);
+        attach(&mut editor, document);
+        let activation = active_id(&editor);
+        let basis = editor.document_query_basis(document).unwrap();
+        let target = EditorPropertyTarget {
+            basis: basis.clone(),
+            entity: id("enemy"),
+            component: kind(STATS),
+            property: ComponentPropertyPath::new(ComponentFieldId::new("health")),
+        };
+        let observed = editor.current_frame();
+        let active = observed.source_tool().active.as_ref().unwrap();
+        assert_eq!(active.id(), &activation);
+        assert_eq!(active.owner(), definition.owner.owner_id());
+        assert_eq!(active.component(), &kind(STATS));
+        let facet = active.integer_property().unwrap();
+        assert_eq!(facet.field(), &ComponentFieldId::new("health"));
+        assert_eq!(facet.parameter(), "bonus");
+        assert_eq!(facet.label(), "Health bonus");
+        assert_eq!(facet.initial(), 0);
+        assert!(active.matches_integer_property(&target));
+        let mut generic = target.clone();
+        generic.property = ComponentPropertyPath::new(ComponentFieldId::new("armor"));
+        assert!(!active.matches_integer_property(&generic));
+        assert!(matches!(
+            source_action(
+                &mut editor,
+                EditorSourceToolAction::IntegerProperty {
+                    activation: activation.clone(),
+                    target: generic,
+                    value: 30,
+                }
+            ),
+            EditorSourceToolActionOutcome::Requested(Err(EditorSourceToolError::PropertyFacet)),
+        ));
+        assert_unchanged(&editor, &project, &basis, (1, 0), &disk);
+        let deferred_property = EditorSourceToolAction::IntegerProperty {
+            activation: activation.clone(),
+            target: target.clone(),
+            value: 90,
+        };
+        let deferred_request = EditorSourceToolAction::Request {
+            activation: activation.clone(),
+            basis: basis.clone(),
+            intent: EditorSourceToolIntent::Edit {
+                entity: id("enemy"),
+            },
+            parameters: parameters(90, None),
+        };
+        let deferred_disable = EditorSourceToolAction::Disable {
+            activation: activation.clone(),
+        };
+        let EditorSourceToolActionOutcome::Requested(Ok(request)) = source_action(
+            &mut editor,
+            EditorSourceToolAction::IntegerProperty {
+                activation: activation.clone(),
+                target: target.clone(),
+                value: 25,
+            },
+        ) else {
+            panic!("The actual admitted health facet must produce a request");
+        };
+        let view = finish_request(&mut editor, &request);
+        assert!(view.request_error.is_none(), "{view:?}");
+        let inspector = editor.current_frame();
+        let panel = editor.current_frame();
+        assert!(Arc::ptr_eq(&inspector, &panel));
+        assert_eq!(inspector.source_tool(), panel.source_tool());
+        let summary = inspector.source_tool().review.as_ref().unwrap();
+        assert_eq!(summary.request, request);
+        let inspector_review = editor.source_tool_review().unwrap();
+        let panel_review = editor.source_tool_review().unwrap();
+        assert!(std::ptr::eq(inspector_review.patch(), panel_review.patch()));
+        assert!(std::ptr::eq(
+            inspector_review.inverse(),
+            panel_review.inverse()
+        ));
+        assert_eq!(summary.operations, panel_review.patch().operations.len());
+        assert_eq!(summary.title.as_ref(), panel_review.title());
+        let inverse = panel_review.inverse().clone();
+        assert_stats(&editor, document, "enemy", 100);
+        assert_unchanged(&editor, &project, &basis, (1, 0), &disk);
+
+        let successor = probe(
+            &mut editor,
+            tool_definition(&definition, "V2", None, TIMEOUT),
+        );
+        assert!(successor.attempt_error.is_none(), "{successor:?}");
+        let next_activation = successor.active.as_ref().unwrap().id().clone();
+        assert_ne!(next_activation, activation);
+        assert!(matches!(
+            source_action(
+                &mut editor,
+                EditorSourceToolAction::Accept {
+                    request: request.clone()
+                },
+            ),
+            EditorSourceToolActionOutcome::Accepted(Err(EditorSourceToolError::StaleRequest))
+        ));
+        for deferred in [deferred_property, deferred_request] {
+            assert!(matches!(
+                source_action(&mut editor, deferred),
+                EditorSourceToolActionOutcome::Requested(Err(
+                    EditorSourceToolError::StaleActivation
+                ))
+            ));
+        }
+        assert!(matches!(
+            source_action(&mut editor, deferred_disable),
+            EditorSourceToolActionOutcome::Disabled(Err(EditorSourceToolError::StaleActivation))
+        ));
+        assert_eq!(active_id(&editor), next_activation);
+        assert_unchanged(&editor, &project, &basis, (1, 0), &disk);
+        assert_stats(&editor, document, "enemy", 100);
+
+        let EditorSourceToolActionOutcome::Requested(Ok(next_request)) = source_action(
+            &mut editor,
+            EditorSourceToolAction::IntegerProperty {
+                activation: next_activation.clone(),
+                target: target.clone(),
+                value: 25,
+            },
+        ) else {
+            panic!("The successor facet must remain usable");
+        };
+        let view = finish_request(&mut editor, &next_request);
+        assert!(view.request_error.is_none(), "{view:?}");
+        let successor_inverse = editor.source_tool_review().unwrap().inverse().clone();
+        assert_eq!(successor_inverse, inverse);
+        let accepted = source_action(
+            &mut editor,
+            EditorSourceToolAction::Accept {
+                request: next_request.clone(),
+            },
+        );
+        let EditorSourceToolActionOutcome::Accepted(Ok(committed)) = accepted else {
+            panic!("The shared candidate must commit exactly once");
+        };
+        assert!(committed.report.applied);
+        assert_eq!(committed.report.document, Some(document));
+        assert!(committed.created_entity.is_none());
+        assert_eq!(
+            committed
+                .report
+                .patch_report
+                .as_ref()
+                .unwrap()
+                .inverse
+                .as_ref(),
+            Some(&inverse)
+        );
+        assert_stats(&editor, document, "enemy", 150);
+        assert_history(&editor, document, 2, 0);
+        assert!(matches!(
+            source_action(
+                &mut editor,
+                EditorSourceToolAction::Accept {
+                    request: next_request
+                },
+            ),
+            EditorSourceToolActionOutcome::Accepted(Err(EditorSourceToolError::Busy))
+        ));
+        replay(&mut editor, document, false);
+        assert_stats(&editor, document, "enemy", 100);
+        replay(&mut editor, document, true);
+        assert_stats(&editor, document, "enemy", 150);
+        assert!(matches!(
+            source_action(
+                &mut editor,
+                EditorSourceToolAction::Disable {
+                    activation: next_activation.clone(),
+                }
+            ),
+            EditorSourceToolActionOutcome::Disabled(Ok(()))
+        ));
+        assert!(editor.current_frame().source_tool().active.is_none());
+        assert!(matches!(
+            source_action(
+                &mut editor,
+                EditorSourceToolAction::IntegerProperty {
+                    activation: next_activation,
+                    target,
+                    value: 1,
+                }
+            ),
+            EditorSourceToolActionOutcome::Requested(Err(EditorSourceToolError::Disabled))
+        ));
         assert_eq!(std::fs::read(project.scene_path()).unwrap(), disk);
         close(&mut editor);
     }

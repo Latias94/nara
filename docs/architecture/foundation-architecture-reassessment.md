@@ -943,16 +943,18 @@ and existing Tasks physical custody. It deletes the displaced fixture-owned prop
 it does not select automatic installation, a gameplay language or the Editor drawing runtime.
 ADRs 0047/0118 own this finite operation independently of Proposed 0120's executable cohorts.
 
-The next discriminator is a real inline `health` property customization and a small panel sharing
-that Session request/review. It precedes local installation because packaging cannot establish
-whether the tool can participate in ordinary property editing. Match the exact owner/component/
-field, preserve frontend-owned drafts, reject old routes after disable/replacement and restore
-the default field renderer when metadata remains admitted. Use only the finite presentation and
-operation semantics required by this consumer. Godot's separate Inspector property contribution
-and default editor paths inform this division; its `Object`/`Control` model and global plugin
-list are not selected. The incumbent frontend provides behavior evidence, while Nara's own UI
-runtime remains separate implementation work. Gameplay executable publications remain an
-independent R3 contract rather than a prerequisite for this tool facet.
+The [inline facet successor](../knowledge/engineering/verification/2026-10/2026-10-27T193225Z-finite-source-tool-property-facets-and-shared-native-review-qualification-c47581dc5dfa45038a38a6aea5b2d4be.md)
+qualifies a real `health` property customization and a small panel sharing that Session's single
+request/review through actual C# and Windows/DX12 source/history/persistence workflows. Exact
+owner/component/field matching, original activation actions, independent generic dirty recovery,
+tool-parameter retirement and default-field fallback now have bounded implementation evidence.
+This precedes local installation because packaging cannot establish ordinary property participation.
+Godot's separate Inspector property contribution and default editor paths inform this division;
+its `Object`/`Control` model and global plugin list are not selected. The finite Tooling view/action
+seam carries no drawing toolkit objects. The incumbent frontend provides behavior evidence, while
+Nara's own UI runtime remains separate implementation work. Local install/update and measured
+placement selection remain R1b work. Gameplay executable publications remain an independent R3
+contract rather than a prerequisite for this tool facet.
 
 Do not implement the conversation's suggested crate list as a new central extension manager.
 Schema, document, command, UI, execution and native-resource owners retain their own admission

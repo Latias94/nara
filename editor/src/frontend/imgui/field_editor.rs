@@ -697,6 +697,7 @@ impl super::ImguiEditorFrontend {
 impl authoring::ImguiAuthoringPanels {
     pub(super) fn action_finished(&mut self, id: PanelSubmissionId, result: &PanelActionDispatch) {
         self.fields.action_finished(id, result);
+        self.source_tool.action_finished(id, result);
     }
 }
 
@@ -785,6 +786,39 @@ impl ImguiEditorPanelContext<'_, '_> {
             && authoring::editing_enabled(frame)
             && component.access.is_editable()
             && field.capabilities.contains(&ComponentCapability::Edit);
+        if let Some(target) = property_target(frame, scene, entity, component, field)
+            && component.access.is_editable()
+            && field.capabilities.contains(&ComponentCapability::Edit)
+            && frame
+                .source_tool()
+                .active
+                .as_ref()
+                .is_some_and(|active| active.matches_integer_property(&target))
+        {
+            let review = self
+                .preparation
+                .as_ref()
+                .ok()
+                .and_then(|session| session.source_tool_review());
+            let (customized, action) = self.widgets.authoring.source_tool.show_integer_property(
+                ui,
+                frame,
+                &target,
+                source(field).and_then(ComponentValue::as_i64),
+                editable,
+                review.as_ref(),
+            );
+            if let Some(owner) = self.widgets.authoring.source_tool.text_owner() {
+                self.output.text_owner = Some(owner);
+            }
+            if customized {
+                if let Some(action) = action {
+                    let result = self.submit_authoring(EditorAction::SourceTool(action));
+                    self.widgets.authoring.source_tool.admitted(result);
+                }
+                return;
+            }
+        }
         if let Some(prepared) = self.widgets.authoring.fields.show(
             ui,
             frame,
@@ -801,12 +835,20 @@ impl ImguiEditorPanelContext<'_, '_> {
 
     pub(super) fn show_scene_inspector(&mut self, ui: &Ui) {
         let mut prepared = Vec::new();
+        let mut tool_actions = Vec::new();
+        let review = self
+            .preparation
+            .as_ref()
+            .ok()
+            .and_then(|session| session.source_tool_review());
         self.widgets.authoring.show_inspector(
             ui,
             self.input.frame,
             self.actions,
             &mut self.output.text_owner,
             &mut prepared,
+            review.as_ref(),
+            &mut tool_actions,
         );
         if let Some(document) = self.model.document() {
             self.widgets
@@ -817,6 +859,10 @@ impl ImguiEditorPanelContext<'_, '_> {
         for edit in prepared {
             self.submit_field(edit);
         }
+        for action in tool_actions {
+            let result = self.submit_authoring(EditorAction::SourceTool(action));
+            self.widgets.authoring.source_tool.admitted(result);
+        }
     }
 
     fn submit_field(&mut self, prepared: PreparedFieldEdit) {
@@ -826,6 +872,26 @@ impl ImguiEditorPanelContext<'_, '_> {
             .fields
             .admitted(&prepared.key, result);
     }
+}
+
+pub(super) fn property_target(
+    frame: &EditorFrameModel,
+    scene: &EditorSceneModel,
+    entity: &SceneEntityId,
+    component: &SceneInspectorComponentView,
+    field: &SceneInspectorFieldView,
+) -> Option<nara::tooling::EditorPropertyTarget> {
+    let document = frame.workspace().document(scene.document)?;
+    Some(nara::tooling::EditorPropertyTarget {
+        basis: nara::tooling::EditorDocumentQueryBasis {
+            document: document.document,
+            revision: scene.revision,
+            schema: document.authoring_schema_basis.clone(),
+        },
+        entity: entity.clone(),
+        component: component.component.clone(),
+        property: nara::reflect::ComponentPropertyPath::new(field.id.clone()),
+    })
 }
 
 fn source(field: &SceneInspectorFieldView) -> Option<&ComponentValue> {

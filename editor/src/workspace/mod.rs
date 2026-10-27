@@ -68,6 +68,13 @@ impl Default for EditorPanelWorkspace {
                 EditorPanelPlacement::Bottom,
                 true,
             ),
+            EditorPanelDescriptor::new(
+                "nara.source-tool",
+                "Source Tool",
+                EditorPanelMultiplicity::Single,
+                EditorPanelPlacement::Right,
+                false,
+            ),
         ] {
             registry
                 .register(descriptor)

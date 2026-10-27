@@ -46,9 +46,14 @@ qualifies explicitly enabled trusted child proposals in ordinary Project Session
 under ADRs 0047/0118. Actual C# metadata, review/acceptance, history, persistence and public Rust
 data access pass; deterministic gates separately prove physical spawn/IO retirement and complete
 Close observations. Concurrent attempt/request failures retain independent results. The old
-managed tool bridge and fixture executor are removed. Inline property/tool UI, local installation,
-executable gameplay publications and the custom-drawn frontend remain open; no SDK or complete
-R1b/R3 claim follows.
+managed tool bridge and fixture executor are removed. The
+[inline facet successor](../../knowledge/engineering/verification/2026-10/2026-10-27T193225Z-finite-source-tool-property-facets-and-shared-native-review-qualification-c47581dc5dfa45038a38a6aea5b2d4be.md)
+adds one admitted i64 property parameter and the small Source Tool panel through the same immutable
+Tooling view and ordered action/result ledger. Actual C# and Windows/DX12 source/history/Save/fresh
+Open workflows exercise the shared candidate. Generic dirty input retains independent recovery;
+only tool parameters retire with their original route. Exact revocation remains available during
+Close decisions. Local installation, general inline contributions, executable gameplay publications
+and the custom-drawn frontend remain open; no SDK or complete R1b/R3 claim follows.
 The [documentation verification](../../knowledge/engineering/verification/2026-10/2026-10-23T115037Z-foundation-architecture-rebaseline-documentation-checks-and-adversarial-closure-33c8c794baf142ee964468a01248af17.md)
 records inventory/link/status checks and the scoped adversarial correction/recheck. No Cargo,
 performance or native trajectory was re-executed for this design-only unit.

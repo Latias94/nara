@@ -40,6 +40,7 @@ mod field_overrides;
 mod ordinary_structure;
 mod prefab_conversion;
 mod recursive_shapes;
+mod source_tool;
 
 struct DocumentObservation {
     kind: EditorDocumentKind,

@@ -14,6 +14,7 @@ nara_fs.workspace = true
 nara_identity.workspace = true
 nara_reflect.workspace = true
 nara_scene = { workspace = true, features = ["serde"] }
+thiserror.workspace = true
 
 [dev-dependencies]
 nara_app.workspace = true

@@ -26,6 +26,7 @@ pub(super) mod value_draft;
 pub(super) struct ImguiAuthoringPanels {
     scope: Option<EditorDocumentId>,
     pub(super) fields: FieldEditors,
+    pub(super) source_tool: super::source_tool::SourceToolWidgets,
     pending_removal: Option<SceneEntityId>,
     read_only: bool,
 }
@@ -38,6 +39,7 @@ impl ImguiAuthoringPanels {
     pub(super) fn retire(&mut self) {
         self.scope = None;
         self.fields.clear();
+        self.source_tool = Default::default();
         self.pending_removal = None;
     }
 
@@ -421,6 +423,8 @@ impl ImguiAuthoringPanels {
         actions: &mut Vec<EditorAction>,
         text_owner: &mut Option<ImguiTextOwner>,
         prepared: &mut Vec<PreparedFieldEdit>,
+        review: Option<&nara::tooling::EditorSourceToolReview<'_>>,
+        tool_actions: &mut Vec<nara::tooling::EditorSourceToolAction>,
     ) {
         self.synchronize(frame.workspace().active_scene.as_ref());
         let Some(scene) = frame.workspace().active_scene.as_ref() else {
@@ -483,7 +487,17 @@ impl ImguiAuthoringPanels {
         }
         for component in &entity.components {
             self.show_component(
-                ui, frame, scene, &entity.id, component, editing, actions, text_owner, prepared,
+                ui,
+                frame,
+                scene,
+                &entity.id,
+                component,
+                editing,
+                actions,
+                text_owner,
+                prepared,
+                review,
+                tool_actions,
             );
         }
         if entity.components.is_empty() {
@@ -503,6 +517,8 @@ impl ImguiAuthoringPanels {
         actions: &mut Vec<EditorAction>,
         text_owner: &mut Option<ImguiTextOwner>,
         prepared: &mut Vec<PreparedFieldEdit>,
+        review: Option<&nara::tooling::EditorSourceToolReview<'_>>,
+        tool_actions: &mut Vec<nara::tooling::EditorSourceToolAction>,
     ) {
         let _id = ui.push_id(component.component.as_str());
         let open = ui.collapsing_header(component.component.as_str(), TreeNodeFlags::DEFAULT_OPEN);
@@ -542,6 +558,38 @@ impl ImguiAuthoringPanels {
             let editable = editing
                 && component.access.is_editable()
                 && field.capabilities.contains(&ComponentCapability::Edit);
+            if let Some(target) =
+                super::field_editor::property_target(frame, scene, entity, component, field)
+                && component.access.is_editable()
+                && field.capabilities.contains(&ComponentCapability::Edit)
+                && frame
+                    .source_tool()
+                    .active
+                    .as_ref()
+                    .is_some_and(|active| active.matches_integer_property(&target))
+            {
+                let (customized, action) = self.source_tool.show_integer_property(
+                    ui,
+                    frame,
+                    &target,
+                    field
+                        .value
+                        .as_ref()
+                        .or(field.default_value.as_ref())
+                        .and_then(ComponentValue::as_i64),
+                    editable,
+                    review,
+                );
+                if let Some(owner) = self.source_tool.text_owner() {
+                    *text_owner = Some(owner);
+                }
+                if customized {
+                    if let Some(action) = action {
+                        tool_actions.push(action);
+                    }
+                    continue;
+                }
+            }
             if let Some(edit) = self.fields.show(
                 ui, frame, scene, entity, component, field, editable, text_owner,
             ) {

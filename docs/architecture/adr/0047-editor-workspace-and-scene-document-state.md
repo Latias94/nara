@@ -9,6 +9,7 @@ receipt-backed content state
 with independent file evidence and complete content authorization
 **Amended**: 2026-10-28 to require complete retained observations at public authoring preparation ingress
 **Amended**: 2026-10-28 to retain finite trusted tool execution and review in the Project Session
+**Amended**: 2026-10-28 to share complete tool observations and activation-bound actions across frontends
 **Refines**: ADR 0015, ADR 0026, ADR 0034, ADR 0038, ADR 0043
 **Refined By**: [ADR 0104](0104-host-owned-editor-workspace-installation.md): Host-Owned Editor
 Workspace Installation
@@ -148,6 +149,13 @@ Rules:
   for a child or join its IO. The first implementation supervises a trusted direct child, not
   descendants or a sandbox. A launch path is explicit Host configuration, not an immutable
   executable package, automatic project-code authorization or install/update support.
+  Pure tool observations, nominal activation/request identities, finite actions and exact
+  outcomes belong to the UI-neutral tooling vocabulary. The immutable frame publishes the full
+  view; the existing ordered action/result path also carries panel and inline tool operations.
+  Deferred requests and disable carry the original activation explicitly. A stale event cannot
+  acquire a successor merely because its document basis remains current. Process ownership and
+  trusted command configuration remain in Project Session; no second frontend result bus or
+  transaction owner is introduced.
 - Retained construction uses that same source owner. Workspace routes the original complete
   query basis plus the draft's exact source/Schema basis, and carries a nominal prepared
   construction with its fixed local mapping. A new query cannot authorize an obsolete draft.

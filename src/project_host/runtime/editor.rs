@@ -78,11 +78,7 @@ pub use presentation::{
 #[cfg(feature = "presentation-2d")]
 pub use preview::{EditorPreviewCandidate, EditorPreviewContentStamp, EditorPreviewHit};
 pub use source_asset_import::{EditorSourceAssetDomain, EditorSourceAssetImporters};
-pub use source_tools::{
-    EditorSourceToolAttemptId, EditorSourceToolCommand, EditorSourceToolCommit,
-    EditorSourceToolDefinition, EditorSourceToolError, EditorSourceToolIntent,
-    EditorSourceToolRequestId, EditorSourceToolReview, EditorSourceToolView,
-};
+pub use source_tools::{EditorSourceToolCommand, EditorSourceToolDefinition};
 #[cfg(feature = "runtime-ui")]
 use ui_authoring::EditorUiAuthoringProjectionCache;
 #[cfg(feature = "runtime-ui")]

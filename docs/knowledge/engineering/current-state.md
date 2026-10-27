@@ -3,7 +3,7 @@ type: "Current State"
 title: "Current Engineering State"
 description: "Derived summary of immutable engineering-memory shards."
 tags: ["engineering-memory", "derived"]
-source_fingerprint: "437a8f876e146e41d4596ab882bb1489d8ef32186c92a765192645f90ffbf448"
+source_fingerprint: "024ff25b6c1e55665b97aac2ef21c75d3ce7ad7c02a720b1bf4794c8c5ab607e"
 ---
 
 # Current State
@@ -12,8 +12,8 @@ source_fingerprint: "437a8f876e146e41d4596ab882bb1489d8ef32186c92a765192645f90ff
 
 This file is derived from immutable shards. Record new facts in shards, then render during integration.
 
-- Source fingerprint: `437a8f876e146e41d4596ab882bb1489d8ef32186c92a765192645f90ffbf448`
-- Immutable records: 981
+- Source fingerprint: `024ff25b6c1e55665b97aac2ef21c75d3ce7ad7c02a720b1bf4794c8c5ab607e`
+- Immutable records: 983
 - Active lane heads: 1
 
 # Active Registrations
@@ -69,6 +69,8 @@ This file is derived from immutable shards. Record new facts in shards, then ren
 
 # Recent Evidence
 
+- **Verification Evidence**: [Finite source tool property facets and shared native review qualification](verification/2026-10/2026-10-27T193225Z-finite-source-tool-property-facets-and-shared-native-review-qualification-c47581dc5dfa45038a38a6aea5b2d4be.md) - Records the UI-neutral Tooling replacement, exact activation and revocation corrections, shared panel and Inspector candidate, actual C# and DX12 workflow, independent review and bounded cleanup.
+- **Work Progress**: [Inline source tool facet contract and frontend integration in progress](progress/2026-10/2026-10-27T185417Z-inline-source-tool-facet-contract-and-frontend-integration-in-progress-cd9355db64e64f6b8ff437035268bdc0.md) - Records the shared Tooling replacement, explicit activation routing and active disjoint implementation lanes before complete production qualification.
 - **Verification Evidence**: [Production finite source tools and exact physical close observations](verification/2026-10/2026-10-27T180941Z-production-finite-source-tools-and-exact-physical-close-observations-fc2363973364434096d350ae4a8d762c.md) - Qualifies Session/Application-owned trusted child proposals, deletes the displaced tool bridge, and fixes concurrent result and physical-close observations.
 - **Verification Evidence**: [Complete observation bases at public authoring preparation ingress](verification/2026-10/2026-10-27T155752Z-complete-observation-bases-at-public-authoring-preparation-ingress-d45451eaca544ad2b50a55a66a0ce496.md) - Qualifies full source/Schema observation checks in Workspace, Session, Application and Panel preparation without a second transaction owner.
 - **Verification Evidence**: [Concrete EnemyStats semantic proposals through the public Project Session](verification/2026-10/2026-10-27T152916Z-concrete-enemystats-semantic-proposals-through-the-public-project-session-1acb9412a2544e98b059654fe5ec2ca7.md) - Qualifies concrete C# source proposals, exact preparation and stale-result refusal through existing Scene and Project Session owners.
@@ -79,8 +81,6 @@ This file is derived from immutable shards. Record new facts in shards, then ren
 - **Verification Evidence**: [Backend-free owner schema snapshots and clarified owned Editor UI sequencing](verification/2026-10/2026-10-27T102723Z-backend-free-owner-schema-snapshots-and-clarified-owned-editor-ui-sequencing-7e4b079a81b64d149b8f031b8b2c84ea.md) - Qualifies metadata-only owner admission and migrated consumers; records user-directed Nara UI ownership and the plan review without blocking ongoing production Scene work.
 - **Work Progress**: [Updated custom UI and language extension evidence integrated with the production data design](progress/2026-10/2026-10-27T100227Z-updated-custom-ui-and-language-extension-evidence-integrated-with-the-production-data-design-5f8d5f8dc41e42888f9099767abc1248.md) - Records source-only UI and language findings, the closed Scene representation proposal, resolved export-policy design review and next production work without declaring SDK or toolkit adoption.
 - **Verification Evidence**: [Actual authored code iteration with retained Lua VM and collectible managed code](verification/2026-10/2026-10-27T091400Z-actual-authored-code-iteration-with-retained-lua-vm-and-collectible-managed-code-060183fe1373441980ece9733ef76f57.md) - Qualifies unchanged-World body routing, rejected candidates, exact old-result fencing and actual physical code/VM retention in the private two-language comparison.
-- **Verification Evidence**: [Schema driven authored Behavior dispatch and complete source workflows](verification/2026-10/2026-10-27T084702Z-schema-driven-authored-behavior-dispatch-and-complete-source-workflows-cec09063db0d4d8a85b838302985bb97.md) - Records external catalog admission, three authored callback bindings, prepared source Attach/history/disk persistence and repeated Prefab identity proof.
-- **Verification Evidence**: [First actual in-process CSharp and Lua Behavior snapshot workflow](verification/2026-10/2026-10-27T080553Z-first-actual-in-process-csharp-and-lua-behavior-snapshot-workflow-81c67c84e2fa47b38b7848f642dae81c.md) - Qualifies the bounded two-language Scene and Prefab command workflow without selecting a production language or claiming VM reload.
 
 # Integration Notes
 

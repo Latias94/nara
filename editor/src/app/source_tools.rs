@@ -3,13 +3,13 @@
 use std::{collections::BTreeMap, time::Duration};
 
 use nara::{
-    project_host::{
-        EditorProjectSession, EditorSourceToolAttemptId, EditorSourceToolCommit,
-        EditorSourceToolDefinition, EditorSourceToolError, EditorSourceToolIntent,
+    project_host::{EditorProjectSession, EditorSourceToolDefinition},
+    reflect::ComponentValue,
+    tooling::{
+        EditorDocumentQueryBasis, EditorSourceToolActivationId, EditorSourceToolAttemptId,
+        EditorSourceToolCommit, EditorSourceToolError, EditorSourceToolIntent,
         EditorSourceToolRequestId, EditorSourceToolReview, EditorSourceToolView,
     },
-    reflect::ComponentValue,
-    tooling::EditorDocumentQueryBasis,
 };
 
 use super::{EditorApplication, EditorApplicationActionNotDispatched, EditorApplicationUpdate};
@@ -67,26 +67,46 @@ impl EditorApplication {
     }
 
     /// Revokes routing and review while the Session retains physical child/IO custody.
-    pub fn disable_source_tool(&mut self) -> Result<(), EditorSourceToolError> {
-        self.state
+    pub fn disable_source_tool(
+        &mut self,
+        activation: &EditorSourceToolActivationId,
+    ) -> Result<(), EditorSourceToolError> {
+        let result = self
+            .state
             .workspace_mut()
             .ok_or(EditorSourceToolError::WorkspaceUnavailable)?
             .session
-            .disable_source_tool();
+            .disable_source_tool(activation);
         self.drive_editor_frame(Duration::ZERO, true, false);
-        Ok(())
+        result
+    }
+
+    /// Cancels exactly one pending probe without disabling its active predecessor.
+    pub fn cancel_source_tool_attempt(
+        &mut self,
+        attempt: &EditorSourceToolAttemptId,
+    ) -> Result<(), EditorSourceToolError> {
+        let result = self
+            .state
+            .workspace_mut()
+            .ok_or(EditorSourceToolError::WorkspaceUnavailable)?
+            .session
+            .cancel_source_tool_attempt(attempt);
+        self.drive_editor_frame(Duration::ZERO, true, false);
+        result
     }
 
     /// Captures the original source observation for one finite copied-value proposal.
     pub fn request_source_tool(
         &mut self,
+        activation: &EditorSourceToolActivationId,
         basis: &EditorDocumentQueryBasis,
         intent: EditorSourceToolIntent,
         parameters: BTreeMap<String, ComponentValue>,
     ) -> Result<EditorSourceToolRequestId, EditorSourceToolError> {
         let result = self
             .source_tool_session_mut()?
-            .request_source_tool(basis, intent, parameters);
+            .request_source_tool(activation, basis, intent, parameters);
         self.drive_editor_frame(Duration::ZERO, true, false);
         result
     }

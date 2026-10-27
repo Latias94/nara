@@ -1492,6 +1492,7 @@ dependencies = [
  "nara_identity",
  "nara_reflect",
  "nara_scene",
+ "thiserror",
 ]
 
 [[package]]
