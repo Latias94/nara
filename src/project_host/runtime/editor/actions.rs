@@ -105,6 +105,9 @@ impl EditorProjectSession {
                     Err(outcome) => outcome,
                 }
             }
+            EditorAction::PrefabConversion(action) => {
+                EditorActionOutcome::PrefabConversion(self.request_prefab_conversion(action))
+            }
             EditorAction::Mutate(action) => self.dispatch_document_mutation(action),
             EditorAction::Extension(action) => {
                 if let Err(rejection) =
@@ -364,6 +367,7 @@ impl EditorProjectSession {
             | EditorActionOutcome::DocumentAuthoring(_)
             | EditorActionOutcome::DocumentProperty(_)
             | EditorActionOutcome::AuthoringConstruction(_)
+            | EditorActionOutcome::PrefabConversion(_)
             | EditorActionOutcome::Persistence(_)
             | EditorActionOutcome::ProjectBrowser(_)
             | EditorActionOutcome::ImageImport(_)

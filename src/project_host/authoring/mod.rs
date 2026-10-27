@@ -16,8 +16,8 @@ pub(crate) use document::{
 #[cfg(any(feature = "tooling", test))]
 pub(crate) use project::{
     AuthoringAssetSource, AuthoringDocumentCapture, AuthoringPrefabSessionSnapshot,
-    AuthoringProjectCandidate, AuthoringProjectReadiness, AuthoringProjectReceipt,
-    AuthoringProjectSessionSnapshot, AuthoringProjectSnapshot,
+    AuthoringPrefabSourceCapture, AuthoringProjectCandidate, AuthoringProjectReadiness,
+    AuthoringProjectReceipt, AuthoringProjectSessionSnapshot, AuthoringProjectSnapshot,
     AuthoringProjectSourceAdmissionError, AuthoringSourceKind, AuthoringSourceValidation,
     CapturedAuthoringPreview, PreparedAuthoringProject,
 };

@@ -7,6 +7,7 @@ mod authoring_images;
 #[cfg(any(feature = "presentation-2d", feature = "runtime-ui"))]
 mod authoring_preview;
 mod authoring_runtime;
+mod authoring_sources;
 mod content_refresh;
 mod document_open;
 mod extension_documents;
@@ -18,6 +19,7 @@ mod model;
 mod open;
 mod persistence;
 mod play;
+mod prefab_conversion;
 mod prepared_edit;
 #[cfg(feature = "presentation-2d")]
 mod presentation;
@@ -857,6 +859,7 @@ pub struct EditorProjectSession {
     project_browser: project_browser::EditorProjectBrowserHost,
     image_import: image_import::EditorImageImportHost,
     source_asset_import: source_asset_import::EditorSourceAssetImportHost,
+    prefab_conversion: prefab_conversion::EditorPrefabConversionHost,
     authoring_prefab_source_observations:
         BTreeMap<nara_asset::AssetPath, AuthoringPrefabSourceObservation>,
     #[cfg(test)]
@@ -993,6 +996,7 @@ impl Drop for EditorProjectSession {
         }
         self.image_import.cancel_pending();
         self.source_asset_import.cancel();
+        self.prefab_conversion.cancel();
         self.cancel_pending_document_open();
     }
 }
@@ -1007,6 +1011,12 @@ impl EditorProjectSession {
     #[doc(hidden)]
     pub fn advance_close(&mut self) -> EditorProjectCloseProgress {
         self.closing = true;
+        self.prefab_conversion.cancel();
+        self.advance_prefab_conversion();
+        #[cfg(test)]
+        if let Some(gate) = self.prefab_conversion.next_close_poll_gate.take() {
+            gate(self);
+        }
         #[cfg(feature = "presentation-2d")]
         self.scene_capture.cancel();
         let play_closed = self.advance_session_play_close();
@@ -1037,6 +1047,7 @@ impl EditorProjectSession {
                 }
             }
             authoring_runtime::EditorAuthoringRuntimeCloseProgress::Complete(task_shutdown) => {
+                self.advance_prefab_conversion();
                 let task_shutdown = self.session_task_shutdown(&task_shutdown);
                 if files_closed && !self.authoring_retirements.is_pending() && play_closed {
                     EditorProjectCloseProgress::Complete(EditorProjectCloseReceipt::new(
@@ -1564,6 +1575,7 @@ impl EditorProjectSession {
                 project_browser: project_browser::EditorProjectBrowserHost::new(),
                 image_import,
                 source_asset_import: source_asset_import::EditorSourceAssetImportHost::default(),
+                prefab_conversion: Default::default(),
                 authoring_prefab_source_observations: BTreeMap::new(),
                 #[cfg(test)]
                 reject_next_prefab_source_binding: false,
@@ -1814,6 +1826,7 @@ impl EditorProjectSession {
                 project_browser: project_browser::EditorProjectBrowserHost::new(),
                 image_import: image_import::EditorImageImportHost::default(),
                 source_asset_import: source_asset_import::EditorSourceAssetImportHost::default(),
+                prefab_conversion: Default::default(),
                 authoring_prefab_source_observations: BTreeMap::new(),
                 #[cfg(test)]
                 reject_next_prefab_source_binding: false,

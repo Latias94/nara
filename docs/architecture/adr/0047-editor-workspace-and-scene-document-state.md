@@ -119,6 +119,12 @@ Rules:
   custody without exposing an extractable ordinary prepared edit or another document store.
   Pending validation and final publication are distinct outcomes; dispatch acknowledgement
   cannot claim commit. Undo/Redo remains source-local replay after the first accepted conversion.
+  Review pagination reads the same fixed mapping and never recompiles or retargets the candidate.
+  Commit starts fresh physical validation after review and rechecks actual participating session
+  lineages on owner return. Cancel and whole-Session Close retain pending task custody until
+  physical return; a cancellation acknowledgement alone cannot release the candidate or publish
+  a conversion result. Review text, participant observations and source preparation copies are
+  admitted against their owning budgets before the corresponding allocations.
 - Retained construction uses that same source owner. Workspace routes an explicit document plus
   the draft's exact basis, and carries a nominal prepared construction with its fixed local mapping.
   No navigation change or generated-entity selection is implicit. Success returns the actual

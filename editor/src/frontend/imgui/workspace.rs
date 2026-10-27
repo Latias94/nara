@@ -258,6 +258,16 @@ impl ImguiEditorPanelContext<'_, '_> {
         self.submit_to(action, Recipient::Authoring)
     }
 
+    pub(super) fn submit_prefab_conversion(
+        &mut self,
+        action: nara::tooling::EditorPrefabConversionAction,
+    ) -> Result<PanelSubmissionId, PanelSubmitError> {
+        self.submit_to(
+            EditorAction::PrefabConversion(action),
+            Recipient::PrefabIntent,
+        )
+    }
+
     fn submit_to(
         &mut self,
         action: EditorAction,

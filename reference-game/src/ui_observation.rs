@@ -414,10 +414,10 @@ mod tests {
         asset::AssetRef,
         prelude::ComponentRegistry,
         scene::{
-            InMemoryPrefabSourceResolver, PrefabDocument, PrefabInstance, SceneDocument,
-            SceneEntityId, SceneEntityRecord, SceneOccurrenceKey, ScenePatchDocument,
-            ScenePatchOperation, ScenePlacement, ScenePlacementOwner, SourceDocumentKey,
-            SourceDocumentKind, spawn_scene,
+            InMemoryPrefabSourceResolver, PrefabAddition, PrefabDocument, PrefabEntityTarget,
+            PrefabInstance, PrefabOverlay, PrefabPlacement, PrefabPlacementParent,
+            PrefabPlacementSlot, SceneDocument, SceneEntityId, SceneEntityRecord,
+            SceneOccurrenceKey, SourceDocumentKey, SourceDocumentKind, spawn_scene,
         },
     };
 
@@ -436,23 +436,22 @@ mod tests {
         let retry_id = SceneEntityId::new("retry-button").unwrap();
         let resolver = InMemoryPrefabSourceResolver::new().with_prefab(
             source_document.clone(),
-            prefab_source,
+            prefab_source.clone(),
             PrefabDocument::from_ordered_roots([SceneEntityRecord::new(retry_id.clone())]),
         );
-        let recreated = ScenePatchDocument::new([
-            ScenePatchOperation::RemoveEntity {
-                entity: retry_id.clone(),
-                from: ScenePlacement::first(ScenePlacementOwner::Root),
-            },
-            ScenePatchOperation::AddEntity {
-                entity: SceneEntityRecord::new(retry_id.clone()),
-                placement: ScenePlacement::first(ScenePlacementOwner::Root),
-            },
-        ]);
-        for (overrides, expected) in [
-            (ScenePatchDocument::default(), Some("retry-button")),
-            (recreated, None),
-        ] {
+        let mut recreated = PrefabOverlay::new(prefab_source);
+        recreated
+            .suppressions
+            .push(PrefabEntityTarget::source(retry_id.clone()));
+        recreated
+            .additions
+            .push(PrefabAddition::new(retry_id.clone()));
+        recreated.placements.push(PrefabPlacement {
+            target: PrefabEntityTarget::addition(retry_id.clone()),
+            parent: PrefabPlacementParent::Root,
+            slot: PrefabPlacementSlot::First,
+        });
+        for (overrides, expected) in [(None, Some("retry-button")), (Some(recreated), None)] {
             let mut anchor = SceneEntityRecord::new(SceneEntityId::new("reference-ui").unwrap());
             anchor.prefab = Some(PrefabInstance {
                 source: source_document.clone(),

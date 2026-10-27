@@ -12,11 +12,11 @@ use nara_tasks::{
 use nara_tooling::{EditorDocumentQueryBasis, EditorDocumentQueryRejection};
 
 use crate::project_host::authoring::{
-    AuthoringDocumentCapture, AuthoringPrefabSessionSnapshot, AuthoringSourceValidation,
-    CapturedAuthoringPreview, document::AuthoringDocumentSourceFact,
+    AuthoringDocumentCapture, AuthoringSourceValidation, CapturedAuthoringPreview,
 };
 
 use super::authoring_preview::EditorAuthoringPreviewOmissions;
+use super::authoring_sources::AuthoringSourceSelection;
 use super::preview::{
     EditorPreviewDependencies, EditorPreviewParticipant, EditorPreviewProjection,
     EditorPreviewSource,
@@ -30,18 +30,9 @@ const CAPTURE_DOMAIN: TaskDomainKey = TaskDomainKey::new(0x7363_656e_6563_6170);
 mod tests;
 
 #[derive(Clone, PartialEq, Eq)]
-struct SourceSelection {
-    document: EditorDocumentId,
-    revision: SceneAuthoringRevision,
-    schema: Option<nara_scene::AuthoringSchemaBasis>,
-    source_key: nara_scene::SourceDocumentKey,
-    receipt: Option<AuthoringDocumentSourceFact>,
-}
-
-#[derive(Clone, PartialEq, Eq)]
 struct CaptureSelection {
-    root: SourceSelection,
-    prefabs: Vec<SourceSelection>,
+    root: AuthoringSourceSelection,
+    prefabs: Vec<AuthoringSourceSelection>,
 }
 
 struct CapturedScene {
@@ -50,7 +41,10 @@ struct CapturedScene {
     validation: AuthoringSourceValidation,
     projection: Option<EditorPreviewProjection>,
     unsaved_dependencies: usize,
-    sources: Vec<(nara_scene::SourceDocumentKey, Option<SourceSelection>)>,
+    sources: Vec<(
+        nara_scene::SourceDocumentKey,
+        Option<AuthoringSourceSelection>,
+    )>,
     source_capture: Option<AuthoringDocumentCapture>,
     native_ready: bool,
     requires_recapture: bool,
@@ -175,48 +169,11 @@ impl EditorSceneCapture {
 impl EditorProjectSession {
     fn capture_selection(&self) -> Option<CaptureSelection> {
         let document = self.scene_preview_document?;
-        let slot = self.workspace.scene(document)?;
-        let lane = self.scene_lanes.get(&document)?;
-        let receipt = lane.authoring_source.as_ref().and_then(|source| {
-            let (identity, parent, digest) = lane
-                .host
-                .try_with(|host| host.accepted_source_observation())??;
-            source
-                .with_persistence_observation(identity, parent, digest)
-                .ok()
-        });
-        let root = SourceSelection {
-            document,
-            revision: slot.revision(),
-            schema: slot.session().authoring_schema_basis(),
-            source_key: lane.source_key.clone(),
-            receipt,
-        };
-        let prefabs = self
-            .prefab_lanes
-            .iter()
-            .filter_map(|(&document, lane)| {
-                let slot = self.workspace.prefab(document)?;
-                let receipt = lane.authoring_source.as_ref().and_then(|source| {
-                    lane.host
-                        .try_with(|host| host.accepted_source_observation())
-                        .flatten()
-                        .and_then(|(identity, parent, digest)| {
-                            source
-                                .with_persistence_observation(identity, parent, digest)
-                                .ok()
-                        })
-                });
-                Some(SourceSelection {
-                    document,
-                    revision: slot.revision(),
-                    schema: slot.session().authoring_schema_basis(),
-                    source_key: lane.source_key.clone(),
-                    receipt,
-                })
-            })
-            .collect();
-        Some(CaptureSelection { root, prefabs })
+        self.workspace.scene(document)?;
+        Some(CaptureSelection {
+            root: self.authoring_source_selection(document)?,
+            prefabs: self.authoring_prefab_selections(),
+        })
     }
 
     pub(super) fn initialize_authoring_scene_capture(&mut self) {
@@ -278,24 +235,7 @@ impl EditorProjectSession {
             ));
             return;
         };
-        let open_prefabs = selection
-            .prefabs
-            .iter()
-            .filter_map(|selected| {
-                let lane = self.prefab_lanes.get(&selected.document)?;
-                let source = selected
-                    .receipt
-                    .as_ref()
-                    .or(lane.authoring_source.as_ref())?;
-                let session = self.workspace.prefab(selected.document)?.session();
-                let snapshot = AuthoringPrefabSessionSnapshot::capture(source, session);
-                Some(if selected.receipt.is_some() {
-                    snapshot
-                } else {
-                    snapshot.without_persistence()
-                })
-            })
-            .collect();
+        let open_prefabs = self.capture_open_prefabs(&selection.prefabs);
         let request = self
             .authoring_project()
             .expect("authoring capture has a project")
@@ -768,7 +708,10 @@ fn projection(
 
 fn dependencies(
     generation: u64,
-    sources: &[(nara_scene::SourceDocumentKey, Option<SourceSelection>)],
+    sources: &[(
+        nara_scene::SourceDocumentKey,
+        Option<AuthoringSourceSelection>,
+    )],
 ) -> EditorPreviewDependencies {
     EditorPreviewDependencies::captured(
         generation,

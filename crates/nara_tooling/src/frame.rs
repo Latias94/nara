@@ -118,6 +118,7 @@ impl EditorFrameClock {
             image_import_work_pending: false,
             source_asset_import: None,
             source_asset_import_work_pending: false,
+            prefab_conversion: Default::default(),
             document_open: Default::default(),
             scene_preview_document: None,
             authoring_retirement_pending: false,
@@ -288,6 +289,7 @@ pub struct EditorFrameModel {
     image_import_work_pending: bool,
     source_asset_import: Option<crate::EditorSourceAssetImportView>,
     source_asset_import_work_pending: bool,
+    prefab_conversion: crate::EditorPrefabConversionView,
     document_open: crate::EditorDocumentOpenView,
     scene_preview_document: Option<EditorDocumentId>,
     authoring_retirement_pending: bool,
@@ -297,6 +299,18 @@ pub struct EditorFrameModel {
 }
 
 impl EditorFrameModel {
+    #[must_use]
+    pub fn prefab_conversion(&self) -> &crate::EditorPrefabConversionView {
+        &self.prefab_conversion
+    }
+
+    #[doc(hidden)]
+    #[must_use]
+    pub fn with_prefab_conversion(mut self, view: crate::EditorPrefabConversionView) -> Self {
+        self.prefab_conversion = view;
+        self
+    }
+
     /// Background capture or source validation needs maintenance without authorizing old pixels.
     #[must_use]
     pub const fn scene_preview_work_pending(&self) -> bool {
@@ -668,6 +682,7 @@ pub enum EditorAction {
     CommitAuthoringEdit(crate::PreparedEditorDocumentEdit),
     /// Consumes the source owner's construction and retains its exact successful mapping.
     CommitAuthoringConstruction(crate::PreparedEditorDocumentConstruction),
+    PrefabConversion(crate::EditorPrefabConversionAction),
     Mutate(EditorDocumentMutation),
     Extension(crate::EditorExtensionCommand),
     Persistence(EditorPersistenceAction),
@@ -715,6 +730,7 @@ impl EditorAction {
             | Self::ReadDocumentProperty(_)
             | Self::CommitAuthoringEdit(_)
             | Self::CommitAuthoringConstruction(_)
+            | Self::PrefabConversion(_)
             | Self::Extension(_)
             | Self::Persistence(_)
             | Self::ProjectContent(_)
@@ -879,6 +895,7 @@ pub enum EditorActionOutcome {
     Workspace(EditorWorkspaceCommandReport),
     /// Exact source-owner receipt after successful construction publication.
     AuthoringConstruction(crate::CommittedEditorDocumentConstruction),
+    PrefabConversion(crate::EditorPrefabConversionActionOutcome),
     /// Owned read-only page or exact query rejection; not a document mutation result.
     DocumentEntities(Result<crate::EditorEntityPage, crate::EditorDocumentQueryRejection>),
     DocumentAuthoring(Result<crate::EditorAuthoringPage, crate::EditorDocumentQueryRejection>),

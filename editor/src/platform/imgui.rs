@@ -2262,6 +2262,7 @@ fn imgui_frame_maintenance_deadline(
     let deadline = (frame.project_browser().has_pending_work()
         || frame.document_open().has_pending_work()
         || frame.authoring_retirement_pending()
+        || frame.prefab_conversion().phase.work_pending()
         || matches!(
             frame.project_content(),
             nara::tooling::EditorProjectContentView::RefreshPending { .. }

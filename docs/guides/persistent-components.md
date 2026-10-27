@@ -443,6 +443,8 @@ a new source incarnation and invalidates earlier conversion tokens.
 The independent consumer is
 `tests/fixtures/module-consumer/tests/prefab_conversion.rs`. It exercises direct Scene and renamed
 root Prefab exports, background preparation, reference remapping, exact replay and disk Reopen.
+The integrated Editor's Host operation, paged review and correlated result are described in
+[the panel guide](editor-panels.md#convert-a-complete-instance).
 
 ## Stable Nested Properties
 

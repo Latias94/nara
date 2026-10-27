@@ -356,6 +356,39 @@ Expansion reports expose `PrefabExpansionFailure`; its `reason()` returns
 `PrefabExpansionFailureKind`, covering source admission and work limits as well as invalid intent.
 The optional location describes an established source declaration, not mutation authority.
 
+### Convert A Complete Instance
+
+The integrated Authoring Host accepts `EditorPrefabConversionAction::Prepare { basis, anchor }`
+for a direct source anchor in an admitted Scene or Prefab. Use the complete basis from
+`document_query_basis(document)`. The built-in `Prefab Intent` tab labels this operation
+**Convert Entire Instance to Local**: nested instances and overlay additions in the selected
+projection also become local. The anchor's own records and ordinary local children retain
+their identities; other instances remain linked. Selected unavailable data refuses conversion.
+
+Prepare returns dispatch acceptance with an operation ID. Observe the same ID through
+`frame.prefab_conversion()` or `session.prefab_conversion_view()`. `Preparing` means actual
+source acquisition and preparation are pending. `Review` exposes a bounded page of the fixed
+origin-to-local-ID mapping, the original document basis and actual source counts.
+The Inspector uses fixed-height local-ID rows; select one to inspect its complete source
+breadcrumb in a separate scrollable detail. This changes panel focus only. The breadcrumb is
+display text; the retained source token and successful receipt carry typed identity.
+`ReviewPage { operation, offset }` reads that retained mapping without preparing again.
+Navigation and paints do not retarget the operation.
+
+`Commit { operation }` starts fresh file, metadata, Schema and stable-lookup validation.
+During `Validating`, no conversion has been published. The Host also checks the current
+root and each actually used file or working copy before committing the original source
+token through Workspace. A changed participating source rejects that candidate; the caller
+must explicitly prepare another operation. Unrelated document edits do not invalidate it.
+
+Only `Committed { operation, receipt }` establishes source publication. The receipt contains
+the actual accepted mapping and document report. Ordinary Undo/Redo and Save/Reopen continue
+through that source document's existing owners; there is no conversion-specific history.
+`Cancel { operation }` works during preparation, review or validation. Pending cancellation
+waits for the worker's physical return before reporting `Cancelled`. After any terminal
+result, send `Acknowledge { operation }` to release the single operation slot.
+Dispatch refusal and terminal failure remain separate observations.
+
 Raw mixed patches use explicit persistent `SceneEntityId` values and declared component templates;
 use [retained construction](#construct-with-transaction-local-references) for source-owned
 transaction-local allocation and references. Schema-relative nested replacements have their separate

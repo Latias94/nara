@@ -2,6 +2,9 @@
 
 use super::*;
 
+mod prefabs;
+pub(crate) use prefabs::AuthoringPrefabSourceCapture;
+
 #[cfg(all(test, any(windows, target_os = "linux")))]
 mod tests;
 
@@ -36,67 +39,19 @@ impl OwnedAuthoringSceneCapture {
         self,
     ) -> Result<AuthoringDocumentCapture, AuthoringProjectSourceAdmissionError> {
         let mut budget = self.schema.budget;
-        budget.charge_source_bytes(0, 0, 0, self.adapter_retained)?;
-        let mut input_retained =
-            checked_sum([self.document.retained_bytes()?, 2 * size_of::<usize>()])?;
-        for snapshot in &self.open_prefabs {
-            input_retained = checked_sum([
-                input_retained,
-                size_of::<AuthoringPrefabSessionSnapshot>(),
-                snapshot.document.retained_bytes()?,
-                snapshot.source.relative_path().len(),
-                snapshot
-                    .source
-                    .native_source()
-                    .retained_bytes()
-                    .ok_or(AuthoringProjectSourceAdmissionError::AccountingOverflow)?,
-            ])?;
-        }
-        budget.charge_source_bytes(0, 0, 0, input_retained)?;
-        budget.charge_reference(self.source.relative_path().len(), 0, false)?;
-        budget.charge_open_file(3)?;
-        budget.charge_source_bytes(
-            self.source.encoded_bytes(),
-            0,
-            0,
-            checked_sum([
-                size_of::<AuthoringSourceFact>(),
-                size_of::<Arc<AuthoringSourceFact>>(),
-                self.source.relative_path().len(),
-            ])?,
+        let (input_retained, containing) = prefabs::charge_capture_inputs(
+            &self.source,
+            self.document.retained_bytes()?,
+            self.adapter_retained,
+            &self.open_prefabs,
+            &mut budget,
         )?;
-        let native = self.source.native_source();
-        let metadata_bytes = if let Some(metadata) = native.metadata_source() {
-            budget.charge_open_file(3)?;
-            budget.charge_reference(metadata.project_path().as_str().len(), 0, false)?;
-            metadata.encoded_bytes()
-        } else {
-            0
-        };
-        budget.charge_source_bytes(
-            metadata_bytes,
-            0,
-            0,
-            native
-                .retained_bytes()
-                .ok_or(AuthoringProjectSourceAdmissionError::AccountingOverflow)?,
-        )?;
-        let containing = AuthoringSourceFact {
-            kind: AuthoringSourceKind::Scene,
-            project_path: ProjectPath::new(self.source.relative_path().to_owned())
-                .map_err(AuthoringProjectSourceAdmissionError::JoinedSourcePath)?,
-            identity: self.source.identity(),
-            parent_identity: self.source.parent_identity(),
-            digest: self.source.digest(),
-            encoded_bytes: self.source.encoded_bytes(),
-            dependency_depth: 0,
-        };
         let mut capture = capture_scene(
             &self.schema,
             self.scene_limits,
             &self.document,
             &self.basis,
-            &Arc::new(containing),
+            &containing,
             self.source.native_source(),
             self.readiness,
             &mut budget,
@@ -298,229 +253,40 @@ pub(super) fn capture_scene(
 ) -> Result<AuthoringDocumentCapture, AuthoringProjectSourceAdmissionError> {
     let prefab_root = schema.settings.paths.prefabs.clone();
     let asset_root = schema.settings.paths.assets.clone();
-    let mut identities = HashMap::new();
-    identities.insert(schema.manifest_identity(), LoadedIdentity::SchemaBasis);
-    identities.insert(schema.bundle_identity(), LoadedIdentity::SchemaBasis);
-    if identities.contains_key(&containing_source.identity()) {
-        return Err(
-            AuthoringProjectSourceAdmissionError::SourceIdentityKindConflict {
-                path: containing_source.project_path().clone(),
-            },
-        );
-    }
-    let source_policy = NativeDocumentSourcePolicy::new(schema.settings());
-    identities.insert(containing_source.identity(), LoadedIdentity::Scene);
-    let mut source_facts = BTreeMap::new();
-    source_facts.insert(
-        containing_source.project_path().as_str().to_owned(),
+    let mut acquisition = prefabs::AuthoringPrefabAcquisition::new(
+        schema,
+        scene_limits,
+        basis,
         Arc::clone(containing_source),
-    );
-    include_native_metadata_source(containing_native_source, &mut identities, &mut source_facts)?;
-
-    let mut pending_assets = BTreeMap::new();
-    let mut unresolved_dependencies = Vec::new();
-    let mut catalogue = ReferenceCatalogue::new(
-        schema.project_root.share(),
-        [asset_root.clone(), prefab_root.clone()],
-    );
-    let mut prefabs_directory = None;
-    let mut prefabs = BTreeMap::new();
-    let mut compiler_limit = remaining_compiler_work(
+        containing_native_source,
         budget,
-        0,
-        nara_scene::PrefabExpansionLimits::default().working_bytes(),
+        open_prefabs,
     )?;
-    let mut compiler_reservation = 0;
-    resize_compiler_work(budget, &mut compiler_reservation, compiler_limit.get())?;
     let options = nara_scene::PrefabExpansionOptions::default()
-        .with_max_depth(budget.limits.traversal_depth().get())
+        .with_max_depth(acquisition.budget.limits.traversal_depth().get())
         .with_limits(
-            nara_scene::PrefabExpansionLimits::default().with_working_bytes(compiler_limit),
+            nara_scene::PrefabExpansionLimits::default()
+                .with_working_bytes(acquisition.initial_compiler_limit()),
         );
     let mut compiled = nara_scene::__private::try_expand_authoring_prefabs_with_loader(
         document,
         basis,
         options,
         None,
-        |reference, working_set| {
-            let suspended = working_set
-                .checked_work_bytes()
-                .ok_or(AuthoringProjectSourceAdmissionError::AccountingOverflow)?;
-            resize_compiler_work(budget, &mut compiler_reservation, suspended)?;
-            let depth = working_set.source_depth();
-            let loaded = (|| -> Result<Option<nara_scene::ResolvedPrefabSource>, AuthoringProjectSourceAdmissionError> {
-                let Some(path) = catalogue.resolve(reference, true, budget)? else {
-                    budget.charge_reference(16, depth, true)?;
-                    unresolved_dependencies.push(AuthoringUnresolvedDependency {
-                        kind: AuthoringUnresolvedDependencyKind::Prefab,
-                        reference: reference.clone(), dependency_depth: depth,
-                    });
-                    return Ok(None);
-                };
-                budget.charge_reference(path.as_str().len(), depth, true)?;
-                if let Some(prefab) = prefabs.get(&path) {
-                    let prefab: &AuthoringPrefabSource = prefab;
-                    return Ok(Some(prefab.resolved_source()));
-                }
-                if prefabs_directory.is_none() {
-                    match open_source_directory(
-                        &schema.project_root, &prefab_root, AuthoringSourceKind::Prefab,
-                        budget,
-                    ) {
-                        Ok(directory) => prefabs_directory = Some(directory),
-                        Err(error) if is_missing_source(&error) => {
-                            unresolved_dependencies.push(AuthoringUnresolvedDependency {
-                                kind: AuthoringUnresolvedDependencyKind::Prefab,
-                                reference: reference.clone(), dependency_depth: depth,
-                            });
-                            return Ok(None);
-                        }
-                        Err(error) => return Err(error),
-                    }
-                }
-                let project_path = join_project_path(&prefab_root, path.as_str())?;
-                let opened = match open_source_file(
-                    prefabs_directory.as_ref().expect("requested Prefab directory is retained"),
-                    project_path, path.as_str(), AuthoringSourceKind::Prefab, depth,
-                    budget,
-                ) {
-                    Ok(opened) => opened,
-                    Err(error) if is_missing_source(&error) => {
-                        unresolved_dependencies.push(AuthoringUnresolvedDependency {
-                            kind: AuthoringUnresolvedDependencyKind::Prefab,
-                            reference: reference.clone(), dependency_depth: depth,
-                        });
-                        return Ok(None);
-                    }
-                    Err(error) => return Err(error),
-                };
-                let native_source = source_policy.admit_budgeted(
-                    &schema.project_root, opened.project_path.as_str(),
-                    nara_scene::SourceDocumentKind::Prefab, opened.identity, depth, 5,
-                    budget,
-                )?;
-                if native_source.key().origin() == containing_native_source.key().origin()
-                    || prefabs.values().any(|prefab: &AuthoringPrefabSource| {
-                        prefab.native_source.key().origin() == native_source.key().origin()
-                            && prefab.source.project_path() != &opened.project_path
-                    })
-                {
-                    return Err(AuthoringProjectSourceAdmissionError::NativeSource(
-                        super::super::AuthoringDocumentAdmissionError::NativeSourceIdentityConflict,
-                    ));
-                }
-                include_native_metadata_source(&native_source, &mut identities, &mut source_facts)?;
-                let mut matching_sessions = open_prefabs.iter().filter(|snapshot| {
-                    snapshot.source.relative_path() == opened.project_path.as_str()
-                        || snapshot.source_key() == native_source.key()
-                });
-                let selected_session = matching_sessions.next();
-                if matching_sessions.next().is_some() {
-                    return Err(AuthoringProjectSourceAdmissionError::AmbiguousPrefabSession {
-                        path: opened.project_path,
-                    });
-                }
-                let (source, content, limits) = if let Some(snapshot) = selected_session {
-                    if snapshot.source_key().kind() != nara_scene::SourceDocumentKind::Prefab
-                        || !snapshot.persistence_available
-                        || !snapshot.source_matches
-                        || snapshot.source_key() != native_source.key()
-                        || snapshot.source.relative_path() != opened.project_path.as_str()
-                        || snapshot.source.identity() != opened.identity
-                        || snapshot.source.parent_identity() != opened.parent_identity
-                        || !matching_metadata(
-                            snapshot.source.native_source().metadata_source(),
-                            native_source.metadata_source(),
-                        )
-                    {
-                        return Err(AuthoringProjectSourceAdmissionError::SourceChanged {
-                            kind: AuthoringSourceKind::Prefab,
-                            path: opened.project_path,
-                        });
-                    }
-                    if snapshot.basis.as_ref() != Some(basis) {
-                        return Err(AuthoringProjectSourceAdmissionError::SchemaBasisMismatch);
-                    }
-                    if identities.contains_key(&opened.identity) {
-                        return Err(AuthoringProjectSourceAdmissionError::SourceIdentityKindConflict {
-                            path: opened.project_path,
-                        });
-                    }
-                    let source = AuthoringSourceFact {
-                        kind: AuthoringSourceKind::Prefab,
-                        project_path: opened.project_path,
-                        identity: snapshot.source.identity(),
-                        parent_identity: snapshot.source.parent_identity(),
-                        digest: snapshot.source.digest(),
-                        encoded_bytes: snapshot.source.encoded_bytes(),
-                        dependency_depth: depth,
-                    };
-                    // No decode or encoded input is charged for a shared working document.
-                    // Its retained source and final file fence remain part of this capture.
-                    budget.reconcile_retained_reservation(snapshot.document.retained_bytes()?, 0)?;
-                    charge_composition_source(&source, 0, &snapshot.document, budget)?;
-                    budget.charge_source_bytes(
-                        source.encoded_bytes(), 0, 0, 0,
-                    )?;
-                    let source = Arc::new(source);
-                    let content = AuthoringPrefabContent::Session {
-                        document: Arc::clone(&snapshot.document),
-                        revision: snapshot.revision,
-                    };
-                    identities.insert(source.identity(), LoadedIdentity::Prefab {
-                        source: Arc::clone(&source),
-                        document: Arc::clone(&snapshot.document),
-                        limits: scene_limits,
-                    });
-                    source_facts.insert(source.project_path().as_str().to_owned(), Arc::clone(&source));
-                    (source, content, scene_limits)
-                } else if let Some(loaded) = identities.get(&opened.identity) {
-                    let LoadedIdentity::Prefab { source, document, limits } = loaded else {
-                        return Err(AuthoringProjectSourceAdmissionError::SourceIdentityKindConflict {
-                            path: opened.project_path,
-                        });
-                    };
-                    if prefabs.values().any(|prefab: &AuthoringPrefabSource| {
-                        prefab.source.identity() == opened.identity && prefab.session_revision().is_some()
-                    }) {
-                        return Err(AuthoringProjectSourceAdmissionError::SourceIdentityKindConflict {
-                            path: opened.project_path,
-                        });
-                    }
-                    (Arc::clone(source), AuthoringPrefabContent::File(Arc::clone(document)), *limits)
-                } else {
-                    let read = read_unique_source(opened, scene_limits.encoded_bytes().get(), budget)?;
-                    let (document, limits) = admit_prefab_composition_source(
-                        &read, scene_limits, budget,
-                    )?;
-                    let source = Arc::clone(&read.source);
-                    identities.insert(source.identity(), LoadedIdentity::Prefab {
-                        source: Arc::clone(&source), document: Arc::clone(&document), limits,
-                    });
-                    source_facts.insert(source.project_path().as_str().to_owned(), Arc::clone(&source));
-                    (source, AuthoringPrefabContent::File(document), limits)
-                };
-                let prefab = AuthoringPrefabSource {
-                    path: path.clone(), native_source, source, content, basis: basis.clone(), limits,
-                };
-                let resolved = prefab.resolved_source();
-                prefabs.insert(path, prefab);
-                Ok(Some(resolved))
-            })()?;
-            compiler_limit = remaining_compiler_work(budget, compiler_reservation, compiler_limit)?;
-            if suspended > compiler_limit.get() {
-                return Err(
-                    AuthoringProjectAdmissionError::RetainedCandidateBytesExceeded {
-                        maximum: budget.limits.retained_candidate_bytes().get(),
-                    }
-                    .into(),
-                );
-            }
-            resize_compiler_work(budget, &mut compiler_reservation, compiler_limit.get())?;
-            working_set.restrict_working_bytes(compiler_limit);
-            Ok::<_, AuthoringProjectSourceAdmissionError>(loaded)
-        },
+        |reference, working_set| acquisition.load(reference, working_set),
     )?;
+    let prefabs::AuthoringPrefabAcquisition {
+        budget,
+        mut identities,
+        mut source_facts,
+        mut unresolved_dependencies,
+        mut catalogue,
+        prefabs_directory,
+        prefabs,
+        mut compiler_reservation,
+        ..
+    } = acquisition;
+    let mut pending_assets = BTreeMap::new();
     if compiled.budget_exceeded() {
         return Err(AuthoringProjectSourceAdmissionError::CompilationBudget(
             compiled.diagnostics,
@@ -737,14 +503,7 @@ pub(super) fn capture_scene(
             .checked_add(path.as_str().len())
             .ok_or(AuthoringProjectSourceAdmissionError::AccountingOverflow)
     })?;
-    containing_native_source
-        .revalidate(&schema.project_root)
-        .map_err(AuthoringProjectSourceAdmissionError::NativeSource)?;
     for prefab in prefabs.values() {
-        prefab
-            .native_source
-            .revalidate(&schema.project_root)
-            .map_err(AuthoringProjectSourceAdmissionError::NativeSource)?;
         if let nara_scene::SourceDocumentOrigin::StableAsset { stable_id } =
             prefab.native_source.key().origin()
             && asset_database
@@ -759,36 +518,15 @@ pub(super) fn capture_scene(
             ));
         }
     }
-    for source in source_facts.values() {
-        revalidate_source_fact(&schema.project_root, source, budget)?;
-    }
-    for source in schema_source_facts(schema) {
-        revalidate_source_fact(&schema.project_root, &source, budget)?;
-    }
-    for source in catalogue.lookup_sources() {
-        if let Some(existing) = source_facts.get(source.project_path().as_str()) {
-            if !existing.same_file_observation(source) {
-                return Err(AuthoringProjectSourceAdmissionError::SourceChanged {
-                    kind: source.kind(),
-                    path: source.project_path().clone(),
-                });
-            }
-        } else {
-            revalidate_source_fact(&schema.project_root, source, budget)?;
-            if identities.contains_key(&source.identity()) {
-                return Err(
-                    AuthoringProjectSourceAdmissionError::SourceIdentityKindConflict {
-                        path: source.project_path().clone(),
-                    },
-                );
-            }
-            identities.insert(source.identity(), LoadedIdentity::AssetMetadata);
-            source_facts.insert(
-                source.project_path().as_str().to_owned(),
-                Arc::clone(source),
-            );
-        }
-    }
+    prefabs::revalidate_sources(
+        schema,
+        containing_native_source,
+        &prefabs,
+        &mut identities,
+        &mut source_facts,
+        &catalogue,
+        budget,
+    )?;
     if let nara_scene::SourceDocumentOrigin::StableAsset { stable_id } =
         containing_native_source.key().origin()
         && asset_database.record_for_stable_id(*stable_id).is_some()

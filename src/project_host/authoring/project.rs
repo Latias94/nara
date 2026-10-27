@@ -38,8 +38,8 @@ use super::{
 mod capture;
 mod catalogue;
 pub(crate) use capture::{
-    AuthoringDocumentCapture, AuthoringPrefabSessionSnapshot, AuthoringSourceValidation,
-    CapturedAuthoringPreview,
+    AuthoringDocumentCapture, AuthoringPrefabSessionSnapshot, AuthoringPrefabSourceCapture,
+    AuthoringSourceValidation, CapturedAuthoringPreview,
 };
 #[cfg(test)]
 mod tests;
@@ -1056,7 +1056,7 @@ fn reserve_preview_identity_store(
 
 enum LoadedIdentity {
     SchemaBasis,
-    Scene,
+    ContainingDocument,
     AssetMetadata,
     AssetSource,
     Prefab {

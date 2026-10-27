@@ -2573,6 +2573,7 @@ fn drive_project_frame(
         || before.project_content() != after.project_content()
         || before.source_asset_import() != after.source_asset_import()
         || before.source_asset_import_work_pending() != after.source_asset_import_work_pending()
+        || before.prefab_conversion() != after.prefab_conversion()
         || before.image_import_work_pending() != after.image_import_work_pending()
         || before.authoring_retirement_pending() != after.authoring_retirement_pending()
         || before.scene_preview_unsaved_dependencies() != after.scene_preview_unsaved_dependencies()

@@ -92,6 +92,20 @@ an incompatible source revision, then requests the unchanged accepted Host sourc
 a fresh submitted/composite token. That recovery probe simulates rejected-source observation;
 the owner tests separately exercise actual materialization rejection and exact source restoration.
 
+For complete Prefab-to-local conversion, also execute:
+
+```powershell
+cargo +1.95.0 nextest run -p nara-editor --all-features --lib --locked --run-ignored only -E 'test(native_complete_prefab_conversion_reviews_commits_and_round_trips_scene_and_prefab)' --test-threads=1
+```
+
+This hidden-window trajectory uses actual Inspector mouse and wheel input to prepare, review and
+commit the same conversion for both Scene and Prefab sources. It checks fixed remaps, exact local
+hierarchy, ordinary local children, another linked instance, one Undo/Redo and actual Save/Reopen.
+It compares Sprite geometry, material and source texture pixels through the presentation owner and
+requires actual native composite receipts. It does not read back the GPU framebuffer or qualify
+monitor scanout. Host tests separately cover stale source/working-copy refusal and physical
+cancellation/Close; a passing native success path does not establish those failure paths.
+
 For trusted Play source association and source-local document Close, also execute:
 
 ```powershell

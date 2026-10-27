@@ -42,6 +42,13 @@ pub(crate) struct AuthoringDocumentSourceFact {
 }
 
 impl AuthoringDocumentSourceFact {
+    pub(crate) fn checked_retained_bytes(&self) -> Option<usize> {
+        std::mem::size_of::<Self>()
+            .checked_add(2 * std::mem::size_of::<usize>())?
+            .checked_add(self.relative_path.len())?
+            .checked_add(self.native.retained_bytes()?)
+    }
+
     /// Retains an already admitted document observation without reopening its source.
     pub(crate) fn from_captured_source(
         source: &AuthoringSourceFact,

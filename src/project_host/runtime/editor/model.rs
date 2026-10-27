@@ -58,6 +58,7 @@ impl EditorProjectSession {
         self.advance_persistence();
         self.advance_workspace_persistence();
         self.advance_workspace_retirement();
+        self.advance_prefab_conversion();
         if drive_runtime && self.trusted_compiled().is_some() {
             self.drive_play_owner(real_delta);
         }
@@ -157,7 +158,8 @@ impl EditorProjectSession {
                 .with_document_open(self.document_open_view())
                 .with_authoring_retirement_pending(self.authoring_retirements.is_pending())
                 .with_scene_preview_work(preview_work.0, preview_work.1, preview_work.2)
-                .with_scene_preview_document(self.scene_preview_document),
+                .with_scene_preview_document(self.scene_preview_document)
+                .with_prefab_conversion(self.prefab_conversion_view()),
         );
         #[cfg(feature = "runtime-ui")]
         self.publish_ui_authoring_frame(frame.revision());

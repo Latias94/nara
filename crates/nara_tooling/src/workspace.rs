@@ -41,6 +41,7 @@ use crate::{
 mod authoring_query;
 mod construction;
 mod extension;
+mod prefab_conversion;
 mod prefab_declarations;
 mod prepared_edit;
 pub use construction::{CommittedEditorDocumentConstruction, PreparedEditorDocumentConstruction};
@@ -49,6 +50,10 @@ pub use extension::{
     EditorExtensionDocumentError, EditorExtensionDocumentView,
 };
 use extension::{ErasedExtensionDocument, TypedExtensionDocument};
+pub use prefab_conversion::{
+    CommittedEditorPrefabConversion, EditorPrefabConversionCommitError,
+    EditorPrefabConversionRequest, PreparedEditorPrefabConversion,
+};
 pub use prepared_edit::PreparedEditorDocumentEdit;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]

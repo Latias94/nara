@@ -11,6 +11,7 @@ mod image_import;
 mod inspector;
 mod persistence;
 mod play;
+mod prefab_conversion;
 mod project_browser;
 mod snapshot;
 mod source_asset_import;
@@ -91,6 +92,11 @@ pub use play::{
     SceneApplyChangesComponentStatus, SceneApplyChangesReport, SceneApplyChangesRequest,
     SceneEditorModel, SceneEditorState,
 };
+pub use prefab_conversion::{
+    EditorPrefabConversionAction, EditorPrefabConversionActionOutcome, EditorPrefabConversionId,
+    EditorPrefabConversionMappingRow, EditorPrefabConversionPhase, EditorPrefabConversionRejection,
+    EditorPrefabConversionResult, EditorPrefabConversionReview, EditorPrefabConversionView,
+};
 pub use project_browser::{
     EditorDocumentOpenId, EditorDocumentOpenPhase, EditorDocumentOpenResult,
     EditorDocumentOpenView, EditorProjectBrowserAction, EditorProjectBrowserActionOutcome,
@@ -109,14 +115,15 @@ pub use source_asset_import::{
     EditorSourceAssetImportRejection, EditorSourceAssetImportView, EditorSourceAssetMetadataView,
 };
 pub use workspace::{
-    CommittedEditorDocumentConstruction, EditorDocumentDigest, EditorDocumentId,
-    EditorDocumentKind, EditorDocumentSourceBinding, EditorDocumentTabModel,
+    CommittedEditorDocumentConstruction, CommittedEditorPrefabConversion, EditorDocumentDigest,
+    EditorDocumentId, EditorDocumentKind, EditorDocumentSourceBinding, EditorDocumentTabModel,
     EditorExtensionCommand, EditorExtensionDocument, EditorExtensionDocumentError,
-    EditorExtensionDocumentView, EditorExternalReloadState, EditorPrefabSessionPublicationError,
-    EditorPrefabSlot, EditorSceneModel, EditorSceneSessionPublicationError, EditorSceneSlot,
-    EditorSceneTabModel, EditorSelectionSet, EditorWorkspace, EditorWorkspaceCommand,
-    EditorWorkspaceCommandReport, EditorWorkspaceModel, PreparedEditorDocumentConstruction,
-    PreparedEditorDocumentEdit,
+    EditorExtensionDocumentView, EditorExternalReloadState, EditorPrefabConversionCommitError,
+    EditorPrefabConversionRequest, EditorPrefabSessionPublicationError, EditorPrefabSlot,
+    EditorSceneModel, EditorSceneSessionPublicationError, EditorSceneSlot, EditorSceneTabModel,
+    EditorSelectionSet, EditorWorkspace, EditorWorkspaceCommand, EditorWorkspaceCommandReport,
+    EditorWorkspaceModel, PreparedEditorDocumentConstruction, PreparedEditorDocumentEdit,
+    PreparedEditorPrefabConversion,
 };
 #[doc(hidden)]
 pub use workspace::{

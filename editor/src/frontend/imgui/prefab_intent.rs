@@ -22,6 +22,8 @@ const PAGE_ROWS: usize = 64;
 const DETAIL_BYTES: usize = 16 * 1024;
 const REVIEW_BYTES: usize = 128 * 1024;
 
+mod conversion;
+
 #[derive(Default)]
 pub(super) struct ImguiPrefabIntent {
     basis: Option<EditorDocumentQueryBasis>,
@@ -37,6 +39,7 @@ pub(super) struct ImguiPrefabIntent {
     result: Option<(PanelSubmissionId, PanelActionDispatch)>,
     result_text: Option<String>,
     notice: Option<String>,
+    conversion: conversion::ConversionUi,
 }
 
 struct RevertReview {
@@ -88,6 +91,9 @@ impl ImguiPrefabIntent {
     }
 
     pub(super) fn action_finished(&mut self, id: PanelSubmissionId, result: PanelActionDispatch) {
+        if self.conversion.action_finished(id, &result) {
+            return;
+        }
         if self.pending != Some(id) {
             return;
         }
@@ -100,6 +106,9 @@ impl ImguiPrefabIntent {
     }
 
     fn show(&mut self, ui: &Ui, context: &mut ImguiEditorPanelContext<'_, '_>) {
+        if self.conversion.show(ui, context) {
+            return;
+        }
         let Some(document) = context.model().document().map(|document| document.document) else {
             self.cancel_review();
             ui.text_disabled("Open a Scene or Prefab document to review its stored intent.");
@@ -152,7 +161,7 @@ impl ImguiPrefabIntent {
             return;
         }
         let locked = !current_basis || self.pending.is_some() || self.review.is_some();
-        let browser_height = (ui.content_region_avail()[1] - 130.0).max(80.0);
+        let browser_height = (ui.content_region_avail()[1] - 240.0).max(80.0);
         ui.child_window("prefab-intent-browser")
             .size([0.0, browser_height])
             .build(ui, || {
@@ -178,6 +187,17 @@ impl ImguiPrefabIntent {
             self.prepare(context, PrefabRevert::Overlay);
         }
         ui.text_wrapped("Revert removes stored intent. Entire overlay Revert keeps the source link. No implicit reference or hierarchy cleanup is performed.");
+        ui.separator();
+        let path = self.selected_path().cloned();
+        let has_instance = self.selected_instance().is_some();
+        self.conversion.show_prepare(
+            ui,
+            context,
+            self.basis.as_ref(),
+            path.as_ref(),
+            has_instance,
+            editing && current_basis && self.pending.is_none() && self.review.is_none(),
+        );
     }
 
     fn refresh(
