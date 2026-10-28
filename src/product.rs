@@ -369,7 +369,7 @@ impl ProductRecipe {
 
     /// Selects one compiled source domain for file-backed Check and Play. Settings live in metadata.
     #[cfg(all(feature = "runtime-2d", feature = "serde"))]
-    pub fn add_asset_domain<D: crate::project_content::ProjectAssetDomain>(
+    pub fn add_asset_domain<D: nara_asset::SourceAssetImporter>(
         mut self,
     ) -> Result<Self, ProductRecipeError> {
         self.asset_domains.add::<D>()?;

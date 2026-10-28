@@ -1,6 +1,7 @@
 //! The Editor facet reuses the same text preparation as the game's source domain.
 
-use nara::project_host::{EditorSourceAssetDomain, ProjectAssetDomain};
+use nara::project_host::EditorSourceAssetDomain;
+use nara_asset::SourceAssetImporter;
 use nara_asset_domain_consumer::{TextDomain, TextSettings};
 
 pub struct TextImportDomain;

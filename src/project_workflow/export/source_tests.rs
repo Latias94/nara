@@ -65,17 +65,17 @@ impl nara_app::Plugin for SourceTextPlugin {
 
 struct SourceTextDomain;
 
-impl crate::project_host::ProjectAssetDomain for SourceTextDomain {
+impl nara_asset::SourceAssetImporter for SourceTextDomain {
     type Settings = ();
     type Product = Vec<u8>;
     const SOURCE_KIND: &'static str = "test.export.text";
-    fn limits() -> crate::project_host::ProjectAssetLimits {
+    fn limits() -> nara_asset::AssetImportLimits {
         let bytes = nara_core::ByteLimit::new(1024).unwrap();
-        crate::project_host::ProjectAssetLimits::new(bytes, bytes, bytes)
+        nara_asset::AssetImportLimits::new(bytes, bytes, bytes)
     }
-    fn prepare(
-        source: &mut crate::project_host::ProjectAssetSource<'_>,
-    ) -> Result<Self::Product, crate::project_host::ProjectContentError> {
+    fn prepare<E>(
+        source: &mut nara_asset::AssetImportSource<'_, E>,
+    ) -> Result<Self::Product, nara_asset::AssetImportError<E>> {
         source.metadata().admit::<Self::Settings>().unwrap();
         Ok(source
             .read_dependency(

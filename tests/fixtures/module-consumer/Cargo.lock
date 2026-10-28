@@ -1934,6 +1934,9 @@ name = "nara-asset-domain-consumer"
 version = "0.0.0"
 dependencies = [
  "nara",
+ "nara_asset",
+ "nara_core",
+ "nara_diagnostic",
  "serde",
 ]
 
@@ -1963,6 +1966,7 @@ dependencies = [
  "nara",
  "nara-asset-domain-consumer",
  "nara-editor",
+ "nara_asset",
  "nara_tooling",
  "serde_json",
 ]

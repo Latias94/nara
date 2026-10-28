@@ -2,7 +2,7 @@
 
 **Status**: Accepted
 **Date**: 2026-08-04
-**Last Revised**: 2026-10-23
+**Last Revised**: 2026-10-29
 **Owner**: `nara_asset`, concrete asset domains, host-authorized source reads, and runtime asset publication
 **Refines**: [ADR 0007](0007-asset-identity-and-import-pipeline.md),
 [ADR 0033](0033-asset-import-and-render-resource-preparation-seam.md),
@@ -89,12 +89,19 @@ flowchart LR
 
 ### Source-backed project domains (2026-10-21 refinement)
 
-The compiled product may select a `ProjectAssetDomain` through
+The compiled product may select a `nara_asset::SourceAssetImporter` through
 `ProductRecipe::add_asset_domain`. This is an executing Check/Play source-content contract in the
 project Host, distinct from Editor Import/Reimport and the generic importer executor rejected
 above. It returns one typed CPU product per referenced source. Domain-specific parsing, settings,
 semantic validation and conservative parser/product memory bounds remain domain-owned.
 
+- The pure executing source facet, `AssetImportSource`, `AssetImportLimits` and
+  `AssetImportError<E>` belong to `nara_asset` under its existing serde feature. A source parser
+  does not depend on the root project Host, Scene, 2D or Editor to express its contract.
+  The reader's caller supplies concrete `E`; auxiliary read failures preserve it, while domain
+  failures carry bounded diagnostics. Root orchestration maps its own read errors without
+  erasing their IO, authority or budget classification. The superseded root-owned
+  `ProjectAssetDomain`/input/limits protocol is removed without aliases.
 - Persisted `AssetSourceKind::Other` selects the exact domain. Extensions and registration order
   do not select an owner. Duplicate kind claims reject during recipe construction. Built-in Image
   and TileSet remain concrete adapters with their existing publication contracts.
@@ -141,7 +148,7 @@ and [source-export tests](../../../src/project_workflow/export/source_tests.rs).
 A trusted source-built Editor may explicitly select an `EditorSourceAssetDomain`. This is a
 metadata-authoring facet of the source-backed domain, not a generic imported-product executor.
 The facet names its associated `Domain` and uses that domain's settings type and
-`ProjectAssetDomain::prepare` implementation
+`SourceAssetImporter::prepare` implementation
 to validate immutable primary and auxiliary sources. The Host discards the temporary CPU product
 after validation; `MetadataPublished` means canonical desired metadata was published, not that
 an Editor preview, GPU object or runtime collection was installed.
@@ -219,9 +226,10 @@ settings, a manifest, an installed crate or supplied package bytes cannot grant 
 activation or native execution authority. A selected facet cannot bypass data-only Open or obtain
 filesystem writes, directory publication or mutable Editor/World authority through its data.
 
-This amendment permits and bounds the study; it does not claim those facets are implemented. The
-existing compiled `ProjectAssetDomain` Check/Play/source-carrying Export and selected Editor
-metadata facet remain the qualified slice described above. The prospective consumer must test
+This amendment permits and bounds the study; it does not claim Runtime or cook facets are
+implemented. The executing `SourceAssetImporter` Check/Play/source-carrying Export and selected
+Editor metadata facet own the source slice described above; the dependency extraction has its own
+qualification. The prospective compound consumer must test
 absent facets, old-generation retention, importer failure, tracked cross-product inputs and a
 dependency probe showing that a pure importer does not pull in Editor/Scene/2D. Shared-protocol
 freeze and production/platform claims require their matching later evidence; historical plan IDs

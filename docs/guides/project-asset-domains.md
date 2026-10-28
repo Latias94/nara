@@ -10,22 +10,25 @@ fn recipe() -> Result<nara::ProductRecipe, nara::ProductRecipeError> {
 }
 ```
 
-The source domain API requires `runtime-2d` and `serde`; `project-workflow` enables both. A package
-may depend on the root facade without Editor, window or graphics dependencies. The
+Implement the pure source/import facet with `nara_asset` and its `serde` feature. Its settings,
+input, limits and error types require no root facade, Scene, 2D or Editor dependency. Product
+selection, typed collections and project workflows remain in the root Host and require
+`runtime-2d` and `serde`; `project-workflow` enables both. The
 [independent text package](../../tests/fixtures/module-consumer/asset-domain-consumer/src/lib.rs)
 and its [public workflow tests](../../tests/fixtures/module-consumer/asset-domain-consumer/tests/workflow.rs)
 are complete examples outside root workspace inheritance.
 
 ## Domain Contract
 
-Implement `ProjectAssetDomain` with a stable `SOURCE_KIND`, associated `Settings` and `Product`, conservative
-`ProjectAssetLimits`, and `prepare`. Persist `AssetSourceKind::Other(SOURCE_KIND)` in the source's
+Implement `nara_asset::SourceAssetImporter` with a stable `SOURCE_KIND`, associated `Settings`
+and `Product`, conservative `AssetImportLimits`, and generic `prepare<E>`. Persist
+`AssetSourceKind::Other(SOURCE_KIND)` in the source's
 canonical `.meta` identity. The Host routes declared persistent `AssetRef` fields by that identity.
 It does not infer a handler from file extensions or crate presence. Two selected owners of the
 same kind reject; a referenced kind without an owner fails Check/Play. Unreferenced files need no
 handler and are not rewritten.
 
-`ProjectAssetSource::metadata()` returns an identity-first candidate. Admit the package's settings
+`AssetImportSource::metadata()` returns an identity-first candidate. Admit the package's settings
 with `admit::<Self::Settings>()` and validate only domain invariants. Source-only settings need
 deserialization; serialization and editable defaults belong to the optional Editor facet.
 `bytes()` provides the bounded
@@ -44,8 +47,32 @@ calling the parser; collection and identity overhead are charged separately. Set
 temporary strings and any shared source buffers retained by a product must fit the declared
 reservations. This is trusted Rust: limits are a domain promise, not an allocator sandbox. Keep
 products and their destructors effect-free, and do not panic. Return a bounded `Diagnostic` with
-`ProjectContentError::asset_domain` for actionable format/settings failures. Host-reported parser
+`AssetImportError::domain` for actionable format/settings failures. `read_dependency` returns
+`AssetImportError<E>`, so ordinary `?` preserves the caller's concrete read failure without
+requiring a root product error type. The project adapter maps only domain diagnostics; source
+IO, authority and budget errors retain their original classification. Host-reported parser
 panics omit the panic payload from the diagnostic report.
+
+```rust,ignore
+impl nara_asset::SourceAssetImporter for TextImporter {
+    type Settings = TextSettings;
+    type Product = TextResource;
+    const SOURCE_KIND: &'static str = "studio.text";
+
+    fn limits() -> nara_asset::AssetImportLimits {
+        text_import_limits()
+    }
+
+    fn prepare<E>(
+        source: &mut nara_asset::AssetImportSource<'_, E>,
+    ) -> Result<TextResource, nara_asset::AssetImportError<E>> {
+        prepare_text(source)
+    }
+}
+```
+
+The generic parameter belongs to the reader's caller. Importers propagate it and author their
+own domain diagnostics; they do not need to inspect filesystem or project Host errors.
 
 The compiled-project tool preserves retained domain code/severity/safe-summary records through
 `ProjectToolInvocationError::Project`; it does not infer them from `Error::to_string()`.
@@ -94,7 +121,7 @@ A trusted compiled Editor package can implement `EditorSourceAssetDomain` with `
 naming its source domain. The adapter can live in a separate crate without forwarding the
 domain's parser, limits or identity. The domain's one `Settings` type owns typed admission;
 the Editor facet additionally requires serialization, and `default_settings` seeds a panel-local
-draft. The facet reuses `ProjectAssetDomain::prepare` to validate primary and
+draft. The facet reuses `SourceAssetImporter::prepare` to validate primary and
 auxiliary sources. The Host discards that temporary CPU value and publishes canonical `.meta`
 only when validation succeeds. It does not create a cooked artifact or install a preview resource.
 

@@ -6,7 +6,9 @@ use std::{
     panic::{AssertUnwindSafe, catch_unwind},
 };
 
-use nara_asset::AssetMetaIdentityCandidate;
+use nara_asset::{
+    AssetImportError, AssetImportSource, AssetMetaIdentityCandidate, SourceAssetImporter,
+};
 use nara_core::ByteLimit;
 use nara_ecs::Resource;
 
@@ -17,95 +19,11 @@ mod editor;
 #[cfg(feature = "tooling")]
 pub(crate) use editor::{EditorSourceValidation, validate_editor_source};
 
-/// Conservative per-source reservations made before a trusted domain prepares its product.
-///
-/// `work_bytes` covers parser scratch allocations and `retained_bytes` covers allocations owned
-/// by the product, including any source buffers it retains. Collection and identity overhead are
-/// charged separately by the Host. These are domain promises, not an allocator sandbox.
-#[derive(Debug, Clone, Copy)]
-pub struct ProjectAssetLimits {
-    source_bytes: ByteLimit,
-    work_bytes: ByteLimit,
-    retained_bytes: ByteLimit,
-}
-
-impl ProjectAssetLimits {
-    #[must_use]
-    pub const fn new(
-        source_bytes: ByteLimit,
-        work_bytes: ByteLimit,
-        retained_bytes: ByteLimit,
-    ) -> Self {
-        Self {
-            source_bytes,
-            work_bytes,
-            retained_bytes,
-        }
+fn import_error(error: AssetImportError<ProjectContentError>) -> ProjectContentError {
+    match error {
+        AssetImportError::Domain(diagnostic) => ProjectContentError::asset_domain(*diagnostic),
+        AssetImportError::Source(error) => error,
     }
-}
-
-/// A compiled, stateless source domain for Check and source-backed Play.
-///
-/// Select it explicitly with [`crate::ProductRecipe::add_asset_domain`]. Settings belong to its
-/// typed metadata; executable code belongs to the compiled product. `SOURCE_KIND` is the exact
-/// `AssetSourceKind::Other` identity, not a file-extension selector. The Host invokes preparation
-/// only for referenced sources, without running ordinary runtime plugin hooks during Check.
-///
-/// Preparation must stay within its declared reservations and use the scoped source reader for
-/// every required file. It returns CPU data, performs no external effects, and receives no World.
-/// Products are borrowed from an immutable collection; consumers retaining shared allocations
-/// must retain the owning [`ProjectDomainAssets`] as well. Editor import, processing, GPU objects,
-/// and dependencies on another domain's prepared products are separate contracts. Product
-/// destructors must be effect-free and must not panic, including during failed preparation.
-pub trait ProjectAssetDomain: Send + Sync + 'static {
-    /// Metadata settings admitted by the domain during preparation, with its own diagnostics.
-    type Settings: serde::de::DeserializeOwned;
-    type Product: Send + Sync + 'static;
-
-    const SOURCE_KIND: &'static str;
-
-    fn limits() -> ProjectAssetLimits;
-
-    fn prepare(source: &mut ProjectAssetSource<'_>) -> Result<Self::Product, ProjectContentError>;
-}
-
-/// Scoped immutable source input. All paths are relative to the admitted project Assets directory.
-pub struct ProjectAssetSource<'a> {
-    metadata: &'a AssetMetaIdentityCandidate,
-    bytes: Arc<[u8]>,
-    reader: &'a mut dyn SourceReader,
-}
-
-impl ProjectAssetSource<'_> {
-    #[must_use]
-    pub const fn metadata(&self) -> &AssetMetaIdentityCandidate {
-        self.metadata
-    }
-
-    #[must_use]
-    pub fn bytes(&self) -> &[u8] {
-        &self.bytes
-    }
-
-    /// Reads an auxiliary source and records its exact digest in the same closure as the owner.
-    ///
-    /// Repeated paths share immutable bytes within this load. Each declared edge is charged, but
-    /// a file is read and charged once. Auxiliary sources have no implied metadata or decoder.
-    pub fn read_dependency(
-        &mut self,
-        path: &AssetPath,
-        limit: ByteLimit,
-    ) -> Result<Arc<[u8]>, ProjectContentError> {
-        self.reader.read_dependency(path, limit)
-    }
-}
-
-trait SourceReader {
-    fn read_dependency(
-        &mut self,
-        path: &AssetPath,
-        limit: ByteLimit,
-    ) -> Result<Arc<[u8]>, ProjectContentError>;
 }
 
 /// Typed products and their admitted identities for one selected Scene.
@@ -137,9 +55,9 @@ pub(super) trait ErasedCollection: Any + Send + Sync {
     fn records(&self) -> &[AssetRecord];
 }
 
-struct DomainCollection<D: ProjectAssetDomain>(ProjectAssetCollection<D::Product>);
+struct DomainCollection<D: SourceAssetImporter>(ProjectAssetCollection<D::Product>);
 
-impl<D: ProjectAssetDomain> ErasedCollection for DomainCollection<D> {
+impl<D: SourceAssetImporter> ErasedCollection for DomainCollection<D> {
     fn domain_type(&self) -> std::any::TypeId {
         std::any::TypeId::of::<D>()
     }
@@ -183,7 +101,9 @@ impl ProjectDomainAssets {
     }
 
     #[must_use]
-    pub fn collection<D: ProjectAssetDomain>(&self) -> Option<&ProjectAssetCollection<D::Product>> {
+    pub fn collection<D: SourceAssetImporter>(
+        &self,
+    ) -> Option<&ProjectAssetCollection<D::Product>> {
         self.inner
             .collections
             .iter()
@@ -240,7 +160,7 @@ impl ProjectAssetDomains {
         self.providers.is_empty()
     }
 
-    pub(crate) fn add<D: ProjectAssetDomain>(&mut self) -> Result<(), crate::ProductRecipeError> {
+    pub(crate) fn add<D: SourceAssetImporter>(&mut self) -> Result<(), crate::ProductRecipeError> {
         validate_asset_domain_kind(
             D::SOURCE_KIND,
             self.providers
@@ -284,7 +204,7 @@ trait DomainProvider: Send + Sync {
 
 struct TypedDomain<D>(PhantomData<fn() -> D>);
 
-impl<D: ProjectAssetDomain> DomainProvider for TypedDomain<D> {
+impl<D: SourceAssetImporter> DomainProvider for TypedDomain<D> {
     fn domain_type(&self) -> std::any::TypeId {
         std::any::TypeId::of::<D>()
     }
@@ -356,21 +276,23 @@ impl<D: ProjectAssetDomain> DomainProvider for TypedDomain<D> {
             }
             context.add_budget(
                 ProjectContentBudgetKind::RetainedBytes,
-                limits.retained_bytes.get(),
+                limits.retained_bytes().get(),
             )?;
-            let work = context.reserve_work(limits.work_bytes.get())?;
+            let work = context.reserve_work(limits.work_bytes().get())?;
             let mut reader = DomainSourceReader {
                 context,
                 assets,
                 root,
                 cache,
             };
-            let bytes = reader.read_source(record.path(), limits.source_bytes)?;
-            let product = D::prepare(&mut ProjectAssetSource {
-                metadata: &metadata,
+            let bytes = reader.read_source(record.path(), limits.source_bytes())?;
+            let mut read_dependency = |path: &AssetPath, limit| reader.read_dependency(path, limit);
+            let product = D::prepare(&mut AssetImportSource::new(
+                &metadata,
                 bytes,
-                reader: &mut reader,
-            })?;
+                &mut read_dependency,
+            ))
+            .map_err(import_error)?;
             drop(metadata);
             context.subtract_budget(ProjectContentBudgetKind::WorkBytes, metadata_work.reserved);
             context.subtract_budget(ProjectContentBudgetKind::WorkBytes, work.reserved);
@@ -447,7 +369,7 @@ impl DomainSourceReader<'_, '_> {
     }
 }
 
-impl SourceReader for DomainSourceReader<'_, '_> {
+impl DomainSourceReader<'_, '_> {
     fn read_dependency(
         &mut self,
         path: &AssetPath,

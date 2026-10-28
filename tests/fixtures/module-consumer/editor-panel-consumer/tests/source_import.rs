@@ -5,6 +5,7 @@ use nara_editor_panel_module_consumer::text_import;
 mod text_project;
 
 use nara::asset::AssetMetaIdentityCandidate;
+use nara_asset::{AssetImportError, AssetImportLimits, AssetImportSource, SourceAssetImporter};
 use nara_tooling::{
     EditorAction, EditorActionBatch, EditorProjectBrowserLocalAction,
     EditorSourceAssetImportAction, EditorSourceAssetImportAttempt, EditorSourceAssetMetadataView,
@@ -368,16 +369,16 @@ static PREPARATION_GATE: std::sync::Mutex<
 > = std::sync::Mutex::new(None);
 
 struct DelayedTextDomain;
-impl nara::project_host::ProjectAssetDomain for DelayedTextDomain {
+impl SourceAssetImporter for DelayedTextDomain {
     type Settings = nara_asset_domain_consumer::TextSettings;
     type Product = nara_asset_domain_consumer::TextResource;
     const SOURCE_KIND: &'static str = "consumer.delayed-text";
-    fn limits() -> nara::project_host::ProjectAssetLimits {
+    fn limits() -> AssetImportLimits {
         nara_asset_domain_consumer::TextDomain::limits()
     }
-    fn prepare(
-        source: &mut nara::project_host::ProjectAssetSource<'_>,
-    ) -> Result<Self::Product, nara::project_host::ProjectContentError> {
+    fn prepare<E>(
+        source: &mut AssetImportSource<'_, E>,
+    ) -> Result<Self::Product, AssetImportError<E>> {
         let product = nara_asset_domain_consumer::TextDomain::prepare(source)?;
         let (started, release) = PREPARATION_GATE.lock().unwrap().take().unwrap();
         started.send(()).unwrap();
@@ -441,8 +442,24 @@ fn closing_during_domain_preparation_waits_for_physical_retirement_without_publi
         "a live parser must prevent physical close"
     );
     wait(&mut application, |frame| {
-        !frame.source_asset_import_work_pending()
+        matches!(
+            frame.workspace_intent().result(),
+            Some(nara_tooling::EditorWorkspaceIntentResult::Applied {
+                intent: nara_tooling::EditorWorkspaceIntent::Exit,
+            })
+        )
     });
+    let closing = application.advance(Duration::ZERO);
+    assert!(
+        !closing.exit_ready(),
+        "cancellation must retain the held parser through physical return"
+    );
+    assert!(
+        application
+            .current_frame()
+            .unwrap()
+            .source_asset_import_work_pending()
+    );
     assert!(!project.root.join("assets/caption.txt.meta").exists());
     drop(release);
     close(&mut application);

@@ -2,7 +2,7 @@ use std::{marker::PhantomData, sync::Arc};
 
 use nara_asset::{
     AssetMeta, AssetMetaFileLimits, AssetMetaIdentity, AssetMetaIdentityCandidate, AssetPath,
-    AssetSourceKind,
+    AssetSourceKind, SourceAssetImporter,
 };
 use nara_fs::{ContentDigest, FileIdentity, RelativePath};
 use nara_tooling::{
@@ -20,8 +20,8 @@ use crate::project_host::{
 use crate::{
     ProductRecipeError,
     project_content::{
-        ProjectAssetDomain, ProjectContentBudgetHost, ProjectContentError,
-        validate_asset_domain_kind, validate_editor_source,
+        ProjectContentBudgetHost, ProjectContentError, validate_asset_domain_kind,
+        validate_editor_source,
     },
 };
 
@@ -38,14 +38,14 @@ use work::{PendingSourceImport, SourceImportWork};
 /// codecs must be deterministic and effect-free.
 pub trait EditorSourceAssetDomain: Send + Sync + 'static {
     /// The source domain reused for metadata, source preparation and resource limits.
-    type Domain: ProjectAssetDomain<Settings: Serialize>;
+    type Domain: SourceAssetImporter<Settings: Serialize>;
 
-    fn default_settings() -> <Self::Domain as ProjectAssetDomain>::Settings;
+    fn default_settings() -> <Self::Domain as SourceAssetImporter>::Settings;
 
     /// Encodes a typed request for this facet's domain. The Host still admits the displayed action.
     fn import_action(
         relative_path: impl Into<Arc<str>>,
-        settings: &<Self::Domain as ProjectAssetDomain>::Settings,
+        settings: &<Self::Domain as SourceAssetImporter>::Settings,
     ) -> Result<EditorSourceAssetImportAction, Rejection> {
         let settings = serde_json::to_string(settings).map_err(|_| Rejection::InvalidSettings)?;
         Ok(EditorSourceAssetImportAction {
@@ -133,14 +133,14 @@ impl<D: EditorSourceAssetDomain> SourceImporter for TypedImporter<D> {
     }
     fn settings(&self, metadata: &AssetMetaIdentityCandidate) -> Option<Arc<str>> {
         let candidate = metadata
-            .admit::<<D::Domain as ProjectAssetDomain>::Settings>()
+            .admit::<<D::Domain as SourceAssetImporter>::Settings>()
             .ok()?;
         serde_json::to_string(candidate.settings())
             .ok()
             .map(Arc::from)
     }
     fn metadata(&self, identity: AssetMetaIdentity, settings: &str) -> Result<String, Rejection> {
-        let settings: <D::Domain as ProjectAssetDomain>::Settings =
+        let settings: <D::Domain as SourceAssetImporter>::Settings =
             serde_json::from_str(settings).map_err(|_| Rejection::InvalidSettings)?;
         AssetMeta::new(identity, settings)
             .to_json_string()

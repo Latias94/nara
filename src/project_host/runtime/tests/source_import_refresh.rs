@@ -1,8 +1,6 @@
 use super::*;
 
-use crate::project_content::{
-    ProjectAssetDomain, ProjectAssetLimits, ProjectAssetSource, ProjectContentError,
-};
+use nara_asset::{AssetImportError, AssetImportLimits, AssetImportSource, SourceAssetImporter};
 use nara_core::ByteLimit;
 use nara_tooling::{
     EditorSourceAssetImportActionOutcome, EditorSourceAssetImportAttempt,
@@ -11,17 +9,19 @@ use nara_tooling::{
 
 struct SettingsDomain;
 
-impl ProjectAssetDomain for SettingsDomain {
+impl SourceAssetImporter for SettingsDomain {
     type Settings = u32;
     type Product = u32;
     const SOURCE_KIND: &'static str = "test.source-refresh";
 
-    fn limits() -> ProjectAssetLimits {
+    fn limits() -> AssetImportLimits {
         let limit = ByteLimit::new(1024).unwrap();
-        ProjectAssetLimits::new(limit, limit, limit)
+        AssetImportLimits::new(limit, limit, limit)
     }
 
-    fn prepare(source: &mut ProjectAssetSource<'_>) -> Result<Self::Product, ProjectContentError> {
+    fn prepare<E>(
+        source: &mut AssetImportSource<'_, E>,
+    ) -> Result<Self::Product, AssetImportError<E>> {
         Ok(*source
             .metadata()
             .admit::<Self::Settings>()

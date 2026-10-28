@@ -4,6 +4,14 @@ This independently declared workspace member adds `consumer.text` through public
 `ProductRecipe::add_asset_domain`. The library owns typed metadata settings, UTF-8 parsing and
 one auxiliary source dependency. It imports no Nara-private interfaces.
 
+The parser implements `nara_asset::SourceAssetImporter` using only `nara_asset` with its
+`serde` feature, `nara_core`, `nara_diagnostic` and Serde as normal dependencies. The root
+`nara` facade is a development dependency for the project workflow tests. Public
+`AssetImportSource` inputs keep domain diagnostics distinct from the caller's concrete
+auxiliary-read errors; the parser does not depend on a project Host, Scene or 2D API.
+The pure input tests in `tests/import.rs` exercise that error distinction, typed settings
+and caller-enforced dependency bounds.
+
 The public integration tests qualify Check receipts, headless Play, actionable domain failures,
 missing contributions, shared dependency reads, parser reservations, panic diagnostics, retained
 generation budgets and explicit Scene transitions. Preparation and commit failures preserve the

@@ -36,6 +36,7 @@ use nara::{
     },
     scene::{SceneComponentRecord, SceneDocument, SceneEntityId, SceneEntityRecord},
 };
+use nara_asset::{AssetImportError, AssetImportLimits, AssetImportSource, SourceAssetImporter};
 use nara_asset_domain_consumer::{TextDomain, TextSettings};
 
 const TEXT_ID: &str = "c4d051e8-73ee-4b16-9d13-8c5fcb8a6a32";
@@ -213,7 +214,16 @@ fn missing_domain_rejects_only_referenced_content_and_duplicate_ownership_reject
 fn missing_dependency_rejects_the_selected_closure() {
     let project = Project::new();
     fs::remove_file(project.root.join("assets/suffix.txt")).unwrap();
-    assert!(check_project(ProjectCheckRequest::new(project.capability(), recipe())).is_err());
+    let error =
+        check_project(ProjectCheckRequest::new(project.capability(), recipe())).unwrap_err();
+    let content = error.content_error().unwrap();
+    assert_eq!(content.kind(), ProjectContentErrorKind::HostIo);
+    assert!(
+        content
+            .diagnostics()
+            .iter()
+            .any(|entry| entry.code().as_str() == "project.content.host-io")
+    );
     assert!(!project.root.join("export").exists());
 }
 
@@ -253,35 +263,31 @@ fn retained_domain_owner_keeps_its_generation_and_budget_alive() {
 }
 
 struct OversizedDomain;
-impl nara::project_host::ProjectAssetDomain for OversizedDomain {
+impl SourceAssetImporter for OversizedDomain {
     type Settings = TextSettings;
     type Product = ();
     const SOURCE_KIND: &'static str = "consumer.text";
-    fn limits() -> nara::project_host::ProjectAssetLimits {
-        nara::project_host::ProjectAssetLimits::new(
+    fn limits() -> AssetImportLimits {
+        AssetImportLimits::new(
             nara::core::ByteLimit::new(4096).unwrap(),
             nara::core::ByteLimit::new(4096).unwrap(),
             nara::core::ByteLimit::new(1024 * 1024 * 1024).unwrap(),
         )
     }
-    fn prepare(
-        _: &mut nara::project_host::ProjectAssetSource<'_>,
-    ) -> Result<(), nara::project_host::ProjectContentError> {
+    fn prepare<E>(_: &mut AssetImportSource<'_, E>) -> Result<(), AssetImportError<E>> {
         panic!("the Host must reject the reservation before invoking this domain")
     }
 }
 
 struct PanickingDomain;
-impl nara::project_host::ProjectAssetDomain for PanickingDomain {
+impl SourceAssetImporter for PanickingDomain {
     type Settings = TextSettings;
     type Product = ();
     const SOURCE_KIND: &'static str = "consumer.text";
-    fn limits() -> nara::project_host::ProjectAssetLimits {
-        <TextDomain as nara::project_host::ProjectAssetDomain>::limits()
+    fn limits() -> AssetImportLimits {
+        TextDomain::limits()
     }
-    fn prepare(
-        _: &mut nara::project_host::ProjectAssetSource<'_>,
-    ) -> Result<(), nara::project_host::ProjectContentError> {
+    fn prepare<E>(_: &mut AssetImportSource<'_, E>) -> Result<(), AssetImportError<E>> {
         panic!("domain panic payload")
     }
 }

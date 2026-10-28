@@ -90,7 +90,7 @@ impl EditorSourceReader<'_> {
     }
 }
 
-impl SourceReader for EditorSourceReader<'_> {
+impl EditorSourceReader<'_> {
     fn read_dependency(
         &mut self,
         path: &AssetPath,
@@ -103,7 +103,7 @@ impl SourceReader for EditorSourceReader<'_> {
     }
 }
 
-pub(crate) fn validate_editor_source<D: ProjectAssetDomain>(
+pub(crate) fn validate_editor_source<D: SourceAssetImporter>(
     assets: &DirectoryCapability,
     metadata: &AssetMetaIdentityCandidate,
     expected_source: FileIdentity,
@@ -112,9 +112,9 @@ pub(crate) fn validate_editor_source<D: ProjectAssetDomain>(
     let limits = D::limits();
     let mut ticket = budget.reserve();
     let reserved = limits
-        .work_bytes
+        .work_bytes()
         .get()
-        .checked_add(limits.retained_bytes.get())
+        .checked_add(limits.retained_bytes().get())
         .and_then(|value| metadata.retained_bytes()?.checked_add(value))
         .ok_or_else(|| overflow_budget(ProjectContentBudgetKind::WorkBytes))?;
     ticket
@@ -125,16 +125,18 @@ pub(crate) fn validate_editor_source<D: ProjectAssetDomain>(
         budget: ticket,
         sources: Vec::new(),
     };
-    let bytes = reader.read(metadata.identity().path(), limits.source_bytes)?;
+    let bytes = reader.read(metadata.identity().path(), limits.source_bytes())?;
     if reader.sources[0].identity != expected_source {
         return Err(source_changed());
     }
     let prepared = catch_unwind(AssertUnwindSafe(|| {
-        D::prepare(&mut ProjectAssetSource {
+        let mut read_dependency = |path: &AssetPath, limit| reader.read_dependency(path, limit);
+        D::prepare(&mut AssetImportSource::new(
             metadata,
             bytes,
-            reader: &mut reader,
-        })
+            &mut read_dependency,
+        ))
+        .map_err(import_error)
         .map(drop)
     }));
     prepared.map_err(|_| {

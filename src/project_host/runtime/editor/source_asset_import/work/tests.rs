@@ -9,13 +9,12 @@ use std::{
     time::{Duration, Instant},
 };
 
-use nara_asset::StableAssetId;
+use nara_asset::{AssetImportError, AssetImportLimits, AssetImportSource, StableAssetId};
 use nara_core::ByteLimit;
 use nara_fs::{CapabilityRights, HostCapabilityOptions, TrustMode};
 use nara_tasks::TaskPoolConfig;
 
 use super::*;
-use crate::project_content::{ProjectAssetLimits, ProjectAssetSource};
 use crate::project_host::runtime::editor::persistence::HostCustody;
 
 const WAIT: Duration = Duration::from_secs(5);
@@ -25,17 +24,17 @@ static NEXT_FIXTURE: AtomicU64 = AtomicU64::new(1);
 
 struct Domain;
 
-impl ProjectAssetDomain for Domain {
+impl SourceAssetImporter for Domain {
     type Settings = ();
     type Product = ();
     const SOURCE_KIND: &'static str = "test.source-return";
 
-    fn limits() -> ProjectAssetLimits {
+    fn limits() -> AssetImportLimits {
         let limit = ByteLimit::new(4096).unwrap();
-        ProjectAssetLimits::new(limit, limit, limit)
+        AssetImportLimits::new(limit, limit, limit)
     }
 
-    fn prepare(source: &mut ProjectAssetSource<'_>) -> Result<(), ProjectContentError> {
+    fn prepare<E>(source: &mut AssetImportSource<'_, E>) -> Result<(), AssetImportError<E>> {
         assert_eq!(source.bytes(), b"source import return fixture");
         Ok(())
     }

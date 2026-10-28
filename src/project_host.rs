@@ -46,13 +46,13 @@ pub use runtime::{
 
 #[cfg(all(feature = "runtime-2d", feature = "serde"))]
 pub use crate::project_content::{
-    ProjectAssetCollection, ProjectAssetDomain, ProjectAssetLimits, ProjectAssetSource,
-    ProjectContentBudgetError, ProjectContentBudgetHost, ProjectContentBudgetKind,
-    ProjectContentBudgetSnapshot, ProjectContentClosureReceipt, ProjectContentDeliveryReceipt,
-    ProjectContentError, ProjectContentErrorKind, ProjectContentLimits, ProjectContentLoader,
-    ProjectContentMemberKind, ProjectContentMemberReceipt, ProjectContentRevision,
-    ProjectContentSnapshot, ProjectDomainAssets, ProjectImageContent, ProjectPrefabContent,
-    ProjectTileSetContent, StartupContentClosureReceipt,
+    ProjectAssetCollection, ProjectContentBudgetError, ProjectContentBudgetHost,
+    ProjectContentBudgetKind, ProjectContentBudgetSnapshot, ProjectContentClosureReceipt,
+    ProjectContentDeliveryReceipt, ProjectContentError, ProjectContentErrorKind,
+    ProjectContentLimits, ProjectContentLoader, ProjectContentMemberKind,
+    ProjectContentMemberReceipt, ProjectContentRevision, ProjectContentSnapshot,
+    ProjectDomainAssets, ProjectImageContent, ProjectPrefabContent, ProjectTileSetContent,
+    StartupContentClosureReceipt,
 };
 pub use composition::{
     CompiledProductCapabilities, CompositionError, ProjectSettingsCandidate,

@@ -75,10 +75,7 @@ pub(crate) use domains::ProjectAssetDomains;
 pub(crate) use domains::validate_asset_domain_kind;
 #[cfg(feature = "tooling")]
 pub(crate) use domains::{EditorSourceValidation, validate_editor_source};
-pub use domains::{
-    ProjectAssetCollection, ProjectAssetDomain, ProjectAssetLimits, ProjectAssetSource,
-    ProjectDomainAssets,
-};
+pub use domains::{ProjectAssetCollection, ProjectDomainAssets};
 
 /// Computes the canonical Runtime startup-content digest from already admitted logical members.
 ///
@@ -582,7 +579,7 @@ pub struct ProjectContentError {
 impl ProjectContentError {
     /// Preserves a domain-authored diagnostic without reinterpreting its format or settings.
     #[must_use]
-    pub fn asset_domain(diagnostic: Diagnostic) -> Self {
+    pub(crate) fn asset_domain(diagnostic: Diagnostic) -> Self {
         let mut report = DiagnosticReport::default();
         report.push(diagnostic);
         Self::with_report(ProjectContentErrorKind::AssetDomain, report)

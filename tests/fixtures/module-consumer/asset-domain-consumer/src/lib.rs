@@ -1,13 +1,10 @@
 //! Independent text-resource domain: typed settings, parsing and an auxiliary source dependency.
 
-use nara::{
-    asset::AssetPath,
-    core::ByteLimit,
-    diagnostic::{Diagnostic, DiagnosticCode, SafeSummary},
-    project_host::{
-        ProjectAssetDomain, ProjectAssetLimits, ProjectAssetSource, ProjectContentError,
-    },
+use nara_asset::{
+    AssetImportError, AssetImportLimits, AssetImportSource, AssetPath, SourceAssetImporter,
 };
+use nara_core::ByteLimit;
+use nara_diagnostic::{Diagnostic, DiagnosticCode, SafeSummary};
 use serde::{Deserialize, Serialize};
 
 pub struct TextDomain;
@@ -23,21 +20,23 @@ pub struct TextResource {
     pub text: String,
 }
 
-impl ProjectAssetDomain for TextDomain {
+impl SourceAssetImporter for TextDomain {
     type Settings = TextSettings;
     type Product = TextResource;
     const SOURCE_KIND: &'static str = "consumer.text";
 
-    fn limits() -> ProjectAssetLimits {
+    fn limits() -> AssetImportLimits {
         let bytes = ByteLimit::new(4096).unwrap();
-        ProjectAssetLimits::new(
+        AssetImportLimits::new(
             bytes,
             ByteLimit::new(16 * 1024).unwrap(),
             ByteLimit::new(8 * 1024).unwrap(),
         )
     }
 
-    fn prepare(source: &mut ProjectAssetSource<'_>) -> Result<TextResource, ProjectContentError> {
+    fn prepare<E>(
+        source: &mut AssetImportSource<'_, E>,
+    ) -> Result<TextResource, AssetImportError<E>> {
         let metadata = source
             .metadata()
             .admit::<Self::Settings>()
@@ -57,7 +56,7 @@ impl ProjectAssetDomain for TextDomain {
         assert!(std::sync::Arc::ptr_eq(&suffix, &repeated));
         text.push_str(std::str::from_utf8(&suffix).map_err(|_| invalid_source())?);
         if text.chars().count() > maximum {
-            return Err(ProjectContentError::asset_domain(Diagnostic::error(
+            return Err(AssetImportError::domain(Diagnostic::error(
                 DiagnosticCode::new("consumer.text.too-long").unwrap(),
                 SafeSummary::new(
                     "Text exceeds max_characters; shorten the source or increase its setting",
@@ -69,15 +68,15 @@ impl ProjectAssetDomain for TextDomain {
     }
 }
 
-fn invalid_settings() -> ProjectContentError {
-    ProjectContentError::asset_domain(Diagnostic::error(
+fn invalid_settings<E>() -> AssetImportError<E> {
+    AssetImportError::domain(Diagnostic::error(
         DiagnosticCode::new("consumer.text.settings-invalid").unwrap(),
         SafeSummary::new("Set max_characters between 1 and 4096 in the text metadata").unwrap(),
     ))
 }
 
-fn invalid_source() -> ProjectContentError {
-    ProjectContentError::asset_domain(Diagnostic::error(
+fn invalid_source<E>() -> AssetImportError<E> {
+    AssetImportError::domain(Diagnostic::error(
         DiagnosticCode::new("consumer.text.source-invalid").unwrap(),
         SafeSummary::new("Use UTF-8 text with an auxiliary asset path on its first line").unwrap(),
     ))
