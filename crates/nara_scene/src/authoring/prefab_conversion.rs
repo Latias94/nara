@@ -21,7 +21,7 @@ pub use request::{
 ///
 /// Payloads remain in the exact patch/inverse. The history content state proves their
 /// predecessor; this footprint restricts which records and placement edges may change.
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub(crate) struct PrefabConversionFootprint {
     anchor: SceneEntityId,
     created: BTreeSet<SceneEntityId>,

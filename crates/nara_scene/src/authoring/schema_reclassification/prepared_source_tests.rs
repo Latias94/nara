@@ -141,13 +141,13 @@ fn validated_views_share_original_arcs_and_borrow_only_successor_classification(
             .prepare_schema_reclassification(&successor, &mut work)
             .unwrap();
         let usage = work.usage();
-        assert_eq!(Arc::strong_count(&source), source_count);
+        assert_eq!(Arc::strong_count(&source), source_count + 1);
         let view = borrow(&session, &prepared).unwrap();
-        assert_eq!(Arc::strong_count(&source), source_count);
+        assert_eq!(Arc::strong_count(&source), source_count + 1);
         assert!(std::ptr::eq(view.document(), source.as_ref()));
         let shared = view.shared_document();
         assert!(Arc::ptr_eq(&source, &shared));
-        assert_eq!(Arc::strong_count(&source), source_count + 1);
+        assert_eq!(Arc::strong_count(&source), source_count + 2);
         assert_eq!(view.schema_basis(), successor);
         assert_ne!(view.schema_basis(), equal_successor);
         assert_eq!(view.base_revision(), revision);

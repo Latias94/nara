@@ -1212,7 +1212,7 @@ fn real_complete_prefab_conversion_history_reclassifies_without_fabricated_footp
             key("conversion-base"),
         )))
     };
-    for redo_branch in [false, true] {
+    for (redo_branch, owned) in [(false, false), (true, false), (false, true), (true, true)] {
         each_source!(&document, &previous, |session| {
             let original = session.document().clone();
             let prepared = session
@@ -1236,9 +1236,21 @@ fn real_complete_prefab_conversion_history_reclassifies_without_fabricated_footp
                 assert!(session.undo_authoring().applied);
             }
             let before = source_snapshot!(session);
-            let prepared = session
-                .prepare_schema_reclassification(&next, &mut SchemaReclassificationWork::default())
-                .unwrap();
+            let mut work = SchemaReclassificationWork::default();
+            let prepared = if owned {
+                let incumbent = session
+                    .retain_schema_reclassification_source(&mut work)
+                    .unwrap();
+                session
+                    .capture_schema_reclassification(&next, &mut work, incumbent)
+                    .unwrap()
+                    .prepare(&mut work)
+                    .unwrap()
+            } else {
+                session
+                    .prepare_schema_reclassification(&next, &mut work)
+                    .unwrap()
+            };
             session.commit_schema_reclassification(prepared).unwrap();
             assert_source_unchanged!(session, before);
             if redo_branch {

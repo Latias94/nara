@@ -52,9 +52,10 @@ pub use prepared::{PreparedPrefabAuthoringEdit, PreparedSceneAuthoringEdit};
 mod schema_reclassification;
 #[cfg(feature = "serde")]
 pub use schema_reclassification::{
-    PrefabSchemaReclassificationCommit, PreparedPrefabSchemaReclassification,
-    PreparedSceneSchemaReclassification, RetainedSchemaReclassificationSource,
-    SceneSchemaReclassificationCommit, SchemaReclassificationLimits, SchemaReclassificationUsage,
+    PrefabSchemaReclassificationCommit, PrefabSchemaReclassificationRequest,
+    PreparedPrefabSchemaReclassification, PreparedSceneSchemaReclassification,
+    RetainedSchemaReclassificationSource, SceneSchemaReclassificationCommit,
+    SceneSchemaReclassificationRequest, SchemaReclassificationLimits, SchemaReclassificationUsage,
     SchemaReclassificationWork,
 };
 #[cfg(feature = "serde")]
@@ -244,7 +245,7 @@ impl SceneAuthoringHistoryCost {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 struct SceneAuthoringHistoryEntry {
     patch: ScenePatchDocument,
     from_state: SceneAuthoringContentState,
@@ -253,7 +254,7 @@ struct SceneAuthoringHistoryEntry {
     scope: AuthoringHistoryScope,
 }
 
-#[derive(Debug, Default)]
+#[derive(Debug, Default, Clone)]
 enum AuthoringHistoryScope {
     #[default]
     Ordinary,
@@ -276,7 +277,7 @@ impl AuthoringHistoryScope {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 struct AuthoringHistory {
     revision: SceneAuthoringRevision,
     content_state: SceneAuthoringContentState,

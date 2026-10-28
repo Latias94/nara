@@ -71,8 +71,9 @@ pub struct SchemaReclassificationUsage {
 
 /// One finite proof allowance for the sources charged by preparation calls so far.
 ///
-/// Work is cumulative. Incumbents and prepared outputs stay charged for this allowance's lifetime,
-/// even if a caller drops a candidate early. Temporary edge scratch is released between edges.
+/// Work is cumulative. Incumbents, frozen inputs and prepared outputs stay charged for this
+/// allowance's lifetime, even if a caller drops one early. Temporary edge scratch is released
+/// between edges. This conservative logical peak is not a measurement of live allocations.
 /// Uncharged open-source incumbents are outside the reported peak. Whole-open-set admission
 /// must charge every incumbent before preparing its first successor; this source helper alone
 /// does not establish that Workspace-wide bound.
@@ -227,6 +228,7 @@ pub fn require_schema_reclassification_successor(
 /// An unpublished classification successor; source and history remain in their original owner.
 #[derive(Debug)]
 pub struct PreparedSceneSchemaReclassification {
+    document: Arc<SceneDocument>,
     revision: SceneAuthoringRevision,
     previous: AuthoringSchemaBasis,
     state: Arc<AuthoringDocumentState>,
@@ -235,12 +237,122 @@ pub struct PreparedSceneSchemaReclassification {
 /// Nominal Prefab counterpart; it cannot be bound to a Scene session.
 #[derive(Debug)]
 pub struct PreparedPrefabSchemaReclassification {
+    document: Arc<PrefabDocument>,
     revision: SceneAuthoringRevision,
     previous: AuthoringSchemaBasis,
     state: Arc<AuthoringDocumentState>,
 }
 
+/// A finite immutable source/history input, detached from the live Session.
+#[doc(hidden)]
+#[derive(Debug)]
+pub struct SceneSchemaReclassificationRequest {
+    input: ReclassificationInput<SceneDocument>,
+}
+
+#[doc(hidden)]
+#[derive(Debug)]
+pub struct PrefabSchemaReclassificationRequest {
+    input: ReclassificationInput<PrefabDocument>,
+}
+
+#[derive(Debug)]
+struct ReclassificationInput<D> {
+    document: Arc<D>,
+    state: Arc<AuthoringDocumentState>,
+    history: AuthoringHistory,
+    successor: AuthoringSchemaBasis,
+    incumbent: RetainedSchemaReclassificationSource,
+}
+
+impl<D> ReclassificationInput<D> {
+    fn capture(
+        document: &Arc<D>,
+        state: &Arc<AuthoringDocumentState>,
+        history: &AuthoringHistory,
+        successor: &AuthoringSchemaBasis,
+        incumbent: RetainedSchemaReclassificationSource,
+        work: &mut SchemaReclassificationWork,
+    ) -> Result<Self, ScenePatchReport> {
+        successor.require_declaration_extension_of(&state.schema_basis())?;
+        // The originating history allowance includes the larger of both exact patch spellings
+        // and the scope footprint. Charge that owning model before copying any entry or scope.
+        let bytes = history_retained_bytes(history).and_then(|bytes| {
+            bytes.checked_add(std::mem::size_of::<Self>())?.checked_add(
+                history
+                    .undo_stack
+                    .len()
+                    .checked_add(history.redo_stack.len())?
+                    .checked_mul(size_of::<super::SceneAuthoringHistoryEntry>())?,
+            )
+        });
+        work.begin_step(Some(0))?;
+        work.reserve("history-input-copy", bytes)?;
+        work.retain_classification(bytes)?;
+        Ok(Self {
+            document: Arc::clone(document),
+            state: Arc::clone(state),
+            history: history.clone(),
+            successor: successor.clone(),
+            incumbent,
+        })
+    }
+}
+
+impl SceneSchemaReclassificationRequest {
+    pub fn prepare(
+        self,
+        work: &mut SchemaReclassificationWork,
+    ) -> Result<PreparedSceneSchemaReclassification, ScenePatchReport> {
+        let input = self.input;
+        input.incumbent.require_source(
+            work,
+            input.history.revision(),
+            Some(input.state.schema_basis()),
+            crate::SourceDocumentKind::Scene,
+        )?;
+        prepare_scene_classification(
+            &input.document,
+            &input.state,
+            &input.history,
+            &input.successor,
+            work,
+        )
+    }
+}
+
+impl PrefabSchemaReclassificationRequest {
+    pub fn prepare(
+        self,
+        work: &mut SchemaReclassificationWork,
+    ) -> Result<PreparedPrefabSchemaReclassification, ScenePatchReport> {
+        let input = self.input;
+        input.incumbent.require_source(
+            work,
+            input.history.revision(),
+            Some(input.state.schema_basis()),
+            crate::SourceDocumentKind::Prefab,
+        )?;
+        prepare_prefab_classification(
+            &input.document,
+            &input.state,
+            &input.history,
+            &input.successor,
+            work,
+        )
+    }
+}
+
 impl PreparedSceneSchemaReclassification {
+    /// Borrows the exact frozen input under this prepared classification. Live publication still
+    /// requires the original Session/Workspace revision and basis to be revalidated.
+    #[doc(hidden)]
+    pub fn source_view(&self) -> PreparedSceneSchemaSource<'_> {
+        PreparedSceneSchemaSource {
+            document: &self.document,
+            prepared: self,
+        }
+    }
     #[must_use]
     pub fn schema_basis(&self) -> AuthoringSchemaBasis {
         self.state.schema_basis()
@@ -264,6 +376,13 @@ impl PreparedSceneSchemaReclassification {
 }
 
 impl PreparedPrefabSchemaReclassification {
+    #[doc(hidden)]
+    pub fn source_view(&self) -> PreparedPrefabSchemaSource<'_> {
+        PreparedPrefabSchemaSource {
+            document: &self.document,
+            prepared: self,
+        }
+    }
     #[must_use]
     pub fn schema_basis(&self) -> AuthoringSchemaBasis {
         self.state.schema_basis()
@@ -482,6 +601,35 @@ impl PrefabSchemaReclassificationCommit<'_> {
 }
 
 impl SceneAuthoringSession {
+    /// Captures an owned request after the whole-set owner has retained every incumbent.
+    #[doc(hidden)]
+    pub fn capture_schema_reclassification(
+        &self,
+        successor: &AuthoringSchemaBasis,
+        work: &mut SchemaReclassificationWork,
+        incumbent: RetainedSchemaReclassificationSource,
+    ) -> Result<SceneSchemaReclassificationRequest, ScenePatchReport> {
+        incumbent.require_source(
+            work,
+            self.revision(),
+            self.authoring_schema_basis(),
+            crate::SourceDocumentKind::Scene,
+        )?;
+        let state = self
+            .authority
+            .published_shared()
+            .expect("retained authoring source");
+        Ok(SceneSchemaReclassificationRequest {
+            input: ReclassificationInput::capture(
+                &self.document,
+                &state,
+                &self.history,
+                successor,
+                incumbent,
+                work,
+            )?,
+        })
+    }
     /// Prepares additive classification and every retained history edge without changing source.
     pub fn prepare_schema_reclassification(
         &self,
@@ -542,38 +690,7 @@ impl SceneAuthoringSession {
             .authority
             .published()
             .expect("retained authoring source");
-        successor.require_declaration_extension_of(&state.schema_basis())?;
-        work.begin_step(Some(0))?;
-        let next = state.reclassify(&self.document, successor, &mut |stage, bytes| {
-            work.reserve(stage, bytes)
-        })?;
-        work.reserve("classification-authority", Some(2 * size_of::<usize>()))?;
-        let retained = next.checked_retained_bytes_with_admission(|bytes| {
-            work.reserve("classification-retention-scan", bytes)
-        })?;
-        work.retain_classification(
-            retained.and_then(|bytes| bytes.checked_add(2 * size_of::<usize>())),
-        )?;
-        prove_history(
-            &self.history,
-            self.document.as_ref(),
-            &next,
-            work,
-            scene_bytes,
-            |document, state, patch, scope, admit| {
-                let prepared = prepare_scene_step(document, state, patch, scope, Some(admit))?;
-                Ok(ProofStep {
-                    document: prepared.document,
-                    state: prepared.state,
-                    report: prepared.report,
-                })
-            },
-        )?;
-        Ok(PreparedSceneSchemaReclassification {
-            revision: self.revision(),
-            previous: state.schema_basis(),
-            state: Arc::new(next),
-        })
+        prepare_scene_classification(&self.document, state, &self.history, successor, work)
     }
 
     /// Commits one candidate while preserving source revision, content state and retained history.
@@ -605,6 +722,34 @@ impl SceneAuthoringSession {
 }
 
 impl PrefabAuthoringSession {
+    #[doc(hidden)]
+    pub fn capture_schema_reclassification(
+        &self,
+        successor: &AuthoringSchemaBasis,
+        work: &mut SchemaReclassificationWork,
+        incumbent: RetainedSchemaReclassificationSource,
+    ) -> Result<PrefabSchemaReclassificationRequest, ScenePatchReport> {
+        incumbent.require_source(
+            work,
+            self.revision(),
+            self.authoring_schema_basis(),
+            crate::SourceDocumentKind::Prefab,
+        )?;
+        let state = self
+            .authority
+            .published_shared()
+            .expect("retained authoring source");
+        Ok(PrefabSchemaReclassificationRequest {
+            input: ReclassificationInput::capture(
+                &self.document,
+                &state,
+                &self.history,
+                successor,
+                incumbent,
+                work,
+            )?,
+        })
+    }
     pub fn prepare_schema_reclassification(
         &self,
         successor: &AuthoringSchemaBasis,
@@ -662,38 +807,7 @@ impl PrefabAuthoringSession {
             .authority
             .published()
             .expect("retained authoring source");
-        successor.require_declaration_extension_of(&state.schema_basis())?;
-        work.begin_step(Some(0))?;
-        let next = state.reclassify_prefab(&self.document, successor, &mut |stage, bytes| {
-            work.reserve(stage, bytes)
-        })?;
-        work.reserve("classification-authority", Some(2 * size_of::<usize>()))?;
-        let retained = next.checked_retained_bytes_with_admission(|bytes| {
-            work.reserve("classification-retention-scan", bytes)
-        })?;
-        work.retain_classification(
-            retained.and_then(|bytes| bytes.checked_add(2 * size_of::<usize>())),
-        )?;
-        prove_history(
-            &self.history,
-            self.document.as_ref(),
-            &next,
-            work,
-            prefab_bytes,
-            |document, state, patch, scope, admit| {
-                let prepared = prepare_prefab_step(document, state, patch, scope, Some(admit))?;
-                Ok(ProofStep {
-                    document: prepared.document,
-                    state: prepared.state,
-                    report: prepared.report,
-                })
-            },
-        )?;
-        Ok(PreparedPrefabSchemaReclassification {
-            revision: self.revision(),
-            previous: state.schema_basis(),
-            state: Arc::new(next),
-        })
+        prepare_prefab_classification(&self.document, state, &self.history, successor, work)
     }
 
     pub fn commit_schema_reclassification(
@@ -739,6 +853,99 @@ impl RetainedSchemaReclassificationSource {
     }
 }
 
+fn prepare_scene_classification(
+    document: &Arc<SceneDocument>,
+    state: &AuthoringDocumentState,
+    history: &AuthoringHistory,
+    successor: &AuthoringSchemaBasis,
+    work: &mut SchemaReclassificationWork,
+) -> Result<PreparedSceneSchemaReclassification, ScenePatchReport> {
+    successor.require_declaration_extension_of(&state.schema_basis())?;
+    work.begin_step(Some(0))?;
+    let next = state.reclassify(document, successor, &mut |stage, bytes| {
+        work.reserve(stage, bytes)
+    })?;
+    work.reserve("classification-authority", Some(2 * size_of::<usize>()))?;
+    let retained = next.checked_retained_bytes_with_admission(|bytes| {
+        work.reserve("classification-retention-scan", bytes)
+    })?;
+    work.retain_classification(
+        retained.and_then(|bytes| bytes.checked_add(2 * size_of::<usize>())),
+    )?;
+    prove_history(
+        history,
+        document.as_ref(),
+        &next,
+        work,
+        scene_bytes,
+        |document, state, patch, scope, admit| {
+            let prepared = prepare_scene_step(document, state, patch, scope, Some(admit))?;
+            Ok(ProofStep {
+                document: prepared.document,
+                state: prepared.state,
+                report: prepared.report,
+            })
+        },
+    )?;
+    Ok(PreparedSceneSchemaReclassification {
+        document: Arc::clone(document),
+        revision: history.revision(),
+        previous: state.schema_basis(),
+        state: Arc::new(next),
+    })
+}
+
+fn prepare_prefab_classification(
+    document: &Arc<PrefabDocument>,
+    state: &AuthoringDocumentState,
+    history: &AuthoringHistory,
+    successor: &AuthoringSchemaBasis,
+    work: &mut SchemaReclassificationWork,
+) -> Result<PreparedPrefabSchemaReclassification, ScenePatchReport> {
+    successor.require_declaration_extension_of(&state.schema_basis())?;
+    work.begin_step(Some(0))?;
+    let next = state.reclassify_prefab(document, successor, &mut |stage, bytes| {
+        work.reserve(stage, bytes)
+    })?;
+    work.reserve("classification-authority", Some(2 * size_of::<usize>()))?;
+    let retained = next.checked_retained_bytes_with_admission(|bytes| {
+        work.reserve("classification-retention-scan", bytes)
+    })?;
+    work.retain_classification(
+        retained.and_then(|bytes| bytes.checked_add(2 * size_of::<usize>())),
+    )?;
+    prove_history(
+        history,
+        document.as_ref(),
+        &next,
+        work,
+        prefab_bytes,
+        |document, state, patch, scope, admit| {
+            let prepared = prepare_prefab_step(document, state, patch, scope, Some(admit))?;
+            Ok(ProofStep {
+                document: prepared.document,
+                state: prepared.state,
+                report: prepared.report,
+            })
+        },
+    )?;
+    Ok(PreparedPrefabSchemaReclassification {
+        document: Arc::clone(document),
+        revision: history.revision(),
+        previous: state.schema_basis(),
+        state: Arc::new(next),
+    })
+}
+
+fn history_retained_bytes(history: &AuthoringHistory) -> Option<usize> {
+    history
+        .cost
+        .operations
+        .checked_mul(512)?
+        .checked_add(history.cost.value_nodes.checked_mul(96)?)?
+        .checked_add(history.cost.logical_bytes)
+}
+
 fn scene_bytes(
     document: &SceneDocument,
     state: &AuthoringDocumentState,
@@ -777,12 +984,7 @@ fn incumbent_bytes<D>(
     admit: &mut Admission<'_>,
 ) -> Result<Option<usize>, ScenePatchReport> {
     let retained = source_and_classification_bytes(document, state, &source_bytes, admit)?;
-    Ok(retained.and_then(|bytes| {
-        bytes
-            .checked_add(history.cost.operations.checked_mul(512)?)?
-            .checked_add(history.cost.value_nodes.checked_mul(96)?)?
-            .checked_add(history.cost.logical_bytes)
-    }))
+    Ok(retained.and_then(|bytes| bytes.checked_add(history_retained_bytes(history)?)))
 }
 
 fn source_and_classification_bytes<D>(
@@ -958,3 +1160,6 @@ mod tests;
 
 #[cfg(test)]
 mod prepared_source_tests;
+
+#[cfg(test)]
+mod owned_request_tests;
