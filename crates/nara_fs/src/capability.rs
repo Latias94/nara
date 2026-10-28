@@ -456,6 +456,19 @@ impl DirectoryCapability {
         }
     }
 
+    /// Creates one exclusive direct child, retaining custody if opening or validation fails.
+    ///
+    /// Before-creation failures contain no created child. After creation, the failure retains the
+    /// parent, original name and any available child handle and identity without granting directory
+    /// access to an unverified object. Neither failure nor custody removes the child on drop.
+    /// Platform trust requirements are the same as for `create_child_directory`.
+    pub fn create_child_directory_retained(
+        &self,
+        name: &RelativeComponent,
+    ) -> Result<Self, crate::DirectoryCreateFailure> {
+        crate::directory_create::create_child_directory_retained(self, name)
+    }
+
     pub(crate) fn create_child_directory_retaining_unverified(
         &self,
         name: &RelativeComponent,

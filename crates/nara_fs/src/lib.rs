@@ -5,6 +5,7 @@
 
 mod capability;
 mod digest;
+mod directory_create;
 mod directory_enumeration;
 mod directory_publication;
 mod error;
@@ -21,6 +22,7 @@ mod unlink;
 
 pub use capability::{CapabilityRights, DirectoryCapability, HostCapabilityOptions, TrustMode};
 pub use digest::{ContentDigest, DigestLimit};
+pub use directory_create::{CreatedDirectoryCustody, DirectoryCreateFailure};
 pub use directory_enumeration::{
     DirectoryEntryObservation, DirectoryEntryRejectedFact, DirectoryEntryRejectionReason,
     DirectoryEnumerationBatch, DirectoryEnumerationLimits, DirectoryEnumerationSession,

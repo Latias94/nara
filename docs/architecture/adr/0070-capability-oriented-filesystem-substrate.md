@@ -225,6 +225,14 @@ contents, perform cleanup or confer deletion authority. A caller may retain a ve
 closing duplicate cleanup custody. Failed or unproven comparison preserves the original owner;
 `discard()` remains a separate temporary-cleanup operation and is not a `FileUnlinkReceipt`.
 
+`create_child_directory_retained` returns the exact created directory on successful admission.
+Its `DirectoryCreateFailure` distinguishes a refusal before creation from an exclusive child
+whose later open or validation failed. Opaque `CreatedDirectoryCustody` retains the actual
+parent, original name and any obtained handle/identity; a created-but-unopened result still
+retains the creation fact. It grants no traversal or deletion authority and performs no Drop
+cleanup. Native template staging uses this retained result alongside temporary-file cleanup
+owners so a later directory or member failure cannot erase earlier actual creation facts.
+
 ### Platform evidence matrix
 
 - **Windows reference contract:** Windows 10 version 1809 or later, or the corresponding Windows
