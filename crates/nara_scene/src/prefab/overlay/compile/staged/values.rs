@@ -110,6 +110,21 @@ where
         if opaque && !program.properties.is_empty() {
             return Err(PrefabExpansionFailureKind::Component.into());
         }
+        if !opaque && authority.schema(component).is_none() {
+            self.context.diagnostics.push(with_public_locator(
+                with_public_locator(
+                    diagnostic_error(
+                        "scene.unknown-component",
+                        "Component type is not registered",
+                    ),
+                    "entity-id",
+                    entity.as_str(),
+                ),
+                "component-id",
+                component.as_str(),
+            ));
+            return Err(PrefabExpansionFailureKind::Component.into());
+        }
         if !opaque && !authority.owner_matches(component, original) {
             return Err(PrefabExpansionFailureKind::OwnerAdmission.into());
         }

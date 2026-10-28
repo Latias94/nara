@@ -23,6 +23,28 @@ fn id(name: &str) -> SceneEntityId {
     SceneEntityId::new(name).unwrap()
 }
 
+#[test]
+fn selected_unknown_component_reports_missing_definition_before_migration() {
+    let registry = registry();
+    let document = SceneDocument::from_ordered_roots([SceneEntityRecord::new(id("unknown"))
+        .with_component(
+            ComponentTypeId::new("studio.unbound.Value"),
+            SceneComponentRecord::new(ComponentSchemaVersion::ONE, ComponentValue::Null),
+        )]);
+    let resolver = InMemoryPrefabSourceResolver::new();
+    let report = document.expand_prefabs(&registry, &resolver);
+    assert!(report.candidate.is_none());
+    assert!(
+        report
+            .diagnostics
+            .iter()
+            .any(|diagnostic| { diagnostic.code().as_str() == "scene.unknown-component" })
+    );
+    assert!(!report.diagnostics.iter().any(|diagnostic| {
+        diagnostic.code().as_str() == "scene.prefab-component-migration-failed"
+    }));
+}
+
 fn source(name: &str) -> AssetRef {
     AssetRef::path(format!("prefabs/{name}.prefab.ron")).unwrap()
 }

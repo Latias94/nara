@@ -436,7 +436,19 @@ fn missing_native_noncurrent_and_foreign_owner_records_refuse_activation() {
             &fixture(),
             Default::default(),
         );
-        conflict(&report, expected);
+        if !native {
+            let diagnostic = rejected(&report, "scene.unknown-component");
+            assert_eq!(
+                field(diagnostic, "component-id"),
+                DiagnosticValueRef::Identifier(component().as_str()),
+            );
+            assert_eq!(
+                report.failure.as_ref().unwrap().reason(),
+                &crate::PrefabExpansionFailureKind::Component,
+            );
+        } else {
+            conflict(&report, expected);
+        }
     }
 }
 
