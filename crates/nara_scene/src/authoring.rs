@@ -57,6 +57,11 @@ pub use schema_reclassification::{
     SchemaReclassificationLimits, SchemaReclassificationUsage, SchemaReclassificationWork,
 };
 #[cfg(feature = "serde")]
+pub use schema_reclassification::{
+    PreparedPrefabSchemaSource, PreparedSceneSchemaSource, borrow_prepared_prefab_schema_source,
+    borrow_prepared_scene_schema_source,
+};
+#[cfg(feature = "serde")]
 mod property;
 #[cfg(feature = "serde")]
 pub use property::AuthoringPropertyEdit;

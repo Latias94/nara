@@ -145,7 +145,9 @@ pub use spawn::{
 #[cfg(feature = "serde")]
 pub mod __private {
     pub use crate::authoring::{
-        PrefabSchemaReclassificationCommit, SceneSchemaReclassificationCommit,
+        PrefabSchemaReclassificationCommit, PreparedPrefabSchemaSource, PreparedSceneSchemaSource,
+        SceneSchemaReclassificationCommit, borrow_prepared_prefab_schema_source,
+        borrow_prepared_scene_schema_source,
     };
     pub use crate::authoring_decode::{
         AuthoringAdapterReceipt, AuthoringAdapterReceiptError,

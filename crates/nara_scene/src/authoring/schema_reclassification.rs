@@ -251,6 +251,171 @@ impl PreparedPrefabSchemaReclassification {
     }
 }
 
+/// Validated current Scene source under an unpublished classification successor.
+///
+/// Both borrows remain live: the session cannot change source or classification and the
+/// candidate cannot be consumed while this view is used. This proves only their current-source
+/// association; selected composition, dependencies and later publication remain Host admission.
+#[doc(hidden)]
+#[derive(Debug)]
+pub struct PreparedSceneSchemaSource<'a> {
+    document: &'a Arc<SceneDocument>,
+    prepared: &'a PreparedSceneSchemaReclassification,
+}
+
+/// Nominal Prefab source counterpart, retaining the original Session document Arc.
+#[doc(hidden)]
+#[derive(Debug)]
+pub struct PreparedPrefabSchemaSource<'a> {
+    document: &'a Arc<PrefabDocument>,
+    prepared: &'a PreparedPrefabSchemaReclassification,
+}
+
+/// Borrows a prepared Scene's exact current source after the same check used by commit bind.
+#[doc(hidden)]
+pub fn borrow_prepared_scene_schema_source<'a>(
+    session: &'a SceneAuthoringSession,
+    prepared: &'a PreparedSceneSchemaReclassification,
+) -> Result<PreparedSceneSchemaSource<'a>, ScenePatchReport> {
+    require_prepared_source(
+        session.revision(),
+        session.authoring_schema_basis(),
+        prepared.revision,
+        &prepared.previous,
+    )?;
+    Ok(PreparedSceneSchemaSource {
+        document: &session.document,
+        prepared,
+    })
+}
+
+/// Borrows a prepared Prefab's exact current source without a Scene projection or source copy.
+#[doc(hidden)]
+pub fn borrow_prepared_prefab_schema_source<'a>(
+    session: &'a PrefabAuthoringSession,
+    prepared: &'a PreparedPrefabSchemaReclassification,
+) -> Result<PreparedPrefabSchemaSource<'a>, ScenePatchReport> {
+    require_prepared_source(
+        session.revision(),
+        session.authoring_schema_basis(),
+        prepared.revision,
+        &prepared.previous,
+    )?;
+    Ok(PreparedPrefabSchemaSource {
+        document: &session.document,
+        prepared,
+    })
+}
+
+impl PreparedSceneSchemaSource<'_> {
+    #[must_use]
+    pub fn document(&self) -> &SceneDocument {
+        self.document.as_ref()
+    }
+
+    /// Clones only the original Session's immutable source handle.
+    #[must_use]
+    pub fn shared_document(&self) -> Arc<SceneDocument> {
+        Arc::clone(self.document)
+    }
+
+    #[must_use]
+    pub fn schema_basis(&self) -> AuthoringSchemaBasis {
+        self.prepared.schema_basis()
+    }
+
+    #[must_use]
+    pub fn source(&self) -> &crate::AuthoringDocumentSource {
+        self.prepared.state.source()
+    }
+
+    #[must_use]
+    pub fn readiness(&self) -> crate::AuthoringDocumentReadiness {
+        self.prepared.readiness()
+    }
+
+    #[must_use]
+    pub const fn base_revision(&self) -> SceneAuthoringRevision {
+        self.prepared.base_revision()
+    }
+
+    #[must_use]
+    pub fn file_limits(&self) -> crate::SceneFileLimits {
+        self.prepared.state.file_limits()
+    }
+
+    #[must_use]
+    pub fn diagnostics(&self) -> &nara_diagnostic::DiagnosticReport {
+        self.prepared.diagnostics()
+    }
+
+    #[must_use]
+    pub fn unavailable_record_manifest(&self) -> &crate::UnavailableRecordManifest {
+        self.prepared.unavailable_record_manifest()
+    }
+}
+
+impl PreparedPrefabSchemaSource<'_> {
+    #[must_use]
+    pub fn document(&self) -> &PrefabDocument {
+        self.document.as_ref()
+    }
+
+    #[must_use]
+    pub fn shared_document(&self) -> Arc<PrefabDocument> {
+        Arc::clone(self.document)
+    }
+
+    #[must_use]
+    pub fn schema_basis(&self) -> AuthoringSchemaBasis {
+        self.prepared.schema_basis()
+    }
+
+    #[must_use]
+    pub fn source(&self) -> &crate::AuthoringDocumentSource {
+        self.prepared.state.source()
+    }
+
+    #[must_use]
+    pub fn readiness(&self) -> crate::AuthoringDocumentReadiness {
+        self.prepared.readiness()
+    }
+
+    #[must_use]
+    pub const fn base_revision(&self) -> SceneAuthoringRevision {
+        self.prepared.base_revision()
+    }
+
+    #[must_use]
+    pub fn file_limits(&self) -> crate::SceneFileLimits {
+        self.prepared.state.file_limits()
+    }
+
+    #[must_use]
+    pub fn diagnostics(&self) -> &nara_diagnostic::DiagnosticReport {
+        self.prepared.diagnostics()
+    }
+
+    #[must_use]
+    pub fn unavailable_record_manifest(&self) -> &crate::UnavailableRecordManifest {
+        self.prepared.unavailable_record_manifest()
+    }
+}
+
+fn require_prepared_source(
+    revision: SceneAuthoringRevision,
+    basis: Option<AuthoringSchemaBasis>,
+    prepared_revision: SceneAuthoringRevision,
+    previous: &AuthoringSchemaBasis,
+) -> Result<(), ScenePatchReport> {
+    if revision != prepared_revision || basis.as_ref() != Some(previous) {
+        return Err(refused(
+            "Schema reclassification requires its original source revision and basis",
+        ));
+    }
+    Ok(())
+}
+
 /// Exclusive validated source access for whole-set publication by the Workspace owner.
 #[doc(hidden)]
 #[derive(Debug)]
@@ -350,13 +515,12 @@ impl SceneAuthoringSession {
         &mut self,
         prepared: PreparedSceneSchemaReclassification,
     ) -> Result<SceneSchemaReclassificationCommit<'_>, ScenePatchReport> {
-        if self.revision() != prepared.revision
-            || self.authoring_schema_basis().as_ref() != Some(&prepared.previous)
-        {
-            return Err(refused(
-                "Schema reclassification requires its original source revision and basis",
-            ));
-        }
+        require_prepared_source(
+            self.revision(),
+            self.authoring_schema_basis(),
+            prepared.revision,
+            &prepared.previous,
+        )?;
         Ok(SceneSchemaReclassificationCommit {
             session: self,
             state: prepared.state,
@@ -430,13 +594,12 @@ impl PrefabAuthoringSession {
         &mut self,
         prepared: PreparedPrefabSchemaReclassification,
     ) -> Result<PrefabSchemaReclassificationCommit<'_>, ScenePatchReport> {
-        if self.revision() != prepared.revision
-            || self.authoring_schema_basis().as_ref() != Some(&prepared.previous)
-        {
-            return Err(refused(
-                "Schema reclassification requires its original source revision and basis",
-            ));
-        }
+        require_prepared_source(
+            self.revision(),
+            self.authoring_schema_basis(),
+            prepared.revision,
+            &prepared.previous,
+        )?;
         Ok(PrefabSchemaReclassificationCommit {
             session: self,
             state: prepared.state,
@@ -660,3 +823,6 @@ pub(super) fn prepare_prefab_step(
 
 #[cfg(test)]
 mod tests;
+
+#[cfg(test)]
+mod prepared_source_tests;
