@@ -338,6 +338,11 @@ pub struct AuthoringAdapterIdentity {
 }
 
 impl AuthoringAdapterIdentity {
+    const DATA: Self = Self {
+        id: "nara.schema-data-authoring",
+        version: 1,
+    };
+
     #[must_use]
     pub const fn as_str(self) -> &'static str {
         self.id
@@ -1030,10 +1035,7 @@ impl AuthoringAdapterReceipt {
                 fingerprint: owner.current().fingerprint(),
                 predecessor: owner.current().predecessor().copied(),
             },
-            identity: AuthoringAdapterIdentity {
-                id: "nara.schema-data-authoring",
-                version: 1,
-            },
+            identity: AuthoringAdapterIdentity::DATA,
             adapter_generation: NonZeroU64::MIN,
             components,
         })
@@ -1494,6 +1496,7 @@ pub(crate) struct PreparedPrefabAuthoringPatch {
 
 #[derive(Debug)]
 struct AuthoringClassificationBasis {
+    owners: Vec<ComponentSchemaOwnerSnapshot>,
     schemas: BTreeMap<ComponentTypeId, AuthoringSchemaEntry>,
 }
 
@@ -1634,7 +1637,10 @@ impl AuthoringClassificationBasis {
             }
         }
 
-        Ok(Self { schemas })
+        Ok(Self {
+            owners: bundle.owners().to_vec(),
+            schemas,
+        })
     }
 
     fn classify_record(

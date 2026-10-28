@@ -7,7 +7,8 @@ use std::{
 use nara_fs::{CapabilityRights, HostCapabilityOptions};
 use nara_reflect::{
     ComponentCapability, ComponentFieldId, ComponentFieldPath, ComponentFieldSchema,
-    ComponentSchema, ComponentSchemaVersion, ComponentValue, ComponentValueKind,
+    ComponentSchema, ComponentSchemaCatalog, ComponentSchemaVersion, ComponentValue,
+    ComponentValueKind,
 };
 use serde_json::{Value, json};
 
@@ -120,6 +121,46 @@ impl Release {
         .unwrap()
     }
 
+    pub(in crate::project_host::runtime::editor::source_tools) fn creation_metadata_successor()
+    -> Self {
+        let mut release = Self::new();
+        let predecessor_bytes = fs::read(release.directory.join("catalog.json")).unwrap();
+        let predecessor = ComponentSchemaCatalog::from_json_bytes(&predecessor_bytes).unwrap();
+        let mut current = ComponentSchemaCatalog::successor_of(&predecessor).unwrap();
+        current.components.push(
+            predecessor.components()[0]
+                .clone()
+                .with_authoring_initial_value(ComponentValue::map([(
+                    "wire_health",
+                    ComponentValue::I64(200),
+                )])),
+        );
+        let bytes = current
+            .to_json_string_with_predecessor(Some(&predecessor))
+            .unwrap()
+            .into_bytes();
+        fs::write(release.directory.join("catalog.json"), &bytes).unwrap();
+        let digest = ContentDigest::of_bytes(&bytes);
+        release.manifest["files"][0]["length"] = json!(digest.length());
+        release.manifest["files"][0]["blake3"] = json!(hex(digest));
+        fs::write(
+            release.directory.join("catalog-predecessor.json"),
+            &predecessor_bytes,
+        )
+        .unwrap();
+        let digest = ContentDigest::of_bytes(&predecessor_bytes);
+        release.manifest["files"]
+            .as_array_mut()
+            .unwrap()
+            .push(json!({
+                "path": "catalog-predecessor.json", "kind": "tool",
+                "length": digest.length(), "blake3": hex(digest),
+            }));
+        release.manifest["catalog_predecessor"] = json!("catalog-predecessor.json");
+        release.manifest["release"] = json!("2");
+        release
+    }
+
     pub(in crate::project_host::runtime::editor::source_tools) fn write_manifest(
         &self,
     ) -> ContentDigest {
@@ -156,6 +197,9 @@ fn capture_freezes_complete_declared_bytes_and_schema_without_execution_or_sourc
     assert_eq!(prepared.manifest_digest(), digest);
     assert_eq!(ContentDigest::of_bytes(prepared.manifest_bytes()), digest);
     assert_eq!(prepared.source_root_identity(), root.identity());
+    assert_eq!(prepared.catalog_predecessor(), None);
+    assert_eq!(prepared.schema_owner().current().generation(), 1);
+    assert!(prepared.schema_owner().predecessor().is_none());
     assert_eq!(
         prepared.schema_owner().owner_id().as_str(),
         "test.stats-schema"
@@ -181,6 +225,210 @@ fn capture_freezes_complete_declared_bytes_and_schema_without_execution_or_sourc
     fs::write(release.directory.join(sample.path()), b"changed sample").unwrap();
     assert_eq!(sample.bytes(), b"editable sample");
     assert!(PreparedEditorSourceToolRelease::capture(&root, digest).is_err());
+}
+
+#[test]
+fn capture_freezes_a_creation_metadata_successor_with_its_complete_actual_predecessor() {
+    let release = Release::creation_metadata_successor();
+    let digest = release.write_manifest();
+    let root = release.root(TrustMode::Untrusted);
+    let prepared = PreparedEditorSourceToolRelease::capture(&root, digest).unwrap();
+    assert_eq!(
+        prepared.catalog_predecessor(),
+        Some("catalog-predecessor.json")
+    );
+    assert_eq!(prepared.members().len(), 4);
+    let current = prepared.schema_owner().current();
+    let predecessor = prepared.schema_owner().predecessor().unwrap();
+    assert_eq!(current.generation(), 2);
+    assert_eq!(predecessor.generation(), 1);
+    assert_eq!(current.predecessor(), Some(&predecessor.fingerprint()));
+    assert_ne!(current.fingerprint(), predecessor.fingerprint());
+    let mut expected_schema = predecessor.components()[0].clone();
+    expected_schema.authoring_initial_value = Some(ComponentValue::map([(
+        "wire_health",
+        ComponentValue::I64(200),
+    )]));
+    assert_eq!(current.components(), &[expected_schema]);
+    assert_eq!(
+        current.components()[0].version(),
+        ComponentSchemaVersion::ONE
+    );
+    for path in [prepared.catalog(), prepared.catalog_predecessor().unwrap()] {
+        let member = prepared
+            .members()
+            .iter()
+            .find(|member| member.path() == path)
+            .unwrap();
+        assert_eq!(member.kind(), EditorSourceToolReleaseMemberKind::Tool);
+        let original_bytes = fs::read(release.directory.join(path)).unwrap();
+        assert_eq!(member.bytes(), original_bytes);
+        fs::write(release.directory.join(path), b"changed after capture").unwrap();
+        assert_eq!(member.bytes(), original_bytes);
+    }
+    assert_eq!(
+        predecessor.components()[0].authoring_initial_value(),
+        Some(&ComponentValue::map([(
+            "wire_health",
+            ComponentValue::I64(100),
+        )]))
+    );
+    assert!(PreparedEditorSourceToolRelease::capture(&root, digest).is_err());
+    assert!(!release.directory.join(".nara").exists());
+}
+
+#[test]
+fn generation_one_accepts_an_explicit_absent_predecessor() {
+    let mut release = Release::new();
+    release.manifest["catalog_predecessor"] = Value::Null;
+    let digest = release.write_manifest();
+    let prepared =
+        PreparedEditorSourceToolRelease::capture(&release.root(TrustMode::Untrusted), digest)
+            .unwrap();
+    assert_eq!(prepared.catalog_predecessor(), None);
+    assert_eq!(prepared.schema_owner().current().generation(), 1);
+    assert!(prepared.schema_owner().predecessor().is_none());
+}
+
+#[test]
+fn later_release_captures_only_its_complete_immediate_predecessor() {
+    let mut release = Release::creation_metadata_successor();
+    let second = PreparedEditorSourceToolRelease::capture(
+        &release.root(TrustMode::Untrusted),
+        release.write_manifest(),
+    )
+    .unwrap();
+    let predecessor = second.schema_owner().current().clone();
+    let predecessor_bytes = fs::read(release.directory.join("catalog.json")).unwrap();
+    let mut current = ComponentSchemaCatalog::successor_of(&predecessor).unwrap();
+    current.components = predecessor.components().to_vec();
+    current.components[0].authoring_initial_value = Some(ComponentValue::map([(
+        "wire_health",
+        ComponentValue::I64(300),
+    )]));
+    let bytes = current
+        .to_json_string_with_predecessor(Some(&predecessor))
+        .unwrap()
+        .into_bytes();
+    for (path, bytes) in [
+        ("catalog.json", bytes),
+        ("catalog-predecessor.json", predecessor_bytes),
+    ] {
+        fs::write(release.directory.join(path), &bytes).unwrap();
+        let digest = ContentDigest::of_bytes(&bytes);
+        let member = release.manifest["files"]
+            .as_array_mut()
+            .unwrap()
+            .iter_mut()
+            .find(|member| member["path"] == path)
+            .unwrap();
+        member["length"] = json!(digest.length());
+        member["blake3"] = json!(hex(digest));
+    }
+    release.manifest["release"] = json!("3");
+    let third = PreparedEditorSourceToolRelease::capture(
+        &release.root(TrustMode::Untrusted),
+        release.write_manifest(),
+    )
+    .unwrap();
+    assert_eq!(third.schema_owner().current(), &current);
+    assert_eq!(third.schema_owner().predecessor(), Some(&predecessor));
+    assert!(
+        third
+            .schema_owner()
+            .is_creation_metadata_successor_of(second.schema_owner())
+    );
+}
+
+#[test]
+fn a_successor_requires_the_explicit_predecessor_declaration() {
+    for explicit_null in [false, true] {
+        let mut release = Release::creation_metadata_successor();
+        release
+            .manifest
+            .as_object_mut()
+            .unwrap()
+            .remove("catalog_predecessor");
+        if explicit_null {
+            release.manifest["catalog_predecessor"] = Value::Null;
+        }
+        let digest = release.write_manifest();
+        assert!(matches!(
+            PreparedEditorSourceToolRelease::capture(&release.root(TrustMode::Untrusted), digest),
+            Err(EditorSourceToolReleaseError::Schema)
+        ));
+    }
+}
+
+#[test]
+fn a_declared_predecessor_must_be_captured_from_its_exact_file() {
+    let release = Release::creation_metadata_successor();
+    let digest = release.write_manifest();
+    fs::remove_file(release.directory.join("catalog-predecessor.json")).unwrap();
+    assert!(matches!(
+        PreparedEditorSourceToolRelease::capture(&release.root(TrustMode::Untrusted), digest),
+        Err(EditorSourceToolReleaseError::Filesystem { member, .. })
+            if member == "catalog-predecessor.json"
+    ));
+}
+
+#[test]
+fn matching_member_digests_cannot_bypass_catalog_generation_or_predecessor_fingerprint() {
+    for (field, invalid) in [
+        ("generation", json!(1)),
+        ("generation", json!(3)),
+        ("predecessor", json!("0".repeat(64))),
+        ("predecessor", Value::Null),
+    ] {
+        let mut release = Release::creation_metadata_successor();
+        let catalog_path = release.directory.join("catalog.json");
+        let mut encoded: Value = serde_json::from_slice(&fs::read(&catalog_path).unwrap()).unwrap();
+        encoded["payload"][field] = invalid;
+        let bytes = serde_json::to_vec(&encoded).unwrap();
+        fs::write(catalog_path, &bytes).unwrap();
+        let digest = ContentDigest::of_bytes(&bytes);
+        release.manifest["files"][0]["length"] = json!(digest.length());
+        release.manifest["files"][0]["blake3"] = json!(hex(digest));
+        let digest = release.write_manifest();
+        assert!(
+            matches!(
+                PreparedEditorSourceToolRelease::capture(
+                    &release.root(TrustMode::Untrusted),
+                    digest
+                ),
+                Err(EditorSourceToolReleaseError::Schema)
+            ),
+            "{field}: {encoded}"
+        );
+    }
+}
+
+#[test]
+fn predecessor_bytes_require_catalog_admission_and_the_actual_claimed_fingerprint() {
+    for invalid_format in [false, true] {
+        let mut release = Release::creation_metadata_successor();
+        let path = release.directory.join("catalog-predecessor.json");
+        let bytes = if invalid_format {
+            b"{}".to_vec()
+        } else {
+            let mut predecessor =
+                ComponentSchemaCatalog::from_json_bytes(&fs::read(&path).unwrap()).unwrap();
+            predecessor.components[0].authoring_initial_value = Some(ComponentValue::map([(
+                "wire_health",
+                ComponentValue::I64(125),
+            )]));
+            predecessor.to_json_string().unwrap().into_bytes()
+        };
+        fs::write(path, &bytes).unwrap();
+        let digest = ContentDigest::of_bytes(&bytes);
+        release.manifest["files"][3]["length"] = json!(digest.length());
+        release.manifest["files"][3]["blake3"] = json!(hex(digest));
+        let digest = release.write_manifest();
+        assert!(matches!(
+            PreparedEditorSourceToolRelease::capture(&release.root(TrustMode::Untrusted), digest),
+            Err(EditorSourceToolReleaseError::Schema)
+        ));
+    }
 }
 
 #[test]

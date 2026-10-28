@@ -118,6 +118,7 @@ fn application_retains_schema_adoption_failure_until_acknowledged() {
         .prepare_installed_schema_owner(
             "tools/missing",
             nara::fs::ContentDigest::of_bytes(b"missing installation"),
+            nara::reflect::ComponentSchemaOwnerChange::Add,
         )
         .unwrap();
     let deadline = Instant::now() + Duration::from_secs(10);

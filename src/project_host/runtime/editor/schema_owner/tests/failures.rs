@@ -64,7 +64,10 @@ fn malformed_unknown_record_retains_the_complete_workspace_preparation_failure_w
         let inspection =
             EditorSourceToolInstallationInspection::read(&installed, fixture.receipt).unwrap();
         let AuthoringSchemaOwnerPreparation::Prepared { owner, .. } = input
-            .prepare_owner(inspection.release().schema_owner())
+            .prepare_owner(
+                inspection.release().schema_owner(),
+                nara_reflect::ComponentSchemaOwnerChange::Add,
+            )
             .unwrap()
         else {
             panic!("the installed owner must still be absent from the project");
@@ -74,6 +77,7 @@ fn malformed_unknown_record_retains_the_complete_workspace_preparation_failure_w
             .capture_schema_reclassification(
                 input.schema_basis(),
                 owner.schema_basis(),
+                owner.reclassification_kind(),
                 Default::default(),
             )
             .unwrap()
@@ -87,7 +91,11 @@ fn malformed_unknown_record_retains_the_complete_workspace_preparation_failure_w
         assert_eq!(patch.diagnostics, expected.diagnostics);
 
         let operation = editor
-            .prepare_installed_schema_owner(INSTALLED, fixture.receipt)
+            .prepare_installed_schema_owner(
+                INSTALLED,
+                fixture.receipt,
+                nara_reflect::ComponentSchemaOwnerChange::Add,
+            )
             .unwrap();
         assert_eq!(
             terminal(editor),
@@ -367,7 +375,11 @@ fn cancelling_successfully_returned_preparation_does_not_invent_a_stale_failure(
         let bundle = fixture.bytes(BUNDLE);
         let source = fixture.bytes(STARTUP);
         let operation = editor
-            .prepare_installed_schema_owner(INSTALLED, fixture.receipt)
+            .prepare_installed_schema_owner(
+                INSTALLED,
+                fixture.receipt,
+                nara_reflect::ComponentSchemaOwnerChange::Add,
+            )
             .unwrap();
         wait(editor, |editor| {
             matches!(
@@ -439,7 +451,11 @@ fn cancelling_inspection_queued_before_start_does_not_invent_a_task_failure() {
         let bundle = fixture.bytes(BUNDLE);
         let source = fixture.bytes(STARTUP);
         let operation = editor
-            .prepare_installed_schema_owner(INSTALLED, fixture.receipt)
+            .prepare_installed_schema_owner(
+                INSTALLED,
+                fixture.receipt,
+                nara_reflect::ComponentSchemaOwnerChange::Add,
+            )
             .unwrap();
         let pools = TaskPools::inline_for_tests(TaskPoolConfig::default()).unwrap();
         // Schedule the Session's actual request on the deterministic Tasks driver, leaving

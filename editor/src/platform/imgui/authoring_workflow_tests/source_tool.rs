@@ -440,10 +440,11 @@ impl AuthoringWorkflow<'_> {
         let before_tool = self.frame()?.source_tool().clone();
         let deadline = Instant::now() + TOOL_TIMEOUT;
         let operation = loop {
-            match self
-                .application
-                .prepare_installed_schema_owner(INSTALLATION, fixture.installed.receipt)
-            {
+            match self.application.prepare_installed_schema_owner(
+                INSTALLATION,
+                fixture.installed.receipt,
+                nara::reflect::ComponentSchemaOwnerChange::Add,
+            ) {
                 Ok(operation) => break operation,
                 Err(EditorSchemaOwnerAdoptionError::Busy) if Instant::now() < deadline => {
                     self.paint(|_| {})?;

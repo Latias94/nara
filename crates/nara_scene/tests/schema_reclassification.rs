@@ -2,6 +2,8 @@
 
 use std::sync::Arc;
 
+use nara_scene::SchemaReclassificationKind::DeclarationExtension;
+
 use nara_asset::AssetRef;
 use nara_reflect::{
     AuthoringSchemaBundle, AuthoringSchemaBundleOwner, ComponentCapability, ComponentFieldId,
@@ -118,11 +120,11 @@ fn independent_consumer_recovers_scene_and_prefab_with_shared_work_and_exact_sou
         .unwrap();
     let mut work = SchemaReclassificationWork::default();
     let prepared_scene: PreparedSceneSchemaReclassification = scene
-        .prepare_schema_reclassification(&next, &mut work)
+        .prepare_schema_reclassification(&next, &DeclarationExtension, &mut work)
         .unwrap();
     let first_usage = work.usage();
     let prepared_prefab: PreparedPrefabSchemaReclassification = prefab
-        .prepare_schema_reclassification(&next, &mut work)
+        .prepare_schema_reclassification(&next, &DeclarationExtension, &mut work)
         .unwrap();
     assert!(work.usage().work_bytes > first_usage.work_bytes);
     assert_eq!(prepared_scene.base_revision(), scene_before.0);

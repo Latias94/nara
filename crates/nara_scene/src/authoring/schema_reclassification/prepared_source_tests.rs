@@ -1,4 +1,5 @@
 use super::*;
+use crate::SchemaReclassificationKind::DeclarationExtension;
 use crate::{
     __private::{
         AuthoringAdapterReceipt, PreparedPrefabSchemaSource, PreparedSceneSchemaSource,
@@ -138,7 +139,7 @@ fn validated_views_share_original_arcs_and_borrow_only_successor_classification(
         let history = session.history_status();
         let mut work = SchemaReclassificationWork::default();
         let prepared = session
-            .prepare_schema_reclassification(&successor, &mut work)
+            .prepare_schema_reclassification(&successor, &DeclarationExtension, &mut work)
             .unwrap();
         let usage = work.usage();
         assert_eq!(Arc::strong_count(&source), source_count + 1);
@@ -181,7 +182,11 @@ fn views_and_commit_bind_reject_the_same_edited_revision() {
     let successor = successor();
     each_source!(&previous, |session, borrow| {
         let prepared = session
-            .prepare_schema_reclassification(&successor, &mut SchemaReclassificationWork::default())
+            .prepare_schema_reclassification(
+                &successor,
+                &DeclarationExtension,
+                &mut SchemaReclassificationWork::default(),
+            )
             .unwrap();
         let patch = ScenePatchDocument::new([ScenePatchOperation::AddEntity {
             entity: SceneEntityRecord::new(SceneEntityId::new("newer").unwrap()),
@@ -214,6 +219,7 @@ fn views_reject_foreign_sources_even_with_equal_contents_and_the_same_bases() {
             let prepared = first
                 .prepare_schema_reclassification(
                     &successor,
+                    &DeclarationExtension,
                     &mut SchemaReclassificationWork::default(),
                 )
                 .unwrap();
@@ -232,10 +238,18 @@ fn views_reject_reclassified_sources_without_a_revision_or_document_change() {
     let successor = successor();
     each_source!(&previous, |session, borrow| {
         let stale = session
-            .prepare_schema_reclassification(&successor, &mut SchemaReclassificationWork::default())
+            .prepare_schema_reclassification(
+                &successor,
+                &DeclarationExtension,
+                &mut SchemaReclassificationWork::default(),
+            )
             .unwrap();
         let accepted = session
-            .prepare_schema_reclassification(&successor, &mut SchemaReclassificationWork::default())
+            .prepare_schema_reclassification(
+                &successor,
+                &DeclarationExtension,
+                &mut SchemaReclassificationWork::default(),
+            )
             .unwrap();
         let revision = session.revision();
         let source = session.shared_document();
@@ -257,11 +271,16 @@ fn independently_readmitted_equal_previous_basis_invalidates_prepared_source_rea
     let successor = successor();
     each_source!(&previous, |session, borrow| {
         let stale = session
-            .prepare_schema_reclassification(&successor, &mut SchemaReclassificationWork::default())
+            .prepare_schema_reclassification(
+                &successor,
+                &DeclarationExtension,
+                &mut SchemaReclassificationWork::default(),
+            )
             .unwrap();
         let replacement = session
             .prepare_schema_reclassification(
                 &equal_previous,
+                &DeclarationExtension,
                 &mut SchemaReclassificationWork::default(),
             )
             .unwrap();

@@ -45,7 +45,7 @@ pub use authoring::{
     PrefabDeclarationLimits, PrefabInstanceObservation, PreparedPrefabAuthoringConstruction,
     PreparedPrefabAuthoringEdit, PreparedPrefabConversion, PreparedPrefabSchemaReclassification,
     PreparedSceneAuthoringConstruction, PreparedSceneAuthoringEdit, PreparedScenePrefabConversion,
-    PreparedSceneSchemaReclassification, ScenePrefabConversionRequest,
+    PreparedSceneSchemaReclassification, ScenePrefabConversionRequest, SchemaReclassificationKind,
     SchemaReclassificationLimits, SchemaReclassificationUsage, SchemaReclassificationWork,
 };
 pub use authoring::{

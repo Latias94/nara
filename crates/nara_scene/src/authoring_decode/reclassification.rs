@@ -7,6 +7,7 @@
 use std::mem::size_of;
 
 use super::*;
+use crate::SchemaReclassificationKind;
 use crate::authoring::prefab_conversion::retention as source_retention;
 use crate::provenance::{provenance_asset_ref_bytes, provenance_string_bytes};
 
@@ -18,6 +19,26 @@ pub(super) type ClassificationCallback<'a> =
 const TREE_ENTRY_BYTES: usize = 6 * size_of::<usize>();
 
 impl AuthoringSchemaBasis {
+    pub(crate) fn require_reclassification_successor_of(
+        &self,
+        previous: &Self,
+        kind: &SchemaReclassificationKind,
+    ) -> Result<(), ScenePatchReport> {
+        // Replay can already hold this exact successor admission. Content equality from an
+        // independent admission never grants this identity-only no-op.
+        if self == previous {
+            return Ok(());
+        }
+        match kind {
+            SchemaReclassificationKind::DeclarationExtension => {
+                self.require_declaration_extension_of(previous)
+            }
+            SchemaReclassificationKind::CreationMetadata { owner } => {
+                self.require_creation_metadata_successor_of(previous, owner)
+            }
+        }
+    }
+
     /// Source owners prove current declarations only. The Host proves complete owner lineage.
     pub(crate) fn require_declaration_extension_of(
         &self,
@@ -36,6 +57,103 @@ impl AuthoringSchemaBasis {
         }
         Ok(())
     }
+
+    fn require_creation_metadata_successor_of(
+        &self,
+        previous: &Self,
+        owner: &PersistentComponentSchemaOwnerId,
+    ) -> Result<(), ScenePatchReport> {
+        let refuse = || {
+            structure::authoring_structure_rejection(
+                "Creation metadata requires one exact owner successor and unchanged data Adapter implementation and coverage",
+            )
+        };
+        if self.0.owners.len() != previous.0.owners.len()
+            || self.0.schemas.len() != previous.0.schemas.len()
+        {
+            return Err(refuse());
+        }
+        let mut selected = false;
+        for (next, previous) in self.0.owners.iter().zip(&previous.0.owners) {
+            if next.owner_id() != previous.owner_id() {
+                return Err(refuse());
+            }
+            if next.owner_id() == owner {
+                if !next.is_creation_metadata_successor_of(previous) {
+                    return Err(refuse());
+                }
+                selected = true;
+            } else if next.current() != previous.current()
+                || next.predecessor() != previous.predecessor()
+            {
+                return Err(refuse());
+            }
+        }
+        if !selected {
+            return Err(refuse());
+        }
+        for (component, previous) in &previous.0.schemas {
+            let Some(next) = self.0.schemas.get(component) else {
+                return Err(refuse());
+            };
+            if next.owner != previous.owner {
+                return Err(refuse());
+            }
+            if &next.owner == owner {
+                if !next
+                    .schema
+                    .same_definition_except_initial_value(&previous.schema)
+                    || !data_adapter_creation_successor(
+                        next.adapter.as_ref(),
+                        previous.adapter.as_ref(),
+                    )
+                {
+                    return Err(refuse());
+                }
+            } else if next.schema != previous.schema || next.adapter != previous.adapter {
+                return Err(refuse());
+            }
+        }
+        Ok(())
+    }
+}
+
+fn data_adapter_creation_successor(
+    next: Option<&AuthoringAdapterEvidence>,
+    previous: Option<&AuthoringAdapterEvidence>,
+) -> bool {
+    let (Some(next), Some(previous)) = (next, previous) else {
+        return false;
+    };
+    if previous.identity != AuthoringAdapterIdentity::DATA
+        || next.identity != previous.identity
+        || next.adapter_generation != previous.adapter_generation
+    {
+        return false;
+    }
+    // Both bases admitted these exact catalogs against actual receipts. Preserve that binding
+    // and compare the permitted lineage advance; never mint or relabel Adapter evidence here.
+    match (&next.catalog, &previous.catalog) {
+        (
+            AuthoringAdapterCatalog::Data {
+                owner,
+                generation,
+                predecessor,
+                ..
+            },
+            AuthoringAdapterCatalog::Data {
+                owner: previous_owner,
+                generation: previous_generation,
+                fingerprint: previous_fingerprint,
+                ..
+            },
+        ) => {
+            owner == previous_owner
+                && previous_generation.checked_add(1) == Some(*generation)
+                && predecessor.as_ref() == Some(previous_fingerprint)
+        }
+        _ => false,
+    }
 }
 
 impl AuthoringDocumentState {
@@ -43,9 +161,10 @@ impl AuthoringDocumentState {
         &self,
         document: &SceneDocument,
         successor: &AuthoringSchemaBasis,
+        kind: &SchemaReclassificationKind,
         admit: &mut AdmissionCallback<'_>,
     ) -> Result<Self, ScenePatchReport> {
-        successor.require_declaration_extension_of(&self.schema_basis())?;
+        successor.require_reclassification_successor_of(&self.schema_basis(), kind)?;
         classify_with_admission(document, self, successor, admit)
     }
 
@@ -53,9 +172,10 @@ impl AuthoringDocumentState {
         &self,
         document: &PrefabDocument,
         successor: &AuthoringSchemaBasis,
+        kind: &SchemaReclassificationKind,
         admit: &mut AdmissionCallback<'_>,
     ) -> Result<Self, ScenePatchReport> {
-        successor.require_declaration_extension_of(&self.schema_basis())?;
+        successor.require_reclassification_successor_of(&self.schema_basis(), kind)?;
         // The incumbent structural validator accepts SceneDocument. Admit this nominal
         // projection explicitly; it coexists with the borrowed Prefab and successor facts.
         admit_document(&document.roots, &document.entities, self.limits, admit)?;
@@ -673,6 +793,9 @@ pub(super) fn diagnostics_bytes(entries: &[UnavailableRecordManifestEntry]) -> O
 
 #[cfg(test)]
 mod tests;
+
+#[cfg(test)]
+mod creation_metadata_tests;
 
 #[cfg(test)]
 mod measurement_tests {

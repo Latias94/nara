@@ -1,4 +1,5 @@
 use super::*;
+use crate::SchemaReclassificationKind::DeclarationExtension;
 use crate::{
     PrefabAuthoringSession, SceneAuthoringHistoryLimits, SceneAuthoringSession,
     SchemaReclassificationWork,
@@ -257,7 +258,11 @@ fn reclassifying_one_owner_preserves_the_published_predecessor_and_sibling() {
         let sibling_revision = sibling.revision();
         let sibling_history = sibling.history_status();
         let prepared = first
-            .prepare_schema_reclassification(&successor, &mut SchemaReclassificationWork::default())
+            .prepare_schema_reclassification(
+                &successor,
+                &DeclarationExtension,
+                &mut SchemaReclassificationWork::default(),
+            )
             .unwrap();
         assert_eq!(prepared.readiness(), AuthoringDocumentReadiness::Complete);
         assert!(std::ptr::eq(

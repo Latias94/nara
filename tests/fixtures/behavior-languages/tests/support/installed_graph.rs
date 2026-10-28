@@ -2,6 +2,8 @@
 
 #![cfg(all(target_os = "windows", target_arch = "x86_64", target_env = "msvc"))]
 
+#[path = "installed_graph/creation_metadata.rs"]
+mod creation_metadata;
 #[path = "installed_graph/template_import.rs"]
 mod template_import;
 

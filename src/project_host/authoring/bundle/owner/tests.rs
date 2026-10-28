@@ -1,5 +1,7 @@
 #![cfg(any(windows, target_os = "linux"))]
 
+mod creation;
+
 use std::{
     fs,
     path::PathBuf,
@@ -199,7 +201,10 @@ fn prepare(
     incumbent: &Arc<AuthoringSchemaReceipt>,
 ) -> (PreparedAuthoringSchemaOwner, FilePublicationHost) {
     match incumbent
-        .prepare_owner(&generation_one(NEW_OWNER, NEW_COMPONENT))
+        .prepare_owner(
+            &generation_one(NEW_OWNER, NEW_COMPONENT),
+            ComponentSchemaOwnerChange::Add,
+        )
         .unwrap()
     {
         AuthoringSchemaOwnerPreparation::Prepared { owner, publication } => (owner, publication),
@@ -211,7 +216,7 @@ fn error(
     incumbent: &Arc<AuthoringSchemaReceipt>,
     incoming: &ComponentSchemaOwnerSnapshot,
 ) -> AuthoringSchemaOwnerError {
-    match incumbent.prepare_owner(incoming) {
+    match incumbent.prepare_owner(incoming, ComponentSchemaOwnerChange::Add) {
         Err(error) => error,
         Ok(_) => panic!("owner preparation unexpectedly succeeded"),
     }
@@ -287,7 +292,11 @@ fn generation_one_addition_preserves_all_lineage_and_attaches_the_actual_leaf_wi
     );
     let reviewed_bundle = Arc::clone(&prepared.bundle);
     let source_candidate = source
-        .prepare_schema_reclassification(&basis, &mut SchemaReclassificationWork::default())
+        .prepare_schema_reclassification(
+            &basis,
+            prepared.reclassification_kind(),
+            &mut SchemaReclassificationWork::default(),
+        )
         .unwrap();
     assert_eq!(project.disk(), before);
     assert_eq!(incumbent.bundle_identity(), before.0);
@@ -370,7 +379,7 @@ fn identical_owner_returns_already_admitted_without_rewriting_bytes_or_leaf() {
     let before = project.disk();
     let existing = generation_one("test.owner.existing", "test.owner.Existing");
     assert!(matches!(
-        incumbent.prepare_owner(&existing),
+        incumbent.prepare_owner(&existing, ComponentSchemaOwnerChange::Add),
         Ok(AuthoringSchemaOwnerPreparation::AlreadyAdmitted)
     ));
     assert_eq!(project.disk(), before);
@@ -398,7 +407,7 @@ fn identical_evolved_owner_is_a_noop_but_changed_current_or_predecessor_is_rejec
     assert!(equal.predecessor().is_some());
     assert!(!equal.ptr_eq(existing));
     assert!(matches!(
-        incumbent.prepare_owner(&equal),
+        incumbent.prepare_owner(&equal, ComponentSchemaOwnerChange::Add),
         Ok(AuthoringSchemaOwnerPreparation::AlreadyAdmitted)
     ));
     assert_eq!(project.disk(), before);

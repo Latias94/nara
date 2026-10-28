@@ -11,8 +11,8 @@ use nara_scene::{
         borrow_prepared_scene_schema_source, require_schema_reclassification_successor,
     },
     AuthoringSchemaBasis, PreparedPrefabSchemaReclassification,
-    PreparedSceneSchemaReclassification, SchemaReclassificationLimits, SchemaReclassificationUsage,
-    SchemaReclassificationWork,
+    PreparedSceneSchemaReclassification, SchemaReclassificationKind, SchemaReclassificationLimits,
+    SchemaReclassificationUsage, SchemaReclassificationWork,
 };
 
 use super::{
@@ -319,6 +319,7 @@ impl EditorWorkspace {
         &self,
         previous: &AuthoringSchemaBasis,
         successor: &AuthoringSchemaBasis,
+        kind: &SchemaReclassificationKind,
         limits: SchemaReclassificationLimits,
     ) -> Result<EditorWorkspaceSchemaReclassificationRequest, EditorWorkspaceCommandReport> {
         let mut work = SchemaReclassificationWork::new(limits);
@@ -328,6 +329,7 @@ impl EditorWorkspace {
         let incumbents = self.retain_schema_sources(
             previous,
             successor,
+            kind,
             &mut work,
             storage_per_source,
             size_of::<EditorWorkspaceSchemaReclassificationRequest>(),
@@ -337,11 +339,11 @@ impl EditorWorkspace {
             let request = match slot {
                 EditorDocumentSlot::Scene(slot) => slot
                     .session
-                    .capture_schema_reclassification(successor, &mut work, incumbent)
+                    .capture_schema_reclassification(successor, kind, &mut work, incumbent)
                     .map(SourceRequestKind::Scene),
                 EditorDocumentSlot::Prefab(slot) => slot
                     .session
-                    .capture_schema_reclassification(successor, &mut work, incumbent)
+                    .capture_schema_reclassification(successor, kind, &mut work, incumbent)
                     .map(SourceRequestKind::Prefab),
                 EditorDocumentSlot::Extension(_) => {
                     unreachable!("unsupported owners were checked before allocation")
@@ -373,6 +375,7 @@ impl EditorWorkspace {
         &self,
         previous: &AuthoringSchemaBasis,
         successor: &AuthoringSchemaBasis,
+        kind: &SchemaReclassificationKind,
         work: &mut SchemaReclassificationWork,
     ) -> Result<PreparedEditorWorkspaceSchemaReclassification, EditorWorkspaceCommandReport> {
         let storage_per_source =
@@ -380,6 +383,7 @@ impl EditorWorkspace {
         let incumbents = self.retain_schema_sources(
             previous,
             successor,
+            kind,
             work,
             storage_per_source,
             size_of::<PreparedEditorWorkspaceSchemaReclassification>(),
@@ -393,13 +397,13 @@ impl EditorWorkspace {
                 EditorDocumentSlot::Scene(slot) => slot
                     .session
                     .prepare_schema_reclassification_with_retained_source(
-                        successor, work, incumbent,
+                        successor, kind, work, incumbent,
                     )
                     .map(SourceClassification::Scene),
                 EditorDocumentSlot::Prefab(slot) => slot
                     .session
                     .prepare_schema_reclassification_with_retained_source(
-                        successor, work, incumbent,
+                        successor, kind, work, incumbent,
                     )
                     .map(SourceClassification::Prefab),
                 EditorDocumentSlot::Extension(_) => {
@@ -426,6 +430,7 @@ impl EditorWorkspace {
         &self,
         previous: &AuthoringSchemaBasis,
         successor: &AuthoringSchemaBasis,
+        kind: &SchemaReclassificationKind,
         work: &mut SchemaReclassificationWork,
         storage_per_source: Option<usize>,
         fixed_storage: usize,
@@ -445,7 +450,7 @@ impl EditorWorkspace {
                 ));
             }
         }
-        require_schema_reclassification_successor(previous, successor)
+        require_schema_reclassification_successor(previous, successor, kind)
             .map_err(|report| source_report_for_set(self.active_document, report))?;
         let storage = storage_per_source
             .and_then(|bytes| {

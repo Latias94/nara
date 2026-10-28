@@ -9,6 +9,7 @@ use nara::{
         EditorSchemaOwnerAdoptionError, EditorSchemaOwnerAdoptionFailure,
         EditorSchemaOwnerAdoptionId, EditorSchemaOwnerAdoptionView,
     },
+    reflect::ComponentSchemaOwnerChange,
     scene::PrefabExpansionFailure,
     tooling::EditorDocumentId,
 };
@@ -38,13 +39,14 @@ impl EditorApplication {
         &mut self,
         directory: &str,
         receipt: ContentDigest,
+        change: ComponentSchemaOwnerChange,
     ) -> Result<EditorSchemaOwnerAdoptionId, EditorSchemaOwnerAdoptionError> {
         let result = self
             .state
             .workspace_mut()
             .ok_or(EditorSchemaOwnerAdoptionError::Closing)?
             .session
-            .prepare_installed_schema_owner(directory, receipt);
+            .prepare_installed_schema_owner(directory, receipt, change);
         self.drive_editor_frame(Duration::ZERO, true, false);
         result
     }

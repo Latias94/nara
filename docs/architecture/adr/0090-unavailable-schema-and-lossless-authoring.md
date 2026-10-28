@@ -44,6 +44,13 @@ First-party asset-reference authoring retains its existing native Adapter. The
 data Adapter binds the exact persistent owner, catalog generation,
 fingerprint and predecessor; it is not an executable-provider receipt.
 
+An explicitly prepared creation-metadata-only owner successor retains the data Adapter's
+implementation identity, version and complete coverage, but requires newly prepared evidence
+for the validated successor catalog. Old opaque evidence cannot be relabeled, and matching is
+never weakened. Unaffected owners retain exact evidence. Source reclassification distinguishes
+this bounded intent from additive declaration extension and reuses the same complete current
+source and retained-history proof. It grants no native binding or stored-value migration.
+
 Such records become authoring `Available` only after complete value coverage,
 required paths, kinds and finite numeric domains validate. Editing reuses the same
 checks and atomic document transactions. Unsupported shapes and unavailable schema

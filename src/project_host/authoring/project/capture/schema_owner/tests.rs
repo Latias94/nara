@@ -3,9 +3,9 @@ use std::{fs, sync::Arc};
 use nara_asset::{AssetPath, AssetRef};
 use nara_reflect::{
     AuthoringSchemaBundleOwner, ComponentCapability, ComponentFieldId, ComponentFieldPath,
-    ComponentFieldSchema, ComponentSchema, ComponentSchemaCatalog, ComponentSchemaOwnerSnapshot,
-    ComponentSchemaVersion, ComponentTypeId, ComponentValue, ComponentValueKind,
-    PersistentComponentSchemaOwnerId,
+    ComponentFieldSchema, ComponentSchema, ComponentSchemaCatalog, ComponentSchemaOwnerChange,
+    ComponentSchemaOwnerSnapshot, ComponentSchemaVersion, ComponentTypeId, ComponentValue,
+    ComponentValueKind, PersistentComponentSchemaOwnerId,
 };
 use nara_scene::{
     __private::{borrow_prepared_prefab_schema_source, borrow_prepared_scene_schema_source},
@@ -124,17 +124,20 @@ fn actual_capture_uses_prepared_dirty_prefab_and_attaches_only_the_same_nominal_
     let AuthoringSchemaOwnerPreparation::Prepared {
         mut owner,
         mut publication,
-    } = snapshot.schema.prepare_owner(&installed_owner()).unwrap()
+    } = snapshot
+        .schema
+        .prepare_owner(&installed_owner(), ComponentSchemaOwnerChange::Add)
+        .unwrap()
     else {
         panic!("missing metadata must prepare");
     };
     let successor_basis = owner.schema_basis().clone();
     let mut work = SchemaReclassificationWork::default();
     let prepared_scene = scene
-        .prepare_schema_reclassification(&successor_basis, &mut work)
+        .prepare_schema_reclassification(&successor_basis, owner.reclassification_kind(), &mut work)
         .unwrap();
     let prepared_prefab = prefab_session
-        .prepare_schema_reclassification(&successor_basis, &mut work)
+        .prepare_schema_reclassification(&successor_basis, owner.reclassification_kind(), &mut work)
         .unwrap();
     let open_prefabs = [AuthoringPrefabSessionSnapshot::capture_prepared(
         &prefab_source,
@@ -173,7 +176,10 @@ fn actual_capture_uses_prepared_dirty_prefab_and_attaches_only_the_same_nominal_
     let AuthoringSchemaOwnerPreparation::Prepared {
         owner: mut independent,
         ..
-    } = snapshot.schema.prepare_owner(&installed_owner()).unwrap()
+    } = snapshot
+        .schema
+        .prepare_owner(&installed_owner(), ComponentSchemaOwnerChange::Add)
+        .unwrap()
     else {
         panic!("an independent preparation must retain its own basis");
     };
@@ -181,6 +187,7 @@ fn actual_capture_uses_prepared_dirty_prefab_and_attaches_only_the_same_nominal_
     let independent_scene = scene
         .prepare_schema_reclassification(
             independent.schema_basis(),
+            independent.reclassification_kind(),
             &mut SchemaReclassificationWork::default(),
         )
         .unwrap();

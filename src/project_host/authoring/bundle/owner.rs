@@ -1,4 +1,4 @@
-//! Additive data-only bundle preparation and actual-leaf attachment.
+//! Explicit data-only bundle successors and actual-leaf attachment.
 //!
 //! A prepared basis does not manufacture a publication receipt. Source preparation uses either
 //! the incumbent leaf before publication or an explicitly observed successor leaf. Whole-project
@@ -9,10 +9,12 @@ use std::{fmt, sync::Arc};
 use nara_fs::ContentDigest;
 use nara_reflect::{
     AuthoringSchemaBundle, AuthoringSchemaBundleError, AuthoringSchemaBundleLimits,
-    ComponentSchemaOwnerSnapshot,
+    ComponentSchemaOwnerChange, ComponentSchemaOwnerSnapshot,
 };
 use nara_scene::__private::AuthoringAdapterReceipt;
-use nara_scene::{AuthoringDocumentPublicationError, AuthoringSchemaBasis};
+use nara_scene::{
+    AuthoringDocumentPublicationError, AuthoringSchemaBasis, SchemaReclassificationKind,
+};
 
 use super::super::{
     AUTHORING_BASIS_ENCODED_MULTIPLIER, AuthoringProjectAdmissionBudget,
@@ -50,6 +52,7 @@ pub(crate) struct PreparedAuthoringSchemaOwner {
     bundle_path: nara_project::ProjectPath,
     adapters: Box<[AuthoringAdapterReceipt]>,
     basis: AuthoringSchemaBasis,
+    reclassification: SchemaReclassificationKind,
     base_budget: AuthoringProjectAdmissionBudget,
     budget: AuthoringProjectAdmissionBudget,
 }
@@ -86,6 +89,10 @@ pub(crate) enum AuthoringSchemaOwnerError {
     UnsupportedLineage,
     #[error("an existing schema owner's complete content differs from the request")]
     ExistingOwnerChanged,
+    #[error(
+        "creation metadata evolution requires the exact existing owner and immediate predecessor"
+    )]
+    InvalidCreationSuccessor,
     #[error("authoring owner composition failed")]
     Composition(#[source] AuthoringSchemaBundleError),
     #[error("authoring bundle encoding failed")]
@@ -105,11 +112,12 @@ impl AuthoringSchemaReceipt {
     pub(crate) fn prepare_owner(
         self: &Arc<Self>,
         owner: &ComponentSchemaOwnerSnapshot,
+        change: ComponentSchemaOwnerChange,
     ) -> Result<AuthoringSchemaOwnerPreparation, AuthoringSchemaOwnerError> {
         self.validate_owner_predecessor()?;
         let mut budget = AuthoringProjectAdmissionBudget::new(self.limits());
         budget.charge_manifest_bytes(self.manifest_bytes().len())?;
-        self.prepare_owner_with_budget(owner, budget)
+        self.prepare_owner_with_budget(owner, change, budget)
     }
 
     /// Reads the selected bundle for a new review, preserving the original manifest and owners.
@@ -117,6 +125,7 @@ impl AuthoringSchemaReceipt {
     pub(crate) fn prepare_observed_owner(
         self: &Arc<Self>,
         owner: &ComponentSchemaOwnerSnapshot,
+        change: ComponentSchemaOwnerChange,
     ) -> Result<AuthoringSchemaOwnerReconciliation, AuthoringSchemaOwnerError> {
         self.validate_owner_manifest()?;
         let mut budget = AuthoringProjectAdmissionBudget::new(self.limits());
@@ -131,11 +140,11 @@ impl AuthoringSchemaReceipt {
             self.validate_owner_predecessor()?;
             budget.charge_source_bytes(observed.bytes().len(), 0, 0, 0)?;
             return self
-                .prepare_owner_with_budget(owner, budget)
+                .prepare_owner_with_budget(owner, change, budget)
                 .map(AuthoringSchemaOwnerReconciliation::Publication);
         }
         let expected = self
-            .owner_successor(owner)?
+            .owner_successor(owner, change)?
             .ok_or(AuthoringSchemaOwnerError::BundleChanged)?;
         if observed.bundle() != &expected {
             return Err(AuthoringSchemaOwnerError::BundleChanged);
@@ -144,6 +153,7 @@ impl AuthoringSchemaReceipt {
             self,
             observed.shared_bundle(),
             Arc::clone(&observed.bytes),
+            reclassification_kind(owner, change),
             budget,
         )?;
         prepared.observation = Arc::new(AuthoringSchemaReceipt {
@@ -161,15 +171,34 @@ impl AuthoringSchemaReceipt {
     fn owner_successor(
         &self,
         owner: &ComponentSchemaOwnerSnapshot,
+        change: ComponentSchemaOwnerChange,
     ) -> Result<Option<AuthoringSchemaBundle>, AuthoringSchemaOwnerError> {
         if let Some(previous) = self.bundle().owner(owner.owner_id()) {
-            return if previous.current() == owner.current()
+            if previous.current() == owner.current()
                 && previous.predecessor() == owner.predecessor()
             {
-                Ok(None)
-            } else {
-                Err(AuthoringSchemaOwnerError::ExistingOwnerChanged)
-            };
+                return Ok(None);
+            }
+            if change != ComponentSchemaOwnerChange::CreationMetadata {
+                return Err(AuthoringSchemaOwnerError::ExistingOwnerChanged);
+            }
+            if !owner.is_creation_metadata_successor_of(previous) {
+                return Err(AuthoringSchemaOwnerError::InvalidCreationSuccessor);
+            }
+            return AuthoringSchemaBundle::from_owner_snapshots(self.bundle().owners().iter().map(
+                |existing| {
+                    if existing.owner_id() == owner.owner_id() {
+                        owner.clone()
+                    } else {
+                        existing.clone()
+                    }
+                },
+            ))
+            .map(Some)
+            .map_err(AuthoringSchemaOwnerError::Composition);
+        }
+        if change == ComponentSchemaOwnerChange::CreationMetadata {
+            return Err(AuthoringSchemaOwnerError::InvalidCreationSuccessor);
         }
         if owner.current().generation() != 1 || owner.predecessor().is_some() {
             return Err(AuthoringSchemaOwnerError::UnsupportedLineage);
@@ -188,9 +217,10 @@ impl AuthoringSchemaReceipt {
     fn prepare_owner_with_budget(
         self: &Arc<Self>,
         owner: &ComponentSchemaOwnerSnapshot,
+        change: ComponentSchemaOwnerChange,
         mut budget: AuthoringProjectAdmissionBudget,
     ) -> Result<AuthoringSchemaOwnerPreparation, AuthoringSchemaOwnerError> {
-        let Some(bundle) = self.owner_successor(owner)? else {
+        let Some(bundle) = self.owner_successor(owner, change)? else {
             return Ok(AuthoringSchemaOwnerPreparation::AlreadyAdmitted);
         };
         let bytes = bundle
@@ -205,6 +235,7 @@ impl AuthoringSchemaReceipt {
             self,
             Arc::new(bundle),
             Arc::from(bytes),
+            reclassification_kind(owner, change),
             budget,
         )?;
         let publication = FilePublicationHost::bind_existing(
@@ -268,6 +299,7 @@ impl PreparedAuthoringSchemaOwner {
         incumbent: &Arc<AuthoringSchemaReceipt>,
         bundle: Arc<AuthoringSchemaBundle>,
         bytes: Arc<[u8]>,
+        reclassification: SchemaReclassificationKind,
         mut budget: AuthoringProjectAdmissionBudget,
     ) -> Result<Self, AuthoringSchemaOwnerError> {
         // Both publication and explicit observation use one metadata preparation kernel and
@@ -295,6 +327,7 @@ impl PreparedAuthoringSchemaOwner {
             bundle_path: incumbent.bundle_path().clone(),
             adapters,
             basis,
+            reclassification,
             base_budget: budget,
             budget,
         })
@@ -317,6 +350,9 @@ impl PreparedAuthoringSchemaOwner {
 
     pub(crate) fn schema_basis(&self) -> &AuthoringSchemaBasis {
         &self.basis
+    }
+    pub(crate) fn reclassification_kind(&self) -> &SchemaReclassificationKind {
+        &self.reclassification
     }
     pub(crate) fn bundle(&self) -> &AuthoringSchemaBundle {
         &self.bundle
@@ -437,6 +473,20 @@ impl fmt::Debug for AuthoringSchemaOwnerAttachmentFailure {
 fn bundle_byte_limit() -> u64 {
     u64::try_from(AuthoringSchemaBundleLimits::default().encoded_bytes().get())
         .expect("the bundle limit fits the filesystem byte limit")
+}
+
+fn reclassification_kind(
+    owner: &ComponentSchemaOwnerSnapshot,
+    change: ComponentSchemaOwnerChange,
+) -> SchemaReclassificationKind {
+    match change {
+        ComponentSchemaOwnerChange::Add => SchemaReclassificationKind::DeclarationExtension,
+        ComponentSchemaOwnerChange::CreationMetadata => {
+            SchemaReclassificationKind::CreationMetadata {
+                owner: owner.owner_id().clone(),
+            }
+        }
+    }
 }
 
 #[cfg(test)]

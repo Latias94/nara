@@ -7,12 +7,14 @@
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
     <ToolRevision Condition="'$(ToolRevision)' == ''">1</ToolRevision>
+    <ToolCatalog Condition="'$(ToolCatalog)' == ''">$(MSBuildThisFileDirectory)enemy-stats.catalog.json</ToolCatalog>
     <DefineConstants Condition="'$(ToolRevision)' == '2'">$(DefineConstants);TOOL_REVISION_TWO</DefineConstants>
     <DefineConstants Condition="'$(ToolRevision)' == 'invalid'">$(DefineConstants);TOOL_REVISION_INVALID</DefineConstants>
   </PropertyGroup>
   <ItemGroup>
-    <EmbeddedResource Include="enemy-stats.catalog.json"
+    <EmbeddedResource Include="$(ToolCatalog)"
                       LogicalName="enemy-stats.catalog.json"
+                      Link="enemy-stats.catalog.json"
                       CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
 </Project>

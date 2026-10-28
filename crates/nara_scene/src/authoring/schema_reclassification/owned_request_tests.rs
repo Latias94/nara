@@ -1,4 +1,5 @@
 use super::*;
+use crate::SchemaReclassificationKind::DeclarationExtension;
 use crate::{
     __private::AuthoringAdapterReceipt, AuthoringDocumentReadiness, AuthoringDocumentSource,
     PrefabDocumentCandidate, SceneComponentRecord, SceneDocumentCandidate, SceneEntityId,
@@ -241,7 +242,7 @@ fn worker_preparation_shares_frozen_source_and_preserves_both_real_history_branc
             .retain_schema_reclassification_source(&mut work)
             .unwrap();
         let request = session
-            .capture_schema_reclassification(&next, &mut work, ticket)
+            .capture_schema_reclassification(&next, &DeclarationExtension, &mut work, ticket)
             .unwrap();
         let captured = work.usage();
         assert_source_unchanged!(session, before);
@@ -310,7 +311,7 @@ fn frozen_requests_survive_edit_reopen_undo_and_basis_changes_but_cannot_commit(
                 .retain_schema_reclassification_source(&mut work)
                 .unwrap();
             let request = session
-                .capture_schema_reclassification(&next, &mut work, ticket)
+                .capture_schema_reclassification(&next, &DeclarationExtension, &mut work, ticket)
                 .unwrap();
             match change {
                 "edit" => assert!(session.apply_authoring_patch(&add("later")).applied),
@@ -334,6 +335,7 @@ fn frozen_requests_survive_edit_reopen_undo_and_basis_changes_but_cannot_commit(
                     let replacement = session
                         .prepare_schema_reclassification(
                             &independently_admitted,
+                            &DeclarationExtension,
                             &mut SchemaReclassificationWork::default(),
                         )
                         .unwrap();
@@ -383,7 +385,12 @@ fn retained_tickets_and_owned_requests_require_their_original_allowance_source_a
         let usage = work.usage();
         assert_rejected(
             &session
-                .capture_schema_reclassification(&next, &mut foreign_work, ticket)
+                .capture_schema_reclassification(
+                    &next,
+                    &DeclarationExtension,
+                    &mut foreign_work,
+                    ticket,
+                )
                 .unwrap_err(),
         );
         assert_eq!(foreign_work.usage(), SchemaReclassificationUsage::default());
@@ -397,7 +404,7 @@ fn retained_tickets_and_owned_requests_require_their_original_allowance_source_a
         let usage = work.usage();
         assert_rejected(
             &foreign
-                .capture_schema_reclassification(&next, &mut work, ticket)
+                .capture_schema_reclassification(&next, &DeclarationExtension, &mut work, ticket)
                 .unwrap_err(),
         );
         assert_eq!(work.usage(), usage);
@@ -408,7 +415,7 @@ fn retained_tickets_and_owned_requests_require_their_original_allowance_source_a
         let usage = work.usage();
         assert_rejected(
             &opposite_kind
-                .capture_schema_reclassification(&next, &mut work, ticket)
+                .capture_schema_reclassification(&next, &DeclarationExtension, &mut work, ticket)
                 .unwrap_err(),
         );
         assert_eq!(work.usage(), usage);
@@ -417,7 +424,7 @@ fn retained_tickets_and_owned_requests_require_their_original_allowance_source_a
             .retain_schema_reclassification_source(&mut work)
             .unwrap();
         let request = session
-            .capture_schema_reclassification(&next, &mut work, ticket)
+            .capture_schema_reclassification(&next, &DeclarationExtension, &mut work, ticket)
             .unwrap();
         let usage = work.usage();
         assert_rejected(&request.prepare(&mut foreign_work).unwrap_err());
@@ -434,7 +441,7 @@ fn retained_tickets_and_owned_requests_require_their_original_allowance_source_a
         let usage = work.usage();
         assert_rejected(
             &session
-                .capture_schema_reclassification(&next, &mut work, ticket)
+                .capture_schema_reclassification(&next, &DeclarationExtension, &mut work, ticket)
                 .unwrap_err(),
         );
         assert_eq!(work.usage(), usage);
@@ -458,7 +465,7 @@ fn observed_capture_and_proof_budgets_refuse_before_history_copy_or_publication(
             .unwrap();
         let retained = measured.usage();
         let request = session
-            .capture_schema_reclassification(&next, &mut measured, ticket)
+            .capture_schema_reclassification(&next, &DeclarationExtension, &mut measured, ticket)
             .unwrap();
         let captured = measured.usage();
         drop(request.prepare(&mut measured).unwrap());
@@ -479,7 +486,7 @@ fn observed_capture_and_proof_budgets_refuse_before_history_copy_or_publication(
                 .unwrap();
             let usage = work.usage();
             let report = session
-                .capture_schema_reclassification(&next, &mut work, ticket)
+                .capture_schema_reclassification(&next, &DeclarationExtension, &mut work, ticket)
                 .unwrap_err();
             assert_limit(&report, kind, Some("history-input-copy"));
             assert_eq!(work.usage(), usage);
@@ -490,7 +497,7 @@ fn observed_capture_and_proof_budgets_refuse_before_history_copy_or_publication(
             .retain_schema_reclassification_source(&mut short)
             .unwrap();
         let request = session
-            .capture_schema_reclassification(&next, &mut short, ticket)
+            .capture_schema_reclassification(&next, &DeclarationExtension, &mut short, ticket)
             .unwrap();
         assert_limit(&request.prepare(&mut short).unwrap_err(), "work", None);
         let mut exact = limited(complete.work_bytes, complete.peak_retained_bytes);
@@ -498,7 +505,7 @@ fn observed_capture_and_proof_budgets_refuse_before_history_copy_or_publication(
             .retain_schema_reclassification_source(&mut exact)
             .unwrap();
         let request = session
-            .capture_schema_reclassification(&next, &mut exact, ticket)
+            .capture_schema_reclassification(&next, &DeclarationExtension, &mut exact, ticket)
             .unwrap();
         let prepared = request.prepare(&mut exact).unwrap();
         assert_eq!(exact.usage(), complete);
@@ -530,14 +537,14 @@ fn invalid_successors_and_native_sources_refuse_without_additional_usage() {
             let usage = work.usage();
             assert!(
                 session
-                    .capture_schema_reclassification(next, &mut work, ticket)
+                    .capture_schema_reclassification(next, &DeclarationExtension, &mut work, ticket)
                     .is_err()
             );
             assert_eq!(work.usage(), usage);
             let mut fresh = SchemaReclassificationWork::default();
             assert!(
                 session
-                    .prepare_schema_reclassification(next, &mut fresh)
+                    .prepare_schema_reclassification(next, &DeclarationExtension, &mut fresh)
                     .is_err()
             );
             assert_eq!(fresh.usage(), SchemaReclassificationUsage::default());
@@ -585,7 +592,7 @@ fn frozen_history_still_rejects_a_dangling_undo_after_reopen_clears_live_history
             .retain_schema_reclassification_source(&mut work)
             .unwrap();
         let request = session
-            .capture_schema_reclassification(&next, &mut work, ticket)
+            .capture_schema_reclassification(&next, &DeclarationExtension, &mut work, ticket)
             .unwrap();
         let candidate =
             Candidate::decode_json_str(&session.document().to_json_string().unwrap()).unwrap();
@@ -603,7 +610,7 @@ fn frozen_history_still_rejects_a_dangling_undo_after_reopen_clears_live_history
             .retain_schema_reclassification_source(&mut clean_work)
             .unwrap();
         let clean = session
-            .capture_schema_reclassification(&next, &mut clean_work, ticket)
+            .capture_schema_reclassification(&next, &DeclarationExtension, &mut clean_work, ticket)
             .unwrap();
         assert_eq!(
             clean.prepare(&mut clean_work).unwrap().readiness(),

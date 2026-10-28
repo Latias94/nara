@@ -1,4 +1,4 @@
-//! Additive Schema recovery preserves source identity and proves retained source history.
+//! Explicit Schema reclassification preserves source identity and proves retained source history.
 //!
 //! Dormant overlay payloads are preserved. Actual selected current composition and dependency
 //! availability remain separate Host observations through the existing Prefab compiler.
@@ -6,6 +6,7 @@
 use std::{mem::size_of, sync::Arc};
 
 use nara_core::ByteLimit;
+use nara_reflect::PersistentComponentSchemaOwnerId;
 
 use super::{
     AuthoringHistory, AuthoringHistoryScope, AuthoringSessionAuthority, PrefabAuthoringSession,
@@ -20,6 +21,17 @@ use crate::{
 };
 
 type Admission<'a> = dyn FnMut(&'static str, Option<usize>) -> Result<(), ScenePatchReport> + 'a;
+
+/// The exact declaration operation authorized for source reclassification.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum SchemaReclassificationKind {
+    /// Retains every selected declaration and Adapter while admitting additional declarations.
+    DeclarationExtension,
+    /// Changes only creation metadata for one existing owner with fresh data Adapter evidence.
+    CreationMetadata {
+        owner: PersistentComponentSchemaOwnerId,
+    },
+}
 
 /// Logical work and peak-retention limits for one source/history classification proof.
 ///
@@ -221,8 +233,9 @@ fn refused(summary: &'static str) -> ScenePatchReport {
 pub fn require_schema_reclassification_successor(
     previous: &AuthoringSchemaBasis,
     successor: &AuthoringSchemaBasis,
+    kind: &SchemaReclassificationKind,
 ) -> Result<(), ScenePatchReport> {
-    successor.require_declaration_extension_of(previous)
+    successor.require_reclassification_successor_of(previous, kind)
 }
 
 /// An unpublished classification successor; source and history remain in their original owner.
@@ -262,6 +275,7 @@ struct ReclassificationInput<D> {
     state: Arc<AuthoringDocumentState>,
     history: AuthoringHistory,
     successor: AuthoringSchemaBasis,
+    kind: SchemaReclassificationKind,
     incumbent: RetainedSchemaReclassificationSource,
 }
 
@@ -271,13 +285,21 @@ impl<D> ReclassificationInput<D> {
         state: &Arc<AuthoringDocumentState>,
         history: &AuthoringHistory,
         successor: &AuthoringSchemaBasis,
+        kind: &SchemaReclassificationKind,
         incumbent: RetainedSchemaReclassificationSource,
         work: &mut SchemaReclassificationWork,
     ) -> Result<Self, ScenePatchReport> {
-        successor.require_declaration_extension_of(&state.schema_basis())?;
+        successor.require_reclassification_successor_of(&state.schema_basis(), kind)?;
         // The originating history allowance includes the larger of both exact patch spellings
         // and the scope footprint. Charge that owning model before copying any entry or scope.
+        let intent_bytes = match kind {
+            SchemaReclassificationKind::DeclarationExtension => Some(0),
+            SchemaReclassificationKind::CreationMetadata { owner } => {
+                crate::provenance::provenance_string_bytes(owner.as_str())
+            }
+        };
         let bytes = history_retained_bytes(history).and_then(|bytes| {
+            let bytes = bytes.checked_add(intent_bytes?)?;
             bytes.checked_add(std::mem::size_of::<Self>())?.checked_add(
                 history
                     .undo_stack
@@ -294,6 +316,7 @@ impl<D> ReclassificationInput<D> {
             state: Arc::clone(state),
             history: history.clone(),
             successor: successor.clone(),
+            kind: kind.clone(),
             incumbent,
         })
     }
@@ -316,6 +339,7 @@ impl SceneSchemaReclassificationRequest {
             &input.state,
             &input.history,
             &input.successor,
+            &input.kind,
             work,
         )
     }
@@ -338,6 +362,7 @@ impl PrefabSchemaReclassificationRequest {
             &input.state,
             &input.history,
             &input.successor,
+            &input.kind,
             work,
         )
     }
@@ -606,6 +631,7 @@ impl SceneAuthoringSession {
     pub fn capture_schema_reclassification(
         &self,
         successor: &AuthoringSchemaBasis,
+        kind: &SchemaReclassificationKind,
         work: &mut SchemaReclassificationWork,
         incumbent: RetainedSchemaReclassificationSource,
     ) -> Result<SceneSchemaReclassificationRequest, ScenePatchReport> {
@@ -625,23 +651,25 @@ impl SceneAuthoringSession {
                 &state,
                 &self.history,
                 successor,
+                kind,
                 incumbent,
                 work,
             )?,
         })
     }
-    /// Prepares additive classification and every retained history edge without changing source.
+    /// Prepares the explicit classification intent and every retained history edge.
     pub fn prepare_schema_reclassification(
         &self,
         successor: &AuthoringSchemaBasis,
+        kind: &SchemaReclassificationKind,
         work: &mut SchemaReclassificationWork,
     ) -> Result<PreparedSceneSchemaReclassification, ScenePatchReport> {
         let previous = self
             .authoring_schema_basis()
             .ok_or_else(|| refused("Native sources have no admitted authoring basis"))?;
-        successor.require_declaration_extension_of(&previous)?;
+        successor.require_reclassification_successor_of(&previous, kind)?;
         let incumbent = self.retain_schema_reclassification_source(work)?;
-        self.prepare_schema_reclassification_with_retained_source(successor, work, incumbent)
+        self.prepare_schema_reclassification_with_retained_source(successor, kind, work, incumbent)
     }
 
     /// Retains this exact incumbent before a whole-set owner prepares any successor.
@@ -677,6 +705,7 @@ impl SceneAuthoringSession {
     pub fn prepare_schema_reclassification_with_retained_source(
         &self,
         successor: &AuthoringSchemaBasis,
+        kind: &SchemaReclassificationKind,
         work: &mut SchemaReclassificationWork,
         incumbent: RetainedSchemaReclassificationSource,
     ) -> Result<PreparedSceneSchemaReclassification, ScenePatchReport> {
@@ -690,7 +719,7 @@ impl SceneAuthoringSession {
             .authority
             .published()
             .expect("retained authoring source");
-        prepare_scene_classification(&self.document, state, &self.history, successor, work)
+        prepare_scene_classification(&self.document, state, &self.history, successor, kind, work)
     }
 
     /// Commits one candidate while preserving source revision, content state and retained history.
@@ -726,6 +755,7 @@ impl PrefabAuthoringSession {
     pub fn capture_schema_reclassification(
         &self,
         successor: &AuthoringSchemaBasis,
+        kind: &SchemaReclassificationKind,
         work: &mut SchemaReclassificationWork,
         incumbent: RetainedSchemaReclassificationSource,
     ) -> Result<PrefabSchemaReclassificationRequest, ScenePatchReport> {
@@ -745,6 +775,7 @@ impl PrefabAuthoringSession {
                 &state,
                 &self.history,
                 successor,
+                kind,
                 incumbent,
                 work,
             )?,
@@ -753,14 +784,15 @@ impl PrefabAuthoringSession {
     pub fn prepare_schema_reclassification(
         &self,
         successor: &AuthoringSchemaBasis,
+        kind: &SchemaReclassificationKind,
         work: &mut SchemaReclassificationWork,
     ) -> Result<PreparedPrefabSchemaReclassification, ScenePatchReport> {
         let previous = self
             .authoring_schema_basis()
             .ok_or_else(|| refused("Native sources have no admitted authoring basis"))?;
-        successor.require_declaration_extension_of(&previous)?;
+        successor.require_reclassification_successor_of(&previous, kind)?;
         let incumbent = self.retain_schema_reclassification_source(work)?;
-        self.prepare_schema_reclassification_with_retained_source(successor, work, incumbent)
+        self.prepare_schema_reclassification_with_retained_source(successor, kind, work, incumbent)
     }
 
     #[doc(hidden)]
@@ -794,6 +826,7 @@ impl PrefabAuthoringSession {
     pub fn prepare_schema_reclassification_with_retained_source(
         &self,
         successor: &AuthoringSchemaBasis,
+        kind: &SchemaReclassificationKind,
         work: &mut SchemaReclassificationWork,
         incumbent: RetainedSchemaReclassificationSource,
     ) -> Result<PreparedPrefabSchemaReclassification, ScenePatchReport> {
@@ -807,7 +840,7 @@ impl PrefabAuthoringSession {
             .authority
             .published()
             .expect("retained authoring source");
-        prepare_prefab_classification(&self.document, state, &self.history, successor, work)
+        prepare_prefab_classification(&self.document, state, &self.history, successor, kind, work)
     }
 
     pub fn commit_schema_reclassification(
@@ -858,11 +891,12 @@ fn prepare_scene_classification(
     state: &AuthoringDocumentState,
     history: &AuthoringHistory,
     successor: &AuthoringSchemaBasis,
+    kind: &SchemaReclassificationKind,
     work: &mut SchemaReclassificationWork,
 ) -> Result<PreparedSceneSchemaReclassification, ScenePatchReport> {
-    successor.require_declaration_extension_of(&state.schema_basis())?;
+    successor.require_reclassification_successor_of(&state.schema_basis(), kind)?;
     work.begin_step(Some(0))?;
-    let next = state.reclassify(document, successor, &mut |stage, bytes| {
+    let next = state.reclassify(document, successor, kind, &mut |stage, bytes| {
         work.reserve(stage, bytes)
     })?;
     work.reserve("classification-authority", Some(2 * size_of::<usize>()))?;
@@ -900,11 +934,12 @@ fn prepare_prefab_classification(
     state: &AuthoringDocumentState,
     history: &AuthoringHistory,
     successor: &AuthoringSchemaBasis,
+    kind: &SchemaReclassificationKind,
     work: &mut SchemaReclassificationWork,
 ) -> Result<PreparedPrefabSchemaReclassification, ScenePatchReport> {
-    successor.require_declaration_extension_of(&state.schema_basis())?;
+    successor.require_reclassification_successor_of(&state.schema_basis(), kind)?;
     work.begin_step(Some(0))?;
-    let next = state.reclassify_prefab(document, successor, &mut |stage, bytes| {
+    let next = state.reclassify_prefab(document, successor, kind, &mut |stage, bytes| {
         work.reserve(stage, bytes)
     })?;
     work.reserve("classification-authority", Some(2 * size_of::<usize>()))?;

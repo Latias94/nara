@@ -50,7 +50,10 @@ impl LocalRelease {
         );
         let directory = tempfile::tempdir().unwrap();
         let mut payloads = BTreeMap::new();
-        for path in TOOL_FILES {
+        let predecessor = variant
+            .starts_with("CREATION_")
+            .then_some("enemy-stats.predecessor.catalog.json");
+        for path in TOOL_FILES.into_iter().chain(predecessor) {
             let bytes = std::fs::read(artifacts.join(path))
                 .unwrap_or_else(|error| panic!("Missing actual C# release member {path}: {error}"));
             assert!(!bytes.is_empty(), "Empty actual C# release member {path}");
@@ -80,10 +83,10 @@ impl LocalRelease {
                 })
             })
             .collect();
-        let manifest = serde_json::to_vec(&json!({
+        let mut manifest = json!({
             "format_version": 1,
             "package": "trial.enemy-stats",
-            "release": if variant == "V2" { "2" } else { "1" },
+            "release": if variant == "V2" || predecessor.is_some() { "2" } else { "1" },
             "host_target": HOST_TARGET,
             "authority": "trusted_process",
             "protocol_version": 1,
@@ -93,8 +96,11 @@ impl LocalRelease {
             "entry": "EnemyStatsTool.dll",
             "requires": [],
             "files": files,
-        }))
-        .unwrap();
+        });
+        if let Some(predecessor) = predecessor {
+            manifest["catalog_predecessor"] = json!(predecessor);
+        }
+        let manifest = serde_json::to_vec(&manifest).unwrap();
         std::fs::write(directory.path().join("nara-tool.json"), &manifest).unwrap();
         Self {
             directory,

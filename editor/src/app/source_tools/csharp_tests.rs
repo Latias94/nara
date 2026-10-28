@@ -1,5 +1,7 @@
 //! Installed C# metadata adoption and durable selection through the public Application boundary.
 
+mod creation;
+
 use std::{
     collections::BTreeMap,
     fs,
@@ -59,12 +61,24 @@ const SELECTION: &str = ".nara/source-tools/selection.json";
 
 struct InstalledSourceTool {
     root: DirectoryCapability,
+    directory: String,
     receipt: ContentDigest,
     host: EditorSourceToolManagedHost,
 }
 
 fn install_tool(project: &Path, artifacts: &Path, executable: &Path) -> InstalledSourceTool {
-    let source = project.join("tool-release-source");
+    install_tool_release(project, artifacts, executable, "installed-tool", "1", None)
+}
+
+fn install_tool_release(
+    project: &Path,
+    artifacts: &Path,
+    executable: &Path,
+    artifact: &str,
+    release: &str,
+    predecessor: Option<&str>,
+) -> InstalledSourceTool {
+    let source = project.join(format!("tool-release-source-{artifact}"));
     fs::create_dir(&source).unwrap();
     let mut files = Vec::new();
     for member in [
@@ -72,7 +86,10 @@ fn install_tool(project: &Path, artifacts: &Path, executable: &Path) -> Installe
         "EnemyStatsTool.deps.json",
         "EnemyStatsTool.runtimeconfig.json",
         "enemy-stats.catalog.json",
-    ] {
+    ]
+    .into_iter()
+    .chain(predecessor)
+    {
         let bytes = fs::read(artifacts.join(member)).unwrap();
         fs::write(source.join(member), &bytes).unwrap();
         let digest = ContentDigest::of_bytes(&bytes);
@@ -88,10 +105,10 @@ fn install_tool(project: &Path, artifacts: &Path, executable: &Path) -> Installe
             "kind": "tool",
         }));
     }
-    let manifest = serde_json::to_vec(&serde_json::json!({
+    let mut manifest = serde_json::json!({
         "format_version": 1,
         "package": "trial.enemy-stats",
-        "release": "1",
+        "release": release,
         "host_target": "x86_64-pc-windows-msvc",
         "authority": "trusted_process",
         "protocol_version": 1,
@@ -101,8 +118,11 @@ fn install_tool(project: &Path, artifacts: &Path, executable: &Path) -> Installe
         "entry": "EnemyStatsTool.dll",
         "requires": [],
         "files": files,
-    }))
-    .unwrap();
+    });
+    if let Some(predecessor) = predecessor {
+        manifest["catalog_predecessor"] = serde_json::json!(predecessor);
+    }
+    let manifest = serde_json::to_vec(&manifest).unwrap();
     fs::write(source.join("nara-tool.json"), &manifest).unwrap();
     let captured = PreparedEditorSourceToolRelease::capture(
         &open_explicit_product_project_root(&source).unwrap(),
@@ -122,7 +142,7 @@ fn install_tool(project: &Path, artifacts: &Path, executable: &Path) -> Installe
     .unwrap();
     let plan = EditorSourceToolInstallationPlan::new(
         root.share(),
-        RelativeComponent::new("installed-tool").unwrap(),
+        RelativeComponent::new(artifact).unwrap(),
         captured,
     )
     .unwrap();
@@ -131,7 +151,8 @@ fn install_tool(project: &Path, artifacts: &Path, executable: &Path) -> Installe
         other => panic!("Actual project-root release publication failed: {other:?}"),
     };
     let receipt = installation.receipt_digest();
-    assert_eq!(installation.project_path(), INSTALLATION);
+    let directory = format!(".nara/source-tools/artifacts/{artifact}");
+    assert_eq!(installation.project_path(), directory);
     drop(installation);
     let bootstrap = PathBuf::from(
         std::env::var_os("NARA_SOURCE_TOOL_BOOTSTRAP_DIR")
@@ -153,6 +174,7 @@ fn install_tool(project: &Path, artifacts: &Path, executable: &Path) -> Installe
     .unwrap();
     InstalledSourceTool {
         root,
+        directory,
         receipt,
         host,
     }
@@ -166,7 +188,7 @@ fn enable_installed_tool(
     let prepared = application
         .prepare_installed_source_tool_selection(
             installed.root.share(),
-            INSTALLATION,
+            &installed.directory,
             installed.receipt,
             &installed.host,
         )
@@ -498,7 +520,11 @@ fn csharp_source_tool_application_preserves_review_and_exact_commit_result() {
         .unwrap();
     let deadline = Instant::now() + TIMEOUT;
     let adoption = loop {
-        match application.prepare_installed_schema_owner(INSTALLATION, installed.receipt) {
+        match application.prepare_installed_schema_owner(
+            INSTALLATION,
+            installed.receipt,
+            nara::reflect::ComponentSchemaOwnerChange::Add,
+        ) {
             Ok(operation) => break operation,
             Err(EditorSchemaOwnerAdoptionError::Busy) => {
                 assert!(

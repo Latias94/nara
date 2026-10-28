@@ -123,6 +123,65 @@ fn release_captures_keep_the_shared_charge_after_captured_bytes_are_dropped() {
 }
 
 #[test]
+fn successor_capture_charges_predecessor_bytes_before_opening_the_member() {
+    let source = Release::creation_metadata_successor();
+    let manifest = source.write_manifest();
+    let root = source.root(TrustMode::Untrusted);
+    let capture_bytes = usize::try_from(manifest.length()).unwrap() + payload_bytes(&source);
+    let mut budget = ReleaseCaptureBudget::new(capture_bytes);
+    let captured =
+        PreparedEditorSourceToolRelease::capture_with_budget(&root, manifest, &mut budget).unwrap();
+    assert_eq!(
+        captured.catalog_predecessor(),
+        Some("catalog-predecessor.json")
+    );
+    assert_eq!(budget.remaining_bytes, 0);
+    drop(captured);
+
+    fs::remove_file(source.directory.join("catalog-predecessor.json")).unwrap();
+    let mut one_byte_short = ReleaseCaptureBudget::new(capture_bytes - 1);
+    assert!(matches!(
+        PreparedEditorSourceToolRelease::capture_with_budget(&root, manifest, &mut one_byte_short),
+        Err(EditorSourceToolReleaseError::CaptureBudget)
+    ));
+    assert!(matches!(
+        PreparedEditorSourceToolRelease::capture(&root, manifest),
+        Err(EditorSourceToolReleaseError::Filesystem { member, .. })
+            if member == "catalog-predecessor.json"
+    ));
+}
+
+#[test]
+fn successor_inspection_shares_one_receipt_manifest_and_catalog_pair_allowance() {
+    let source = Release::creation_metadata_successor();
+    let manifest = source.write_manifest();
+    let receipt = write_receipt(&source, manifest, 1);
+    let root = source.root(TrustMode::Untrusted);
+    let capture_bytes =
+        usize::try_from(receipt.length() + manifest.length()).unwrap() + payload_bytes(&source);
+    let mut budget = ReleaseCaptureBudget::new(capture_bytes);
+    let inspected =
+        EditorSourceToolInstallationInspection::read_with_budget(&root, receipt, &mut budget)
+            .unwrap();
+    assert_eq!(inspected.release().schema_owner().current().generation(), 2);
+    assert!(inspected.release().schema_owner().predecessor().is_some());
+    assert_eq!(budget.remaining_bytes, 0);
+    drop(inspected);
+
+    let mut one_byte_short = ReleaseCaptureBudget::new(capture_bytes - 1);
+    assert!(matches!(
+        EditorSourceToolInstallationInspection::read_with_budget(
+            &root,
+            receipt,
+            &mut one_byte_short,
+        ),
+        Err(EditorSourceToolInstallationError::Inspection(
+            EditorSourceToolReleaseError::CaptureBudget
+        ))
+    ));
+}
+
+#[test]
 fn failed_payload_read_keeps_its_full_declared_charge() {
     let source = Release::new();
     let manifest = source.write_manifest();

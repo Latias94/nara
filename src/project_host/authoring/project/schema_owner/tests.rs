@@ -8,9 +8,9 @@ use std::{
 use nara_core::ItemLimit;
 use nara_reflect::{
     AuthoringSchemaBundleOwner, ComponentCapability, ComponentFieldId, ComponentFieldPath,
-    ComponentFieldSchema, ComponentSchema, ComponentSchemaCatalog, ComponentSchemaOwnerSnapshot,
-    ComponentSchemaVersion, ComponentTypeId, ComponentValue, ComponentValueKind,
-    PersistentComponentSchemaOwnerId,
+    ComponentFieldSchema, ComponentSchema, ComponentSchemaCatalog, ComponentSchemaOwnerChange,
+    ComponentSchemaOwnerSnapshot, ComponentSchemaVersion, ComponentTypeId, ComponentValue,
+    ComponentValueKind, PersistentComponentSchemaOwnerId,
 };
 use nara_scene::{
     __private::{borrow_prepared_prefab_schema_source, borrow_prepared_scene_schema_source},
@@ -93,8 +93,10 @@ fn open_project(project: &TestAuthoringProject) -> AuthoringProjectSessionSnapsh
 fn prepare_owner(
     snapshot: &AuthoringProjectSessionSnapshot,
 ) -> (PreparedAuthoringSchemaOwner, FilePublicationHost) {
-    let AuthoringSchemaOwnerPreparation::Prepared { owner, publication } =
-        snapshot.schema.prepare_owner(&installed_owner()).unwrap()
+    let AuthoringSchemaOwnerPreparation::Prepared { owner, publication } = snapshot
+        .schema
+        .prepare_owner(&installed_owner(), ComponentSchemaOwnerChange::Add)
+        .unwrap()
     else {
         panic!("the independent project must not already admit the installed owner");
     };
@@ -162,7 +164,11 @@ fn saved_project_and_dirty_scene_keep_distinct_roots_and_rebuild_the_actual_sour
     let (mut owner, mut publication) = prepare_owner(&incumbent);
     let basis = owner.schema_basis().clone();
     let prepared_scene = scene
-        .prepare_schema_reclassification(&basis, &mut SchemaReclassificationWork::default())
+        .prepare_schema_reclassification(
+            &basis,
+            owner.reclassification_kind(),
+            &mut SchemaReclassificationWork::default(),
+        )
         .unwrap();
     let prepared = owner.prepare_project(&incumbent, &[]).unwrap();
     assert_eq!(prepared.readiness(), AuthoringProjectReadiness::Complete);
@@ -279,7 +285,11 @@ fn saved_startup_is_reread_as_b_while_the_incumbent_retains_a_and_the_scene_is_d
     let (mut owner, mut publication) = prepare_owner(&incumbent);
     let basis = owner.schema_basis().clone();
     let reclassified = scene
-        .prepare_schema_reclassification(&basis, &mut SchemaReclassificationWork::default())
+        .prepare_schema_reclassification(
+            &basis,
+            owner.reclassification_kind(),
+            &mut SchemaReclassificationWork::default(),
+        )
         .unwrap();
     let prepared = owner.prepare_project(&incumbent, &[]).unwrap();
     assert_ne!(saved_a.document(), &saved_b);
@@ -362,6 +372,7 @@ fn prepared_project_selects_the_dirty_prefab_arc_and_revision_without_disk_previ
     let reclassified = session
         .prepare_schema_reclassification(
             owner.schema_basis(),
+            owner.reclassification_kind(),
             &mut SchemaReclassificationWork::default(),
         )
         .unwrap();
@@ -754,6 +765,7 @@ fn preserved_history_can_expose_a_composition_conflict_and_redo_its_exact_source
         let reclassified = scene
             .prepare_schema_reclassification(
                 owner.schema_basis(),
+                owner.reclassification_kind(),
                 &mut SchemaReclassificationWork::default(),
             )
             .unwrap();

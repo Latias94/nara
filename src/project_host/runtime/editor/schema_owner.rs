@@ -6,6 +6,8 @@ use std::sync::{
 };
 
 use nara_fs::{ContentDigest, FileIdentity, RelativePath, ReplaceReceipt};
+use nara_reflect::ComponentSchemaOwnerChange;
+use nara_scene::SchemaReclassificationKind;
 use nara_tasks::{
     TaskDomainKey, TaskHandle, TaskPoolKind, TaskPools, TaskReturnState, TaskSpawnRequest,
 };
@@ -58,6 +60,10 @@ pub enum EditorSchemaOwnerAdoptionError {
     Closing,
     #[error("conflicting source or publication work is pending")]
     Busy,
+    #[error("the affected Schema owner's tool must be explicitly disabled before evolution")]
+    ActiveTool,
+    #[error("failed tool cleanup prevents Schema owner evolution")]
+    ToolCleanupFailed,
     #[error("this operation requires an authoring project")]
     NotAuthoring,
     #[error("the installed release observation is unavailable or changed")]
@@ -98,6 +104,7 @@ pub struct EditorSchemaOwnerAdoptionView {
     pub documents: usize,
     pub degraded_roots: usize,
     pub reconciliation: bool,
+    pub change: ComponentSchemaOwnerChange,
 }
 
 impl Default for EditorSchemaOwnerAdoptionView {
@@ -110,6 +117,7 @@ impl Default for EditorSchemaOwnerAdoptionView {
             documents: 0,
             degraded_roots: 0,
             reconciliation: false,
+            change: ComponentSchemaOwnerChange::Add,
         }
     }
 }
@@ -128,6 +136,7 @@ struct Start {
     directory: Arc<str>,
     receipt: ContentDigest,
     reconcile: bool,
+    change: ComponentSchemaOwnerChange,
 }
 struct Metadata {
     input: AuthoringSchemaOwnerProjectInput,
@@ -420,6 +429,7 @@ impl EditorProjectSession {
         &mut self,
         directory: &str,
         receipt: ContentDigest,
+        change: ComponentSchemaOwnerChange,
     ) -> Result<EditorSchemaOwnerAdoptionId, EditorSchemaOwnerAdoptionError> {
         if !self.accepts_new_work() {
             return Err(EditorSchemaOwnerAdoptionError::Closing);
@@ -453,6 +463,7 @@ impl EditorProjectSession {
             view: EditorSchemaOwnerAdoptionView {
                 operation: Some(id),
                 phase: EditorSchemaOwnerAdoptionPhase::Quiescing,
+                change,
                 ..Default::default()
             },
             start: Some(Start {
@@ -460,6 +471,7 @@ impl EditorProjectSession {
                 directory: Arc::from(directory),
                 receipt,
                 reconcile: false,
+                change,
             }),
             installation: Some((Arc::from(directory), receipt)),
             ..Default::default()
@@ -510,10 +522,12 @@ impl EditorProjectSession {
                 })
                 .map_err(|_| EditorSchemaOwnerAdoptionError::Operation)?,
         );
+        let change = self.schema_owner_adoption.view.change;
         self.schema_owner_adoption.view = EditorSchemaOwnerAdoptionView {
             operation: Some(id),
             phase: EditorSchemaOwnerAdoptionPhase::Quiescing,
             reconciliation: true,
+            change,
             ..Default::default()
         };
         self.schema_owner_adoption.start = Some(Start {
@@ -521,6 +535,7 @@ impl EditorProjectSession {
             directory,
             receipt,
             reconcile: true,
+            change,
         });
         self.schema_owner_adoption.cancelled = false;
         self.schema_owner_adoption.failure = None;
@@ -611,6 +626,7 @@ impl EditorProjectSession {
             .candidate
             .as_ref()
             .ok_or(EditorSchemaOwnerAdoptionError::Operation)?;
+        self.require_schema_evolution_execution(candidate.metadata.owner.reclassification_kind())?;
         if self.closing || !self.schema_adoption_matches(candidate) {
             return Err(EditorSchemaOwnerAdoptionError::Stale);
         }
@@ -666,6 +682,29 @@ impl EditorProjectSession {
             && candidate.sources.iter().all(|source| {
                 self.authoring_source_selection(source.document).as_ref() == Some(source)
             })
+            && self
+                .require_schema_evolution_execution(
+                    candidate.metadata.owner.reclassification_kind(),
+                )
+                .is_ok()
+    }
+
+    fn require_schema_evolution_execution(
+        &self,
+        kind: &SchemaReclassificationKind,
+    ) -> Result<(), EditorSchemaOwnerAdoptionError> {
+        if let SchemaReclassificationKind::CreationMetadata { owner } = kind {
+            if self.source_tools.has_active_schema_owner(owner) {
+                return Err(EditorSchemaOwnerAdoptionError::ActiveTool);
+            }
+            if self.source_tools.process_cleanup_failed() {
+                return Err(EditorSchemaOwnerAdoptionError::ToolCleanupFailed);
+            }
+            if self.source_tools.schema_adoption_pending() {
+                return Err(EditorSchemaOwnerAdoptionError::Busy);
+            }
+        }
+        Ok(())
     }
 
     pub(super) fn advance_schema_owner_adoption(&mut self) {
@@ -807,6 +846,8 @@ impl EditorProjectSession {
     fn start_schema_source_preparation(&mut self, mut metadata: Metadata) {
         self.schema_owner_adoption.publication_host = metadata.publisher.clone();
         let result = (|| {
+            self.require_schema_evolution_execution(metadata.owner.reclassification_kind())
+                .map_err(|error| Failure::new(error, EditorSchemaOwnerAdoptionPhase::Preparing))?;
             let count = self.workspace.len();
             let buffers = count
                 .checked_mul(
@@ -870,6 +911,7 @@ impl EditorProjectSession {
                 .capture_schema_reclassification(
                     metadata.input.schema_basis(),
                     metadata.owner.schema_basis(),
+                    metadata.owner.reclassification_kind(),
                     Default::default(),
                 )
                 .map_err(|report| {
@@ -1142,7 +1184,7 @@ fn inspect(start: Start, custody: HostCustody) -> Result<Inspected, Failure> {
     let preparation = if start.reconcile {
         match start
             .input
-            .prepare_observed_owner(inspection.release().schema_owner())
+            .prepare_observed_owner(inspection.release().schema_owner(), start.change)
             .map_err(|error| Failure::metadata(error, phase))?
         {
             AuthoringSchemaOwnerReconciliation::Observed(owner) => {
@@ -1158,7 +1200,7 @@ fn inspect(start: Start, custody: HostCustody) -> Result<Inspected, Failure> {
     } else {
         start
             .input
-            .prepare_owner(inspection.release().schema_owner())
+            .prepare_owner(inspection.release().schema_owner(), start.change)
             .map_err(|error| Failure::metadata(error, phase))?
     };
     match preparation {

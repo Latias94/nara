@@ -98,6 +98,7 @@ pub(super) fn prepare_images(release: &PreparedEditorSourceToolRelease) -> Resul
             && value.path() != deps_path
             && value.path() != config_path
             && value.path() != release.catalog()
+            && Some(value.path()) != release.catalog_predecessor()
         {
             return Err(Error::Contract(
                 "unsupported or undeclared managed tool member",

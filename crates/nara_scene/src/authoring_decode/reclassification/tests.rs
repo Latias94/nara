@@ -1,4 +1,5 @@
 use super::*;
+use crate::SchemaReclassificationKind::DeclarationExtension;
 use nara_reflect::{
     AuthoringSchemaBundleOwner, ComponentFieldPath, ComponentFieldSchema, ComponentSchemaCatalog,
     ComponentValueKind,
@@ -69,7 +70,10 @@ fn extension_keeps_every_full_declaration_owner_and_adapter() {
     let mutate = |edit: fn(&mut BTreeMap<ComponentTypeId, AuthoringSchemaEntry>)| {
         let mut schemas = previous.0.schemas.clone();
         edit(&mut schemas);
-        AuthoringSchemaBasis(Arc::new(AuthoringClassificationBasis { schemas }))
+        AuthoringSchemaBasis(Arc::new(AuthoringClassificationBasis {
+            owners: previous.0.owners.clone(),
+            schemas,
+        }))
     };
     assert!(previous.require_declaration_extension_of(&previous).is_ok());
     assert!(
@@ -135,14 +139,19 @@ fn valid_unknown_becomes_available_without_copying_or_mutating_the_source() {
     let successor = basis(schema());
     let mut admitted = 0usize;
     let next = previous
-        .reclassify(&document, &successor, &mut |_, bytes| {
-            admitted = admitted.checked_add(bytes.unwrap()).unwrap();
-            assert!(
-                admitted < 1024 * 1024,
-                "small sources must not reserve file-limit maxima"
-            );
-            Ok(())
-        })
+        .reclassify(
+            &document,
+            &successor,
+            &DeclarationExtension,
+            &mut |_, bytes| {
+                admitted = admitted.checked_add(bytes.unwrap()).unwrap();
+                assert!(
+                    admitted < 1024 * 1024,
+                    "small sources must not reserve file-limit maxima"
+                );
+                Ok(())
+            },
+        )
         .unwrap();
     assert_eq!(next.readiness, AuthoringDocumentReadiness::Complete);
     assert_eq!(next.unavailable_manifest.record_count(), 0);
@@ -151,7 +160,9 @@ fn valid_unknown_becomes_available_without_copying_or_mutating_the_source() {
     assert_eq!(document.entities.as_ptr(), source_ptr);
     assert!(admitted >= next.checked_retained_bytes().unwrap() + 2 * size_of::<usize>());
     let repeated = next
-        .reclassify(&document, &successor, &mut |_, _| Ok(()))
+        .reclassify(&document, &successor, &DeclarationExtension, &mut |_, _| {
+            Ok(())
+        })
         .unwrap();
     assert_eq!(repeated.record_facts, next.record_facts);
     assert_eq!(repeated.unavailable_manifest, next.unavailable_manifest);
@@ -163,13 +174,18 @@ fn tiny_allowance_refuses_before_value_validation_or_source_copy() {
     let previous = classify(&document, &empty_basis());
     let successor = basis(schema());
     let mut stages = Vec::new();
-    let result = previous.reclassify(&document, &successor, &mut |stage, bytes| {
-        stages.push(stage);
-        assert!(bytes.unwrap() > 1);
-        Err(structure::authoring_structure_rejection(
-            "test allowance refused",
-        ))
-    });
+    let result = previous.reclassify(
+        &document,
+        &successor,
+        &DeclarationExtension,
+        &mut |stage, bytes| {
+            stages.push(stage);
+            assert!(bytes.unwrap() > 1);
+            Err(structure::authoring_structure_rejection(
+                "test allowance refused",
+            ))
+        },
+    );
     assert!(result.is_err());
     assert_eq!(stages, ["classification-source"]);
     let prefab = PrefabDocument {
@@ -179,12 +195,17 @@ fn tiny_allowance_refuses_before_value_validation_or_source_copy() {
     stages.clear();
     assert!(
         previous
-            .reclassify_prefab(&prefab, &successor, &mut |stage, _| {
-                stages.push(stage);
-                Err(structure::authoring_structure_rejection(
-                    "test allowance refused",
-                ))
-            })
+            .reclassify_prefab(
+                &prefab,
+                &successor,
+                &DeclarationExtension,
+                &mut |stage, _| {
+                    stages.push(stage);
+                    Err(structure::authoring_structure_rejection(
+                        "test allowance refused",
+                    ))
+                }
+            )
             .is_err()
     );
     assert_eq!(stages, ["source-cost-walk"]);
@@ -196,7 +217,12 @@ fn newly_known_invalid_value_and_dangling_local_reference_refuse() {
     let previous = classify(&invalid, &empty_basis());
     assert!(
         previous
-            .reclassify(&invalid, &basis(schema()), &mut |_, _| Ok(()))
+            .reclassify(
+                &invalid,
+                &basis(schema()),
+                &DeclarationExtension,
+                &mut |_, _| Ok(())
+            )
             .is_err()
     );
     let schema = ComponentSchema::new(component(), "Reference", ComponentSchemaVersion::ONE)
@@ -222,7 +248,12 @@ fn newly_known_invalid_value_and_dangling_local_reference_refuse() {
     let previous = classify(&invalid, &empty_basis());
     assert!(
         previous
-            .reclassify(&invalid, &basis(schema), &mut |_, _| Ok(()))
+            .reclassify(
+                &invalid,
+                &basis(schema),
+                &DeclarationExtension,
+                &mut |_, _| Ok(())
+            )
             .is_err()
     );
 }
@@ -285,17 +316,23 @@ fn scalar_defaults_are_admitted_even_without_asset_facts() {
     let mut stage = None;
     assert!(
         previous
-            .reclassify(&source, &successor, &mut |name, bytes| {
-                if name == "classification-defaults" && bytes.is_none_or(|bytes| bytes >= 32 * 1024)
-                {
-                    stage = Some(name);
-                    Err(structure::authoring_structure_rejection(
-                        "default copy refused",
-                    ))
-                } else {
-                    Ok(())
+            .reclassify(
+                &source,
+                &successor,
+                &DeclarationExtension,
+                &mut |name, bytes| {
+                    if name == "classification-defaults"
+                        && bytes.is_none_or(|bytes| bytes >= 32 * 1024)
+                    {
+                        stage = Some(name);
+                        Err(structure::authoring_structure_rejection(
+                            "default copy refused",
+                        ))
+                    } else {
+                        Ok(())
+                    }
                 }
-            })
+            )
             .is_err()
     );
     assert_eq!(stage, Some("classification-defaults"));
@@ -371,12 +408,12 @@ fn fixed_scalar_overlay_claims_charge_schema_scans_and_refuse_in_the_selector_wa
     let mut wide_work = SchemaReclassificationWork::default();
     drop(
         session
-            .prepare_schema_reclassification(&narrow, &mut narrow_work)
+            .prepare_schema_reclassification(&narrow, &DeclarationExtension, &mut narrow_work)
             .unwrap(),
     );
     drop(
         session
-            .prepare_schema_reclassification(&wide, &mut wide_work)
+            .prepare_schema_reclassification(&wide, &DeclarationExtension, &mut wide_work)
             .unwrap(),
     );
     assert!(wide_work.usage().work_bytes > narrow_work.usage().work_bytes);
@@ -387,7 +424,7 @@ fn fixed_scalar_overlay_claims_charge_schema_scans_and_refuse_in_the_selector_wa
     );
     let mut limited = SchemaReclassificationWork::new(limits);
     let refused = session
-        .prepare_schema_reclassification(&wide, &mut limited)
+        .prepare_schema_reclassification(&wide, &DeclarationExtension, &mut limited)
         .unwrap_err();
     assert!(
         refused.diagnostics.iter().any(|diagnostic| {

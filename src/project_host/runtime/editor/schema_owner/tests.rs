@@ -5,6 +5,7 @@
     all(target_os = "linux", target_arch = "x86_64", target_env = "gnu")
 ))]
 
+mod creation;
 mod failures;
 
 use std::{
@@ -201,7 +202,11 @@ impl Fixture {
 
     fn review(&self, editor: &mut EditorProjectSession) -> EditorSchemaOwnerAdoptionId {
         let operation = editor
-            .prepare_installed_schema_owner(INSTALLED, self.receipt)
+            .prepare_installed_schema_owner(
+                INSTALLED,
+                self.receipt,
+                nara_reflect::ComponentSchemaOwnerChange::Add,
+            )
             .unwrap();
         wait(editor, |editor| {
             matches!(
@@ -290,18 +295,34 @@ fn install(root: &Path) -> ContentDigest {
         None,
     )
     .unwrap();
-    let source = root.join("release-input");
+    install_owner(root, "stats", &owner)
+}
+
+fn install_owner(root: &Path, name: &str, owner: &ComponentSchemaOwnerSnapshot) -> ContentDigest {
+    let source = root.join("release-input").join(name);
+    fs::create_dir_all(&source).unwrap();
     let mut members = Vec::new();
-    for (path, bytes) in [
+    let mut payloads = vec![
         (
             "catalog.json",
-            owner.current().to_json_string().unwrap().into_bytes(),
+            owner
+                .current()
+                .to_json_string_with_predecessor(owner.predecessor())
+                .unwrap()
+                .into_bytes(),
         ),
         (
             "Tool.dll",
             b"inert metadata fixture; never executed".to_vec(),
         ),
-    ] {
+    ];
+    if let Some(predecessor) = owner.predecessor() {
+        payloads.push((
+            "predecessor.json",
+            predecessor.to_json_string().unwrap().into_bytes(),
+        ));
+    }
+    for (path, bytes) in payloads {
         fs::write(source.join(path), &bytes).unwrap();
         let digest = ContentDigest::of_bytes(&bytes);
         let hash: String = digest
@@ -320,6 +341,7 @@ fn install(root: &Path) -> ContentDigest {
         "host_target": if cfg!(windows) { "x86_64-pc-windows-msvc" } else { "x86_64-unknown-linux-gnu" },
         "authority": "trusted_process", "protocol_version": 1,
         "owner": OWNER, "component": component().as_str(),
+        "catalog_predecessor": owner.predecessor().map(|_| "predecessor.json"),
         "catalog": "catalog.json", "entry": "Tool.dll", "requires": [], "files": members,
     }))
     .unwrap();
@@ -331,7 +353,7 @@ fn install(root: &Path) -> ContentDigest {
     .unwrap();
     let plan = EditorSourceToolInstallationPlan::new(
         strict_directory(root),
-        RelativeComponent::new("stats").unwrap(),
+        RelativeComponent::new(name).unwrap(),
         release,
     )
     .unwrap();
@@ -1116,7 +1138,11 @@ fn installed_missing_owner_adoption_preserves_whole_live_source_history_and_save
         assert!(!editor.workspace().scene(inactive).unwrap().is_dirty());
         assert!(editor.source_tool_view().active.is_none());
         let operation = editor
-            .prepare_installed_schema_owner(INSTALLED, fixture.receipt)
+            .prepare_installed_schema_owner(
+                INSTALLED,
+                fixture.receipt,
+                nara_reflect::ComponentSchemaOwnerChange::Add,
+            )
             .unwrap();
         assert_eq!(
             terminal(editor),
@@ -1442,7 +1468,11 @@ fn cancelled_held_publication_retains_evidence_and_reconciles_the_current_dirty_
             Err(EditorSchemaOwnerAdoptionError::Operation)
         );
         assert_eq!(
-            editor.prepare_installed_schema_owner(INSTALLED, fixture.receipt),
+            editor.prepare_installed_schema_owner(
+                INSTALLED,
+                fixture.receipt,
+                nara_reflect::ComponentSchemaOwnerChange::Add
+            ),
             Err(EditorSchemaOwnerAdoptionError::RequiresReconcile)
         );
         editor.cancel_schema_owner_adoption(operation).unwrap();
@@ -1700,7 +1730,11 @@ fn cancelled_failed_publication_keeps_cleanup_pending_after_physical_return_unti
                 Err(EditorSchemaOwnerAdoptionError::Operation)
             );
             assert_eq!(
-                editor.prepare_installed_schema_owner(INSTALLED, fixture.receipt),
+                editor.prepare_installed_schema_owner(
+                    INSTALLED,
+                    fixture.receipt,
+                    nara_reflect::ComponentSchemaOwnerChange::Add
+                ),
                 Err(EditorSchemaOwnerAdoptionError::Busy)
             );
             assert_eq!(source_state(editor, document), before);

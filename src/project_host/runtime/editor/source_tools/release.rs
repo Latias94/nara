@@ -4,7 +4,7 @@ use std::fmt;
 
 use nara_fs::{ContentDigest, DirectoryCapability, FileIdentity, FsError, RelativePath, TrustMode};
 use nara_reflect::{
-    ComponentSchemaCatalog, ComponentSchemaOwnerSnapshot, ComponentTypeId,
+    ComponentCatalogFileLimits, ComponentSchemaOwnerSnapshot, ComponentTypeId,
     PersistentComponentSchemaOwnerId,
 };
 
@@ -143,6 +143,7 @@ struct ReleaseMetadata {
     component: ComponentTypeId,
     entry: String,
     catalog: String,
+    catalog_predecessor: Option<String>,
     requires: Vec<EditorSourceToolReleaseRequirement>,
 }
 
@@ -157,6 +158,8 @@ impl fmt::Debug for PreparedEditorSourceToolRelease {
             .field("schema_owner", self.metadata.owner.owner_id())
             .field("component", &self.metadata.component)
             .field("entry", &self.metadata.entry)
+            .field("catalog", &self.metadata.catalog)
+            .field("catalog_predecessor", &self.metadata.catalog_predecessor)
             .field("requires", &self.metadata.requires)
             .field("member_count", &self.members.len())
             .finish_non_exhaustive()
@@ -193,10 +196,11 @@ impl PreparedEditorSourceToolRelease {
     ///
     /// Fixed ceilings are 64 KiB manifest, 64 files, 16 MiB per payload and 64 MiB aggregate
     /// payload. Paths have at most eight ASCII components and 512 bytes. The catalog additionally
-    /// passes the existing Reflect format and Schema admission limits. This first form accepts
-    /// a generation-one catalog; it carries no predecessor lineage. This is a bounded native
-    /// filesystem read, not a time limit, archive reader or RSS sandbox. Undeclared siblings are
-    /// not read or captured and may never become implicit runtime dependencies of this candidate.
+    /// passes the existing Reflect format and Schema admission limits, together with any declared
+    /// complete predecessor Tool member. An absent predecessor admits generation one only. This
+    /// is a bounded native filesystem read, not a time limit, archive reader or RSS sandbox.
+    /// Undeclared siblings are not read or captured and may never become implicit runtime
+    /// dependencies of this candidate.
     pub fn capture(
         root: &DirectoryCapability,
         expected_manifest: ContentDigest,
@@ -245,13 +249,24 @@ impl PreparedEditorSourceToolRelease {
             .find(|member| member.path == manifest.catalog)
             .ok_or(EditorSourceToolReleaseError::Schema)?
             .bytes();
-        let catalog = ComponentSchemaCatalog::from_json_bytes(catalog_bytes)
-            .map_err(|_| EditorSourceToolReleaseError::Schema)?;
-        let owner = ComponentSchemaOwnerSnapshot::admit(
+        let predecessor = manifest
+            .catalog_predecessor
+            .as_ref()
+            .map(|path| {
+                let bytes = members
+                    .iter()
+                    .find(|member| member.path == *path)
+                    .ok_or(EditorSourceToolReleaseError::Schema)?
+                    .bytes();
+                Ok::<_, EditorSourceToolReleaseError>(bytes)
+            })
+            .transpose()?;
+        let owner = ComponentSchemaOwnerSnapshot::from_json_catalogs(
             PersistentComponentSchemaOwnerId::try_new(manifest.owner)
                 .map_err(|_| EditorSourceToolReleaseError::Schema)?,
-            catalog,
-            None,
+            catalog_bytes,
+            predecessor,
+            ComponentCatalogFileLimits::default(),
         )
         .map_err(|_| EditorSourceToolReleaseError::Schema)?;
         let component = ComponentTypeId::try_new(manifest.component)
@@ -272,6 +287,7 @@ impl PreparedEditorSourceToolRelease {
                 component,
                 entry: manifest.entry,
                 catalog: manifest.catalog,
+                catalog_predecessor: manifest.catalog_predecessor,
                 requires: manifest
                     .requires
                     .into_iter()
@@ -334,6 +350,12 @@ impl PreparedEditorSourceToolRelease {
     #[must_use]
     pub fn catalog(&self) -> &str {
         &self.metadata.catalog
+    }
+
+    /// Exact declared predecessor Tool member, independent of project Schema adoption.
+    #[must_use]
+    pub fn catalog_predecessor(&self) -> Option<&str> {
+        self.metadata.catalog_predecessor.as_deref()
     }
 
     #[must_use]

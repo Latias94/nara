@@ -3,8 +3,8 @@ use std::{fs, sync::Arc, thread};
 use nara_core::ItemLimit;
 use nara_reflect::{
     AuthoringSchemaBundleOwner, ComponentCapability, ComponentSchema, ComponentSchemaCatalog,
-    ComponentSchemaOwnerSnapshot, ComponentSchemaVersion, ComponentTypeId,
-    PersistentComponentSchemaOwnerId,
+    ComponentSchemaOwnerChange, ComponentSchemaOwnerSnapshot, ComponentSchemaVersion,
+    ComponentTypeId, PersistentComponentSchemaOwnerId,
 };
 use nara_scene::{__private::borrow_prepared_scene_schema_source, SchemaReclassificationWork};
 
@@ -80,8 +80,9 @@ fn cloned_input_prepares_on_its_actual_root_after_the_live_project_is_dropped() 
     thread::spawn(move || {
         assert_eq!(owned.project_root().identity(), root_identity);
         assert_eq!(owned.schema_basis(), &basis);
-        let AuthoringSchemaOwnerPreparation::Prepared { mut owner, .. } =
-            owned.prepare_owner(&installed_owner()).unwrap()
+        let AuthoringSchemaOwnerPreparation::Prepared { mut owner, .. } = owned
+            .prepare_owner(&installed_owner(), ComponentSchemaOwnerChange::Add)
+            .unwrap()
         else {
             panic!("the missing owner must prepare from the retained actual authority");
         };
@@ -120,8 +121,9 @@ fn input_rejects_foreign_and_independently_readmitted_project_authority() {
     assert!(!input.matches(&readmitted));
     assert!(!input.matches(&foreign));
 
-    let AuthoringSchemaOwnerPreparation::Prepared { mut owner, .. } =
-        input.prepare_owner(&installed_owner()).unwrap()
+    let AuthoringSchemaOwnerPreparation::Prepared { mut owner, .. } = input
+        .prepare_owner(&installed_owner(), ComponentSchemaOwnerChange::Add)
+        .unwrap()
     else {
         panic!("the missing owner must prepare");
     };
@@ -141,8 +143,9 @@ fn current_capture_validation_keeps_saved_project_budget_and_original_source_obs
     let project = independent_project();
     let (snapshot, source, scene) = open_second_scene(&project);
     let input = snapshot.schema_owner_input();
-    let AuthoringSchemaOwnerPreparation::Prepared { mut owner, .. } =
-        input.prepare_owner(&installed_owner()).unwrap()
+    let AuthoringSchemaOwnerPreparation::Prepared { mut owner, .. } = input
+        .prepare_owner(&installed_owner(), ComponentSchemaOwnerChange::Add)
+        .unwrap()
     else {
         panic!("the missing owner must prepare");
     };
@@ -150,7 +153,11 @@ fn current_capture_validation_keeps_saved_project_budget_and_original_source_obs
     let saved_work = owner.budget().usage().decode_work();
     let mut work = SchemaReclassificationWork::default();
     let prepared_scene = scene
-        .prepare_schema_reclassification(owner.schema_basis(), &mut work)
+        .prepare_schema_reclassification(
+            owner.schema_basis(),
+            owner.reclassification_kind(),
+            &mut work,
+        )
         .unwrap();
     let capture = owner
         .capture_scene(
@@ -170,7 +177,9 @@ fn current_capture_validation_keeps_saved_project_budget_and_original_source_obs
 
     let AuthoringSchemaOwnerPreparation::Prepared {
         owner: mut other, ..
-    } = input.prepare_owner(&installed_owner()).unwrap()
+    } = input
+        .prepare_owner(&installed_owner(), ComponentSchemaOwnerChange::Add)
+        .unwrap()
     else {
         panic!("the independently prepared owner must remain unpublished");
     };

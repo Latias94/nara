@@ -126,6 +126,77 @@ fn real_windows_installation_preserves_created_objects_and_reopens_receipt_selec
 }
 
 #[test]
+fn real_windows_successor_installation_reinspects_the_exact_captured_catalog_pair() {
+    let source = Release::creation_metadata_successor();
+    let plan = plan(&source);
+    let expected_manifest = plan.release().manifest_digest();
+    let expected_owner = plan.release().schema_owner().clone();
+    let expected_catalogs = ["catalog.json", "catalog-predecessor.json"].map(|path| {
+        let member = plan
+            .release()
+            .members()
+            .iter()
+            .find(|member| member.path() == path)
+            .unwrap();
+        (path, member.bytes().to_vec())
+    });
+    let installation = published(plan.publish());
+    assert_eq!(
+        installation.catalog_predecessor(),
+        Some("catalog-predecessor.json")
+    );
+    assert_eq!(installation.members().len(), 6);
+    assert!(installation.members().iter().any(|member| {
+        member.path() == "catalog-predecessor.json"
+            && member.kind() == Some(EditorSourceToolReleaseMemberKind::Tool)
+    }));
+    installation.verify().unwrap();
+    let expected_receipt = installation.receipt_digest();
+    drop(installation);
+
+    let reopened = project_root(&source)
+        .open_directory_exact(&RelativePath::new(INSTALLATION_PATH).unwrap())
+        .unwrap();
+    let inspected =
+        EditorSourceToolInstallationInspection::read(&reopened, expected_receipt).unwrap();
+    let release = inspected.release();
+    assert_eq!(release.manifest_digest(), expected_manifest);
+    assert_eq!(
+        release.catalog_predecessor(),
+        Some("catalog-predecessor.json")
+    );
+    assert_eq!(release.schema_owner().current(), expected_owner.current());
+    assert_eq!(
+        release.schema_owner().predecessor(),
+        expected_owner.predecessor()
+    );
+    for (path, bytes) in expected_catalogs {
+        let member = release
+            .members()
+            .iter()
+            .find(|member| member.path() == path)
+            .unwrap();
+        assert_eq!(member.bytes(), bytes);
+        assert_eq!(
+            fs::read(installation_path(&source).join(path)).unwrap(),
+            bytes
+        );
+    }
+    drop(inspected);
+
+    let predecessor_path = installation_path(&source).join("catalog-predecessor.json");
+    let mut changed_bytes = fs::read(&predecessor_path).unwrap();
+    changed_bytes[0] ^= 1;
+    fs::write(predecessor_path, changed_bytes).unwrap();
+    assert!(matches!(
+        EditorSourceToolInstallationInspection::read(&reopened, expected_receipt),
+        Err(EditorSourceToolInstallationError::Inspection(
+            super::super::EditorSourceToolReleaseError::Digest { member }
+        )) if member == "catalog-predecessor.json"
+    ));
+}
+
+#[test]
 fn inspection_retains_the_live_read_only_root_without_execution_or_deletion() {
     use std::os::windows::fs::OpenOptionsExt;
 

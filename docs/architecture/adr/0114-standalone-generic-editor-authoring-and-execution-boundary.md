@@ -177,6 +177,29 @@ precede their exclusive publication turn. Known file publication without live ad
 an explicit outcome. Source-index and preview authority bound to the predecessor are invalidated.
 The [owner-adoption plan](../../plans/2026-10-28-authoring-owner-adoption-plan.md) orders this workflow;
 source-only qualification does not establish project or Session adoption.
+
+### Creation-only metadata successors
+
+An explicit existing-owner operation may replace one admitted data owner's catalog with its
+immediate creation-metadata successor. The candidate's complete predecessor must equal the
+project's current catalog, and only complete `authoring_initial_value` metadata may differ.
+Owner/component/field identities, aliases, wire versions, fields, capabilities, defaults and
+tombstones stay equal. Other owners retain their complete snapshots. This is a distinct intent
+from additive adoption and grants no field/value migration or executable approval.
+
+The source owner admits this bounded relation explicitly while preserving additive equality
+guards and the existing source/history proof kernel. The affected engine-owned data Adapter
+keeps its implementation identity, version and coverage but prepares fresh exact successor
+catalog evidence under ADR 0090. One shared nominal basis covers every prepared source and
+current capture. Original source/content/checkpoint/history identities remain unchanged.
+
+The affected tool route must be explicitly disabled and its actual work returned before Schema
+publication; the Session rechecks this condition through confirmation and live adoption. Tool
+enablement is a separate explicit operation after Schema adoption. A failed new probe or desired
+selection write leaves the new Schema and inactive tool observable and retryable. Bundle and
+selection publication are separate durable outcomes, including their intermediate Close/Open
+state. Existing uncertain/publication-without-adoption reconciliation remains authoritative.
+
 The metadata receipt retains its own baseline budget for future independent captures. The
 adoption operation separately accumulates source/history proof and current capture work, including failed
 attempts; exhaustion forbids validation and attachment. A completed capture's observed usage is

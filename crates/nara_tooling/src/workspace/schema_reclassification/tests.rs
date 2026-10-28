@@ -1,3 +1,4 @@
+use nara_scene::SchemaReclassificationKind::DeclarationExtension;
 use std::{convert::Infallible, sync::Arc};
 
 use nara_asset::AssetRef;
@@ -31,6 +32,8 @@ use crate::{
 const RECOVERED: &str = "test.workspace.Recovered";
 const RECOVERED_OWNER: &str = "test.workspace.recovered";
 const UNKNOWN: &str = "missing.Unrelated";
+
+mod creation_metadata;
 
 fn id(name: &str) -> SceneEntityId {
     SceneEntityId::new(name).unwrap()
@@ -373,7 +376,7 @@ fn mixed_open_set_preserves_dirty_inactive_sources_navigation_checkpoints_and_re
     }
     let mut work = SchemaReclassificationWork::default();
     let prepared = workspace
-        .prepare_schema_reclassification(&previous, &next, &mut work)
+        .prepare_schema_reclassification(&previous, &next, &DeclarationExtension, &mut work)
         .unwrap();
     assert_eq!(prepared.schema_basis(), &next);
     assert_eq!(prepared.documents().collect::<Vec<_>>(), documents);
@@ -473,6 +476,7 @@ fn stale_final_source_refuses_the_whole_set_without_changing_earlier_classificat
         .prepare_schema_reclassification(
             &previous,
             &next,
+            &DeclarationExtension,
             &mut SchemaReclassificationWork::default(),
         )
         .unwrap();
@@ -500,6 +504,7 @@ fn binding_and_dropping_all_guards_does_not_publish_any_classification() {
         .prepare_schema_reclassification(
             &previous,
             &next,
+            &DeclarationExtension,
             &mut SchemaReclassificationWork::default(),
         )
         .unwrap();
@@ -509,6 +514,7 @@ fn binding_and_dropping_all_guards_does_not_publish_any_classification() {
         .prepare_schema_reclassification(
             &previous,
             &next,
+            &DeclarationExtension,
             &mut SchemaReclassificationWork::default(),
         )
         .unwrap();
@@ -537,6 +543,7 @@ fn foreign_workspace_refuses_even_matching_raw_ids_and_the_exact_original_source
         .prepare_schema_reclassification(
             &previous,
             &next,
+            &DeclarationExtension,
             &mut SchemaReclassificationWork::default(),
         )
         .unwrap();
@@ -572,6 +579,7 @@ fn opening_closing_or_replacing_one_document_invalidates_the_exact_open_set() {
             .prepare_schema_reclassification(
                 &previous,
                 &next,
+                &DeclarationExtension,
                 &mut SchemaReclassificationWork::default(),
             )
             .unwrap();
@@ -622,6 +630,7 @@ fn reopening_either_source_kind_invalidates_the_set_at_the_same_document_id() {
             .prepare_schema_reclassification(
                 &previous,
                 &next,
+                &DeclarationExtension,
                 &mut SchemaReclassificationWork::default(),
             )
             .unwrap();
@@ -697,6 +706,7 @@ fn changed_source_binding_refuses_views_and_commit_without_a_revision_change() {
             .prepare_schema_reclassification(
                 &previous,
                 &next,
+                &DeclarationExtension,
                 &mut SchemaReclassificationWork::default(),
             )
             .unwrap();
@@ -755,6 +765,7 @@ fn old_queries_continuations_and_edit_candidates_are_stale_at_the_same_revision(
         .prepare_schema_reclassification(
             &previous,
             &next,
+            &DeclarationExtension,
             &mut SchemaReclassificationWork::default(),
         )
         .unwrap();
@@ -817,6 +828,7 @@ fn a_saved_checkpoint_captured_before_reclassification_remains_usable_after_adop
         .prepare_schema_reclassification(
             &previous,
             &next,
+            &DeclarationExtension,
             &mut SchemaReclassificationWork::default(),
         )
         .unwrap();
@@ -874,7 +886,7 @@ fn independent_equal_predecessor_admission_is_refused_before_preparation_work() 
     let usage = work.usage();
     assert_refused(
         &workspace
-            .prepare_schema_reclassification(&previous, &next, &mut work)
+            .prepare_schema_reclassification(&previous, &next, &DeclarationExtension, &mut work)
             .unwrap_err(),
     );
     assert_eq!(work.usage(), usage);
@@ -910,7 +922,7 @@ fn native_scene_and_prefab_owners_refuse_without_preparing_earlier_authoring_sou
         let usage = work.usage();
         assert_refused(
             &workspace
-                .prepare_schema_reclassification(&previous, &next, &mut work)
+                .prepare_schema_reclassification(&previous, &next, &DeclarationExtension, &mut work)
                 .unwrap_err(),
         );
         assert_eq!(work.usage(), usage);
@@ -978,7 +990,7 @@ fn unsupported_extension_refuses_the_complete_set_before_any_preparation_work() 
     let usage = work.usage();
     assert_refused(
         &workspace
-            .prepare_schema_reclassification(&previous, &next, &mut work)
+            .prepare_schema_reclassification(&previous, &next, &DeclarationExtension, &mut work)
             .unwrap_err(),
     );
     assert_eq!(work.usage(), usage);
@@ -1025,7 +1037,7 @@ fn work_and_retention_limits_are_shared_across_the_complete_open_set() {
         );
         let mut work = SchemaReclassificationWork::default();
         workspace
-            .prepare_schema_reclassification(&previous, &next, &mut work)
+            .prepare_schema_reclassification(&previous, &next, &DeclarationExtension, &mut work)
             .unwrap();
         single_usage.push(work.usage());
     }
@@ -1043,7 +1055,7 @@ fn work_and_retention_limits_are_shared_across_the_complete_open_set() {
     open_pair(&mut workspace, &previous);
     let mut unlimited = SchemaReclassificationWork::default();
     workspace
-        .prepare_schema_reclassification(&previous, &next, &mut unlimited)
+        .prepare_schema_reclassification(&previous, &next, &DeclarationExtension, &mut unlimited)
         .unwrap();
     assert!(unlimited.usage().work_bytes > work_cap);
     assert!(unlimited.usage().peak_retained_bytes > retention_cap);
@@ -1057,7 +1069,7 @@ fn work_and_retention_limits_are_shared_across_the_complete_open_set() {
     ] {
         assert_limit(
             &workspace
-                .prepare_schema_reclassification(&previous, &next, &mut work)
+                .prepare_schema_reclassification(&previous, &next, &DeclarationExtension, &mut work)
                 .unwrap_err(),
             kind,
         );
@@ -1120,7 +1132,7 @@ fn every_incumbent_is_admitted_before_the_first_malformed_successor_is_classifie
         .scene(first)
         .unwrap()
         .session()
-        .prepare_schema_reclassification(&next, &mut first_only)
+        .prepare_schema_reclassification(&next, &DeclarationExtension, &mut first_only)
         .unwrap_err();
     assert!(malformed_report.diagnostics.has_errors());
     assert!(
@@ -1149,7 +1161,7 @@ fn every_incumbent_is_admitted_before_the_first_malformed_successor_is_classifie
     let before = snapshot(&workspace);
     let mut work = work_with_limits(512 * 1024 * 1024, retention_cap);
     let report = workspace
-        .prepare_schema_reclassification(&previous, &next, &mut work)
+        .prepare_schema_reclassification(&previous, &next, &DeclarationExtension, &mut work)
         .unwrap_err();
     assert_limit(&report, "retained");
     assert_eq!(report.document, Some(last));
@@ -1188,7 +1200,12 @@ fn finite_task_prepares_frozen_sources_and_only_the_original_live_set_can_adopt(
             .session()
             .shared_document();
         let request = workspace
-            .capture_schema_reclassification(&previous, &next, Default::default())
+            .capture_schema_reclassification(
+                &previous,
+                &next,
+                &DeclarationExtension,
+                Default::default(),
+            )
             .unwrap();
         assert_eq!(snapshot(&workspace), before);
         let pools = TaskPools::try_new_lazy(
@@ -1302,7 +1319,12 @@ fn owned_input_outlives_its_workspace_without_gaining_publication_authority() {
         .session()
         .shared_document();
     let request = original
-        .capture_schema_reclassification(&previous, &next, Default::default())
+        .capture_schema_reclassification(
+            &previous,
+            &next,
+            &DeclarationExtension,
+            Default::default(),
+        )
         .unwrap();
     drop(original);
     let prepared = request.prepare().unwrap();

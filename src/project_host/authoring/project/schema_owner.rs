@@ -40,15 +40,17 @@ impl AuthoringSchemaOwnerProjectInput {
     pub(crate) fn prepare_owner(
         &self,
         owner: &nara_reflect::ComponentSchemaOwnerSnapshot,
+        change: nara_reflect::ComponentSchemaOwnerChange,
     ) -> Result<AuthoringSchemaOwnerPreparation, AuthoringSchemaOwnerError> {
-        self.incumbent.prepare_owner(owner)
+        self.incumbent.prepare_owner(owner, change)
     }
 
     pub(crate) fn prepare_observed_owner(
         &self,
         owner: &nara_reflect::ComponentSchemaOwnerSnapshot,
+        change: nara_reflect::ComponentSchemaOwnerChange,
     ) -> Result<AuthoringSchemaOwnerReconciliation, AuthoringSchemaOwnerError> {
-        self.incumbent.prepare_observed_owner(owner)
+        self.incumbent.prepare_observed_owner(owner, change)
     }
 
     /// Revalidation compares actual authority and nominal basis, never just equal file bytes.

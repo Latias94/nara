@@ -55,8 +55,8 @@ pub use schema_reclassification::{
     PrefabSchemaReclassificationCommit, PrefabSchemaReclassificationRequest,
     PreparedPrefabSchemaReclassification, PreparedSceneSchemaReclassification,
     RetainedSchemaReclassificationSource, SceneSchemaReclassificationCommit,
-    SceneSchemaReclassificationRequest, SchemaReclassificationLimits, SchemaReclassificationUsage,
-    SchemaReclassificationWork,
+    SceneSchemaReclassificationRequest, SchemaReclassificationKind, SchemaReclassificationLimits,
+    SchemaReclassificationUsage, SchemaReclassificationWork,
 };
 #[cfg(feature = "serde")]
 pub use schema_reclassification::{

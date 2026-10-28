@@ -465,6 +465,11 @@ impl EditorSourceToolInstallation {
     pub fn release(&self) -> &str {
         &self.metadata.release
     }
+    /// Exact predecessor Tool member retained from the captured release manifest.
+    #[must_use]
+    pub fn catalog_predecessor(&self) -> Option<&str> {
+        self.metadata.catalog_predecessor.as_deref()
+    }
     #[must_use]
     pub fn receipt(&self) -> &EditorSourceToolInstallationReceipt {
         &self.receipt
@@ -516,7 +521,8 @@ impl EditorSourceToolInstallation {
 }
 
 impl EditorSourceToolInstallationInspection {
-    /// Reopens and captures a receipt-selected declared release without recovering deletion rights.
+    /// Reopens and captures a receipt-selected declared release, including its catalog pair.
+    /// This admits no project Schema, executable approval or deletion rights.
     pub fn read(
         root: &DirectoryCapability,
         expected_receipt: ContentDigest,

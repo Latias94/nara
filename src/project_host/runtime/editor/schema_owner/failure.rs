@@ -63,6 +63,14 @@ impl EditorSchemaOwnerAdoptionFailure {
 
     pub(super) fn new(reason: Reason, phase: Phase) -> Self {
         let (code, summary) = match reason {
+            Reason::ActiveTool => (
+                "project.editor.schema-owner-tool-active",
+                "Explicitly disable the affected tool before changing its Schema owner",
+            ),
+            Reason::ToolCleanupFailed => (
+                "project.editor.schema-owner-tool-cleanup-failed",
+                "Failed physical tool cleanup prevents Schema owner evolution",
+            ),
             Reason::Installation => (
                 "project.editor.schema-owner-installation-rejected",
                 "The selected installation changed or could not be inspected",
@@ -157,6 +165,10 @@ impl EditorSchemaOwnerAdoptionFailure {
             E::ExistingOwnerChanged => super::super::single_error(
                 "project.editor.schema-owner-existing-content-changed",
                 "An existing owner's complete declarations differ from the selected installation",
+            ),
+            E::InvalidCreationSuccessor => super::super::single_error(
+                "project.editor.schema-owner-creation-successor-rejected",
+                "Creation metadata requires the exact existing owner and immediate catalog predecessor",
             ),
             E::Budget(_) => super::super::single_error(
                 "project.editor.schema-owner-budget-exceeded",

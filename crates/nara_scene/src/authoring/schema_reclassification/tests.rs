@@ -1,3 +1,4 @@
+use crate::SchemaReclassificationKind::DeclarationExtension;
 use std::{convert::Infallible, mem::Discriminant};
 
 use nara_asset::AssetRef;
@@ -284,7 +285,7 @@ fn recovery_preserves_source_and_both_history_branches_without_rebuilding_entrie
         let before = source_snapshot!(session);
         let mut work = SchemaReclassificationWork::default();
         let prepared = session
-            .prepare_schema_reclassification(&next, &mut work)
+            .prepare_schema_reclassification(&next, &DeclarationExtension, &mut work)
             .unwrap();
         assert_eq!(prepared.schema_basis(), next);
         assert_eq!(prepared.base_revision(), session.revision());
@@ -373,7 +374,11 @@ fn owner_created_restore_entity_is_proved_as_history_and_remains_replayable() {
         let deleted = session.document().clone();
         let before = source_snapshot!(session);
         let prepared = session
-            .prepare_schema_reclassification(&next, &mut SchemaReclassificationWork::default())
+            .prepare_schema_reclassification(
+                &next,
+                &DeclarationExtension,
+                &mut SchemaReclassificationWork::default(),
+            )
             .unwrap();
         session.commit_schema_reclassification(prepared).unwrap();
         assert_source_unchanged!(session, before);
@@ -471,7 +476,11 @@ fn dormant_malformed_overlay_history_remains_replayable_on_either_branch() {
             );
             let mut clean = scene(&current, &previous);
             let clean_prepared = clean
-                .prepare_schema_reclassification(&next, &mut SchemaReclassificationWork::default())
+                .prepare_schema_reclassification(
+                    &next,
+                    &DeclarationExtension,
+                    &mut SchemaReclassificationWork::default(),
+                )
                 .unwrap();
             clean
                 .commit_schema_reclassification(clean_prepared)
@@ -482,7 +491,11 @@ fn dormant_malformed_overlay_history_remains_replayable_on_either_branch() {
             let repaired = session.document().clone();
             let repaired_content = session.content_state();
             let prepared = session
-                .prepare_schema_reclassification(&next, &mut SchemaReclassificationWork::default())
+                .prepare_schema_reclassification(
+                    &next,
+                    &DeclarationExtension,
+                    &mut SchemaReclassificationWork::default(),
+                )
                 .unwrap();
             let reviewed_manifest = prepared.unavailable_record_manifest().clone();
             let reviewed_diagnostics = prepared.diagnostics().clone();
@@ -579,14 +592,22 @@ fn public_add_entity_history_rejects_reclassification_when_undo_reveals_a_dangli
         let clean_prefab = prefab(&current, &previous);
         assert_eq!(
             clean_scene
-                .prepare_schema_reclassification(&next, &mut SchemaReclassificationWork::default())
+                .prepare_schema_reclassification(
+                    &next,
+                    &DeclarationExtension,
+                    &mut SchemaReclassificationWork::default()
+                )
                 .unwrap()
                 .readiness(),
             AuthoringDocumentReadiness::Complete
         );
         assert_eq!(
             clean_prefab
-                .prepare_schema_reclassification(&next, &mut SchemaReclassificationWork::default())
+                .prepare_schema_reclassification(
+                    &next,
+                    &DeclarationExtension,
+                    &mut SchemaReclassificationWork::default()
+                )
                 .unwrap()
                 .readiness(),
             AuthoringDocumentReadiness::Complete
@@ -595,7 +616,11 @@ fn public_add_entity_history_rejects_reclassification_when_undo_reveals_a_dangli
         let facts = session.authoring_record_facts().unwrap().to_vec();
         let manifest = session.unavailable_record_manifest().unwrap().clone();
         let report = session
-            .prepare_schema_reclassification(&next, &mut SchemaReclassificationWork::default())
+            .prepare_schema_reclassification(
+                &next,
+                &DeclarationExtension,
+                &mut SchemaReclassificationWork::default(),
+            )
             .unwrap_err();
         assert!(!report.applied);
         assert!(report.inverse.is_none());
@@ -636,7 +661,7 @@ fn declaration_extension_requires_exact_owner_full_schema_and_adapter_coverage()
             let mut work = SchemaReclassificationWork::default();
             assert!(
                 session
-                    .prepare_schema_reclassification(next, &mut work)
+                    .prepare_schema_reclassification(next, &DeclarationExtension, &mut work)
                     .is_err()
             );
             assert_eq!(work.usage(), SchemaReclassificationUsage::default());
@@ -650,6 +675,7 @@ fn declaration_extension_requires_exact_owner_full_schema_and_adapter_coverage()
             session
                 .prepare_schema_reclassification(
                     &previous,
+                    &DeclarationExtension,
                     &mut SchemaReclassificationWork::default()
                 )
                 .is_err()
@@ -665,7 +691,11 @@ fn edit_and_schema_candidates_reject_stale_revision_and_independently_admitted_e
     let next = successor();
     each_source!(&document(), &previous, |session| {
         let stale = session
-            .prepare_schema_reclassification(&next, &mut SchemaReclassificationWork::default())
+            .prepare_schema_reclassification(
+                &next,
+                &DeclarationExtension,
+                &mut SchemaReclassificationWork::default(),
+            )
             .unwrap();
         assert!(session.apply_authoring_patch(&add("newer")).applied);
         let before = source_snapshot!(session);
@@ -676,12 +706,17 @@ fn edit_and_schema_candidates_reject_stale_revision_and_independently_admitted_e
             .prepare_authoring_edit(session.revision(), &add("old-edit"))
             .unwrap();
         let old_schema = session
-            .prepare_schema_reclassification(&next, &mut SchemaReclassificationWork::default())
+            .prepare_schema_reclassification(
+                &next,
+                &DeclarationExtension,
+                &mut SchemaReclassificationWork::default(),
+            )
             .unwrap();
         // Equal metadata admitted independently changes the exact basis without changing revision.
         let replacement = session
             .prepare_schema_reclassification(
                 &equal_previous,
+                &DeclarationExtension,
                 &mut SchemaReclassificationWork::default(),
             )
             .unwrap();
@@ -704,10 +739,18 @@ fn duplicate_candidates_and_candidates_from_another_source_cannot_publish() {
     let next = successor();
     each_source!(&document(), &previous, |session| {
         let first = session
-            .prepare_schema_reclassification(&next, &mut SchemaReclassificationWork::default())
+            .prepare_schema_reclassification(
+                &next,
+                &DeclarationExtension,
+                &mut SchemaReclassificationWork::default(),
+            )
             .unwrap();
         let duplicate = session
-            .prepare_schema_reclassification(&next, &mut SchemaReclassificationWork::default())
+            .prepare_schema_reclassification(
+                &next,
+                &DeclarationExtension,
+                &mut SchemaReclassificationWork::default(),
+            )
             .unwrap();
         let before = source_snapshot!(session);
         session.commit_schema_reclassification(first).unwrap();
@@ -718,7 +761,11 @@ fn duplicate_candidates_and_candidates_from_another_source_cannot_publish() {
     let mut first = scene(&document(), &previous);
     let mut second = scene(&document(), &previous);
     let foreign = first
-        .prepare_schema_reclassification(&next, &mut SchemaReclassificationWork::default())
+        .prepare_schema_reclassification(
+            &next,
+            &DeclarationExtension,
+            &mut SchemaReclassificationWork::default(),
+        )
         .unwrap();
     let before = source_snapshot!(second);
     assert!(second.commit_schema_reclassification(foreign).is_err());
@@ -726,7 +773,11 @@ fn duplicate_candidates_and_candidates_from_another_source_cannot_publish() {
     let mut first_prefab = prefab(&document(), &previous);
     let mut second_prefab = prefab(&document(), &previous);
     let foreign = first_prefab
-        .prepare_schema_reclassification(&next, &mut SchemaReclassificationWork::default())
+        .prepare_schema_reclassification(
+            &next,
+            &DeclarationExtension,
+            &mut SchemaReclassificationWork::default(),
+        )
         .unwrap();
     let before = source_snapshot!(second_prefab);
     assert!(
@@ -737,7 +788,11 @@ fn duplicate_candidates_and_candidates_from_another_source_cannot_publish() {
     assert_source_unchanged!(second_prefab, before);
     // A fresh source with identical bytes still owns an independent revision lineage.
     let stale = first
-        .prepare_schema_reclassification(&next, &mut SchemaReclassificationWork::default())
+        .prepare_schema_reclassification(
+            &next,
+            &DeclarationExtension,
+            &mut SchemaReclassificationWork::default(),
+        )
         .unwrap();
     first = first
         .try_reopen_authoring_candidate(
@@ -748,7 +803,11 @@ fn duplicate_candidates_and_candidates_from_another_source_cannot_publish() {
     assert!(first.commit_schema_reclassification(stale).is_err());
     assert_source_unchanged!(first, before);
     let stale = first_prefab
-        .prepare_schema_reclassification(&next, &mut SchemaReclassificationWork::default())
+        .prepare_schema_reclassification(
+            &next,
+            &DeclarationExtension,
+            &mut SchemaReclassificationWork::default(),
+        )
         .unwrap();
     first_prefab = first_prefab
         .try_reopen_authoring_candidate(
@@ -775,7 +834,11 @@ fn successful_recovery_invalidates_old_edits_even_when_source_revision_stays_equ
             .unwrap();
         let before = source_snapshot!(session);
         let prepared = session
-            .prepare_schema_reclassification(&next, &mut SchemaReclassificationWork::default())
+            .prepare_schema_reclassification(
+                &next,
+                &DeclarationExtension,
+                &mut SchemaReclassificationWork::default(),
+            )
             .unwrap();
         session.commit_schema_reclassification(prepared).unwrap();
         assert!(!session.commit_authoring_edit(edit).applied);
@@ -808,7 +871,7 @@ fn many_tiny_edits_charge_cumulative_work_separately_from_peak_retention() {
         let mut measured = SchemaReclassificationWork::default();
         drop(
             session
-                .prepare_schema_reclassification(&next, &mut measured)
+                .prepare_schema_reclassification(&next, &DeclarationExtension, &mut measured)
                 .unwrap(),
         );
         let usage = measured.usage();
@@ -816,21 +879,21 @@ fn many_tiny_edits_charge_cumulative_work_separately_from_peak_retention() {
         let mut exact = work_with_limits(usage.work_bytes, usage.peak_retained_bytes);
         drop(
             session
-                .prepare_schema_reclassification(&next, &mut exact)
+                .prepare_schema_reclassification(&next, &DeclarationExtension, &mut exact)
                 .unwrap(),
         );
         assert_eq!(exact.usage(), usage);
         let mut work_limited = work_with_limits(usage.work_bytes - 1, usage.peak_retained_bytes);
         assert_limit(
             &session
-                .prepare_schema_reclassification(&next, &mut work_limited)
+                .prepare_schema_reclassification(&next, &DeclarationExtension, &mut work_limited)
                 .unwrap_err(),
             "work",
         );
         let mut peak_limited = work_with_limits(usage.work_bytes, usage.peak_retained_bytes - 1);
         assert_limit(
             &session
-                .prepare_schema_reclassification(&next, &mut peak_limited)
+                .prepare_schema_reclassification(&next, &DeclarationExtension, &mut peak_limited)
                 .unwrap_err(),
             "retained",
         );
@@ -914,13 +977,13 @@ fn absent_string_field_history_replays_large_generated_inverses_with_a_finite_wo
             let mut measured = SchemaReclassificationWork::default();
             drop(
                 session
-                    .prepare_schema_reclassification(&next, &mut measured)
+                    .prepare_schema_reclassification(&next, &DeclarationExtension, &mut measured)
                     .unwrap(),
             );
             let usage = measured.usage();
             let mut limited = work_with_limits(usage.work_bytes - 1, usage.peak_retained_bytes);
             let report = session
-                .prepare_schema_reclassification(&next, &mut limited)
+                .prepare_schema_reclassification(&next, &DeclarationExtension, &mut limited)
                 .unwrap_err();
             assert_limit(&report, "work");
             assert_source_unchanged!(session, before);
@@ -929,7 +992,7 @@ fn absent_string_field_history_replays_large_generated_inverses_with_a_finite_wo
             assert_eq!(session.unavailable_record_manifest(), Some(&manifest));
             let mut exact = work_with_limits(usage.work_bytes, usage.peak_retained_bytes);
             let prepared = session
-                .prepare_schema_reclassification(&next, &mut exact)
+                .prepare_schema_reclassification(&next, &DeclarationExtension, &mut exact)
                 .unwrap();
             assert_eq!(prepared.readiness(), AuthoringDocumentReadiness::Complete);
             assert_eq!(prepared.unavailable_record_manifest().total_count(), 0);
@@ -966,20 +1029,20 @@ fn shared_work_remembers_dropped_candidates_and_limits_the_complete_source_set()
     let mut shared = SchemaReclassificationWork::default();
     drop(
         first
-            .prepare_schema_reclassification(&next, &mut shared)
+            .prepare_schema_reclassification(&next, &DeclarationExtension, &mut shared)
             .unwrap(),
     );
     let first_usage = shared.usage();
     drop(
         second
-            .prepare_schema_reclassification(&next, &mut shared)
+            .prepare_schema_reclassification(&next, &DeclarationExtension, &mut shared)
             .unwrap(),
     );
     let combined = shared.usage();
     let mut independent = SchemaReclassificationWork::default();
     drop(
         second
-            .prepare_schema_reclassification(&next, &mut independent)
+            .prepare_schema_reclassification(&next, &DeclarationExtension, &mut independent)
             .unwrap(),
     );
     assert_eq!(
@@ -990,12 +1053,12 @@ fn shared_work_remembers_dropped_candidates_and_limits_the_complete_source_set()
     let mut limited = work_with_limits(combined.work_bytes - 1, combined.peak_retained_bytes);
     drop(
         first
-            .prepare_schema_reclassification(&next, &mut limited)
+            .prepare_schema_reclassification(&next, &DeclarationExtension, &mut limited)
             .unwrap(),
     );
     assert_limit(
         &second
-            .prepare_schema_reclassification(&next, &mut limited)
+            .prepare_schema_reclassification(&next, &DeclarationExtension, &mut limited)
             .unwrap_err(),
         "work",
     );
@@ -1017,20 +1080,24 @@ fn tiny_limits_and_discarded_candidates_never_change_semantic_owner_state() {
         let mut tiny_work = work_with_limits(1, 256 * 1024 * 1024);
         assert_limit(
             &session
-                .prepare_schema_reclassification(&next, &mut tiny_work)
+                .prepare_schema_reclassification(&next, &DeclarationExtension, &mut tiny_work)
                 .unwrap_err(),
             "work",
         );
         let mut tiny_peak = work_with_limits(512 * 1024 * 1024, 1);
         assert_limit(
             &session
-                .prepare_schema_reclassification(&next, &mut tiny_peak)
+                .prepare_schema_reclassification(&next, &DeclarationExtension, &mut tiny_peak)
                 .unwrap_err(),
             "retained",
         );
         drop(
             session
-                .prepare_schema_reclassification(&next, &mut SchemaReclassificationWork::default())
+                .prepare_schema_reclassification(
+                    &next,
+                    &DeclarationExtension,
+                    &mut SchemaReclassificationWork::default(),
+                )
                 .unwrap(),
         );
         assert_source_unchanged!(session, before);
@@ -1059,7 +1126,11 @@ fn retained_edges_must_keep_their_original_cost_on_both_stacks() {
             stack.front_mut().unwrap().cost = SceneAuthoringHistoryCost::default();
             let before = source_snapshot!(session);
             let report = session
-                .prepare_schema_reclassification(&next, &mut SchemaReclassificationWork::default())
+                .prepare_schema_reclassification(
+                    &next,
+                    &DeclarationExtension,
+                    &mut SchemaReclassificationWork::default(),
+                )
                 .unwrap_err();
             assert!(
                 has_code(&report, "scene.authoring-history-cost-changed"),
@@ -1137,13 +1208,13 @@ fn all_sources_bind_before_infallible_commits_and_a_later_bind_failure_publishes
     let mut third = scene(&document(), &previous);
     let mut work = SchemaReclassificationWork::default();
     let first_candidate = first
-        .prepare_schema_reclassification(&next, &mut work)
+        .prepare_schema_reclassification(&next, &DeclarationExtension, &mut work)
         .unwrap();
     let second_candidate = second
-        .prepare_schema_reclassification(&next, &mut work)
+        .prepare_schema_reclassification(&next, &DeclarationExtension, &mut work)
         .unwrap();
     let third_candidate = third
-        .prepare_schema_reclassification(&next, &mut work)
+        .prepare_schema_reclassification(&next, &DeclarationExtension, &mut work)
         .unwrap();
     assert!(third.apply_authoring_patch(&add("newer")).applied);
     let first_before = source_snapshot!(first);
@@ -1165,13 +1236,13 @@ fn all_sources_bind_before_infallible_commits_and_a_later_bind_failure_publishes
     assert_eq!(third.authoring_schema_basis(), Some(previous));
     let mut work = SchemaReclassificationWork::default();
     let first_candidate = first
-        .prepare_schema_reclassification(&next, &mut work)
+        .prepare_schema_reclassification(&next, &DeclarationExtension, &mut work)
         .unwrap();
     let second_candidate = second
-        .prepare_schema_reclassification(&next, &mut work)
+        .prepare_schema_reclassification(&next, &DeclarationExtension, &mut work)
         .unwrap();
     let third_candidate = third
-        .prepare_schema_reclassification(&next, &mut work)
+        .prepare_schema_reclassification(&next, &DeclarationExtension, &mut work)
         .unwrap();
     let first_guard = first.bind_schema_reclassification(first_candidate).unwrap();
     let second_guard = second
@@ -1242,13 +1313,18 @@ fn real_complete_prefab_conversion_history_reclassifies_without_fabricated_footp
                     .retain_schema_reclassification_source(&mut work)
                     .unwrap();
                 session
-                    .capture_schema_reclassification(&next, &mut work, incumbent)
+                    .capture_schema_reclassification(
+                        &next,
+                        &DeclarationExtension,
+                        &mut work,
+                        incumbent,
+                    )
                     .unwrap()
                     .prepare(&mut work)
                     .unwrap()
             } else {
                 session
-                    .prepare_schema_reclassification(&next, &mut work)
+                    .prepare_schema_reclassification(&next, &DeclarationExtension, &mut work)
                     .unwrap()
             };
             session.commit_schema_reclassification(prepared).unwrap();
@@ -1275,7 +1351,7 @@ fn native_sessions_have_no_reclassification_authority() {
     let mut work = SchemaReclassificationWork::default();
     assert!(
         native
-            .prepare_schema_reclassification(&next, &mut work)
+            .prepare_schema_reclassification(&next, &DeclarationExtension, &mut work)
             .is_err()
     );
     assert_eq!(work.usage(), SchemaReclassificationUsage::default());
@@ -1283,7 +1359,7 @@ fn native_sessions_have_no_reclassification_authority() {
         PrefabAuthoringSession::new(PrefabDocument::new(document().roots, document().entities));
     assert!(
         native
-            .prepare_schema_reclassification(&next, &mut work)
+            .prepare_schema_reclassification(&next, &DeclarationExtension, &mut work)
             .is_err()
     );
     assert_eq!(work.usage(), SchemaReclassificationUsage::default());
@@ -1302,7 +1378,12 @@ fn retained_incumbent_cannot_skip_another_allowances_source_charge() {
         let mut foreign = SchemaReclassificationWork::default();
         assert!(
             session
-                .prepare_schema_reclassification_with_retained_source(&next, &mut foreign, retained)
+                .prepare_schema_reclassification_with_retained_source(
+                    &next,
+                    &DeclarationExtension,
+                    &mut foreign,
+                    retained
+                )
                 .is_err()
         );
         assert_eq!(foreign.usage(), SchemaReclassificationUsage::default());
@@ -1323,7 +1404,12 @@ fn retained_incumbent_requires_its_original_source_revision_and_kind() {
     let before = work.usage();
     assert!(
         second
-            .prepare_schema_reclassification_with_retained_source(&next, &mut work, retained)
+            .prepare_schema_reclassification_with_retained_source(
+                &next,
+                &DeclarationExtension,
+                &mut work,
+                retained
+            )
             .is_err()
     );
     assert_eq!(work.usage(), before);
@@ -1335,7 +1421,12 @@ fn retained_incumbent_requires_its_original_source_revision_and_kind() {
     let before = work.usage();
     assert!(
         prefab
-            .prepare_schema_reclassification_with_retained_source(&next, &mut work, retained)
+            .prepare_schema_reclassification_with_retained_source(
+                &next,
+                &DeclarationExtension,
+                &mut work,
+                retained
+            )
             .is_err()
     );
     assert_eq!(work.usage(), before);
@@ -1347,9 +1438,16 @@ fn retained_incumbent_requires_its_original_source_revision_and_kind() {
     let before = work.usage();
     assert!(
         first
-            .prepare_schema_reclassification_with_retained_source(&next, &mut work, retained)
+            .prepare_schema_reclassification_with_retained_source(
+                &next,
+                &DeclarationExtension,
+                &mut work,
+                retained
+            )
             .is_err()
     );
     assert_eq!(work.usage(), before);
     assert_eq!(first.authoring_schema_basis(), Some(previous));
 }
+
+mod creation_metadata;

@@ -264,6 +264,15 @@ pub(super) struct EditorSourceTools {
 }
 
 impl EditorSourceTools {
+    pub(super) fn has_active_schema_owner(
+        &self,
+        owner: &nara_reflect::PersistentComponentSchemaOwnerId,
+    ) -> bool {
+        self.active
+            .as_ref()
+            .is_some_and(|active| active.definition.owner.owner_id() == owner)
+    }
+
     pub(super) fn template_source_admission_pending(&self) -> bool {
         self.template_import.native_pending()
     }

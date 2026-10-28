@@ -702,6 +702,19 @@ Present template metadata affects catalog fingerprint/generation and exact autho
 A template-only change advances catalog generation without changing component wire version or stored-record decode semantics.
 Same-version lineage comparison excludes creation-only metadata while catalog identity includes it.
 
+Installed creation-metadata evolution is an explicit metadata intent under ADR 0114, separate
+from adding a previously absent owner. A release may declare its complete immediate predecessor
+catalog as another exact, nonempty Tool member; it is captured and re-inspected under the same
+file/count/byte limits. Reflect validates that lineage without executing code. The project also
+requires the predecessor to equal its actual admitted current catalog; a self-consistent release
+pair alone cannot establish that relation. There is one canonical format-1 release reader.
+
+The first workflow updates an engine-owned data Adapter's owner while preserving existing values,
+history and stored definitions. The affected execution route is explicitly disabled and physically
+quiet before publication and adoption. Fresh Adapter evidence joins the same successor basis;
+V2 enablement is separately approved afterwards. Intermediate durable Schema/selection states
+remain visible and recoverable through ordinary Close/Open rather than a cross-file rollback.
+
 The first derive extension accepts only explicitly typed finite scalar literal initializers through the existing sealed codecs.
 If a component opts in, every field must be covered.
 Manual schema owners may publish complete values for already-admitted built-ins using existing reference semantics.

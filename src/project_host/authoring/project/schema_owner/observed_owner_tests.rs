@@ -1,7 +1,7 @@
 use std::{fs, sync::Arc};
 
 use nara_core::ByteLimit;
-use nara_reflect::AuthoringSchemaBundleOwner;
+use nara_reflect::{AuthoringSchemaBundleOwner, ComponentSchemaOwnerChange};
 use nara_scene::{
     __private::borrow_prepared_scene_schema_source, SceneEntityId, ScenePatchDocument,
     ScenePatchOperation, ScenePlacement, ScenePlacementOwner, SchemaReclassificationWork,
@@ -30,7 +30,9 @@ fn observed_successor_reprepares_dirty_source_and_attaches_without_another_write
     let AuthoringSchemaOwnerPreparation::Prepared {
         owner: original,
         mut publication,
-    } = input.prepare_owner(&installed_owner()).unwrap()
+    } = input
+        .prepare_owner(&installed_owner(), ComponentSchemaOwnerChange::Add)
+        .unwrap()
     else {
         panic!("the owner must be missing");
     };
@@ -53,8 +55,9 @@ fn observed_successor_reprepares_dirty_source_and_attaches_without_another_write
     let content = scene.content_state();
     let document = scene.shared_document();
 
-    let AuthoringSchemaOwnerReconciliation::Observed(mut owner) =
-        input.prepare_observed_owner(&installed_owner()).unwrap()
+    let AuthoringSchemaOwnerReconciliation::Observed(mut owner) = input
+        .prepare_observed_owner(&installed_owner(), ComponentSchemaOwnerChange::Add)
+        .unwrap()
     else {
         panic!("published metadata must produce an observed preparation");
     };
@@ -68,7 +71,7 @@ fn observed_successor_reprepares_dirty_source_and_attaches_without_another_write
     let saved = owner.prepare_project_input(&input, &[]).unwrap();
     let mut work = SchemaReclassificationWork::default();
     let prepared_scene = scene
-        .prepare_schema_reclassification(&basis, &mut work)
+        .prepare_schema_reclassification(&basis, owner.reclassification_kind(), &mut work)
         .unwrap();
     let capture = owner
         .capture_scene(
@@ -117,8 +120,9 @@ fn observed_owner_refuses_changed_manifest_dropped_lineage_and_reviewed_leaf_dri
     let snapshot = open_project(&project);
     let input = snapshot.schema_owner_input();
     let installed = installed_owner();
-    let AuthoringSchemaOwnerPreparation::Prepared { owner, .. } =
-        input.prepare_owner(&installed).unwrap()
+    let AuthoringSchemaOwnerPreparation::Prepared { owner, .. } = input
+        .prepare_owner(&installed, ComponentSchemaOwnerChange::Add)
+        .unwrap()
     else {
         panic!("the owner must be missing");
     };
@@ -127,7 +131,7 @@ fn observed_owner_refuses_changed_manifest_dropped_lineage_and_reviewed_leaf_dri
     let dropped = AuthoringSchemaBundle::from_owner_snapshots([installed.clone()]).unwrap();
     fs::write(project.root.join(BUNDLE), dropped.to_json_string().unwrap()).unwrap();
     assert!(matches!(
-        input.prepare_observed_owner(&installed),
+        input.prepare_observed_owner(&installed, ComponentSchemaOwnerChange::Add),
         Err(AuthoringSchemaOwnerError::BundleChanged)
     ));
     // A changed current catalog for the requested owner is not its exact installed snapshot.
@@ -152,12 +156,13 @@ fn observed_owner_refuses_changed_manifest_dropped_lineage_and_reviewed_leaf_dri
     .unwrap();
     fs::write(project.root.join(BUNDLE), bundle.to_json_string().unwrap()).unwrap();
     assert!(matches!(
-        input.prepare_observed_owner(&installed),
+        input.prepare_observed_owner(&installed, ComponentSchemaOwnerChange::Add),
         Err(AuthoringSchemaOwnerError::BundleChanged)
     ));
     fs::write(project.root.join(BUNDLE), &successor).unwrap();
-    let AuthoringSchemaOwnerReconciliation::Observed(mut observed) =
-        input.prepare_observed_owner(&installed).unwrap()
+    let AuthoringSchemaOwnerReconciliation::Observed(mut observed) = input
+        .prepare_observed_owner(&installed, ComponentSchemaOwnerChange::Add)
+        .unwrap()
     else {
         panic!("the exact successor must prepare");
     };
@@ -183,7 +188,7 @@ fn observed_owner_refuses_changed_manifest_dropped_lineage_and_reviewed_leaf_dri
     manifest.push(b' ');
     fs::write(&manifest_path, manifest).unwrap();
     assert!(matches!(
-        input.prepare_observed_owner(&installed),
+        input.prepare_observed_owner(&installed, ComponentSchemaOwnerChange::Add),
         Err(AuthoringSchemaOwnerError::ManifestChanged)
     ));
 }
@@ -195,7 +200,9 @@ fn observed_preparation_falls_back_to_publication_and_retains_refused_input_rese
     let input = snapshot.schema_owner_input();
     let AuthoringSchemaOwnerReconciliation::Publication(
         AuthoringSchemaOwnerPreparation::Prepared { mut owner, .. },
-    ) = input.prepare_observed_owner(&installed_owner()).unwrap()
+    ) = input
+        .prepare_observed_owner(&installed_owner(), ComponentSchemaOwnerChange::Add)
+        .unwrap()
     else {
         panic!("the original actual bundle must use ordinary publication");
     };

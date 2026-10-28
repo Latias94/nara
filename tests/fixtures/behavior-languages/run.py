@@ -89,6 +89,26 @@ def main():
         environment[f"NARA_SOURCE_TOOL_{name.upper()}_DIR"] = str(
             destination / "bin" / "EnemyStatsTool" / "debug"
         )
+    catalogs = artifacts.parent / "creation-catalogs"
+    subprocess.run(
+        [
+            "cargo", "+1.95.0", "run", "--manifest-path", str(fixture / "Cargo.toml"),
+            "--locked", "--example", "creation_catalogs", "--",
+            str(Path(environment["NARA_SOURCE_TOOL_V1_DIR"]) / "enemy-stats.catalog.json"),
+            str(catalogs),
+        ], cwd=root, env=environment, check=True,
+    )
+    for name in ["creation_v2", "creation_wrong_predecessor", "creation_unsupported",
+                 "creation_invalid"]:
+        metadata = catalogs / ("creation_v2" if name == "creation_invalid" else name)
+        destination = artifacts.parent / "tools" / name
+        build(tool_project, destination,
+              ToolRevision="invalid" if name == "creation_invalid" else "2",
+              ToolCatalog=metadata / "enemy-stats.catalog.json")
+        published = destination / "bin" / "EnemyStatsTool" / "debug"
+        shutil.copyfile(metadata / "enemy-stats.predecessor.catalog.json",
+                        published / "enemy-stats.predecessor.catalog.json")
+        environment[f"NARA_SOURCE_TOOL_{name.upper()}_DIR"] = str(published)
     for name, revision, mode in [
         ("v1", "1", "sync"), ("v2", "2", "sync"),
         ("async", "1", "async"), ("sta", "1", "sta"),
@@ -120,7 +140,8 @@ def main():
             [
                 "cargo", "+1.95.0", "nextest", "run", "-p", "nara-editor", "--lib", "--locked",
                 "--run-ignored", "only", "-E",
-                "test(csharp_source_tool_application_preserves_review_and_exact_commit_result)",
+                "test(csharp_source_tool_application_preserves_review_and_exact_commit_result) | "
+                "test(csharp_source_tool_creation_metadata_evolution_preserves_existing_data_and_history)",
                 "--test-threads=1", "--status-level", "fail", "--final-status-level", "fail",
             ],
             cwd=root, env=environment, check=True,

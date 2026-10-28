@@ -18,6 +18,7 @@ pub(super) struct Manifest {
     pub owner: String,
     pub component: String,
     pub catalog: String,
+    pub catalog_predecessor: Option<String>,
     pub entry: String,
     pub requires: Vec<Requirement>,
     pub files: Vec<Member>,
@@ -54,6 +55,8 @@ struct ManifestDto {
     owner: String,
     component: String,
     catalog: String,
+    #[serde(default)]
+    catalog_predecessor: Option<String>,
     entry: String,
     requires: Vec<RequirementDto>,
     files: Vec<MemberDto>,
@@ -144,6 +147,17 @@ impl Manifest {
         if input.catalog == input.entry {
             return Err("catalog and entry must be distinct");
         }
+        if let Some(predecessor) = &input.catalog_predecessor {
+            validate_path(predecessor)?;
+            if predecessor == &input.catalog
+                || predecessor == &input.entry
+                || predecessor.eq_ignore_ascii_case(MANIFEST_NAME)
+            {
+                return Err(
+                    "catalog predecessor must be distinct from catalog, entry and manifest",
+                );
+            }
+        }
 
         let mut packages = BTreeSet::new();
         let mut requires = Vec::with_capacity(input.requires.len());
@@ -202,13 +216,16 @@ impl Manifest {
                 }
             }
         }
-        for path in [&input.catalog, &input.entry] {
+        for path in [&input.catalog, &input.entry]
+            .into_iter()
+            .chain(input.catalog_predecessor.iter())
+        {
             if !files.iter().any(|member| {
                 member.path == *path
                     && member.kind == MemberKind::Tool
                     && member.digest.length() != 0
             }) {
-                return Err("catalog and entry must exactly name nonempty tool members");
+                return Err("catalogs and entry must exactly name nonempty tool members");
             }
         }
 
@@ -219,6 +236,7 @@ impl Manifest {
             owner: input.owner,
             component: input.component,
             catalog: input.catalog,
+            catalog_predecessor: input.catalog_predecessor,
             entry: input.entry,
             requires,
             files,
@@ -317,6 +335,129 @@ mod tests {
 
     fn decode(value: &Value) -> Result<Manifest, &'static str> {
         Manifest::decode(&serde_json::to_vec(value).unwrap())
+    }
+
+    fn fixture_with_predecessor() -> Value {
+        let mut value = fixture();
+        value["catalog_predecessor"] = json!("catalog-predecessor.ron");
+        value["files"]
+            .as_array_mut()
+            .unwrap()
+            .push(member("catalog-predecessor.ron", 1, "tool"));
+        value
+    }
+
+    #[test]
+    fn predecessor_is_one_semantic_optional_manifest_declaration() {
+        let mut value = fixture();
+        assert!(decode(&value).unwrap().catalog_predecessor.is_none());
+        value["catalog_predecessor"] = Value::Null;
+        assert!(decode(&value).unwrap().catalog_predecessor.is_none());
+
+        let admitted = decode(&fixture_with_predecessor()).unwrap();
+        assert_eq!(
+            admitted.catalog_predecessor.as_deref(),
+            Some("catalog-predecessor.ron")
+        );
+        assert_eq!(admitted.files.len(), 3);
+        assert_eq!(admitted.files[2].kind, MemberKind::Tool);
+    }
+
+    #[test]
+    fn predecessor_requires_a_distinct_exact_nonempty_tool_member() {
+        for path in [
+            "",
+            "missing.ron",
+            "Catalog-predecessor.ron",
+            "catalog.ron",
+            "bin/tool.exe",
+            MANIFEST_NAME,
+            "NARA-TOOL.JSON",
+            "../catalog-predecessor.ron",
+        ] {
+            let mut value = fixture_with_predecessor();
+            value["catalog_predecessor"] = json!(path);
+            assert!(decode(&value).is_err(), "{path:?}");
+        }
+        for (field, invalid) in [("kind", json!("content")), ("length", json!(0))] {
+            let mut value = fixture_with_predecessor();
+            value["files"][2][field] = invalid;
+            assert!(decode(&value).is_err(), "{field}");
+        }
+        for invalid in [json!([]), json!({}), json!(false), json!(1)] {
+            let mut value = fixture_with_predecessor();
+            value["catalog_predecessor"] = invalid;
+            assert!(decode(&value).is_err());
+        }
+    }
+
+    #[test]
+    fn predecessor_rejects_duplicate_fields_and_alternate_field_names() {
+        for predecessor in [json!("catalog-predecessor.ron"), Value::Null] {
+            let mut value = fixture_with_predecessor();
+            value["catalog_predecessor"] = predecessor.clone();
+            let encoded = serde_json::to_string(&value).unwrap();
+            let field = format!("\"catalog_predecessor\":{predecessor}");
+            let duplicated = encoded.replacen(&field, &format!("{field},{field}"), 1);
+            assert_ne!(duplicated, encoded);
+            assert!(Manifest::decode(duplicated.as_bytes()).is_err());
+        }
+        let mut value = fixture_with_predecessor();
+        let predecessor = value.as_object_mut().unwrap().remove("catalog_predecessor");
+        value["predecessor_catalog"] = predecessor.unwrap();
+        assert!(decode(&value).is_err());
+    }
+
+    #[test]
+    fn predecessor_uses_the_existing_member_namespace() {
+        for path in [
+            "catalog-predecessor.ron",
+            "CATALOG-PREDECESSOR.RON",
+            "catalog-predecessor.ron/child",
+        ] {
+            let mut value = fixture_with_predecessor();
+            value["files"]
+                .as_array_mut()
+                .unwrap()
+                .push(member(path, 1, "tool"));
+            assert!(decode(&value).is_err(), "{path}");
+        }
+    }
+
+    #[test]
+    fn predecessor_shares_file_count_and_payload_byte_limits() {
+        let mut value = fixture_with_predecessor();
+        value["files"][2]["length"] = json!(MAX_MEMBER_BYTES + 1);
+        assert_eq!(decode(&value).unwrap_err(), "member exceeds byte limit");
+
+        value = fixture_with_predecessor();
+        for index in 3..MAX_FILES {
+            value["files"].as_array_mut().unwrap().push(member(
+                &format!("aux-{index}"),
+                0,
+                "content",
+            ));
+        }
+        assert_eq!(decode(&value).unwrap().files.len(), MAX_FILES);
+        value["files"]
+            .as_array_mut()
+            .unwrap()
+            .push(member("extra", 0, "content"));
+        assert_eq!(decode(&value).unwrap_err(), "invalid manifest file count");
+
+        value = fixture_with_predecessor();
+        value["files"][0]["length"] = json!(MAX_MEMBER_BYTES);
+        value["files"][1]["length"] = json!(MAX_MEMBER_BYTES);
+        value["files"].as_array_mut().unwrap().extend([
+            member("data/a", MAX_MEMBER_BYTES, "content"),
+            member("data/b", MAX_MEMBER_BYTES - 1, "content"),
+        ]);
+        assert!(decode(&value).is_ok());
+        value["files"][2]["length"] = json!(2);
+        assert_eq!(
+            decode(&value).unwrap_err(),
+            "members exceed total byte limit"
+        );
     }
 
     #[test]
