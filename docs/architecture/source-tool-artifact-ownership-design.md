@@ -1,7 +1,8 @@
 # Source-Tool Artifact And Project-Source Ownership
 
-**Date:** 2026-10-28. **Status:** Owning ADRs amended; managed artifact publication/inventory and
-project-owned text import implemented. Reviewed reclamation remains in progress.
+**Date:** 2026-10-28. **Status:** Owning ADRs amended; managed artifact publication/inventory,
+project-owned text import and reviewed registered-artifact reclamation implemented.
+Incomplete-publication recovery and native template import remain in progress.
 **Research baseline:** `874bfc0`.
 
 The [implementation plan](../plans/2026-10-28-managed-source-tool-artifacts-plan.md) continues
@@ -64,7 +65,7 @@ the deleting handle; disposition uses that same handle. The adapter refuses unsu
 platforms instead of emulating exact removal with a path check followed by an unrelated delete.
 
 The source-tool owner supplies the domain permission: the selected file is a disposable artifact,
-its installation is absent from the current graph, its actual users have returned, and the
+its installation ID and actual directory are absent from the current graph, its actual users have returned, and the
 original explicit review remains valid. The generic filesystem primitive must not absorb
 installation graphs, history, digests or adoption rules.
 
@@ -130,8 +131,19 @@ The retained-source alias and physical-pending corrections precede this replacem
 Managed publication/inventory and explicit text import replace the mixed installation/project
 content model. The superseded sticky installation-content interception, classification debt in
 ordinary Save/Reopen/Close, old management/adoption APIs and old record reader are removed.
-There is no parallel compatibility model. The linked implementation evidence qualifies that
-scope separately from future reviewed intent, unlink and partial recovery.
+There is no parallel compatibility model. The predecessor implementation evidence qualifies the
+store/import replacement. The registered-artifact owner now publishes reviewed intent, performs
+real per-member unlink and retains partial recovery facts through Session/Application Close.
+Its qualification is recorded separately; the predecessor evidence does not establish it.
+
+An incomplete installation still retains its original plan, published-directory facts, created
+readers and cleanup-only handles outside the ready inventory. It cannot be fabricated as a ready
+installation or silently disposed of. The next owning replacement must admit actual partial
+publication facts, distinguish real receipt temporary paths from the ready receipt, hand over
+cleanup-only live objects before unlink review, and preserve source alias protection on refusal.
+It should reuse the existing publisher/review/reclaimer and retain one canonical format-1 reader.
+The [implementation continuity](../knowledge/engineering/progress/2026-10/2026-10-28T182559Z-reviewed-real-artifact-unlink-integration-and-incomplete-publication-follow-up-1de5c56631a146318b4b1098eb0fdfd8.md)
+records concrete source gaps and the proposed next unit; it is not qualification of that successor.
 
 Canonical formats remain version 1 because the product has not shipped. No old reader,
 conversion helper, compatibility alias or migration guide is required. Existing historical

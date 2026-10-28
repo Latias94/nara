@@ -145,8 +145,11 @@ installed/project content and selects a managed artifact subtree with explicit p
 template import. Its [replacement plan](../plans/2026-10-28-managed-source-tool-artifacts-plan.md)
 retains actual exact-object unlink and complete reviewed reclamation. Owning ADRs adopt the
 replacement; managed publication/inventory and explicit project-owned text import remove the
-mixed-content protection mechanism. Native-format template remapping, reviewed reclamation and
-partial recovery remain open. The replacement evidence owns actual results and platform scope.
+mixed-content protection mechanism. The
+[registered-artifact reclamation successor](../knowledge/engineering/verification/2026-10/2026-10-28T185322Z-reviewed-registered-artifact-unlink-and-truthful-partial-recovery-qualification-4c85687a35ef4b54b24b3fc98b6e5083.md)
+adds reviewed intent, real per-member unlink, partial/result-publication recovery and exact
+Session/Application Close evidence. Incomplete publication recovery and native-format template
+remapping remain open. Each evidence record owns its actual results and platform scope.
 
 The [per-document persistence-custody design](editor-document-persistence-custody-design.md)
 specifies R5c's concrete replacement for the integrated Host's per-kind file lanes. It separates

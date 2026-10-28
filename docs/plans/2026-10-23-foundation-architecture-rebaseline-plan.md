@@ -204,8 +204,11 @@ template import. It retains real generic unlink and orders retained-source/physi
 corrections before store admission, import, reviewed removal intent and actual partial recovery.
 Its [store/text-import implementation](../knowledge/engineering/verification/2026-10/2026-10-28T163225Z-managed-source-tool-artifact-store-and-project-owned-text-template-replacement-7c31339a78064eb8bc385a9bd82b372a.md)
 removes mixed-content protection and optional-ledger persistence gates while qualifying project
-copies through ordinary source history and persistence. Reviewed intent, actual unlink and
-partial recovery remain open; this is not a complete R1b claim.
+copies through ordinary source history and persistence. The
+[registered-artifact reclamation successor](../knowledge/engineering/verification/2026-10/2026-10-28T185322Z-reviewed-registered-artifact-unlink-and-truthful-partial-recovery-qualification-4c85687a35ef4b54b24b3fc98b6e5083.md)
+adds reviewed intent, actual unlink, partial recovery and retained result-publication debt through
+physical Close. Incomplete publication recovery and native template identity/remapping remain
+open; this is not a complete R1b claim.
 
 Acceptance: panel/session parity, exact result, one Undo, Save/Reopen, rejected/stale proposal,
 delayed completion after newer requests, multiple observers and bounded structured diagnostic

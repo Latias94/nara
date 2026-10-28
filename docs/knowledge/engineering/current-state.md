@@ -3,7 +3,7 @@ type: "Current State"
 title: "Current Engineering State"
 description: "Derived summary of immutable engineering-memory shards."
 tags: ["engineering-memory", "derived"]
-source_fingerprint: "34cd3c91a12cb2651d5b78121c90839c2928f163b0d083ebcb66bbf918eebd59"
+source_fingerprint: "93792116df1ab63d5541391d79d7ba3789d3b3618e833d045b43392188d142b4"
 ---
 
 # Current State
@@ -12,8 +12,8 @@ source_fingerprint: "34cd3c91a12cb2651d5b78121c90839c2928f163b0d083ebcb66bbf918e
 
 This file is derived from immutable shards. Record new facts in shards, then render during integration.
 
-- Source fingerprint: `34cd3c91a12cb2651d5b78121c90839c2928f163b0d083ebcb66bbf918eebd59`
-- Immutable records: 1008
+- Source fingerprint: `93792116df1ab63d5541391d79d7ba3789d3b3618e833d045b43392188d142b4`
+- Immutable records: 1010
 - Active lane heads: 1
 
 # Active Registrations
@@ -69,6 +69,8 @@ This file is derived from immutable shards. Record new facts in shards, then ren
 
 # Recent Evidence
 
+- **Verification Evidence**: [Reviewed registered artifact unlink and truthful partial recovery qualification](verification/2026-10/2026-10-28T185322Z-reviewed-registered-artifact-unlink-and-truthful-partial-recovery-qualification-4c85687a35ef4b54b24b3fc98b6e5083.md) - Qualifies actual ready-artifact intent, per-member unlink, cancellation, result publication debt and exact Session/Application retention; incomplete publications remain open.
+- **Work Progress**: [Reviewed real artifact unlink integration and incomplete publication follow-up](progress/2026-10/2026-10-28T182559Z-reviewed-real-artifact-unlink-integration-and-incomplete-publication-follow-up-1de5c56631a146318b4b1098eb0fdfd8.md) - Records real ready-artifact disposal, namespace and cleanup corrections, focused verification and the concrete incomplete-publication owner successor.
 - **Verification Evidence**: [Managed source-tool artifact store and project-owned text template replacement](verification/2026-10/2026-10-28T163225Z-managed-source-tool-artifact-store-and-project-owned-text-template-replacement-7c31339a78064eb8bc385a9bd82b372a.md) - Qualifies fixed managed artifact publication/inventory and explicit project-owned text import while removing mixed-content source protection and retaining future real reclamation.
 - **Verification Evidence**: [Retained source objects and truthful source-tool physical cleanup qualification](verification/2026-10/2026-10-28T150643Z-retained-source-objects-and-truthful-source-tool-physical-cleanup-qualification-13bc9f4599ef4e839fd608dcfd7f4aed.md) - Qualifies retained document and metadata aliases, superseded cleanup observation, and terminal process cleanup failure without claiming artifact reclamation.
 - **Verification Evidence**: [Accepted document protection and repairable installed-content close qualification](verification/2026-10/2026-10-28T132217Z-accepted-document-protection-and-repairable-installed-content-close-qualification-8a03235372c74fcbb4a02f7ee23eaca2.md) - Qualifies sticky accepted-edit protection, original snapshot persistence, failure repair and physical Close through actual Session, Application and managed/native consumers.
@@ -79,8 +81,6 @@ This file is derived from immutable shards. Record new facts in shards, then ren
 - **Verification Evidence**: [Schema adoption failure provenance and truthful cancellation](verification/2026-10/2026-10-28T085355Z-schema-adoption-failure-provenance-and-truthful-cancellation-b8fcde768b2e4e36a93355796a5f6224.md) - Retains source/history owning reports and actual worker failures through Session and Application without inventing failures for pure cancellation.
 - **Verification Evidence**: [Whole Session installed schema owner adoption and explicit publication recovery](verification/2026-10/2026-10-28T080917Z-whole-session-installed-schema-owner-adoption-and-explicit-publication-recovery-5a02037cad1b4af49cbec2b24306524a.md) - Records code-free installed metadata preparation, current dirty sources, actual publication and no-write reconciliation with physical custody and native consumer qualification.
 - **Verification Evidence**: [Owned source history and whole-workspace schema preparation](verification/2026-10/2026-10-28T061611Z-owned-source-history-and-whole-workspace-schema-preparation-a4021ad50ca24035b6530ae233b9dff3.md) - Records bounded frozen input handoff and exact original publication checks without claiming complete Session adoption.
-- **Verification Evidence**: [Same-basis saved project receipt before whole-session schema adoption](verification/2026-10/2026-10-28T054209Z-same-basis-saved-project-receipt-before-whole-session-schema-adoption-a796d5f92d5e4fb4b1ae7cbdca4d2741.md) - Qualifies actual saved startup and selected dirty Prefab capture joined to one published owner, with cumulative revalidation and a fresh source index.
-- **Verification Evidence**: [Whole-workspace schema preparation and shared immutable published sources](verification/2026-10/2026-10-28T050925Z-whole-workspace-schema-preparation-and-shared-immutable-published-sources-dc568b9954884122a24a9f8a25491451.md) - Qualifies exact whole-set source classification and immutable source sharing without claiming project or Session adoption.
 
 # Integration Notes
 

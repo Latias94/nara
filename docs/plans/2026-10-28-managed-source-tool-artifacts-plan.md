@@ -25,8 +25,10 @@ weakening that filesystem guarantee or removing deletion from the product.
 The [replacement evidence](../knowledge/engineering/verification/2026-10/2026-10-28T163225Z-managed-source-tool-artifact-store-and-project-owned-text-template-replacement-7c31339a78064eb8bc385a9bd82b372a.md)
 records implemented observations, fixed-store publication/inventory and project-owned text import.
 The mixed-content record, APIs, source-touch interception and persistence gates are removed.
-Native template formats, reviewed intent/unlink and partial recovery remain to be completed;
-steps 4-6 and the full lifecycle/Goal are not closed by text import qualification.
+Registered-artifact review, intent, actual unlink and partial-result recovery now have their own
+[implementation evidence](../knowledge/engineering/verification/2026-10/2026-10-28T185322Z-reviewed-registered-artifact-unlink-and-truthful-partial-recovery-qualification-4c85687a35ef4b54b24b3fc98b6e5083.md).
+Native template formats and incomplete-publication recovery remain open. Steps 4-6 and the full lifecycle
+are not closed by text import or a ready-artifact success path.
 
 ### 1. Complete Existing Ownership Observations
 
@@ -96,6 +98,19 @@ Cancellation stops new member work; later failure never rewrites earlier receipt
 Do not use recursive directory deletion or construct deletion authority from serialized IDs.
 
 ### 6. Qualify Recovery And Remove Superseded Mechanisms
+
+The current inventory admits ready publication only. Complete the remaining incomplete-publication
+owner through the same review/publisher/removal path: retain actual project/destination and published
+directory facts, actual created-member paths and cleanup-only custody. Do not fabricate a ready
+receipt, assume every declared member was created, or rename a receipt temporary fact into the ready
+receipt. Cleanup-only reader handover must compare the continuously held live object before closing
+duplicate writers and creation-time directory handles. Refusal retains the original cleanup/error;
+`TemporaryFileCleanup::discard` is not a successful unlink receipt. The next canonical inventory
+should express Ready/Incomplete artifact facts directly, retaining version 1 and one reader. Source
+alias protection must include cleanup-only original objects, and graph absence must exclude the
+same directory even under another ready ID. The
+[continuity record](../knowledge/engineering/progress/2026-10/2026-10-28T182559Z-reviewed-real-artifact-unlink-integration-and-incomplete-publication-follow-up-1de5c56631a146318b4b1098eb0fdfd8.md)
+maps the concrete source gaps and meaningful failure controls for that next unit.
 
 Fresh Open reads recovery without execution or automatic deletion. A new review is required
 after interruption. Test partial unlink and failed/uncertain result publication, equal-byte

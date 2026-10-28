@@ -11,7 +11,8 @@ publication and explicitly approved captured-image execution have separate concr
 The project-local installed graph and desired-selection workflow follow the
 [local lifecycle plan](../plans/2026-10-28-local-source-tool-release-plan.md) and
 [installed-graph successor](../plans/2026-10-28-installed-source-tool-graph-plan.md).
-Safe file reclamation and a public language SDK remain separate work.
+Reviewed file reclamation uses the explicit operation below; a public language SDK remains
+separate work.
 Raw development command paths are trusted local configuration, not immutable installed release
 identity.
 
@@ -85,7 +86,8 @@ After closing an artifact owner, reopen its directory through a strict capabilit
 verifies the selected receipt and recaptures the full declared release; unknown, missing or changed
 files reject. This returns data observations, not recovered creation provenance or deletion rights.
 Unready custody has no automatic/public reclamation operation; dropping it closes handles and
-preserves files for reconciliation. Explicitly reviewed artifact reclamation remains pending.
+preserves files for reconciliation. The review operation below currently requires a registered
+artifact inventory entry and does not admit an incomplete installation.
 
 This is an artifact preparation/publication API, not the complete Package Manager. It does not
 select an installed graph, satisfy declared requirements, adopt project Schema, approve a launcher,
@@ -167,11 +169,54 @@ the copy's origin to overwrite or delete it. Another import uses another absent 
 This finite text-copy workflow does not qualify native Scene/Prefab/asset template import.
 Those formats require their owners to allocate destination identities and sidecars and remap
 references before support can be claimed. Generic `DirectoryCapability::unlink_file` remains
-available as the exact-object primitive. Full explicitly reviewed artifact reclamation, mixed
-result recovery and Package Manager controls remain pending under the
-[managed artifact plan](../plans/2026-10-28-managed-source-tool-artifacts-plan.md). Inventory
+available as the exact-object primitive. The operation below reclaims registered artifacts and
+preserves mixed results. Incomplete-installation recovery and Package Manager controls remain under
+the [managed artifact plan](../plans/2026-10-28-managed-source-tool-artifacts-plan.md). Inventory
 observations and graph withdrawal alone grant no deletion authority; default-stream digest
 equality does not cover alternate streams or authorize whole-file disposal.
+
+## Review And Reclaim Withdrawn Artifacts
+
+Withdraw the exact installation through the installed graph first, including disabled required
+dependents. Wait for actual process, pipe, selection/import/capture work and Host cleanup to
+return. `Withdrawn`, task cancellation and phase Idle alone do not authorize deletion.
+
+Observe both `source_tool_artifact_view().basis` and `source_tool_selection_view().basis`, then
+call `prepare_source_tool_reclamation(&artifact_basis, &selection_basis, project_root,
+&installation_id)`. Preparation performs finite reads and retains the exact candidate objects;
+it neither writes an intent nor schedules deletion. Inspect `record()` for the exact selected
+members and `creation_custody()` for continuously held creation facts. After fresh Open that
+historical custody is absent; explicit confirmation still requires the new reviewed live objects.
+Changed artifacts can be explicitly disposed of as whole objects, including their alternate
+streams. This is not evidence that the bytes were unchanged. Unknown siblings are unselected.
+
+`confirm_source_tool_reclamation(candidate)` consumes the original review. Observe its attempt
+through `source_tool_reclamation_view()` while driving ordinary frames. The owner publishes
+Intent through the existing artifact file lane and waits for actual return/cleanup before the
+first `unlink_file`, revalidating the original selection and live-object observations after that
+asynchronous wait. It retains per-member Pending, Removed, Missing and Failed states and
+publishes Results. The first member failure stops subsequent removals, leaving them Pending.
+Imported project copies, source history and other installations stay outside that authority.
+Empty directories and unknown files remain; this is not recursive directory
+deletion or a promise of immediate storage release.
+
+`cancel_source_tool_reclamation(&attempt)` stops subsequent removals and retains actual earlier
+receipts. If result publication fails, `record_publication_pending` and the exact mixed record
+remain observable independently of `physical_work_pending`. Explicitly call
+`reconcile_source_tool_artifacts(&basis)`, inspect its result, then
+`retry_source_tool_reclamation_record(&attempt, &new_basis)` to publish retained facts without
+deleting another member. New persistence/preparation IO returns Busy during actual reclamation;
+after terminal record failure, ordinary document Save/Reopen retains its existing owner.
+Whole Close waits for actual removal return and a result-publication attempt before shutting its
+publisher. If that record still cannot publish, physical Close completes with a failure receipt
+whose `unpublished_reclamation()` preserves the exact in-memory results and error. Application's
+`failed_session_close_receipts()` retains every failed Session by workspace entry generation;
+`failed_session_close_receipt()` supplies the first failure for the native exit summary. This is
+a returned publication failure, not endless physical pending.
+
+Fresh Open reads the format-1 `reclamations` inventory array without restoring a task, execution
+approval or deletion authority. An old Pending member or currently missing path is not an invented
+successful unlink. Prepare and explicitly confirm a new review to continue disposal.
 
 ## Review And Adopt A Missing Schema Owner
 
@@ -277,7 +322,7 @@ ambient process authority; this adapter is not a sandbox.
 Approval and successful Session activation are independent of durable desired selection. Fresh
 Open does not start a tool because its receipt exists. Schema metadata must already be admitted
 in the project; missing-owner adoption uses the operation above. Existing-owner evolution and
-reviewed artifact reclamation remain in the lifecycle plan.
+incomplete-installation recovery remain in the lifecycle plan.
 
 ## Select A Project-Local Installed Tool
 
@@ -384,8 +429,8 @@ execution is fenced during reconciliation; Disable, source editing and Close rem
 
 Withdrawal removes no files and revokes no admitted Schema or source/history. Broken installations
 can be withdrawn without passing complete artifact inspection. Artifact inventory entries and
-imported project copies remain. Full explicitly reviewed file reclamation is a separate pending
-lifecycle operation.
+imported project copies remain. Explicitly prepare and confirm the separate reclamation operation
+above to remove registered artifact members.
 
 ## Configure A Trusted Development Command And Probe
 

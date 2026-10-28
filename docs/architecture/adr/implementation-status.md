@@ -206,7 +206,17 @@ It removes the old mixed-content record/reader, adoption/touch interception and 
 Save/Reopen/Close gates. Exact graph requirements, source history, actual publication and physical
 return remain with their existing owners. The linked evidence owns independent/public/native
 results and the reviewed alias corrections. Generic unlink remains unchanged; native-format
-templates, reviewed intent/unlink/partial recovery and the full local lifecycle remain open.
+templates, reviewed intent/unlink/partial recovery and the full local lifecycle are outside that
+predecessor's qualification.
+The [reviewed registered-artifact successor](../../knowledge/engineering/verification/2026-10/2026-10-28T185322Z-reviewed-registered-artifact-unlink-and-truthful-partial-recovery-qualification-4c85687a35ef4b54b24b3fc98b6e5083.md)
+implements original-basis disposal review, actual graph/source/user checks, pre-deletion intent,
+real per-member unlink, first-failure/cancellation preservation and result-publication recovery.
+Exact directory namespace custody permits child publication and deletion; completed installation
+releases creation-time DELETE access through a live-object handover. Sticky Tasks cleanup failure
+cannot become deletion permission. Close retains unpublished mixed results, and Application keeps
+every failed Session receipt. Final affected libraries pass 1,316 with 38 explicit skips. The
+linked evidence owns actual independent/native results and limits. Incomplete installation
+publication recovery, native templates, existing-owner evolution and the full lifecycle remain open.
 The [documentation verification](../../knowledge/engineering/verification/2026-10/2026-10-23T115037Z-foundation-architecture-rebaseline-documentation-checks-and-adversarial-closure-33c8c794baf142ee964468a01248af17.md)
 records inventory/link/status checks and the scoped adversarial correction/recheck. No Cargo,
 performance or native trajectory was re-executed for this design-only unit.

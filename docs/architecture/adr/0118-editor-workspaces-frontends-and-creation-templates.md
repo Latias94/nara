@@ -595,6 +595,42 @@ actual member result and any later record-publication debt; failure is not rollb
 `DirectoryCapability::unlink_file` remains the exact-object primitive. It does not own this
 domain policy or grant disposal rights over imported project copies and unknown members.
 
+The finite inventory also retains one bounded reclamation record per installation: a fresh
+random correlation ID, installation ID, Intent/Results phase and at most 66 exact member paths
+with Pending/Removed/Missing/Failed states. These serialized fields never retain native identity
+or removal permission. A new explicit review can replace the previous record for that same
+installation; ordinary registration/observation preserves it. Format 1 requires this record
+array, with no older reader for the unreleased predecessor shape.
+
+An admitted review retains the actual project/directory/member objects and parent namespace
+custody through removal. Exact directory namespace leases prevent reviewed parents from being
+renamed; they do not make all data streams immutable. Completed installation publication hands its created
+directory over to a strictly opened read/traverse capability while the original object is still
+held and compared. It releases creation-time DELETE access, which would otherwise conflict with
+its own later namespace lease. Failed handover retains the original object and an unverified
+publication outcome. Confirmation rechecks the original inventory and selection bases, exact
+graph absence by ID, canonical directory and actual directory object, actual source ownership and
+physical return of tool/capture/import/publication work. A failed executor cleanup remains a refusal
+even when no task is pending. These checks use existing owners' source observations, not another
+global source registry. Relevant graph/enable/Open/import/Play work stays fenced until settlement.
+
+The existing artifact publisher accepts the exact intent before the removal task starts. The
+owner waits for its actual return and cleanup, then revalidates the original selection binding,
+graph absence, current source owners and reviewed objects before admitting removal. Only a real
+exact-object unlink receipt produces Removed; absence produces Missing. Every result is retained
+before subsequent members begin. Cancellation or the first member failure stops subsequent
+removals without hiding earlier success. Result publication failure retains the mixed record and
+publication debt. Explicit artifact reconciliation followed by retry republishes only those facts,
+never resumes unlink. While physical removal is active,
+new persistence and source-preparation IO refuses with Busy; result acknowledgment and cancellation
+remain available. Terminal record failure does not gate ordinary document Save/Reopen.
+Whole Close stops subsequent deletion and waits for actual return and one result-publication
+attempt before shutting Tasks/file admission. If its terminal record debt remains, Close can
+complete physically with the exact unpublished record/error in its failure receipt. The existing
+Application retains every failed Session receipt by its original workspace entry generation after
+Session release; repeated polling retains one receipt per Session. A returned failure is not perpetual
+physical pending, and fresh Open still interprets only the durable intent/results actually read.
+
 Fresh Open only observes inventories/recovery: no execution, approval restoration or continued
 deletion. Pending and missing are not invented successful-removal receipts. Resumption requires
 another explicit review. Unsupported Windows parent-directory synchronization prevents a
