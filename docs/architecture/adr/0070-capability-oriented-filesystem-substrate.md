@@ -219,6 +219,12 @@ the reviewed caller before it publishes intent, independently of generic unlink 
 These sharing distinctions follow Microsoft's [CreateFile contract](https://learn.microsoft.com/en-us/windows/win32/api/fileapi/nf-fileapi-createfilew);
 actual caller qualification remains separate from documentation of the platform mechanism.
 
+An explicit readonly `TemporaryFileCleanup::same_object` query compares continuously live handles
+for owner handover and source-alias refusal, including independent Host sessions. It does not read
+contents, perform cleanup or confer deletion authority. A caller may retain a verified reader before
+closing duplicate cleanup custody. Failed or unproven comparison preserves the original owner;
+`discard()` remains a separate temporary-cleanup operation and is not a `FileUnlinkReceipt`.
+
 ### Platform evidence matrix
 
 - **Windows reference contract:** Windows 10 version 1809 or later, or the corresponding Windows

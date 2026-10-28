@@ -6,9 +6,9 @@ use std::{
 };
 
 use crate::{
-    ConflictProtection, ContentDigest, DurabilityProgress, FileIdentity, FileSyncTier, FsError,
-    ParentAuthorizationTier, PublicationAtomicity, PublicationIdentityEvidence,
-    PublicationSourceBinding, RelativeComponent, StageStatus,
+    ConflictProtection, ContentDigest, DurabilityProgress, FileCapability, FileIdentity, FileKind,
+    FileSyncTier, FsError, FsOperation, ParentAuthorizationTier, PublicationAtomicity,
+    PublicationIdentityEvidence, PublicationSourceBinding, RelativeComponent, StageStatus,
     capability::{DirectoryInner, validate_file_facts},
     platform,
 };
@@ -119,6 +119,38 @@ impl TemporaryFileCleanup {
     #[must_use]
     pub const fn name(&self) -> &RelativeComponent {
         &self.name
+    }
+
+    /// Compares this continuously held candidate with another live file, across Host sessions.
+    ///
+    /// Fresh observations must prove regular, non-reparse objects and satisfy each owner's strict
+    /// single-link policy. An initially unknown identity is rechecked without updating it;
+    /// `Ok(false)` means distinct proven objects, while an error never establishes absence.
+    /// This neither reopens a name, performs cleanup, grants read/write/publication/deletion
+    /// authority, nor proves immutable content. Retain `other` before dropping this cleanup owner
+    /// to preserve object continuity during handover.
+    pub fn same_object(&self, other: &FileCapability) -> Result<bool, FsError> {
+        let left = platform::facts(&self.file)?;
+        validate_file_facts(&self.parent, left)?;
+        let right = platform::facts(&other.file)?;
+        if right.kind != FileKind::Regular {
+            return Err(FsError::NotRegularFile);
+        }
+        if let Some(tag) = right.reparse_tag {
+            return Err(FsError::ReparsePoint { tag });
+        }
+        if other.trust().is_strict() && right.link_count != 1 {
+            return Err(FsError::MultipleLinks {
+                links: right.link_count,
+            });
+        }
+        if !left.identity_proven || !right.identity_proven {
+            return Err(FsError::Unproven {
+                operation: FsOperation::InspectHandle,
+                proof: "comparing live files requires proven native object identity",
+            });
+        }
+        Ok(left.identity == right.identity)
     }
 
     /// Retries cleanup of this exact opened object and returns ownership again on failure.
@@ -396,3 +428,6 @@ impl ReplaceReceipt {
         matches!(self.publication, PublicationAtomicity::AtomicNameSwitch)
     }
 }
+
+#[cfg(all(test, any(windows, target_os = "linux")))]
+mod tests;
