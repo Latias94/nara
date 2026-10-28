@@ -199,9 +199,14 @@ keeping current namespace checks. Existing HostCustody supplies read-only cleanu
 for superseded Hosts; source-tool pending and sticky executor cleanup failure stay distinct.
 Focused owner tests, the independent 30-test consumer, actual managed/Application and selected
 Windows/DX12 workflows pass within the linked evidence. Generic unlink is unchanged.
-The [artifact ownership design](../source-tool-artifact-ownership-design.md) selects the next
-managed-store/explicit-import replacement; that design and its plan do not implement a reclaimer
-or remove the current mixed-content protection mechanism.
+The [managed artifact and text-import replacement](../../knowledge/engineering/verification/2026-10/2026-10-28T163225Z-managed-source-tool-artifact-store-and-project-owned-text-template-replacement-7c31339a78064eb8bc385a9bd82b372a.md)
+implements the amended ADRs 0020/0035/0047/0070/0118: fixed private installation publication,
+finite artifact inventory, strict source isolation and explicit project-owned text import.
+It removes the old mixed-content record/reader, adoption/touch interception and optional-ledger
+Save/Reopen/Close gates. Exact graph requirements, source history, actual publication and physical
+return remain with their existing owners. The linked evidence owns independent/public/native
+results and the reviewed alias corrections. Generic unlink remains unchanged; native-format
+templates, reviewed intent/unlink/partial recovery and the full local lifecycle remain open.
 The [documentation verification](../../knowledge/engineering/verification/2026-10/2026-10-23T115037Z-foundation-architecture-rebaseline-documentation-checks-and-adversarial-closure-33c8c794baf142ee964468a01248af17.md)
 records inventory/link/status checks and the scoped adversarial correction/recheck. No Cargo,
 performance or native trajectory was re-executed for this design-only unit.

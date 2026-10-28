@@ -51,6 +51,9 @@ impl PreparedEditorSourceToolSelection {
         directory: &str,
         definition: EditorSourceToolDefinition,
     ) -> Result<Self, Error> {
+        if !artifact_store::validate_path(directory) {
+            return Err(Error::InvalidPath);
+        }
         let approved = definition
             .command
             .approved
@@ -599,7 +602,7 @@ impl EditorProjectSession {
             #[cfg(test)]
             gate,
         ));
-        self.initialize_source_tool_content();
+        self.initialize_source_tool_artifacts();
     }
 
     /// Observes desired disk selection separately from the actual active route; performs no IO.

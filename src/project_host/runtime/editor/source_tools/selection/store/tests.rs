@@ -4,7 +4,7 @@ fn entry(id: u8, package: &str, requirements: &[(u8, &str)]) -> Entry {
     Entry {
         installed: EditorSourceToolInstalledSelection {
             package: package.into(),
-            directory: format!("tools/install-{id}").into(),
+            directory: format!(".nara/source-tools/artifacts/install-{id}").into(),
             installation: [id; 32],
             receipt: ContentDigest::from_parts(32, [2; 32]),
             manifest: ContentDigest::from_parts(64, [3; 32]),
@@ -50,7 +50,7 @@ fn canonical_graph_records_roundtrip_with_enabled_disabled_and_absent_desired() 
         let mut graph = graph();
         graph.desired.as_mut().unwrap().enabled = enabled;
         let expected = format!(
-            "{{\"format_version\":1,\"installed\":[{{\"package\":\"test.stats\",\"directory\":\"tools/install-1\",\"installation\":{},\"receipt\":{{\"length\":32,\"hash\":{}}},\"manifest\":{{\"length\":64,\"hash\":{}}},\"requires\":[]}}],\"desired\":{{\"installation\":{},\"enabled\":{enabled}}}}}",
+            "{{\"format_version\":1,\"installed\":[{{\"package\":\"test.stats\",\"directory\":\".nara/source-tools/artifacts/install-1\",\"installation\":{},\"receipt\":{{\"length\":32,\"hash\":{}}},\"manifest\":{{\"length\":64,\"hash\":{}}},\"requires\":[]}}],\"desired\":{{\"installation\":{},\"enabled\":{enabled}}}}}",
             serde_json::to_string(&[1_u8; 32]).unwrap(),
             serde_json::to_string(&[2_u8; 32]).unwrap(),
             serde_json::to_string(&[3_u8; 32]).unwrap(),
@@ -109,7 +109,10 @@ fn rejects_malformed_missing_unknown_and_previous_single_member_records() {
         format!("{valid} {{}}"),
         valid.replace("\"format_version\":1,", ""),
         valid.replace("\"package\":\"test.stats\",", ""),
-        valid.replace("\"directory\":\"tools/install-1\",", ""),
+        valid.replace(
+            "\"directory\":\".nara/source-tools/artifacts/install-1\",",
+            "",
+        ),
         valid.replace(",\"requires\":[]", ""),
         valid.replace("\"enabled\":true", "\"enabled\":null"),
         valid.replace("\"enabled\":true", "\"enabled\":1"),
@@ -318,7 +321,7 @@ fn validates_fixed_width_byte_arrays_and_digest_lengths() {
 }
 
 #[test]
-fn validates_relative_paths_and_selection_parent_exclusion_before_publication() {
+fn validates_fixed_artifact_namespace_and_single_component_before_publication() {
     for directory in [
         "",
         "/tools",
@@ -342,6 +345,27 @@ fn validates_relative_paths_and_selection_parent_exclusion_before_publication() 
         ".NARA",
         ".nara/source-tools",
         ".NARA/Source-Tools",
+        ".nara/source-tools/artifacts",
+        ".nara/source-tools/artifacts/",
+        ".NARA/source-tools/artifacts/install-1",
+        ".nara/Source-Tools/artifacts/install-1",
+        ".nara/source-tools/Artifacts/install-1",
+        ".nara/source-tools/artifacts/.",
+        ".nara/source-tools/artifacts/..",
+        ".nara/source-tools/artifacts/./stats",
+        ".nara/source-tools/artifacts/../stats",
+        ".nara/source-tools/artifacts//stats",
+        ".nara/source-tools/artifacts/stats/",
+        ".nara/source-tools/artifacts/stats/child",
+        ".nara/source-tools/artifacts/stats\\child",
+        ".nara/source-tools/artifacts/stats.",
+        ".nara/source-tools/artifacts/stats ",
+        ".nara/source-tools/artifacts/NUL",
+        ".nara/source-tools/artifacts/con.txt",
+        ".nara/source-tools/artifacts/a:b",
+        ".nara/source-tools/artifacts/a?b",
+        ".nara/source-tools/artifacts/a\nb",
+        ".nara/source-tools/artifacts/工具",
     ] {
         let mut graph = graph();
         graph.desired = None;
@@ -357,13 +381,24 @@ fn validates_relative_paths_and_selection_parent_exclusion_before_publication() 
         );
     }
     for (directory, accepted) in [
-        (vec!["a"; 16].join("/"), true),
+        (vec!["a"; 16].join("/"), false),
         (vec!["a"; 17].join("/"), false),
-        (format!("{}/{}/c", "a".repeat(255), "b".repeat(254)), true),
+        (format!("{}/{}/c", "a".repeat(255), "b".repeat(254)), false),
         (format!("{}/{}/c", "a".repeat(255), "b".repeat(255)), false),
         ("a".repeat(256), false),
-        ("tools/工具".to_owned(), true),
-        (".nara/source-tools/install-1".to_owned(), true),
+        ("tools/工具".to_owned(), false),
+        (".nara/source-tools/install-1".to_owned(), false),
+        (".nara/source-tools/artifacts/a".to_owned(), true),
+        (".nara/source-tools/artifacts/install-1".to_owned(), true),
+        (".nara/source-tools/artifacts/INSTALL-1".to_owned(), true),
+        (
+            format!(".nara/source-tools/artifacts/{}", "a".repeat(255)),
+            true,
+        ),
+        (
+            format!(".nara/source-tools/artifacts/{}", "a".repeat(256)),
+            false,
+        ),
     ] {
         let mut graph = graph();
         graph.desired = None;
@@ -377,20 +412,53 @@ fn validates_relative_paths_and_selection_parent_exclusion_before_publication() 
 }
 
 #[test]
-fn decode_rejects_directory_aliases_overlaps_missing_targets_package_mismatches_and_cycles() {
-    let original = required_graph();
-    let valid = String::from_utf8(encode(&original).unwrap()).unwrap();
+fn rejects_old_arbitrary_installation_directories_in_graph_and_record() {
+    let valid = record();
     for directory in [
+        "install-1",
         "tools/install-1",
         "TOOLS/INSTALL-1",
         "tools/INSTALL-1/child",
         "TOOLS",
+        "packages/test.stats/install-1",
+        ".nara/source-tools/install-1",
+        ".nara/source-tools/artifacts-other/install-1",
+    ] {
+        let mut graph = graph();
+        graph.desired = None;
+        graph.entries[0].installed.directory = directory.into();
+        assert_eq!(encode(&graph), Err(Error::InvalidPath), "{directory}");
+
+        let mut dto: SelectionRecord = serde_json::from_str(&valid).unwrap();
+        dto.installed[0].directory = Cow::Borrowed(directory);
+        assert_eq!(
+            decode(&serde_json::to_vec(&dto).unwrap()),
+            Err(Error::InvalidPath),
+            "{directory}"
+        );
+    }
+}
+
+#[test]
+fn decode_rejects_directory_aliases_overlaps_missing_targets_package_mismatches_and_cycles() {
+    let original = required_graph();
+    let valid = String::from_utf8(encode(&original).unwrap()).unwrap();
+    for (directory, expected) in [
+        (".nara/source-tools/artifacts/install-1", Error::Graph),
+        (".nara/source-tools/artifacts/INSTALL-1", Error::Graph),
+        (".NARA/SOURCE-TOOLS/ARTIFACTS/INSTALL-1", Error::InvalidPath),
+        (
+            ".nara/source-tools/artifacts/INSTALL-1/child",
+            Error::InvalidPath,
+        ),
+        (".nara/source-tools/artifacts", Error::InvalidPath),
     ] {
         let mut dto: SelectionRecord = serde_json::from_str(&valid).unwrap();
         dto.installed[1].directory = Cow::Borrowed(directory);
         assert_eq!(
             decode(&serde_json::to_vec(&dto).unwrap()),
-            Err(Error::Graph)
+            Err(expected),
+            "{directory}"
         );
     }
     for case in 0..5 {
@@ -478,7 +546,7 @@ fn admits_exact_graph_bounds_and_rejects_excess_outgoing_and_aggregate_edges() {
             }),
             _ => dto.installed.push(InstalledRecord {
                 package: Cow::Borrowed("test.extra"),
-                directory: Cow::Borrowed("tools/extra"),
+                directory: Cow::Borrowed(".nara/source-tools/artifacts/extra"),
                 installation: [33; 32],
                 receipt: DigestRecord {
                     length: 32,
@@ -517,7 +585,7 @@ fn encode_rejects_a_valid_graph_whose_canonical_json_exceeds_the_publication_lim
             let mut entry = entry(id, &format!("p{id:02}{}", "a".repeat(125)), &[]);
             entry.installed.installation = [id + 223; 32];
             entry.installed.directory =
-                format!("{}/{}/{id:02}", "a".repeat(255), "b".repeat(253)).into();
+                format!(".nara/source-tools/artifacts/{id:02}{}", "a".repeat(253)).into();
             entry.installed.receipt = ContentDigest::from_parts(4096, [255; 32]);
             entry.installed.manifest = ContentDigest::from_parts(65_536, [255; 32]);
             entry
@@ -727,6 +795,12 @@ mod filesystem {
                     .replace("\"format_version\":1", "\"format_version\":2")
                     .into_bytes(),
                 Error::UnsupportedFormat,
+            ),
+            (
+                record()
+                    .replace(".nara/source-tools/artifacts/install-1", "tools/install-1")
+                    .into_bytes(),
+                Error::InvalidPath,
             ),
             (vec![b'!'; BYTE_LIMIT as usize + 1], Error::TooLarge),
         ] {

@@ -197,10 +197,14 @@ bytes, creation provenance, sample adoption, document ownership or physical-user
 An actual NTFS candidate probe with restrictive default-stream read/delete custody still permits
 creating and modifying alternate streams. A default-stream digest therefore cannot authorize
 automatic whole-file unchanged-content reclamation. Byte-range locks also cannot exclude mapped
-writes. The domain must obtain its complete proof and explicit review before invoking unlink;
-neither a receipt nor an equal digest recovers historical creation authority. The
-[content plan](../../plans/2026-10-28-protected-source-tool-content-plan.md) owns that still-open
-consumer. This stronger gap is not a reason to remove the independently useful generic primitive.
+writes. A domain claiming unchanged-content deletion must obtain that complete proof;
+neither a receipt nor an equal digest recovers historical creation authority.
+The [artifact ownership design](../source-tool-artifact-ownership-design.md) instead separates
+disposable installed artifacts from project-owned imported sources. Its fresh explicit review
+may authorize disposal of a selected damaged whole artifact, including all streams, without
+claiming that it never changed. Current graph absence, actual-user return, original review,
+pre-deletion intent and partial-result recovery remain domain obligations. That consumer uses
+this exact-object primitive unchanged; it is not permission to reclaim arbitrary project files.
 
 ### Platform evidence matrix
 
@@ -279,7 +283,7 @@ operation remains unavailable:
 
 | Reserved primitive | First owning unit | Completion rule |
 |---|---|---|
-| Protected exact-object file reclamation | [Installed content plan](../../plans/2026-10-28-protected-source-tool-content-plan.md), with Proposed ADR 0091 retaining broader recovery scope | Prove the complete removed object's stable content and exact handle binding, including Windows alternate streams; do not substitute `stat + unlink` or default-stream equality. |
+| Reviewed managed-artifact reclamation | [Managed artifact plan](../../plans/2026-10-28-managed-source-tool-artifacts-plan.md), with Proposed ADR 0091 retaining broader recovery scope | Explicit whole-object disposal after graph/user retirement, original review, intent publication and exact handle binding; retain partial results. Project-owned copies and unknown members stay outside disposal authority. |
 
 The completed [Editor Project Browser and Source Index v1](../../plans/2026-08-19-001-feat-editor-project-browser-and-source-index-v1-plan.md)
 plan implements the previously reserved handle-bound enumeration primitive and its first Host and

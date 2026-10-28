@@ -1,20 +1,19 @@
 //! Bounded installation relationships; neither artifact inspection nor executable authority.
 
-use nara_fs::RelativePath;
 use nara_tooling::{
     EditorSourceToolDesiredSelection as Desired, EditorSourceToolInstalledEntry as Entry,
     EditorSourceToolInstalledSelection, EditorSourceToolSelectionError as Error,
     EditorSourceToolWithdrawalMode,
 };
 
+use super::super::artifact_store;
+
 pub(super) const MAX_ENTRIES: usize = 32;
 pub(super) const MAX_EDGES: usize = 128;
 pub(super) const MAX_REQUIREMENTS: usize = 16;
-pub(super) const MAX_DIRECTORY_BYTES: usize = 512;
-const MAX_DIRECTORY_COMPONENTS: usize = 16;
+pub(super) const MAX_DIRECTORY_BYTES: usize = artifact_store::PREFIX.len() + 255;
 const MAX_RECEIPT_BYTES: u64 = 4096;
 const MAX_MANIFEST_BYTES: u64 = 65_536;
-const SELECTION_PARENT: &str = ".nara/source-tools";
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub(super) struct Graph {
@@ -45,16 +44,8 @@ impl Graph {
             {
                 return Err(Error::Graph);
             }
-            let directory = entry.installed.directory.to_lowercase();
-            if directories.iter().any(|previous| {
-                directory == *previous
-                    || directory
-                        .strip_prefix(previous.as_str())
-                        .is_some_and(|suffix| suffix.starts_with('/'))
-                    || previous
-                        .strip_prefix(directory.as_str())
-                        .is_some_and(|suffix| suffix.starts_with('/'))
-            }) {
+            let directory = entry.installed.directory.to_ascii_lowercase();
+            if directories.contains(&directory) {
                 return Err(Error::Graph);
             }
             directories.push(directory);
@@ -299,22 +290,7 @@ fn validate_installed(installed: &EditorSourceToolInstalledSelection) -> Result<
     {
         return Err(Error::InvalidRecord);
     }
-    if installed.directory.len() > MAX_DIRECTORY_BYTES
-        || installed.directory.split('/').count() > MAX_DIRECTORY_COMPONENTS
-        || installed
-            .directory
-            .split('/')
-            .any(|component| matches!(component, "" | "." | ".."))
-    {
-        return Err(Error::InvalidPath);
-    }
-    RelativePath::preflight(installed.directory.as_ref()).map_err(|_| Error::InvalidPath)?;
-    let directory = installed.directory.to_lowercase();
-    if directory == SELECTION_PARENT
-        || SELECTION_PARENT
-            .strip_prefix(directory.as_str())
-            .is_some_and(|suffix| suffix.starts_with('/'))
-    {
+    if !artifact_store::validate_path(&installed.directory) {
         return Err(Error::InvalidPath);
     }
     Ok(())
@@ -343,7 +319,7 @@ mod tests {
         Entry {
             installed: EditorSourceToolInstalledSelection {
                 package: package.into(),
-                directory: format!("tools/install-{id}").into(),
+                directory: format!("{}install-{id}", artifact_store::PREFIX).into(),
                 installation: [id; 32],
                 receipt: ContentDigest::from_parts(32, [id; 32]),
                 manifest: ContentDigest::from_parts(64, [7; 32]),
@@ -399,7 +375,9 @@ mod tests {
             let mut conflict = original.entries[2].clone();
             match changed {
                 0 => conflict.installed.package = "other".into(),
-                1 => conflict.installed.directory = "tools/other".into(),
+                1 => {
+                    conflict.installed.directory = format!("{}other", artifact_store::PREFIX).into()
+                }
                 2 => conflict.installed.receipt = ContentDigest::from_parts(32, [9; 32]),
                 3 => conflict.installed.manifest = ContentDigest::from_parts(64, [9; 32]),
                 4 => conflict.requirements.clear(),
@@ -523,13 +501,11 @@ mod tests {
     }
 
     #[test]
-    fn rejects_duplicate_ids_directory_aliases_and_component_prefix_overlap() {
+    fn rejects_duplicate_ids_and_case_insensitive_artifact_directory_aliases() {
         let a = entry(1, "test.a", &[]);
         for directory in [
-            "tools/install-1",
-            "TOOLS/INSTALL-1",
-            "tools/INSTALL-1/child",
-            "TOOLS",
+            ".nara/source-tools/artifacts/install-1",
+            ".nara/source-tools/artifacts/INSTALL-1",
         ] {
             let mut b = entry(2, "test.b", &[]);
             b.installed.directory = directory.into();
@@ -540,7 +516,7 @@ mod tests {
             );
         }
         let mut duplicate = a.clone();
-        duplicate.installed.directory = "tools/other".into();
+        duplicate.installed.directory = format!("{}other", artifact_store::PREFIX).into();
         assert_eq!(
             Graph {
                 entries: vec![a.clone(), duplicate],
@@ -550,13 +526,40 @@ mod tests {
             Err(Error::Graph)
         );
         let mut sibling = entry(2, "test.b", &[]);
-        sibling.installed.directory = "tools/install-10".into();
+        sibling.installed.directory = format!("{}install-10", artifact_store::PREFIX).into();
         assert!(Graph::default().register(&[a, sibling]).is_ok());
     }
 
     #[test]
-    fn rejects_selection_parent_ancestors_but_allows_dedicated_installation_descendants() {
-        for directory in [".nara", ".NARA", ".nara/source-tools", ".NARA/Source-Tools"] {
+    fn rejects_every_directory_outside_the_fixed_store_and_single_ascii_name() {
+        for directory in [
+            "tools/install-1",
+            "installed",
+            ".nara",
+            ".NARA",
+            ".nara/source-tools",
+            ".NARA/Source-Tools",
+            ".nara/source-tools/install-1",
+            ".nara/source-tools-extra",
+            ".nara-extra",
+            ".nara/source-tools/artifacts",
+            ".nara/source-tools/artifacts/",
+            ".NARA/source-tools/artifacts/install-1",
+            ".nara/Source-Tools/artifacts/install-1",
+            ".nara/source-tools/Artifacts/install-1",
+            ".nara/source-tools/artifacts-extra/install-1",
+            ".nara/source-tools/artifacts/install-1/child",
+            ".nara/source-tools/artifacts/install-1/",
+            ".nara/source-tools/artifacts//install-1",
+            ".nara/source-tools/artifacts/.",
+            ".nara/source-tools/artifacts/..",
+            ".nara/source-tools/artifacts/../install-1",
+            ".nara/source-tools/artifacts/install-1.",
+            ".nara/source-tools/artifacts/install-1 ",
+            ".nara/source-tools/artifacts/install:1",
+            ".nara/source-tools/artifacts/CON",
+            ".nara/source-tools/artifacts/工具",
+        ] {
             let mut installation = entry(1, "test.a", &[]);
             installation.installed.directory = directory.into();
             assert_eq!(
@@ -564,14 +567,43 @@ mod tests {
                 Err(Error::InvalidPath)
             );
         }
-        for directory in [
-            ".nara/source-tools/install-1",
-            ".nara/source-tools-extra",
-            ".nara-extra",
-        ] {
+        for name in ["install-1", "INSTALL-1", "sample_tool.v2"] {
             let mut installation = entry(1, "test.a", &[]);
-            installation.installed.directory = directory.into();
+            installation.installed.directory = format!("{}{name}", artifact_store::PREFIX).into();
             Graph::default().register(&[installation]).unwrap();
+        }
+        let mut installation = entry(1, "test.a", &[]);
+        installation.installed.directory =
+            format!("{}{}", artifact_store::PREFIX, "a".repeat(255)).into();
+        Graph::default().register(&[installation.clone()]).unwrap();
+        installation.installed.directory =
+            format!("{}{}", artifact_store::PREFIX, "a".repeat(256)).into();
+        assert_eq!(
+            Graph::default().register(&[installation]),
+            Err(Error::InvalidPath)
+        );
+    }
+
+    #[test]
+    fn source_namespace_includes_case_aliases_and_descendants_but_excludes_store_siblings() {
+        for path in [
+            ".nara/source-tools/artifacts",
+            ".NARA/SOURCE-TOOLS/ARTIFACTS",
+            ".nara/source-tools/artifacts/",
+            ".nara/source-tools/artifacts/install-1/Tool.dll",
+            ".NARA/source-tools/Artifacts/install-1/samples/工具.txt",
+        ] {
+            assert!(artifact_store::contains_path(path), "{path}");
+        }
+        for path in [
+            ".nara",
+            ".nara/source-tools",
+            ".nara/source-tools/selection.json",
+            ".nara/source-tools/artifacts-extra/install-1",
+            ".nara/source-tools/artifacts.json",
+            "scenes/imported.scene.json",
+        ] {
+            assert!(!artifact_store::contains_path(path), "{path}");
         }
     }
 

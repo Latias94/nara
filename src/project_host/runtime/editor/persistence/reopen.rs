@@ -77,12 +77,6 @@ pub(in crate::project_host::runtime::editor) struct PendingReopen {
     request: ReopenRequest,
 }
 
-impl PendingReopen {
-    pub(super) fn document(&self) -> EditorDocumentId {
-        self.admission.document
-    }
-}
-
 struct ReopenWork {
     request: Option<ReopenRequest>,
     prepared: Option<ReopenCompletion>,

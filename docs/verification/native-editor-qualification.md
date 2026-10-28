@@ -134,6 +134,12 @@ consumer separately proves invocation from captured bytes after removing the ins
 This is a bounded installed-selection trajectory, not the full install/update/remove UI, a language
 SDK, executable gameplay publications or the future custom-drawn UI runtime. Record actual results
 for this source revision; earlier evidence retains its original development/captured-image scope.
+Integrated installations now use `.nara/source-tools/artifacts/<name>`. The independent Session
+consumer additionally imports a declared text template into an ordinary project copy and verifies
+history, Save/Reopen and withdrawal preservation; window-free Application tests exercise that
+public copy operation and unavailable inventory without document persistence gates. The native
+trajectory above retains its tool/facet/selection scope. No newly drawn import/reclamation control
+or native Scene/Prefab template remapping follows from those window-free results.
 
 For trusted Play source association and source-local document Close, also execute:
 

@@ -202,7 +202,10 @@ The [artifact ownership successor](2026-10-28-managed-source-tool-artifacts-plan
 that future mixed-content reclamation premise with managed artifacts and explicit project-owned
 template import. It retains real generic unlink and orders retained-source/physical-pending
 corrections before store admission, import, reviewed removal intent and actual partial recovery.
-The selected design is not implementation or a complete R1b claim.
+Its [store/text-import implementation](../knowledge/engineering/verification/2026-10/2026-10-28T163225Z-managed-source-tool-artifact-store-and-project-owned-text-template-replacement-7c31339a78064eb8bc385a9bd82b372a.md)
+removes mixed-content protection and optional-ledger persistence gates while qualifying project
+copies through ordinary source history and persistence. Reviewed intent, actual unlink and
+partial recovery remain open; this is not a complete R1b claim.
 
 Acceptance: panel/session parity, exact result, one Undo, Save/Reopen, rejected/stale proposal,
 delayed completion after newer requests, multiple observers and bounded structured diagnostic

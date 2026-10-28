@@ -23,10 +23,10 @@ use nara_tasks::{
 use nara_tooling::{
     EditorDocumentQueryBasis, EditorPropertyRead, EditorPropertyReadLimits, EditorPropertyTarget,
     EditorPropertyValue, EditorSourceToolActivationId, EditorSourceToolActive,
-    EditorSourceToolAttemptId, EditorSourceToolCommit, EditorSourceToolContentView,
-    EditorSourceToolError, EditorSourceToolIntegerProperty, EditorSourceToolIntent,
-    EditorSourceToolRequestId, EditorSourceToolReview, EditorSourceToolReviewSummary,
-    EditorSourceToolView, PreparedEditorDocumentConstruction,
+    EditorSourceToolAttemptId, EditorSourceToolCommit, EditorSourceToolError,
+    EditorSourceToolIntegerProperty, EditorSourceToolIntent, EditorSourceToolRequestId,
+    EditorSourceToolReview, EditorSourceToolReviewSummary, EditorSourceToolView,
+    PreparedEditorDocumentConstruction,
 };
 use serde::{Deserialize, Serialize};
 
@@ -36,13 +36,15 @@ use super::{
     source_admission::{SourceAdmissionError, exclude_publication_alias},
 };
 
-mod content;
+mod artifact_store;
+mod artifacts;
 mod managed;
 mod process;
 mod release;
 mod selection;
-pub(super) use content::CONTENT_PATH;
-pub use content::PreparedEditorSourceToolContent;
+mod template_import;
+pub(super) use artifacts::ARTIFACTS_PATH;
+pub use artifacts::PreparedEditorSourceToolArtifacts;
 pub use managed::{
     EditorSourceToolManagedError, EditorSourceToolManagedHost, EditorSourceToolManagedHostDigests,
 };
@@ -59,6 +61,7 @@ pub use selection::{
     PreparedEditorSourceToolInstallations, PreparedEditorSourceToolSelection,
     PreparedEditorSourceToolWithdrawal,
 };
+pub use template_import::PreparedEditorSourceToolTemplateImport;
 #[cfg(all(test, any(windows, target_os = "linux")))]
 mod physical_tests;
 #[cfg(test)]
@@ -69,6 +72,10 @@ const WIRE_BYTES: usize = 64 * 1024;
 const VALUE_NODES: usize = 4096;
 const VALUE_BYTES: usize = 32 * 1024;
 const MAX_WRITES: usize = 64;
+
+pub(super) fn is_artifact_source_path(path: &str) -> bool {
+    artifact_store::contains_path(path)
+}
 const MAX_FIELDS: usize = 16;
 const MAX_JOBS: usize = 2;
 
@@ -238,15 +245,23 @@ pub(super) struct EditorSourceTools {
     request_error: Option<EditorSourceToolError>,
     process_cleanup_failed: bool,
     selection: selection::SelectionState,
-    content: content::ContentState,
+    artifacts: artifacts::ArtifactState,
+    template_import: template_import::TemplateImportState,
     #[cfg(test)]
     next_gates: process::ProcessTestGates,
 }
 
 impl EditorSourceTools {
+    pub(super) fn cancel_template_import(&self) {
+        self.template_import.cancel();
+    }
+
     /// Selection IO and deferred promotion are separate from process jobs.
     pub(super) fn schema_adoption_pending(&self) -> bool {
-        self.jobs() != 0 || self.selection.schema_adoption_pending() || self.content.pending()
+        self.jobs() != 0
+            || self.selection.schema_adoption_pending()
+            || self.artifacts.pending()
+            || self.template_import.pending()
     }
 
     /// Physical work can settle despite failure; callers must also inspect process cleanup failure.
@@ -263,9 +278,17 @@ impl EditorSourceTools {
         &self,
         candidate: &FileCapability,
     ) -> Result<(), SourceAdmissionError> {
+        if self
+            .artifacts
+            .contains_source_object(candidate)
+            .map_err(|_| SourceAdmissionError::SourceRead)?
+        {
+            return Err(SourceAdmissionError::PrivateArtifact);
+        }
         for host in [
             self.selection.publication_host(),
-            self.content.publication_host(),
+            self.artifacts.publication_host(),
+            self.template_import.publication_host(),
         ]
         .into_iter()
         .flatten()
@@ -323,11 +346,7 @@ impl EditorSourceTools {
         }
     }
 
-    pub(super) fn view(
-        &self,
-        content: EditorSourceToolContentView,
-        custody: &HostCustody,
-    ) -> EditorSourceToolView {
+    pub(super) fn view(&self, custody: &HostCustody) -> EditorSourceToolView {
         let review = self
             .reviewed
             .as_ref()
@@ -364,7 +383,8 @@ impl EditorSourceTools {
                         .and_then(|active| active.origin.clone()),
                 ),
             ),
-            content: Some(content),
+            artifacts: Some(self.artifacts.view()),
+            template_import: Some(self.template_import.view()),
         }
     }
 }
@@ -420,10 +440,8 @@ struct WireWrite {
 impl EditorProjectSession {
     #[must_use]
     pub fn source_tool_view(&self) -> EditorSourceToolView {
-        self.source_tools.view(
-            self.source_tool_content_view(),
-            self.authoring_runtime.host_custody(),
-        )
+        self.source_tools
+            .view(self.authoring_runtime.host_custody())
     }
 
     #[must_use]
@@ -833,7 +851,8 @@ impl EditorProjectSession {
     }
 
     pub(super) fn advance_source_tools(&mut self) {
-        self.advance_source_tool_content();
+        self.advance_source_tool_artifacts();
+        self.advance_source_tool_template_import();
         self.authoring_runtime.host_custody().retry_cleanup();
         self.advance_source_tool_selection();
         let cleanup_failed = &mut self.source_tools.process_cleanup_failed;

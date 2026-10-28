@@ -1,7 +1,8 @@
 # Source-Tool Artifact And Project-Source Ownership
 
-**Date:** 2026-10-28. **Status:** Selected replacement design; implementation and owning ADR
-amendments remain in progress. **Source baseline:** `874bfc0`.
+**Date:** 2026-10-28. **Status:** Owning ADRs amended; managed artifact publication/inventory and
+project-owned text import implemented. Reviewed reclamation remains in progress.
+**Research baseline:** `874bfc0`.
 
 The [implementation plan](../plans/2026-10-28-managed-source-tool-artifacts-plan.md) continues
 the complete finite-tool lifecycle. This design does not qualify a production reclaimer or
@@ -125,18 +126,20 @@ requires its ordinary explicit source-edit transaction, identity and history con
 
 ## Implementation Boundary And Deletions
 
-First fix the independently confirmed retained-source alias and physical-pending omissions.
-Then replace the mixed installation/project-content model as a complete consumer slice. Remove
-the superseded sticky installation-content interception, classification debt in ordinary
-Save/Reopen/Close, old public management/adoption entry points and obsolete record reader when
-their replacement workflow is qualified. Do not maintain both models for compatibility.
+The retained-source alias and physical-pending corrections precede this replacement.
+Managed publication/inventory and explicit text import replace the mixed installation/project
+content model. The superseded sticky installation-content interception, classification debt in
+ordinary Save/Reopen/Close, old management/adoption APIs and old record reader are removed.
+There is no parallel compatibility model. The linked implementation evidence qualifies that
+scope separately from future reviewed intent, unlink and partial recovery.
 
 Canonical formats remain version 1 because the product has not shipped. No old reader,
 conversion helper, compatibility alias or migration guide is required. Existing historical
 verification records retain their original scope; they are not current release authority.
 
-Before changing the production ownership boundary, reconcile ADRs 0020/0035, 0047/0118 and 0070.
-Record implementation separately. The filesystem exact-object guarantee remains unchanged.
+ADRs 0020/0035, 0047/0118 and 0070 reconcile the production ownership boundary. The
+[replacement evidence](../knowledge/engineering/verification/2026-10/2026-10-28T163225Z-managed-source-tool-artifact-store-and-project-owned-text-template-replacement-7c31339a78064eb8bc385a9bd82b372a.md)
+records actual workflow results and limits. The filesystem exact-object guarantee remains unchanged.
 
 ## Reference Scope
 

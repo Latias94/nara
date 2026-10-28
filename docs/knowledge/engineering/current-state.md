@@ -3,7 +3,7 @@ type: "Current State"
 title: "Current Engineering State"
 description: "Derived summary of immutable engineering-memory shards."
 tags: ["engineering-memory", "derived"]
-source_fingerprint: "fab4ec3d876e0c8c52616097c96236038c5e000fd7a5224c407731831c5f145a"
+source_fingerprint: "34cd3c91a12cb2651d5b78121c90839c2928f163b0d083ebcb66bbf918eebd59"
 ---
 
 # Current State
@@ -12,8 +12,8 @@ source_fingerprint: "fab4ec3d876e0c8c52616097c96236038c5e000fd7a5224c407731831c5
 
 This file is derived from immutable shards. Record new facts in shards, then render during integration.
 
-- Source fingerprint: `fab4ec3d876e0c8c52616097c96236038c5e000fd7a5224c407731831c5f145a`
-- Immutable records: 1007
+- Source fingerprint: `34cd3c91a12cb2651d5b78121c90839c2928f163b0d083ebcb66bbf918eebd59`
+- Immutable records: 1008
 - Active lane heads: 1
 
 # Active Registrations
@@ -69,6 +69,7 @@ This file is derived from immutable shards. Record new facts in shards, then ren
 
 # Recent Evidence
 
+- **Verification Evidence**: [Managed source-tool artifact store and project-owned text template replacement](verification/2026-10/2026-10-28T163225Z-managed-source-tool-artifact-store-and-project-owned-text-template-replacement-7c31339a78064eb8bc385a9bd82b372a.md) - Qualifies fixed managed artifact publication/inventory and explicit project-owned text import while removing mixed-content source protection and retaining future real reclamation.
 - **Verification Evidence**: [Retained source objects and truthful source-tool physical cleanup qualification](verification/2026-10/2026-10-28T150643Z-retained-source-objects-and-truthful-source-tool-physical-cleanup-qualification-13bc9f4599ef4e839fd608dcfd7f4aed.md) - Qualifies retained document and metadata aliases, superseded cleanup observation, and terminal process cleanup failure without claiming artifact reclamation.
 - **Verification Evidence**: [Accepted document protection and repairable installed-content close qualification](verification/2026-10/2026-10-28T132217Z-accepted-document-protection-and-repairable-installed-content-close-qualification-8a03235372c74fcbb4a02f7ee23eaca2.md) - Qualifies sticky accepted-edit protection, original snapshot persistence, failure repair and physical Close through actual Session, Application and managed/native consumers.
 - **Work Progress**: [Accepted document content protection integration and close recovery](progress/2026-10/2026-10-28T130259Z-accepted-document-content-protection-integration-and-close-recovery-c332720c1d2b451d91cd31e85c7a0711.md) - Records the known-versus-published protection correction, independent close/recovery findings and intermediate verification before final qualification.
@@ -80,7 +81,6 @@ This file is derived from immutable shards. Record new facts in shards, then ren
 - **Verification Evidence**: [Owned source history and whole-workspace schema preparation](verification/2026-10/2026-10-28T061611Z-owned-source-history-and-whole-workspace-schema-preparation-a4021ad50ca24035b6530ae233b9dff3.md) - Records bounded frozen input handoff and exact original publication checks without claiming complete Session adoption.
 - **Verification Evidence**: [Same-basis saved project receipt before whole-session schema adoption](verification/2026-10/2026-10-28T054209Z-same-basis-saved-project-receipt-before-whole-session-schema-adoption-a796d5f92d5e4fb4b1ae7cbdca4d2741.md) - Qualifies actual saved startup and selected dirty Prefab capture joined to one published owner, with cumulative revalidation and a fresh source index.
 - **Verification Evidence**: [Whole-workspace schema preparation and shared immutable published sources](verification/2026-10/2026-10-28T050925Z-whole-workspace-schema-preparation-and-shared-immutable-published-sources-dc568b9954884122a24a9f8a25491451.md) - Qualifies exact whole-set source classification and immutable source sharing without claiming project or Session adoption.
-- **Verification Evidence**: [Snapshot-preserving bundle successors and prepared current-source capture](verification/2026-10/2026-10-28T041431Z-snapshot-preserving-bundle-successors-and-prepared-current-source-capture-74dd681a584541178fb81b346b53e878.md) - Qualifies live bundle-leaf handoff and same-basis current capture without claiming whole project, historical or Session adoption.
 
 # Integration Notes
 

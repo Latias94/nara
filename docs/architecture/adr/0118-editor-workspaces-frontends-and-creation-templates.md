@@ -2,7 +2,7 @@
 
 **Status**: Accepted
 **Date**: 2026-10-16
-**Last Revised**: 2026-10-28 (finite tool facets, local release capture, complete-observation preparation and accepted source-edit protection)
+**Last Revised**: 2026-10-28 (finite tool facets, complete-observation preparation, managed artifacts and explicit project-owned import)
 **Owner**: Private Editor product, tooling, reflection and document-domain owners
 **Refines**: [0015](0015-editor-tooling-and-dogfooding-boundary.md), [0081](0081-schema-source-stable-identity-catalog-and-runtime-binding.md), [0090](0090-unavailable-schema-and-lossless-authoring.md), [0107](0107-shared-ui-foundation-and-independent-product-layers.md), [0113](0113-editor-ui-prefab-authoring-and-canvas-authority.md), [0114](0114-standalone-generic-editor-authoring-and-execution-boundary.md)
 **Related**: [0117](0117-2d-foundation-ownership-and-authoring-contracts.md)
@@ -542,83 +542,66 @@ cleanup does not prove unchanged/adopted content. A persisted receipt supports b
 inspection only: it cannot recover creation custody, select a Package graph, admit open-document
 metadata, approve executable code or grant deletion. Those product lifecycle owners remain separate.
 
-Installed-content protection has its own bounded `.nara/source-tools/content.json` record,
-independent of selection so withdrawn installations retain their facts. Session preparation accepts
-actual live installation custody, verifies its project-relative directory association and publishes
-the finite declared member baselines through the existing Tasks/FilePublicationHost owner. Retain
-at most 32 installations and 66 members per installation within a 2 MiB record; capacity refusal
-never evicts protection. Registration repeats cannot replace immutable facts or clear observed
-modification/adoption. Explicit adoption of declared Content members makes them project-owned
-without editing a source, rewriting history or following imported-copy origins.
+Installed artifacts, required data and unimported templates occupy only
+`.nara/source-tools/artifacts/<installation-name>/`. Ordinary editable-source admission refuses
+this namespace and protected actual-object aliases. Source-built/local/Git/Cargo packages retain
+their existing workspace/toolchain ownership. Other `.nara` files are not disposable caches.
+Store membership is application ownership, not OS-enforced immutability or deletion permission
+for unknown files. The [ownership design](../source-tool-artifact-ownership-design.md) records
+why the former mixed installed/project-content protection model is replaced.
+Initial and newly admitted editable sources require strict single-link resolution and exact
+stored spelling. Short native names, junction traversal and hardlinked store objects cannot
+create a second ordinary source owner. Already retained document objects and configured
+Prefab directories preserve their existing custody through allowed namespace renames.
 
-Preparation and dropped candidates write nothing. Confirmation consumes the original nominal
-content basis and exact protection successor; stale candidates reject. Explicit management,
-adoption and observation confirmation admit their known facts before starting IO. Failed or
-uncertain publication retains those facts. An observation can set sticky modification and current
-presence/failure facts, but an equal default-stream digest is no immutable whole-object or deletion
-proof. Unknown siblings are untouched. Re-observation cannot clear known protection, discard
-installations or replace immutable baselines. Corrupt/unavailable records preserve files rather
-than becoming empty overwrite candidates.
-The Session separately retains which confirmed local registrations have not yet appeared in
-accepted disk evidence. If their first publication fails, reconciliation may retain those
-missing entries as unpublished protection for explicit repair. It cannot apply that exception
-to an installation already admitted by a disk read or successful publication. Conflicting
-immutable facts, overlapping directories and record capacity still refuse; failure never
-evicts known protection.
+The separate format-1 `.nara/source-tools/artifacts.json` inventory retains at most 32
+installations and 66 members each within 2 MiB. Entries retain exact installation facts,
+finite member roles/baselines and current observations after graph withdrawal. Registration
+cannot replace immutable facts or evict another entry. Actual live installation custody remains
+distinct from serialized observations. Changed default-stream bytes report damage; matching
+bytes are not whole-file stability or historical creation proof. Unknown siblings are untouched.
+Corrupt/unavailable records never become empty overwrite candidates.
 
-ADR 0047 owns the five source acceptance seams and their exact bound path/content-identity
-capture. Accepted changes immediately protect matching managed members, independently of dirty
-state, Undo, restored baseline bytes, Save replacement, Reopen or Discard. Existing persistence
-lanes retain a private accepted-touch fact across initial asynchronous reads and later management;
-no second document store or history is introduced. Conservative ASCII-case path matching grants
-protection only, not exact-object deletion proof or imported-origin ownership.
-If the initial management read is unavailable, a document's sticky accepted-touch fact remains
-unclassified. Save, Reopen and Close require successful reconciliation before releasing that
-fact, including when Undo made the document clean. Whole Close retains the repairable Session;
-an unchanged document alone creates no such obligation.
+Preparation retains the original nominal artifact basis and exact candidate bytes without
+writes. Confirmation consumes it through existing Tasks/FilePublicationHost custody; stale
+reviews refuse. Pending bytes remain fixed. Actual publication outcomes and temporary cleanup
+remain observable after cancellation and physical return. Uncertain publication requires
+explicit reconciliation before another artifact mutation. Reading or reconciling inventory
+does not authorize code execution or deletion.
 
-The prepared preview retains the complete creation-custody projection and exact encoded candidate
-bytes; confirmation does not refresh either behind the review. Additional known protection invalidates
-the original content basis immediately. An already pending publication retains its immutable
-bytes; later document facts form an automatic coalesced successor. Accepted publication settles
-only known facts covered by those bytes, so an older successful publication cannot erase later
-protection debt.
+Editable templates cross an explicit import boundary. A supported finite text template is
+captured from the exact admitted installation; its prepared copy retains original project,
+selection and source observations. Confirmation publishes only to an absent destination
+outside the store through the existing no-replace publisher. Existing equal bytes still refuse.
+The bounded text destination stays outside `.nara`, uses portable separators, and its complete
+parent path is opened with exact stored spelling before preparation and publication. This
+prevents native short-name aliases from redirecting the copy into the store.
+The resulting copy belongs to the ordinary project source owner and its history/persistence;
+update, withdrawal and artifact disposal never follow origin to overwrite or delete it. Native
+Scene/Prefab/asset templates separately require format-owned identity, sidecar and reference
+remapping before support is claimed. An opaque text-copy workflow is not that qualification.
 
-A disk read retains the known protection basis from its start. If disk is weaker than that basis,
-retain the stronger facts and actual read Host, report
-`NeedsProtectionPublication`/`RequiresReconcile`, and require explicit reconciliation and
-original-basis republication. Only an older in-flight read missing newer document facts may queue
-their automatic successor when its start-basis protection is intact. An in-memory merge is not
-durable reconciliation. After a successful read, public Session/Application
-`prepare_source_tool_content_protection(&basis)` prepares the exact already-known repair candidate
-without IO or new ownership. Explicit `commit_source_tool_content(candidate)` publishes it with
-the `Protected` outcome on accepted publication; failed or uncertain publication requires another
-fresh reconciliation. Session/Application inspection, original-basis preparation, commit and
-reconciliation remain available while Close or project replacement waits on protection, including
-the retained Session while a replacement opens. Ordinary authoring remains gated.
+Artifact records are optional tool-management facts. Failure cannot block an unrelated document
+Save, Reopen or Close. Remove installation-content touch interception, sticky adoption flags,
+protection publication debt and the old record reader rather than retain compatibility. Whole
+Session Close still revokes admission and retains every actual artifact/import task and file
+cleanup. Actual publication and physical completion stay separate from logical cancellation.
 
-`protection_publication_pending` describes known protection debt, independently of
-`physical_work_pending` for actual task return and publication cleanup. Both enter the existing
-immutable frame/change/polling path. Automatic metadata work updates these protection/phase/error
-facts without replacing the explicit `content.operation` attempt or outcome. Save, Reopen and
-new document Close use ADR 0047's owning-source `Busy`/`RequiresReconcile` guard. Whole physical
-Close advances protection before irreversible closing or Host/task admission shutdown, leaving
-publication failures repairable. Already-entered Save IO retains its actual receipt; no cross-file
-transaction follows.
+Reclamation remains an explicit operation after exact graph withdrawal and actual user return.
+A fresh move-only review names selected disposable whole objects, including alternate streams;
+it may authorize damaged artifacts without claiming unchanged content. Confirm its original
+observations, fence conflicting admission, and publish intent before first unlink. Retain each
+actual member result and any later record-publication debt; failure is not rollback. Generic
+`DirectoryCapability::unlink_file` remains the exact-object primitive. It does not own this
+domain policy or grant disposal rights over imported project copies and unknown members.
 
-Source acceptance is in-memory protection, not disk evidence. Only an accepted file-publication
-receipt supplies that evidence for its covered facts. A crash in the acceptance-to-publication
-window may lose protection. Existing Windows parent-directory synchronization is unsupported;
-neither this sequence nor its receipts promise power-failure durability.
-
-Fresh Open reads management/recovery data without recovering historical creation custody,
-execution approval or permission to delete. This record and its filesystem aliases are reserved
-from ordinary source-document admission. No reclaim operation follows automatically from Open,
-graph withdrawal, an equal digest or an adopted Schema. Source-edit protection and
-reviewed reclamation have separate qualification obligations in the
-[protected-content plan](../../plans/2026-10-28-protected-source-tool-content-plan.md).
-Generic exact-object unlink already exists; an all-stream safe reclaimer remains unresolved.
-This contract claims no new UI controls, completed reclamation or complete local release lifecycle.
+Fresh Open only observes inventories/recovery: no execution, approval restoration or continued
+deletion. Pending and missing are not invented successful-removal receipts. Resumption requires
+another explicit review. Unsupported Windows parent-directory synchronization prevents a
+power-failure durability claim. The
+[managed artifact plan](../../plans/2026-10-28-managed-source-tool-artifacts-plan.md) owns actual
+implementation and qualification; this decision alone claims no completed reclaimer, new UI
+controls or full local release lifecycle.
 
 The initial framework-dependent installed-tool design admits a Host-approved machine runtime as
 an explicit trusted platform prerequisite. Approval names its configured launcher/root, requested

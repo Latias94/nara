@@ -58,7 +58,9 @@ impl LocalRelease {
             payloads.insert(path, bytes);
         }
         std::fs::create_dir(directory.path().join("samples")).unwrap();
-        let sample = b"EnemyStats sample content; not an executable tool member.\n".to_vec();
+        let sample =
+            format!("EnemyStats {variant} text template; import into project source to edit.\n")
+                .into_bytes();
         std::fs::write(directory.path().join(SAMPLE), &sample).unwrap();
         payloads.insert(SAMPLE, sample);
         let files: Vec<_> = payloads
@@ -154,6 +156,10 @@ fn install(
         EditorSourceToolInstallationOutcome::Published(installation) => installation,
         other => panic!("Actual release publication failed: {other:?}"),
     };
+    assert_eq!(
+        installation.project_path(),
+        ".nara/source-tools/artifacts/installed"
+    );
     let inspection = EditorSourceToolInstallationInspection::read(
         installation.directory(),
         installation.receipt_digest(),
@@ -353,6 +359,12 @@ fn csharp_local_release_installs_frozen_bytes_and_fresh_inspection_rejects_conte
     let preview =
         EditorSourceToolInstallationPlan::new(parent.share(), destination.clone(), captured)
             .unwrap();
+    assert_eq!(
+        preview.project_path(),
+        ".nara/source-tools/artifacts/installed"
+    );
+    assert!(preview.same_project(&parent).unwrap());
+    assert!(preview.project_root().same_object(&parent).unwrap());
     assert_eq!(preview.release().manifest_digest(), expected_manifest);
     assert_eq!(
         preview.release().manifest_bytes(),
@@ -380,6 +392,16 @@ fn csharp_local_release_installs_frozen_bytes_and_fresh_inspection_rejects_conte
         EditorSourceToolInstallationOutcome::Published(installation) => installation,
         other => panic!("Expected actual C# release publication: {other:?}"),
     };
+    let project_path = installation.project_path().to_owned();
+    assert_eq!(project_path, ".nara/source-tools/artifacts/installed");
+    let original_project = open_explicit_product_project_root(parent_directory.path()).unwrap();
+    assert!(installation.same_project(&original_project).unwrap());
+    assert!(
+        installation
+            .project_root()
+            .same_object(&original_project)
+            .unwrap()
+    );
     assert_eq!(installation.package(), "trial.enemy-stats");
     assert_eq!(installation.release(), "1");
     assert_eq!(installation.receipt().manifest_digest(), expected_manifest);
@@ -441,7 +463,7 @@ fn csharp_local_release_installs_frozen_bytes_and_fresh_inspection_rejects_conte
     // Fresh inspection recovers persisted facts, not the closed owner's live-file provenance.
     let reopened_parent = open_explicit_product_project_root(parent_directory.path()).unwrap();
     let reopened = reopened_parent
-        .open_directory_exact(&RelativePath::new("installed").unwrap())
+        .open_directory_exact(&RelativePath::new(&project_path).unwrap())
         .unwrap();
     let inspected =
         EditorSourceToolInstallationInspection::read(&reopened, expected_receipt).unwrap();
@@ -469,7 +491,7 @@ fn csharp_local_release_installs_frozen_bytes_and_fresh_inspection_rejects_conte
     let mut changed_sample = release.payloads[SAMPLE].clone();
     changed_sample[0] ^= 1;
     fs::write(
-        parent_directory.path().join("installed").join(SAMPLE),
+        parent_directory.path().join(&project_path).join(SAMPLE),
         changed_sample,
     )
     .unwrap();

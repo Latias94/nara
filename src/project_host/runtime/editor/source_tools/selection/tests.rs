@@ -169,7 +169,7 @@ mod native {
         EditorSourceToolDesiredSelection {
             installed: EditorSourceToolInstalledSelection {
                 package: "test.finite-source-payload".into(),
-                directory: "tools/finite-source-payload".into(),
+                directory: ".nara/source-tools/artifacts/finite-source-payload".into(),
                 installation: [1; 32],
                 receipt: ContentDigest::from_parts(32, [2; 32]),
                 manifest: ContentDigest::from_parts(64, [3; 32]),
@@ -400,6 +400,8 @@ mod native {
         use crate::project_host::EditorProjectCloseProgress;
         use crate::project_host::file_publication::CleanupTestControl;
 
+        const PAYLOAD_PATH: &str = ".nara/source-tools/artifacts/finite-source-payload/Tool.dll";
+
         fn strict_directory(path: &Path) -> DirectoryCapability {
             use std::os::windows::fs::OpenOptionsExt;
 
@@ -469,13 +471,9 @@ mod native {
                 manifest_digest,
             )
             .unwrap();
-            fs::create_dir(project.root.join("tools")).unwrap();
             let project_root = strict_directory(&project.root);
-            let tools = project_root
-                .open_directory_exact(&RelativePath::new("tools").unwrap())
-                .unwrap();
             let plan = EditorSourceToolInstallationPlan::new(
-                tools,
+                project_root.share(),
                 RelativeComponent::new("finite-source-payload").unwrap(),
                 release,
             )
@@ -488,7 +486,7 @@ mod native {
             let desired = EditorSourceToolDesiredSelection {
                 installed: EditorSourceToolInstalledSelection {
                     package: installation.package().into(),
-                    directory: "tools/finite-source-payload".into(),
+                    directory: ".nara/source-tools/artifacts/finite-source-payload".into(),
                     installation: *installation.receipt().installation_id(),
                     receipt: installation.receipt_digest(),
                     manifest: manifest_digest,
@@ -524,16 +522,11 @@ mod native {
                         &[request.clone()],
                     )
                     .unwrap();
-                let bytes =
-                    fs::read(project.root.join("tools/finite-source-payload/Tool.dll")).unwrap();
+                let bytes = fs::read(project.root.join(PAYLOAD_PATH)).unwrap();
                 let held = hold(editor, IoPhase::BeforeWork);
                 let attempt = editor.register_source_tool_installations(prepared).unwrap();
                 held.wait_until_entered();
-                fs::write(
-                    project.root.join("tools/finite-source-payload/Tool.dll"),
-                    b"changed after review",
-                )
-                .unwrap();
+                fs::write(project.root.join(PAYLOAD_PATH), b"changed after review").unwrap();
                 held.release();
                 wait_for_outcome(
                     editor,
@@ -546,11 +539,7 @@ mod native {
                 assert!(editor.source_tool_view().active.is_none());
                 assert_eq!(project.persisted(), source);
 
-                fs::write(
-                    project.root.join("tools/finite-source-payload/Tool.dll"),
-                    bytes,
-                )
-                .unwrap();
+                fs::write(project.root.join(PAYLOAD_PATH), bytes).unwrap();
                 let basis = editor.source_tool_selection_view().basis;
                 let prepared = editor
                     .prepare_source_tool_installations(&basis, root.share(), &[request])
@@ -614,12 +603,7 @@ mod native {
                     editor.source_tool_selection_view().installed,
                     initial.installed
                 );
-                assert!(
-                    project
-                        .root
-                        .join("tools/finite-source-payload/Tool.dll")
-                        .exists()
-                );
+                assert!(project.root.join(PAYLOAD_PATH).exists());
                 assert_eq!(
                     fs::read(project.root.join(SELECTION_PATH)).unwrap(),
                     b"external selection edit"
@@ -694,12 +678,7 @@ mod native {
                     assert_eq!(returned.state(), TaskReturnState::Returned);
                     assert!(editor.accept_source_tool_review(&request).is_err());
                     assert_eq!(project.persisted(), source);
-                    assert!(
-                        project
-                            .root
-                            .join("tools/finite-source-payload/Tool.dll")
-                            .exists()
-                    );
+                    assert!(project.root.join(PAYLOAD_PATH).exists());
                 });
             }
         }

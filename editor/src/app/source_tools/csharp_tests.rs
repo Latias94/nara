@@ -54,7 +54,7 @@ use crate::app::{
 const STATS: &str = "trial.enemy.EnemyStats";
 const NAME: &str = "nara.scene.Name";
 const TIMEOUT: Duration = Duration::from_secs(30);
-const INSTALLATION: &str = "installed-tool";
+const INSTALLATION: &str = ".nara/source-tools/artifacts/installed-tool";
 const SELECTION: &str = ".nara/source-tools/selection.json";
 
 struct InstalledSourceTool {
@@ -122,7 +122,7 @@ fn install_tool(project: &Path, artifacts: &Path, executable: &Path) -> Installe
     .unwrap();
     let plan = EditorSourceToolInstallationPlan::new(
         root.share(),
-        RelativeComponent::new(INSTALLATION).unwrap(),
+        RelativeComponent::new("installed-tool").unwrap(),
         captured,
     )
     .unwrap();
@@ -131,6 +131,7 @@ fn install_tool(project: &Path, artifacts: &Path, executable: &Path) -> Installe
         other => panic!("Actual project-root release publication failed: {other:?}"),
     };
     let receipt = installation.receipt_digest();
+    assert_eq!(installation.project_path(), INSTALLATION);
     drop(installation);
     let bootstrap = PathBuf::from(
         std::env::var_os("NARA_SOURCE_TOOL_BOOTSTRAP_DIR")

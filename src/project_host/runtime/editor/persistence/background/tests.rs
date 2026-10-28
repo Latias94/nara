@@ -92,7 +92,6 @@ impl SaveFixture {
             .unwrap(),
             document: self.document,
             authoring_source: None,
-            content_edited: false,
             host: custody.retain_scene(opened.host).unwrap(),
         });
         BackgroundSave::start(

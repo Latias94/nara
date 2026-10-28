@@ -42,8 +42,10 @@ operation_id!(EditorSourceToolActivationId);
 
 mod selection;
 pub use selection::*;
-mod content;
-pub use content::*;
+mod artifacts;
+pub use artifacts::*;
+mod template_import;
+pub use template_import::*;
 
 /// Explicit source intent retained by the Host rather than returned by the child.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -278,7 +280,8 @@ pub struct EditorSourceToolView {
     pub attempt_error: Option<EditorSourceToolError>,
     pub request_error: Option<EditorSourceToolError>,
     pub selection: Option<EditorSourceToolSelectionView>,
-    pub content: Option<EditorSourceToolContentView>,
+    pub artifacts: Option<EditorSourceToolArtifactView>,
+    pub template_import: Option<EditorSourceToolTemplateImportView>,
 }
 
 impl EditorSourceToolView {
@@ -297,16 +300,14 @@ impl EditorSourceToolView {
                         | EditorSourceToolSelectionPhase::Reconciling
                 )
             })
-            || self.content.as_ref().is_some_and(|content| {
-                content.physical_work_pending
-                    || matches!(
-                        content.phase,
-                        EditorSourceToolContentPhase::Loading
-                            | EditorSourceToolContentPhase::ProtectionPending
-                            | EditorSourceToolContentPhase::Publishing
-                            | EditorSourceToolContentPhase::Reconciling
-                    )
-            })
+            || self
+                .artifacts
+                .as_ref()
+                .is_some_and(|artifacts| artifacts.physical_work_pending)
+            || self
+                .template_import
+                .as_ref()
+                .is_some_and(|import| import.physical_work_pending)
     }
 }
 

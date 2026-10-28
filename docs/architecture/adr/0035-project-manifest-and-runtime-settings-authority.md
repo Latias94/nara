@@ -58,6 +58,20 @@ assembly search paths or authorize deletion. A broken artifact may be withdrawn 
 its files. The [installed-graph plan](../../plans/2026-10-28-installed-source-tool-graph-plan.md)
 owns the ordered replacement and actual workflow qualification.
 
+Integrated finite-tool installations occupy only
+`.nara/source-tools/artifacts/<installation-name>/`. The finite publisher receives the actual
+project root; preparation writes nothing and explicit publication creates only its fixed store
+parents and absent installation destination. Installed graph admission refuses arbitrary source
+directories. This restriction separates disposable artifacts from project sources rather than
+granting deletion rights to every file found under a directory.
+
+The separate `.nara/source-tools/artifacts.json` record retains bounded artifact inventories and
+recovery observations after graph withdrawal. It is not source ownership, executable approval,
+a second dependency graph or deletion authorization. Imported project copies are not its members.
+No optional artifact-record read, repair or publication becomes an ordinary document Save,
+Reopen or Close prerequisite. Canonical formats remain 1; the unreleased mixed-content record
+and reader are removed rather than migrated.
+
 The manifest contract is:
 
 - `schema_version` is required and gates future manifest migrations.

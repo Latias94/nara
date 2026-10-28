@@ -8,9 +8,10 @@ related_plan: 2026-10-23-foundation-architecture-rebaseline-plan.md
 # Local Finite Source-Tool Releases
 
 The [managed artifact and project-owned import successor](2026-10-28-managed-source-tool-artifacts-plan.md)
-owns the next ownership replacement. Mixed installed-content protection below describes the
-qualified predecessor; its remaining deletion premise is superseded. Actual exact-object unlink
-remains required. The successor must complete installation, dependencies, import, withdrawal and
+owns the ownership replacement. Mixed installed-content protection below describes a historical
+qualified predecessor; its record and editing/persistence interception are removed. Managed
+artifact publication/inventory and explicit text import have separate replacement evidence.
+Actual exact-object unlink remains required. The successor must complete installation, dependencies, import, withdrawal and
 reviewed partial reclamation rather than reduce this lifecycle to graph mutation alone.
 
 ## Complete Consumer And Placement

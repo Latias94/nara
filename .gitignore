@@ -3,6 +3,7 @@ repo-ref/
 .worktrees/
 .nara-supervised-play-canary-*/
 .nara/import-cache/
+.nara/source-tools/artifacts/
 __pycache__/
 docs/reviews/
 .codex-research/

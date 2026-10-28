@@ -71,7 +71,7 @@ const WAIT: Duration = Duration::from_secs(15);
 const STARTUP: &str = "scenes/startup.scene.json";
 const SECOND: &str = "scenes/second.scene.json";
 const BUNDLE: &str = "schema/authoring.bundle.json";
-const INSTALLED: &str = "tools/stats";
+const INSTALLED: &str = ".nara/source-tools/artifacts/stats";
 const OWNER: &str = "test.session-installed-stats";
 static NEXT_FIXTURE: AtomicU64 = AtomicU64::new(1);
 
@@ -330,7 +330,7 @@ fn install(root: &Path) -> ContentDigest {
     )
     .unwrap();
     let plan = EditorSourceToolInstallationPlan::new(
-        strict_directory(&root.join("tools")),
+        strict_directory(root),
         RelativeComponent::new("stats").unwrap(),
         release,
     )

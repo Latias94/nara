@@ -1,20 +1,21 @@
 ---
 title: Protected installed content and explicit source-tool reclamation
 date: 2026-10-28
-status: in-progress
+status: superseded
 related_plan: 2026-10-28-local-source-tool-release-plan.md
 ---
 
 # Protected Installed Content And Explicit Reclamation
 
-The qualified mixed-content implementation below remains the current production predecessor.
-Its future reclamation design is superseded by the
+The qualified mixed-content implementation below is a historical predecessor.
+Its implementation and future reclamation design are replaced by the
 [managed artifact and explicit import plan](2026-10-28-managed-source-tool-artifacts-plan.md)
 and [ownership design](../architecture/source-tool-artifact-ownership-design.md).
-That replacement keeps real exact-object unlink, separates disposable artifacts from project
-sources, and removes the optional protection-record dependency from ordinary persistence after
-complete replacement qualification. Do not implement an older mixed-content deletion path or
-add a compatibility reader. The historical results below do not qualify the new design.
+The replacement keeps real exact-object unlink and separates disposable artifacts from
+project-owned sources. Managed publication/inventory and explicit text import remove the optional
+protection-record dependency from ordinary persistence; reviewed reclamation remains open.
+Do not implement an older mixed-content deletion path or add a compatibility reader. Historical
+results below retain their source scope; current results belong to the replacement evidence.
 
 ## Complete Consumer
 

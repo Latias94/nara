@@ -3,6 +3,7 @@
 use nara_fs::ContentDigest;
 use nara_tooling::{EditorSourceToolInstallationRequest, EditorSourceToolWithdrawalMode};
 
+use super::super::artifact_store;
 use super::*;
 use crate::project_host::runtime::editor::source_tools::release::{
     EditorSourceToolReleaseError, ReleaseCaptureBudget,
@@ -122,6 +123,9 @@ impl RouteObservation {
             .iter()
             .find(|entry| entry.installed.installation == *installation)
             .expect("nominal closure includes its selected member");
+        if !artifact_store::validate_path(&entry.installed.directory) {
+            return Err(Error::InvalidPath);
+        }
         let root = root.strict_read_only().map_err(|_| Error::Installation)?;
         let directory = root
             .open_directory_exact(
@@ -161,7 +165,7 @@ fn inspect(
     receipt: ContentDigest,
     budget: &mut ReleaseCaptureBudget,
 ) -> Result<EditorSourceToolInstallationInspection, Error> {
-    if directory.len() > 512 || directory.split('/').count() > 16 {
+    if !artifact_store::validate_path(directory) {
         return Err(Error::InvalidPath);
     }
     let root = root.strict_read_only().map_err(|_| Error::Installation)?;
@@ -260,8 +264,10 @@ impl EditorProjectSession {
         // executable images are acquired later by the selected managed approval operation.
         let mut declarations = Vec::with_capacity(requests.len());
         for request in requests {
-            if request.directory.len() > 512
-                || request.requirements.len() > 16
+            if !artifact_store::validate_path(&request.directory) {
+                return Err(Error::InvalidPath);
+            }
+            if request.requirements.len() > 16
                 || request
                     .requirements
                     .iter()
@@ -502,4 +508,45 @@ pub(super) fn prepare_required_selection(
         graph,
         basis: Some(session.source_tools.selection.basis.clone()),
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::project_host::runtime::editor::source_tools::release::tests::Release;
+
+    #[test]
+    fn capture_rejects_arbitrary_or_nested_installation_paths_before_reading_artifacts() {
+        let release = Release::new();
+        let root = release.root(nara_fs::TrustMode::Untrusted);
+        let receipt = ContentDigest::of_bytes(b"not an installation receipt");
+        for directory in [
+            "tools/install-1",
+            ".nara/source-tools/install-1",
+            ".nara/source-tools/artifacts",
+            ".nara/source-tools/artifacts/",
+            ".nara/source-tools/artifacts/install-1/child",
+            ".NARA/source-tools/artifacts/install-1",
+            ".nara/source-tools/artifacts/工具",
+        ] {
+            let mut budget = ReleaseCaptureBudget::new(0);
+            assert!(
+                matches!(
+                    inspect(&root, directory, receipt, &mut budget),
+                    Err(Error::InvalidPath)
+                ),
+                "{directory}"
+            );
+        }
+        let mut budget = ReleaseCaptureBudget::new(0);
+        assert!(matches!(
+            inspect(
+                &root,
+                ".nara/source-tools/artifacts/install-1",
+                receipt,
+                &mut budget,
+            ),
+            Err(Error::Installation)
+        ));
+    }
 }

@@ -5,25 +5,26 @@ use std::{collections::BTreeMap, time::Duration};
 use nara::{
     project_host::{
         EditorProjectSession, EditorSourceToolDefinition, EditorSourceToolInstallation,
-        EditorSourceToolManagedHost, PreparedEditorSourceToolContent,
+        EditorSourceToolManagedHost, PreparedEditorSourceToolArtifacts,
         PreparedEditorSourceToolInstallations, PreparedEditorSourceToolSelection,
-        PreparedEditorSourceToolWithdrawal,
+        PreparedEditorSourceToolTemplateImport, PreparedEditorSourceToolWithdrawal,
     },
     reflect::ComponentValue,
     tooling::{
-        EditorDocumentQueryBasis, EditorSourceToolActivationId, EditorSourceToolAttemptId,
-        EditorSourceToolCommit, EditorSourceToolContentBasis, EditorSourceToolContentError,
-        EditorSourceToolContentView, EditorSourceToolError, EditorSourceToolInstallationRequest,
+        EditorDocumentQueryBasis, EditorSourceToolActivationId, EditorSourceToolArtifactBasis,
+        EditorSourceToolArtifactError, EditorSourceToolArtifactView, EditorSourceToolAttemptId,
+        EditorSourceToolCommit, EditorSourceToolError, EditorSourceToolInstallationRequest,
         EditorSourceToolIntent, EditorSourceToolRequestId, EditorSourceToolReview,
         EditorSourceToolSelectionBasis, EditorSourceToolSelectionError,
-        EditorSourceToolSelectionView, EditorSourceToolView, EditorSourceToolWithdrawalMode,
+        EditorSourceToolSelectionView, EditorSourceToolTemplateImportError,
+        EditorSourceToolTemplateImportView, EditorSourceToolView, EditorSourceToolWithdrawalMode,
     },
 };
 
 use super::{EditorApplication, EditorApplicationActionNotDispatched, EditorApplicationUpdate};
 
 #[cfg(all(test, windows))]
-mod content_tests;
+mod artifacts_tests;
 #[cfg(all(test, windows))]
 mod csharp_tests;
 
@@ -52,85 +53,112 @@ impl EditorApplicationSourceToolSubmission {
 }
 
 impl EditorApplication {
-    /// Observes protection facts separately from executable selection and graph withdrawal.
-    pub fn source_tool_content_view(
+    pub fn source_tool_template_import_view(
         &self,
-    ) -> Result<EditorSourceToolContentView, EditorSourceToolError> {
+    ) -> Result<EditorSourceToolTemplateImportView, EditorSourceToolError> {
         Ok(self
             .state
             .published()
             .ok_or(EditorSourceToolError::Closing)?
             .session
-            .source_tool_content_view())
+            .source_tool_template_import_view())
     }
 
-    pub fn prepare_source_tool_content_management(
+    pub fn prepare_source_tool_template_import(
         &self,
-        basis: &EditorSourceToolContentBasis,
-        directory: &str,
-        installation: std::sync::Arc<EditorSourceToolInstallation>,
-    ) -> Result<PreparedEditorSourceToolContent, EditorSourceToolContentError> {
-        self.authoring_edit_session()
-            .map_err(|_| EditorSourceToolContentError::Closing)?
-            .prepare_source_tool_content_management(basis, directory, installation)
-    }
-
-    pub fn prepare_source_tool_content_adoption(
-        &self,
-        basis: &EditorSourceToolContentBasis,
+        basis: &EditorSourceToolSelectionBasis,
+        project: nara::fs::DirectoryCapability,
         installation: &[u8; 32],
-        paths: &[&str],
-    ) -> Result<PreparedEditorSourceToolContent, EditorSourceToolContentError> {
+        member: &str,
+        destination: &str,
+    ) -> Result<PreparedEditorSourceToolTemplateImport, EditorSourceToolTemplateImportError> {
         self.authoring_edit_session()
-            .map_err(|_| EditorSourceToolContentError::Closing)?
-            .prepare_source_tool_content_adoption(basis, installation, paths)
+            .map_err(|_| EditorSourceToolTemplateImportError::Closing)?
+            .prepare_source_tool_template_import(basis, project, installation, member, destination)
     }
 
-    pub fn prepare_source_tool_content_observation(
-        &self,
-        basis: &EditorSourceToolContentBasis,
-        installation: &[u8; 32],
-    ) -> Result<PreparedEditorSourceToolContent, EditorSourceToolContentError> {
-        self.authoring_edit_session()
-            .map_err(|_| EditorSourceToolContentError::Closing)?
-            .prepare_source_tool_content_observation(basis, installation)
-    }
-
-    pub fn prepare_source_tool_content_protection(
-        &self,
-        basis: &EditorSourceToolContentBasis,
-    ) -> Result<PreparedEditorSourceToolContent, EditorSourceToolContentError> {
-        self.state
-            .published()
-            .ok_or(EditorSourceToolContentError::Closing)?
-            .session
-            .prepare_source_tool_content_protection(basis)
-    }
-
-    pub fn commit_source_tool_content(
+    pub fn commit_source_tool_template_import(
         &mut self,
-        prepared: PreparedEditorSourceToolContent,
-    ) -> Result<EditorSourceToolAttemptId, EditorSourceToolContentError> {
+        prepared: PreparedEditorSourceToolTemplateImport,
+    ) -> Result<EditorSourceToolAttemptId, EditorSourceToolTemplateImportError> {
         let result = self
-            .state
-            .published_mut()
-            .ok_or(EditorSourceToolContentError::Closing)?
-            .session
-            .commit_source_tool_content(prepared);
+            .authoring_edit_session_mut()
+            .map_err(|_| EditorSourceToolTemplateImportError::Closing)?
+            .commit_source_tool_template_import(prepared);
         self.drive_editor_frame(Duration::ZERO, true, false);
         result
     }
 
-    pub fn reconcile_source_tool_content(
+    pub fn cancel_source_tool_template_import(
         &mut self,
-        basis: &EditorSourceToolContentBasis,
-    ) -> Result<EditorSourceToolAttemptId, EditorSourceToolContentError> {
+        attempt: &EditorSourceToolAttemptId,
+    ) -> Result<(), EditorSourceToolTemplateImportError> {
         let result = self
             .state
             .published_mut()
-            .ok_or(EditorSourceToolContentError::Closing)?
+            .ok_or(EditorSourceToolTemplateImportError::Closing)?
             .session
-            .reconcile_source_tool_content(basis);
+            .cancel_source_tool_template_import(attempt);
+        self.drive_editor_frame(Duration::ZERO, true, false);
+        result
+    }
+
+    /// Observes artifact inventory separately from executable selection and graph withdrawal.
+    pub fn source_tool_artifact_view(
+        &self,
+    ) -> Result<EditorSourceToolArtifactView, EditorSourceToolError> {
+        Ok(self
+            .state
+            .published()
+            .ok_or(EditorSourceToolError::Closing)?
+            .session
+            .source_tool_artifact_view())
+    }
+
+    pub fn prepare_source_tool_artifact_registration(
+        &self,
+        basis: &EditorSourceToolArtifactBasis,
+        installation: std::sync::Arc<EditorSourceToolInstallation>,
+    ) -> Result<PreparedEditorSourceToolArtifacts, EditorSourceToolArtifactError> {
+        self.authoring_edit_session()
+            .map_err(|_| EditorSourceToolArtifactError::Closing)?
+            .prepare_source_tool_artifact_registration(basis, installation)
+    }
+
+    pub fn prepare_source_tool_artifact_observation(
+        &self,
+        basis: &EditorSourceToolArtifactBasis,
+        installation: &[u8; 32],
+    ) -> Result<PreparedEditorSourceToolArtifacts, EditorSourceToolArtifactError> {
+        self.authoring_edit_session()
+            .map_err(|_| EditorSourceToolArtifactError::Closing)?
+            .prepare_source_tool_artifact_observation(basis, installation)
+    }
+
+    pub fn commit_source_tool_artifacts(
+        &mut self,
+        prepared: PreparedEditorSourceToolArtifacts,
+    ) -> Result<EditorSourceToolAttemptId, EditorSourceToolArtifactError> {
+        let result = self
+            .state
+            .published_mut()
+            .ok_or(EditorSourceToolArtifactError::Closing)?
+            .session
+            .commit_source_tool_artifacts(prepared);
+        self.drive_editor_frame(Duration::ZERO, true, false);
+        result
+    }
+
+    pub fn reconcile_source_tool_artifacts(
+        &mut self,
+        basis: &EditorSourceToolArtifactBasis,
+    ) -> Result<EditorSourceToolAttemptId, EditorSourceToolArtifactError> {
+        let result = self
+            .state
+            .published_mut()
+            .ok_or(EditorSourceToolArtifactError::Closing)?
+            .session
+            .reconcile_source_tool_artifacts(basis);
         self.drive_editor_frame(Duration::ZERO, true, false);
         result
     }

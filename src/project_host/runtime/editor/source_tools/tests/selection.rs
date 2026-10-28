@@ -20,7 +20,7 @@ fn desired(enabled: bool) -> EditorSourceToolDesiredSelection {
     EditorSourceToolDesiredSelection {
         installed: EditorSourceToolInstalledSelection {
             package: "test.finite-source-payload".into(),
-            directory: "tools/finite-source-payload".into(),
+            directory: ".nara/source-tools/artifacts/finite-source-payload".into(),
             installation: [1; 32],
             receipt: ContentDigest::from_parts(32, [2; 32]),
             manifest: ContentDigest::from_parts(64, [3; 32]),

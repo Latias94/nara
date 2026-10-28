@@ -30,6 +30,8 @@ prefabs/
 scripts/
 .nara/
   import-cache/
+  source-tools/
+    artifacts/
 ```
 
 Rules:
@@ -40,6 +42,12 @@ Rules:
 - `assets/` holds source assets.
 - `scenes/` and `prefabs/` hold data documents.
 - `.nara/import-cache/` holds generated import artifacts and records and should not be hand-authored.
+- `.nara/source-tools/artifacts/<installation-name>/` holds managed finite-tool artifacts,
+  required tool data and unimported templates. It is a fixed private ownership domain, not
+  ordinary editable project source. Explicit template import creates project-owned copies
+  outside it. Only that subtree has disposable-artifact semantics; other `.nara` facts remain
+  governed by their owners. Local/Git/Cargo source checkouts do not enter this disposal domain.
+  Ignore the generated artifact subtree in source control rather than ignoring all `.nara` facts.
 - AI-generated projects should be able to produce this layout without editor involvement.
 - The layout is conventional, not a hard requirement for embedded/library use.
 - `nara.toml` does not duplicate Cargo dependencies, version resolution, source lists, or lock

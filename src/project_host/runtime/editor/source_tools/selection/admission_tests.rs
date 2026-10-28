@@ -46,7 +46,7 @@ fn returned_session_only_probe_invalidates_original_durable_enable_before_admiss
             desired: EditorSourceToolDesiredSelection {
                 installed: EditorSourceToolInstalledSelection {
                     package: "test.finite-source-payload".into(),
-                    directory: "tools/finite-source-payload".into(),
+                    directory: ".nara/source-tools/artifacts/finite-source-payload".into(),
                     installation: [1; 32],
                     receipt: ContentDigest::of_bytes(b"receipt"),
                     manifest: ContentDigest::of_bytes(b"manifest"),

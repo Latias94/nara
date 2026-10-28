@@ -126,7 +126,6 @@ fn indexed_file_alias_cannot_replace_the_open_source_or_its_unsaved_history() {
                 ("prefabs/original.prefab.json", "prefabs/alias.prefab.json")
             }
         };
-        fs::hard_link(project.root.join(original), project.root.join(alias)).unwrap();
         let mut editor = open_generic_editor_with_ready_index(&project);
         let index = editor.project_source_index_snapshot().unwrap();
         let document = opened_document(editor.open_indexed_authoring_document(
@@ -134,6 +133,8 @@ fn indexed_file_alias_cannot_replace_the_open_source_or_its_unsaved_history() {
             original,
             kind,
         ));
+        fs::hard_link(project.root.join(original), project.root.join(alias)).unwrap();
+        let index = refresh_project_source_index(&mut editor);
         make_authoring_name_dirty(&mut editor, document, "unsaved");
         let before = editor.drive_editor_frame(Duration::ZERO);
         let result = editor.open_indexed_authoring_document(index, alias, kind);

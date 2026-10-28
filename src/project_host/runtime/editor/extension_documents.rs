@@ -37,6 +37,8 @@ pub enum EditorExtensionDocumentHostError {
     PublicationOpen,
     #[error("document source is already open")]
     SourceAlreadyOpen,
+    #[error("managed artifacts must be imported before opening an editable project copy")]
+    PrivateArtifactSource,
     #[error("the workspace is busy or closing")]
     Busy,
 }
@@ -54,7 +56,6 @@ pub(super) struct ExtensionPersistenceLane {
     pub(super) document: EditorDocumentId,
     pub(super) source: EditorDocumentSourceBinding,
     pub(super) host: RetainedHost<FilePublicationHost>,
-    pub(super) content_edited: bool,
     decode: DecodeDocument,
 }
 
@@ -90,12 +91,6 @@ impl EditorExtensionDocumentsHost {
 
     pub(super) fn lanes(&self) -> impl Iterator<Item = &ExtensionPersistenceLane> {
         self.lanes.values()
-    }
-
-    pub(super) fn record_content_edit(&mut self, document: EditorDocumentId) {
-        if let Some(lane) = self.lanes.get_mut(&document) {
-            lane.content_edited = true;
-        }
     }
 
     pub(super) fn retire(&mut self, document: EditorDocumentId) -> bool {
@@ -204,7 +199,6 @@ impl EditorProjectSession {
                 document,
                 source: binding,
                 host: publication,
-                content_edited: false,
                 decode,
             },
         );
@@ -216,6 +210,9 @@ impl EditorProjectSession {
 fn extension_source_error(error: SourceAdmissionError) -> EditorExtensionDocumentHostError {
     match error {
         SourceAdmissionError::AlreadyOpen => EditorExtensionDocumentHostError::SourceAlreadyOpen,
+        SourceAdmissionError::PrivateArtifact => {
+            EditorExtensionDocumentHostError::PrivateArtifactSource
+        }
         SourceAdmissionError::HostUnavailable => EditorExtensionDocumentHostError::Busy,
         SourceAdmissionError::SourceRead => EditorExtensionDocumentHostError::SourceRead,
     }

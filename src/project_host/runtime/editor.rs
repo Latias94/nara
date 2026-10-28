@@ -92,9 +92,10 @@ pub use source_tools::{
     EditorSourceToolInstalledMember, EditorSourceToolManagedError, EditorSourceToolManagedHost,
     EditorSourceToolManagedHostDigests, EditorSourceToolReleaseError,
     EditorSourceToolReleaseMember, EditorSourceToolReleaseMemberKind,
-    EditorSourceToolReleaseRequirement, PreparedEditorSourceToolContent,
+    EditorSourceToolReleaseRequirement, PreparedEditorSourceToolArtifacts,
     PreparedEditorSourceToolInstallations, PreparedEditorSourceToolRelease,
-    PreparedEditorSourceToolSelection, PreparedEditorSourceToolWithdrawal,
+    PreparedEditorSourceToolSelection, PreparedEditorSourceToolTemplateImport,
+    PreparedEditorSourceToolWithdrawal,
 };
 #[cfg(feature = "runtime-ui")]
 use ui_authoring::EditorUiAuthoringProjectionCache;
@@ -817,7 +818,6 @@ struct EditorScenePersistenceLane {
     document: EditorDocumentId,
     host: persistence::RetainedHost<ScenePersistenceHost>,
     authoring_source: Option<crate::project_host::authoring::document::AuthoringDocumentSourceFact>,
-    content_edited: bool,
 }
 
 #[derive(Clone)]
@@ -827,7 +827,6 @@ struct EditorPrefabPersistenceLane {
     document: EditorDocumentId,
     host: persistence::RetainedHost<PrefabPersistenceHost>,
     authoring_source: Option<crate::project_host::authoring::document::AuthoringDocumentSourceFact>,
-    content_edited: bool,
 }
 
 struct TrustedCompiledEditorLane {
@@ -1023,6 +1022,7 @@ impl Drop for EditorProjectSession {
         self.source_asset_import.cancel();
         self.prefab_conversion.cancel();
         self.source_tools.cancel();
+        self.source_tools.cancel_template_import();
         self.cancel_pending_document_open();
     }
 }
@@ -1037,19 +1037,7 @@ impl EditorProjectSession {
     #[doc(hidden)]
     pub fn advance_close(&mut self) -> EditorProjectCloseProgress {
         self.source_tools.cancel();
-        if !self.closing {
-            self.advance_source_tool_content();
-            if !self.source_tool_content_ready_for_close() {
-                return EditorProjectCloseProgress::Incomplete {
-                    task_shutdown: self.session_task_shutdown(&TaskShutdownReport::default()),
-                    file_cleanup_pending: true,
-                    play_cleanup_pending: self.trusted_compiled().is_some_and(|lane| {
-                        !matches!(lane.runtime_owner, EditorRuntimeOwnerState::Empty)
-                            || lane.runtime_host.has_runtime_custody()
-                    }),
-                };
-            }
-        }
+        self.source_tools.cancel_template_import();
         self.closing = true;
         self.schema_owner_adoption.cancel();
         self.advance_schema_owner_adoption();
@@ -1545,6 +1533,17 @@ impl EditorProjectSession {
                 settings.paths.scenes.as_str(),
                 startup.as_str()
             ));
+            if source_tools::is_artifact_source_path(&startup_project_path) {
+                return Err(editor_open_error("project.editor.private-artifact-source"));
+            }
+            project_root
+                .strict_read_only()
+                .map_err(|_| editor_open_error("project.editor.startup-source-policy"))?
+                .open_file_exact(
+                    &RelativePath::new(startup_project_path.as_ref())
+                        .map_err(|_| editor_open_error("project.editor.startup-scene-missing"))?,
+                )
+                .map_err(|_| editor_open_error("project.editor.startup-source-spelling"))?;
             let startup_source_key = snapshot.startup_native_source().key().clone();
             let crate::project_host::authoring::AdmittedAuthoringDocument::Scene {
                 source: startup_authoring_source,
@@ -1602,7 +1601,6 @@ impl EditorProjectSession {
                         project_path: startup_project_path,
                         source_key: startup_source_key,
                         authoring_source: Some(startup_authoring_source),
-                        content_edited: false,
                         document,
                         host: authoring_runtime
                             .host_custody()
@@ -1744,8 +1742,12 @@ impl EditorProjectSession {
 
         let prefabs_path = RelativePath::new(candidate.settings().paths.prefabs.as_str())
             .map_err(|_| editor_open_error("project.editor.prefabs-path-invalid"))?;
+        project_root
+            .strict_read_only()
+            .and_then(|root| root.open_directory_exact(&prefabs_path))
+            .map_err(|_| editor_open_error("project.editor.prefabs-open-failed"))?;
         let prefab_root = project_root
-            .open_directory(&prefabs_path)
+            .open_directory_exact(&prefabs_path)
             .map_err(|_| editor_open_error("project.editor.prefabs-open-failed"))?;
 
         let loader = ProjectContentLoader::new(project_root.share())
@@ -1797,6 +1799,17 @@ impl EditorProjectSession {
                 candidate.settings().paths.scenes.as_str(),
                 startup.as_str()
             ));
+            if source_tools::is_artifact_source_path(&startup_project_path) {
+                return Err(editor_open_error("project.editor.private-artifact-source"));
+            }
+            project_root
+                .strict_read_only()
+                .map_err(|_| editor_open_error("project.editor.startup-source-policy"))?
+                .open_file_exact(
+                    &RelativePath::new(startup_project_path.as_ref())
+                        .map_err(|_| editor_open_error("project.editor.startup-scene-missing"))?,
+                )
+                .map_err(|_| editor_open_error("project.editor.startup-source-spelling"))?;
             let opened = ScenePersistenceHost::open(
                 &scenes,
                 startup.as_str(),
@@ -1834,7 +1847,6 @@ impl EditorProjectSession {
                         project_path: startup_project_path,
                         source_key: snapshot.selected_scene_source_key().clone(),
                         authoring_source: None,
-                        content_edited: false,
                         document,
                         host: authoring_runtime
                             .host_custody()
@@ -2744,22 +2756,6 @@ impl EditorProjectSession {
                 "project.editor.workspace-intent-pending",
             );
         }
-        let edit = match &command {
-            EditorWorkspaceCommand::ApplyInspectorCommand { document, .. }
-            | EditorWorkspaceCommand::ApplyScenePatch { document, .. }
-            | EditorWorkspaceCommand::ApplyPrefabPatch { document, .. }
-            | EditorWorkspaceCommand::ApplyAuthoringFieldEdit { document, .. }
-            | EditorWorkspaceCommand::ComposeScene { document, .. }
-            | EditorWorkspaceCommand::ComposePrefab { document, .. }
-            | EditorWorkspaceCommand::Undo { document, .. }
-            | EditorWorkspaceCommand::Redo { document, .. } => {
-                self.capture_source_tool_content_edit(*document)
-            }
-            EditorWorkspaceCommand::CloseDocument { .. }
-            | EditorWorkspaceCommand::SetActiveDocument { .. }
-            | EditorWorkspaceCommand::SelectEntity { .. }
-            | EditorWorkspaceCommand::MarkExternalChanged { .. } => None,
-        };
         let selected_document = match &command {
             EditorWorkspaceCommand::SetActiveDocument { document } => Some(*document),
             _ => None,
@@ -2770,9 +2766,6 @@ impl EditorProjectSession {
                 .workspace
                 .apply_command(lane.plan.schema_validation().registry(), command),
         };
-        if report.applied {
-            self.record_source_tool_content_edit(edit);
-        }
         if report.applied
             && selected_document.is_some_and(|document| {
                 self.workspace.document_kind(document) == Some(EditorDocumentKind::Scene)
@@ -3296,23 +3289,11 @@ impl EditorProjectSession {
     }
 
     fn finish_workspace_intent_document(&mut self) {
-        self.advance_source_tool_content();
         let Some(pending) = self.pending_workspace_intent.take() else {
             return;
         };
         match pending {
             PendingWorkspaceIntent::CloseDocument(pending) => {
-                if let Some(reason) =
-                    self.source_tool_content_persistence_rejection(pending.document)
-                {
-                    self.workspace_intent_result = Some(EditorWorkspaceIntentResult::Rejected {
-                        intent: EditorWorkspaceIntent::CloseDocument {
-                            document: pending.document,
-                        },
-                        reason: EditorWorkspaceIntentRejection::PersistenceRejected(reason),
-                    });
-                    return;
-                }
                 let scene_clean = self.scene_lanes.get(&pending.document).is_none_or(|lane| {
                     lane.host
                         .try_with(|host| host.retry_cleanup())

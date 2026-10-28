@@ -135,6 +135,10 @@ fn install_variant_in_project(
         EditorSourceToolInstallationOutcome::Published(installation) => installation,
         other => panic!("Actual project-root release publication failed: {other:?}"),
     };
+    assert_eq!(
+        installation.project_path(),
+        format!(".nara/source-tools/artifacts/{destination}")
+    );
     let receipt = installation.receipt_digest();
     let inspected =
         EditorSourceToolInstallationInspection::read(installation.directory(), receipt).unwrap();
@@ -286,7 +290,11 @@ fn csharp_installed_source_tool_selection_persists_v1_switches_v2_and_disables()
     let v1_a = host.approve_installation(v1_a).unwrap();
 
     assert!(matches!(
-        PreparedEditorSourceToolSelection::new(root.share(), "installed-v1-b", v1_a.clone()),
+        PreparedEditorSourceToolSelection::new(
+            root.share(),
+            ".nara/source-tools/artifacts/installed-v1-b",
+            v1_a.clone(),
+        ),
         Err(EditorSourceToolSelectionError::RootMismatch)
     ));
 
@@ -307,7 +315,7 @@ fn csharp_installed_source_tool_selection_persists_v1_switches_v2_and_disables()
     let cancelled = editor
         .prepare_installed_source_tool_selection(
             root.share(),
-            "installed-v1-a",
+            ".nara/source-tools/artifacts/installed-v1-a",
             v1_a_receipt,
             &host,
         )
@@ -347,14 +355,17 @@ fn csharp_installed_source_tool_selection_persists_v1_switches_v2_and_disables()
     let prepared = editor
         .prepare_installed_source_tool_selection(
             root.share(),
-            "installed-v1-a",
+            ".nara/source-tools/artifacts/installed-v1-a",
             v1_a_receipt,
             &host,
         )
         .unwrap();
     let prepared_selection = prepared.selection().clone();
     assert_eq!(prepared_selection.package.as_ref(), "trial.enemy-stats");
-    assert_eq!(prepared_selection.directory.as_ref(), "installed-v1-a");
+    assert_eq!(
+        prepared_selection.directory.as_ref(),
+        ".nara/source-tools/artifacts/installed-v1-a"
+    );
     let started = Instant::now();
     let attempt = editor
         .enable_installed_source_tool(&cancelled.basis, prepared)
@@ -370,7 +381,10 @@ fn csharp_installed_source_tool_selection_persists_v1_switches_v2_and_disables()
     ));
     let v1_selection = enabled.desired.clone().unwrap();
     assert!(v1_selection.enabled);
-    assert_eq!(v1_selection.installed.directory.as_ref(), "installed-v1-a");
+    assert_eq!(
+        v1_selection.installed.directory.as_ref(),
+        ".nara/source-tools/artifacts/installed-v1-a"
+    );
     assert_eq!(v1_selection.installed, prepared_selection);
     assert_eq!(enabled.active_origin, Some(v1_selection.installed.clone()));
     let active_view = editor.source_tool_view();
@@ -386,12 +400,15 @@ fn csharp_installed_source_tool_selection_persists_v1_switches_v2_and_disables()
         let prepared = editor
             .prepare_installed_source_tool_selection(
                 root.share(),
-                "installed-v2",
+                ".nara/source-tools/artifacts/installed-v2",
                 v2_receipt,
                 &host,
             )
             .unwrap();
-        let path = project.root().join("installed-v2").join(member);
+        let path = project
+            .root()
+            .join(".nara/source-tools/artifacts/installed-v2")
+            .join(member);
         let original = std::fs::read(&path).unwrap();
         let mut changed = original.clone();
         changed.push(b'\n');
@@ -423,7 +440,7 @@ fn csharp_installed_source_tool_selection_persists_v1_switches_v2_and_disables()
     let invalid_prepared = editor
         .prepare_installed_source_tool_selection(
             root.share(),
-            "installed-invalid",
+            ".nara/source-tools/artifacts/installed-invalid",
             invalid_receipt,
             &host,
         )
@@ -474,7 +491,12 @@ fn csharp_installed_source_tool_selection_persists_v1_switches_v2_and_disables()
     );
     let proposal_review = started.elapsed();
     let prepared = editor
-        .prepare_installed_source_tool_selection(root.share(), "installed-v2", v2_receipt, &host)
+        .prepare_installed_source_tool_selection(
+            root.share(),
+            ".nara/source-tools/artifacts/installed-v2",
+            v2_receipt,
+            &host,
+        )
         .unwrap();
     let selection_basis = editor.source_tool_selection_view().basis.clone();
     let started = Instant::now();
@@ -491,7 +513,10 @@ fn csharp_installed_source_tool_selection_persists_v1_switches_v2_and_disables()
     ));
     let v2_selection = switched.desired.clone().unwrap();
     assert!(v2_selection.enabled);
-    assert_eq!(v2_selection.installed.directory.as_ref(), "installed-v2");
+    assert_eq!(
+        v2_selection.installed.directory.as_ref(),
+        ".nara/source-tools/artifacts/installed-v2"
+    );
     assert_eq!(switched.active_origin, Some(v2_selection.installed.clone()));
     assert_ne!(switched.active_origin, Some(v1_selection.installed.clone()));
     assert!(editor.source_tool_view().active.is_some());
@@ -544,8 +569,10 @@ fn csharp_installed_source_tool_selection_persists_v1_switches_v2_and_disables()
     );
     assert_eq!(reopened_selection.desired, Some(retained));
     assert!(reopened_selection.active_origin.is_none());
-    assert!(reopened.source_tool_view().active.is_none());
-    assert!(!reopened.source_tool_view().probing);
+    let observed_tool = reopened.source_tool_view();
+    assert!(observed_tool.active.is_none() && !observed_tool.probing);
+    assert!(!observed_tool.working && !observed_tool.retiring);
+    assert!(observed_tool.attempt.is_none() && observed_tool.request.is_none());
     assert_value(
         &reopened,
         document,
@@ -556,7 +583,12 @@ fn csharp_installed_source_tool_selection_persists_v1_switches_v2_and_disables()
     );
 
     let prepared = reopened
-        .prepare_installed_source_tool_selection(root.share(), "installed-v2", v2_receipt, &host)
+        .prepare_installed_source_tool_selection(
+            root.share(),
+            ".nara/source-tools/artifacts/installed-v2",
+            v2_receipt,
+            &host,
+        )
         .unwrap();
     let selection_basis = reopened_selection.basis.clone();
     let attempt = reopened

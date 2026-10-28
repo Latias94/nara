@@ -2,8 +2,8 @@
 
 #![cfg(all(target_os = "windows", target_arch = "x86_64", target_env = "msvc"))]
 
-#[path = "installed_graph/content_edits.rs"]
-mod content_edits;
+#[path = "installed_graph/template_import.rs"]
+mod template_import;
 
 use std::{
     collections::BTreeMap,
@@ -28,11 +28,11 @@ use nara_engine::{
 use nara_reflect::{ComponentSchemaVersion, ComponentTypeId, ComponentValue};
 use nara_scene::{SceneComponentRecord, SceneDocument, SceneEntityRecord};
 use nara_tooling::{
-    EditorDocumentId, EditorSourceToolAttemptId, EditorSourceToolContentError,
-    EditorSourceToolContentInstallation, EditorSourceToolContentMember,
-    EditorSourceToolContentObservation, EditorSourceToolContentOutcome,
-    EditorSourceToolContentPhase, EditorSourceToolContentRole, EditorSourceToolContentView,
-    EditorSourceToolError, EditorSourceToolInstallationRequest, EditorSourceToolInstalledEntry,
+    EditorDocumentId, EditorSourceToolArtifactError, EditorSourceToolArtifactInstallation,
+    EditorSourceToolArtifactMember, EditorSourceToolArtifactObservation,
+    EditorSourceToolArtifactOutcome, EditorSourceToolArtifactPhase, EditorSourceToolArtifactRole,
+    EditorSourceToolArtifactView, EditorSourceToolAttemptId, EditorSourceToolError,
+    EditorSourceToolInstallationRequest, EditorSourceToolInstalledEntry,
     EditorSourceToolInstalledSelection, EditorSourceToolIntent, EditorSourceToolRequestId,
     EditorSourceToolRequirementBinding, EditorSourceToolSelectionError,
     EditorSourceToolSelectionOutcome, EditorSourceToolSelectionPhase,
@@ -55,12 +55,12 @@ const PACKAGE_C: &str = "trial.enemy-stats-independent";
 const STATS: &str = "trial.enemy.EnemyStats";
 const NAME: &str = "nara.scene.Name";
 const RECORD_PATH: &str = ".nara/source-tools/selection.json";
-const CONTENT_PATH: &str = ".nara/source-tools/content.json";
+const ARTIFACT_PATH: &str = ".nara/source-tools/artifacts.json";
 const SAMPLE: &str = "samples/readme.txt";
 const TIMEOUT: Duration = Duration::from_secs(30);
 
 #[test]
-fn csharp_installed_content_retains_adoption_and_observed_modification_after_withdrawal_and_open() {
+fn csharp_artifact_inventory_observes_changes_without_mutating_managed_tool_history() {
     let (_template_directory, template) = installed_variant("V1");
     let project = Project::new(
         &schema_bundle(template.release().schema_owner()),
@@ -68,29 +68,29 @@ fn csharp_installed_content_retains_adoption_and_observed_modification_after_wit
         "json",
     );
     let root = project_root(&project);
-    let (adopted, adopted_owner) = install_owned(
+    let (primary, primary_owner) = install_owned(
         &root,
         template.release(),
-        "installed-adopted",
+        "installed-primary",
         PACKAGE_A,
         None,
     );
-    let (modified, modified_owner) = install_owned(
+    let (secondary, secondary_owner) = install_owned(
         &root,
         template.release(),
-        "installed-modified",
+        "installed-secondary",
         PACKAGE_A,
         None,
     );
-    assert_eq!(adopted.installed.manifest, modified.installed.manifest);
+    assert_eq!(primary.installed.manifest, secondary.installed.manifest);
     assert_ne!(
-        adopted.installed.installation,
-        modified.installed.installation
+        primary.installed.installation,
+        secondary.installed.installation
     );
-    let mut expected_adopted = content_installation(&adopted, &adopted_owner);
-    let mut expected_modified = content_installation(&modified, &modified_owner);
+    let expected_primary = artifact_installation(&primary, &primary_owner);
+    let mut expected_secondary = artifact_installation(&secondary, &secondary_owner);
     let mut installed_bytes = BTreeMap::new();
-    for (entry, owner) in [(&adopted, &adopted_owner), (&modified, &modified_owner)] {
+    for (entry, owner) in [(&primary, &primary_owner), (&secondary, &secondary_owner)] {
         for member in owner.members() {
             let path = format!("{}/{}", entry.installed.directory, member.path());
             let bytes = fs::read(project.root().join(&path)).unwrap();
@@ -103,69 +103,65 @@ fn csharp_installed_content_retains_adoption_and_observed_modification_after_wit
     let document = editor.current_frame().workspace().active_document.unwrap();
     let source_basis = editor.document_query_basis(document).unwrap();
     let selection = settle_selection(&mut editor);
-    let content = settle_content(&mut editor);
-    assert_eq!(content.phase, EditorSourceToolContentPhase::Idle);
+    let content = settle_artifacts(&mut editor);
+    assert_eq!(content.phase, EditorSourceToolArtifactPhase::Idle);
     assert!(content.error.is_none());
     assert!(matches!(
         content.operation.as_ref().unwrap().outcome,
-        Some(EditorSourceToolContentOutcome::Observed)
+        Some(EditorSourceToolArtifactOutcome::Observed)
     ));
     assert!(content.installations.is_empty());
     assert!(selection.installed.is_empty());
-    assert!(!project.root().join(CONTENT_PATH).exists());
+    assert!(!project.root().join(ARTIFACT_PATH).exists());
     assert_no_execution(&editor);
 
     let cancelled = editor
-        .prepare_source_tool_content_management(
-            &content.basis,
-            adopted.installed.directory.as_ref(),
-            Arc::clone(&adopted_owner),
-        )
+        .prepare_source_tool_artifact_registration(&content.basis, Arc::clone(&primary_owner))
         .unwrap();
-    assert_content_installations(
+    assert_artifact_installations(
         &cancelled.installations(),
-        std::slice::from_ref(&expected_adopted),
+        std::slice::from_ref(&expected_primary),
     );
     drop(cancelled);
-    assert_eq!(editor.source_tool_content_view(), content);
+    assert_eq!(editor.source_tool_artifact_view(), content);
     assert_eq!(editor.source_tool_selection_view(), selection);
     assert_eq!(editor.document_query_basis(document).unwrap(), source_basis);
     assert_history(&editor, document, 0, 0);
     assert_no_execution(&editor);
-    assert!(!project.root().join(CONTENT_PATH).exists());
+    assert!(!project.root().join(ARTIFACT_PATH).exists());
     assert!(!project.root().join(RECORD_PATH).exists());
     assert_eq!(fs::read(project.scene_path()).unwrap(), source_bytes);
     assert_installed_bytes(&project, &installed_bytes);
 
     let prepared = editor
-        .prepare_source_tool_content_management(
-            &content.basis,
-            adopted.installed.directory.as_ref(),
-            Arc::clone(&adopted_owner),
-        )
+        .prepare_source_tool_artifact_registration(&content.basis, Arc::clone(&primary_owner))
         .unwrap();
-    let attempt = editor.commit_source_tool_content(prepared).unwrap();
-    let managed = settle_content(&mut editor);
-    assert_content_outcome(&managed, &attempt, EditorSourceToolContentOutcome::Managed);
-    assert_content_installations(
+    let attempt = editor.commit_source_tool_artifacts(prepared).unwrap();
+    let managed = settle_artifacts(&mut editor);
+    assert_artifact_outcome(
+        &managed,
+        &attempt,
+        EditorSourceToolArtifactOutcome::Registered,
+    );
+    assert_artifact_installations(
         &managed.installations,
-        std::slice::from_ref(&expected_adopted),
+        std::slice::from_ref(&expected_primary),
     );
     let prepared = editor
-        .prepare_source_tool_content_management(
-            &managed.basis,
-            modified.installed.directory.as_ref(),
-            Arc::clone(&modified_owner),
-        )
+        .prepare_source_tool_artifact_registration(&managed.basis, Arc::clone(&secondary_owner))
         .unwrap();
-    let attempt = editor.commit_source_tool_content(prepared).unwrap();
-    let managed = settle_content(&mut editor);
-    assert_content_outcome(&managed, &attempt, EditorSourceToolContentOutcome::Managed);
-    assert_content_installations(
-        &managed.installations,
-        &[expected_adopted.clone(), expected_modified.clone()],
+    let attempt = editor.commit_source_tool_artifacts(prepared).unwrap();
+    let managed = settle_artifacts(&mut editor);
+    assert_artifact_outcome(
+        &managed,
+        &attempt,
+        EditorSourceToolArtifactOutcome::Registered,
     );
-    let managed_bytes = fs::read(project.root().join(CONTENT_PATH)).unwrap();
+    assert_artifact_installations(
+        &managed.installations,
+        &[expected_primary.clone(), expected_secondary.clone()],
+    );
+    let managed_bytes = fs::read(project.root().join(ARTIFACT_PATH)).unwrap();
     assert_eq!(editor.source_tool_selection_view(), selection);
     assert_eq!(editor.document_query_basis(document).unwrap(), source_basis);
     assert_history(&editor, document, 0, 0);
@@ -179,7 +175,7 @@ fn csharp_installed_content_retains_adoption_and_observed_modification_after_wit
         .prepare_source_tool_installations(
             &selection.basis,
             root.share(),
-            &[request(&adopted), request(&modified)],
+            &[request(&primary), request(&secondary)],
         )
         .unwrap();
     let attempt = editor.register_source_tool_installations(prepared).unwrap();
@@ -189,15 +185,15 @@ fn csharp_installed_content_retains_adoption_and_observed_modification_after_wit
         Some(operation) if operation.attempt == attempt
             && operation.outcome == Some(EditorSourceToolSelectionOutcome::Registered)
     ));
-    assert_installations(&registered.installed, &[adopted.clone(), modified.clone()]);
-    assert_eq!(editor.source_tool_content_view(), managed);
+    assert_installations(&registered.installed, &[primary.clone(), secondary.clone()]);
+    assert_eq!(editor.source_tool_artifact_view(), managed);
     assert_no_execution(&editor);
     let host = approved_managed_host();
     let prepared = editor
         .prepare_installed_source_tool_selection(
             root.share(),
-            adopted.installed.directory.as_ref(),
-            adopted.installed.receipt,
+            primary.installed.directory.as_ref(),
+            primary.installed.receipt,
             &host,
         )
         .unwrap();
@@ -210,7 +206,7 @@ fn csharp_installed_content_retains_adoption_and_observed_modification_after_wit
         Some(operation) if operation.attempt == attempt
             && operation.outcome == Some(EditorSourceToolSelectionOutcome::Enabled)
     ));
-    assert_eq!(enabled.active_origin.as_ref(), Some(&adopted.installed));
+    assert_eq!(enabled.active_origin.as_ref(), Some(&primary.installed));
     let active = editor.source_tool_view();
     assert_eq!(active.attempt.as_ref(), Some(&attempt));
     assert!(active.attempt_error.is_none(), "{active:?}");
@@ -235,60 +231,50 @@ fn csharp_installed_content_retains_adoption_and_observed_modification_after_wit
     let reviewed_patch = editor.source_tool_review().unwrap().patch().clone();
     let reviewed_inverse = editor.source_tool_review().unwrap().inverse().clone();
     let selection_bytes = fs::read(project.root().join(RECORD_PATH)).unwrap();
-    // Keep this exact pre-adoption successor; committing it later must not rebase its facts.
+    // Retain the original candidate; a later inventory observation must not rebase it.
     let stale = editor
-        .prepare_source_tool_content_observation(&managed.basis, &adopted.installed.installation)
+        .prepare_source_tool_artifact_observation(&managed.basis, &primary.installed.installation)
         .unwrap();
     let stale_installations = stale.installations();
     let prepared = editor
-        .prepare_source_tool_content_adoption(
-            &managed.basis,
-            &adopted.installed.installation,
-            &[SAMPLE],
-        )
+        .prepare_source_tool_artifact_observation(&managed.basis, &primary.installed.installation)
         .unwrap();
-    assert_eq!(editor.source_tool_content_view(), managed);
+    assert_eq!(editor.source_tool_artifact_view(), managed);
     assert_eq!(
-        fs::read(project.root().join(CONTENT_PATH)).unwrap(),
+        fs::read(project.root().join(ARTIFACT_PATH)).unwrap(),
         managed_bytes
     );
     assert_installed_bytes(&project, &installed_bytes);
-    let attempt = editor.commit_source_tool_content(prepared).unwrap();
-    let protected = settle_content(&mut editor);
-    assert_content_outcome(
-        &protected,
+    let attempt = editor.commit_source_tool_artifacts(prepared).unwrap();
+    let inspected = settle_artifacts(&mut editor);
+    assert_artifact_outcome(
+        &inspected,
         &attempt,
-        EditorSourceToolContentOutcome::Adopted,
+        EditorSourceToolArtifactOutcome::Observed,
     );
-    expected_adopted
-        .members
-        .iter_mut()
-        .find(|member| member.path.as_ref() == SAMPLE)
-        .unwrap()
-        .adopted = true;
-    assert_content_installations(
-        &protected.installations,
-        &[expected_adopted.clone(), expected_modified.clone()],
+    assert_artifact_installations(
+        &inspected.installations,
+        &[expected_primary.clone(), expected_secondary.clone()],
     );
-    assert_ne!(protected.basis, managed.basis);
+    assert_ne!(inspected.basis, managed.basis);
     assert_eq!(stale.installations(), stale_installations);
     assert_eq!(stale_installations.len(), 2);
     assert!(
         stale_installations
             .iter()
             .flat_map(|installation| &installation.members)
-            .all(|member| !member.adopted && !member.modified)
+            .all(|member| member.observation == EditorSourceToolArtifactObservation::Present)
     );
-    let adopted_bytes = fs::read(project.root().join(CONTENT_PATH)).unwrap();
-    assert_ne!(adopted_bytes, managed_bytes);
+    let observed_bytes = fs::read(project.root().join(ARTIFACT_PATH)).unwrap();
+    assert_eq!(observed_bytes, managed_bytes);
     assert!(matches!(
-        editor.commit_source_tool_content(stale),
-        Err(EditorSourceToolContentError::StaleBasis)
+        editor.commit_source_tool_artifacts(stale),
+        Err(EditorSourceToolArtifactError::StaleBasis)
     ));
-    assert_eq!(editor.source_tool_content_view(), protected);
+    assert_eq!(editor.source_tool_artifact_view(), inspected);
     assert_eq!(editor.source_tool_selection_view(), enabled);
     let mut expected_tool = reviewed_tool;
-    expected_tool.content = Some(protected.clone());
+    expected_tool.artifacts = Some(inspected.clone());
     assert_eq!(editor.source_tool_view(), expected_tool);
     assert_eq!(editor.source_tool_review().unwrap().request(), &attached);
     assert_eq!(
@@ -303,8 +289,8 @@ fn csharp_installed_content_retains_adoption_and_observed_modification_after_wit
     assert_history(&editor, document, 0, 0);
     assert_eq!(fs::read(project.scene_path()).unwrap(), source_bytes);
     assert_eq!(
-        fs::read(project.root().join(CONTENT_PATH)).unwrap(),
-        adopted_bytes
+        fs::read(project.root().join(ARTIFACT_PATH)).unwrap(),
+        observed_bytes
     );
     assert_eq!(
         fs::read(project.root().join(RECORD_PATH)).unwrap(),
@@ -329,13 +315,13 @@ fn csharp_installed_content_retains_adoption_and_observed_modification_after_wit
     let edited_tool = editor.source_tool_view();
 
     // Add user files only after the actual command's exact release checks have completed.
-    let unknown = "installed-modified/samples/user-notes.txt";
-    let user_bytes = b"Project notes outside the declared release inventory.\n".to_vec();
-    fs::write(project.root().join(unknown), &user_bytes).unwrap();
+    let unknown = format!("{}/samples/user-notes.txt", secondary.installed.directory);
+    let user_bytes = b"Unlisted notes outside the declared artifact inventory.\n".to_vec();
+    fs::write(project.root().join(&unknown), &user_bytes).unwrap();
     installed_bytes.insert(unknown.into(), user_bytes);
-    let sample = format!("{}/{}", modified.installed.directory, SAMPLE);
+    let sample = format!("{}/{}", secondary.installed.directory, SAMPLE);
     let baseline = installed_bytes[&sample].clone();
-    let changed = b"Project-authored EnemyStats sample.\n".to_vec();
+    let changed = b"Externally changed EnemyStats artifact template.\n".to_vec();
     assert_ne!(
         ContentDigest::of_bytes(&changed),
         ContentDigest::of_bytes(&baseline)
@@ -343,57 +329,69 @@ fn csharp_installed_content_retains_adoption_and_observed_modification_after_wit
     fs::write(project.root().join(&sample), &changed).unwrap();
     installed_bytes.insert(sample.clone(), changed);
     let prepared = editor
-        .prepare_source_tool_content_observation(&protected.basis, &modified.installed.installation)
+        .prepare_source_tool_artifact_observation(
+            &inspected.basis,
+            &secondary.installed.installation,
+        )
         .unwrap();
-    assert_eq!(editor.source_tool_content_view(), protected);
+    assert_eq!(editor.source_tool_artifact_view(), inspected);
     assert_eq!(
-        fs::read(project.root().join(CONTENT_PATH)).unwrap(),
-        adopted_bytes
+        fs::read(project.root().join(ARTIFACT_PATH)).unwrap(),
+        observed_bytes
     );
     assert_installed_bytes(&project, &installed_bytes);
-    let attempt = editor.commit_source_tool_content(prepared).unwrap();
-    let observed = settle_content(&mut editor);
-    assert_content_outcome(
+    let attempt = editor.commit_source_tool_artifacts(prepared).unwrap();
+    let observed = settle_artifacts(&mut editor);
+    assert_artifact_outcome(
         &observed,
         &attempt,
-        EditorSourceToolContentOutcome::Observed,
+        EditorSourceToolArtifactOutcome::Observed,
     );
-    expected_modified
+    expected_secondary
         .members
         .iter_mut()
         .find(|member| member.path.as_ref() == SAMPLE)
         .unwrap()
-        .modified = true;
-    assert_content_installations(
+        .observation = EditorSourceToolArtifactObservation::Changed;
+    assert_artifact_installations(
         &observed.installations,
-        &[expected_adopted.clone(), expected_modified.clone()],
+        &[expected_primary.clone(), expected_secondary.clone()],
     );
-    let modified_bytes = fs::read(project.root().join(CONTENT_PATH)).unwrap();
-    assert_ne!(modified_bytes, adopted_bytes);
+    let changed_bytes = fs::read(project.root().join(ARTIFACT_PATH)).unwrap();
+    assert_ne!(changed_bytes, observed_bytes);
     assert_installed_bytes(&project, &installed_bytes);
     fs::write(project.root().join(&sample), &baseline).unwrap();
     installed_bytes.insert(sample, baseline);
     let prepared = editor
-        .prepare_source_tool_content_observation(&observed.basis, &modified.installed.installation)
+        .prepare_source_tool_artifact_observation(
+            &observed.basis,
+            &secondary.installed.installation,
+        )
         .unwrap();
-    let attempt = editor.commit_source_tool_content(prepared).unwrap();
-    let restored = settle_content(&mut editor);
-    assert_content_outcome(
+    let attempt = editor.commit_source_tool_artifacts(prepared).unwrap();
+    let restored = settle_artifacts(&mut editor);
+    expected_secondary
+        .members
+        .iter_mut()
+        .find(|member| member.path.as_ref() == SAMPLE)
+        .unwrap()
+        .observation = EditorSourceToolArtifactObservation::Present;
+    assert_artifact_outcome(
         &restored,
         &attempt,
-        EditorSourceToolContentOutcome::Observed,
+        EditorSourceToolArtifactOutcome::Observed,
     );
-    assert_content_installations(
+    assert_artifact_installations(
         &restored.installations,
-        &[expected_adopted.clone(), expected_modified.clone()],
+        &[expected_primary.clone(), expected_secondary.clone()],
     );
     assert_eq!(
-        fs::read(project.root().join(CONTENT_PATH)).unwrap(),
-        modified_bytes
+        fs::read(project.root().join(ARTIFACT_PATH)).unwrap(),
+        observed_bytes
     );
     assert_eq!(editor.source_tool_selection_view(), enabled);
     let mut expected_tool = edited_tool;
-    expected_tool.content = Some(restored.clone());
+    expected_tool.artifacts = Some(restored.clone());
     assert_eq!(editor.source_tool_view(), expected_tool);
     assert_eq!(editor.document_query_basis(document).unwrap(), edited_basis);
     assert_stats(&editor, document, 125);
@@ -402,7 +400,7 @@ fn csharp_installed_content_retains_adoption_and_observed_modification_after_wit
     assert_installed_bytes(&project, &installed_bytes);
 
     let mut withdrawn = enabled;
-    for entry in [&adopted, &modified] {
+    for entry in [&primary, &secondary] {
         let prepared = editor
             .prepare_source_tool_withdrawal(
                 &withdrawn.basis,
@@ -419,14 +417,14 @@ fn csharp_installed_content_retains_adoption_and_observed_modification_after_wit
                 && operation.outcome == Some(EditorSourceToolSelectionOutcome::Withdrawn)
         ));
         settle_tool(&mut editor);
-        assert_eq!(editor.source_tool_content_view(), restored);
+        assert_eq!(editor.source_tool_artifact_view(), restored);
         assert_eq!(editor.document_query_basis(document).unwrap(), edited_basis);
         assert_stats(&editor, document, 125);
         assert_history(&editor, document, 2, 0);
         assert_eq!(fs::read(project.scene_path()).unwrap(), source_bytes);
         assert_eq!(
-            fs::read(project.root().join(CONTENT_PATH)).unwrap(),
-            modified_bytes
+            fs::read(project.root().join(ARTIFACT_PATH)).unwrap(),
+            observed_bytes
         );
         assert_installed_bytes(&project, &installed_bytes);
         assert_no_execution(&editor);
@@ -456,17 +454,17 @@ fn csharp_installed_content_retains_adoption_and_observed_modification_after_wit
     assert_ne!(saved, original());
     let saved_bytes = fs::read(project.scene_path()).unwrap();
     let graph_bytes = fs::read(project.root().join(RECORD_PATH)).unwrap();
-    assert_eq!(editor.source_tool_content_view(), restored);
+    assert_eq!(editor.source_tool_artifact_view(), restored);
     assert_eq!(
-        fs::read(project.root().join(CONTENT_PATH)).unwrap(),
-        modified_bytes
+        fs::read(project.root().join(ARTIFACT_PATH)).unwrap(),
+        observed_bytes
     );
     assert_installed_bytes(&project, &installed_bytes);
     close(&mut editor);
     assert_no_execution(&editor);
     drop(editor);
-    drop(adopted_owner);
-    drop(modified_owner);
+    drop(primary_owner);
+    drop(secondary_owner);
 
     let mut reopened = project.open();
     let document = reopened
@@ -475,21 +473,19 @@ fn csharp_installed_content_retains_adoption_and_observed_modification_after_wit
         .active_document
         .unwrap();
     let selection = settle_selection(&mut reopened);
-    let content = settle_content(&mut reopened);
+    let content = settle_artifacts(&mut reopened);
     assert!(selection.installed.is_empty());
     assert!(selection.desired.is_none());
     assert!(selection.active_origin.is_none());
-    assert_eq!(content.phase, EditorSourceToolContentPhase::Idle);
+    assert_eq!(content.phase, EditorSourceToolArtifactPhase::Idle);
     assert!(content.error.is_none());
     assert!(matches!(
         content.operation.as_ref().unwrap().outcome,
-        Some(EditorSourceToolContentOutcome::Observed)
+        Some(EditorSourceToolArtifactOutcome::Observed)
     ));
-    expected_adopted.creation_custody = false;
-    expected_modified.creation_custody = false;
-    assert_content_installations(
+    assert_artifact_installations(
         &content.installations,
-        &[expected_adopted, expected_modified],
+        &[expected_primary, expected_secondary],
     );
     assert_no_execution(&reopened);
     assert!(reopened.source_tool_view().attempt.is_none());
@@ -503,16 +499,16 @@ fn csharp_installed_content_retains_adoption_and_observed_modification_after_wit
         graph_bytes
     );
     assert_eq!(
-        fs::read(project.root().join(CONTENT_PATH)).unwrap(),
-        modified_bytes
+        fs::read(project.root().join(ARTIFACT_PATH)).unwrap(),
+        observed_bytes
     );
     assert_installed_bytes(&project, &installed_bytes);
     close(&mut reopened);
     assert_no_execution(&reopened);
     assert_eq!(fs::read(project.scene_path()).unwrap(), saved_bytes);
     assert_eq!(
-        fs::read(project.root().join(CONTENT_PATH)).unwrap(),
-        modified_bytes
+        fs::read(project.root().join(ARTIFACT_PATH)).unwrap(),
+        observed_bytes
     );
     assert_installed_bytes(&project, &installed_bytes);
 }
@@ -532,8 +528,20 @@ fn csharp_installed_graph_keeps_exact_disabled_dependents_and_confirms_fresh_cas
     assert_ne!(a1.installed.installation, a2.installed.installation);
     assert_ne!(a1.installed.receipt, a2.installed.receipt);
     assert_eq!(
-        fs::read(project.root().join("installed-a1/EnemyStatsTool.dll")).unwrap(),
-        fs::read(project.root().join("installed-a2/EnemyStatsTool.dll")).unwrap(),
+        fs::read(
+            project
+                .root()
+                .join(a1.installed.directory.as_ref())
+                .join("EnemyStatsTool.dll")
+        )
+        .unwrap(),
+        fs::read(
+            project
+                .root()
+                .join(a2.installed.directory.as_ref())
+                .join("EnemyStatsTool.dll")
+        )
+        .unwrap(),
     );
     let mut b = install(
         &root,
@@ -893,7 +901,7 @@ fn csharp_installed_graph_rejects_missing_mismatched_and_silently_rebound_requir
     let mut wrong_manifest = request(&b);
     wrong_manifest.requirements = vec![binding(&different)];
     let mut missing_directory = request(&a1);
-    missing_directory.directory = "missing-installation".into();
+    missing_directory.directory = ".nara/source-tools/artifacts/missing-installation".into();
     let mut wrong_receipt = request(&a1);
     wrong_receipt.receipt = ContentDigest::of_bytes(b"another installation receipt");
     for (case, requests, expected) in [
@@ -1041,7 +1049,10 @@ fn csharp_installed_graph_rechecks_required_payloads_before_describe_and_each_pr
             &host,
         )
         .unwrap();
-    let a1_payload = project.root().join("installed-a1/EnemyStatsTool.dll");
+    let a1_payload = project
+        .root()
+        .join(a1.installed.directory.as_ref())
+        .join("EnemyStatsTool.dll");
     let original_payload = fs::read(&a1_payload).unwrap();
     let mut changed_payload = original_payload.clone();
     changed_payload[0] ^= 1;
@@ -1081,7 +1092,13 @@ fn csharp_installed_graph_rechecks_required_payloads_before_describe_and_each_pr
     assert_eq!(fs::read(project.scene_path()).unwrap(), scene_bytes);
     assert_history(&editor, document, 0, 0);
     assert_eq!(
-        fs::read(project.root().join("installed-a2/EnemyStatsTool.dll")).unwrap(),
+        fs::read(
+            project
+                .root()
+                .join(a2.installed.directory.as_ref())
+                .join("EnemyStatsTool.dll")
+        )
+        .unwrap(),
         original_payload,
     );
 
@@ -1560,7 +1577,7 @@ fn install_owned(
     let entry = EditorSourceToolInstalledEntry {
         installed: EditorSourceToolInstalledSelection {
             package: inspected.release().package().into(),
-            directory: destination.into(),
+            directory: installation.project_path().into(),
             installation: *inspected.receipt().installation_id(),
             receipt: inspected.receipt_digest(),
             manifest: inspected.release().manifest_digest(),
@@ -1570,47 +1587,43 @@ fn install_owned(
     (entry, Arc::new(installation))
 }
 
-fn content_installation(
+fn artifact_installation(
     entry: &EditorSourceToolInstalledEntry,
     owner: &EditorSourceToolInstallation,
-) -> EditorSourceToolContentInstallation {
-    EditorSourceToolContentInstallation {
+) -> EditorSourceToolArtifactInstallation {
+    EditorSourceToolArtifactInstallation {
         installed: entry.installed.clone(),
         members: owner
             .members()
             .iter()
-            .map(|member| EditorSourceToolContentMember {
+            .map(|member| EditorSourceToolArtifactMember {
                 path: member.path().into(),
                 role: match member.kind() {
                     Some(EditorSourceToolReleaseMemberKind::Tool) => {
-                        EditorSourceToolContentRole::Tool
+                        EditorSourceToolArtifactRole::Tool
                     }
                     Some(EditorSourceToolReleaseMemberKind::Content) => {
-                        EditorSourceToolContentRole::Content
+                        EditorSourceToolArtifactRole::Content
                     }
-                    None => EditorSourceToolContentRole::Metadata,
+                    None => EditorSourceToolArtifactRole::Metadata,
                 },
                 baseline: member.digest(),
-                modified: false,
-                adopted: false,
-                observation: EditorSourceToolContentObservation::Present,
+                observation: EditorSourceToolArtifactObservation::Present,
             })
             .collect(),
-        creation_custody: true,
     }
 }
 
-fn assert_content_installations(
-    actual: &[EditorSourceToolContentInstallation],
-    expected: &[EditorSourceToolContentInstallation],
+fn assert_artifact_installations(
+    actual: &[EditorSourceToolArtifactInstallation],
+    expected: &[EditorSourceToolArtifactInstallation],
 ) {
     assert_eq!(actual.len(), expected.len(), "{actual:?}");
     for expected in expected {
         let installation = actual
             .iter()
             .find(|installation| installation.installed == expected.installed)
-            .unwrap_or_else(|| panic!("Missing exact content entry {expected:?}: {actual:?}"));
-        assert_eq!(installation.creation_custody, expected.creation_custody);
+            .unwrap_or_else(|| panic!("Missing exact artifact entry {expected:?}: {actual:?}"));
         assert_eq!(
             installation.members.len(),
             expected.members.len(),
@@ -1619,7 +1632,7 @@ fn assert_content_installations(
         for member in &expected.members {
             assert!(
                 installation.members.contains(member),
-                "Missing complete content member {member:?}: {installation:?}"
+                "Missing complete artifact member {member:?}: {installation:?}"
             );
         }
     }
@@ -1635,12 +1648,12 @@ fn assert_installed_bytes(project: &Project, expected: &BTreeMap<String, Vec<u8>
     }
 }
 
-fn assert_content_outcome(
-    view: &EditorSourceToolContentView,
+fn assert_artifact_outcome(
+    view: &EditorSourceToolArtifactView,
     attempt: &EditorSourceToolAttemptId,
-    outcome: EditorSourceToolContentOutcome,
+    outcome: EditorSourceToolArtifactOutcome,
 ) {
-    assert_eq!(view.phase, EditorSourceToolContentPhase::Idle, "{view:?}");
+    assert_eq!(view.phase, EditorSourceToolArtifactPhase::Idle, "{view:?}");
     assert!(view.error.is_none(), "{view:?}");
     assert!(!view.physical_work_pending, "{view:?}");
     let operation = view.operation.as_ref().unwrap();
@@ -1717,10 +1730,10 @@ fn settle_selection(editor: &mut EditorProjectSession) -> EditorSourceToolSelect
     }
 }
 
-fn settle_content(editor: &mut EditorProjectSession) -> EditorSourceToolContentView {
+fn settle_artifacts(editor: &mut EditorProjectSession) -> EditorSourceToolArtifactView {
     let deadline = Instant::now() + TIMEOUT;
     loop {
-        let view = editor.source_tool_content_view();
+        let view = editor.source_tool_artifact_view();
         if !view.physical_work_pending
             && view
                 .operation
@@ -1728,16 +1741,16 @@ fn settle_content(editor: &mut EditorProjectSession) -> EditorSourceToolContentV
                 .is_some_and(|operation| operation.outcome.is_some())
             && matches!(
                 view.phase,
-                EditorSourceToolContentPhase::Idle
-                    | EditorSourceToolContentPhase::Unavailable
-                    | EditorSourceToolContentPhase::RequiresReconcile
+                EditorSourceToolArtifactPhase::Idle
+                    | EditorSourceToolArtifactPhase::Unavailable
+                    | EditorSourceToolArtifactPhase::RequiresReconcile
             )
         {
             return view;
         }
         assert!(
             Instant::now() < deadline,
-            "Installed content did not settle: {view:?}"
+            "Artifact inventory did not settle: {view:?}"
         );
         editor.drive_editor_frame(Duration::ZERO);
         std::thread::sleep(Duration::from_millis(1));

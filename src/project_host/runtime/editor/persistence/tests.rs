@@ -190,7 +190,6 @@ impl Fixture {
                             document,
                             EditorScenePersistenceLane {
                                 authoring_source: None,
-                                content_edited: false,
                                 project_path: Arc::from(format!("scenes/{name}")),
                                 source_key: nara_scene::SourceDocumentKey::project_location(
                                     "6d57f8c5-867c-5463-b74a-057a8cabe2bc".parse().unwrap(),
@@ -241,7 +240,6 @@ impl Fixture {
                             document,
                             EditorPrefabPersistenceLane {
                                 authoring_source: None,
-                                content_edited: false,
                                 project_path: Arc::from(format!("prefabs/{name}")),
                                 source_key: nara_scene::SourceDocumentKey::project_location(
                                     "6d57f8c5-867c-5463-b74a-057a8cabe2bc".parse().unwrap(),
@@ -1400,6 +1398,97 @@ impl Fixture {
 }
 
 #[test]
+fn startup_sources_cannot_adopt_hardlinked_artifacts_through_trusted_local_caps() {
+    for authoring in [false, true] {
+        let fixture = Fixture::new();
+        fs::create_dir_all(fixture.root.join(".nara/source-tools/artifacts/sample")).unwrap();
+        fs::hard_link(
+            fixture.root.join("scenes/startup.scene.json"),
+            fixture
+                .root
+                .join(".nara/source-tools/artifacts/sample/startup.scene.json"),
+        )
+        .unwrap();
+        let opened = if authoring {
+            use crate::project_host::authoring::{
+                AuthoringProjectAdmissionHost, PreparedAuthoringProject, project_authoring_adapters,
+            };
+            let schema = AuthoringProjectAdmissionHost::default()
+                .prepare(fixture.capability(), None)
+                .unwrap()
+                .admit_bundle()
+                .unwrap()
+                .publish();
+            let adapters = project_authoring_adapters(schema.bundle()).unwrap();
+            let receipt = PreparedAuthoringProject::new(schema, adapters)
+                .admit_startup_closure()
+                .unwrap()
+                .publish();
+            EditorProjectSession::open(receipt, None)
+        } else {
+            EditorProjectSession::open_trusted_compiled(
+                fixture.capability(),
+                super::super::TrustedCompiledEditorProjectIntent::new(),
+            )
+        };
+        assert!(
+            opened.is_err(),
+            "the startup bypass must reject a multi-link artifact object"
+        );
+        assert_eq!(
+            fs::metadata(fixture.root.join("scenes/startup.scene.json"))
+                .unwrap()
+                .len(),
+            fs::metadata(
+                fixture
+                    .root
+                    .join(".nara/source-tools/artifacts/sample/startup.scene.json")
+            )
+            .unwrap()
+            .len()
+        );
+    }
+}
+
+#[test]
+fn private_artifacts_require_import_before_editable_source_admission() {
+    use super::super::extension_documents::EditorExtensionDocumentHostError;
+
+    let fixture = Fixture::new();
+    let path = ".nara/source-tools/artifacts/sample/source.txt";
+    fs::create_dir_all(fixture.root.join(".nara/source-tools/artifacts/sample")).unwrap();
+    fs::write(fixture.root.join(path), b"artifact template").unwrap();
+    fs::write(fixture.root.join("project-copy.txt"), b"artifact template").unwrap();
+    let mut editor = fixture.editor();
+    editor.register_extension_document::<SourceProbe>().unwrap();
+    let documents = editor.workspace.len();
+    let active = editor.workspace.active_document();
+    assert_eq!(
+        editor.open_extension_document::<SourceProbe>(path),
+        Err(EditorExtensionDocumentHostError::PrivateArtifactSource)
+    );
+    let file = fixture
+        .capability()
+        .open_file(&RelativePath::new(path).unwrap())
+        .unwrap();
+    assert_eq!(
+        editor.exclude_source_aliases(".NARA/SOURCE-TOOLS/ARTIFACTS/sample/source.txt", &file),
+        Err(SourceAdmissionError::PrivateArtifact)
+    );
+    assert_eq!(editor.workspace.len(), documents);
+    assert_eq!(editor.workspace.active_document(), active);
+    let imported = editor
+        .open_extension_document::<SourceProbe>("project-copy.txt")
+        .unwrap();
+    assert_eq!(editor.workspace.active_document(), Some(imported));
+    assert_eq!(
+        fs::read(fixture.root.join(path)).unwrap(),
+        b"artifact template"
+    );
+    close(&mut editor);
+}
+
+#[test]
 fn source_exclusion_checks_later_owners_across_every_source_domain() {
     use nara_tooling::EditorExtensionDocument;
     for kind in [
@@ -1602,7 +1691,7 @@ fn source_exclusion_reserves_renamed_tool_metadata_objects_after_actual_admissio
             br#"{"format_version":1,"installed":[],"desired":null}"#.as_slice(),
         ),
         (
-            super::super::source_tools::CONTENT_PATH,
+            super::super::source_tools::ARTIFACTS_PATH,
             br#"{"format_version":1,"installations":[]}"#.as_slice(),
         ),
     ] {
@@ -1627,8 +1716,8 @@ fn source_exclusion_reserves_renamed_tool_metadata_objects_after_actual_admissio
             nara_tooling::EditorSourceToolSelectionPhase::Idle
         );
         assert_eq!(
-            editor.source_tool_content_view().phase,
-            nara_tooling::EditorSourceToolContentPhase::Idle
+            editor.source_tool_artifact_view().phase,
+            nara_tooling::EditorSourceToolArtifactPhase::Idle
         );
 
         fs::rename(

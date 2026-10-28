@@ -9,6 +9,7 @@ use nara_fs::{
     RelativeComponent, RelativePath, ReplaceReceipt, TemporaryFileCleanup,
 };
 
+use super::super::artifact_store;
 use super::{
     EditorSourceToolReleaseMemberKind, PreparedEditorSourceToolRelease, ReleaseCaptureBudget,
     ReleaseMetadata, manifest::MANIFEST_NAME,
@@ -20,8 +21,9 @@ use receipt::{MAX_RECEIPT_BYTES, RECEIPT_NAME};
 
 /// Retains the exact candidate shown in a preview. Dropping or cancelling it performs no writes.
 pub struct EditorSourceToolInstallationPlan {
-    parent: DirectoryCapability,
+    project_root: DirectoryCapability,
     destination: RelativeComponent,
+    project_path: String,
     release: PreparedEditorSourceToolRelease,
 }
 
@@ -31,8 +33,10 @@ pub struct EditorSourceToolInstallationPlan {
 /// native identity reuse cannot establish ownership. Closing this value relinquishes those live
 /// facts. The persisted receipt alone cannot reconstruct them or authorize deletion after Open.
 pub struct EditorSourceToolInstallation {
+    project_root: DirectoryCapability,
     parent: DirectoryCapability,
     destination: RelativeComponent,
+    project_path: String,
     directory: DirectoryCapability,
     metadata: ReleaseMetadata,
     receipt: EditorSourceToolInstallationReceipt,
@@ -100,10 +104,11 @@ pub struct EditorSourceToolInstallationInspection {
 /// An unready candidate retains actual namespace facts and every acquired cleanup handle.
 ///
 /// Cleanup handles here refer only to newly created, unaccepted candidate members. They must not
-/// become an installed-content deletion path; adoption and changed-content policy are separate.
+/// become artifact disposal authority; an explicit disposal review is a separate operation.
 #[derive(Debug)]
 pub struct EditorSourceToolInstallationOrphan {
     publication: DirectoryPublicationOutcome,
+    parent: DirectoryCapability,
     directory: Option<DirectoryCapability>,
     files: Vec<TemporaryFileCleanup>,
     readers: Vec<EditorSourceToolInstalledMember>,
@@ -132,14 +137,25 @@ pub enum EditorSourceToolInstallationOutcome {
 
 #[derive(Debug, thiserror::Error)]
 pub enum EditorSourceToolInstallationError {
-    #[error("the installation parent is read-only")]
+    #[error("the installation project root is read-only")]
     ReadOnly,
+    #[error("the project capability must enforce strict beneath-root traversal")]
+    StrictCapabilityRequired,
+    #[error("the installation destination must be one ASCII component")]
+    InvalidDestination,
+    #[error("the fixed artifact store parent could not be prepared")]
+    ArtifactStore(#[source] FsError),
     #[error("the release uses a reserved installation receipt path")]
     ReservedPath,
     #[error("installation receipt preparation failed: {0}")]
     Receipt(&'static str),
     #[error("directory publication could not begin")]
-    Begin(#[source] DirectoryPublicationBeginError),
+    Begin {
+        #[source]
+        source: DirectoryPublicationBeginError,
+        /// Retains the actual store parent even if beginning publication left a staging orphan.
+        parent: DirectoryCapability,
+    },
     #[error("the installation member could not be prepared: {member}")]
     Member {
         member: String,
@@ -161,18 +177,27 @@ pub enum EditorSourceToolInstallationError {
 }
 
 impl EditorSourceToolInstallationPlan {
-    /// Captures destination authority without reserving a name, executing code or writing a file.
+    /// Captures project authority without reserving a name, executing code or writing a file.
     ///
-    /// This publishes a release artifact directory only. It does not select an installed Package
-    /// graph, satisfy required dependencies, enable a tool or adopt metadata into a project.
+    /// Confirmation publishes only beneath `.nara/source-tools/artifacts/`, using one ASCII
+    /// destination component. It does not select an installed Package graph, satisfy required
+    /// dependencies, enable a tool or adopt metadata into a project.
     pub fn new(
-        parent: DirectoryCapability,
+        project_root: DirectoryCapability,
         destination: RelativeComponent,
         release: PreparedEditorSourceToolRelease,
     ) -> Result<Self, EditorSourceToolInstallationError> {
-        if parent.options().rights() != CapabilityRights::ReadWrite {
+        if project_root.options().rights() != CapabilityRights::ReadWrite {
             return Err(EditorSourceToolInstallationError::ReadOnly);
         }
+        if project_root.options().trust() == nara_fs::TrustMode::TrustedLocal {
+            return Err(EditorSourceToolInstallationError::StrictCapabilityRequired);
+        }
+        let name = destination
+            .to_str()
+            .filter(|name| name.is_ascii())
+            .ok_or(EditorSourceToolInstallationError::InvalidDestination)?;
+        let project_path = format!("{}{name}", artifact_store::PREFIX);
         if release.members().iter().any(|member| {
             let path = member.path().to_ascii_lowercase();
             path == RECEIPT_NAME || path.starts_with(&format!("{RECEIPT_NAME}/"))
@@ -180,8 +205,9 @@ impl EditorSourceToolInstallationPlan {
             return Err(EditorSourceToolInstallationError::ReservedPath);
         }
         Ok(Self {
-            parent,
+            project_root,
             destination,
+            project_path,
             release,
         })
     }
@@ -198,8 +224,18 @@ impl EditorSourceToolInstallationPlan {
     }
 
     #[must_use]
-    pub fn parent_identity(&self) -> FileIdentity {
-        self.parent.identity()
+    pub fn project_path(&self) -> &str {
+        &self.project_path
+    }
+
+    /// Retains the actual project root, including across independently issued Host capabilities.
+    #[must_use]
+    pub fn project_root(&self) -> &DirectoryCapability {
+        &self.project_root
+    }
+
+    pub fn same_project(&self, project: &DirectoryCapability) -> Result<bool, FsError> {
+        self.project_root.same_object(project)
     }
 
     /// Cancels before staging and returns the unchanged captured input.
@@ -244,13 +280,25 @@ impl EditorSourceToolInstallationPlan {
             Ok(prepared) => prepared,
             Err(error) => return failed(self, error, None),
         };
-        let transaction = match self
-            .parent
-            .begin_directory_publication(&self.destination, &staging_name)
+        let parent = match artifact_store::ensure_parent(&self.project_root) {
+            Ok(parent) => parent,
+            Err(error) => {
+                return failed(
+                    self,
+                    EditorSourceToolInstallationError::ArtifactStore(error),
+                    None,
+                );
+            }
+        };
+        let transaction = match parent.begin_directory_publication(&self.destination, &staging_name)
         {
             Ok(transaction) => transaction,
-            Err(error) => {
-                return failed(self, EditorSourceToolInstallationError::Begin(error), None);
+            Err(source) => {
+                return failed(
+                    self,
+                    EditorSourceToolInstallationError::Begin { source, parent },
+                    None,
+                );
             }
         };
         let staging = transaction.staging_directory();
@@ -264,6 +312,7 @@ impl EditorSourceToolInstallationPlan {
                     EditorSourceToolInstallationError::Publication,
                     Some(EditorSourceToolInstallationOrphan {
                         publication: outcome,
+                        parent,
                         directory: Some(staging),
                         files: Vec::new(),
                         readers: Vec::new(),
@@ -275,29 +324,43 @@ impl EditorSourceToolInstallationPlan {
         let stage_result = stage_release(&staging, &self.release, &mut staged)
             .and_then(|()| before_publish(&staging))
             .and_then(|()| {
-                verify_destination(&self.parent, &self.destination, &staging, &staged.readers)
+                verify_destination(
+                    &self.project_root,
+                    &parent,
+                    &self.destination,
+                    &staging,
+                    &staged.readers,
+                )
             });
         if let Err(error) = stage_result {
-            return incomplete(self, error, publication, staging, staged);
+            return incomplete(self, error, publication, parent, staging, staged);
         }
         let receipt_publication = match commit_receipt(&staging, &receipt_bytes, &mut staged) {
             Ok(receipt_publication) => receipt_publication,
-            Err(error) => return incomplete(self, error, publication, staging, staged),
+            Err(error) => return incomplete(self, error, publication, parent, staging, staged),
         };
         let receipt_digest = ContentDigest::of_bytes(&receipt_bytes);
-        let verification = after_publish(&self.parent, &staging).and_then(|()| {
+        let verification = after_publish(&parent, &staging).and_then(|()| {
             if receipt_publication.verified_content_digest() != Some(receipt_digest) {
                 return Err(EditorSourceToolInstallationError::Changed {
                     member: RECEIPT_NAME.to_owned(),
                 });
             }
-            verify_destination(&self.parent, &self.destination, &staging, &staged.readers)
+            verify_destination(
+                &self.project_root,
+                &parent,
+                &self.destination,
+                &staging,
+                &staged.readers,
+            )
         });
         // Exact read handles have held every created object continuously before writers close.
         staged.writers.clear();
         let installation = EditorSourceToolInstallation {
-            parent: self.parent,
+            project_root: self.project_root,
+            parent,
             destination: self.destination,
+            project_path: self.project_path,
             directory: staging,
             metadata: self.release.metadata,
             receipt,
@@ -341,6 +404,19 @@ impl EditorSourceToolInstallation {
     pub fn receipt_publication(&self) -> &ReplaceReceipt {
         &self.receipt_publication
     }
+    /// Exact project-relative artifact directory selected at preparation.
+    #[must_use]
+    pub fn project_path(&self) -> &str {
+        &self.project_path
+    }
+    /// The retained project association is independent of the installation's current names.
+    #[must_use]
+    pub fn project_root(&self) -> &DirectoryCapability {
+        &self.project_root
+    }
+    pub fn same_project(&self, project: &DirectoryCapability) -> Result<bool, FsError> {
+        self.project_root.same_object(project)
+    }
     /// Borrows exact directory authority, not an authorization-checked ambient path.
     #[must_use]
     pub fn directory(&self) -> &DirectoryCapability {
@@ -353,6 +429,7 @@ impl EditorSourceToolInstallation {
     /// Verifies current names, live objects and bytes. A successful observation is not a write lock.
     pub fn verify(&self) -> Result<(), EditorSourceToolInstallationError> {
         verify_destination(
+            &self.project_root,
             &self.parent,
             &self.destination,
             &self.directory,
@@ -459,6 +536,11 @@ impl EditorSourceToolInstallationOrphan {
     pub fn publication(&self) -> &DirectoryPublicationOutcome {
         &self.publication
     }
+    /// Retains the actual store parent used by the attempted directory publication.
+    #[must_use]
+    pub fn store_parent(&self) -> &DirectoryCapability {
+        &self.parent
+    }
     #[must_use]
     pub fn pending_files(&self) -> usize {
         self.files.len()
@@ -496,6 +578,7 @@ fn incomplete(
     plan: EditorSourceToolInstallationPlan,
     error: EditorSourceToolInstallationError,
     publication: DirectoryPublicationReceipt,
+    parent: DirectoryCapability,
     directory: DirectoryCapability,
     staged: StagedMembers,
 ) -> EditorSourceToolInstallationOutcome {
@@ -504,6 +587,7 @@ fn incomplete(
         error,
         orphan: EditorSourceToolInstallationOrphan {
             publication: DirectoryPublicationOutcome::Published(publication),
+            parent,
             directory: Some(directory),
             files: staged.writers,
             readers: staged.readers,
@@ -672,11 +756,23 @@ fn commit_receipt(
 }
 
 fn verify_destination(
+    project_root: &DirectoryCapability,
     parent: &DirectoryCapability,
     destination: &RelativeComponent,
     original: &DirectoryCapability,
     members: &[EditorSourceToolInstalledMember],
 ) -> Result<(), EditorSourceToolInstallationError> {
+    let current_parent = project_root
+        .open_directory_exact(
+            &RelativePath::new(artifact_store::PATH)
+                .expect("the fixed artifact store path is valid"),
+        )
+        .map_err(|source| member_error("artifact store", source))?;
+    if current_parent.identity() != parent.identity() {
+        return Err(EditorSourceToolInstallationError::Changed {
+            member: "artifact store".to_owned(),
+        });
+    }
     let current = parent
         .open_directory_exact(
             &RelativePath::from_components([destination.clone()])
@@ -808,7 +904,7 @@ fn staging_name() -> Result<RelativeComponent, EditorSourceToolInstallationError
 impl fmt::Debug for EditorSourceToolInstallationPlan {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("EditorSourceToolInstallationPlan")
-            .field("destination", &self.destination)
+            .field("project_path", &self.project_path)
             .field("release", &self.release)
             .finish_non_exhaustive()
     }
@@ -817,6 +913,7 @@ impl fmt::Debug for EditorSourceToolInstallation {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("EditorSourceToolInstallation")
             .field("package", &self.metadata.package)
+            .field("project_path", &self.project_path)
             .field("receipt", &self.receipt)
             .field("publication", &self.publication)
             .field("members", &self.members.len())

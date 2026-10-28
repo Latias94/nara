@@ -50,7 +50,7 @@ const PANEL_ATTACH: &str = "source-tool:attach-or-edit";
 const PANEL_ACCEPT: &str = "source-tool:accept";
 const PANEL_DISABLE: &str = "source-tool:disable";
 const PANEL_DISABLE_SAVED: &str = "source-tool:disable-saved";
-const INSTALLATION: &str = "installed-tool";
+const INSTALLATION: &str = ".nara/source-tools/artifacts/installed-tool";
 const SELECTION: &str = ".nara/source-tools/selection.json";
 
 struct SourceToolFixture {
@@ -215,7 +215,7 @@ fn installed_tool(
     .map_err(|error| error.to_string())?;
     let plan = EditorSourceToolInstallationPlan::new(
         parent.share(),
-        RelativeComponent::new(INSTALLATION).map_err(|error| error.to_string())?,
+        RelativeComponent::new("installed-tool").map_err(|error| error.to_string())?,
         captured,
     )
     .map_err(|error| error.to_string())?;
@@ -228,6 +228,9 @@ fn installed_tool(
         }
     };
     let receipt = installation.receipt_digest();
+    if installation.project_path() != INSTALLATION {
+        return Err("the tool was not published into its managed artifact directory".into());
+    }
     let bootstrap = PathBuf::from(
         std::env::var_os("NARA_SOURCE_TOOL_BOOTSTRAP_DIR")
             .ok_or("NARA_SOURCE_TOOL_BOOTSTRAP_DIR must name the actual prebuilt managed Host")?,

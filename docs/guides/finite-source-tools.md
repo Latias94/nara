@@ -42,8 +42,8 @@ a different current Host. The executable runtime/launcher remains an external Ho
 Paths are portable ASCII with at most eight components and 512 bytes. File and directory spelling
 aliases, traversal, device names, manifest self-membership, and file/directory collisions reject.
 Ceilings are 64 KiB manifest, 64 members, 16 MiB per member and 64 MiB aggregate payload; existing
-Reflect catalog limits apply as well. Unlisted siblings are not read or included. Only the captured
-closure may be staged by a future installer; ambient siblings cannot become implicit dependencies.
+Reflect catalog limits apply as well. Unlisted siblings are not read or included. Installation
+publishes only the captured closure; ambient siblings cannot become implicit dependencies.
 
 Preparation starts no child, writes no project file and changes no active tool or document Schema.
 Content classification grants no project destination, overwrite or deletion authority. Exact
@@ -54,13 +54,15 @@ execution need the later publication and runtime-custody boundaries before they 
 
 ## Publish And Inspect A Local Artifact
 
-Create `EditorSourceToolInstallationPlan::new(parent, destination, captured)` with a Host-issued
-read-write parent capability and one validated destination component. `release()` lends the same
+Create `EditorSourceToolInstallationPlan::new(project_root, destination, captured)` with a
+Host-issued strict read-write project-root capability and one validated ASCII destination component.
+Publication uses only `.nara/source-tools/artifacts/<destination>`; `project_path()` on the plan
+and resulting installation returns that project-relative directory. `release()` lends the same
 immutable candidate for preview; `cancel()` returns it without writing. `publish()` explicitly
-confirms this artifact publication. It reserves an absent empty candidate directory, writes and
-checks declared members, then commits `.nara-installation.json` with no-replace file publication
-last. The root can therefore be visible before it is ready. No existing destination or unowned
-receipt is overwritten or adopted, even when its bytes match.
+confirms publication, creates missing fixed store parents and reserves an absent empty candidate
+directory. It writes and checks declared members, then commits `.nara-installation.json` with
+no-replace file publication last. The root can therefore be visible before it is ready. No
+existing destination or unowned receipt is overwritten or adopted, even when its bytes match.
 
 Handle the complete `EditorSourceToolInstallationOutcome`:
 
@@ -76,111 +78,100 @@ Handle the complete `EditorSourceToolInstallationOutcome`:
 ready-receipt commit. Member `sync_receipt()` values record actual file synchronization. These
 facts neither combine into whole-tree atomicity nor prove crash durability. In particular,
 Windows parent-directory synchronization is unsupported. Later writes remain possible through
-ordinary read sharing and must be revalidated by an execution or content consumer.
+ordinary read sharing and must be revalidated by an execution or template-import consumer.
 
 After closing an artifact owner, reopen its directory through a strict capability and call
 `EditorSourceToolInstallationInspection::read(&directory, expected_receipt_digest)`. Inspection
 verifies the selected receipt and recaptures the full declared release; unknown, missing or changed
 files reject. This returns data observations, not recovered creation provenance or deletion rights.
-Unready custody has no automatic/public deletion operation until stable-content reclamation is
-qualified; dropping it closes handles and preserves files for reconciliation.
+Unready custody has no automatic/public reclamation operation; dropping it closes handles and
+preserves files for reconciliation. Explicitly reviewed artifact reclamation remains pending.
 
 This is an artifact preparation/publication API, not the complete Package Manager. It does not
 select an installed graph, satisfy declared requirements, adopt project Schema, approve a launcher,
 enable a tool or complete update/removal. Those operations remain in the local lifecycle plan.
 
-## Retain Installed Content And Adopt Samples
+## Manage The Artifact Inventory
 
-Keep a successful `EditorSourceToolInstallation` in an `Arc` when transferring its live
-created-member custody into a Project Session or Application. Observe `source_tool_content_view()`
-and wait for its initial read and actual pending work to return. Then call
-`prepare_source_tool_content_management(&basis, project_relative_directory, Arc::clone(&installation))`.
-The returned candidate describes the finite member baselines and protection facts. Preparation
-and dropping the candidate write nothing. `commit_source_tool_content(candidate)` confirms that
-original successor and admits its known facts before IO; failed publication retains them.
-Observe its eventual operation outcome separately from the returned attempt. A changed Session
-basis or different actual project directory refuses the candidate.
+Installed Tool members, required Content and unimported templates belong to the fixed artifact
+store. Ordinary editable-source admission refuses that namespace and protected actual-object
+aliases. Store ownership does not make other `.nara` files disposable. Local, Git and Cargo source
+packages retain their existing workspace and toolchain owners. See the
+[ownership design](../architecture/source-tool-artifact-ownership-design.md).
 
-`prepare_source_tool_content_adoption(&basis, &installation_id, &["samples/readme.txt"])` prepares
-explicit project ownership of declared Content members. Confirm through the same commit API.
-Adoption changes no source, history, graph or executable approval. It remains set even while
-bytes equal the release baseline or its publication fails. Unknown members and tool/metadata
-members cannot be adopted as samples. An imported project copy is outside this member set;
-management never follows its origin to delete that copy.
+Keep a successful `EditorSourceToolInstallation` in an `Arc` to transfer its live created-member
+custody into a Project Session or Application. Observe `source_tool_artifact_view()` and wait for
+the initial read and actual pending work to return. Then call
+`prepare_source_tool_artifact_registration(&basis, Arc::clone(&installation))`. The candidate's
+`installations()` exposes exact installation facts, member roles, release baselines and current
+observations. Preparation and dropping the candidate write nothing. Registration uses the
+installation's retained project association and `project_path()`; a different actual project
+directory or an ordinary document already owning a member refuses it.
 
-`prepare_source_tool_content_observation(&basis, &installation_id)` observes declared member
-presence and bounded default-stream digests without requiring the whole installation to remain
-a valid executable release. Confirming that candidate retains observed modification. Restoring
-baseline bytes or registering the same installation again cannot clear admitted modification
-or adoption, including after a failed publication. Unknown siblings remain untouched. This cannot
-discover an external change that was reverted entirely between observations.
+`commit_source_tool_artifacts(candidate)` confirms that original basis and exact successor bytes
+through the existing Tasks and file publisher. Drive ordinary frames and correlate `operation`
+with the returned attempt. Its eventual outcome is `Registered`, `Observed`, `Reconciled`,
+`PublishedWithCleanupFailure` or `Failed(error)`; an admitted attempt alone is not publication.
+Accepted publication followed by executor cleanup failure retains the published inventory,
+reports `TaskCleanupFailed` separately and requires reconciliation. A changed basis returns
+`StaleBasis`, and actual pending work returns `Busy`. Pending bytes remain fixed. Observe
+`physical_work_pending` separately from the logical result and retain actual publication and
+cleanup facts after cancellation.
 
-For document edits, the Session captures the exact bound project-relative source and owner content
-identity before five actual acceptance seams: Workspace commands (including Undo/Redo), prepared
-edit commit, prepared construction commit, final Prefab-conversion publication and extension
-actions. Accepted content changes immediately mark matching managed members `modified`, even
-before Save. No-op, refusal, query, navigation, preview and reclassification do not mark.
-Modification remains sticky through Undo, baseline restoration, Save file replacement, Reopen and
-Discard. Existing persistence lanes privately retain accepted-touch facts through initial
-asynchronous content reads and later management; there is no additional document store/history.
-Path matching conservatively protects ASCII-case variants. It grants no exact-object deletion
-proof and never follows an imported copy's origin to claim ownership.
-If the management record is unavailable, an accepted touch cannot yet be classified. That
-document's Save/Reopen/Close returns `RequiresReconcile`, and whole Close retains the Session.
-Restore a valid record and explicitly reconcile before retrying; Undo to clean does not remove
-the obligation. Opening an unchanged document does not create it.
+`prepare_source_tool_artifact_observation(&basis, &installation_id)` prepares current observations
+of declared members without requiring a valid executable release. Confirm it with the same commit
+API. Member observations are `Present`, `Changed`, `Missing` or `Failed`; they cover bounded
+default-stream digests and available live object comparisons. Matching bytes do not establish
+whole-file stability or historical creation provenance. Unknown siblings remain untouched.
 
-The separate bounded `.nara/source-tools/content.json` preserves up to 32 installations,
-66 members each and 2 MiB of data, including installations already withdrawn from the graph.
-Capacity refusal never evicts protection records. `protection_publication_pending` reports known
-facts still awaiting accepted disk publication; `physical_work_pending` separately includes actual
-task return and publication cleanup. Additional protection invalidates an older content basis. Already
-pending bytes stay exact; later facts form an automatic coalesced successor. Success settles only
-facts covered by the accepted publication, so an older receipt cannot clear later debt. Automatic
-metadata work updates protection/phase/error observations without overwriting the explicit
-`content.operation` attempt or outcome.
+The separate format-1 `.nara/source-tools/artifacts.json` inventory retains up to 32 installations,
+66 members each and 2 MiB, including installations withdrawn from the graph. Registration cannot
+replace immutable installation facts or evict another entry. Corrupt, unavailable or unsupported
+records refuse blind overwrite. Publication drift or uncertainty reports `RequiresReconcile`;
+call `reconcile_source_tool_artifacts(&basis)` to read current disk facts before preparing another
+mutation. Reconciliation writes nothing and does not recover live creation custody, approve code
+or authorize deletion.
 
-Publication drift or uncertainty retains known facts. `reconcile_source_tool_content(&basis)`
-explicitly reads the current record without writing; it cannot discard known entries, replace
-immutable baselines or clear protection. Each read remembers the protection basis from its start.
-Disk weaker than that basis yields `NeedsProtectionPublication`, with
-`protection_publication_pending` and `RequiresReconcile`, requiring explicit reconcile/republication.
-An older in-flight read missing only newer document facts can instead queue their automatic
-successor when its start-basis protection is intact.
+The inventory is optional tool-management data. Its failure does not block an unrelated document's
+Save, Reopen or Close. Whole-Session Close still retains actual inventory tasks and file cleanup.
+Fresh Open observes the record without executing tools or deleting files.
 
-After the reconciliation read succeeds, including a `NeedsProtectionPublication` result, call
-`prepare_source_tool_content_protection(&basis)` on Session or Application with the returned
-basis, then `commit_source_tool_content(candidate)`. The repair API prepares the exact
-already-known protection without IO or additional ownership;
-accepted explicit repair publication reports `Protected`. Preparing or dropping the candidate
-writes nothing. A failed or uncertain publication retains the facts and requires another fresh
-read before repair. Read-only reconciliation itself never republishes them.
+## Import A Project-Owned Text Template
 
-Save, Reopen and new document Close guard the owning source before writes, replacement or release.
-Wait on `Busy`; use explicit reconciliation and repair for `RequiresReconcile`. Discard does not
-bypass protection. Unknown pending classification may first admit the original owned Save/Reopen
-request; persistence polling itself advances classification/protection before starting its IO.
-Whole physical Close advances protection before irreversible closing or
-Host/task admission shutdown; failure leaves the retained Session repairable. During Close or
-project replacement waiting, Application still exposes content inspection, original-basis repair
-preparation/commit and reconciliation on that retained Session, including while a replacement
-opens. Other authoring remains gated. Already-entered Save IO keeps its actual publication/receipt
-result; source and protection writes are not a cross-file transaction.
+Use `prepare_source_tool_template_import(&selection_basis, project_root, &installation_id,
+member, destination)` for a declared text Content member from the exact registered installation.
+Use the original `source_tool_selection_view().basis` and a Host-issued capability for the actual
+project root with strict read-write traversal. The first supported destination is an absent `.txt` file outside `.nara`
+with an existing parent directory. Tool/metadata members and native Scene/Prefab destinations
+refuse. Preparation captures the finite bytes and original project, selection and source
+observations without writes; dropping the candidate changes nothing.
 
-Accepted source changes protect memory only. Only an accepted file-publication receipt supplies
-disk evidence for its covered facts; a crash between acceptance and publication may lose them.
-Windows parent-directory synchronization remains unsupported, with no power-failure guarantee.
+Confirm with `commit_source_tool_template_import(candidate)` and observe
+`source_tool_template_import_view()` while driving ordinary frames. Correlate its `attempt` and
+eventual `outcome` with the returned attempt, and wait for `physical_work_pending` to settle.
+The existing no-replace publisher refuses an existing destination even when its bytes match.
+Changed original observations require a new preparation. Cancellation cannot erase actual
+publication or temporary-file cleanup obligations.
 
-Fresh Open reads the ledger without recovering historical creation custody, approving code or
-deleting any file. An unavailable/corrupt record preserves installed files. A pending recovery
-fact is not permission to resume deletion. Whole-file reclamation remains unqualified: actual
-Windows probes show that restrictive default-stream custody still allows named alternate-stream
-creation/modification. Default-stream digest equality therefore cannot authorize destroying the
-complete file. See the [protected-content plan](../plans/2026-10-28-protected-source-tool-content-plan.md)
-for the source-edit successor's pending qualification and the separate all-stream safe reclaimer.
-Generic exact-object unlink already exists; it supplies no unchanged-content policy. This
-source-edit contract is being implemented, with no new executed qualification claimed here.
-It does not add UI controls or complete reclamation or the full foundation Goal.
+`Imported` retains the destination, digest and actual parent synchronization tier.
+`PublishedWithoutAdmission` and `PublicationUncertain` preserve their distinct filesystem facts
+instead of claiming a successful project copy. `cleanup_failed` is independent of the actual
+publication outcome and physical pending. After return and cleanup release the temporary file
+Host, the ordinary source owner can open the imported copy.
+
+The published copy belongs to the ordinary project source owner. Open supported text through its
+registered extension document owner; editing, Undo/Redo, Save and Reopen use that owner's history
+and persistence. Later installation updates, graph withdrawal and artifact disposal never follow
+the copy's origin to overwrite or delete it. Another import uses another absent destination.
+
+This finite text-copy workflow does not qualify native Scene/Prefab/asset template import.
+Those formats require their owners to allocate destination identities and sidecars and remap
+references before support can be claimed. Generic `DirectoryCapability::unlink_file` remains
+available as the exact-object primitive. Full explicitly reviewed artifact reclamation, mixed
+result recovery and Package Manager controls remain pending under the
+[managed artifact plan](../plans/2026-10-28-managed-source-tool-artifacts-plan.md). Inventory
+observations and graph withdrawal alone grant no deletion authority; default-stream digest
+equality does not cover alternate streams or authorize whole-file disposal.
 
 ## Review And Adopt A Missing Schema Owner
 
@@ -286,7 +277,7 @@ ambient process authority; this adapter is not a sandbox.
 Approval and successful Session activation are independent of durable desired selection. Fresh
 Open does not start a tool because its receipt exists. Schema metadata must already be admitted
 in the project; missing-owner adoption uses the operation above. Existing-owner evolution and
-safe content reclamation remain in the lifecycle plan.
+reviewed artifact reclamation remain in the lifecycle plan.
 
 ## Select A Project-Local Installed Tool
 
@@ -307,7 +298,7 @@ live native directory objects without combining authority or reopening a pathnam
 ```rust,ignore
 let prepared = session.prepare_installed_source_tool_selection(
     approved_project_root,
-    "tools/enemy-stats",
+    ".nara/source-tools/artifacts/enemy-stats",
     selected_receipt_digest,
     &host,
 )?;
@@ -359,10 +350,10 @@ receipt digest and explicit `EditorSourceToolRequirementBinding` values naming e
 IDs. Binding a package to the first matching release is never implicit. Multiple identical release
 installations remain distinct. Repeating an exact member is allowed; rebinding an existing member,
 missing or extra declarations, mismatched release digests, cycles and overlapping directories
-reject. Installation roots cannot contain the fixed selection parent; a dedicated descendant of
-`.nara/source-tools` is allowed. `register_source_tool_installations(prepared)` confirms that
-original basis, then rechecks actual artifacts in background before publishing the complete graph.
-Observe its attempt until Registered or Failed; an admitted request alone is not publication.
+reject. Each installation directory must be one direct child of `.nara/source-tools/artifacts/`.
+`register_source_tool_installations(prepared)` confirms that original basis, then rechecks actual
+artifacts in background before publishing the complete graph. Observe its attempt until Registered
+or Failed; an admitted request alone is not publication.
 
 Preparation and revalidation charge receipt, manifest and payload bytes against one shared
 128 MiB work allowance before reading/allocating. This is a logical byte-work bound, not an RSS
@@ -392,8 +383,9 @@ relations, and stops the original linked route on missing or unavailable graph d
 execution is fenced during reconciliation; Disable, source editing and Close remain available.
 
 Withdrawal removes no files and revokes no admitted Schema or source/history. Broken installations
-can be withdrawn without passing complete artifact inspection. Modified/adopted content protection
-and exact-object file reclamation remain the next distinct lifecycle operation.
+can be withdrawn without passing complete artifact inspection. Artifact inventory entries and
+imported project copies remain. Full explicitly reviewed file reclamation is a separate pending
+lifecycle operation.
 
 ## Configure A Trusted Development Command And Probe
 

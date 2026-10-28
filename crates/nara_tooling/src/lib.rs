@@ -117,19 +117,20 @@ pub use source_asset_import::{
 };
 pub use source_tools::{
     EditorSourceToolAction, EditorSourceToolActionOutcome, EditorSourceToolActivationId,
-    EditorSourceToolActive, EditorSourceToolAttemptId, EditorSourceToolCommit,
-    EditorSourceToolContentAttempt, EditorSourceToolContentBasis, EditorSourceToolContentError,
-    EditorSourceToolContentInstallation, EditorSourceToolContentMember,
-    EditorSourceToolContentObservation, EditorSourceToolContentOutcome,
-    EditorSourceToolContentPhase, EditorSourceToolContentRole, EditorSourceToolContentView,
+    EditorSourceToolActive, EditorSourceToolArtifactAttempt, EditorSourceToolArtifactBasis,
+    EditorSourceToolArtifactError, EditorSourceToolArtifactInstallation,
+    EditorSourceToolArtifactMember, EditorSourceToolArtifactObservation,
+    EditorSourceToolArtifactOutcome, EditorSourceToolArtifactPhase, EditorSourceToolArtifactRole,
+    EditorSourceToolArtifactView, EditorSourceToolAttemptId, EditorSourceToolCommit,
     EditorSourceToolDesiredSelection, EditorSourceToolError, EditorSourceToolInstallationRequest,
     EditorSourceToolInstalledEntry, EditorSourceToolInstalledSelection,
     EditorSourceToolIntegerProperty, EditorSourceToolIntent, EditorSourceToolRequestId,
     EditorSourceToolRequirementBinding, EditorSourceToolReview, EditorSourceToolReviewSummary,
     EditorSourceToolSelectionAttempt, EditorSourceToolSelectionBasis,
     EditorSourceToolSelectionError, EditorSourceToolSelectionOutcome,
-    EditorSourceToolSelectionPhase, EditorSourceToolSelectionView, EditorSourceToolView,
-    EditorSourceToolWithdrawalMode,
+    EditorSourceToolSelectionPhase, EditorSourceToolSelectionView,
+    EditorSourceToolTemplateImportError, EditorSourceToolTemplateImportOutcome,
+    EditorSourceToolTemplateImportView, EditorSourceToolView, EditorSourceToolWithdrawalMode,
 };
 pub use workspace::{
     CommittedEditorDocumentConstruction, CommittedEditorPrefabConversion, EditorDocumentDigest,

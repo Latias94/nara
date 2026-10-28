@@ -22,6 +22,12 @@ weakening that filesystem guarantee or removing deletion from the product.
 
 ## Dependency Order
 
+The [replacement evidence](../knowledge/engineering/verification/2026-10/2026-10-28T163225Z-managed-source-tool-artifact-store-and-project-owned-text-template-replacement-7c31339a78064eb8bc385a9bd82b372a.md)
+records implemented observations, fixed-store publication/inventory and project-owned text import.
+The mixed-content record, APIs, source-touch interception and persistence gates are removed.
+Native template formats, reviewed intent/unlink and partial recovery remain to be completed;
+steps 4-6 and the full lifecycle/Goal are not closed by text import qualification.
+
 ### 1. Complete Existing Ownership Observations
 
 Fix actual retained-source alias checks at FilePublicationHost and source admission. Protect

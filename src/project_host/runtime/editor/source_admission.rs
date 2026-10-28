@@ -8,6 +8,7 @@ use super::{EditorExecutionLane, EditorProjectSession};
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(super) enum SourceAdmissionError {
     AlreadyOpen,
+    PrivateArtifact,
     HostUnavailable,
     SourceRead,
 }
@@ -16,6 +17,7 @@ impl SourceAdmissionError {
     pub(super) const fn code(self) -> &'static str {
         match self {
             Self::AlreadyOpen => "project.editor.document-source-already-open",
+            Self::PrivateArtifact => "project.editor.private-artifact-source",
             Self::HostUnavailable => "project.editor.document-open-busy",
             Self::SourceRead => "project.editor.document-source-open-failed",
         }
@@ -147,11 +149,29 @@ impl EditorProjectSession {
         project_path: &str,
         current: &FileCapability,
     ) -> Result<(), SourceAdmissionError> {
+        if super::source_tools::is_artifact_source_path(project_path) {
+            return Err(SourceAdmissionError::PrivateArtifact);
+        }
         if project_path.eq_ignore_ascii_case(super::source_tools::SELECTION_PATH)
-            || project_path.eq_ignore_ascii_case(super::source_tools::CONTENT_PATH)
+            || project_path.eq_ignore_ascii_case(super::source_tools::ARTIFACTS_PATH)
             || self.exact_source_owner(project_path).is_some()
         {
             return Err(SourceAdmissionError::AlreadyOpen);
+        }
+        // Resolve the exact stored spelling as well as the object. Native short-name aliases
+        // must not bypass the private namespace before live artifact custody is registered.
+        let path = RelativePath::new(project_path).map_err(|_| SourceAdmissionError::SourceRead)?;
+        match self.source_project_root().open_file_exact(&path) {
+            Ok(exact) => {
+                if !exact
+                    .same_object(current)
+                    .map_err(|_| SourceAdmissionError::SourceRead)?
+                {
+                    return Err(SourceAdmissionError::SourceRead);
+                }
+            }
+            Err(FsError::Io { source, .. }) if source.kind() == std::io::ErrorKind::NotFound => {}
+            Err(_) => return Err(SourceAdmissionError::SourceRead),
         }
         // Reserve the current metadata objects even before parsing or Host admission succeeds.
         let root = self
@@ -160,7 +180,7 @@ impl EditorProjectSession {
             .map_err(|_| SourceAdmissionError::SourceRead)?;
         for reserved in [
             super::source_tools::SELECTION_PATH,
-            super::source_tools::CONTENT_PATH,
+            super::source_tools::ARTIFACTS_PATH,
         ] {
             let path = RelativePath::new(reserved).expect("fixed source-tool metadata path");
             exclude_file_alias(current, root.open_file_exact(&path))?;
@@ -198,7 +218,37 @@ impl EditorProjectSession {
                 })
                 .ok_or(SourceAdmissionError::HostUnavailable)??;
         }
-        self.source_tools.exclude_metadata_source_aliases(current)
+        self.source_tools.exclude_metadata_source_aliases(current)?;
+        // Unclaimed sources must also satisfy the strict root policy. This prevents a junction
+        // or another traversal alias from reaching the store before inventory registration.
+        let exact = match root.open_file_exact(&path) {
+            Ok(exact) => exact,
+            Err(FsError::Io { source, .. }) if source.kind() == std::io::ErrorKind::NotFound => {
+                // Trusted content retains its configured Prefab directory across a namespace
+                // rename. Revalidate the exact leaf through that same strict directory owner.
+                let lane = self
+                    .trusted_compiled()
+                    .ok_or(SourceAdmissionError::SourceRead)?;
+                let relative = project_path
+                    .strip_prefix(lane.content_candidate.settings().paths.prefabs.as_str())
+                    .and_then(|path| path.strip_prefix('/'))
+                    .ok_or(SourceAdmissionError::SourceRead)?;
+                lane.prefab_root
+                    .strict_read_only()
+                    .and_then(|root| {
+                        root.open_file_exact(&RelativePath::new(relative).map_err(FsError::from)?)
+                    })
+                    .map_err(|_| SourceAdmissionError::SourceRead)?
+            }
+            Err(_) => return Err(SourceAdmissionError::SourceRead),
+        };
+        if !exact
+            .same_object(current)
+            .map_err(|_| SourceAdmissionError::SourceRead)?
+        {
+            return Err(SourceAdmissionError::SourceRead);
+        }
+        Ok(())
     }
 
     pub(super) fn discard_unpublished_document(
