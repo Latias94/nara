@@ -38,6 +38,8 @@ use super::{
 
 mod capture;
 mod catalogue;
+#[cfg(any(feature = "tooling", test))]
+mod schema_owner;
 pub(crate) use capture::{
     AuthoringDocumentCapture, AuthoringPrefabSessionSnapshot, AuthoringPrefabSourceCapture,
     AuthoringSourceValidation, CapturedAuthoringPreview,
@@ -355,6 +357,7 @@ struct AuthoringProjectSnapshotInner {
     scene_limits: SceneFileLimits,
     readiness: AuthoringProjectReadiness,
     startup_compilation_diagnostics: DiagnosticReport,
+    startup_composition_failure: Option<nara_scene::PrefabExpansionFailure>,
     startup_preview: Option<CapturedAuthoringPreview>,
     startup_source: Arc<AuthoringSourceFact>,
     startup_native_source: AdmittedNativeDocumentSource,
@@ -427,6 +430,12 @@ impl AuthoringProjectSnapshot {
 
     pub(crate) fn startup_compilation_diagnostics(&self) -> &DiagnosticReport {
         &self.inner.startup_compilation_diagnostics
+    }
+
+    pub(crate) fn startup_composition_failure(
+        &self,
+    ) -> Option<&nara_scene::PrefabExpansionFailure> {
+        self.inner.startup_composition_failure.as_ref()
     }
 
     #[must_use]
@@ -543,6 +552,7 @@ impl AuthoringProjectReceipt {
             scene_limits: inner.scene_limits,
             readiness: inner.readiness,
             startup_compilation_diagnostics: inner.startup_compilation_diagnostics,
+            startup_composition_failure: inner.startup_composition_failure,
             startup_preview: inner.startup_preview,
             startup_source: inner.startup_source,
             startup_native_source: inner.startup_native_source,
@@ -591,6 +601,7 @@ pub(crate) struct AuthoringProjectSessionSnapshot {
     scene_limits: SceneFileLimits,
     readiness: AuthoringProjectReadiness,
     startup_compilation_diagnostics: DiagnosticReport,
+    startup_composition_failure: Option<nara_scene::PrefabExpansionFailure>,
     startup_preview: Option<CapturedAuthoringPreview>,
     startup_source: Arc<AuthoringSourceFact>,
     startup_native_source: AdmittedNativeDocumentSource,
@@ -734,6 +745,12 @@ impl AuthoringProjectSessionSnapshot {
 
     pub(crate) fn startup_compilation_diagnostics(&self) -> &DiagnosticReport {
         &self.startup_compilation_diagnostics
+    }
+
+    pub(crate) fn startup_composition_failure(
+        &self,
+    ) -> Option<&nara_scene::PrefabExpansionFailure> {
+        self.startup_composition_failure.as_ref()
     }
 
     #[must_use]
@@ -906,50 +923,9 @@ impl PreparedAuthoringProject {
         self,
     ) -> Result<AuthoringProjectCandidate, AuthoringProjectSourceAdmissionError> {
         let mut budget = self.schema.budget;
-        let scene_root = self.schema.settings.paths.scenes.clone();
-        let bundle_encoded_bytes = self.schema.bundle_bytes().len();
-        let startup_path = self
-            .schema
-            .settings
-            .startup
-            .default_scene
-            .clone()
-            .ok_or(AuthoringProjectSourceAdmissionError::MissingStartupScene)?;
-
         let adapter_retained = adapter_receipts_retained_bytes(&self.adapters)?;
         budget.charge_source_bytes(0, 0, 0, adapter_retained)?;
-
-        let scenes = open_source_directory(
-            &self.schema.project_root,
-            &scene_root,
-            AuthoringSourceKind::Scene,
-            &mut budget,
-        )?;
-        budget.charge_reference(startup_path.as_str().len(), 0, false)?;
-        let startup_project_path = join_project_path(&scene_root, startup_path.as_str())?;
-        let startup_opened = open_source_file(
-            &scenes,
-            startup_project_path,
-            startup_path.as_str(),
-            AuthoringSourceKind::Scene,
-            0,
-            &mut budget,
-        )?;
-        let mut identities = HashMap::new();
-        identities.insert(self.schema.manifest_identity(), LoadedIdentity::SchemaBasis);
-        identities.insert(self.schema.bundle_identity(), LoadedIdentity::SchemaBasis);
-        if identities.contains_key(&startup_opened.identity) {
-            return Err(
-                AuthoringProjectSourceAdmissionError::SourceIdentityKindConflict {
-                    path: startup_opened.project_path,
-                },
-            );
-        }
-        let startup_read = read_unique_source(
-            startup_opened,
-            self.scene_limits.encoded_bytes().get(),
-            &mut budget,
-        )?;
+        let startup_read = read_saved_startup(&self.schema, self.scene_limits, &mut budget)?;
         let basis = AuthoringSchemaBasis::admit(self.schema.bundle.bundle(), &self.adapters)
             .map_err(|error| {
                 map_document_data_error(
@@ -958,44 +934,45 @@ impl PreparedAuthoringProject {
                     &mut budget,
                 )
             })?;
-        let startup_scene = {
-            let budget = &mut budget;
-            admit_scene_document(
-                &startup_read,
-                self.scene_limits,
-                &basis,
-                bundle_encoded_bytes,
-                budget,
-            )?
-        };
-        drop(scenes);
-
-        let startup_source = Arc::clone(&startup_read.source);
-        let source_policy = NativeDocumentSourcePolicy::new(self.schema.settings());
-        let startup_native_source = source_policy.admit_budgeted(
-            &self.schema.project_root,
-            startup_source.project_path().as_str(),
-            nara_scene::SourceDocumentKind::Scene,
-            startup_source.identity(),
-            0,
-            3,
-            &mut budget,
-        )?;
-        let mut capture = capture::capture_scene(
+        let mut startup = capture_saved_startup(
             &self.schema,
             self.scene_limits,
-            startup_scene.document(),
+            startup_read,
             &basis,
-            &startup_source,
-            &startup_native_source,
-            AuthoringProjectReadiness::from_document(startup_scene.readiness()),
+            self.schema.bundle_bytes().len(),
             &mut budget,
             &[],
+            capture::AuthoringCapturePreview::Prepare,
         )?;
         #[cfg(feature = "presentation-2d")]
-        reserve_preview_identity_store(&capture, &mut budget)?;
-        capture.usage = budget.usage();
-        let capture::AuthoringDocumentCapture {
+        reserve_preview_identity_store(&startup.capture, &mut budget)?;
+        startup.capture.usage = budget.usage();
+        Ok(startup.into_candidate(
+            self.schema,
+            self.adapters,
+            self.scene_limits,
+            budget.usage(),
+        ))
+    }
+}
+
+/// The saved root and its observed file remain paired, separately from working Scene captures.
+struct CapturedSavedStartup {
+    source: Arc<AuthoringSourceFact>,
+    native_source: AdmittedNativeDocumentSource,
+    document: Arc<PublishedAuthoringSceneDocument>,
+    capture: AuthoringDocumentCapture,
+}
+
+impl CapturedSavedStartup {
+    fn into_candidate(
+        self,
+        schema: Arc<AuthoringSchemaReceipt>,
+        adapters: Box<[AuthoringAdapterReceipt]>,
+        scene_limits: SceneFileLimits,
+        usage: AuthoringProjectAdmissionUsage,
+    ) -> AuthoringProjectCandidate {
+        let AuthoringDocumentCapture {
             readiness,
             diagnostics: startup_compilation_diagnostics,
             prefabs,
@@ -1004,24 +981,25 @@ impl PreparedAuthoringProject {
             unresolved_dependencies,
             source_facts,
             stable_lookups,
-            usage,
+            usage: _,
             preview: startup_preview,
-            composition_failure: _,
+            composition_failure: startup_composition_failure,
             root_revision: _,
             authority: _,
-        } = capture;
+        } = self.capture;
 
-        Ok(AuthoringProjectCandidate {
+        AuthoringProjectCandidate {
             inner: AuthoringProjectSnapshotInner {
-                schema: self.schema,
-                adapters: self.adapters,
-                scene_limits: self.scene_limits,
+                schema,
+                adapters,
+                scene_limits,
                 readiness,
                 startup_compilation_diagnostics,
+                startup_composition_failure,
                 startup_preview,
-                startup_source,
-                startup_native_source,
-                startup_scene,
+                startup_source: self.source,
+                startup_native_source: self.native_source,
+                startup_scene: self.document,
                 prefabs,
                 assets,
                 asset_database,
@@ -1030,8 +1008,89 @@ impl PreparedAuthoringProject {
                 stable_lookups,
                 usage,
             },
-        })
+        }
     }
+}
+
+fn read_saved_startup(
+    schema: &AuthoringSchemaReceipt,
+    scene_limits: SceneFileLimits,
+    budget: &mut AuthoringProjectAdmissionBudget,
+) -> Result<ReadAuthoringSource, AuthoringProjectSourceAdmissionError> {
+    let scene_root = &schema.settings.paths.scenes;
+    let startup_path = schema
+        .settings
+        .startup
+        .default_scene
+        .as_ref()
+        .ok_or(AuthoringProjectSourceAdmissionError::MissingStartupScene)?;
+    let scenes = open_source_directory(
+        &schema.project_root,
+        scene_root,
+        AuthoringSourceKind::Scene,
+        budget,
+    )?;
+    budget.charge_reference(startup_path.as_str().len(), 0, false)?;
+    let startup_project_path = join_project_path(scene_root, startup_path.as_str())?;
+    let opened = open_source_file(
+        &scenes,
+        startup_project_path,
+        startup_path.as_str(),
+        AuthoringSourceKind::Scene,
+        0,
+        budget,
+    )?;
+    if opened.identity == schema.manifest_identity() || opened.identity == schema.bundle_identity()
+    {
+        return Err(
+            AuthoringProjectSourceAdmissionError::SourceIdentityKindConflict {
+                path: opened.project_path,
+            },
+        );
+    }
+    read_unique_source(opened, scene_limits.encoded_bytes().get(), budget)
+}
+
+fn capture_saved_startup(
+    schema: &Arc<AuthoringSchemaReceipt>,
+    scene_limits: SceneFileLimits,
+    read: ReadAuthoringSource,
+    basis: &AuthoringSchemaBasis,
+    bundle_encoded_bytes: usize,
+    budget: &mut AuthoringProjectAdmissionBudget,
+    open_prefabs: &[AuthoringPrefabSessionSnapshot],
+    preview: capture::AuthoringCapturePreview,
+) -> Result<CapturedSavedStartup, AuthoringProjectSourceAdmissionError> {
+    let document = admit_scene_document(&read, scene_limits, basis, bundle_encoded_bytes, budget)?;
+    let source = Arc::clone(&read.source);
+    let native_source = NativeDocumentSourcePolicy::new(schema.settings()).admit_budgeted(
+        &schema.project_root,
+        source.project_path().as_str(),
+        nara_scene::SourceDocumentKind::Scene,
+        source.identity(),
+        0,
+        3,
+        budget,
+    )?;
+    capture::charge_open_prefab_inputs(open_prefabs, budget)?;
+    let capture = capture::capture_scene(
+        schema,
+        scene_limits,
+        document.document(),
+        basis,
+        &source,
+        &native_source,
+        AuthoringProjectReadiness::from_document(document.readiness()),
+        budget,
+        open_prefabs,
+        preview,
+    )?;
+    Ok(CapturedSavedStartup {
+        source,
+        native_source,
+        document,
+        capture,
+    })
 }
 
 #[cfg(feature = "presentation-2d")]

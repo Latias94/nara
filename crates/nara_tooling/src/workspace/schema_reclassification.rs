@@ -22,7 +22,7 @@ use super::{
 /// One move-only successor for the exact complete open set of its original workspace.
 ///
 /// This proves source classification and exact source-history replay. The project Host must
-/// separately prepare actual current/historical dependency composition and file publication.
+/// separately prepare actual current dependency composition and file publication.
 #[derive(Debug)]
 pub struct PreparedEditorWorkspaceSchemaReclassification {
     owner: Arc<EditorWorkspacePersistenceIdentity>,

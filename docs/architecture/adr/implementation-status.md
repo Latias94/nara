@@ -120,9 +120,8 @@ or history replacement. Dormant malformed overlay payloads remain preserved. The
 adds snapshot-preserving bundle composition, actual accepted leaf/target attachment and current
 Scene capture using the original dirty Prefab Arcs under one prepared nominal basis. Complete
 lineage no-op and stale/wrong-target/budget refusals retain actual observations. ADR 0114 adopts
-the metadata successor boundary. The full project receipt, actual selected historical composition,
-whole Session adoption, publication/reconciliation and native installed-owner workflow
-remain unimplemented; neither source proof nor this internal handoff closes them.
+the metadata successor boundary. The later saved-project receipt and whole-Workspace units have
+their own evidence below; neither source proof nor this internal handoff closes Session adoption.
 The [whole-Workspace successor](../../knowledge/engineering/verification/2026-10/2026-10-28T050925Z-whole-workspace-schema-preparation-and-shared-immutable-published-sources-dc568b9954884122a24a9f8a25491451.md)
 adds one move-only candidate for the exact complete open Scene/Prefab set, all-incumbent admission
 before successor classification and exclusive all-source binding before infallible swaps. Foreign
@@ -131,7 +130,16 @@ partial publication; source/history/selection/saved checkpoints remain in place.
 now share immutable document/classification Arcs through fork and Session transfer, with independent
 source identities and history. ADRs 0047/0118 own the Workspace cut; ADR 0114 distinguishes saved
 startup observations from dirty working captures. The linked evidence qualifies this source unit,
-not the matching project receipt, historical effective-demand proof or installed Session adoption.
+not the matching project receipt or installed Session adoption.
+The [saved-project successor](../../knowledge/engineering/verification/2026-10/2026-10-28T054209Z-same-basis-saved-project-receipt-before-whole-session-schema-adoption-a796d5f92d5e4fb4b1ae7cbdca4d2741.md)
+shares ordinary startup reading/classification/capture under the prepared basis, keeps saved and
+dirty roots distinct, joins the complete actual source/asset/database/lookup closure to the accepted
+owner leaf and creates a new bundle-bound index. Cumulative capture and validation budget, final
+usage, stale observations and exact attachment failure have actual-file evidence. ADRs
+0090/0047/0114/0118 correct the earlier all-historical-composition requirement: exact source history
+is preserved; a later Undo may expose a diagnosed composition conflict and Redo its repair. No
+Cartesian dependency-history validator is required. Whole Session publication/reconciliation,
+immediate preview invalidation and installed-owner/native adoption remain unimplemented.
 The [documentation verification](../../knowledge/engineering/verification/2026-10/2026-10-23T115037Z-foundation-architecture-rebaseline-documentation-checks-and-adversarial-closure-33c8c794baf142ee964468a01248af17.md)
 records inventory/link/status checks and the scoped adversarial correction/recheck. No Cargo,
 performance or native trajectory was re-executed for this design-only unit.

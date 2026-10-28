@@ -137,7 +137,9 @@ evolution transaction; adding metadata grants no executable approval or native R
 
 The Authoring owner prepares one successor bundle, engine-owned Adapters and one nominal
 `AuthoringSchemaBasis` before publication. Current dirty sources and retained history are prepared
-against that same basis through their actual source and composition owners. File observations
+against that same basis through their actual source owners; current composition uses the actual
+selected compiler. History continuity promises source replayability rather than all-history
+preview validity under ADR 0090. File observations
 during preparation still describe the incumbent bundle. They are not a successor receipt and
 must not be relabeled as successor bytes or file identity. The prepared data and actual accepted
 bundle leaf join only after known file publication, without another catalog or basis admission.
@@ -150,6 +152,18 @@ present unsaved content as saved. Immutable Published source/classification hand
 with independently owned Sessions; history/source lineage remains Session-owned. Sharing does not
 admit a new basis or permit arbitrary document/classification pairs. Actual dirty Scene/Prefab
 captures retain their participant revisions and cannot use a disk-only startup-preview seed.
+
+Saved-root successor preparation uses the ordinary startup source/compiler path with the prepared
+basis supplied explicitly. It recaptures actual selected Prefab sources, assets/database, unresolved
+dependencies, source/lookup observations, readiness and diagnostics; copying the predecessor's
+inventory would omit references newly understood by the added Schema. Original metadata remains
+the physical observation until accepted publication. Pre-write validation uses the same cumulative
+operation allowance, including failed validation work. Attachment joins the complete prepared
+closure to the exact nominal published owner and records the operation's final usage, without IO
+or a second admission. A refused attachment retains both prepared closure and actual published
+leaf/evidence. A fresh Session snapshot rebuilds the bundle-bound source index before any live
+source swap; inherited scans cannot retain authority under a new bundle. A prepared project may
+expose Degraded/composition diagnostics for review; that observation alone grants no adoption.
 
 The shared publisher binds while the admitted incumbent leaf is alive and transfers the actual
 accepted successor capability into its receipt. Original project root, manifest, bundle, parent
@@ -164,7 +178,7 @@ an explicit outcome. Source-index and preview authority bound to the predecessor
 The [owner-adoption plan](../../plans/2026-10-28-authoring-owner-adoption-plan.md) orders this workflow;
 source-only qualification does not establish project or Session adoption.
 The metadata receipt retains its own baseline budget for future independent captures. The
-adoption operation separately accumulates all current/historical capture work, including failed
+adoption operation separately accumulates source/history proof and current capture work, including failed
 attempts; exhaustion forbids validation and attachment. A completed capture's observed usage is
 a cumulative snapshot at that point, not its independent delta or the operation's final total.
 

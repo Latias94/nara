@@ -105,12 +105,15 @@ bytes does not recreate that nominal basis.
    startup-preview initializer that assumes disk-only Prefabs and zero unsaved participants.
    Closed raw Prefabs retain actual-demand composition: do not force independent strict publication
    of a source whose invalid payload is lawfully repaired/discarded by an outer declaration.
-   Extend the same history preparation traversal to validate actual selected composition for
-   every retained reachable state against the successor closure before publication. The Host
-   must distinguish invalid surviving intent from a dormant payload lawfully discarded by an
-   outer declaration; a source-only classification candidate does not establish this proof.
-   Keep that integration internal to the actual Host workflow, with no second history interpreter
-   or eager dependency scan and no retained snapshot per historical state.
+   Capture actual current composition for the saved startup and each open Scene against the
+   prepared working Prefabs. Preserve current semantic candidate/failure, diagnostics and unresolved
+   facts for review. Capture uses ordinary Authoring admission: classified source failure, format,
+   acquisition or budget errors refuse; a returned Degraded capture retains its typed composition
+   failure, unresolved facts and preview limits without pretending it is ready for execution.
+   Retained history must remain exactly source-replayable under the successor; it is not a promise
+   that every past or cross-document combination can materialize. Later Undo/Redo selects current
+   source again and uses ordinary revision-bound capture/diagnostics and repair. Do not add a second
+   history interpreter, historical dependency Cartesian search or a snapshot for every entry.
 3. **Whole open-set preparation.** Through Workspace, prepare every open Scene and Prefab,
    including inactive dirty documents, against that shared successor. Preserve per-document
    persistence Hosts and saved checkpoints. Capture the exact open set/incarnations, revisions,
@@ -154,15 +157,48 @@ bytes does not recreate that nominal basis.
 
 ## Source And History Counterexamples
 
+### History preservation and current composition
+
+Source truth and its disposable composition have different acceptance. ADR 0026 owns exact
+source/inverse replay and retained cost; ADR 0047 explicitly permits a source repair while effective
+composition remains rejected. An older authoring state can therefore be lawful source history
+without being a usable preview. Metadata adoption preserves this same boundary.
+
+The earlier requirement to prove every historical selected composition was an additional product
+restriction, not a consequence of history preservation. Independent Undo/Redo can form a product
+of Scene and demanded Prefab states; validating only separate axes is incomplete, while a complete
+search can reject an otherwise useful adoption because of a past repaired conflict or combinatorial
+work. Do not build a state-search engine to impose that extra guarantee. Retain the actual source
+history proof, exact current dependency capture and explicit future composition failure/recovery.
+
+Before publishing, prove every retained source edge in both directions through the existing kernel
+and prepare current saved/open Scene roots with the actual selected current working Prefabs. No
+independent Prefab root is invented. Unknown or native-binding omissions remain compiler-owned;
+`Ok(Degraded)` or `failure == None` alone does not establish current semantic success. A returned
+Authoring capture may preserve a composition conflict or unresolved dependency under the ordinary
+degraded contract. Review and adopted observations retain those exact facts; no usable preview,
+Play or Export authority follows. Source/format/acquisition/budget failures still refuse. The
+Session integrates current facts with the full original source set, cumulative allowance and
+publication fence, rather than adding a second complete-runtime gate to metadata recovery.
+
+After adoption, an actual Undo/Redo publishes its admitted source transaction and invalidates
+projection. The ordinary current capture then either publishes a new valid preview or exposes
+composition diagnostics while retaining the last accepted preview under its existing stale-input
+rules. Redo or an explicit source repair can restore composition; no history is removed, silently
+rewritten or relabeled as saved. The guarantee is exact source-history continuity, not all-history
+preview availability. A separate optional diagnostic tool would need its own concrete consumer
+before any historical journal/search abstraction is added.
+
 - Two Scenes and two Prefabs include inactive dirty sources, both Undo/Redo branches, saved states,
   unrelated unavailable records and dormant overlays. Exact source/selection/history survives
   adoption; newly understood data becomes editable without a fabricated source edit.
 - An old explicit complete-instance repair hides a malformed unknown overlay value. Source-only
   classification must preserve this dormant history. With the real canonical base, prove current
   composition succeeds and a retained Undo/Redo state actually selects the invalid surviving
-  value; the Host then refuses adoption before file publication. A paired outer replacement or
-  suppression that lawfully discards the payload must succeed. Do not clear history, eagerly
-  validate all embedded payloads or mistake source classification for this Host proof.
+  value after adoption; source Undo/Redo still succeeds and actual current capture reports the
+  conflict. Redoing the exact source repair restores valid composition. A paired outer replacement
+  or suppression that lawfully discards the payload must succeed. Do not clear history, eagerly
+  validate all embedded payloads or promise every past dependency combination will preview.
 - A valid history patch generates an inverse which fails reverse admission under the successor.
   Reject that edge before publication; test RestoreEntity and scoped conversion through actual
   history semantics, not ordinary-edit restrictions.

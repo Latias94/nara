@@ -210,10 +210,12 @@ Rules:
   extension and native-only owners refuse explicitly. All source guards bind under exclusive
   Workspace access before an infallible classification-only swap; source Arcs, content states,
   history, selection, saved checkpoints and persistence custody remain in their owners.
-  This source proof does not grant file publication, executable approval or actual historical
+  This source proof does not grant file publication, executable approval or current effective
   dependency validity. The Project Session must prepare those facts and its matching receipt
   before publishing, then adopt project and Workspace in the same owner turn. A known published
   bundle that cannot be adopted remains an explicit published-without-adoption outcome.
+  Later source Undo/Redo may expose a composition conflict; ordinary revision-bound capture reports
+  it and source repair can recover. History continuity does not promise all-history preview validity.
 - Authoring revision remains monotonic for conflict detection. Dirty state compares the current
   opaque content-state identity with the receipt-backed saved content-state identity, with
   source-upgrade-required as an additional dirty condition.

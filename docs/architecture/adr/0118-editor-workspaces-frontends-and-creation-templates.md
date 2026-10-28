@@ -41,8 +41,11 @@ Scene/Prefab set under one successor admission. All incumbents enter its finite 
 before any successor classification, and all exclusive source guards bind before an infallible
 whole-set swap. Navigation, field selection, content/saved identities and persistence owners are
 preserved. Native-only or unsupported extension sources refuse explicitly. The Project Session
-separately owns actual current/historical composition, metadata publication, its matching project
+separately owns actual current composition, metadata publication, its matching project
 receipt and immediate preview invalidation; source preparation alone does not complete adoption.
+Retained Undo/Redo keeps source replayability; a later selected source may produce composition
+diagnostics and recover through the ordinary repair path. Adoption does not prove all historical
+dependency combinations can preview.
 
 Future custom UI reuses these semantic boundaries and render-view handoff, but may replace all widget, layout, focus and docking code.
 Sharing rendering does not require sharing the runtime game's complete UI toolkit.

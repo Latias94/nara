@@ -125,9 +125,20 @@ This logical preparation model excludes allocator capacity, shared catalogs and 
 refusal reporting. Diagnostic draft/report limits bound that refusal envelope even at exhaustion;
 retained classification diagnostics and dynamic interpretation scratch remain admitted work.
 This source proof preserves dormant overlay payloads and does not establish effective historical
-composition. Project adoption separately proves its actual selected source/dependency closure
-through the same compiler and history preparation kernel before publishing the bundle. A malformed
-surviving value refuses that Host successor; a lawfully discarded dormant payload does not.
+composition. Project adoption separately prepares its actual current selected source/dependency
+closure through the existing compiler before publishing the bundle. Ordinary Authoring admission
+still applies: source/format/acquisition/budget failures refuse; returned Degraded composition,
+unresolved dependencies and unavailable/native omissions remain explicit review/adopted facts.
+Metadata recovery is not a complete Runtime gate and grants no preview, Play or Export readiness.
+
+History preservation means exact source transactions remain replayable, not that every past
+Scene/Prefab combination can materialize. ADR 0047 already permits valid source edits while
+composition is rejected. Adoption keeps that boundary: a later Undo/Redo can expose a composition
+conflict, which ordinary revision-bound capture diagnoses; Redo or explicit source repair may
+restore it. The last accepted preview retains its existing stale-input rules. Do not reject useful
+metadata recovery solely for an older repaired composition conflict or enumerate a Cartesian
+history/dependency product. Source replay, current composition and executable/native readiness
+remain distinct guarantees; metadata adoption grants no all-history preview promise.
 
 The move-only candidate retains the original revision and exact predecessor/successor bases.
 Commit changes classification only, preserving document/source identity, content state, source

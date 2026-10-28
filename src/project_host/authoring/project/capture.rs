@@ -58,6 +58,7 @@ impl OwnedAuthoringSceneCapture {
             self.readiness,
             &mut budget,
             &self.open_prefabs,
+            AuthoringCapturePreview::Prepare,
         )?;
         // Selected documents transfer into composition ownership during loading. The other
         // working copies remain request inputs until preparation physically returns.
@@ -178,6 +179,14 @@ impl AuthoringSourceValidation {
 
     pub(crate) fn validate(self) -> Result<(), AuthoringProjectSourceAdmissionError> {
         let mut budget = self.schema.budget;
+        self.validate_with_budget(&mut budget)
+    }
+
+    /// Reuses the same observation checks under an operation's cumulative allowance.
+    pub(super) fn validate_with_budget(
+        &self,
+        budget: &mut AuthoringProjectAdmissionBudget,
+    ) -> Result<(), AuthoringProjectSourceAdmissionError> {
         let retained = self.sources.iter().try_fold(
             checked_product(self.sources.len(), size_of::<Arc<AuthoringSourceFact>>())?,
             |bytes, source| checked_sum([bytes, source_fact_retained_bytes(source)?]),
@@ -196,10 +205,10 @@ impl AuthoringSourceValidation {
             ),
         )?;
         for source in self.sources.iter() {
-            revalidate_source_fact(&self.schema.project_root, source, &mut budget)?;
+            revalidate_source_fact(&self.schema.project_root, source, budget)?;
         }
         for source in schema_source_facts(&self.schema) {
-            revalidate_source_fact(&self.schema.project_root, &source, &mut budget)?;
+            revalidate_source_fact(&self.schema.project_root, &source, budget)?;
         }
         ReferenceCatalogue::revalidate_lookups(
             &self.schema.project_root,
@@ -208,10 +217,23 @@ impl AuthoringSourceValidation {
                 &self.schema.settings.paths.prefabs,
             ],
             &self.stable_lookups,
-            &mut budget,
+            budget,
         )?;
         Ok(())
     }
+}
+
+pub(super) fn charge_open_prefab_inputs(
+    open_prefabs: &[AuthoringPrefabSessionSnapshot],
+    budget: &mut AuthoringProjectAdmissionBudget,
+) -> Result<(), AuthoringProjectSourceAdmissionError> {
+    budget.charge_source_bytes(
+        0,
+        0,
+        0,
+        prefabs::open_prefab_inputs_retained_bytes(open_prefabs)?,
+    )?;
+    Ok(())
 }
 
 impl AuthoringDocumentCapture {
@@ -262,6 +284,12 @@ impl AuthoringDocumentCapture {
     }
 }
 
+#[derive(Clone, Copy)]
+pub(super) enum AuthoringCapturePreview {
+    Prepare,
+    Omit,
+}
+
 pub(super) fn capture_scene(
     schema: &Arc<AuthoringSchemaReceipt>,
     scene_limits: SceneFileLimits,
@@ -272,6 +300,7 @@ pub(super) fn capture_scene(
     mut readiness: AuthoringProjectReadiness,
     budget: &mut AuthoringProjectAdmissionBudget,
     open_prefabs: &[AuthoringPrefabSessionSnapshot],
+    preview: AuthoringCapturePreview,
 ) -> Result<AuthoringDocumentCapture, AuthoringProjectSourceAdmissionError> {
     let prefab_root = schema.settings.paths.prefabs.clone();
     let asset_root = schema.settings.paths.assets.clone();
@@ -342,20 +371,21 @@ pub(super) fn capture_scene(
         budget.charge_source_bytes(0, 0, 0, composition_failure_retained_bytes(failure)?)?;
     }
     let composition_failure = compiled.failure.take();
-    let preview = if compiled.candidate.is_some() {
-        let key_bytes = containing_native_source.key().retained_bytes();
-        budget.charge_source_bytes(0, 0, 0, key_bytes)?;
-        let (expanded, omissions) = compiled
-            .into_native_preview()
-            .map_err(AuthoringProjectSourceAdmissionError::CompilationBudget)?;
-        Some(CapturedAuthoringPreview {
-            candidate: expanded.bind_source(containing_native_source.key().clone()),
-            omissions,
-        })
-    } else {
-        drop(compiled);
-        None
-    };
+    let preview =
+        if matches!(preview, AuthoringCapturePreview::Prepare) && compiled.candidate.is_some() {
+            let key_bytes = containing_native_source.key().retained_bytes();
+            budget.charge_source_bytes(0, 0, 0, key_bytes)?;
+            let (expanded, omissions) = compiled
+                .into_native_preview()
+                .map_err(AuthoringProjectSourceAdmissionError::CompilationBudget)?;
+            Some(CapturedAuthoringPreview {
+                candidate: expanded.bind_source(containing_native_source.key().clone()),
+                omissions,
+            })
+        } else {
+            drop(compiled);
+            None
+        };
     resize_compiler_work(budget, &mut compiler_reservation, 0)?;
     if let Some(preview) = &preview {
         let candidate_bytes =

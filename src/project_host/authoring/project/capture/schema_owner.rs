@@ -6,7 +6,7 @@ use crate::project_host::authoring::{AdmittedAuthoringSchemaOwner, PreparedAutho
 /// Actual selected capture under prepared metadata, still fenced by the incumbent bundle leaf.
 ///
 /// The inner capture is unavailable as a published successor until the bundle's actual accepted
-/// leaf has been attached. Historical composition and whole-project publication are separate.
+/// leaf has been attached. Source-history proof and whole-project publication are separate.
 pub(crate) struct PreparedSchemaOwnerSceneCapture {
     capture: AuthoringDocumentCapture,
     basis: AuthoringSchemaBasis,
@@ -48,6 +48,7 @@ impl PreparedAuthoringSchemaOwner {
                     AuthoringProjectReadiness::from_document(view.readiness()),
                     &mut budget,
                     open_prefabs,
+                    AuthoringCapturePreview::Prepare,
                 )
             })
         })();

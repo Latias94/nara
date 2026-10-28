@@ -3,7 +3,7 @@ type: "Current State"
 title: "Current Engineering State"
 description: "Derived summary of immutable engineering-memory shards."
 tags: ["engineering-memory", "derived"]
-source_fingerprint: "68de1e6aec422757821c9a6c89b73f6dfed561f6916ff5914ac3bb05895502e2"
+source_fingerprint: "0cc18e2b8dd450296aa83475e769f6eea0feb4c4bfe7a53d2155c1477d5fec3d"
 ---
 
 # Current State
@@ -12,8 +12,8 @@ source_fingerprint: "68de1e6aec422757821c9a6c89b73f6dfed561f6916ff5914ac3bb05895
 
 This file is derived from immutable shards. Record new facts in shards, then render during integration.
 
-- Source fingerprint: `68de1e6aec422757821c9a6c89b73f6dfed561f6916ff5914ac3bb05895502e2`
-- Immutable records: 997
+- Source fingerprint: `0cc18e2b8dd450296aa83475e769f6eea0feb4c4bfe7a53d2155c1477d5fec3d`
+- Immutable records: 998
 - Active lane heads: 1
 
 # Active Registrations
@@ -69,6 +69,7 @@ This file is derived from immutable shards. Record new facts in shards, then ren
 
 # Recent Evidence
 
+- **Verification Evidence**: [Same-basis saved project receipt before whole-session schema adoption](verification/2026-10/2026-10-28T054209Z-same-basis-saved-project-receipt-before-whole-session-schema-adoption-a796d5f92d5e4fb4b1ae7cbdca4d2741.md) - Qualifies actual saved startup and selected dirty Prefab capture joined to one published owner, with cumulative revalidation and a fresh source index.
 - **Verification Evidence**: [Whole-workspace schema preparation and shared immutable published sources](verification/2026-10/2026-10-28T050925Z-whole-workspace-schema-preparation-and-shared-immutable-published-sources-dc568b9954884122a24a9f8a25491451.md) - Qualifies exact whole-set source classification and immutable source sharing without claiming project or Session adoption.
 - **Verification Evidence**: [Snapshot-preserving bundle successors and prepared current-source capture](verification/2026-10/2026-10-28T041431Z-snapshot-preserving-bundle-successors-and-prepared-current-source-capture-74dd681a584541178fb81b346b53e878.md) - Qualifies live bundle-leaf handoff and same-basis current capture without claiming whole project, historical or Session adoption.
 - **Work Progress**: [Bundle owner successor and current source capture integration in progress](progress/2026-10/2026-10-28T041003Z-bundle-owner-successor-and-current-source-capture-integration-in-progress-92c27e57b33f494f8505ae9d834233c9.md) - Records snapshot-preserving composition, live accepted leaf handoff, nominal current-source capture and remaining historical and Session adoption work.
@@ -80,7 +81,6 @@ This file is derived from immutable shards. Record new facts in shards, then ren
 - **Work Progress**: [Durable installed tool selection and paired attempt integration in progress](progress/2026-10/2026-10-28T010718Z-durable-installed-tool-selection-and-paired-attempt-integration-in-progress-9621f4a6d44249569e458a0e4006fa4a.md) - Records the current single-slot selection replacement, independent review corrections and live qualification boundary.
 - **Verification Evidence**: [Continuous file publication and editor source custody qualification](verification/2026-10/2026-10-27T233313Z-continuous-file-publication-and-editor-source-custody-qualification-d9a0d6253fc3473ab82093b446048d9c.md) - Qualifies live leaf custody across publication, fresh authoring admission and pending image imports, with public, managed and native consumers.
 - **Verification Evidence**: [Captured managed tool images through the Session and exact finite child custody](verification/2026-10/2026-10-27T221624Z-captured-managed-tool-images-through-the-session-and-exact-finite-child-custody-b852454a4fe841548bed563ca97d071e.md) - Records approved machine runtime and immutable image execution, strict managed graph admission, native cancellation custody, actual installed V1 V2 consumers and qualification limits.
-- **Verification Evidence**: [Shared Windows process image evidence and explicit installed tool runtime trust partition](verification/2026-10/2026-10-27T213708Z-shared-windows-process-image-evidence-and-explicit-installed-tool-runtime-trust-partition-814f24baa3964ef5ae5708602aaca655.md) - Records extraction of exact native image checks from Play, actual process-image and generation tests, and the bounded machine-runtime trust decision without claiming installed execution.
 
 # Integration Notes
 

@@ -1,7 +1,7 @@
 //! Additive Schema recovery preserves source identity and proves retained source history.
 //!
-//! Dormant overlay payloads are preserved. Actual selected historical composition and dependency
-//! availability remain separate Host admission through the existing Prefab compiler.
+//! Dormant overlay payloads are preserved. Actual selected current composition and dependency
+//! availability remain separate Host observations through the existing Prefab compiler.
 
 use std::{mem::size_of, sync::Arc};
 

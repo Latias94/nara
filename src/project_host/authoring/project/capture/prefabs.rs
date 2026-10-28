@@ -584,20 +584,11 @@ pub(super) fn charge_capture_inputs(
     budget: &mut AuthoringProjectAdmissionBudget,
 ) -> Result<(usize, Arc<AuthoringSourceFact>), AuthoringProjectSourceAdmissionError> {
     budget.charge_source_bytes(0, 0, 0, adapter_retained)?;
-    let mut input_retained = checked_sum([document_bytes, 2 * size_of::<usize>()])?;
-    for snapshot in open_prefabs {
-        input_retained = checked_sum([
-            input_retained,
-            size_of::<AuthoringPrefabSessionSnapshot>(),
-            snapshot.document.retained_bytes()?,
-            snapshot.source.relative_path().len(),
-            snapshot
-                .source
-                .native_source()
-                .retained_bytes()
-                .ok_or(AuthoringProjectSourceAdmissionError::AccountingOverflow)?,
-        ])?;
-    }
+    let input_retained = checked_sum([
+        document_bytes,
+        2 * size_of::<usize>(),
+        open_prefab_inputs_retained_bytes(open_prefabs)?,
+    ])?;
     budget.charge_source_bytes(0, 0, 0, input_retained)?;
     budget.charge_reference(source.relative_path().len(), 0, false)?;
     budget.charge_open_file(3)?;
@@ -644,6 +635,26 @@ pub(super) fn charge_capture_inputs(
             dependency_depth: 0,
         }),
     ))
+}
+
+pub(super) fn open_prefab_inputs_retained_bytes(
+    open_prefabs: &[AuthoringPrefabSessionSnapshot],
+) -> Result<usize, AuthoringProjectSourceAdmissionError> {
+    let mut input_retained = 0;
+    for snapshot in open_prefabs {
+        input_retained = checked_sum([
+            input_retained,
+            size_of::<AuthoringPrefabSessionSnapshot>(),
+            snapshot.document.retained_bytes()?,
+            snapshot.source.relative_path().len(),
+            snapshot
+                .source
+                .native_source()
+                .retained_bytes()
+                .ok_or(AuthoringProjectSourceAdmissionError::AccountingOverflow)?,
+        ])?;
+    }
+    Ok(input_retained)
 }
 
 pub(super) fn revalidate_sources(
