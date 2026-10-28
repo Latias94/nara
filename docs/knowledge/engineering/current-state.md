@@ -3,7 +3,7 @@ type: "Current State"
 title: "Current Engineering State"
 description: "Derived summary of immutable engineering-memory shards."
 tags: ["engineering-memory", "derived"]
-source_fingerprint: "e41cbe2fff87211732e8546e9f697e341a8a7fe84be68967b42363caeb078d6b"
+source_fingerprint: "ec4da0a8a97f49776f4fbe526c227eecaae0aae6aa0a21578e1c9efb92b2c9e0"
 ---
 
 # Current State
@@ -12,8 +12,8 @@ source_fingerprint: "e41cbe2fff87211732e8546e9f697e341a8a7fe84be68967b42363caeb0
 
 This file is derived from immutable shards. Record new facts in shards, then render during integration.
 
-- Source fingerprint: `e41cbe2fff87211732e8546e9f697e341a8a7fe84be68967b42363caeb078d6b`
-- Immutable records: 994
+- Source fingerprint: `ec4da0a8a97f49776f4fbe526c227eecaae0aae6aa0a21578e1c9efb92b2c9e0`
+- Immutable records: 996
 - Active lane heads: 1
 
 # Active Registrations
@@ -69,6 +69,8 @@ This file is derived from immutable shards. Record new facts in shards, then ren
 
 # Recent Evidence
 
+- **Verification Evidence**: [Snapshot-preserving bundle successors and prepared current-source capture](verification/2026-10/2026-10-28T041431Z-snapshot-preserving-bundle-successors-and-prepared-current-source-capture-74dd681a584541178fb81b346b53e878.md) - Qualifies live bundle-leaf handoff and same-basis current capture without claiming whole project, historical or Session adoption.
+- **Work Progress**: [Bundle owner successor and current source capture integration in progress](progress/2026-10/2026-10-28T041003Z-bundle-owner-successor-and-current-source-capture-integration-in-progress-92c27e57b33f494f8505ae9d834233c9.md) - Records snapshot-preserving composition, live accepted leaf handoff, nominal current-source capture and remaining historical and Session adoption work.
 - **Subagent Finding**: [Host schema adoption seams after source history qualification](subagents/2026-10/2026-10-28T033218Z-host-schema-adoption-seams-after-source-history-qualification-656e522708f64f469f6623e660467e9a.md) - Maps actual bundle, capture, Workspace and Session ownership and records proposed streaming historical proof without a second interpreter.
 - **Verification Evidence**: [Source-owned schema reclassification with exact retained history and bounded interpretation](verification/2026-10/2026-10-28T032419Z-source-owned-schema-reclassification-with-exact-retained-history-and-bounded-interpretation-becb85b221e241aebeb4845c692a7379.md) - Qualifies the additive source/history owner and records the actual-demand historical composition boundary before whole-Session adoption.
 - **Work Progress**: [Source-owned additive schema reclassification and retained history integration in progress](progress/2026-10/2026-10-28T023202Z-source-owned-additive-schema-reclassification-and-retained-history-integration-in-progress-3f8038175810499ab6477d801c8903d2.md) - Records the in-progress source/history replacement and concrete budget, nominal identity and shared preparation interfaces before qualification.
@@ -79,8 +81,6 @@ This file is derived from immutable shards. Record new facts in shards, then ren
 - **Verification Evidence**: [Captured managed tool images through the Session and exact finite child custody](verification/2026-10/2026-10-27T221624Z-captured-managed-tool-images-through-the-session-and-exact-finite-child-custody-b852454a4fe841548bed563ca97d071e.md) - Records approved machine runtime and immutable image execution, strict managed graph admission, native cancellation custody, actual installed V1 V2 consumers and qualification limits.
 - **Verification Evidence**: [Shared Windows process image evidence and explicit installed tool runtime trust partition](verification/2026-10/2026-10-27T213708Z-shared-windows-process-image-evidence-and-explicit-installed-tool-runtime-trust-partition-814f24baa3964ef5ae5708602aaca655.md) - Records extraction of exact native image checks from Play, actual process-image and generation tests, and the bounded machine-runtime trust decision without claiming installed execution.
 - **Verification Evidence**: [Local tool artifact publication with a final ready receipt and continuous file custody](verification/2026-10/2026-10-27T210523Z-local-tool-artifact-publication-with-a-final-ready-receipt-and-continuous-file-custody-4443d7b18348430884f7015082c9e304.md) - Records the Windows populated-directory rename counterexample, receipt-last artifact publication, incomplete and post-commit facts, continuous file custody and actual local C# consumers.
-- **Verification Evidence**: [Code-free local finite tool release capture and lifecycle owner design](verification/2026-10/2026-10-27T201403Z-code-free-local-finite-tool-release-capture-and-lifecycle-owner-design-1f12c7706bd44248adec1203402d167e.md) - Qualifies immutable declared artifact capture before installation, records pinned placement findings and the remaining local Package ownership and activation boundaries.
-- **Verification Evidence**: [Finite source tool property facets and shared native review qualification](verification/2026-10/2026-10-27T193225Z-finite-source-tool-property-facets-and-shared-native-review-qualification-c47581dc5dfa45038a38a6aea5b2d4be.md) - Records the UI-neutral Tooling replacement, exact activation and revocation corrections, shared panel and Inspector candidate, actual C# and DX12 workflow, independent review and bounded cleanup.
 
 # Integration Notes
 

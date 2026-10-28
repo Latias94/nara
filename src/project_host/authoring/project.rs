@@ -29,8 +29,9 @@ use nara_scene::{
 };
 
 use super::{
-    AuthoringProjectAdmissionBudget, AuthoringProjectAdmissionError,
-    AuthoringProjectAdmissionUsage, AuthoringProjectAttemptGeneration, AuthoringSchemaReceipt,
+    AUTHORING_BASIS_ENCODED_MULTIPLIER, AuthoringProjectAdmissionBudget,
+    AuthoringProjectAdmissionError, AuthoringProjectAdmissionUsage,
+    AuthoringProjectAttemptGeneration, AuthoringSchemaReceipt,
     document::{AuthoringDocumentDataError, admit_scene_bytes_with_basis},
     source_index::ProjectSourceIndexState,
 };
@@ -49,7 +50,6 @@ use catalogue::{ReferenceCatalogue, charge_database_record, insert_asset_record}
 const SOURCE_OPEN_HANDLE_PEAK: usize = 7;
 const VALUE_NODE_RETAINED_BYTES: usize = 32;
 const AUTHORING_RECORD_RETAINED_OVERHEAD: usize = 64;
-const AUTHORING_BASIS_ENCODED_MULTIPLIER: usize = 4;
 const DEGRADED_ISSUE_RETAINED_BYTES: usize = 128;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]

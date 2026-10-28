@@ -3,6 +3,8 @@
 use super::*;
 
 mod prefabs;
+#[cfg(any(feature = "tooling", test))]
+mod schema_owner;
 pub(crate) use prefabs::AuthoringPrefabSourceCapture;
 
 #[cfg(all(test, any(windows, target_os = "linux")))]
@@ -79,6 +81,26 @@ impl OwnedAuthoringSceneCapture {
 }
 
 impl AuthoringPrefabSessionSnapshot {
+    /// Retains an actual working source under its unpublished classification successor.
+    pub(crate) fn capture_prepared(
+        source: &super::super::document::AuthoringDocumentSourceFact,
+        view: nara_scene::__private::PreparedPrefabSchemaSource<'_>,
+    ) -> Result<Self, AuthoringProjectSourceAdmissionError> {
+        if source.source_key().kind() != nara_scene::SourceDocumentKind::Prefab
+            || !source_locator_matches(Some(view.source()), source.relative_path())
+        {
+            return Err(AuthoringProjectSourceAdmissionError::DocumentSourceMismatch);
+        }
+        Ok(Self {
+            source: source.clone(),
+            document: view.shared_document(),
+            basis: Some(view.schema_basis()),
+            source_matches: true,
+            persistence_available: true,
+            revision: view.base_revision(),
+        })
+    }
+
     pub(crate) fn capture(
         source: &super::super::document::AuthoringDocumentSourceFact,
         session: &nara_scene::PrefabAuthoringSession,

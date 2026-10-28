@@ -2,7 +2,7 @@
 
 **Status**: Accepted
 **Date**: 2026-08-18
-**Last Revised**: 2026-10-16
+**Last Revised**: 2026-10-28
 **Owner**: Private `nara-editor`, project Host, `nara_project`, `nara_reflect`, `nara_scene`,
 `nara_tooling`, and project workflow owners
 **Refines**: [ADR 0090](0090-unavailable-schema-and-lossless-authoring.md) and
@@ -126,6 +126,38 @@ explicit Scene/Prefab/UI/asset closure, source digests and provenance, readiness
 compatibility receipts, canonical unavailable-record manifests, and budget use. Typed previews
 project only facts admitted by exact Adapter receipts; unavailable records remain visible document
 facts and diagnostics rather than placeholder runtime objects.
+
+### Additive authoring Schema successors
+
+An explicit metadata adoption may add one previously absent owner while preserving every existing
+owner's complete current and predecessor catalogs. Reflect owns composition, aggregate limits and
+all current/predecessor/tombstone collisions. Already admitted owner snapshots may be composed
+without cloning or readmitting their catalogs. Existing-owner content changes require a separate
+evolution transaction; adding metadata grants no executable approval or native Runtime binding.
+
+The Authoring owner prepares one successor bundle, engine-owned Adapters and one nominal
+`AuthoringSchemaBasis` before publication. Current dirty sources and retained history are prepared
+against that same basis through their actual source and composition owners. File observations
+during preparation still describe the incumbent bundle. They are not a successor receipt and
+must not be relabeled as successor bytes or file identity. The prepared data and actual accepted
+bundle leaf join only after known file publication, without another catalog or basis admission.
+
+The shared publisher binds while the admitted incumbent leaf is alive and transfers the actual
+accepted successor capability into its receipt. Original project root, manifest, bundle, parent
+and source observations are revalidated before writing. Same owner/content is AlreadyAdmitted
+only when both live project admission and named disk bundle agree. A disk successor with a live
+predecessor requires explicit reconciliation, not a false no-op or an automatic rollback.
+
+The project receipt and complete open-source classifications are installed together under the
+Workspace/Session contracts in ADRs 0047/0118. All fallible preparation, capture, IO and validation
+precede their exclusive publication turn. Known file publication without live adoption remains
+an explicit outcome. Source-index and preview authority bound to the predecessor are invalidated.
+The [owner-adoption plan](../../plans/2026-10-28-authoring-owner-adoption-plan.md) orders this workflow;
+source-only qualification does not establish project or Session adoption.
+The metadata receipt retains its own baseline budget for future independent captures. The
+adoption operation separately accumulates all current/historical capture work, including failed
+attempts; exhaustion forbids validation and attachment. A completed capture's observed usage is
+a cumulative snapshot at that point, not its independent delta or the operation's final total.
 
 ### Non-executable authoring schema bundle
 

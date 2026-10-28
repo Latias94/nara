@@ -115,9 +115,14 @@ history, cumulative-work, successor-receipt and whole-open-set requirements. The
 qualifies additive Scene/Prefab classification, exact retained history in both directions,
 nominal commit guards and cumulative-work/peak-retention admission under ADRs 0026/0090. It reuses
 actual source preparation, with Reflect pre-allocation interpretation hooks and no source revision
-or history replacement. Dormant malformed overlay payloads remain preserved; Host qualification
-of actual selected historical composition, the bundle successor, whole Workspace/Session adoption
-and publication/reconciliation remain unimplemented. This is source-owner qualification only.
+or history replacement. Dormant malformed overlay payloads remain preserved. The
+[metadata/current-source handoff](../../knowledge/engineering/verification/2026-10/2026-10-28T041431Z-snapshot-preserving-bundle-successors-and-prepared-current-source-capture-74dd681a584541178fb81b346b53e878.md)
+adds snapshot-preserving bundle composition, actual accepted leaf/target attachment and current
+Scene capture using the original dirty Prefab Arcs under one prepared nominal basis. Complete
+lineage no-op and stale/wrong-target/budget refusals retain actual observations. ADR 0114 adopts
+the metadata successor boundary. The full project receipt, actual selected historical composition,
+whole Workspace/Session adoption, publication/reconciliation and native installed-owner workflow
+remain unimplemented; neither source proof nor this internal handoff closes them.
 The [documentation verification](../../knowledge/engineering/verification/2026-10/2026-10-23T115037Z-foundation-architecture-rebaseline-documentation-checks-and-adversarial-closure-33c8c794baf142ee964468a01248af17.md)
 records inventory/link/status checks and the scoped adversarial correction/recheck. No Cargo,
 performance or native trajectory was re-executed for this design-only unit.

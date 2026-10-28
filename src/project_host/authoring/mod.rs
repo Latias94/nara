@@ -24,6 +24,7 @@ pub(crate) use project::{
 
 pub(crate) const MAX_AUTHORING_IMAGE_IDENTITIES: usize = 4_096;
 pub(crate) const MAX_AUTHORING_IMAGE_IDENTITY_PATH_BYTES: usize = 2 * 1024 * 1024;
+const AUTHORING_BASIS_ENCODED_MULTIPLIER: usize = 4;
 pub(crate) use source_index::{
     ProjectSourceIndexBudgetUsage, ProjectSourceIndexDiagnostic, ProjectSourceIndexDiagnosticPhase,
     ProjectSourceIndexEntry, ProjectSourceIndexFailure, ProjectSourceIndexGeneration,
@@ -55,6 +56,10 @@ use nara_reflect::{
 };
 
 use self::bundle::{AdmittedAuthoringSchemaBundle, admit_bundle};
+#[cfg(test)]
+pub(crate) use bundle::AuthoringSchemaOwnerPreparation;
+#[cfg(any(feature = "tooling", test))]
+pub(crate) use bundle::{AdmittedAuthoringSchemaOwner, PreparedAuthoringSchemaOwner};
 
 const PROJECT_MANIFEST_PATH: &str = "nara.toml";
 
@@ -584,7 +589,8 @@ impl AuthoringProjectAdmissionHost {
                 capability: manifest_capability,
                 bytes: Arc::from(manifest_bytes),
                 digest: manifest_digest,
-            },
+            }
+            .into(),
             settings,
             bundle_path,
             budget,
@@ -611,7 +617,7 @@ struct AdmittedAuthoringManifest {
 pub(crate) struct PreparedAuthoringSchemaBasis {
     attempt: AuthoringProjectAttemptGeneration,
     project_root: DirectoryCapability,
-    manifest: AdmittedAuthoringManifest,
+    manifest: Arc<AdmittedAuthoringManifest>,
     settings: EffectiveProjectSettings,
     bundle_path: ProjectPath,
     budget: AuthoringProjectAdmissionBudget,
@@ -641,7 +647,7 @@ impl PreparedAuthoringSchemaBasis {
 pub(crate) struct AuthoringSchemaCandidate {
     attempt: AuthoringProjectAttemptGeneration,
     project_root: DirectoryCapability,
-    manifest: AdmittedAuthoringManifest,
+    manifest: Arc<AdmittedAuthoringManifest>,
     settings: EffectiveProjectSettings,
     bundle: AdmittedAuthoringSchemaBundle,
     budget: AuthoringProjectAdmissionBudget,
@@ -664,7 +670,7 @@ impl AuthoringSchemaCandidate {
 pub(crate) struct AuthoringSchemaReceipt {
     attempt: AuthoringProjectAttemptGeneration,
     project_root: DirectoryCapability,
-    manifest: AdmittedAuthoringManifest,
+    manifest: Arc<AdmittedAuthoringManifest>,
     settings: EffectiveProjectSettings,
     bundle: AdmittedAuthoringSchemaBundle,
     budget: AuthoringProjectAdmissionBudget,
@@ -687,12 +693,12 @@ impl AuthoringSchemaReceipt {
     }
 
     #[must_use]
-    pub(crate) const fn manifest_identity(&self) -> FileIdentity {
+    pub(crate) fn manifest_identity(&self) -> FileIdentity {
         self.manifest.capability.identity()
     }
 
     #[must_use]
-    pub(crate) const fn manifest_parent_identity(&self) -> Option<FileIdentity> {
+    pub(crate) fn manifest_parent_identity(&self) -> Option<FileIdentity> {
         self.manifest.capability.parent_identity()
     }
 
@@ -702,7 +708,7 @@ impl AuthoringSchemaReceipt {
     }
 
     #[must_use]
-    pub(crate) const fn manifest_digest(&self) -> ContentDigest {
+    pub(crate) fn manifest_digest(&self) -> ContentDigest {
         self.manifest.digest
     }
 

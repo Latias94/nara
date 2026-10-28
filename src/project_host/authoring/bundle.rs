@@ -9,6 +9,13 @@ use nara_reflect::{
 
 use super::{AuthoringProjectAdmissionBudget, AuthoringProjectAdmissionError};
 
+#[cfg(any(feature = "tooling", test))]
+mod owner;
+#[cfg(test)]
+pub(crate) use owner::AuthoringSchemaOwnerPreparation;
+#[cfg(any(feature = "tooling", test))]
+pub(crate) use owner::{AdmittedAuthoringSchemaOwner, PreparedAuthoringSchemaOwner};
+
 pub(super) struct AdmittedAuthoringSchemaBundle {
     path: ProjectPath,
     capability: FileCapability,

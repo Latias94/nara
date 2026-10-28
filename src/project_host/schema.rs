@@ -1,9 +1,7 @@
 use std::io;
 
 use nara_fs::{ContentDigest, DirectoryCapability, FsError, RelativePath};
-use nara_reflect::{
-    AuthoringSchemaBundle, AuthoringSchemaBundleLimits, AuthoringSchemaBundleOwner,
-};
+use nara_reflect::{AuthoringSchemaBundle, AuthoringSchemaBundleLimits};
 
 use super::{
     file_publication::{FilePublicationHost, FilePublicationOutcome},
@@ -83,12 +81,8 @@ pub(crate) fn execute(
         .into_iter()
         .flat_map(|(_, _, bundle)| bundle.owners())
         .filter(|owner| recipe_bundle.owner(owner.owner_id()).is_none());
-    let successor = AuthoringSchemaBundle::new(
-        recipe_bundle
-            .owners()
-            .iter()
-            .chain(retained)
-            .map(AuthoringSchemaBundleOwner::from),
+    let successor = AuthoringSchemaBundle::from_owner_snapshots(
+        recipe_bundle.owners().iter().chain(retained).cloned(),
     )
     .map_err(|_| SchemaRefreshError::BundleComposition)?;
     // Reflect admits canonical owner/catalog content. Compare the complete lineage, not raw
@@ -167,8 +161,9 @@ mod tests {
 
     use nara_fs::CapabilityRights;
     use nara_reflect::{
-        ComponentSchema, ComponentSchemaCatalog, ComponentSchemaOwnerSnapshot,
-        ComponentSchemaVersion, ComponentTypeId, PersistentComponentSchemaOwnerId,
+        AuthoringSchemaBundleOwner, ComponentSchema, ComponentSchemaCatalog,
+        ComponentSchemaOwnerSnapshot, ComponentSchemaVersion, ComponentTypeId,
+        PersistentComponentSchemaOwnerId,
     };
 
     use super::*;

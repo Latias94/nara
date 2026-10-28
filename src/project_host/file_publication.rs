@@ -30,6 +30,15 @@ impl FilePublicationSource {
     pub(in crate::project_host) const fn digest(&self) -> ContentDigest {
         self.digest
     }
+
+    pub(in crate::project_host) const fn parent_identity(&self) -> Option<FileIdentity> {
+        self.file.parent_identity()
+    }
+
+    /// Transfers the accepted live leaf to its semantic receipt owner without reopening it.
+    pub(in crate::project_host) fn into_parts(self) -> (FileCapability, ContentDigest) {
+        (self.file, self.digest)
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -111,9 +120,17 @@ impl FilePublicationEvidence {
 pub(in crate::project_host) struct AcceptedFilePublication {
     evidence: FilePublicationEvidence,
     source: FilePublicationSource,
+    target: RelativeComponent,
 }
 
 impl AcceptedFilePublication {
+    pub(in crate::project_host) fn target(&self) -> &RelativeComponent {
+        &self.target
+    }
+    pub(in crate::project_host) const fn source(&self) -> &FilePublicationSource {
+        &self.source
+    }
+
     pub(in crate::project_host) const fn evidence(&self) -> &FilePublicationEvidence {
         &self.evidence
     }
@@ -547,7 +564,11 @@ impl FilePublicationHost {
             return FilePublicationOutcome::Uncertain(evidence);
         }
 
-        FilePublicationOutcome::Published(AcceptedFilePublication { evidence, source })
+        FilePublicationOutcome::Published(AcceptedFilePublication {
+            evidence,
+            source,
+            target: self.target.clone(),
+        })
     }
 }
 
