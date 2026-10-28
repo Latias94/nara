@@ -385,6 +385,44 @@ fn detached_completed_output_disposal_stays_on_worker_and_blocks_activity_return
 }
 
 #[test]
+fn live_cleanup_failure_observation_is_activity_local_and_survives_task_drop() {
+    let facilities = TaskFacilities::inline_for_tests(test_config(2)).unwrap();
+    let failed = facilities.scope();
+    let healthy = facilities.scope();
+    let failed_spawner = failed.spawner();
+    let healthy_spawner = healthy.spawner();
+    assert!(!failed_spawner.has_cleanup_failure());
+    assert!(!healthy_spawner.has_cleanup_failure());
+
+    let capture = PanicOnDrop;
+    let task = accepted(failed_spawner.spawn(TaskPoolKind::Io, request(1), move |_| drop(capture)));
+    let returned = task.return_observer();
+    assert_eq!(returned.state(), TaskReturnState::Pending);
+    assert!(!failed_spawner.has_cleanup_failure());
+    assert_eq!(facilities.run_pending_for_tests().executed, 1);
+    assert_eq!(returned.state(), TaskReturnState::CleanupFailed);
+    assert!(failed_spawner.has_cleanup_failure());
+    assert!(!healthy_spawner.has_cleanup_failure());
+    drop(task);
+    drop(returned);
+    assert!(failed.spawner().has_cleanup_failure());
+
+    let mut retry = accepted(failed_spawner.spawn(TaskPoolKind::Io, request(2), |_| 3));
+    let mut sibling = accepted(healthy_spawner.spawn(TaskPoolKind::Io, request(2), |_| 4));
+    assert_eq!(facilities.run_pending_for_tests().executed, 2);
+    assert_eq!(retry.try_take(), Some(TaskTerminal::Completed(3)));
+    assert_eq!(sibling.try_take(), Some(TaskTerminal::Completed(4)));
+    assert!(failed_spawner.has_cleanup_failure());
+    assert!(!healthy_spawner.has_cleanup_failure());
+    assert!(
+        facilities
+            .shutdown_blocking()
+            .unwrap()
+            .has_cleanup_failure()
+    );
+}
+
+#[test]
 fn cleanup_failure_is_sticky_after_activity_return_and_does_not_poison_siblings() {
     let facilities = TaskFacilities::inline_for_tests(test_config(2)).unwrap();
     let mut failed = facilities.scope();

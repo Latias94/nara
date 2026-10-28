@@ -486,6 +486,83 @@ fn task_return_waits_for_cancelled_late_result_disposal() {
 }
 
 #[test]
+fn cleanup_failure_observation_is_sticky_without_closing_live_pools() {
+    let pools = TaskPools::try_new(test_config(2)).unwrap();
+    assert!(!pools.has_cleanup_failure());
+
+    let (started_tx, started_rx) = mpsc::channel();
+    let (release_tx, release_rx) = mpsc::channel();
+    let captured = PanicOnDrop;
+    let handle = accepted(pools.spawn(TaskPoolKind::Io, request(1), move |_| {
+        let _capture = &captured;
+        started_tx.send(()).unwrap();
+        release_rx.recv_timeout(Duration::from_secs(10)).unwrap();
+    }));
+    let returned = handle.return_observer();
+    started_rx.recv_timeout(Duration::from_secs(10)).unwrap();
+    assert_eq!(returned.state(), TaskReturnState::Pending);
+    assert!(!pools.has_cleanup_failure());
+
+    let mut business_error = accepted(pools.spawn(TaskPoolKind::Compute, request(2), |_| {
+        Err::<(), _>("ordinary business error")
+    }));
+    wait_finished(&business_error);
+    assert_eq!(
+        business_error.try_take(),
+        Some(TaskTerminal::Completed(Err("ordinary business error")))
+    );
+    assert!(!pools.has_cleanup_failure());
+
+    release_tx.send(()).unwrap();
+    let deadline = Instant::now() + Duration::from_secs(10);
+    while returned.state() == TaskReturnState::Pending {
+        assert!(Instant::now() < deadline, "capture disposal did not return");
+        thread::yield_now();
+    }
+    assert_eq!(returned.state(), TaskReturnState::CleanupFailed);
+    assert!(pools.has_cleanup_failure());
+    drop(handle);
+    drop(returned);
+    assert!(pools.has_cleanup_failure());
+
+    let mut next = accepted(pools.spawn(TaskPoolKind::Io, request(3), |_| 7));
+    wait_finished(&next);
+    assert_eq!(next.try_take(), Some(TaskTerminal::Completed(7)));
+    assert!(pools.has_cleanup_failure());
+    for kind in TaskPoolKind::ALL {
+        assert_eq!(pools.stats().for_kind(kind).shutdowns, 0);
+    }
+    let report = pools.shutdown_blocking().unwrap();
+    assert!(report.is_complete());
+    assert!(report.has_cleanup_failure());
+}
+
+#[test]
+fn root_cleanup_failure_is_visible_before_running_accounting_finishes() {
+    let pools = TaskPools::try_new(test_config(1)).unwrap();
+    let (returned_tx, returned_rx) = mpsc::channel();
+    let (release_tx, release_rx) = mpsc::channel();
+    pools.set_after_task_return_hook_for_tests(TaskPoolKind::Io, move || {
+        returned_tx.send(()).unwrap();
+        let _ = release_rx.recv_timeout(Duration::from_secs(10));
+    });
+    let captured = PanicOnDrop;
+    let handle = accepted(pools.spawn(TaskPoolKind::Io, request(1), move |_| {
+        let _capture = &captured;
+    }));
+    let returned = handle.return_observer();
+    returned_rx.recv_timeout(Duration::from_secs(10)).unwrap();
+
+    assert_eq!(returned.state(), TaskReturnState::CleanupFailed);
+    assert_eq!(pools.stats().for_kind(TaskPoolKind::Io).running, 1);
+    assert!(pools.has_cleanup_failure());
+    release_tx.send(()).unwrap();
+    let report = pools.shutdown_blocking().unwrap();
+    assert!(report.is_complete());
+    assert!(report.has_cleanup_failure());
+}
+
+#[test]
 fn task_return_reports_capture_cleanup_panic_and_does_not_retain_delivered_output() {
     let pools = inline_pools(2);
     let captured = PanicOnDrop;
@@ -536,7 +613,9 @@ fn completed_result_drop_panics_do_not_escape_handle_drop() {
     let handle = accepted(pools.spawn(TaskPoolKind::Compute, request(1), |_| PanicOnDrop));
     assert_eq!(pools.run_pending_for_tests().executed, 1);
 
+    assert!(!pools.has_cleanup_failure());
     assert!(catch_unwind(AssertUnwindSafe(|| drop(handle))).is_ok());
+    assert!(!pools.has_cleanup_failure());
 }
 
 #[test]

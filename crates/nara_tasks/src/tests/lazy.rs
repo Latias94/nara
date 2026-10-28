@@ -333,6 +333,7 @@ fn partial_first_use_failure_rejects_without_fallback_and_retains_its_workers() 
         .with_kind(TaskPoolKind::Io, TaskKindConfig::new(items(2), items(4)))
         .unwrap();
     let pools = TaskPools::try_new_lazy(config).unwrap();
+    assert!(!pools.has_cleanup_failure());
     let (release_tx, release_rx) = mpsc::channel();
     let called = Arc::new(std::sync::atomic::AtomicBool::new(false));
     let calls = called.clone();
@@ -352,6 +353,7 @@ fn partial_first_use_failure_rejects_without_fallback_and_retains_its_workers() 
         })
     ));
     assert_eq!(probe.started(), 1);
+    assert!(!pools.has_cleanup_failure());
     assert!(!called.load(std::sync::atomic::Ordering::Acquire));
     assert!(matches!(
         pools.spawn(TaskPoolKind::Io, request(1), |_| ()),
@@ -372,6 +374,41 @@ fn partial_first_use_failure_rejects_without_fallback_and_retains_its_workers() 
     assert_eq!(report.for_kind(TaskPoolKind::Io).joined_workers, 1);
     assert_eq!(probe.exited(), 1);
     assert_eq!(pools.stats().for_kind(TaskPoolKind::Io).admitted, 0);
+    assert!(!pools.has_cleanup_failure());
+    assert!(!report.has_cleanup_failure());
+}
+
+#[test]
+fn worker_startup_rejection_does_not_conflate_healthy_cleanup_with_failure() {
+    let config = test_config(2)
+        .with_kind(TaskPoolKind::Io, TaskKindConfig::new(items(2), items(2)))
+        .unwrap();
+    let facilities = TaskFacilities::try_new_lazy(config).unwrap();
+    let first = facilities.scope();
+    let sibling = facilities.scope();
+    let first_spawner = first.spawner();
+    let sibling_spawner = sibling.spawner();
+    assert!(!first_spawner.has_cleanup_failure());
+    assert!(!sibling_spawner.has_cleanup_failure());
+    let (outcome, probe) =
+        TaskPools::with_worker_spawn_failure_for_tests(TaskPoolKind::Io, 1, || {
+            first_spawner.spawn(TaskPoolKind::Io, request(1), |_| ())
+        });
+    assert!(matches!(
+        outcome,
+        TaskSpawnOutcome::Rejected(TaskRejection {
+            reason: TaskRejectReason::WorkerStartupFailed,
+            return_state: TaskReturnState::Returned,
+            ..
+        })
+    ));
+    assert_eq!(probe.started(), 1);
+    assert!(!first_spawner.has_cleanup_failure());
+    assert!(!sibling_spawner.has_cleanup_failure());
+    let healthy_kind = accepted(sibling_spawner.spawn(TaskPoolKind::Compute, request(2), |_| ()));
+    wait_until(|| healthy_kind.return_observer().state() == TaskReturnState::Returned);
+    assert!(facilities.shutdown_blocking().unwrap().is_complete());
+    assert!(!sibling_spawner.has_cleanup_failure());
 }
 
 #[test]

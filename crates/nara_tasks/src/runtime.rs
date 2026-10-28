@@ -649,16 +649,24 @@ struct TaskReturnObservation {
     cleanup_failed: AtomicBool,
     admitted: AtomicBool,
     scope: Option<Arc<TaskScopeShared>>,
+    instance_token: Arc<TaskPoolInstanceToken>,
+    facility_cleanup_failed: Arc<AtomicBool>,
 }
 
 impl TaskReturnObserver {
-    fn for_scope(scope: Option<Arc<TaskScopeShared>>) -> Self {
+    fn for_scope(
+        scope: Option<Arc<TaskScopeShared>>,
+        instance_token: Arc<TaskPoolInstanceToken>,
+        facility_cleanup_failed: Arc<AtomicBool>,
+    ) -> Self {
         Self {
             observation: Arc::new(TaskReturnObservation {
                 state: AtomicU8::new(RETURN_PENDING),
                 cleanup_failed: AtomicBool::new(false),
                 admitted: AtomicBool::new(false),
                 scope,
+                instance_token,
+                facility_cleanup_failed,
             }),
         }
     }
@@ -693,6 +701,18 @@ impl TaskReturnObserver {
     }
 
     fn finish(&self) {
+        // Publish sticky owner evidence before making CleanupFailed observable on the task.
+        if self.observation.admitted.load(Ordering::Acquire)
+            && self.cleanup_outcome() == TaskCleanupOutcome::Failed
+        {
+            self.observation
+                .instance_token
+                .cleanup_failed
+                .store(true, Ordering::Release);
+            self.observation
+                .facility_cleanup_failed
+                .store(true, Ordering::Release);
+        }
         let returned = self
             .observation
             .state
@@ -724,8 +744,8 @@ impl TaskReturnObserver {
     fn record_admission(&self) {
         if let Some(scope) = &self.observation.scope {
             scope.admit_task();
-            self.observation.admitted.store(true, Ordering::Release);
         }
+        self.observation.admitted.store(true, Ordering::Release);
     }
 }
 
@@ -862,6 +882,7 @@ impl<T> TaskState<T> {
         counters: SharedTaskCounters,
         instance_token: Arc<TaskPoolInstanceToken>,
         scope: Option<Arc<TaskScopeShared>>,
+        facility_cleanup_failed: Arc<AtomicBool>,
     ) -> Self {
         Self {
             inner: Mutex::new(TaskStateInner {
@@ -873,8 +894,12 @@ impl<T> TaskState<T> {
             finished: AtomicBool::new(false),
             token: TaskCancellationToken::new(),
             counters,
+            returned: TaskReturnObserver::for_scope(
+                scope,
+                instance_token.clone(),
+                facility_cleanup_failed,
+            ),
             instance_token,
-            returned: TaskReturnObserver::for_scope(scope),
         }
     }
 
@@ -1366,6 +1391,7 @@ impl TaskCompletionPublication {
 #[derive(Debug, Default)]
 struct TaskPoolInstanceToken {
     completion_publication: Mutex<TaskCompletionPublication>,
+    cleanup_failed: AtomicBool,
 }
 
 /// Bounded worker queues that execute owned, potentially blocking closures.
@@ -1660,6 +1686,26 @@ impl TaskPools {
         stats
     }
 
+    /// Observes sticky executor-owned cleanup failure without locking or driving shutdown.
+    ///
+    /// Standalone and managed root facades include all work on their physical facilities.
+    /// Activity facades include only their own admitted task disposal, plus shared worker cleanup
+    /// failure, including retained partial startup; a sibling activity's task failure is excluded.
+    /// Evidence survives dropping task handles and return observers. Business errors, startup
+    /// rejection and pending work alone are not cleanup failures. Published or transferred outputs
+    /// retain their own cleanup owners.
+    ///
+    /// This snapshot neither closes admission nor proves physical return or successful cleanup.
+    #[must_use]
+    pub fn has_cleanup_failure(&self) -> bool {
+        self.instance_token.cleanup_failed.load(Ordering::Acquire)
+            || TaskPoolKind::ALL.into_iter().any(|kind| {
+                let shared = &self.executor(kind).shared;
+                shared.worker_cleanup_failed.load(Ordering::Acquire)
+                    || (self.scope.is_none() && shared.cleanup_failed.load(Ordering::Acquire))
+            })
+    }
+
     #[must_use]
     pub fn capture_completion_cutoff(&self) -> TaskCompletionCutoff {
         let publication = lock_unpoisoned(&self.instance_token.completion_publication);
@@ -1714,6 +1760,7 @@ impl TaskPools {
             counters,
             self.instance_token.clone(),
             self.scope.clone(),
+            self.executor(kind).shared.cleanup_failed.clone(),
         ));
         let handle = TaskHandle {
             descriptor,
@@ -1881,6 +1928,15 @@ impl TaskPools {
         self.executor(kind)
             .shared
             .set_before_coalesce_cancel_hook(hook);
+    }
+
+    #[cfg(test)]
+    pub(crate) fn set_after_task_return_hook_for_tests(
+        &self,
+        kind: TaskPoolKind,
+        hook: impl FnOnce() + Send + 'static,
+    ) {
+        *lock_unpoisoned(&self.executor(kind).shared.after_task_return_hook) = Some(Box::new(hook));
     }
 
     #[cfg(test)]
@@ -2145,7 +2201,6 @@ struct QueueState {
     running: BTreeMap<TaskId, RunningJob>,
     live_workers: usize,
     disposing: usize,
-    cleanup_failed: bool,
 }
 
 impl QueueState {
@@ -2156,7 +2211,6 @@ impl QueueState {
             running: BTreeMap::new(),
             live_workers,
             disposing: 0,
-            cleanup_failed: false,
         }
     }
 
@@ -2177,6 +2231,8 @@ impl QueueState {
 struct ExecutorShared {
     pending_capacity: usize,
     queue: Mutex<QueueState>,
+    cleanup_failed: Arc<AtomicBool>,
+    worker_cleanup_failed: AtomicBool,
     changed: Condvar,
     counters: SharedTaskCounters,
     #[cfg(test)]
@@ -2185,6 +2241,8 @@ struct ExecutorShared {
     before_coalesce_cancel_hook: Mutex<Option<Arc<dyn Fn() + Send + Sync>>>,
     #[cfg(test)]
     after_running_snapshot_hook: Mutex<Option<Box<dyn FnOnce() + Send>>>,
+    #[cfg(test)]
+    after_task_return_hook: Mutex<Option<Box<dyn FnOnce() + Send>>>,
 }
 
 impl ExecutorShared {
@@ -2192,6 +2250,8 @@ impl ExecutorShared {
         Self {
             pending_capacity,
             queue: Mutex::new(QueueState::new(live_workers)),
+            cleanup_failed: Arc::new(AtomicBool::new(false)),
+            worker_cleanup_failed: AtomicBool::new(false),
             changed: Condvar::new(),
             counters: Arc::new(Mutex::new(TaskCounters::default())),
             #[cfg(test)]
@@ -2200,6 +2260,8 @@ impl ExecutorShared {
             before_coalesce_cancel_hook: Mutex::new(None),
             #[cfg(test)]
             after_running_snapshot_hook: Mutex::new(None),
+            #[cfg(test)]
+            after_task_return_hook: Mutex::new(None),
         }
     }
 
@@ -2295,9 +2357,11 @@ impl ExecutorShared {
     }
 
     fn finish_running(&self, id: TaskId, outcome: TaskCleanupOutcome) {
+        if outcome == TaskCleanupOutcome::Failed {
+            self.cleanup_failed.store(true, Ordering::Release);
+        }
         let running = {
             let mut queue = lock_unpoisoned(&self.queue);
-            queue.cleanup_failed |= outcome == TaskCleanupOutcome::Failed;
             let running = queue.running.remove(&id);
             self.changed.notify_all();
             running
@@ -2306,11 +2370,18 @@ impl ExecutorShared {
     }
 
     fn finish_disposal(&self, outcome: TaskCleanupOutcome) {
+        if outcome == TaskCleanupOutcome::Failed {
+            self.cleanup_failed.store(true, Ordering::Release);
+        }
         let mut queue = lock_unpoisoned(&self.queue);
-        queue.cleanup_failed |= outcome == TaskCleanupOutcome::Failed;
         debug_assert!(queue.disposing > 0, "admitted disposal count underflowed");
         queue.disposing -= 1;
         self.changed.notify_all();
+    }
+
+    fn record_worker_cleanup_failure(&self) {
+        self.worker_cleanup_failed.store(true, Ordering::Release);
+        self.cleanup_failed.store(true, Ordering::Release);
     }
 
     fn release_running_control(&self, id: TaskId) -> Option<TaskControl> {
@@ -2742,7 +2813,8 @@ impl TaskPoolCloseOwner {
                     self.collect_completed_reaps();
                     let disposal_returned = {
                         let queue = lock_unpoisoned(&self.shared.queue);
-                        self.shutdown_report.cleanup_failed |= queue.cleanup_failed;
+                        self.shutdown_report.cleanup_failed |=
+                            self.shared.cleanup_failed.load(Ordering::Acquire);
                         queue.disposing == 0 && queue.pending.is_empty() && queue.running.is_empty()
                     };
                     if self.workers.is_empty() && self.pending_reaps.is_empty() && disposal_returned
@@ -3015,7 +3087,7 @@ impl TaskPoolsCloseOwner {
         for kind in TaskPoolKind::ALL {
             if let Some(owner) = self.executor(kind) {
                 let mut pool_report = owner.shutdown_report;
-                pool_report.cleanup_failed |= lock_unpoisoned(&owner.shared.queue).cleanup_failed;
+                pool_report.cleanup_failed |= owner.shared.cleanup_failed.load(Ordering::Acquire);
                 report.per_kind.insert(kind, pool_report);
             }
         }
@@ -3158,7 +3230,7 @@ impl Drop for WorkerLifetimeProbe {
 }
 
 fn worker_main(shared: Arc<ExecutorShared>) {
-    let _ = catch_unwind(AssertUnwindSafe(|| {
+    let result = catch_unwind(AssertUnwindSafe(|| {
         loop {
             match shared.take_next(true) {
                 NextJob::Ready(pending) => execute_pending(&shared, pending),
@@ -3170,6 +3242,10 @@ fn worker_main(shared: Arc<ExecutorShared>) {
             }
         }
     }));
+    if let Err(payload) = result {
+        shared.record_worker_cleanup_failure();
+        let _ = catch_unwind(AssertUnwindSafe(|| drop(payload)));
+    }
     shared.worker_exited();
 }
 
@@ -3190,6 +3266,13 @@ fn execute_pending(shared: &ExecutorShared, mut pending: PendingJob) {
     drop(shared.release_running_control(id));
     drop(control);
     let outcome = safe_drop_pending(pending);
+    #[cfg(test)]
+    {
+        let hook = lock_unpoisoned(&shared.after_task_return_hook).take();
+        if let Some(hook) = hook {
+            hook();
+        }
+    }
     shared.finish_running(id, outcome);
 }
 
@@ -3544,7 +3627,7 @@ impl TaskOwnerReapRequest {
             return false;
         }
         if let Some(owner) = &self.owner.disposal_owner
-            && lock_unpoisoned(&owner.queue).cleanup_failed
+            && owner.cleanup_failed.load(Ordering::Acquire)
         {
             self.receipt.record_outcome(TaskCleanupOutcome::Failed);
         }
@@ -3724,7 +3807,7 @@ fn retain_abandoned_task_owner(owner: AbandonedTaskPoolOwner) -> TaskOwnerReapRe
     if owner.is_reaped(&AtomicUsize::new(0)) {
         let receipt = TaskOwnerReapReceipt::completed();
         if let Some(shared) = &owner.disposal_owner
-            && lock_unpoisoned(&shared.queue).cleanup_failed
+            && shared.cleanup_failed.load(Ordering::Acquire)
         {
             receipt.record_outcome(TaskCleanupOutcome::Failed);
         }
@@ -3974,6 +4057,7 @@ impl TaskOwnerReaperHarness {
                     Arc::clone(&counters),
                     Arc::clone(&instance_token),
                     None,
+                    Arc::new(AtomicBool::new(false)),
                 ));
                 PendingJob {
                     descriptor,
