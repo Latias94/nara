@@ -1502,6 +1502,187 @@ fn source_exclusion_refuses_busy_or_retired_hosts_in_every_domain() {
 }
 
 #[test]
+fn source_exclusion_reserves_renamed_retained_and_replacement_objects_in_every_domain() {
+    use nara_tooling::EditorExtensionDocument;
+    for kind in [
+        EditorDocumentKind::Scene,
+        EditorDocumentKind::Prefab,
+        EditorDocumentKind::Extension(SourceProbe::TYPE_ID),
+    ] {
+        let fixture = Fixture::new();
+        let mut editor = fixture.editor();
+        let (document, source) = match kind {
+            EditorDocumentKind::Scene => (
+                fixture.add(&mut editor, kind, "owner.json"),
+                "scenes/owner.json",
+            ),
+            EditorDocumentKind::Prefab => (
+                fixture.add(&mut editor, kind, "owner.json"),
+                "prefabs/owner.json",
+            ),
+            EditorDocumentKind::Extension(_) => {
+                editor.register_extension_document::<SourceProbe>().unwrap();
+                (
+                    fixture.add_probe(&mut editor, "owner.json"),
+                    "probes/owner.json",
+                )
+            }
+        };
+        let bytes = fs::read(fixture.root.join(source)).unwrap();
+        fs::rename(
+            fixture.root.join(source),
+            fixture.root.join("retained.json"),
+        )
+        .unwrap();
+        fs::write(fixture.root.join("unrelated.json"), &bytes).unwrap();
+        let independent = Fixture::open_capability(&fixture.root);
+        let retained = independent
+            .open_file(&RelativePath::new("retained.json").unwrap())
+            .unwrap();
+        let unrelated = independent
+            .open_file(&RelativePath::new("unrelated.json").unwrap())
+            .unwrap();
+        let active = editor.workspace.active_document();
+        assert_eq!(
+            editor.exclude_source_aliases("retained.json", &retained),
+            Err(SourceAdmissionError::AlreadyOpen),
+            "{kind:?} must retain ownership after its source is renamed"
+        );
+        assert_eq!(
+            editor.exclude_source_aliases("unrelated.json", &unrelated),
+            Ok(())
+        );
+
+        fs::write(fixture.root.join(source), &bytes).unwrap();
+        fs::hard_link(
+            fixture.root.join(source),
+            fixture.root.join("replacement.json"),
+        )
+        .unwrap();
+        let replacement = independent
+            .open_file(&RelativePath::new("replacement.json").unwrap())
+            .unwrap();
+        let lane = editor.capture_persistence_lane(document).unwrap();
+        match lane {
+            PersistenceLane::Scene(lane) => {
+                lane.host.try_with(|host| host.mark_uncertain()).unwrap()
+            }
+            PersistenceLane::Prefab(lane) => {
+                lane.host.try_with(|host| host.mark_uncertain()).unwrap()
+            }
+            PersistenceLane::Extension(lane) => {
+                lane.host.try_with(|host| host.mark_uncertain()).unwrap()
+            }
+        }
+        fs::remove_file(fixture.root.join("retained.json")).unwrap();
+        for (path, candidate) in [
+            ("retained.json", &retained),
+            ("replacement.json", &replacement),
+        ] {
+            assert_eq!(
+                editor.exclude_source_aliases(path, candidate),
+                Err(SourceAdmissionError::AlreadyOpen),
+                "{kind:?} must protect both retained and current namespace objects"
+            );
+        }
+        assert_eq!(
+            editor.exclude_source_aliases("unrelated.json", &unrelated),
+            Ok(())
+        );
+        assert_eq!(editor.workspace.active_document(), active);
+        close(&mut editor);
+    }
+}
+
+#[test]
+fn source_exclusion_reserves_renamed_tool_metadata_objects_after_actual_admission() {
+    for (source, bytes) in [
+        (
+            super::super::source_tools::SELECTION_PATH,
+            br#"{"format_version":1,"installed":[],"desired":null}"#.as_slice(),
+        ),
+        (
+            super::super::source_tools::CONTENT_PATH,
+            br#"{"format_version":1,"installations":[]}"#.as_slice(),
+        ),
+    ] {
+        let fixture = Fixture::new();
+        fs::create_dir_all(fixture.root.join(".nara/source-tools")).unwrap();
+        fs::write(fixture.root.join(source), bytes).unwrap();
+        let mut editor = fixture.editor();
+        let deadline = Instant::now() + Duration::from_secs(15);
+        loop {
+            editor.advance_source_tools();
+            if !editor.source_tool_view().has_pending_work() {
+                break;
+            }
+            assert!(
+                Instant::now() < deadline,
+                "metadata admission did not return"
+            );
+            std::thread::sleep(Duration::from_millis(1));
+        }
+        assert_eq!(
+            editor.source_tool_selection_view().phase,
+            nara_tooling::EditorSourceToolSelectionPhase::Idle
+        );
+        assert_eq!(
+            editor.source_tool_content_view().phase,
+            nara_tooling::EditorSourceToolContentPhase::Idle
+        );
+
+        fs::rename(
+            fixture.root.join(source),
+            fixture.root.join("retained-ledger.json"),
+        )
+        .unwrap();
+        fs::write(fixture.root.join("unrelated.json"), bytes).unwrap();
+        let independent = Fixture::open_capability(&fixture.root);
+        let retained = independent
+            .open_file(&RelativePath::new("retained-ledger.json").unwrap())
+            .unwrap();
+        let unrelated = independent
+            .open_file(&RelativePath::new("unrelated.json").unwrap())
+            .unwrap();
+        assert_eq!(
+            editor.exclude_source_aliases("retained-ledger.json", &retained),
+            Err(SourceAdmissionError::AlreadyOpen),
+            "{source} must keep the actual admitted object reserved"
+        );
+        assert_eq!(
+            editor.exclude_source_aliases("unrelated.json", &unrelated),
+            Ok(())
+        );
+        fs::remove_file(fixture.root.join("retained-ledger.json")).unwrap();
+        assert_eq!(
+            editor.exclude_source_aliases("retained-ledger.json", &retained),
+            Err(SourceAdmissionError::AlreadyOpen)
+        );
+
+        fs::write(fixture.root.join(source), bytes).unwrap();
+        fs::hard_link(
+            fixture.root.join(source),
+            fixture.root.join("replacement.json"),
+        )
+        .unwrap();
+        let replacement = independent
+            .open_file(&RelativePath::new("replacement.json").unwrap())
+            .unwrap();
+        // Strict metadata admission refuses a multi-link replacement before alias classification.
+        for (path, candidate) in [
+            ("retained-ledger.json", &retained),
+            ("replacement.json", &replacement),
+        ] {
+            assert_eq!(
+                editor.exclude_source_aliases(path, candidate),
+                Err(SourceAdmissionError::SourceRead)
+            );
+        }
+        close(&mut editor);
+    }
+}
+
+#[test]
 fn source_exclusion_observes_replacement_and_preserves_live_source_custody() {
     for kind in [EditorDocumentKind::Scene, EditorDocumentKind::Prefab] {
         let fixture = Fixture::new();

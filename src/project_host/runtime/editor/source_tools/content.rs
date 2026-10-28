@@ -23,7 +23,7 @@ use super::{
 use crate::project_host::{
     file_publication::{
         FilePublicationEvidence, FilePublicationHost, FilePublicationOutcome,
-        FilePublicationReadSource, FilePublicationRejection,
+        FilePublicationRejection,
     },
     runtime::editor::persistence::{HostCustody, RetainedHost},
 };
@@ -132,11 +132,8 @@ impl ContentState {
             })
     }
 
-    pub(super) fn read_source(&self) -> Result<Option<FilePublicationReadSource>, ()> {
-        self.host
-            .as_ref()
-            .map(|host| host.try_with(|host| host.read_source()).ok_or(()))
-            .transpose()
+    pub(super) fn publication_host(&self) -> Option<&RetainedHost<FilePublicationHost>> {
+        self.host.as_ref()
     }
 
     fn require_basis(&self, basis: &EditorSourceToolContentBasis) -> Result<(), Error> {

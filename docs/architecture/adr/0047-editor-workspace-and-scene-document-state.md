@@ -281,6 +281,10 @@ Rules:
   object lifetime, not immutable bytes or stronger predecessor conflict protection. Native sharing
   rules can consequently refuse parent-directory rename while a document remains open; physical
   Close releases its custody before that operation is retried.
+  Duplicate source admission protects both that retained object and the current bound
+  parent/name. Renaming the prior object does not relinquish its owner; uncertainty does not
+  suppress its alias protection. A fresh open of the bound name alone cannot prove that a
+  candidate is unrelated to the retained source.
 - Installed finite-tool selection is a separate concrete file lifecycle, never a Scene Save lane
   or document-history edit. After complete probe readiness, desired-selection publication precedes
   route promotion in the same Session owner. Filesystem publication and route promotion are not

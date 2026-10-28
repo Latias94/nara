@@ -9,6 +9,7 @@ use std::{
     time::Duration,
 };
 
+use nara_fs::FileCapability;
 use nara_reflect::{
     ComponentFieldId, ComponentPropertyPath, ComponentSchemaCatalog, ComponentSchemaOwnerSnapshot,
     ComponentTypeId, ComponentValue, resolve_component_property,
@@ -29,7 +30,11 @@ use nara_tooling::{
 };
 use serde::{Deserialize, Serialize};
 
-use super::{EditorEditPreparationError, EditorProjectSession};
+use super::{
+    EditorEditPreparationError, EditorProjectSession,
+    persistence::HostCustody,
+    source_admission::{SourceAdmissionError, exclude_publication_alias},
+};
 
 mod content;
 mod managed;
@@ -54,6 +59,8 @@ pub use selection::{
     PreparedEditorSourceToolInstallations, PreparedEditorSourceToolSelection,
     PreparedEditorSourceToolWithdrawal,
 };
+#[cfg(all(test, any(windows, target_os = "linux")))]
+mod physical_tests;
 #[cfg(test)]
 mod tests;
 
@@ -229,6 +236,7 @@ pub(super) struct EditorSourceTools {
     sequence: u64,
     attempt_error: Option<EditorSourceToolError>,
     request_error: Option<EditorSourceToolError>,
+    process_cleanup_failed: bool,
     selection: selection::SelectionState,
     content: content::ContentState,
     #[cfg(test)]
@@ -241,16 +249,37 @@ impl EditorSourceTools {
         self.jobs() != 0 || self.selection.schema_adoption_pending() || self.content.pending()
     }
 
-    pub(super) fn selection_read_source(
-        &self,
-    ) -> Result<Option<crate::project_host::file_publication::FilePublicationReadSource>, ()> {
-        self.selection.read_source()
+    /// Physical work can settle despite failure; callers must also inspect process cleanup failure.
+    pub(super) fn physical_work_pending(&self, custody: &HostCustody) -> bool {
+        self.schema_adoption_pending() || custody.has_cleanup()
     }
 
-    pub(super) fn content_read_source(
+    /// Retains failed process-task cleanup after its task leaves the pending slots.
+    pub(super) fn process_cleanup_failed(&self) -> bool {
+        self.process_cleanup_failed
+    }
+
+    pub(super) fn exclude_metadata_source_aliases(
         &self,
-    ) -> Result<Option<crate::project_host::file_publication::FilePublicationReadSource>, ()> {
-        self.content.read_source()
+        candidate: &FileCapability,
+    ) -> Result<(), SourceAdmissionError> {
+        for host in [
+            self.selection.publication_host(),
+            self.content.publication_host(),
+        ]
+        .into_iter()
+        .flatten()
+        {
+            host.try_with(|host| {
+                exclude_publication_alias(
+                    candidate,
+                    host.same_source_object(candidate),
+                    host.read_source(),
+                )
+            })
+            .ok_or(SourceAdmissionError::HostUnavailable)??;
+        }
+        Ok(())
     }
 
     fn jobs(&self) -> usize {
@@ -294,7 +323,11 @@ impl EditorSourceTools {
         }
     }
 
-    pub(super) fn view(&self, content: EditorSourceToolContentView) -> EditorSourceToolView {
+    pub(super) fn view(
+        &self,
+        content: EditorSourceToolContentView,
+        custody: &HostCustody,
+    ) -> EditorSourceToolView {
         let review = self
             .reviewed
             .as_ref()
@@ -317,6 +350,8 @@ impl EditorSourceTools {
             probing: self.probe.is_some(),
             working: self.invocation.is_some(),
             retiring: !self.retiring.is_empty(),
+            physical_work_pending: self.physical_work_pending(custody),
+            process_cleanup_failed: self.process_cleanup_failed(),
             attempt: self.attempt.clone(),
             request: self.latest.clone(),
             review,
@@ -385,7 +420,10 @@ struct WireWrite {
 impl EditorProjectSession {
     #[must_use]
     pub fn source_tool_view(&self) -> EditorSourceToolView {
-        self.source_tools.view(self.source_tool_content_view())
+        self.source_tools.view(
+            self.source_tool_content_view(),
+            self.authoring_runtime.host_custody(),
+        )
     }
 
     #[must_use]
@@ -796,13 +834,19 @@ impl EditorProjectSession {
 
     pub(super) fn advance_source_tools(&mut self) {
         self.advance_source_tool_content();
-        self.source_tools
-            .selection
-            .observe_schema_adoption_cleanup();
+        self.authoring_runtime.host_custody().retry_cleanup();
         self.advance_source_tool_selection();
+        let cleanup_failed = &mut self.source_tools.process_cleanup_failed;
         self.source_tools
             .retiring
-            .retain(|task| task.return_observer().state() == TaskReturnState::Pending);
+            .retain(|task| match task.return_observer().state() {
+                TaskReturnState::Pending => true,
+                TaskReturnState::Returned => false,
+                TaskReturnState::CleanupFailed => {
+                    *cleanup_failed = true;
+                    false
+                }
+            });
         if self
             .source_tools
             .probe
@@ -854,6 +898,9 @@ impl EditorProjectSession {
                     Ok(active)
                 })
                 .and_then(|active| self.ensure_source_tool_admission().map(|()| active));
+            if matches!(&result, Err(EditorSourceToolError::TaskCleanupFailed)) {
+                self.source_tools.process_cleanup_failed = true;
+            }
             match result {
                 Ok(active) => {
                     self.source_tool_ready(selection::ReadyTool {
@@ -887,6 +934,9 @@ impl EditorProjectSession {
                 .expect("observed an invocation");
             let result = take_reply(&mut pending.task, pending.sequence)
                 .and_then(|reply| self.prepare_source_tool_result(pending.invocation, reply));
+            if matches!(&result, Err(EditorSourceToolError::TaskCleanupFailed)) {
+                self.source_tools.process_cleanup_failed = true;
+            }
             match result {
                 Ok(reviewed) => self.source_tools.reviewed = Some(reviewed),
                 Err(error) => self.source_tools.request_error = Some(error),
@@ -990,6 +1040,11 @@ impl EditorProjectSession {
 }
 
 fn take_reply(task: &mut ProcessTask, sequence: u64) -> Result<WireResult, EditorSourceToolError> {
+    match task.return_observer().state() {
+        TaskReturnState::Pending => return Err(EditorSourceToolError::Busy),
+        TaskReturnState::CleanupFailed => return Err(EditorSourceToolError::TaskCleanupFailed),
+        TaskReturnState::Returned => {}
+    }
     let bytes = match task.try_take() {
         Some(TaskTerminal::Completed(bytes)) => bytes.map_err(|error| {
             use process::ProcessFailure as Failure;

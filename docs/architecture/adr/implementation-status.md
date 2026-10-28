@@ -193,6 +193,15 @@ first registration, unavailable initial records and retired file Hosts retain ho
 semantics. Final root/Tooling/Editor libraries pass 1,144 with 38 explicit skips; independent30,
 actual managed cancellation/Application and selected Windows/DX12 pass. Reclamation, all-stream
 proof, replacement-opening failure injection and interactive locality retain the linked limits.
+The [retained-source and physical-observation successor](../../knowledge/engineering/verification/2026-10/2026-10-28T150643Z-retained-source-objects-and-truthful-source-tool-physical-cleanup-qualification-13bc9f4599ef4e839fd608dcfd7f4aed.md)
+protects actual retained document/metadata leaves through rename, unlink and uncertainty while
+keeping current namespace checks. Existing HostCustody supplies read-only cleanup observations
+for superseded Hosts; source-tool pending and sticky executor cleanup failure stay distinct.
+Focused owner tests, the independent 30-test consumer, actual managed/Application and selected
+Windows/DX12 workflows pass within the linked evidence. Generic unlink is unchanged.
+The [artifact ownership design](../source-tool-artifact-ownership-design.md) selects the next
+managed-store/explicit-import replacement; that design and its plan do not implement a reclaimer
+or remove the current mixed-content protection mechanism.
 The [documentation verification](../../knowledge/engineering/verification/2026-10/2026-10-23T115037Z-foundation-architecture-rebaseline-documentation-checks-and-adversarial-closure-33c8c794baf142ee964468a01248af17.md)
 records inventory/link/status checks and the scoped adversarial correction/recheck. No Cargo,
 performance or native trajectory was re-executed for this design-only unit.

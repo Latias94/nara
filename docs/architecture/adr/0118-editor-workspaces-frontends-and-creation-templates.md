@@ -98,6 +98,9 @@ by reserved path and actual current file identity across these namespaces, inclu
 case aliases. Existing publication capabilities retain the actual parent directory, so source
 exclusion follows atomic Save replacement and parent-directory renames without global path
 lowercasing or another source registry.
+Exclusion also compares the actual leaf retained by each file Host, independently from a fresh
+open of its current bound parent/name. Renamed retained objects and uncertain publication keep
+their ownership; an unrelated replacement at the bound name does not release the prior object.
 
 Scene/Prefab exact-source activation uses the Host's project-relative publication path rather
 than raw Workspace locators from different configured source scopes. Browser and anchored Open
@@ -464,6 +467,10 @@ revokes proposal authority immediately and leaves physical custody pending until
 and pipe workers return. A frame exposes pending work for native maintenance; status transitions
 must invalidate observations even when another retired invocation remains pending. This owns no
 widgets or second transaction store and can be consumed by Nara's future custom-drawn frontend.
+Physical pending includes publication cleanup after the logical selection phase is Idle and
+cleanup retained by superseded Hosts in the existing custody. Observing pending does not run
+cleanup. Executor cleanup failure is a retained terminal failure, distinct from Pending and
+successful return; it cannot authorize reclamation or create permanent maintenance polling.
 The [finite source-tool plan](../../plans/2026-10-28-finite-source-tool-owner-plan.md) scopes the
 first concrete contract; package discovery, installation, executable byte pinning, descendant
 containment and an official language SDK are separate designs.

@@ -1,6 +1,8 @@
 use nara_fs::{DirectoryCapability, FileCapability, FsError, RelativePath};
 use nara_tooling::EditorDocumentId;
 
+use crate::project_host::file_publication::FilePublicationReadSource;
+
 use super::{EditorExecutionLane, EditorProjectSession};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -164,41 +166,39 @@ impl EditorProjectSession {
             exclude_file_alias(current, root.open_file_exact(&path))?;
         }
         for lane in self.scene_lanes.values() {
-            let source = lane
-                .host
-                .try_with(|host| host.read_source())
-                .ok_or(SourceAdmissionError::HostUnavailable)?;
-            exclude_file_alias(current, source.open())?;
+            lane.host
+                .try_with(|host| {
+                    exclude_publication_alias(
+                        current,
+                        host.same_source_object(current),
+                        host.read_source(),
+                    )
+                })
+                .ok_or(SourceAdmissionError::HostUnavailable)??;
         }
         for lane in self.prefab_lanes.values() {
-            let source = lane
-                .host
-                .try_with(|host| host.read_source())
-                .ok_or(SourceAdmissionError::HostUnavailable)?;
-            exclude_file_alias(current, source.open())?;
+            lane.host
+                .try_with(|host| {
+                    exclude_publication_alias(
+                        current,
+                        host.same_source_object(current),
+                        host.read_source(),
+                    )
+                })
+                .ok_or(SourceAdmissionError::HostUnavailable)??;
         }
         for lane in self.extension_documents.lanes() {
-            let source = lane
-                .host
-                .try_with(|host| host.read_source())
-                .ok_or(SourceAdmissionError::HostUnavailable)?;
-            exclude_file_alias(current, source.open())?;
+            lane.host
+                .try_with(|host| {
+                    exclude_publication_alias(
+                        current,
+                        host.same_source_object(current),
+                        host.read_source(),
+                    )
+                })
+                .ok_or(SourceAdmissionError::HostUnavailable)??;
         }
-        if let Some(source) = self
-            .source_tools
-            .selection_read_source()
-            .map_err(|_| SourceAdmissionError::HostUnavailable)?
-        {
-            exclude_file_alias(current, source.open())?;
-        }
-        if let Some(source) = self
-            .source_tools
-            .content_read_source()
-            .map_err(|_| SourceAdmissionError::HostUnavailable)?
-        {
-            exclude_file_alias(current, source.open())?;
-        }
-        Ok(())
+        self.source_tools.exclude_metadata_source_aliases(current)
     }
 
     pub(super) fn discard_unpublished_document(
@@ -220,6 +220,18 @@ fn matches_project_path(project_path: &str, root: &str, logical_path: &str) -> b
         == Some(logical_path)
 }
 
+pub(super) fn exclude_publication_alias(
+    current: &FileCapability,
+    retained: Result<bool, FsError>,
+    source: FilePublicationReadSource,
+) -> Result<(), SourceAdmissionError> {
+    match retained {
+        Ok(true) => Err(SourceAdmissionError::AlreadyOpen),
+        Ok(false) => exclude_file_alias(current, source.open()),
+        Err(_) => Err(SourceAdmissionError::SourceRead),
+    }
+}
+
 fn exclude_file_alias(
     current: &FileCapability,
     source: Result<FileCapability, FsError>,
@@ -235,5 +247,156 @@ fn exclude_file_alias(
         },
         Err(FsError::Io { source, .. }) if source.kind() == std::io::ErrorKind::NotFound => Ok(()),
         Err(_) => Err(SourceAdmissionError::SourceRead),
+    }
+}
+
+#[cfg(all(test, any(windows, target_os = "linux")))]
+mod tests {
+    use std::{
+        fs,
+        path::PathBuf,
+        sync::atomic::{AtomicU64, Ordering},
+    };
+
+    use nara_fs::{CapabilityRights, ContentDigest, HostCapabilityOptions, TrustMode};
+
+    use super::*;
+    use crate::project_host::file_publication::FilePublicationHost;
+
+    static NEXT_FIXTURE: AtomicU64 = AtomicU64::new(1);
+
+    const SOURCE: &str = "source.json";
+    const MOVED: &str = "moved.json";
+    const ALIAS: &str = "alias.json";
+    const UNRELATED: &str = "unrelated.json";
+
+    struct Fixture(PathBuf);
+
+    impl Fixture {
+        fn new() -> Self {
+            let path = std::env::temp_dir().join(format!(
+                "nara-source-admission-alias-{}-{}",
+                std::process::id(),
+                NEXT_FIXTURE.fetch_add(1, Ordering::Relaxed)
+            ));
+            fs::create_dir(&path).unwrap();
+            Self(path)
+        }
+
+        fn capability(&self) -> DirectoryCapability {
+            #[cfg(windows)]
+            let directory = {
+                use std::os::windows::fs::OpenOptionsExt;
+                use windows_sys::Win32::Storage::FileSystem::{
+                    FILE_FLAG_BACKUP_SEMANTICS, FILE_FLAG_OPEN_REPARSE_POINT, FILE_SHARE_DELETE,
+                    FILE_SHARE_READ, FILE_SHARE_WRITE,
+                };
+
+                fs::OpenOptions::new()
+                    .read(true)
+                    .share_mode(FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE)
+                    .custom_flags(FILE_FLAG_BACKUP_SEMANTICS | FILE_FLAG_OPEN_REPARSE_POINT)
+                    .open(&self.0)
+                    .unwrap()
+            };
+            #[cfg(target_os = "linux")]
+            let directory = fs::File::open(&self.0).unwrap();
+            DirectoryCapability::from_host_handle(
+                directory,
+                HostCapabilityOptions::new(CapabilityRights::ReadWrite, TrustMode::TrustedLocal),
+            )
+            .unwrap()
+        }
+    }
+
+    impl Drop for Fixture {
+        fn drop(&mut self) {
+            for name in [SOURCE, MOVED, ALIAS, UNRELATED] {
+                match fs::remove_file(self.0.join(name)) {
+                    Ok(()) => {}
+                    Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+                    Err(error) => panic!("failed to remove fixture leaf {name}: {error}"),
+                }
+            }
+            fs::remove_dir(&self.0).unwrap();
+        }
+    }
+
+    #[test]
+    fn publication_alias_exclusion_keeps_retained_and_current_namespace_objects_reserved() {
+        let fixture = Fixture::new();
+        let bytes = b"accepted source";
+        fs::write(fixture.0.join(SOURCE), bytes).unwrap();
+        fs::write(fixture.0.join(UNRELATED), bytes).unwrap();
+        let root = fixture.capability();
+        let source = root.open_file(&RelativePath::new(SOURCE).unwrap()).unwrap();
+        let mut host = FilePublicationHost::from_existing(
+            root,
+            nara_fs::RelativeComponent::new(SOURCE).unwrap(),
+            source,
+            ContentDigest::of_bytes(bytes),
+            1024,
+        );
+        fs::rename(fixture.0.join(SOURCE), fixture.0.join(MOVED)).unwrap();
+        fs::hard_link(fixture.0.join(MOVED), fixture.0.join(ALIAS)).unwrap();
+        let independent = fixture.capability();
+        let alias = independent
+            .open_file(&RelativePath::new(ALIAS).unwrap())
+            .unwrap();
+        let unrelated = independent
+            .open_file(&RelativePath::new(UNRELATED).unwrap())
+            .unwrap();
+        assert_eq!(
+            exclude_publication_alias(&alias, host.same_source_object(&alias), host.read_source()),
+            Err(SourceAdmissionError::AlreadyOpen)
+        );
+        assert_eq!(
+            exclude_publication_alias(
+                &unrelated,
+                host.same_source_object(&unrelated),
+                host.read_source(),
+            ),
+            Ok(())
+        );
+
+        fs::write(fixture.0.join(SOURCE), b"current replacement").unwrap();
+        let current = independent
+            .open_file(&RelativePath::new(SOURCE).unwrap())
+            .unwrap();
+        assert!(!host.same_source_object(&current).unwrap());
+        assert_eq!(
+            exclude_publication_alias(
+                &current,
+                host.same_source_object(&current),
+                host.read_source(),
+            ),
+            Err(SourceAdmissionError::AlreadyOpen)
+        );
+        host.mark_uncertain();
+        assert_eq!(host.accepted_source_observation(), None);
+        fs::remove_file(fixture.0.join(MOVED)).unwrap();
+        fs::remove_file(fixture.0.join(ALIAS)).unwrap();
+        for candidate in [&alias, &current] {
+            assert_eq!(
+                exclude_publication_alias(
+                    candidate,
+                    host.same_source_object(candidate),
+                    host.read_source(),
+                ),
+                Err(SourceAdmissionError::AlreadyOpen)
+            );
+        }
+        assert_eq!(
+            exclude_publication_alias(
+                &unrelated,
+                host.same_source_object(&unrelated),
+                host.read_source(),
+            ),
+            Ok(())
+        );
+        assert_eq!(
+            exclude_publication_alias(&unrelated, Err(FsError::NotRegularFile), host.read_source(),),
+            Err(SourceAdmissionError::SourceRead)
+        );
     }
 }

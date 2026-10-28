@@ -529,6 +529,14 @@ The existing Tasks activity keeps custody until the child is reaped and all acqu
 are joined. Close continues polling that same owner; a held physical obligation remains pending.
 The UI owner performs no synchronous process wait or IO join.
 
+Use `EditorSourceToolView::has_pending_work()` for continued maintenance. Its
+`physical_work_pending` observation includes deferred selection work and publication cleanup
+retained by current or superseded file Hosts, even when the logical selection phase is Idle.
+Reading this observation never advances cleanup. `process_cleanup_failed` is a sticky
+Session-local terminal failure; a failed probe/request reports `TaskCleanupFailed`. Failed
+executor cleanup does not keep maintenance pending forever, and absence of pending work does
+not prove successful cleanup or authorize file reclamation.
+
 The first contract supervises one trusted direct child per invocation. It does not contain
 descendants or revoke ambient OS privileges, and it provides no hard cleanup deadline. A new
 request can be refused while obsolete work still occupies the finite two-job allowance.

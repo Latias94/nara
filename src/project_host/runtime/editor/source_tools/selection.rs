@@ -153,17 +153,7 @@ impl SelectionState {
         self.pending.is_some()
             || self.ready.is_some()
             || self.deferred_disable.is_some()
-            || self
-                .host
-                .as_ref()
-                .is_some_and(|host| host.try_with(|host| host.has_cleanup()).unwrap_or(true))
-    }
-
-    /// Keeps the accepted selection leaf; only retries temporary publication cleanup.
-    pub(super) fn observe_schema_adoption_cleanup(&mut self) {
-        if let Some(host) = &self.host {
-            host.try_with(|host| host.retry_cleanup());
-        }
+            || self.host.as_ref().is_some_and(RetainedHost::has_cleanup)
     }
 
     pub(super) fn view(
@@ -257,13 +247,8 @@ impl SelectionState {
         self.ready = None;
     }
 
-    pub(super) fn read_source(
-        &self,
-    ) -> Result<Option<crate::project_host::file_publication::FilePublicationReadSource>, ()> {
-        self.host
-            .as_ref()
-            .map(|host| host.try_with(|host| host.read_source()).ok_or(()))
-            .transpose()
+    pub(super) fn publication_host(&self) -> Option<&RetainedHost<FilePublicationHost>> {
+        self.host.as_ref()
     }
 }
 

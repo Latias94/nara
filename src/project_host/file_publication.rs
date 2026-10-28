@@ -392,6 +392,16 @@ impl FilePublicationHost {
         }
     }
 
+    /// Compares the retained leaf even when its name or accepted observation is unavailable.
+    pub(in crate::project_host) fn same_source_object(
+        &self,
+        candidate: &FileCapability,
+    ) -> Result<bool, FsError> {
+        self.source
+            .as_ref()
+            .map_or(Ok(false), |source| source.file.same_object(candidate))
+    }
+
     pub(in crate::project_host) fn mark_uncertain(&mut self) {
         self.uncertain = true;
     }
@@ -720,12 +730,22 @@ mod tests {
         )
         .unwrap();
         fs::write(fixture.directory.join(TARGET), b"different current name").unwrap();
+        let independent = fixture.capability();
+        let alias = independent
+            .open_file(&RelativePath::new(MOVED).unwrap())
+            .unwrap();
+        let replacement = independent
+            .open_file(&RelativePath::new(TARGET).unwrap())
+            .unwrap();
+        assert!(host.same_source_object(&alias).unwrap());
+        assert!(!host.same_source_object(&replacement).unwrap());
         let source = host.source.as_ref().unwrap();
         assert_eq!(source.identity(), identity);
         assert_eq!(source.digest(), digest);
         assert_eq!(source.file.read_to_end_bounded(BYTE_LIMIT).unwrap(), bytes);
         fs::remove_file(fixture.directory.join(MOVED)).unwrap();
         assert_eq!(source.file.read_to_end_bounded(BYTE_LIMIT).unwrap(), bytes);
+        assert!(host.same_source_object(&alias).unwrap());
         assert_eq!(
             host.binding(),
             FilePublicationBinding::Existing { identity, digest }
@@ -737,6 +757,8 @@ mod tests {
 
         host.mark_uncertain();
         assert_eq!(host.accepted_source_observation(), None);
+        assert!(host.same_source_object(&alias).unwrap());
+        assert!(!host.same_source_object(&replacement).unwrap());
         assert_eq!(
             host.binding(),
             FilePublicationBinding::Existing { identity, digest }
@@ -797,12 +819,18 @@ mod tests {
         let bytes = b"freshly decoded source";
         fs::write(fixture.directory.join(TARGET), bytes).unwrap();
         let file = host.read_source().open().unwrap();
+        let independent = fixture.capability();
+        let alias = independent
+            .open_file(&RelativePath::new(TARGET).unwrap())
+            .unwrap();
+        assert!(!host.same_source_object(&alias).unwrap());
         let identity = file.identity();
         let digest = ContentDigest::of_bytes(&file.read_to_end_bounded(BYTE_LIMIT).unwrap());
         host.commit_reconciled(file, digest);
         fs::remove_file(fixture.directory.join(TARGET)).unwrap();
 
         assert!(!host.uncertain());
+        assert!(host.same_source_object(&alias).unwrap());
         assert_eq!(
             host.accepted_source_observation(),
             Some((identity, Some(root.identity()), digest))

@@ -14,22 +14,35 @@ use crate::project_host::persistence::{
 };
 
 trait RetirableHost {
+    fn has_cleanup(&self) -> bool;
     fn retry_cleanup(&mut self) -> bool;
 }
 
 impl RetirableHost for ScenePersistenceHost {
+    fn has_cleanup(&self) -> bool {
+        ScenePersistenceHost::has_cleanup(self)
+    }
+
     fn retry_cleanup(&mut self) -> bool {
         ScenePersistenceHost::retry_cleanup(self)
     }
 }
 
 impl RetirableHost for PrefabPersistenceHost {
+    fn has_cleanup(&self) -> bool {
+        PrefabPersistenceHost::has_cleanup(self)
+    }
+
     fn retry_cleanup(&mut self) -> bool {
         PrefabPersistenceHost::retry_cleanup(self)
     }
 }
 
 impl RetirableHost for FilePublicationHost {
+    fn has_cleanup(&self) -> bool {
+        FilePublicationHost::has_cleanup(self)
+    }
+
     fn retry_cleanup(&mut self) -> bool {
         FilePublicationHost::retry_cleanup(self)
     }
@@ -94,6 +107,16 @@ impl<H> RetainedHost<H> {
 
 #[allow(private_bounds)]
 impl<H: RetirableHost> RetainedHost<H> {
+    /// Observes cleanup without advancing it; a current borrower conservatively remains pending.
+    pub(in crate::project_host::runtime::editor) fn has_cleanup(&self) -> bool {
+        let host = match self.host.try_lock() {
+            Ok(host) => host,
+            Err(TryLockError::WouldBlock) => return true,
+            Err(TryLockError::Poisoned(error)) => error.into_inner(),
+        };
+        host.as_ref().is_some_and(RetirableHost::has_cleanup)
+    }
+
     fn retry_cleanup(&self) -> bool {
         let mut host = match self.host.try_lock() {
             Ok(host) => host,
@@ -125,6 +148,14 @@ enum HostRegistration {
 }
 
 impl HostRegistration {
+    fn has_cleanup(&self) -> bool {
+        match self {
+            Self::Scene(host) => host.has_cleanup(),
+            Self::Prefab(host) => host.has_cleanup(),
+            Self::Publication(host) => host.has_cleanup(),
+        }
+    }
+
     fn retry_cleanup(&self) -> bool {
         match self {
             Self::Scene(host) => host.retry_cleanup(),
@@ -236,6 +267,16 @@ impl HostCustody {
             .lock()
             .unwrap_or_else(|error| error.into_inner())
             .closing = true;
+    }
+
+    /// Includes superseded Hosts still held here; observation never retries or retires them.
+    pub(in crate::project_host::runtime::editor) fn has_cleanup(&self) -> bool {
+        let registry = match self.registry.try_lock() {
+            Ok(registry) => registry,
+            Err(TryLockError::WouldBlock) => return true,
+            Err(TryLockError::Poisoned(error)) => error.into_inner(),
+        };
+        registry.hosts.iter().any(HostRegistration::has_cleanup)
     }
 
     /// Retries every registered Host without retiring a lane that the session still owns.

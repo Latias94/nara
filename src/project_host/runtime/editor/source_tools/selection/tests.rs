@@ -958,6 +958,76 @@ mod native {
         }
 
         #[test]
+        fn idle_selection_and_superseded_hosts_keep_cleanup_publicly_pending() {
+            let project = Project::new();
+            let original = seed(&project);
+            project.run(|editor| {
+                let loaded = loaded(editor);
+                wait(editor, |editor| {
+                    !editor.source_tool_view().has_pending_work()
+                });
+                let host = editor.source_tools.selection.host.as_ref().unwrap().clone();
+                let custody = editor.authoring_runtime.host_custody().clone();
+                assert!(!custody.has_cleanup());
+                host.try_with(|_| {
+                    assert!(custody.has_cleanup());
+                    assert!(editor.source_tool_view().physical_work_pending);
+                })
+                .unwrap();
+                assert!(!custody.has_cleanup());
+
+                let before = entries(&project);
+                let cleanup =
+                    CleanupGuard::new(host.try_with(|host| host.test_fail_after_write()).unwrap());
+                let attempt = editor.disable_installed_source_tool(&loaded.basis).unwrap();
+                let returned = returned(editor);
+                wait_for_outcome(
+                    editor,
+                    Lane::Disable,
+                    &attempt,
+                    Outcome::Failed(Error::Write),
+                );
+                assert_eq!(returned.state(), TaskReturnState::Returned);
+                assert_eq!(editor.source_tool_selection_view().phase, Phase::Idle);
+                assert!(host.has_cleanup());
+                assert!(editor.source_tool_view().physical_work_pending);
+                assert!(editor.source_tool_view().has_pending_work());
+
+                let basis = editor.source_tool_selection_view().basis;
+                let attempt = editor.reconcile_source_tool_selection(&basis).unwrap();
+                wait_for_outcome(editor, Lane::Operation, &attempt, Outcome::Reconciled);
+                let current = editor.source_tools.selection.host.as_ref().unwrap();
+                assert!(!current.same_owner(&host));
+                assert!(!current.has_cleanup());
+                assert!(!editor.source_tools.schema_adoption_pending());
+                assert!(!host.is_retired());
+                assert!(host.has_cleanup());
+                assert!(custody.has_cleanup());
+
+                let pending = entries(&project);
+                assert_eq!(pending.len(), before.len() + 1);
+                cleanup.control.release();
+                for _ in 0..3 {
+                    let view = editor.source_tool_view();
+                    assert!(view.physical_work_pending);
+                    assert!(view.has_pending_work());
+                    assert!(host.has_cleanup());
+                    assert_eq!(entries(&project), pending);
+                }
+                wait(editor, |editor| {
+                    !editor.source_tool_view().has_pending_work()
+                });
+                assert!(!host.has_cleanup());
+                assert!(!custody.has_cleanup());
+                assert_eq!(entries(&project), before);
+                assert_eq!(
+                    fs::read(project.root.join(SELECTION_PATH)).unwrap(),
+                    original
+                );
+            });
+        }
+
+        #[test]
         fn failed_write_cleanup_survives_close_and_abnormal_drop_until_explicit_release() {
             for close_before_drop in [false, true] {
                 let project = Project::new();
@@ -971,6 +1041,7 @@ mod native {
                 cleanup =
                     CleanupGuard::new(host.try_with(|host| host.test_fail_after_write()).unwrap());
                 let attempt = editor.disable_installed_source_tool(&loaded.basis).unwrap();
+                let returned = returned(&editor);
                 wait_for_outcome(
                     &mut editor,
                     Lane::Disable,
@@ -981,6 +1052,10 @@ mod native {
                     editor.source_tool_selection_view().operation,
                     loaded.operation
                 );
+                assert_eq!(returned.state(), TaskReturnState::Returned);
+                assert_eq!(editor.source_tool_selection_view().phase, Phase::Idle);
+                assert!(editor.source_tool_view().physical_work_pending);
+                assert!(editor.source_tool_view().has_pending_work());
                 assert!(host.try_with(|host| host.has_cleanup()).unwrap());
                 let pending = entries(&project);
                 assert_eq!(pending.len(), before.len() + 1);

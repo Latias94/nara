@@ -368,6 +368,14 @@ impl ScenePersistenceHost {
         self.file.publication.read_source()
     }
 
+    pub(super) fn same_source_object(&self, candidate: &FileCapability) -> Result<bool, FsError> {
+        self.file.publication.same_source_object(candidate)
+    }
+
+    pub(crate) fn has_cleanup(&self) -> bool {
+        self.file.publication.has_cleanup()
+    }
+
     #[cfg(test)]
     pub(super) fn test_fail_after_write(&mut self) -> CleanupTestControl {
         self.file.publication.test_fail_after_write()
@@ -504,6 +512,14 @@ impl PrefabPersistenceHost {
 
     pub(super) fn read_source(&self) -> super::file_publication::FilePublicationReadSource {
         self.file.publication.read_source()
+    }
+
+    pub(super) fn same_source_object(&self, candidate: &FileCapability) -> Result<bool, FsError> {
+        self.file.publication.same_source_object(candidate)
+    }
+
+    pub(crate) fn has_cleanup(&self) -> bool {
+        self.file.publication.has_cleanup()
     }
 
     #[cfg(test)]
@@ -1028,6 +1044,70 @@ mod tests {
                 .iter()
                 .all(|(_, thread)| *thread == std::thread::current().id())
         );
+    }
+
+    #[test]
+    fn document_hosts_compare_retained_sources_after_rename_unlink_and_uncertainty() {
+        let root = TestRoot::new();
+        let directory = root.capability();
+        let scene_bytes = fs::read(root.scene_path()).unwrap();
+        let prefab_bytes = fs::read(root.path.join("reference-ui.prefab.json")).unwrap();
+        let scene = directory
+            .open_file(&RelativePath::new("startup.scene.json").unwrap())
+            .unwrap();
+        let prefab = directory
+            .open_file(&RelativePath::new("reference-ui.prefab.json").unwrap())
+            .unwrap();
+        let (mut scene_host, _) = ScenePersistenceHost::bind_authoring_source(
+            &directory,
+            "startup.scene.json",
+            scene,
+            ContentDigest::of_bytes(&scene_bytes),
+        )
+        .unwrap();
+        let (mut prefab_host, _) = PrefabPersistenceHost::bind_authoring_source(
+            &directory,
+            EditorDocumentSourceBinding::new("reference-ui.prefab.json"),
+            prefab,
+            ContentDigest::of_bytes(&prefab_bytes),
+        )
+        .unwrap();
+        fs::rename(root.scene_path(), root.path.join("retained.scene.json")).unwrap();
+        fs::rename(
+            root.path.join("reference-ui.prefab.json"),
+            root.path.join("retained.prefab.json"),
+        )
+        .unwrap();
+        let independent = root.capability();
+        let scene_alias = independent
+            .open_file(&RelativePath::new("retained.scene.json").unwrap())
+            .unwrap();
+        let prefab_alias = independent
+            .open_file(&RelativePath::new("retained.prefab.json").unwrap())
+            .unwrap();
+        fs::write(root.scene_path(), &scene_bytes).unwrap();
+        fs::write(root.path.join("reference-ui.prefab.json"), &prefab_bytes).unwrap();
+        let scene_replacement = scene_host.read_source().open().unwrap();
+        let prefab_replacement = prefab_host.read_source().open().unwrap();
+        assert!(scene_host.same_source_object(&scene_alias).unwrap());
+        assert!(prefab_host.same_source_object(&prefab_alias).unwrap());
+        assert!(!scene_host.same_source_object(&scene_replacement).unwrap());
+        assert!(!prefab_host.same_source_object(&prefab_replacement).unwrap());
+        assert!(!scene_host.same_source_object(&prefab_alias).unwrap());
+        assert!(!prefab_host.same_source_object(&scene_alias).unwrap());
+
+        scene_host.mark_uncertain();
+        prefab_host.mark_uncertain();
+        assert_eq!(scene_host.accepted_source_observation(), None);
+        assert_eq!(prefab_host.accepted_source_observation(), None);
+        fs::remove_file(root.path.join("retained.scene.json")).unwrap();
+        fs::remove_file(root.path.join("retained.prefab.json")).unwrap();
+        assert!(scene_host.same_source_object(&scene_alias).unwrap());
+        assert!(prefab_host.same_source_object(&prefab_alias).unwrap());
+        scene_host.commit_reopen(scene_replacement, ContentDigest::of_bytes(&scene_bytes));
+        prefab_host.commit_reopen(prefab_replacement, ContentDigest::of_bytes(&prefab_bytes));
+        assert!(!scene_host.same_source_object(&scene_alias).unwrap());
+        assert!(!prefab_host.same_source_object(&prefab_alias).unwrap());
     }
 
     #[test]

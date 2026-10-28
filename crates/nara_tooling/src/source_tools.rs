@@ -69,6 +69,8 @@ pub enum EditorSourceToolError {
     Limit,
     #[error("the source tool task was not admitted")]
     TaskRejected,
+    #[error("the source tool task returned with failed executor cleanup")]
+    TaskCleanupFailed,
     #[error("the source tool child failed: {0}")]
     Process(&'static str),
     #[error("the source tool response does not match its finite protocol")]
@@ -266,6 +268,10 @@ pub struct EditorSourceToolView {
     pub probing: bool,
     pub working: bool,
     pub retiring: bool,
+    /// Includes deferred selection work and cleanup retained by superseded file Hosts.
+    pub physical_work_pending: bool,
+    /// Sticky Session-local failure, independent of pending work and never a clean-return proof.
+    pub process_cleanup_failed: bool,
     pub attempt: Option<EditorSourceToolAttemptId>,
     pub request: Option<EditorSourceToolRequestId>,
     pub review: Option<EditorSourceToolReviewSummary>,
@@ -278,7 +284,8 @@ pub struct EditorSourceToolView {
 impl EditorSourceToolView {
     #[must_use]
     pub fn has_pending_work(&self) -> bool {
-        self.probing
+        self.physical_work_pending
+            || self.probing
             || self.working
             || self.retiring
             || self.selection.as_ref().is_some_and(|selection| {
