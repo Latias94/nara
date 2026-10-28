@@ -4,11 +4,12 @@ use std::{collections::BTreeMap, time::Duration};
 
 use nara::{
     project_host::{
-        EditorProjectSession, EditorSourceToolDefinition, EditorSourceToolInstallation,
-        EditorSourceToolManagedHost, PreparedEditorSourceToolArtifacts,
-        PreparedEditorSourceToolInstallations, PreparedEditorSourceToolReclamation,
-        PreparedEditorSourceToolSelection, PreparedEditorSourceToolTemplateImport,
-        PreparedEditorSourceToolWithdrawal,
+        EditorProjectSession, EditorSourceToolArtifactCommitError, EditorSourceToolDefinition,
+        EditorSourceToolIncompleteArtifactRegistrationError, EditorSourceToolIncompletePublication,
+        EditorSourceToolInstallation, EditorSourceToolManagedHost,
+        PreparedEditorSourceToolArtifacts, PreparedEditorSourceToolInstallations,
+        PreparedEditorSourceToolReclamation, PreparedEditorSourceToolSelection,
+        PreparedEditorSourceToolTemplateImport, PreparedEditorSourceToolWithdrawal,
     },
     reflect::ComponentValue,
     tooling::{
@@ -191,6 +192,40 @@ impl EditorApplication {
             .prepare_source_tool_artifact_registration(basis, installation)
     }
 
+    /// Retains the original incomplete publication when Session admission refuses it.
+    pub fn prepare_source_tool_incomplete_artifact_registration(
+        &self,
+        basis: &EditorSourceToolArtifactBasis,
+        publication: EditorSourceToolIncompletePublication,
+    ) -> Result<
+        PreparedEditorSourceToolArtifacts,
+        EditorSourceToolIncompleteArtifactRegistrationError,
+    > {
+        let session = match self.authoring_edit_session() {
+            Ok(session) => session,
+            Err(_) => {
+                return Err(
+                    EditorSourceToolIncompleteArtifactRegistrationError::with_publication(
+                        EditorSourceToolArtifactError::Closing,
+                        publication,
+                    ),
+                );
+            }
+        };
+        session.prepare_source_tool_incomplete_artifact_registration(basis, publication)
+    }
+
+    /// Prepares registration from the Session's continuously retained live artifact custody.
+    pub fn prepare_retained_source_tool_artifact_registration(
+        &self,
+        basis: &EditorSourceToolArtifactBasis,
+        artifact_id: &[u8; 32],
+    ) -> Result<PreparedEditorSourceToolArtifacts, EditorSourceToolArtifactError> {
+        self.authoring_edit_session()
+            .map_err(|_| EditorSourceToolArtifactError::Closing)?
+            .prepare_retained_source_tool_artifact_registration(basis, artifact_id)
+    }
+
     pub fn prepare_source_tool_artifact_observation(
         &self,
         basis: &EditorSourceToolArtifactBasis,
@@ -204,13 +239,17 @@ impl EditorApplication {
     pub fn commit_source_tool_artifacts(
         &mut self,
         prepared: PreparedEditorSourceToolArtifacts,
-    ) -> Result<EditorSourceToolAttemptId, EditorSourceToolArtifactError> {
-        let result = self
-            .state
-            .published_mut()
-            .ok_or(EditorSourceToolArtifactError::Closing)?
-            .session
-            .commit_source_tool_artifacts(prepared);
+    ) -> Result<EditorSourceToolAttemptId, EditorSourceToolArtifactCommitError> {
+        let published = match self.state.published_mut() {
+            Some(published) => published,
+            None => {
+                return Err(EditorSourceToolArtifactCommitError::with_prepared(
+                    EditorSourceToolArtifactError::Closing,
+                    prepared,
+                ));
+            }
+        };
+        let result = published.session.commit_source_tool_artifacts(prepared);
         self.drive_editor_frame(Duration::ZERO, true, false);
         result
     }

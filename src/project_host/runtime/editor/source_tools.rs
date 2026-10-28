@@ -45,12 +45,16 @@ mod release;
 mod selection;
 mod template_import;
 pub(super) use artifacts::ARTIFACTS_PATH;
-pub use artifacts::PreparedEditorSourceToolArtifacts;
+pub use artifacts::{
+    EditorSourceToolArtifactCommitError, EditorSourceToolIncompleteArtifactRegistrationError,
+    PreparedEditorSourceToolArtifacts,
+};
 pub use managed::{
     EditorSourceToolManagedError, EditorSourceToolManagedHost, EditorSourceToolManagedHostDigests,
 };
 pub use reclamation::PreparedEditorSourceToolReclamation;
 pub use release::{
+    EditorSourceToolIncompleteMember, EditorSourceToolIncompletePublication,
     EditorSourceToolInstallation, EditorSourceToolInstallationError,
     EditorSourceToolInstallationInspection, EditorSourceToolInstallationOrphan,
     EditorSourceToolInstallationOutcome, EditorSourceToolInstallationPlan,

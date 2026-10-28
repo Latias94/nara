@@ -11,7 +11,11 @@ use nara_reflect::{
 mod installation;
 mod manifest;
 
+#[cfg(test)]
+pub(in crate::project_host::runtime::editor::source_tools) use installation::PublicationTestFault;
+
 pub use installation::{
+    EditorSourceToolIncompleteMember, EditorSourceToolIncompletePublication,
     EditorSourceToolInstallation, EditorSourceToolInstallationError,
     EditorSourceToolInstallationInspection, EditorSourceToolInstallationOrphan,
     EditorSourceToolInstallationOutcome, EditorSourceToolInstallationPlan,

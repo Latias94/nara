@@ -88,7 +88,7 @@ mod session {
     use nara_tooling::{
         EditorAction, EditorActionBatch, EditorActionOutcome, EditorPersistenceAction,
         EditorPersistenceRequestResult, EditorPersistenceResult,
-        EditorSourceToolArtifactObservation as Observation,
+        EditorSourceToolArtifactObservation as Observation, EditorSourceToolArtifactPublication,
     };
 
     use super::super::*;
@@ -182,16 +182,16 @@ mod session {
         let prepared = editor
             .prepare_source_tool_artifact_registration(&basis, Arc::clone(installation))
             .unwrap();
-        let expected = prepared.installations();
+        let expected = prepared.artifacts();
         let attempt = editor.commit_source_tool_artifacts(prepared).unwrap();
         let view = completed(editor, &attempt, Outcome::Registered);
-        assert_eq!(view.installations, expected);
+        assert_eq!(view.artifacts, expected);
         assert_eq!(view.phase, Phase::Idle);
         view
     }
 
     fn sample(view: &EditorSourceToolArtifactView) -> Observation {
-        view.installations[0]
+        view.artifacts[0]
             .members
             .iter()
             .find(|member| member.path.as_ref() == SAMPLE)
@@ -219,8 +219,14 @@ mod session {
                 .unwrap();
             assert_eq!(editor.source_tool_artifact_view(), before);
             assert_eq!(
-                prepared.installations()[0].installed.directory.as_ref(),
+                prepared.artifacts()[0].directory.as_ref(),
                 installation.project_path()
+            );
+            assert_eq!(
+                prepared.artifacts()[0].publication,
+                EditorSourceToolArtifactPublication::Ready {
+                    receipt: installation.receipt_digest(),
+                }
             );
             assert!(!project.root.join(ARTIFACTS_PATH).exists());
             drop(prepared);
@@ -232,8 +238,11 @@ mod session {
             let registered = register(editor, &installation);
             let bytes = fs::read(project.root.join(ARTIFACTS_PATH)).unwrap();
             assert_eq!(
-                editor.commit_source_tool_artifacts(stale),
-                Err(Error::StaleBasis)
+                editor
+                    .commit_source_tool_artifacts(stale)
+                    .unwrap_err()
+                    .error(),
+                &Error::StaleBasis
             );
             assert_eq!(editor.source_tool_artifact_view(), registered);
             assert_eq!(fs::read(project.root.join(ARTIFACTS_PATH)).unwrap(), bytes);
@@ -356,7 +365,7 @@ mod session {
                     installation.receipt().installation_id(),
                 )
                 .unwrap();
-            let expected = prepared.installations();
+            let expected = prepared.artifacts();
             let attempt = editor.commit_source_tool_artifacts(prepared).unwrap();
             wait(editor, |editor| {
                 editor
@@ -370,7 +379,7 @@ mod session {
             assert_eq!(failed.error, Some(Error::Write));
             assert!(failed.physical_work_pending);
             let received = editor.source_tools.artifacts.received.as_ref().unwrap();
-            assert_eq!(received._candidate.installations(), expected);
+            assert_eq!(received._candidate.artifacts(), expected);
             assert!(matches!(
                 &received._completed.result,
                 Ok(io::IoResult::Refused {
@@ -438,7 +447,7 @@ mod session {
                 .reconcile_source_tool_artifacts(&failed.basis)
                 .unwrap();
             let observed = completed(editor, &reconcile, Outcome::Reconciled);
-            assert!(observed.installations.is_empty());
+            assert!(observed.artifacts.is_empty());
             assert_eq!(fs::read(&record).unwrap(), disk);
             assert!(editor.source_tools.artifacts.received.is_some());
             assert_eq!(editor.source_tools.artifacts.created.len(), 1);
@@ -466,7 +475,7 @@ mod session {
             let prepared = editor
                 .prepare_source_tool_artifact_registration(&before.basis, Arc::clone(&installation))
                 .unwrap();
-            let expected = prepared.installations();
+            let expected = prepared.artifacts();
             let (gate, control) = IoGate::new();
             editor.source_tools.artifacts.next_io_gate = Some(gate);
             let attempt = editor.commit_source_tool_artifacts(prepared).unwrap();
@@ -486,16 +495,16 @@ mod session {
                 editor.advance_source_tool_artifacts();
                 let view = editor.source_tool_artifact_view();
                 assert_eq!(view.phase, Phase::Publishing);
-                assert_eq!(view.installations, before.installations);
+                assert_eq!(view.artifacts, before.artifacts);
                 assert!(view.physical_work_pending);
                 assert!(view.operation.as_ref().unwrap().outcome.is_none());
                 assert_eq!(returned.state(), TaskReturnState::Pending);
             }
             let bytes = fs::read(project.root.join(ARTIFACTS_PATH)).unwrap();
-            assert_eq!(record::decode(&bytes).unwrap().installations, expected);
+            assert_eq!(record::decode(&bytes).unwrap().artifacts, expected);
             control.release();
             let completed = completed(editor, &attempt, Outcome::Registered);
-            assert_eq!(completed.installations, expected);
+            assert_eq!(completed.artifacts, expected);
             assert_eq!(returned.state(), TaskReturnState::Returned);
             assert!(matches!(
                 editor
@@ -520,7 +529,7 @@ mod session {
         let prepared = editor
             .prepare_source_tool_artifact_registration(&before.basis, Arc::clone(&installation))
             .unwrap();
-        let expected = prepared.installations();
+        let expected = prepared.artifacts();
         let (gate, control) = IoGate::with_cleanup_failure(true);
         editor.source_tools.artifacts.next_io_gate = Some(gate);
         let attempt = editor.commit_source_tool_artifacts(prepared).unwrap();
@@ -538,13 +547,13 @@ mod session {
         assert_eq!(
             record::decode(&fs::read(project.root.join(ARTIFACTS_PATH)).unwrap())
                 .unwrap()
-                .installations,
+                .artifacts,
             expected
         );
         assert_eq!(returned.state(), TaskReturnState::Pending);
         control.release();
         let published = completed(&mut editor, &attempt, Outcome::PublishedWithCleanupFailure);
-        assert_eq!(published.installations, expected);
+        assert_eq!(published.artifacts, expected);
         assert_eq!(published.error, Some(Error::TaskCleanupFailed));
         assert_eq!(published.phase, Phase::RequiresReconcile);
         assert!(!published.physical_work_pending);

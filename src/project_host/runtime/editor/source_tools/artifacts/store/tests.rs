@@ -9,8 +9,7 @@ use std::{
 
 use nara_fs::{HostCapabilityOptions, TrustMode};
 use nara_tooling::{
-    EditorSourceToolArtifactInstallation, EditorSourceToolArtifactMember,
-    EditorSourceToolInstalledSelection,
+    EditorSourceToolArtifact, EditorSourceToolArtifactMember, EditorSourceToolArtifactPublication,
 };
 
 use super::*;
@@ -82,26 +81,26 @@ impl Drop for Fixture {
 }
 
 fn inventory() -> Inventory {
-    let installed = EditorSourceToolInstalledSelection {
-        package: "test.stats".into(),
-        directory: ".nara/source-tools/artifacts/absent".into(),
-        installation: [1; 32],
-        receipt: ContentDigest::from_parts(64, [2; 32]),
-        manifest: ContentDigest::from_parts(128, [3; 32]),
-    };
+    let receipt = ContentDigest::from_parts(64, [2; 32]);
+    let manifest = ContentDigest::from_parts(128, [3; 32]);
     Inventory {
-        installations: vec![EditorSourceToolArtifactInstallation {
+        artifacts: vec![EditorSourceToolArtifact {
+            id: [1; 32],
+            package: "test.stats".into(),
+            directory: ".nara/source-tools/artifacts/absent".into(),
+            manifest,
+            publication: EditorSourceToolArtifactPublication::Ready { receipt },
             members: vec![
                 EditorSourceToolArtifactMember {
                     path: ".nara-installation.json".into(),
                     role: record::Role::Metadata,
-                    baseline: installed.receipt,
+                    baseline: receipt,
                     observation: record::Observation::Missing,
                 },
                 EditorSourceToolArtifactMember {
                     path: "nara-tool.json".into(),
                     role: record::Role::Metadata,
-                    baseline: installed.manifest,
+                    baseline: manifest,
                     observation: record::Observation::Changed,
                 },
                 EditorSourceToolArtifactMember {
@@ -111,7 +110,6 @@ fn inventory() -> Inventory {
                     observation: record::Observation::Failed,
                 },
             ],
-            installed,
         }],
         reclamations: Vec::new(),
     }
@@ -141,7 +139,7 @@ fn absent_inventory_read_and_old_record_do_not_create_or_import_anything() {
 }
 
 #[test]
-fn loading_exact_facts_does_not_inspect_or_reconstruct_installation_objects() {
+fn loading_exact_facts_does_not_inspect_or_reconstruct_artifact_objects() {
     let fixture = Fixture::new();
     fixture.parents();
     let bytes = record::encode(&inventory()).unwrap();
@@ -193,7 +191,7 @@ fn corrupt_unsupported_oversized_and_nonregular_records_never_become_empty() {
     for (bytes, expected) in [
         (b"not JSON".to_vec(), Error::InvalidRecord),
         (
-            br#"{"format_version":2,"installations":[],"reclamations":[]}"#.to_vec(),
+            br#"{"format_version":2,"artifacts":[],"reclamations":[]}"#.to_vec(),
             Error::UnsupportedFormat,
         ),
         (vec![b'!'; BYTE_LIMIT as usize + 1], Error::TooLarge),

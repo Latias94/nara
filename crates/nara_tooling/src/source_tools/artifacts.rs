@@ -4,10 +4,7 @@ use std::sync::Arc;
 
 use nara_fs::ContentDigest;
 
-use super::{
-    EditorSourceToolAttemptId, EditorSourceToolInstalledSelection,
-    EditorSourceToolReclamationRecord,
-};
+use super::{EditorSourceToolAttemptId, EditorSourceToolReclamationRecord};
 
 operation_id!(EditorSourceToolArtifactBasis);
 
@@ -16,6 +13,7 @@ pub enum EditorSourceToolArtifactRole {
     Tool,
     Content,
     Metadata,
+    ReceiptTemporary,
 }
 
 /// The last finite observation of a member, never a successful removal receipt.
@@ -31,13 +29,29 @@ pub enum EditorSourceToolArtifactObservation {
 pub struct EditorSourceToolArtifactMember {
     pub path: Arc<str>,
     pub role: EditorSourceToolArtifactRole,
+    /// Captured intended bytes, independent of the last observed partial or changed content.
     pub baseline: ContentDigest,
     pub observation: EditorSourceToolArtifactObservation,
 }
 
+/// Publication facts alone never grant execution, resumption or deletion authority.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum EditorSourceToolArtifactPublication {
+    Ready { receipt: ContentDigest },
+    Incomplete,
+}
+
+/// Exact publication facts and the members actually created in one managed directory.
+///
+/// The nonzero `id` correlates these facts; it cannot reconstruct live object custody or authorize
+/// deletion. An incomplete publication may contain no members and has no ready receipt.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct EditorSourceToolArtifactInstallation {
-    pub installed: EditorSourceToolInstalledSelection,
+pub struct EditorSourceToolArtifact {
+    pub id: [u8; 32],
+    pub package: Arc<str>,
+    pub directory: Arc<str>,
+    pub manifest: ContentDigest,
+    pub publication: EditorSourceToolArtifactPublication,
     pub members: Vec<EditorSourceToolArtifactMember>,
 }
 
@@ -59,7 +73,7 @@ pub enum EditorSourceToolArtifactError {
     Busy,
     #[error("the project is closing or adopting metadata")]
     Closing,
-    #[error("the installation belongs to another project directory")]
+    #[error("the artifact belongs to another project directory")]
     RootMismatch,
     #[error("the artifact inventory is invalid")]
     InvalidRecord,
@@ -75,7 +89,7 @@ pub enum EditorSourceToolArtifactError {
     Write,
     #[error("the original artifact observation changed")]
     Changed,
-    #[error("an ordinary document already owns an installation member")]
+    #[error("an ordinary document already owns an artifact member")]
     SourceOwned,
     #[error("artifact inventory publication requires explicit reconciliation")]
     RequiresReconcile,
@@ -85,7 +99,7 @@ pub enum EditorSourceToolArtifactError {
     TaskRejected,
     #[error("the artifact inventory task returned with failed executor cleanup")]
     TaskCleanupFailed,
-    #[error("the installation is absent from this artifact inventory")]
+    #[error("the artifact is absent from this artifact inventory")]
     Unregistered,
 }
 
@@ -97,7 +111,7 @@ pub enum EditorSourceToolArtifactOutcome {
     /// An exact reclamation intent or results record was published and accepted.
     ReclamationRecorded,
     /// The exact inventory was published and accepted before executor cleanup failed.
-    /// The accepted installations remain observable; this does not certify successful cleanup.
+    /// The accepted artifacts remain observable; this does not certify successful cleanup.
     PublishedWithCleanupFailure,
     Failed(EditorSourceToolArtifactError),
 }
@@ -116,7 +130,7 @@ pub struct EditorSourceToolArtifactAttempt {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct EditorSourceToolArtifactView {
     pub basis: EditorSourceToolArtifactBasis,
-    pub installations: Vec<EditorSourceToolArtifactInstallation>,
+    pub artifacts: Vec<EditorSourceToolArtifact>,
     pub reclamations: Vec<EditorSourceToolReclamationRecord>,
     pub phase: EditorSourceToolArtifactPhase,
     pub operation: Option<EditorSourceToolArtifactAttempt>,

@@ -8,6 +8,7 @@ use nara_fs::{
     ExpectedTarget, FileCapability, FileIdentity, FileKind, FileSyncReceipt, FsError,
     RelativeComponent, RelativePath, ReplaceReceipt, TemporaryFileCleanup,
 };
+use nara_tooling::EditorSourceToolArtifactRole;
 
 use super::super::artifact_store;
 use super::{
@@ -101,17 +102,38 @@ pub struct EditorSourceToolInstallationInspection {
     release: PreparedEditorSourceToolRelease,
 }
 
-/// An unready candidate retains actual namespace facts and every acquired cleanup handle.
-///
-/// Cleanup handles here refer only to newly created, unaccepted candidate members. They must not
-/// become artifact disposal authority; an explicit disposal review is a separate operation.
+/// A failed directory-publication attempt retains its actual namespace facts.
 #[derive(Debug)]
 pub struct EditorSourceToolInstallationOrphan {
     publication: DirectoryPublicationOutcome,
     parent: DirectoryCapability,
     directory: Option<DirectoryCapability>,
-    files: Vec<TemporaryFileCleanup>,
-    readers: Vec<EditorSourceToolInstalledMember>,
+}
+
+/// Actual published but unready artifact custody. No ready receipt or execution is implied.
+#[derive(Debug)]
+pub struct EditorSourceToolIncompletePublication {
+    id: [u8; 32],
+    project_root: DirectoryCapability,
+    parent: DirectoryCapability,
+    destination: RelativeComponent,
+    project_path: String,
+    package: String,
+    manifest: ContentDigest,
+    publication: DirectoryPublicationReceipt,
+    directory: DirectoryCapability,
+    members: Vec<EditorSourceToolIncompleteMember>,
+}
+
+/// One actually created file; content, synchronization and reader handover are separate facts.
+#[derive(Debug)]
+pub struct EditorSourceToolIncompleteMember {
+    path: String,
+    role: EditorSourceToolArtifactRole,
+    baseline: ContentDigest,
+    sync: Option<FileSyncReceipt>,
+    file: Option<FileCapability>,
+    cleanup: Option<TemporaryFileCleanup>,
 }
 
 /// Filesystem publication and later content observations are separate facts.
@@ -131,7 +153,7 @@ pub enum EditorSourceToolInstallationOutcome {
     Incomplete {
         plan: EditorSourceToolInstallationPlan,
         error: EditorSourceToolInstallationError,
-        orphan: EditorSourceToolInstallationOrphan,
+        publication: EditorSourceToolIncompletePublication,
     },
 }
 
@@ -256,7 +278,7 @@ impl EditorSourceToolInstallationPlan {
         self.publish_with(|_| Ok(()), |_, _| Ok(()))
     }
 
-    fn publish_with(
+    pub(in crate::project_host::runtime::editor::source_tools) fn publish_with(
         self,
         before_publish: impl FnOnce(
             &DirectoryCapability,
@@ -280,6 +302,7 @@ impl EditorSourceToolInstallationPlan {
             Ok(prepared) => prepared,
             Err(error) => return failed(self, error, None),
         };
+        let artifact_id = *receipt.installation_id();
         let parent = match artifact_store::ensure_parent(&self.project_root) {
             Ok(parent) => parent,
             Err(error) => {
@@ -314,13 +337,23 @@ impl EditorSourceToolInstallationPlan {
                         publication: outcome,
                         parent,
                         directory: Some(staging),
-                        files: Vec::new(),
-                        readers: Vec::new(),
                     }),
                 );
             }
         };
         let mut staged = StagedMembers::default();
+        #[cfg(test)]
+        if test_publication_fault(PublicationTestFault::BeforePayloads) {
+            return incomplete(
+                self,
+                artifact_id,
+                EditorSourceToolInstallationError::Receipt("injected before payloads"),
+                publication,
+                parent,
+                staging,
+                staged,
+            );
+        }
         let stage_result = stage_release(&staging, &self.release, &mut staged)
             .and_then(|()| before_publish(&staging))
             .and_then(|()| {
@@ -333,11 +366,29 @@ impl EditorSourceToolInstallationPlan {
                 )
             });
         if let Err(error) = stage_result {
-            return incomplete(self, error, publication, parent, staging, staged);
+            return incomplete(
+                self,
+                artifact_id,
+                error,
+                publication,
+                parent,
+                staging,
+                staged,
+            );
         }
         let receipt_publication = match commit_receipt(&staging, &receipt_bytes, &mut staged) {
             Ok(receipt_publication) => receipt_publication,
-            Err(error) => return incomplete(self, error, publication, parent, staging, staged),
+            Err(error) => {
+                return incomplete(
+                    self,
+                    artifact_id,
+                    error,
+                    publication,
+                    parent,
+                    staging,
+                    staged,
+                );
+            }
         };
         let receipt_digest = ContentDigest::of_bytes(&receipt_bytes);
         let verification = after_publish(&parent, &staging).and_then(|()| {
@@ -568,24 +619,142 @@ impl EditorSourceToolInstallationOrphan {
         &self.parent
     }
     #[must_use]
-    pub fn pending_files(&self) -> usize {
-        self.files.len()
-    }
-    /// Last observed created members. These facts do not prove unchanged content for deletion.
-    #[must_use]
-    pub fn members(&self) -> &[EditorSourceToolInstalledMember] {
-        &self.readers
-    }
-    #[must_use]
     pub fn directory(&self) -> Option<&DirectoryCapability> {
         self.directory.as_ref()
     }
 }
 
+impl EditorSourceToolIncompletePublication {
+    #[must_use]
+    pub const fn id(&self) -> &[u8; 32] {
+        &self.id
+    }
+    #[must_use]
+    pub fn package(&self) -> &str {
+        &self.package
+    }
+    #[must_use]
+    pub fn project_path(&self) -> &str {
+        &self.project_path
+    }
+    #[must_use]
+    pub const fn project_root(&self) -> &DirectoryCapability {
+        &self.project_root
+    }
+    #[must_use]
+    pub const fn directory(&self) -> &DirectoryCapability {
+        &self.directory
+    }
+    #[must_use]
+    pub const fn store_parent(&self) -> &DirectoryCapability {
+        &self.parent
+    }
+    #[must_use]
+    pub const fn manifest_digest(&self) -> ContentDigest {
+        self.manifest
+    }
+    #[must_use]
+    pub const fn publication(&self) -> &DirectoryPublicationReceipt {
+        &self.publication
+    }
+    #[must_use]
+    pub fn members(&self) -> &[EditorSourceToolIncompleteMember] {
+        &self.members
+    }
+    #[must_use]
+    pub fn pending_files(&self) -> usize {
+        self.members
+            .iter()
+            .filter(|member| member.cleanup.is_some())
+            .count()
+    }
+
+    /// Refines only live-handle custody. Failure retains every unresolved original object.
+    pub(in crate::project_host::runtime::editor::source_tools) fn hand_over_readers(
+        &mut self,
+    ) -> Result<(), FsError> {
+        let current_parent = self.project_root.open_directory_exact(
+            &RelativePath::new(artifact_store::PATH).expect("fixed store path"),
+        )?;
+        if !current_parent.same_object(&self.parent)? {
+            return Err(FsError::CapabilityIdentityDrift {
+                operation: nara_fs::FsOperation::OpenDirectory,
+            });
+        }
+        let current_directory = self.parent.open_directory_exact(
+            &RelativePath::from_components([self.destination.clone()])
+                .expect("admitted destination"),
+        )?;
+        if !current_directory.same_object(&self.directory)? {
+            return Err(FsError::CapabilityIdentityDrift {
+                operation: nara_fs::FsOperation::OpenDirectory,
+            });
+        }
+        for member in &mut self.members {
+            let current = current_directory.open_file_exact(&RelativePath::new(&member.path)?)?;
+            if member
+                .file
+                .as_ref()
+                .is_some_and(|original| !current.same_object(original).unwrap_or(false))
+            {
+                return Err(FsError::CapabilityIdentityDrift {
+                    operation: nara_fs::FsOperation::OpenFile,
+                });
+            }
+            if let Some(cleanup) = &member.cleanup {
+                if !cleanup.same_object(&current)? {
+                    return Err(FsError::CapabilityIdentityDrift {
+                        operation: nara_fs::FsOperation::OpenFile,
+                    });
+                }
+            } else if member.file.is_none() {
+                return Err(FsError::IdentityUnavailable);
+            }
+            member.file = Some(current);
+            // The new reader continuously holds the proven original. No discard is attempted.
+            member.cleanup = None;
+        }
+        self.directory = current_directory;
+        Ok(())
+    }
+}
+
+impl EditorSourceToolIncompleteMember {
+    #[must_use]
+    pub fn path(&self) -> &str {
+        &self.path
+    }
+    #[must_use]
+    pub const fn role(&self) -> EditorSourceToolArtifactRole {
+        self.role
+    }
+    #[must_use]
+    pub const fn baseline(&self) -> ContentDigest {
+        self.baseline
+    }
+    #[must_use]
+    pub const fn sync_receipt(&self) -> Option<FileSyncReceipt> {
+        self.sync
+    }
+    pub(in crate::project_host::runtime::editor::source_tools) fn file(
+        &self,
+    ) -> Option<&FileCapability> {
+        self.file.as_ref()
+    }
+}
+
 #[derive(Default)]
 struct StagedMembers {
-    writers: Vec<TemporaryFileCleanup>,
+    writers: Vec<PendingCreatedMember>,
     readers: Vec<EditorSourceToolInstalledMember>,
+}
+
+struct PendingCreatedMember {
+    path: String,
+    role: EditorSourceToolArtifactRole,
+    baseline: ContentDigest,
+    sync: Option<FileSyncReceipt>,
+    cleanup: TemporaryFileCleanup,
 }
 
 fn failed(
@@ -602,22 +771,65 @@ fn failed(
 
 fn incomplete(
     plan: EditorSourceToolInstallationPlan,
+    id: [u8; 32],
     error: EditorSourceToolInstallationError,
     publication: DirectoryPublicationReceipt,
     parent: DirectoryCapability,
     directory: DirectoryCapability,
     staged: StagedMembers,
 ) -> EditorSourceToolInstallationOutcome {
+    let mut members: Vec<_> = staged
+        .readers
+        .into_iter()
+        .map(|member| EditorSourceToolIncompleteMember {
+            path: member.path,
+            role: match member.kind {
+                Some(EditorSourceToolReleaseMemberKind::Tool) => EditorSourceToolArtifactRole::Tool,
+                Some(EditorSourceToolReleaseMemberKind::Content) => {
+                    EditorSourceToolArtifactRole::Content
+                }
+                None => EditorSourceToolArtifactRole::Metadata,
+            },
+            baseline: member.digest,
+            sync: Some(member.sync),
+            file: Some(member.file),
+            cleanup: None,
+        })
+        .collect();
+    for pending in staged.writers {
+        if let Some(member) = members
+            .iter_mut()
+            .find(|member| member.path == pending.path)
+        {
+            member.cleanup = Some(pending.cleanup);
+        } else {
+            members.push(EditorSourceToolIncompleteMember {
+                path: pending.path,
+                role: pending.role,
+                baseline: pending.baseline,
+                sync: pending.sync,
+                file: None,
+                cleanup: Some(pending.cleanup),
+            });
+        }
+    }
+    members.sort_by(|left, right| left.path.cmp(&right.path));
+    let incomplete = EditorSourceToolIncompletePublication {
+        id,
+        project_root: plan.project_root.share(),
+        parent,
+        destination: plan.destination.clone(),
+        project_path: plan.project_path.clone(),
+        package: plan.release.metadata.package.clone(),
+        manifest: plan.release.manifest_digest(),
+        publication,
+        directory,
+        members,
+    };
     EditorSourceToolInstallationOutcome::Incomplete {
         plan,
         error,
-        orphan: EditorSourceToolInstallationOrphan {
-            publication: DirectoryPublicationOutcome::Published(publication),
-            parent,
-            directory: Some(directory),
-            files: staged.writers,
-            readers: staged.readers,
-        },
+        publication: incomplete,
     }
 }
 
@@ -627,7 +839,7 @@ fn stage_release(
     staged: &mut StagedMembers,
 ) -> Result<(), EditorSourceToolInstallationError> {
     let mut directories = BTreeMap::new();
-    for (path, bytes, digest, kind) in std::iter::once((
+    for (index, (path, bytes, digest, kind)) in std::iter::once((
         MANIFEST_NAME,
         release.manifest_bytes(),
         release.manifest_digest(),
@@ -640,7 +852,9 @@ fn stage_release(
             member.digest(),
             Some(member.kind()),
         )
-    })) {
+    }))
+    .enumerate()
+    {
         let mut parent = root.share();
         let parts: Vec<_> = path.split('/').collect();
         let mut prefix = String::new();
@@ -663,15 +877,45 @@ fn stage_release(
         }
         let leaf = RelativeComponent::new(parts[parts.len() - 1])
             .map_err(|source| member_error(path, source.into()))?;
+        let role = match kind {
+            Some(EditorSourceToolReleaseMemberKind::Tool) => EditorSourceToolArtifactRole::Tool,
+            Some(EditorSourceToolReleaseMemberKind::Content) => {
+                EditorSourceToolArtifactRole::Content
+            }
+            None => EditorSourceToolArtifactRole::Metadata,
+        };
         let mut file = match parent.create_temp(&leaf) {
             Ok(file) => file,
             Err(failure) => {
                 let (source, cleanup) = failure.into_parts();
-                staged.writers.extend(cleanup);
+                if let Some(cleanup) = cleanup {
+                    staged.writers.push(PendingCreatedMember {
+                        path: path.to_owned(),
+                        role,
+                        baseline: digest,
+                        sync: None,
+                        cleanup,
+                    });
+                }
                 return Err(member_error(path, source));
             }
         };
         let identity = file.identity();
+        #[cfg(test)]
+        if test_publication_fault(PublicationTestFault::MemberCreated(index)) {
+            staged.writers.push(PendingCreatedMember {
+                path: path.to_owned(),
+                role,
+                baseline: digest,
+                sync: None,
+                cleanup: file.into_cleanup(),
+            });
+            return Err(EditorSourceToolInstallationError::Receipt(
+                "injected after member creation",
+            ));
+        }
+        #[cfg(not(test))]
+        let _ = index;
         let result = file
             .write_all(bytes)
             .map_err(|source| EditorSourceToolInstallationError::Write {
@@ -679,7 +923,13 @@ fn stage_release(
                 source,
             })
             .and_then(|()| file.sync().map_err(|source| member_error(path, source)));
-        staged.writers.push(file.into_cleanup());
+        staged.writers.push(PendingCreatedMember {
+            path: path.to_owned(),
+            role,
+            baseline: digest,
+            sync: result.as_ref().ok().copied(),
+            cleanup: file.into_cleanup(),
+        });
         let sync = result?;
         let reader = root
             .open_file_exact(
@@ -718,14 +968,24 @@ fn commit_receipt(
         .ok_or(EditorSourceToolInstallationError::Receipt(
             "invalid receipt staging name",
         ))?;
+    let baseline = ContentDigest::of_bytes(bytes);
     let mut temporary = match root.create_temp(&name) {
         Ok(temporary) => temporary,
         Err(failure) => {
             let (source, cleanup) = failure.into_parts();
-            staged.writers.extend(cleanup);
+            if let Some(cleanup) = cleanup {
+                staged.writers.push(PendingCreatedMember {
+                    path: path.to_owned(),
+                    role: EditorSourceToolArtifactRole::ReceiptTemporary,
+                    baseline,
+                    sync: None,
+                    cleanup,
+                });
+            }
             return Err(member_error(RECEIPT_NAME, source));
         }
     };
+    let mut synchronized = None;
     let prepared = (|| {
         temporary
             .write_all(bytes)
@@ -736,6 +996,7 @@ fn commit_receipt(
         let sync = temporary
             .sync()
             .map_err(|source| member_error(RECEIPT_NAME, source))?;
+        synchronized = Some(sync);
         let reader = root
             .open_file_exact(
                 &RelativePath::new(path)
@@ -757,17 +1018,42 @@ fn commit_receipt(
     let (sync, reader) = match prepared {
         Ok(prepared) => prepared,
         Err(error) => {
-            staged.writers.push(temporary.into_cleanup());
+            staged.writers.push(PendingCreatedMember {
+                path: path.to_owned(),
+                role: EditorSourceToolArtifactRole::ReceiptTemporary,
+                baseline,
+                sync: synchronized,
+                cleanup: temporary.into_cleanup(),
+            });
             return Err(error);
         }
     };
     let target =
         RelativeComponent::new(RECEIPT_NAME).expect("the generated receipt has a valid fixed name");
+    #[cfg(test)]
+    if test_publication_fault(PublicationTestFault::CompetingReceipt) {
+        let mut competing = root
+            .create_child_file(&target)
+            .expect("test competitor exclusively creates ready name");
+        competing
+            .writer()
+            .expect("test competitor has write authority")
+            .write_all(b"independent competing receipt")
+            .expect("test competitor writes actual bytes");
+    }
     let publication = match root.replace_temp(temporary, &target, ExpectedTarget::Missing) {
         Ok(publication) => publication,
         Err(failure) => {
             let (source, cleanup) = failure.into_parts();
-            staged.writers.extend(cleanup);
+            if let Some(cleanup) = cleanup {
+                staged.writers.push(PendingCreatedMember {
+                    path: path.to_owned(),
+                    role: EditorSourceToolArtifactRole::ReceiptTemporary,
+                    baseline,
+                    sync: Some(sync),
+                    cleanup,
+                });
+            }
             return Err(member_error(RECEIPT_NAME, source));
         }
     };
@@ -927,6 +1213,42 @@ fn staging_name() -> Result<RelativeComponent, EditorSourceToolInstallationError
         .map_err(|_| EditorSourceToolInstallationError::Receipt("invalid staging name"))
 }
 
+#[cfg(test)]
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub(in crate::project_host::runtime::editor::source_tools) enum PublicationTestFault {
+    BeforePayloads,
+    MemberCreated(usize),
+    CompetingReceipt,
+}
+
+#[cfg(test)]
+thread_local! {
+    static PUBLICATION_TEST_FAULT: std::cell::Cell<Option<PublicationTestFault>> = const { std::cell::Cell::new(None) };
+}
+
+#[cfg(test)]
+fn test_publication_fault(fault: PublicationTestFault) -> bool {
+    PUBLICATION_TEST_FAULT.with(|current| current.get() == Some(fault))
+}
+
+#[cfg(test)]
+impl EditorSourceToolInstallationPlan {
+    pub(in crate::project_host::runtime::editor::source_tools) fn publish_failing_for_tests(
+        self,
+        fault: PublicationTestFault,
+    ) -> EditorSourceToolInstallationOutcome {
+        struct Reset;
+        impl Drop for Reset {
+            fn drop(&mut self) {
+                PUBLICATION_TEST_FAULT.with(|current| current.set(None));
+            }
+        }
+        PUBLICATION_TEST_FAULT.with(|current| assert!(current.replace(Some(fault)).is_none()));
+        let _reset = Reset;
+        self.publish()
+    }
+}
+
 impl fmt::Debug for EditorSourceToolInstallationPlan {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("EditorSourceToolInstallationPlan")
@@ -963,10 +1285,12 @@ impl fmt::Debug for EditorSourceToolInstallationOutcome {
                 .field("error", error)
                 .field("orphan", orphan)
                 .finish_non_exhaustive(),
-            Self::Incomplete { error, orphan, .. } => f
+            Self::Incomplete {
+                error, publication, ..
+            } => f
                 .debug_struct("Incomplete")
                 .field("error", error)
-                .field("orphan", orphan)
+                .field("publication", publication)
                 .finish_non_exhaustive(),
         }
     }

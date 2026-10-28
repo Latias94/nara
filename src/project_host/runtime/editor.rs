@@ -85,7 +85,9 @@ pub use schema_owner::{
 };
 pub use source_asset_import::{EditorSourceAssetDomain, EditorSourceAssetImporters};
 pub use source_tools::{
-    EditorSourceToolCommand, EditorSourceToolDefinition, EditorSourceToolInstallation,
+    EditorSourceToolArtifactCommitError, EditorSourceToolCommand, EditorSourceToolDefinition,
+    EditorSourceToolIncompleteArtifactRegistrationError, EditorSourceToolIncompleteMember,
+    EditorSourceToolIncompletePublication, EditorSourceToolInstallation,
     EditorSourceToolInstallationError, EditorSourceToolInstallationInspection,
     EditorSourceToolInstallationOrphan, EditorSourceToolInstallationOutcome,
     EditorSourceToolInstallationPlan, EditorSourceToolInstallationReceipt,

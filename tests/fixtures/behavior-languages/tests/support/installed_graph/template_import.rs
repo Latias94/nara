@@ -378,7 +378,7 @@ fn csharp_template_import_history_survives_reviewed_artifact_reclamation_and_fre
             EditorSourceToolArtifactOutcome::Registered,
         );
     }
-    assert_artifact_installations(&inventory.installations, &expected_inventory);
+    assert_artifact_installations(&inventory.artifacts, &expected_inventory);
     let inventory_bytes = fs::read(project.root().join(ARTIFACT_PATH)).unwrap();
     let selection = settle_selection(&mut editor);
     let prepared = editor
@@ -833,7 +833,7 @@ fn csharp_template_import_history_survives_reviewed_artifact_reclamation_and_fre
     assert!(prepared.creation_custody());
     let review = prepared.record().clone();
     assert_ne!(review.id, [0; 32]);
-    assert_eq!(review.installation, a1.installed.installation);
+    assert_eq!(review.artifact, a1.installed.installation);
     assert_eq!(review.phase, ReclamationRecordPhase::Intent);
     assert_eq!(review.members.len(), owner1.members().len());
     assert_eq!(
@@ -942,7 +942,7 @@ fn csharp_template_import_history_survives_reviewed_artifact_reclamation_and_fre
     assert!(reclaimed.error.is_none(), "{reclaimed:?}");
     let results = reclaimed.record.unwrap();
     assert_eq!(results.id, reviewed.id);
-    assert_eq!(results.installation, reviewed.installation);
+    assert_eq!(results.artifact, reviewed.artifact);
     assert_eq!(results.phase, ReclamationRecordPhase::Results);
     let mut expected_results = reviewed;
     expected_results.phase = ReclamationRecordPhase::Results;
@@ -994,14 +994,15 @@ fn csharp_template_import_history_survives_reviewed_artifact_reclamation_and_fre
     assert_eq!(inventory.phase, EditorSourceToolArtifactPhase::Idle);
     assert!(inventory.error.is_none());
     assert_eq!(inventory.reclamations, [results.clone()]);
-    assert_eq!(inventory.installations.len(), expected_inventory.len());
+    assert_eq!(inventory.artifacts.len(), expected_inventory.len());
     for expected in &expected_inventory {
-        assert!(
-            inventory
-                .installations
-                .iter()
-                .any(|entry| entry.installed == expected.installed)
-        );
+        assert!(inventory.artifacts.iter().any(|entry| {
+            entry.id == expected.id
+                && entry.package == expected.package
+                && entry.directory == expected.directory
+                && entry.manifest == expected.manifest
+                && entry.publication == expected.publication
+        }));
     }
     let fresh_reclamation = reopened.source_tool_reclamation_view();
     assert_eq!(fresh_reclamation.phase, ReclamationPhase::Idle);

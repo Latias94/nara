@@ -4,15 +4,15 @@ use std::{collections::BTreeMap, fmt, sync::Arc};
 
 use nara_fs::{DirectoryCapability, FileCapability, FsError, RelativePath};
 use nara_tooling::{
-    EditorSourceToolArtifactAttempt, EditorSourceToolArtifactBasis,
-    EditorSourceToolArtifactError as Error, EditorSourceToolArtifactInstallation,
-    EditorSourceToolArtifactMember, EditorSourceToolArtifactOutcome as Outcome,
-    EditorSourceToolArtifactPhase as Phase, EditorSourceToolArtifactView,
-    EditorSourceToolAttemptId, EditorSourceToolInstalledSelection,
+    EditorSourceToolArtifact, EditorSourceToolArtifactAttempt, EditorSourceToolArtifactBasis,
+    EditorSourceToolArtifactError as Error, EditorSourceToolArtifactMember,
+    EditorSourceToolArtifactOutcome as Outcome, EditorSourceToolArtifactPhase as Phase,
+    EditorSourceToolArtifactPublication, EditorSourceToolArtifactView, EditorSourceToolAttemptId,
 };
 
 use super::{
-    EditorProjectSession, EditorSourceToolInstallation, EditorSourceToolReleaseMemberKind,
+    EditorProjectSession, EditorSourceToolIncompletePublication, EditorSourceToolInstallation,
+    EditorSourceToolReleaseMemberKind,
 };
 use crate::project_host::{
     file_publication::FilePublicationHost,
@@ -38,7 +38,7 @@ pub struct PreparedEditorSourceToolArtifacts {
     basis: EditorSourceToolArtifactBasis,
     inventory: record::Inventory,
     bytes: Arc<[u8]>,
-    registration: Option<Arc<EditorSourceToolInstallation>>,
+    registration: Option<ArtifactCustody>,
     outcome: Outcome,
 }
 
@@ -46,7 +46,7 @@ impl fmt::Debug for PreparedEditorSourceToolArtifacts {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         formatter
             .debug_struct("PreparedEditorSourceToolArtifacts")
-            .field("installations", &self.inventory.installations.len())
+            .field("artifacts", &self.inventory.artifacts.len())
             .field("outcome", &self.outcome)
             .finish_non_exhaustive()
     }
@@ -54,8 +54,154 @@ impl fmt::Debug for PreparedEditorSourceToolArtifacts {
 
 impl PreparedEditorSourceToolArtifacts {
     #[must_use]
-    pub fn installations(&self) -> Vec<EditorSourceToolArtifactInstallation> {
-        self.inventory.installations.clone()
+    pub fn artifacts(&self) -> Vec<EditorSourceToolArtifact> {
+        self.inventory.artifacts.clone()
+    }
+
+    /// Recovers unaccepted incomplete custody for a fresh explicit registration review.
+    pub fn into_incomplete_publication(
+        mut self,
+    ) -> Result<EditorSourceToolIncompletePublication, Self> {
+        match self.registration.take() {
+            Some(ArtifactCustody::Incomplete(publication)) => match Arc::try_unwrap(publication) {
+                Ok(publication) => Ok(publication),
+                Err(publication) => {
+                    self.registration = Some(ArtifactCustody::Incomplete(publication));
+                    Err(self)
+                }
+            },
+            registration => {
+                self.registration = registration;
+                Err(self)
+            }
+        }
+    }
+}
+
+/// Confirmation refusal retains the original candidate and its live publication custody.
+#[derive(Debug, thiserror::Error)]
+#[error("{error}")]
+pub struct EditorSourceToolArtifactCommitError {
+    error: Error,
+    prepared: Box<PreparedEditorSourceToolArtifacts>,
+}
+
+impl EditorSourceToolArtifactCommitError {
+    #[must_use]
+    pub fn with_prepared(error: Error, prepared: PreparedEditorSourceToolArtifacts) -> Self {
+        Self {
+            error,
+            prepared: Box::new(prepared),
+        }
+    }
+    #[must_use]
+    pub const fn error(&self) -> &Error {
+        &self.error
+    }
+    #[must_use]
+    pub fn into_parts(self) -> (Error, PreparedEditorSourceToolArtifacts) {
+        (self.error, *self.prepared)
+    }
+}
+
+/// Registration refusal preserves the exact incomplete publication and unresolved cleanup.
+#[derive(Debug, thiserror::Error)]
+#[error("{error}")]
+pub struct EditorSourceToolIncompleteArtifactRegistrationError {
+    error: Error,
+    publication: Box<EditorSourceToolIncompletePublication>,
+}
+
+impl EditorSourceToolIncompleteArtifactRegistrationError {
+    #[must_use]
+    pub fn with_publication(
+        error: Error,
+        publication: EditorSourceToolIncompletePublication,
+    ) -> Self {
+        Self {
+            error,
+            publication: Box::new(publication),
+        }
+    }
+    #[must_use]
+    pub const fn error(&self) -> &Error {
+        &self.error
+    }
+    #[must_use]
+    pub fn into_parts(self) -> (Error, EditorSourceToolIncompletePublication) {
+        (self.error, *self.publication)
+    }
+}
+
+#[derive(Clone)]
+pub(super) enum ArtifactCustody {
+    Ready(Arc<EditorSourceToolInstallation>),
+    Incomplete(Arc<EditorSourceToolIncompletePublication>),
+}
+
+impl ArtifactCustody {
+    fn id(&self) -> &[u8; 32] {
+        match self {
+            Self::Ready(value) => value.receipt().installation_id(),
+            Self::Incomplete(value) => value.id(),
+        }
+    }
+    fn project_root(&self) -> &DirectoryCapability {
+        match self {
+            Self::Ready(value) => value.project_root(),
+            Self::Incomplete(value) => value.project_root(),
+        }
+    }
+    fn project_path(&self) -> &str {
+        match self {
+            Self::Ready(value) => value.project_path(),
+            Self::Incomplete(value) => value.project_path(),
+        }
+    }
+    pub(super) fn directory(&self) -> &DirectoryCapability {
+        match self {
+            Self::Ready(value) => value.directory(),
+            Self::Incomplete(value) => value.directory(),
+        }
+    }
+    pub(super) fn member_file(&self, path: &str) -> Option<&FileCapability> {
+        match self {
+            Self::Ready(value) => value
+                .members()
+                .iter()
+                .find(|member| member.path() == path)
+                .map(|member| member.file()),
+            Self::Incomplete(value) => value
+                .members()
+                .iter()
+                .find(|member| member.path() == path)
+                .and_then(|member| member.file()),
+        }
+    }
+    fn facts(&self) -> EditorSourceToolArtifact {
+        match self {
+            Self::Ready(value) => installation_facts(value),
+            Self::Incomplete(value) => incomplete_facts(value),
+        }
+    }
+    fn contains_source_object(&self, candidate: &FileCapability) -> Result<bool, FsError> {
+        match self {
+            Self::Ready(value) => {
+                for member in value.members() {
+                    if candidate.same_object(member.file())? {
+                        return Ok(true);
+                    }
+                }
+            }
+            Self::Incomplete(value) => {
+                for member in value.members() {
+                    if candidate.same_object(member.file().ok_or(FsError::IdentityUnavailable)?)? {
+                        return Ok(true);
+                    }
+                }
+            }
+        }
+        Ok(false)
     }
 }
 
@@ -64,7 +210,7 @@ pub(super) struct ArtifactState {
     inventory: record::Inventory,
     // Confirmed registration retains actual objects, including after failed publication or a
     // weaker disk observation. It supplies alias custody only, never deletion authorization.
-    created: BTreeMap<[u8; 32], Arc<EditorSourceToolInstallation>>,
+    created: BTreeMap<[u8; 32], ArtifactCustody>,
     host: Option<RetainedHost<FilePublicationHost>>,
     pending: Option<io::Pending>,
     phase: Phase,
@@ -125,7 +271,7 @@ impl ArtifactState {
     pub(super) fn view(&self) -> EditorSourceToolArtifactView {
         EditorSourceToolArtifactView {
             basis: self.basis.clone(),
-            installations: self.inventory.installations.clone(),
+            artifacts: self.inventory.artifacts.clone(),
             reclamations: self.inventory.reclamations.clone(),
             phase: self.phase,
             operation: self.operation.clone(),
@@ -142,20 +288,17 @@ impl ArtifactState {
         &self,
         basis: &EditorSourceToolArtifactBasis,
         installation: &[u8; 32],
-    ) -> Result<EditorSourceToolArtifactInstallation, Error> {
+    ) -> Result<EditorSourceToolArtifact, Error> {
         self.require_basis(basis)?;
         self.inventory
-            .installations
+            .artifacts
             .iter()
-            .find(|entry| &entry.installed.installation == installation)
+            .find(|entry| &entry.id == installation)
             .cloned()
             .ok_or(Error::Unregistered)
     }
 
-    pub(super) fn creation_custody(
-        &self,
-        installation: &[u8; 32],
-    ) -> Option<&Arc<EditorSourceToolInstallation>> {
+    pub(super) fn creation_custody(&self, installation: &[u8; 32]) -> Option<&ArtifactCustody> {
         self.created.get(installation)
     }
 
@@ -166,9 +309,9 @@ impl ArtifactState {
     pub(super) fn same_reclamation_facts(
         &self,
         basis: &EditorSourceToolArtifactBasis,
-        expected: &EditorSourceToolArtifactInstallation,
+        expected: &EditorSourceToolArtifact,
     ) -> Result<bool, Error> {
-        let current = self.reclamation_entry(basis, &expected.installed.installation)?;
+        let current = self.reclamation_entry(basis, &expected.id)?;
         Ok(record::same_facts(&current, expected))
     }
 
@@ -182,11 +325,9 @@ impl ArtifactState {
         &self,
         candidate: &FileCapability,
     ) -> Result<bool, FsError> {
-        for installation in self.created.values() {
-            for member in installation.members() {
-                if candidate.same_object(member.file())? {
-                    return Ok(true);
-                }
+        for artifact in self.created.values() {
+            if artifact.contains_source_object(candidate)? {
+                return Ok(true);
             }
         }
         Ok(false)
@@ -211,7 +352,7 @@ impl ArtifactState {
         &self,
         root: DirectoryCapability,
         inventory: record::Inventory,
-        registration: Option<Arc<EditorSourceToolInstallation>>,
+        registration: Option<ArtifactCustody>,
         outcome: Outcome,
     ) -> Result<PreparedEditorSourceToolArtifacts, Error> {
         let bytes = record::encode(&inventory)?.into();
@@ -260,27 +401,123 @@ impl EditorProjectSession {
         self.require_artifact_preparation(basis)?;
         let state = &self.source_tools.artifacts;
         let id = *installation.receipt().installation_id();
-        if !state.created.contains_key(&id) && state.created.len() == record::MAX_INSTALLATIONS {
+        if !state.created.contains_key(&id) && state.created.len() == record::MAX_ARTIFACTS {
             return Err(Error::TooLarge);
         }
-        if state
-            .created
-            .get(&id)
-            .is_some_and(|previous| !Arc::ptr_eq(previous, &installation))
-        {
+        if state.created.get(&id).is_some_and(|previous| {
+            !matches!(previous,
+                ArtifactCustody::Ready(previous) if Arc::ptr_eq(previous, &installation))
+        }) {
             return Err(Error::Changed);
         }
         let root = self.source_project_root();
-        validate_registration(&root, &installation)?;
-        self.require_unowned_artifact_members(&installation)?;
-        let mut entry = installation_facts(&installation);
-        observe_members(installation.directory(), &mut entry, Some(&installation));
+        let registration = ArtifactCustody::Ready(installation);
+        validate_registration(&root, &registration)?;
+        self.require_unowned_artifact_members(&registration)?;
+        let mut entry = registration.facts();
+        observe_members(registration.directory(), &mut entry, Some(&registration));
         state.prepare(
             root,
             state.inventory.register(entry)?,
-            Some(installation),
+            Some(registration),
             Outcome::Registered,
         )
+    }
+
+    /// Prepares registration again from this Session's continuously retained actual custody.
+    /// After explicit reconciliation, serialized IDs alone cannot supply a missing owner.
+    pub fn prepare_retained_source_tool_artifact_registration(
+        &self,
+        basis: &EditorSourceToolArtifactBasis,
+        artifact: &[u8; 32],
+    ) -> Result<PreparedEditorSourceToolArtifacts, Error> {
+        self.require_artifact_preparation(basis)?;
+        let state = &self.source_tools.artifacts;
+        let retained = state.created.get(artifact).ok_or(Error::Unregistered)?;
+        let root = self.source_project_root();
+        validate_registration(&root, retained)?;
+        self.require_unowned_artifact_members(retained)?;
+        let mut entry = retained.facts();
+        observe_members(retained.directory(), &mut entry, Some(retained));
+        state.prepare(
+            root,
+            state.inventory.register(entry)?,
+            Some(retained.clone()),
+            Outcome::Registered,
+        )
+    }
+
+    /// Retains actual unready publication facts. A refusal returns its exact live custody.
+    /// Reader handover closes duplicate handles only; preparation never discards a file.
+    pub fn prepare_source_tool_incomplete_artifact_registration(
+        &self,
+        basis: &EditorSourceToolArtifactBasis,
+        mut publication: EditorSourceToolIncompletePublication,
+    ) -> Result<
+        PreparedEditorSourceToolArtifacts,
+        EditorSourceToolIncompleteArtifactRegistrationError,
+    > {
+        let prepared = (|| {
+            self.require_artifact_preparation(basis)?;
+            let state = &self.source_tools.artifacts;
+            if state.created.contains_key(publication.id()) {
+                return Err(Error::Changed);
+            }
+            if state.created.len() == record::MAX_ARTIFACTS {
+                return Err(Error::TooLarge);
+            }
+            let root = self.source_project_root();
+            record::validate_directory(publication.project_path())?;
+            if !root
+                .same_object(publication.project_root())
+                .map_err(|_| Error::RootMismatch)?
+            {
+                return Err(Error::RootMismatch);
+            }
+            publication
+                .hand_over_readers()
+                .map_err(|_| Error::Changed)?;
+            let mut entry = incomplete_facts(&publication);
+            for member in &mut entry.members {
+                let original = publication
+                    .members()
+                    .iter()
+                    .find(|original| original.path() == member.path.as_ref())
+                    .and_then(|original| original.file())
+                    .ok_or(Error::Read)?;
+                self.require_unowned_artifact_object(original)?;
+                let current = publication
+                    .directory()
+                    .open_file_exact(
+                        &RelativePath::new(member.path.as_ref()).map_err(|_| Error::InvalidPath)?,
+                    )
+                    .map_err(|_| Error::Changed)?;
+                if !current.same_object(original).map_err(|_| Error::Read)? {
+                    return Err(Error::Changed);
+                }
+                self.require_unowned_artifact_object(&current)?;
+                member.observation = observe_file(publication.directory(), member, Some(original));
+            }
+            let inventory = state.inventory.register(entry)?;
+            let bytes = record::encode(&inventory)?.into();
+            Ok((root, inventory, bytes))
+        })();
+        match prepared {
+            Ok((root, inventory, bytes)) => Ok(PreparedEditorSourceToolArtifacts {
+                root,
+                basis: basis.clone(),
+                inventory,
+                bytes,
+                registration: Some(ArtifactCustody::Incomplete(Arc::new(publication))),
+                outcome: Outcome::Registered,
+            }),
+            Err(error) => Err(
+                EditorSourceToolIncompleteArtifactRegistrationError::with_publication(
+                    error,
+                    publication,
+                ),
+            ),
+        }
     }
 
     /// Refreshes only the finite declared members. Digests observe the default data stream.
@@ -295,13 +532,12 @@ impl EditorProjectSession {
         let root = self.source_project_root();
         let mut inventory = state.inventory.clone();
         let entry = inventory
-            .installations
+            .artifacts
             .iter_mut()
-            .find(|entry| &entry.installed.installation == installation)
+            .find(|entry| &entry.id == installation)
             .ok_or(Error::Unregistered)?;
-        let path = RelativePath::new(entry.installed.directory.as_ref())
-            .map_err(|_| Error::InvalidPath)?;
-        let created = state.created.get(installation).map(Arc::as_ref);
+        let path = RelativePath::new(entry.directory.as_ref()).map_err(|_| Error::InvalidPath)?;
+        let created = state.created.get(installation);
         match root.open_directory_exact(&path) {
             Ok(directory) => {
                 let same_directory = created
@@ -326,23 +562,33 @@ impl EditorProjectSession {
     pub fn commit_source_tool_artifacts(
         &mut self,
         prepared: PreparedEditorSourceToolArtifacts,
-    ) -> Result<EditorSourceToolAttemptId, Error> {
+    ) -> Result<EditorSourceToolAttemptId, EditorSourceToolArtifactCommitError> {
         self.advance_source_tools();
-        self.require_artifact_preparation(&prepared.basis)?;
-        if !prepared
-            .root
-            .same_object(&self.source_project_root())
-            .map_err(|_| Error::RootMismatch)?
-        {
-            return Err(Error::RootMismatch);
+        let admission = (|| {
+            self.require_artifact_preparation(&prepared.basis)?;
+            if !prepared
+                .root
+                .same_object(&self.source_project_root())
+                .map_err(|_| Error::RootMismatch)?
+            {
+                return Err(Error::RootMismatch);
+            }
+            if let Some(artifact) = &prepared.registration {
+                validate_registration(&prepared.root, artifact)?;
+                self.require_unowned_artifact_members(artifact)?;
+            }
+            Ok(())
+        })();
+        if let Err(error) = admission {
+            return Err(EditorSourceToolArtifactCommitError::with_prepared(
+                error, prepared,
+            ));
         }
         if let Some(installation) = &prepared.registration {
-            validate_registration(&prepared.root, installation)?;
-            self.require_unowned_artifact_members(installation)?;
-            self.source_tools.artifacts.created.insert(
-                *installation.receipt().installation_id(),
-                Arc::clone(installation),
-            );
+            self.source_tools
+                .artifacts
+                .created
+                .insert(*installation.id(), installation.clone());
         }
         let request = io::Request::Publish {
             bytes: Arc::clone(&prepared.bytes),
@@ -388,14 +634,13 @@ impl EditorProjectSession {
 
     // Registration must also work when an ordinary source was admitted before registration.
     // Check its retained original and current namespace object without invoking store admission.
-    fn require_unowned_artifact_members(
-        &self,
-        installation: &EditorSourceToolInstallation,
-    ) -> Result<(), Error> {
-        for member in installation.members() {
-            self.require_unowned_artifact_object(member.file())?;
-            let path = RelativePath::new(member.path()).map_err(|_| Error::InvalidPath)?;
-            match installation.directory().open_file_exact(&path) {
+    fn require_unowned_artifact_members(&self, artifact: &ArtifactCustody) -> Result<(), Error> {
+        for member in artifact.facts().members {
+            self.require_unowned_artifact_object(
+                artifact.member_file(&member.path).ok_or(Error::Read)?,
+            )?;
+            let path = RelativePath::new(member.path.as_ref()).map_err(|_| Error::InvalidPath)?;
+            match artifact.directory().open_file_exact(&path) {
                 Ok(current) => self.require_unowned_artifact_object(&current)?,
                 Err(error) if store::is_missing(&error) => {}
                 Err(_) => return Err(Error::Read),
@@ -607,16 +852,14 @@ fn failed_phase(error: &Error, observing: bool) -> Phase {
     }
 }
 
-fn installation_facts(
-    installation: &EditorSourceToolInstallation,
-) -> EditorSourceToolArtifactInstallation {
-    EditorSourceToolArtifactInstallation {
-        installed: EditorSourceToolInstalledSelection {
-            package: installation.package().into(),
-            directory: installation.project_path().into(),
-            installation: *installation.receipt().installation_id(),
+fn installation_facts(installation: &EditorSourceToolInstallation) -> EditorSourceToolArtifact {
+    EditorSourceToolArtifact {
+        id: *installation.receipt().installation_id(),
+        package: installation.package().into(),
+        directory: installation.project_path().into(),
+        manifest: installation.receipt().manifest_digest(),
+        publication: EditorSourceToolArtifactPublication::Ready {
             receipt: installation.receipt_digest(),
-            manifest: installation.receipt().manifest_digest(),
         },
         members: installation
             .members()
@@ -631,13 +874,36 @@ fn installation_facts(
     }
 }
 
+fn incomplete_facts(
+    publication: &EditorSourceToolIncompletePublication,
+) -> EditorSourceToolArtifact {
+    EditorSourceToolArtifact {
+        id: *publication.id(),
+        package: publication.package().into(),
+        directory: publication.project_path().into(),
+        manifest: publication.manifest_digest(),
+        publication: EditorSourceToolArtifactPublication::Incomplete,
+        members: publication
+            .members()
+            .iter()
+            .map(|member| EditorSourceToolArtifactMember {
+                path: member.path().into(),
+                role: member.role(),
+                baseline: member.baseline(),
+                observation: record::Observation::Failed,
+            })
+            .collect(),
+    }
+}
+
 fn validate_registration(
     root: &DirectoryCapability,
-    installation: &EditorSourceToolInstallation,
+    installation: &ArtifactCustody,
 ) -> Result<(), Error> {
     record::validate_directory(installation.project_path())?;
     if !installation
-        .same_project(root)
+        .project_root()
+        .same_object(root)
         .map_err(|_| Error::RootMismatch)?
     {
         return Err(Error::RootMismatch);
@@ -663,7 +929,7 @@ fn member_role(kind: Option<EditorSourceToolReleaseMemberKind>) -> record::Role 
     }
 }
 
-fn set_observations(entry: &mut record::Installation, observation: record::Observation) {
+fn set_observations(entry: &mut record::Artifact, observation: record::Observation) {
     for member in &mut entry.members {
         member.observation = observation;
     }
@@ -671,8 +937,8 @@ fn set_observations(entry: &mut record::Installation, observation: record::Obser
 
 fn observe_members(
     directory: &DirectoryCapability,
-    entry: &mut record::Installation,
-    created: Option<&EditorSourceToolInstallation>,
+    entry: &mut record::Artifact,
+    created: Option<&ArtifactCustody>,
 ) {
     for member in &mut entry.members {
         member.observation = observe_member(directory, member, created);
@@ -682,7 +948,22 @@ fn observe_members(
 fn observe_member(
     directory: &DirectoryCapability,
     member: &record::Member,
-    created: Option<&EditorSourceToolInstallation>,
+    created: Option<&ArtifactCustody>,
+) -> record::Observation {
+    let original = match created {
+        Some(created) => match created.member_file(&member.path) {
+            Some(file) => Some(file),
+            None => return record::Observation::Failed,
+        },
+        None => None,
+    };
+    observe_file(directory, member, original)
+}
+
+fn observe_file(
+    directory: &DirectoryCapability,
+    member: &record::Member,
+    original: Option<&FileCapability>,
 ) -> record::Observation {
     use record::Observation;
     let Ok(path) = RelativePath::new(member.path.as_ref()) else {
@@ -693,15 +974,8 @@ fn observe_member(
         Err(error) if store::is_missing(&error) => return Observation::Missing,
         Err(_) => return Observation::Failed,
     };
-    if let Some(created) = created {
-        let Some(original) = created
-            .members()
-            .iter()
-            .find(|original| original.path() == member.path.as_ref())
-        else {
-            return Observation::Failed;
-        };
-        match current.same_object(original.file()) {
+    if let Some(original) = original {
+        match current.same_object(original) {
             Ok(true) => {}
             Ok(false) => return Observation::Changed,
             Err(_) => return Observation::Failed,

@@ -4,6 +4,9 @@
 mod authoring_project;
 #[path = "support/enemy_stats.rs"]
 mod enemy_stats;
+#[cfg(all(target_os = "windows", target_arch = "x86_64", target_env = "msvc"))]
+#[path = "support/incomplete_artifacts.rs"]
+mod incomplete_artifacts;
 #[path = "support/installed_graph.rs"]
 mod installed_graph;
 #[path = "support/local_release.rs"]

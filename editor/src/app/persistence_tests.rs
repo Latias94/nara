@@ -81,6 +81,7 @@ fn settle_background_imports(application: &mut EditorApplication) {
             && !frame.image_import_work_pending()
             && !frame.source_asset_import_work_pending()
             && !frame.authoring_retirement_pending()
+            && !frame.source_tool().has_pending_work()
         {
             return;
         }

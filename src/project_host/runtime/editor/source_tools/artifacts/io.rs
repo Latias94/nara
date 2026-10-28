@@ -7,8 +7,7 @@ use nara_tasks::{TaskHandle, TaskPoolKind, TaskPools, TaskReturnState, TaskSpawn
 use nara_tooling::EditorSourceToolAttemptId;
 
 use super::{
-    EditorSourceToolInstallation, Error, PreparedEditorSourceToolArtifacts, record, store,
-    validate_registration,
+    ArtifactCustody, Error, PreparedEditorSourceToolArtifacts, record, store, validate_registration,
 };
 use crate::project_host::{
     file_publication::{
@@ -23,7 +22,7 @@ pub(super) enum Request {
     Publish {
         bytes: Arc<[u8]>,
         host: Option<RetainedHost<FilePublicationHost>>,
-        registration: Option<Arc<EditorSourceToolInstallation>>,
+        registration: Option<ArtifactCustody>,
     },
 }
 

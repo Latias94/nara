@@ -1,4 +1,4 @@
-//! Bounded installation and recovery facts, without live object or deletion authority.
+//! Bounded artifact publication and recovery facts, without live object or deletion authority.
 
 use std::{
     borrow::Cow,
@@ -9,7 +9,7 @@ use std::{
 use nara_core::{ByteLimit, DepthLimit, ItemLimit, SerdeShapeLimits, preflight_serde_shape};
 use nara_fs::{ContentDigest, RelativeComponent, RelativePath};
 use nara_tooling::{
-    EditorSourceToolInstalledSelection, EditorSourceToolReclamationMember as ReclamationMember,
+    EditorSourceToolReclamationMember as ReclamationMember,
     EditorSourceToolReclamationMemberState as ReclamationMemberState,
     EditorSourceToolReclamationRecord as Reclamation,
     EditorSourceToolReclamationRecordPhase as ReclamationPhase,
@@ -17,13 +17,13 @@ use nara_tooling::{
 use serde::{Deserialize, Serialize};
 
 pub(super) use nara_tooling::{
-    EditorSourceToolArtifactError as Error, EditorSourceToolArtifactInstallation as Installation,
+    EditorSourceToolArtifact as Artifact, EditorSourceToolArtifactError as Error,
     EditorSourceToolArtifactMember as Member, EditorSourceToolArtifactObservation as Observation,
-    EditorSourceToolArtifactRole as Role,
+    EditorSourceToolArtifactPublication as Publication, EditorSourceToolArtifactRole as Role,
 };
 
 pub(super) const BYTE_LIMIT: u64 = 2 * 1024 * 1024;
-pub(super) const MAX_INSTALLATIONS: usize = 32;
+pub(super) const MAX_ARTIFACTS: usize = 32;
 pub(super) const MAX_RECLAMATIONS: usize = 32;
 pub(super) const MAX_MEMBERS: usize = 66;
 const MAX_PAYLOADS: usize = 64;
@@ -34,70 +34,65 @@ const MAX_PAYLOAD_BYTES: u64 = 16 * 1024 * 1024;
 const MAX_TOTAL_PAYLOAD_BYTES: u64 = 64 * 1024 * 1024;
 const MANIFEST_NAME: &str = "nara-tool.json";
 const RECEIPT_NAME: &str = ".nara-installation.json";
+const RECEIPT_TEMPORARY_PREFIX: &str = ".nara-tool-stage-";
 
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub(super) struct Inventory {
-    pub(super) installations: Vec<Installation>,
+    pub(super) artifacts: Vec<Artifact>,
     pub(super) reclamations: Vec<Reclamation>,
 }
 
 impl Inventory {
     pub(super) fn validate(&self) -> Result<(), Error> {
-        if self.installations.len() > MAX_INSTALLATIONS
-            || self.reclamations.len() > MAX_RECLAMATIONS
-        {
+        if self.artifacts.len() > MAX_ARTIFACTS || self.reclamations.len() > MAX_RECLAMATIONS {
             return Err(Error::TooLarge);
         }
-        for (index, installation) in self.installations.iter().enumerate() {
-            validate_installation(installation)?;
-            if self.installations[..index].iter().any(|previous| {
-                previous.installed.installation == installation.installed.installation
-                    || previous
-                        .installed
-                        .directory
-                        .eq_ignore_ascii_case(&installation.installed.directory)
+        for (index, artifact) in self.artifacts.iter().enumerate() {
+            validate_artifact(artifact)?;
+            if self.artifacts[..index].iter().any(|previous| {
+                previous.id == artifact.id
+                    || previous.directory.eq_ignore_ascii_case(&artifact.directory)
             }) {
                 return Err(Error::InvalidRecord);
             }
         }
         for (index, reclamation) in self.reclamations.iter().enumerate() {
             self.validate_reclamation(reclamation)?;
-            if self.reclamations[..index]
-                .iter()
-                .any(|previous| previous.installation == reclamation.installation)
-            {
+            if self.reclamations[..index].iter().any(|previous| {
+                previous.artifact == reclamation.artifact || previous.id == reclamation.id
+            }) {
                 return Err(Error::InvalidRecord);
             }
         }
         Ok(())
     }
 
-    /// Repeating exact immutable facts may refresh observations; it never rebinds an installation.
-    pub(super) fn register(&self, installation: Installation) -> Result<Self, Error> {
+    /// Repeating exact immutable facts may refresh observations; it never rebinds an artifact.
+    pub(super) fn register(&self, artifact: Artifact) -> Result<Self, Error> {
         self.validate()?;
-        validate_installation(&installation)?;
+        validate_artifact(&artifact)?;
         let mut next = self.clone();
         if let Some(existing) = next
-            .installations
+            .artifacts
             .iter_mut()
-            .find(|entry| entry.installed.installation == installation.installed.installation)
+            .find(|entry| entry.id == artifact.id)
         {
-            if !same_facts(existing, &installation) {
+            if !same_facts(existing, &artifact) {
                 return Err(Error::Changed);
             }
-            *existing = installation;
+            *existing = artifact;
         } else {
-            if next.installations.len() == MAX_INSTALLATIONS {
+            if next.artifacts.len() == MAX_ARTIFACTS {
                 return Err(Error::TooLarge);
             }
-            next.installations.push(installation);
+            next.artifacts.push(artifact);
         }
         next.validate()?;
         next.canonicalize();
         Ok(next)
     }
 
-    /// Replaces only this installation's recovery facts after a new explicit review.
+    /// Replaces only this artifact's recovery facts after a new explicit review.
     /// Validating or decoding the record never recreates that review's live authority.
     pub(super) fn with_reclamation(&self, reclamation: &Reclamation) -> Result<Self, Error> {
         self.validate()?;
@@ -105,7 +100,7 @@ impl Inventory {
         let existing = self
             .reclamations
             .iter()
-            .position(|entry| entry.installation == reclamation.installation);
+            .position(|entry| entry.artifact == reclamation.artifact);
         if existing.is_none() && self.reclamations.len() == MAX_RECLAMATIONS {
             return Err(Error::TooLarge);
         }
@@ -114,6 +109,7 @@ impl Inventory {
             Some(index) => next.reclamations[index] = reclamation.clone(),
             None => next.reclamations.push(reclamation.clone()),
         }
+        next.validate()?;
         next.canonicalize();
         Ok(next)
     }
@@ -125,15 +121,15 @@ impl Inventory {
         if reclamation.id == [0; 32] {
             return Err(Error::InvalidRecord);
         }
-        let installation = self
-            .installations
+        let artifact = self
+            .artifacts
             .iter()
-            .find(|entry| entry.installed.installation == reclamation.installation)
+            .find(|entry| entry.id == reclamation.artifact)
             .ok_or(Error::Unregistered)?;
         let mut paths = BTreeSet::new();
         for member in &reclamation.members {
             validate_path(&member.path)?;
-            if !installation
+            if !artifact
                 .members
                 .iter()
                 .any(|registered| registered.path == member.path)
@@ -151,15 +147,14 @@ impl Inventory {
     }
 
     fn canonicalize(&mut self) {
-        self.installations
-            .sort_unstable_by_key(|entry| entry.installed.installation);
-        for installation in &mut self.installations {
-            installation
+        self.artifacts.sort_unstable_by_key(|entry| entry.id);
+        for artifact in &mut self.artifacts {
+            artifact
                 .members
                 .sort_unstable_by(|left, right| left.path.cmp(&right.path));
         }
         self.reclamations
-            .sort_unstable_by_key(|entry| entry.installation);
+            .sort_unstable_by_key(|entry| entry.artifact);
         for reclamation in &mut self.reclamations {
             reclamation
                 .members
@@ -168,8 +163,12 @@ impl Inventory {
     }
 }
 
-pub(super) fn same_facts(left: &Installation, right: &Installation) -> bool {
-    left.installed == right.installed
+pub(super) fn same_facts(left: &Artifact, right: &Artifact) -> bool {
+    left.id == right.id
+        && left.package == right.package
+        && left.directory == right.directory
+        && left.manifest == right.manifest
+        && left.publication == right.publication
         && left.members.len() == right.members.len()
         && left.members.iter().all(|member| {
             right.members.iter().any(|candidate| {
@@ -187,20 +186,28 @@ pub(super) fn validate_directory(value: &str) -> Result<(), Error> {
     Ok(())
 }
 
-fn validate_installation(entry: &Installation) -> Result<(), Error> {
-    let installed = &entry.installed;
-    if !valid_package(&installed.package)
-        || installed.installation == [0; 32]
-        || !(1..=MAX_RECEIPT_BYTES).contains(&installed.receipt.length())
-        || !(1..=MAX_METADATA_BYTES).contains(&installed.manifest.length())
+fn validate_artifact(entry: &Artifact) -> Result<(), Error> {
+    if !valid_package(&entry.package)
+        || entry.id == [0; 32]
+        || !(1..=MAX_METADATA_BYTES).contains(&entry.manifest.length())
     {
         return Err(Error::InvalidRecord);
     }
-    validate_directory(&installed.directory)?;
+    let receipt = match entry.publication {
+        Publication::Ready { receipt } => {
+            if !(1..=MAX_RECEIPT_BYTES).contains(&receipt.length()) {
+                return Err(Error::InvalidRecord);
+            }
+            Some(receipt)
+        }
+        Publication::Incomplete => None,
+    };
+    validate_directory(&entry.directory)?;
     if entry.members.len() > MAX_MEMBERS {
         return Err(Error::TooLarge);
     }
     let mut metadata = 0;
+    let mut receipt_temporaries = 0;
     let mut tools = 0;
     let mut payloads = 0;
     let mut payload_bytes = 0_u64;
@@ -212,8 +219,8 @@ fn validate_installation(entry: &Installation) -> Result<(), Error> {
         match member.role {
             Role::Metadata => {
                 let expected = match member.path.as_ref() {
-                    MANIFEST_NAME => installed.manifest,
-                    RECEIPT_NAME => installed.receipt,
+                    MANIFEST_NAME => entry.manifest,
+                    RECEIPT_NAME => receipt.ok_or(Error::InvalidRecord)?,
                     _ => return Err(Error::InvalidRecord),
                 };
                 if member.baseline != expected {
@@ -221,8 +228,28 @@ fn validate_installation(entry: &Installation) -> Result<(), Error> {
                 }
                 metadata += 1;
             }
+            Role::ReceiptTemporary => {
+                let nonce = member
+                    .path
+                    .strip_prefix(RECEIPT_TEMPORARY_PREFIX)
+                    .ok_or(Error::InvalidRecord)?;
+                if receipt.is_some()
+                    || nonce.len() != 32
+                    || !nonce
+                        .bytes()
+                        .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
+                    || member.baseline.length() > MAX_RECEIPT_BYTES
+                {
+                    return Err(Error::InvalidRecord);
+                }
+                receipt_temporaries += 1;
+                if receipt_temporaries > 1 {
+                    return Err(Error::InvalidRecord);
+                }
+            }
             Role::Tool | Role::Content => {
-                if matches!(folded.as_str(), MANIFEST_NAME | RECEIPT_NAME) {
+                let root_name = folded.split('/').next().ok_or(Error::InvalidPath)?;
+                if matches!(root_name, MANIFEST_NAME | RECEIPT_NAME) {
                     return Err(Error::InvalidRecord);
                 }
                 tools += usize::from(member.role == Role::Tool);
@@ -251,7 +278,7 @@ fn validate_installation(entry: &Installation) -> Result<(), Error> {
             }
         }
     }
-    if metadata != 2 || tools == 0 {
+    if receipt.is_some() && (metadata != 2 || tools == 0) {
         return Err(Error::InvalidRecord);
     }
     for path in &paths {
@@ -301,23 +328,52 @@ fn validate_path(value: &str) -> Result<(), Error> {
 struct Record<'a> {
     format_version: u32,
     #[serde(borrow)]
-    installations: Vec<InstallationRecord<'a>>,
+    artifacts: Vec<ArtifactRecord<'a>>,
     #[serde(borrow)]
     reclamations: Vec<ReclamationRecord<'a>>,
 }
 
 #[derive(Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
-struct InstallationRecord<'a> {
+struct ArtifactRecord<'a> {
+    id: [u8; 32],
     #[serde(borrow)]
     package: Cow<'a, str>,
     #[serde(borrow)]
     directory: Cow<'a, str>,
-    installation: [u8; 32],
-    receipt: DigestRecord,
     manifest: DigestRecord,
+    publication: PublicationRecord,
     #[serde(borrow)]
     members: Vec<MemberRecord<'a>>,
+}
+
+#[derive(Serialize, Deserialize)]
+#[serde(tag = "state", rename_all = "snake_case", deny_unknown_fields)]
+enum PublicationRecord {
+    Ready { receipt: DigestRecord },
+    Incomplete {},
+}
+
+impl From<Publication> for PublicationRecord {
+    fn from(publication: Publication) -> Self {
+        match publication {
+            Publication::Ready { receipt } => Self::Ready {
+                receipt: receipt.into(),
+            },
+            Publication::Incomplete => Self::Incomplete {},
+        }
+    }
+}
+
+impl From<PublicationRecord> for Publication {
+    fn from(publication: PublicationRecord) -> Self {
+        match publication {
+            PublicationRecord::Ready { receipt } => Self::Ready {
+                receipt: receipt.into(),
+            },
+            PublicationRecord::Incomplete {} => Self::Incomplete,
+        }
+    }
 }
 
 #[derive(Serialize, Deserialize)]
@@ -334,7 +390,7 @@ struct MemberRecord<'a> {
 #[serde(deny_unknown_fields)]
 struct ReclamationRecord<'a> {
     id: [u8; 32],
-    installation: [u8; 32],
+    artifact: [u8; 32],
     phase: ReclamationPhaseRecord,
     #[serde(borrow)]
     members: Vec<ReclamationMemberRecord<'a>>,
@@ -432,6 +488,7 @@ enum RoleRecord {
     Tool,
     Content,
     Metadata,
+    ReceiptTemporary,
 }
 
 impl From<Role> for RoleRecord {
@@ -440,6 +497,7 @@ impl From<Role> for RoleRecord {
             Role::Tool => Self::Tool,
             Role::Content => Self::Content,
             Role::Metadata => Self::Metadata,
+            Role::ReceiptTemporary => Self::ReceiptTemporary,
         }
     }
 }
@@ -450,6 +508,7 @@ impl From<RoleRecord> for Role {
             RoleRecord::Tool => Self::Tool,
             RoleRecord::Content => Self::Content,
             RoleRecord::Metadata => Self::Metadata,
+            RoleRecord::ReceiptTemporary => Self::ReceiptTemporary,
         }
     }
 }
@@ -487,8 +546,8 @@ impl From<ObservationRecord> for Observation {
 
 pub(super) fn encode(inventory: &Inventory) -> Result<Vec<u8>, Error> {
     inventory.validate()?;
-    let mut installations: Vec<_> = inventory
-        .installations
+    let mut artifacts: Vec<_> = inventory
+        .artifacts
         .iter()
         .map(|entry| {
             let mut members: Vec<_> = entry
@@ -502,17 +561,17 @@ pub(super) fn encode(inventory: &Inventory) -> Result<Vec<u8>, Error> {
                 })
                 .collect();
             members.sort_unstable_by(|left, right| left.path.cmp(&right.path));
-            InstallationRecord {
-                package: Cow::Borrowed(&entry.installed.package),
-                directory: Cow::Borrowed(&entry.installed.directory),
-                installation: entry.installed.installation,
-                receipt: entry.installed.receipt.into(),
-                manifest: entry.installed.manifest.into(),
+            ArtifactRecord {
+                id: entry.id,
+                package: Cow::Borrowed(&entry.package),
+                directory: Cow::Borrowed(&entry.directory),
+                manifest: entry.manifest.into(),
+                publication: entry.publication.into(),
                 members,
             }
         })
         .collect();
-    installations.sort_unstable_by_key(|entry| entry.installation);
+    artifacts.sort_unstable_by_key(|entry| entry.id);
     let mut reclamations: Vec<_> = inventory
         .reclamations
         .iter()
@@ -528,13 +587,13 @@ pub(super) fn encode(inventory: &Inventory) -> Result<Vec<u8>, Error> {
             members.sort_unstable_by(|left, right| left.path.cmp(&right.path));
             ReclamationRecord {
                 id: entry.id,
-                installation: entry.installation,
+                artifact: entry.artifact,
                 phase: entry.phase.into(),
                 members,
             }
         })
         .collect();
-    reclamations.sort_unstable_by_key(|entry| entry.installation);
+    reclamations.sort_unstable_by_key(|entry| entry.artifact);
     let mut output = RecordBytes {
         bytes: Vec::new(),
         oversized: false,
@@ -543,7 +602,7 @@ pub(super) fn encode(inventory: &Inventory) -> Result<Vec<u8>, Error> {
         &mut output,
         &Record {
             format_version: 1,
-            installations,
+            artifacts,
             reclamations,
         },
     )
@@ -576,23 +635,19 @@ pub(super) fn decode(bytes: &[u8]) -> Result<Inventory, Error> {
     if record.format_version != 1 {
         return Err(Error::UnsupportedFormat);
     }
-    if record.installations.len() > MAX_INSTALLATIONS
-        || record.reclamations.len() > MAX_RECLAMATIONS
-    {
+    if record.artifacts.len() > MAX_ARTIFACTS || record.reclamations.len() > MAX_RECLAMATIONS {
         return Err(Error::TooLarge);
     }
     let mut inventory = Inventory {
-        installations: record
-            .installations
+        artifacts: record
+            .artifacts
             .into_iter()
-            .map(|entry| Installation {
-                installed: EditorSourceToolInstalledSelection {
-                    package: entry.package.as_ref().into(),
-                    directory: entry.directory.as_ref().into(),
-                    installation: entry.installation,
-                    receipt: entry.receipt.into(),
-                    manifest: entry.manifest.into(),
-                },
+            .map(|entry| Artifact {
+                id: entry.id,
+                package: entry.package.as_ref().into(),
+                directory: entry.directory.as_ref().into(),
+                manifest: entry.manifest.into(),
+                publication: entry.publication.into(),
                 members: entry
                     .members
                     .into_iter()
@@ -610,7 +665,7 @@ pub(super) fn decode(bytes: &[u8]) -> Result<Inventory, Error> {
             .into_iter()
             .map(|entry| Reclamation {
                 id: entry.id,
-                installation: entry.installation,
+                artifact: entry.artifact,
                 phase: entry.phase.into(),
                 members: entry
                     .members

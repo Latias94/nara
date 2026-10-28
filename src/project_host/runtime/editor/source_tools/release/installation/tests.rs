@@ -393,21 +393,25 @@ fn payload_failure_retains_the_unready_published_directory_and_actual_cleanup_cu
         },
         |_, _| Ok(()),
     );
-    let EditorSourceToolInstallationOutcome::Incomplete { error, orphan, .. } = outcome else {
+    let EditorSourceToolInstallationOutcome::Incomplete {
+        error, publication, ..
+    } = outcome
+    else {
         panic!("unready published candidate must retain actual custody");
     };
     assert!(matches!(
         error,
         EditorSourceToolInstallationError::Receipt("injected before publish")
     ));
-    let DirectoryPublicationOutcome::Published(_) = orphan.publication() else {
-        panic!("the candidate directory was already published");
-    };
-    assert_eq!(orphan.pending_files(), 4);
+    assert_eq!(
+        publication.publication().published_identity(),
+        publication.directory().identity()
+    );
+    assert_eq!(publication.pending_files(), 4);
     assert!(installation_path(&source).exists());
     assert!(!installation_path(&source).join(RECEIPT_NAME).exists());
     assert!(
-        orphan
+        publication
             .store_parent()
             .same_object(
                 &project_root(&source)
@@ -416,16 +420,88 @@ fn payload_failure_retains_the_unready_published_directory_and_actual_cleanup_cu
             )
             .unwrap()
     );
-    assert_eq!(orphan.members().len(), 4);
+    assert_eq!(publication.members().len(), 4);
     assert!(
-        orphan
+        publication
             .directory()
-            .unwrap()
             .open_directory(&RelativePath::new("samples").unwrap())
             .is_ok()
     );
-    drop(orphan);
+    drop(publication);
     assert!(installation_path(&source).join("Tool.dll").is_file());
+}
+
+#[test]
+fn incomplete_cleanup_handover_preserves_replaced_original_until_explicit_repair() {
+    let source = Release::new();
+    let outcome = plan(&source).publish_failing_for_tests(PublicationTestFault::MemberCreated(0));
+    let EditorSourceToolInstallationOutcome::Incomplete {
+        mut publication, ..
+    } = outcome
+    else {
+        panic!("actual created member must remain incomplete");
+    };
+    assert_eq!(publication.members().len(), 1);
+    assert_eq!(publication.pending_files(), 1);
+    assert_eq!(publication.members()[0].path(), MANIFEST_NAME);
+    assert_eq!(publication.members()[0].sync_receipt(), None);
+    let directory = installation_path(&source);
+    let original = directory.join(MANIFEST_NAME);
+    let renamed = directory.join("original-manifest");
+    let bytes = fs::read(&original).unwrap();
+    fs::rename(&original, &renamed).unwrap();
+    fs::write(&original, &bytes).unwrap();
+    assert!(publication.hand_over_readers().is_err());
+    assert_eq!(publication.pending_files(), 1);
+    assert_eq!(fs::read(&original).unwrap(), bytes);
+    assert_eq!(fs::read(&renamed).unwrap(), bytes);
+    fs::remove_file(&original).unwrap();
+    fs::rename(&renamed, &original).unwrap();
+    publication.hand_over_readers().unwrap();
+    assert_eq!(publication.pending_files(), 0);
+    assert!(publication.members()[0].file().is_some());
+    let lease = publication.directory().acquire_namespace_lease().unwrap();
+    assert_eq!(fs::read(&original).unwrap(), bytes);
+    drop(lease);
+    drop(publication);
+    assert!(original.is_file());
+}
+
+#[test]
+fn failed_receipt_commit_retains_the_actual_temporary_path_and_competing_receipt() {
+    let source = Release::new();
+    let outcome = plan(&source).publish_failing_for_tests(PublicationTestFault::CompetingReceipt);
+    let EditorSourceToolInstallationOutcome::Incomplete {
+        mut publication, ..
+    } = outcome
+    else {
+        panic!("the actual competing receipt must refuse no-replace publication");
+    };
+    assert_eq!(publication.members().len(), 5);
+    assert!(
+        !publication
+            .members()
+            .iter()
+            .any(|member| member.path() == RECEIPT_NAME)
+    );
+    let temporary = publication
+        .members()
+        .iter()
+        .find(|member| member.role() == EditorSourceToolArtifactRole::ReceiptTemporary)
+        .unwrap();
+    assert!(temporary.path().starts_with(".nara-tool-stage-"));
+    assert!(temporary.sync_receipt().is_some());
+    let temporary_path = installation_path(&source).join(temporary.path());
+    let bytes = fs::read(&temporary_path).unwrap();
+    assert_eq!(ContentDigest::of_bytes(&bytes), temporary.baseline());
+    publication.hand_over_readers().unwrap();
+    assert_eq!(publication.pending_files(), 0);
+    assert_eq!(
+        fs::read(installation_path(&source).join(RECEIPT_NAME)).unwrap(),
+        b"independent competing receipt"
+    );
+    drop(publication);
+    assert_eq!(fs::read(temporary_path).unwrap(), bytes);
 }
 
 #[test]
@@ -490,17 +566,17 @@ fn undeclared_payload_prevents_ready_commit_and_survives_candidate_retirement() 
         },
         |_, _| Ok(()),
     );
-    let EditorSourceToolInstallationOutcome::Incomplete { orphan, .. } = outcome else {
+    let EditorSourceToolInstallationOutcome::Incomplete { publication, .. } = outcome else {
         panic!("undeclared payload must prevent ready publication");
     };
     assert!(!installation_path(&source).join(RECEIPT_NAME).exists());
-    assert_eq!(orphan.pending_files(), 4);
+    assert_eq!(publication.pending_files(), 4);
     fs::write(
         installation_path(&source).join("samples/readme.txt"),
         b"user edit after failure",
     )
     .unwrap();
-    drop(orphan);
+    drop(publication);
     assert_eq!(
         fs::read(installation_path(&source).join("unknown.dll")).unwrap(),
         b"unowned"
@@ -553,11 +629,11 @@ fn a_competing_receipt_is_not_overwritten_or_claimed() {
         },
         |_, _| Ok(()),
     );
-    let EditorSourceToolInstallationOutcome::Incomplete { orphan, .. } = outcome else {
+    let EditorSourceToolInstallationOutcome::Incomplete { publication, .. } = outcome else {
         panic!("receipt collision must refuse the ready commit");
     };
-    assert!(orphan.pending_files() > 0);
-    drop(orphan);
+    assert!(publication.pending_files() > 0);
+    drop(publication);
     assert_eq!(
         fs::read(installation_path(&source).join(RECEIPT_NAME)).unwrap(),
         b"unowned receipt"

@@ -25,14 +25,14 @@ pub struct EditorSourceToolReclamationMember {
     pub state: EditorSourceToolReclamationMemberState,
 }
 
-/// Recovery facts for one installation, without native object identities or live authority.
+/// Recovery facts for one artifact, without native object identities or live authority.
 ///
 /// The nonzero random `id` correlates one explicit review's durable intent and results. It is
 /// independent of Session attempt identities and never authorizes resumption or deletion.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct EditorSourceToolReclamationRecord {
     pub id: [u8; 32],
-    pub installation: [u8; 32],
+    pub artifact: [u8; 32],
     pub phase: EditorSourceToolReclamationRecordPhase,
     pub members: Vec<EditorSourceToolReclamationMember>,
 }
@@ -47,9 +47,9 @@ pub enum EditorSourceToolReclamationError {
     Closing,
     #[error("the reclamation review belongs to another project directory")]
     RootMismatch,
-    #[error("the installation is absent from the artifact inventory")]
+    #[error("the artifact is absent from the artifact inventory")]
     Unregistered,
-    #[error("the installation is still present in the installed graph")]
+    #[error("the artifact is still present in the installed graph")]
     StillInstalled,
     #[error("an ordinary document owns an artifact member")]
     SourceOwned,

@@ -7,6 +7,9 @@ use std::{
 
 const WAIT: Duration = Duration::from_secs(15);
 
+#[cfg(all(target_arch = "x86_64", target_env = "msvc"))]
+mod incomplete;
+
 pub(super) struct RemovalGate {
     entered: mpsc::Sender<usize>,
     release: Mutex<mpsc::Receiver<()>>,
@@ -65,7 +68,7 @@ mod session {
     const NAME: &str = "reclamation-one";
     const UNKNOWN: &str = "unknown-sibling.txt";
 
-    fn writable_root(project: &Project) -> DirectoryCapability {
+    pub(super) fn writable_root(project: &Project) -> DirectoryCapability {
         DirectoryCapability::from_host_handle(
             fs::OpenOptions::new()
                 .read(true)
@@ -78,7 +81,7 @@ mod session {
         .unwrap()
     }
 
-    fn quiet(editor: &mut EditorProjectSession) {
+    pub(super) fn quiet(editor: &mut EditorProjectSession) {
         wait(editor, |editor| {
             let artifacts = editor.source_tool_artifact_view();
             artifacts.phase == ArtifactPhase::Idle
@@ -89,7 +92,7 @@ mod session {
         assert!(editor.source_tools.active.is_none());
     }
 
-    fn artifact_completed(
+    pub(super) fn artifact_completed(
         editor: &mut EditorProjectSession,
         attempt: &EditorSourceToolAttemptId,
         expected: ArtifactOutcome,
@@ -230,7 +233,7 @@ mod session {
             .unwrap()
     }
 
-    fn gate(editor: &mut EditorProjectSession, after: usize) -> RemovalControl {
+    pub(super) fn gate(editor: &mut EditorProjectSession, after: usize) -> RemovalControl {
         let (entered, entrance) = mpsc::channel();
         let (release, released) = mpsc::channel();
         editor.source_tools.reclamation.next_gate = Some(Arc::new(RemovalGate {
@@ -244,7 +247,11 @@ mod session {
         }
     }
 
-    fn entered(editor: &mut EditorProjectSession, control: &RemovalControl, index: usize) {
+    pub(super) fn entered(
+        editor: &mut EditorProjectSession,
+        control: &RemovalControl,
+        index: usize,
+    ) {
         wait(editor, |editor| {
             editor.source_tool_reclamation_view().phase == Phase::Removing
         });
@@ -258,7 +265,7 @@ mod session {
         assert!(editor.source_tool_reclamation_view().physical_work_pending);
     }
 
-    fn completed(editor: &mut EditorProjectSession, expected: Outcome) -> Record {
+    pub(super) fn completed(editor: &mut EditorProjectSession, expected: Outcome) -> Record {
         wait(editor, |editor| {
             let view = editor.source_tool_reclamation_view();
             view.phase == Phase::Terminal && !view.physical_work_pending
@@ -269,7 +276,7 @@ mod session {
         view.record.unwrap()
     }
 
-    fn disk(project: &Project) -> Vec<Record> {
+    pub(super) fn disk(project: &Project) -> Vec<Record> {
         ArtifactState::test_decode_reclamations(
             &fs::read(project.root.join(ARTIFACTS_PATH)).unwrap(),
         )
@@ -838,7 +845,7 @@ mod session {
             editor.confirm_source_tool_reclamation(prepared).unwrap();
             let actual = completed(editor, Outcome::Partial);
             assert_eq!(actual.id, reviewed.id);
-            assert_eq!(actual.installation, reviewed.installation);
+            assert_eq!(actual.artifact, reviewed.artifact);
             assert_eq!(actual.phase, RecordPhase::Results);
             assert_eq!(actual.members.len(), reviewed.members.len());
             assert_eq!(
@@ -918,7 +925,7 @@ mod session {
         assert!(failed.record_publication_pending);
         let actual = failed.record.as_ref().unwrap();
         assert_eq!(actual.id, reviewed.id);
-        assert_eq!(actual.installation, reviewed.installation);
+        assert_eq!(actual.artifact, reviewed.artifact);
         assert_eq!(actual.phase, RecordPhase::Results);
         assert_eq!(actual.members.len(), reviewed.members.len());
         for (index, member) in actual.members.iter().enumerate() {

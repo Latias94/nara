@@ -33,9 +33,9 @@ use nara::{
         EditorAction, EditorActionBatch, EditorActionOutcome, EditorDocumentMutation,
         EditorPersistenceAction, EditorPersistenceRequestResult, EditorPersistenceResult,
         EditorSourceToolArtifactError as Error, EditorSourceToolArtifactOutcome as Outcome,
-        EditorSourceToolArtifactPhase as Phase, EditorSourceToolArtifactView,
-        EditorSourceToolAttemptId, EditorSourceToolInstallationRequest,
-        EditorSourceToolReclamationError as ReclamationError,
+        EditorSourceToolArtifactPhase as Phase, EditorSourceToolArtifactPublication,
+        EditorSourceToolArtifactView, EditorSourceToolAttemptId,
+        EditorSourceToolInstallationRequest, EditorSourceToolReclamationError as ReclamationError,
         EditorSourceToolReclamationMemberState as ReclamationMemberState,
         EditorSourceToolReclamationOutcome as ReclamationOutcome,
         EditorSourceToolReclamationPhase as ReclamationPhase,
@@ -301,10 +301,17 @@ fn application_reclaims_reviewed_artifacts_and_reopens_results_without_deleting_
         inventory.operation.as_ref().unwrap().outcome,
         Some(Outcome::Registered)
     );
-    assert_eq!(inventory.installations.len(), 1);
+    assert_eq!(inventory.artifacts.len(), 1);
     assert_eq!(
-        inventory.installations[0].installed.directory.as_ref(),
+        inventory.artifacts[0].directory.as_ref(),
         installation.project_path()
+    );
+    assert_eq!(inventory.artifacts[0].id, id);
+    assert_eq!(
+        inventory.artifacts[0].publication,
+        EditorSourceToolArtifactPublication::Ready {
+            receipt: installation.receipt_digest(),
+        }
     );
     let inventory_bytes = fs::read(fixture.root.join(RECORD)).unwrap();
     settle_selection(&mut application);
@@ -424,7 +431,7 @@ fn application_reclaims_reviewed_artifacts_and_reopens_results_without_deleting_
     assert!(prepared.creation_custody());
     let review = prepared.record().clone();
     assert_ne!(review.id, [0; 32]);
-    assert_eq!(review.installation, id);
+    assert_eq!(review.artifact, id);
     assert_eq!(review.phase, ReclamationRecordPhase::Intent);
     assert_eq!(review.members.len(), installation.members().len());
     assert_eq!(
@@ -533,7 +540,7 @@ fn application_reclaims_reviewed_artifacts_and_reopens_results_without_deleting_
     let mut reopened = fixture.open_with_expected_state(EditorApplicationState::AuthoringDegraded);
     let inventory = settle_artifacts(&mut reopened, None);
     assert_eq!(inventory.phase, Phase::Idle);
-    assert_eq!(inventory.installations.len(), 1);
+    assert_eq!(inventory.artifacts.len(), 1);
     assert_eq!(inventory.reclamations, [results.clone()]);
     settle_selection(&mut reopened);
     let selection = reopened.source_tool_selection_view().unwrap();
@@ -585,7 +592,7 @@ fn application_reclaims_reviewed_artifacts_and_reopens_results_without_deleting_
     assert!(!prepared.creation_custody());
     let missing = prepared.record();
     assert_ne!(missing.id, results.id);
-    assert_eq!(missing.installation, id);
+    assert_eq!(missing.artifact, id);
     assert_eq!(missing.phase, ReclamationRecordPhase::Intent);
     let mut expected_missing = results;
     expected_missing.id = missing.id;

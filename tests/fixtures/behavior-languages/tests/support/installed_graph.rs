@@ -28,9 +28,10 @@ use nara_engine::{
 use nara_reflect::{ComponentSchemaVersion, ComponentTypeId, ComponentValue};
 use nara_scene::{SceneComponentRecord, SceneDocument, SceneEntityRecord};
 use nara_tooling::{
-    EditorDocumentId, EditorSourceToolArtifactError, EditorSourceToolArtifactInstallation,
+    EditorDocumentId, EditorSourceToolArtifact, EditorSourceToolArtifactError,
     EditorSourceToolArtifactMember, EditorSourceToolArtifactObservation,
-    EditorSourceToolArtifactOutcome, EditorSourceToolArtifactPhase, EditorSourceToolArtifactRole,
+    EditorSourceToolArtifactOutcome, EditorSourceToolArtifactPhase,
+    EditorSourceToolArtifactPublication, EditorSourceToolArtifactRole,
     EditorSourceToolArtifactView, EditorSourceToolAttemptId, EditorSourceToolError,
     EditorSourceToolInstallationRequest, EditorSourceToolInstalledEntry,
     EditorSourceToolInstalledSelection, EditorSourceToolIntent, EditorSourceToolRequestId,
@@ -110,7 +111,7 @@ fn csharp_artifact_inventory_observes_changes_without_mutating_managed_tool_hist
         content.operation.as_ref().unwrap().outcome,
         Some(EditorSourceToolArtifactOutcome::Observed)
     ));
-    assert!(content.installations.is_empty());
+    assert!(content.artifacts.is_empty());
     assert!(selection.installed.is_empty());
     assert!(!project.root().join(ARTIFACT_PATH).exists());
     assert_no_execution(&editor);
@@ -119,7 +120,7 @@ fn csharp_artifact_inventory_observes_changes_without_mutating_managed_tool_hist
         .prepare_source_tool_artifact_registration(&content.basis, Arc::clone(&primary_owner))
         .unwrap();
     assert_artifact_installations(
-        &cancelled.installations(),
+        &cancelled.artifacts(),
         std::slice::from_ref(&expected_primary),
     );
     drop(cancelled);
@@ -143,10 +144,7 @@ fn csharp_artifact_inventory_observes_changes_without_mutating_managed_tool_hist
         &attempt,
         EditorSourceToolArtifactOutcome::Registered,
     );
-    assert_artifact_installations(
-        &managed.installations,
-        std::slice::from_ref(&expected_primary),
-    );
+    assert_artifact_installations(&managed.artifacts, std::slice::from_ref(&expected_primary));
     let prepared = editor
         .prepare_source_tool_artifact_registration(&managed.basis, Arc::clone(&secondary_owner))
         .unwrap();
@@ -158,7 +156,7 @@ fn csharp_artifact_inventory_observes_changes_without_mutating_managed_tool_hist
         EditorSourceToolArtifactOutcome::Registered,
     );
     assert_artifact_installations(
-        &managed.installations,
+        &managed.artifacts,
         &[expected_primary.clone(), expected_secondary.clone()],
     );
     let managed_bytes = fs::read(project.root().join(ARTIFACT_PATH)).unwrap();
@@ -235,7 +233,7 @@ fn csharp_artifact_inventory_observes_changes_without_mutating_managed_tool_hist
     let stale = editor
         .prepare_source_tool_artifact_observation(&managed.basis, &primary.installed.installation)
         .unwrap();
-    let stale_installations = stale.installations();
+    let stale_artifacts = stale.artifacts();
     let prepared = editor
         .prepare_source_tool_artifact_observation(&managed.basis, &primary.installed.installation)
         .unwrap();
@@ -253,24 +251,27 @@ fn csharp_artifact_inventory_observes_changes_without_mutating_managed_tool_hist
         EditorSourceToolArtifactOutcome::Observed,
     );
     assert_artifact_installations(
-        &inspected.installations,
+        &inspected.artifacts,
         &[expected_primary.clone(), expected_secondary.clone()],
     );
     assert_ne!(inspected.basis, managed.basis);
-    assert_eq!(stale.installations(), stale_installations);
-    assert_eq!(stale_installations.len(), 2);
+    assert_eq!(stale.artifacts(), stale_artifacts);
+    assert_eq!(stale_artifacts.len(), 2);
     assert!(
-        stale_installations
+        stale_artifacts
             .iter()
-            .flat_map(|installation| &installation.members)
+            .flat_map(|artifact| &artifact.members)
             .all(|member| member.observation == EditorSourceToolArtifactObservation::Present)
     );
     let observed_bytes = fs::read(project.root().join(ARTIFACT_PATH)).unwrap();
     assert_eq!(observed_bytes, managed_bytes);
-    assert!(matches!(
-        editor.commit_source_tool_artifacts(stale),
-        Err(EditorSourceToolArtifactError::StaleBasis)
-    ));
+    assert_eq!(
+        editor
+            .commit_source_tool_artifacts(stale)
+            .unwrap_err()
+            .error(),
+        &EditorSourceToolArtifactError::StaleBasis
+    );
     assert_eq!(editor.source_tool_artifact_view(), inspected);
     assert_eq!(editor.source_tool_selection_view(), enabled);
     let mut expected_tool = reviewed_tool;
@@ -354,7 +355,7 @@ fn csharp_artifact_inventory_observes_changes_without_mutating_managed_tool_hist
         .unwrap()
         .observation = EditorSourceToolArtifactObservation::Changed;
     assert_artifact_installations(
-        &observed.installations,
+        &observed.artifacts,
         &[expected_primary.clone(), expected_secondary.clone()],
     );
     let changed_bytes = fs::read(project.root().join(ARTIFACT_PATH)).unwrap();
@@ -382,7 +383,7 @@ fn csharp_artifact_inventory_observes_changes_without_mutating_managed_tool_hist
         EditorSourceToolArtifactOutcome::Observed,
     );
     assert_artifact_installations(
-        &restored.installations,
+        &restored.artifacts,
         &[expected_primary.clone(), expected_secondary.clone()],
     );
     assert_eq!(
@@ -483,10 +484,7 @@ fn csharp_artifact_inventory_observes_changes_without_mutating_managed_tool_hist
         content.operation.as_ref().unwrap().outcome,
         Some(EditorSourceToolArtifactOutcome::Observed)
     ));
-    assert_artifact_installations(
-        &content.installations,
-        &[expected_primary, expected_secondary],
-    );
+    assert_artifact_installations(&content.artifacts, &[expected_primary, expected_secondary]);
     assert_no_execution(&reopened);
     assert!(reopened.source_tool_view().attempt.is_none());
     assert!(reopened.source_tool_view().request.is_none());
@@ -1590,9 +1588,15 @@ fn install_owned(
 fn artifact_installation(
     entry: &EditorSourceToolInstalledEntry,
     owner: &EditorSourceToolInstallation,
-) -> EditorSourceToolArtifactInstallation {
-    EditorSourceToolArtifactInstallation {
-        installed: entry.installed.clone(),
+) -> EditorSourceToolArtifact {
+    EditorSourceToolArtifact {
+        id: entry.installed.installation,
+        package: entry.installed.package.clone(),
+        directory: entry.installed.directory.clone(),
+        manifest: entry.installed.manifest,
+        publication: EditorSourceToolArtifactPublication::Ready {
+            receipt: entry.installed.receipt,
+        },
         members: owner
             .members()
             .iter()
@@ -1615,24 +1619,28 @@ fn artifact_installation(
 }
 
 fn assert_artifact_installations(
-    actual: &[EditorSourceToolArtifactInstallation],
-    expected: &[EditorSourceToolArtifactInstallation],
+    actual: &[EditorSourceToolArtifact],
+    expected: &[EditorSourceToolArtifact],
 ) {
     assert_eq!(actual.len(), expected.len(), "{actual:?}");
     for expected in expected {
-        let installation = actual
+        let artifact = actual
             .iter()
-            .find(|installation| installation.installed == expected.installed)
+            .find(|artifact| artifact.id == expected.id)
             .unwrap_or_else(|| panic!("Missing exact artifact entry {expected:?}: {actual:?}"));
+        assert_eq!(artifact.package, expected.package);
+        assert_eq!(artifact.directory, expected.directory);
+        assert_eq!(artifact.manifest, expected.manifest);
+        assert_eq!(artifact.publication, expected.publication);
         assert_eq!(
-            installation.members.len(),
+            artifact.members.len(),
             expected.members.len(),
-            "{installation:?}"
+            "{artifact:?}"
         );
         for member in &expected.members {
             assert!(
-                installation.members.contains(member),
-                "Missing complete artifact member {member:?}: {installation:?}"
+                artifact.members.contains(member),
+                "Missing complete artifact member {member:?}: {artifact:?}"
             );
         }
     }

@@ -35,7 +35,7 @@ pub struct PreparedEditorSourceToolReclamation {
     selection_basis: EditorSourceToolSelectionBasis,
     record: Record,
     files: Vec<Option<FileCapability>>,
-    facts: nara_tooling::EditorSourceToolArtifactInstallation,
+    facts: nara_tooling::EditorSourceToolArtifact,
     creation_custody: bool,
     // Exact native namespace leases keep the reviewed parent chain from being renamed
     // between intent publication and per-file unlink. They do not freeze file contents.
@@ -83,7 +83,7 @@ pub(super) struct ReclamationState {
     cancelled: bool,
     receipts: Vec<FileUnlinkReceipt>,
     removal_error: Option<Error>,
-    facts: Option<nara_tooling::EditorSourceToolArtifactInstallation>,
+    facts: Option<nara_tooling::EditorSourceToolArtifact>,
     release_custody: bool,
     #[cfg(all(test, windows))]
     next_gate: Option<Arc<tests::RemovalGate>>,
@@ -143,17 +143,17 @@ impl EditorProjectSession {
             .artifacts
             .reclamation_entry(artifact_basis, installation)
             .map_err(artifact_error)?;
-        if !artifact_store::validate_path(&entry.installed.directory) {
+        if !artifact_store::validate_path(&entry.directory) {
             return Err(Error::Changed);
         }
         let directory = project
-            .open_directory_exact(&relative(&entry.installed.directory)?)
+            .open_directory_exact(&relative(&entry.directory)?)
             .map_err(|_| Error::Read)?;
         let mut namespace_custody = Vec::new();
         let mut guarded_directories = Vec::new();
         retain_parent_chain(
             &project,
-            &entry.installed.directory,
+            &entry.directory,
             &mut guarded_directories,
             &mut namespace_custody,
         )?;
@@ -166,7 +166,7 @@ impl EditorProjectSession {
             if let Some((parent, _)) = member.path.rsplit_once('/') {
                 retain_parent_chain(
                     &project,
-                    &format!("{}/{parent}", entry.installed.directory),
+                    &format!("{}/{parent}", entry.directory),
                     &mut guarded_directories,
                     &mut namespace_custody,
                 )?;
@@ -174,13 +174,8 @@ impl EditorProjectSession {
             let (file, state) = match directory.open_file_exact(&relative(&member.path)?) {
                 Ok(file) => {
                     creation_custody &= created
-                        .and_then(|created| {
-                            created
-                                .members()
-                                .iter()
-                                .find(|candidate| candidate.path() == member.path.as_ref())
-                        })
-                        .is_some_and(|created| created.file().same_object(&file).unwrap_or(false));
+                        .and_then(|created| created.member_file(&member.path))
+                        .is_some_and(|created| created.same_object(&file).unwrap_or(false));
                     (Some(file), MemberState::Pending)
                 }
                 Err(error) if missing(&error) => {
@@ -204,12 +199,12 @@ impl EditorProjectSession {
         Ok(PreparedEditorSourceToolReclamation {
             root: project,
             directory,
-            directory_path: Arc::clone(&entry.installed.directory),
+            directory_path: Arc::clone(&entry.directory),
             artifact_basis: artifact_basis.clone(),
             selection_basis: selection_basis.clone(),
             record: Record {
                 id,
-                installation: *installation,
+                artifact: *installation,
                 phase: RecordPhase::Intent,
                 members,
             },
@@ -229,7 +224,7 @@ impl EditorProjectSession {
         self.require_reclamation_review(
             &prepared.artifact_basis,
             &prepared.selection_basis,
-            &prepared.record.installation,
+            &prepared.record.artifact,
         )?;
         if !prepared
             .root
@@ -363,7 +358,7 @@ impl EditorProjectSession {
         self.source_tools.selection.require_reclamation_absence(
             selection_basis,
             installation,
-            &entry.installed.directory,
+            &entry.directory,
             &self.source_project_root(),
         )?;
         self.require_reclamation_quiet()
@@ -535,7 +530,7 @@ impl EditorProjectSession {
                                 .selection
                                 .require_reclamation_absence(
                                     &prepared.selection_basis,
-                                    &prepared.record.installation,
+                                    &prepared.record.artifact,
                                     &prepared.directory_path,
                                     &self.source_project_root(),
                                 )
@@ -604,7 +599,7 @@ impl EditorProjectSession {
                     {
                         self.source_tools
                             .artifacts
-                            .release_creation_custody(&record.installation);
+                            .release_creation_custody(&record.artifact);
                     }
                     state.view.phase = Phase::Terminal;
                     state.view.record_publication_pending = false;
