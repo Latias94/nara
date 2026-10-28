@@ -5,6 +5,7 @@
 This file is a derived view of immutable shards. It is refreshed only during integration.
 
 ## 2026-10-28
+* **Verification Evidence**: [Recipe schema refresh preserves independently admitted owner lineage](verification/2026-10/2026-10-28T014807Z-recipe-schema-refresh-preserves-independently-admitted-owner-lineage-8afcd1ede3dc4451ac719a1a236e9c85.md) - Qualifies bounded owner-preserving refresh and records the reviewed source/history successor design without claiming Session adoption.
 * **Verification Evidence**: [Durable installed source-tool selection and independent paired attempt qualification](verification/2026-10/2026-10-28T012206Z-durable-installed-source-tool-selection-and-independent-paired-attempt-qualification-3a4a90d3cc3042e5b89e8fa20e314c22.md) - Qualifies code-free desired selection, approved installation enablement and physical lifetime through Session, Application and native Editor consumers.
 * **Work Progress**: [Durable installed tool selection and paired attempt integration in progress](progress/2026-10/2026-10-28T010718Z-durable-installed-tool-selection-and-paired-attempt-integration-in-progress-9621f4a6d44249569e458a0e4006fa4a.md) - Records the current single-slot selection replacement, independent review corrections and live qualification boundary.
 
@@ -134,4 +135,3 @@ This file is a derived view of immutable shards. It is refreshed only during int
 
 ## 2026-10-23
 * **Verification Evidence**: [Disposable Scene projection epochs and stable native preview qualification](verification/2026-10/2026-10-23T225800Z-disposable-scene-projection-epochs-and-stable-native-preview-qualification-2478d897135549daacbc8d1fbc90b9d9.md) - Qualify complete-domain Scene epochs while retaining shared authoring owners and renderer producer identity.
-* **Work Progress**: [Projection lifetime next-unit design and measurement boundary](progress/2026-10/2026-10-23T211757Z-projection-lifetime-next-unit-design-and-measurement-boundary-d55f02e666d0487987d1a1f8b1d9c8b6.md) - Ground the remaining R5c preview-history pressure and compare explicit epoch handoff with owner-specific incremental projection; no production selection yet.

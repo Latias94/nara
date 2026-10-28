@@ -245,6 +245,14 @@ impl ProjectToolFailure {
                 "project.tool.schema-bundle-unavailable",
                 "Cannot read the declared authoring schema bundle",
             ),
+            Error::BundleInvalid => (
+                "project.tool.schema-bundle-invalid",
+                "The declared authoring schema bundle is invalid; schema refresh requires valid existing metadata",
+            ),
+            Error::BundleComposition => (
+                "project.tool.schema-bundle-composition-rejected",
+                "Cannot compose retained authoring schema owners with the selected project schema",
+            ),
             Error::Stale => (
                 "project.tool.schema-stale",
                 "The declared authoring schema bundle is missing or stale; run nara schema <project-directory> --write with the same profile",
@@ -570,6 +578,38 @@ mod tests {
             "project.tool.check-failed",
             "Project check failed",
         )
+    }
+
+    #[test]
+    fn schema_bundle_refusals_roundtrip_as_distinct_static_failures() {
+        use crate::project_host::schema::SchemaRefreshError;
+
+        for (error, code, summary) in [
+            (
+                SchemaRefreshError::BundleInvalid,
+                "project.tool.schema-bundle-invalid",
+                "The declared authoring schema bundle is invalid; schema refresh requires valid existing metadata",
+            ),
+            (
+                SchemaRefreshError::BundleComposition,
+                "project.tool.schema-bundle-composition-rejected",
+                "Cannot compose retained authoring schema owners with the selected project schema",
+            ),
+        ] {
+            for operation in ["schema-check", "schema-write"] {
+                let failure = ProjectToolFailure::from_schema(operation, error);
+                let raw: RawFailure = serde_json::from_value(failure.to_value()).unwrap();
+                let decoded = raw.admit(operation).unwrap();
+                assert_eq!(decoded, failure);
+                assert_eq!(decoded.operation(), operation);
+                assert_eq!(decoded.stage(), ProjectToolFailureStage::Schema);
+                assert_eq!(decoded.code(), code);
+                assert_eq!(decoded.summary(), summary);
+                assert!(decoded.diagnostics().is_empty());
+                assert_eq!(decoded.loss(), ProjectToolDiagnosticLoss::default());
+                assert!(decoded.repair_hint().is_none());
+            }
+        }
     }
 
     #[test]

@@ -186,6 +186,10 @@ closure, stale proposals and modified/adopted file preservation. A panel alone c
 The [local source-tool release plan](2026-10-28-local-source-tool-release-plan.md) orders code-free
 artifact capture before installation ownership, approved activation, dependency-safe removal and
 actual public/native qualification. Its first capture API is not an installed or enabled tool.
+The [owner-adoption successor](2026-10-28-authoring-owner-adoption-plan.md) addresses the current
+installed consumer's pre-admitted metadata premise through source-owned reclassification/history,
+bundle publication and whole-Session adoption. New-owner adoption, existing-owner evolution and
+installed graph/removal retain distinct acceptance; the full R1b workflow must join them.
 
 Acceptance: panel/session parity, exact result, one Undo, Save/Reopen, rejected/stale proposal,
 delayed completion after newer requests, multiple observers and bounded structured diagnostic

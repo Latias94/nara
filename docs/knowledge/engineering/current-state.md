@@ -3,7 +3,7 @@ type: "Current State"
 title: "Current Engineering State"
 description: "Derived summary of immutable engineering-memory shards."
 tags: ["engineering-memory", "derived"]
-source_fingerprint: "c4e9c46a48804035d4f0a59d69eef2f03412492e6d40f54d3534272df241ab00"
+source_fingerprint: "c8de4122a859aa1b2293a18b4173feddad9b0d25cd6fda42b2914dc8f3e0e743"
 ---
 
 # Current State
@@ -12,8 +12,8 @@ source_fingerprint: "c4e9c46a48804035d4f0a59d69eef2f03412492e6d40f54d3534272df24
 
 This file is derived from immutable shards. Record new facts in shards, then render during integration.
 
-- Source fingerprint: `c4e9c46a48804035d4f0a59d69eef2f03412492e6d40f54d3534272df241ab00`
-- Immutable records: 990
+- Source fingerprint: `c8de4122a859aa1b2293a18b4173feddad9b0d25cd6fda42b2914dc8f3e0e743`
+- Immutable records: 991
 - Active lane heads: 1
 
 # Active Registrations
@@ -69,6 +69,7 @@ This file is derived from immutable shards. Record new facts in shards, then ren
 
 # Recent Evidence
 
+- **Verification Evidence**: [Recipe schema refresh preserves independently admitted owner lineage](verification/2026-10/2026-10-28T014807Z-recipe-schema-refresh-preserves-independently-admitted-owner-lineage-8afcd1ede3dc4451ac719a1a236e9c85.md) - Qualifies bounded owner-preserving refresh and records the reviewed source/history successor design without claiming Session adoption.
 - **Verification Evidence**: [Durable installed source-tool selection and independent paired attempt qualification](verification/2026-10/2026-10-28T012206Z-durable-installed-source-tool-selection-and-independent-paired-attempt-qualification-3a4a90d3cc3042e5b89e8fa20e314c22.md) - Qualifies code-free desired selection, approved installation enablement and physical lifetime through Session, Application and native Editor consumers.
 - **Work Progress**: [Durable installed tool selection and paired attempt integration in progress](progress/2026-10/2026-10-28T010718Z-durable-installed-tool-selection-and-paired-attempt-integration-in-progress-9621f4a6d44249569e458a0e4006fa4a.md) - Records the current single-slot selection replacement, independent review corrections and live qualification boundary.
 - **Verification Evidence**: [Continuous file publication and editor source custody qualification](verification/2026-10/2026-10-27T233313Z-continuous-file-publication-and-editor-source-custody-qualification-d9a0d6253fc3473ab82093b446048d9c.md) - Qualifies live leaf custody across publication, fresh authoring admission and pending image imports, with public, managed and native consumers.
@@ -80,7 +81,6 @@ This file is derived from immutable shards. Record new facts in shards, then ren
 - **Work Progress**: [Inline source tool facet contract and frontend integration in progress](progress/2026-10/2026-10-27T185417Z-inline-source-tool-facet-contract-and-frontend-integration-in-progress-cd9355db64e64f6b8ff437035268bdc0.md) - Records the shared Tooling replacement, explicit activation routing and active disjoint implementation lanes before complete production qualification.
 - **Verification Evidence**: [Production finite source tools and exact physical close observations](verification/2026-10/2026-10-27T180941Z-production-finite-source-tools-and-exact-physical-close-observations-fc2363973364434096d350ae4a8d762c.md) - Qualifies Session/Application-owned trusted child proposals, deletes the displaced tool bridge, and fixes concurrent result and physical-close observations.
 - **Verification Evidence**: [Complete observation bases at public authoring preparation ingress](verification/2026-10/2026-10-27T155752Z-complete-observation-bases-at-public-authoring-preparation-ingress-d45451eaca544ad2b50a55a66a0ce496.md) - Qualifies full source/Schema observation checks in Workspace, Session, Application and Panel preparation without a second transaction owner.
-- **Verification Evidence**: [Concrete EnemyStats semantic proposals through the public Project Session](verification/2026-10/2026-10-27T152916Z-concrete-enemystats-semantic-proposals-through-the-public-project-session-1acb9412a2544e98b059654fe5ec2ca7.md) - Qualifies concrete C# source proposals, exact preparation and stale-result refusal through existing Scene and Project Session owners.
 
 # Integration Notes
 

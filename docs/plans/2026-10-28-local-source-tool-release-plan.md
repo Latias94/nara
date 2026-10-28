@@ -121,7 +121,9 @@ The existing EnemyStats fixture pre-admits its metadata in the project's authori
 activation integration must state that premise explicitly. Complete fresh-project installation
 also needs adoption through the actual authoring bundle/readmission owner; copying a catalog
 does not update admitted documents or history. Do not close that gap by inventing a package Schema
-executor. The first capture API additionally accepts only a generation-one catalog, without a
+executor. The [owner-adoption plan](2026-10-28-authoring-owner-adoption-plan.md) orders the
+source/history, bundle-custody and whole-Session replacement for one newly installed owner;
+its design is not implementation evidence. The first capture API additionally accepts only a generation-one catalog, without a
 predecessor input; even code-only updates over an evolved existing catalog need that input from
 the actual metadata owner before qualification. Updates requiring Schema migration reject until
 that owner has a qualified transaction.

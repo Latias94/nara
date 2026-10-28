@@ -168,6 +168,14 @@ flowchart LR
   distinguishes failed Check from changed prepared facts or incomplete publication evidence.
   Repair content failures reuse the bounded report projection. The admitted repair hint is
   publicly inspectable without parsing terminal prose and has no unbounded deserialization API.
+- Schema refresh replaces the selected compiled recipe's owner declarations while retaining
+  complete admitted current/predecessor catalogs for every existing owner absent from that recipe.
+  Project-adopted metadata is not disposable generated output. Compose the complete successor
+  through Reflect's ordinary bounded bundle admission, including reserved/tombstone claims;
+  collisions or invalid existing bundles refuse before publication, including explicit write.
+  Missing bundles may be created from the recipe. Check remains read-only and successful
+  no-change refresh keeps the existing leaf. Retained metadata grants neither a native binding
+  nor executable approval. Owner removal and value migration require separate explicit operations.
 - All member and source-change validation precedes directory publication. Process acceptance occurs
   afterward. A published candidate that fails acceptance remains present and is reported as
   published-but-unaccepted; no rollback or in-place acceptance retry is claimed.

@@ -96,6 +96,12 @@ cargo run --manifest-path "$game/Cargo.toml" --bin headless --locked
 cargo run --manifest-path "$game/Cargo.toml" --bin headless --locked -- --verify-reset
 ```
 
+Schema refresh updates the compiled recipe's owners and preserves complete current/predecessor
+catalogs for other admitted project owners. A semantically unchanged bundle keeps its existing
+file and spelling. Conflicting owner claims or invalid existing bundle data reject before writing;
+restore or explicitly repair invalid input rather than treating `--write` as permission to erase
+it. Retaining authoring metadata does not add a Runtime binding or approve installed tool code.
+
 The first demonstration collects three targets and wins. The reset demonstration
 restores the initial player position, three visible targets and original background.
 Gameplay changes runtime state and leaves authored source intact. Collected targets

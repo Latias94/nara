@@ -105,6 +105,13 @@ Root/public persistence 702, filesystem 87, Tooling 86, Editor 245 and rebuilt i
 pass. The selected evidence retains its exact platform and final-check scope. Metadata is
 pre-admitted; fresh-project adoption/evolved lineage, installed dependent closure, protected content,
 safe removal and complete Package UI remain open. This is not full R1b or foundation completion.
+The [owner-preserving refresh successor](../../knowledge/engineering/verification/2026-10/2026-10-28T014807Z-recipe-schema-refresh-preserves-independently-admitted-owner-lineage-8afcd1ede3dc4451ac719a1a236e9c85.md)
+corrects ADR 0110's compiled schema refresh to retain complete owners absent from the current
+recipe, reject invalid/conflicting existing metadata and preserve semantically unchanged leaf
+bytes. Focused owner/protocol and public Check evidence belong to that record. The
+[adoption plan](../../plans/2026-10-28-authoring-owner-adoption-plan.md) separately records reviewed
+history, cumulative-work, successor-receipt and whole-open-set requirements; source/history
+transition and Session adoption remain unimplemented.
 The [documentation verification](../../knowledge/engineering/verification/2026-10/2026-10-23T115037Z-foundation-architecture-rebaseline-documentation-checks-and-adversarial-closure-33c8c794baf142ee964468a01248af17.md)
 records inventory/link/status checks and the scoped adversarial correction/recheck. No Cargo,
 performance or native trajectory was re-executed for this design-only unit.
