@@ -605,6 +605,21 @@ pub(crate) fn restrictive_clone_directory(file: &File) -> Result<File, FsError> 
     imp::restrictive_clone_directory(file)
 }
 
+pub(crate) fn namespace_clone_directory(file: &File) -> Result<File, FsError> {
+    #[cfg(windows)]
+    {
+        windows::namespace_clone_directory(file)
+    }
+    #[cfg(not(windows))]
+    {
+        let _ = file;
+        Err(FsError::Unsupported {
+            operation: crate::FsOperation::CloneHandle,
+            capability: "exact directory namespace lease",
+        })
+    }
+}
+
 /// Reopens a regular file through the capability handle with the restrictive exact-self contract
 /// required by an immutable-generation launch.
 pub(crate) fn restrictive_clone_file(file: &File) -> Result<File, FsError> {

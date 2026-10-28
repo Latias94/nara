@@ -1,5 +1,25 @@
 use std::{fmt, fs::File};
 
+/// Holds an exact directory object against ordinary rename/removal on qualified platforms.
+///
+/// Child creation, replacement and unlink remain available. This lease does not freeze contents
+/// or supply mutation authority. Dropping it releases the namespace restriction.
+pub struct DirectoryNamespaceLease {
+    _file: File,
+}
+
+impl DirectoryNamespaceLease {
+    pub(crate) const fn new(file: File) -> Self {
+        Self { _file: file }
+    }
+}
+
+impl fmt::Debug for DirectoryNamespaceLease {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter.write_str("DirectoryNamespaceLease(..)")
+    }
+}
+
 /// Opaque handle lease whose platform adapter has re-opened and revalidated the exact live
 /// capability object with the restrictive launch contract.
 ///

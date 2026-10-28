@@ -80,40 +80,55 @@ pub(crate) fn write_at(file: &File, buffer: &[u8], offset: u64) -> io::Result<us
 }
 
 pub(crate) fn restrictive_clone_directory(file: &File) -> Result<File, FsError> {
-    restrictive_exact_self(
+    exact_self(
         file,
         FileKind::Directory,
         FILE_TRAVERSE | FILE_READ_ATTRIBUTES | SYNCHRONIZE,
         FILE_DIRECTORY_FILE,
+        FILE_SHARE_READ,
         "restrictive exact-self directory lease",
     )
 }
 
 pub(crate) fn restrictive_clone_file(file: &File) -> Result<File, FsError> {
-    restrictive_exact_self(
+    exact_self(
         file,
         FileKind::Regular,
         FILE_READ_DATA | FILE_READ_ATTRIBUTES | SYNCHRONIZE,
         FILE_NON_DIRECTORY_FILE,
+        FILE_SHARE_READ,
         "restrictive exact-self file lease",
     )
 }
 
 pub(crate) fn restrictive_clone_executable(file: &File) -> Result<File, FsError> {
-    restrictive_exact_self(
+    exact_self(
         file,
         FileKind::Regular,
         FILE_READ_DATA | FILE_EXECUTE | FILE_READ_ATTRIBUTES | SYNCHRONIZE,
         FILE_NON_DIRECTORY_FILE,
+        FILE_SHARE_READ,
         "restrictive exact-self executable lease",
     )
 }
 
-fn restrictive_exact_self(
+pub(crate) fn namespace_clone_directory(file: &File) -> Result<File, FsError> {
+    exact_self(
+        file,
+        FileKind::Directory,
+        FILE_TRAVERSE | FILE_READ_ATTRIBUTES | SYNCHRONIZE,
+        FILE_DIRECTORY_FILE,
+        FILE_SHARE_READ | FILE_SHARE_WRITE,
+        "exact directory namespace lease",
+    )
+}
+
+fn exact_self(
     source: &File,
     expected_kind: FileKind,
     desired_access: u32,
     type_options: u32,
+    share_mode: u32,
     capability: &'static str,
 ) -> Result<File, FsError> {
     let original = facts(source)?;
@@ -123,7 +138,7 @@ fn restrictive_exact_self(
             FileKind::Regular => Err(FsError::NotRegularFile),
             FileKind::Other => Err(FsError::Unproven {
                 operation: FsOperation::CloneHandle,
-                proof: "exact launch leases cannot target device or other non-file objects",
+                proof: "exact leases cannot target device or other non-file objects",
             }),
         };
     }
@@ -154,14 +169,14 @@ fn restrictive_exact_self(
     let mut handle = ptr::null_mut();
     // SAFETY: the source handle is the capability owner’s live authority. The empty relative name
     // asks the NT object manager to reopen that exact object; no ambient path is consulted. The
-    // restrictive share mode prevents later ordinary write/delete opens while the lease lives.
+    // requested sharing contract is applied to this exact object for the lease's lifetime.
     let status = unsafe {
         NtOpenFile(
             &mut handle,
             desired_access,
             ptr::addr_of!(attributes),
             &mut status_block,
-            FILE_SHARE_READ,
+            share_mode,
             FILE_SYNCHRONOUS_IO_NONALERT | FILE_OPEN_REPARSE_POINT | type_options,
         )
     };

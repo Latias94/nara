@@ -205,6 +205,19 @@ may authorize disposal of a selected damaged whole artifact, including all strea
 claiming that it never changed. Current graph absence, actual-user return, original review,
 pre-deletion intent and partial-result recovery remain domain obligations. That consumer uses
 this exact-object primitive unchanged; it is not permission to reclaim arbitrary project files.
+The first reviewed caller retains `DirectoryNamespaceLease` over the finite reviewed parent chain
+and the original live leaves. `acquire_namespace_lease()` reopens the exact live directory with
+read/write sharing and without delete sharing on local Windows NTFS/ReFS, validating the actual
+identity before returning opaque custody. This excludes ordinary rename/removal of that directory
+while permitting child publication and unlink. Ancestors need their own leases; contents and child
+names remain mutable. Existing creation-time DELETE handles can prevent lease admission and must
+be relinquished through an exact-object handover when their mutation is complete. Other platforms
+return Unsupported. The separate immutable-launch lease keeps its stronger read-only sharing
+contract: it cannot substitute for namespace-only custody without blocking the caller's own child
+publication. No second filesystem deletion primitive is added. Unsupported namespace leases refuse
+the reviewed caller before it publishes intent, independently of generic unlink platform support.
+These sharing distinctions follow Microsoft's [CreateFile contract](https://learn.microsoft.com/en-us/windows/win32/api/fileapi/nf-fileapi-createfilew);
+actual caller qualification remains separate from documentation of the platform mechanism.
 
 ### Platform evidence matrix
 

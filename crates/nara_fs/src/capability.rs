@@ -9,9 +9,9 @@ use std::{
 
 use crate::{
     CapabilityGeneration, CapabilitySessionId, DirectoryEnumerationLimits,
-    DirectoryEnumerationSession, DirectorySyncReceipt, DirectorySyncTier, DurabilityProgress,
-    ExpectedTarget, FileCapability, FileFacts, FileIdentity, FileKind, FsError, FsOperation,
-    NativeFileIdentity, RelativeComponent, RelativePath, ResolutionTier,
+    DirectoryEnumerationSession, DirectoryNamespaceLease, DirectorySyncReceipt, DirectorySyncTier,
+    DurabilityProgress, ExpectedTarget, FileCapability, FileFacts, FileIdentity, FileKind, FsError,
+    FsOperation, NativeFileIdentity, RelativeComponent, RelativePath, ResolutionTier,
     RestrictiveCapabilityHandleLease, StageStatus, TemporaryFile, TemporaryFileCleanup,
     TemporaryFileFailure, platform,
 };
@@ -228,6 +228,24 @@ impl DirectoryCapability {
             });
         }
         Ok(RestrictiveCapabilityHandleLease::new(file))
+    }
+
+    /// Retains this exact directory against ordinary rename/removal while permitting child writes.
+    ///
+    /// Windows local NTFS/ReFS reopens the live object with read/write sharing and no delete
+    /// sharing, then validates its identity. Existing DELETE handles can prevent admission. Other
+    /// platforms return Unsupported; a duplicated handle alone cannot provide this guarantee.
+    /// Ancestors require their own leases. File contents and child names remain mutable.
+    pub fn acquire_namespace_lease(&self) -> Result<DirectoryNamespaceLease, FsError> {
+        let file = platform::namespace_clone_directory(&self.inner.file)?;
+        let facts = platform::facts(&file)?;
+        validate_directory_facts(&self.inner, facts)?;
+        if !facts.identity_proven || facts.identity != self.inner.identity.native() {
+            return Err(FsError::CapabilityIdentityDrift {
+                operation: FsOperation::CloneHandle,
+            });
+        }
+        Ok(DirectoryNamespaceLease::new(file))
     }
 
     #[must_use]
@@ -1035,6 +1053,67 @@ mod tests {
         drop(nested);
         drop(strict);
         drop(capability);
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[cfg(all(windows, target_arch = "x86_64"))]
+    #[test]
+    fn namespace_lease_blocks_directory_rename_and_permits_child_publication_and_unlink() {
+        use std::io::Write;
+
+        static SEQUENCE: AtomicU64 = AtomicU64::new(0);
+        let root = std::env::temp_dir().join(format!(
+            "nara_fs_namespace_{}_{}",
+            std::process::id(),
+            SEQUENCE.fetch_add(1, Ordering::Relaxed)
+        ));
+        std::fs::create_dir(&root).unwrap();
+        let parent = DirectoryCapability::from_host_handle(
+            test_host_directory(&root),
+            HostCapabilityOptions::new(CapabilityRights::ReadWrite, TrustMode::Untrusted),
+        )
+        .unwrap();
+        let created = parent
+            .create_child_directory(&RelativeComponent::new("held").unwrap())
+            .unwrap();
+        assert!(
+            created.acquire_namespace_lease().is_err(),
+            "creation DELETE authority is still live"
+        );
+        let directory = parent
+            .open_directory_exact(&RelativePath::new("held").unwrap())
+            .unwrap();
+        assert!(directory.same_object(&created).unwrap());
+        drop(created);
+        let lease = directory.acquire_namespace_lease().unwrap();
+        let mut temporary = directory
+            .create_temp(&RelativeComponent::new("candidate.tmp").unwrap())
+            .unwrap();
+        temporary.write_all(b"child contents").unwrap();
+        directory
+            .replace_temp(
+                temporary,
+                &RelativeComponent::new("published.txt").unwrap(),
+                ExpectedTarget::Missing,
+            )
+            .unwrap();
+        assert_eq!(
+            std::fs::read(root.join("held/published.txt")).unwrap(),
+            b"child contents"
+        );
+        std::fs::rename(root.join("held/published.txt"), root.join("held/moved.txt")).unwrap();
+        let path = RelativePath::new("moved.txt").unwrap();
+        let file = directory.open_file_exact(&path).unwrap();
+        let removed = directory.unlink_file(&path, &file).unwrap();
+        assert_eq!(removed.identity(), file.identity());
+        assert_eq!(removed.parent_identity(), directory.identity());
+        assert!(!root.join("held/moved.txt").exists());
+        assert!(std::fs::rename(root.join("held"), root.join("renamed")).is_err());
+        drop(lease);
+        std::fs::rename(root.join("held"), root.join("renamed")).unwrap();
+        drop(file);
+        drop(directory);
+        drop(parent);
         std::fs::remove_dir_all(root).unwrap();
     }
 

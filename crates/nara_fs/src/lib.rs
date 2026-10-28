@@ -32,6 +32,7 @@ pub use directory_publication::{
 };
 pub use error::{FsError, FsOperation, PathValidationError};
 pub use file::{CapabilityReader, CapabilityWriter, FileCapability};
+pub use host_handle::DirectoryNamespaceLease;
 #[doc(hidden)]
 pub use host_handle::RestrictiveCapabilityHandleLease;
 pub use identity::{CapabilityGeneration, CapabilitySessionId, FileIdentity, FileKind};
