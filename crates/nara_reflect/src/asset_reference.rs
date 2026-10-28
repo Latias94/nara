@@ -13,8 +13,9 @@ use crate::{
     effective_component_value,
     entity_reference::{
         PresentReferenceLeaf, ReferenceTraversalError, collect_present_field_reference_leaves,
-        collect_present_reference_leaves, collect_present_reference_leaves_with_admission,
-        collect_present_value_reference_leaves,
+        collect_present_field_reference_leaves_with_admission, collect_present_reference_leaves,
+        collect_present_reference_leaves_with_admission, collect_present_value_reference_leaves,
+        collect_present_value_reference_leaves_with_admission,
     },
 };
 
@@ -185,14 +186,23 @@ pub fn collect_declared_effective_asset_references_with_admission<E>(
             },
         ));
     }
-    let leaves = match collect_present_reference_leaves_with_admission::<(), E>(
+    let leaves = collect_present_reference_leaves_with_admission::<(), E>(
         schema,
         value,
         limits,
         ComponentValueKind::AssetRef,
         true,
         &mut admit,
-    ) {
+    );
+    materialize_asset_references_with_admission(component, leaves, &mut admit)
+}
+
+fn materialize_asset_references_with_admission<E>(
+    component: &ComponentTypeId,
+    leaves: Result<Vec<PresentReferenceLeaf<'_, '_>>, ReferenceTraversalError<(), E>>,
+    admit: &mut dyn FnMut(usize, usize, usize) -> Result<(), E>,
+) -> Result<Vec<DeclaredAssetReference>, AssetReferenceCollectionError<E>> {
+    let leaves = match leaves {
         Ok(leaves) => leaves,
         Err(ReferenceTraversalError::Admission(error)) => {
             return Err(AssetReferenceCollectionError::Admission(error));
@@ -420,6 +430,31 @@ pub fn collect_declared_field_asset_references_with_limits(
     materialize_asset_references(component, value, leaves, field.path().segments().len())
 }
 
+/// Collects assets from a selected field under an already admitted schema.
+///
+/// The borrowed value is the actual field subtree; returned paths remain component-relative.
+/// Defaults are not filled. The callback receives work deltas (nodes, logical bytes, modeled
+/// allocation bytes) at the same pre-growth and pre-copy boundaries as the effective collector.
+/// Output slots, field IDs and parsed asset paths are admitted before materialization. A refusal
+/// returns the exact caller error without allocating an error path or cloning the input.
+pub fn collect_declared_field_asset_references_with_admission<E>(
+    component: &ComponentTypeId,
+    field: &ComponentFieldSchema,
+    value: &ComponentValue,
+    traversal_limits: EntityReferenceTraversalLimits,
+    mut admit: impl FnMut(usize, usize, usize) -> Result<(), E>,
+) -> Result<Vec<DeclaredAssetReference>, AssetReferenceCollectionError<E>> {
+    let leaves = collect_present_field_reference_leaves_with_admission::<(), E>(
+        field,
+        value,
+        traversal_limits,
+        ComponentValueKind::AssetRef,
+        true,
+        &mut admit,
+    );
+    materialize_asset_references_with_admission(component, leaves, &mut admit)
+}
+
 /// Collects declared assets relative to a selected replacement payload, with explicit limits.
 ///
 /// The caller supplies an admitted owning field and its selected shape, for example from
@@ -449,6 +484,32 @@ pub fn collect_declared_value_asset_references_with_limits(
         source,
     })?;
     materialize_asset_references(component, value, leaves, 0)
+}
+
+/// Collects assets from a borrowed selected shape and replacement payload with work admission.
+///
+/// The caller supplies an already admitted owning field and selected shape. Paths are relative
+/// to the payload, including the empty path for a scalar asset. This shares the field collector's
+/// pre-allocation admission and exact caller-error propagation without copying the shape, filling
+/// defaults, constructing a component tree or reserving from configured worst-case limits.
+pub fn collect_declared_value_asset_references_with_admission<E>(
+    component: &ComponentTypeId,
+    field: &ComponentFieldSchema,
+    shape: &ComponentValueShape,
+    value: &ComponentValue,
+    traversal_limits: EntityReferenceTraversalLimits,
+    mut admit: impl FnMut(usize, usize, usize) -> Result<(), E>,
+) -> Result<Vec<DeclaredAssetReference>, AssetReferenceCollectionError<E>> {
+    let leaves = collect_present_value_reference_leaves_with_admission::<(), E>(
+        field,
+        shape,
+        value,
+        traversal_limits,
+        ComponentValueKind::AssetRef,
+        true,
+        &mut admit,
+    );
+    materialize_asset_references_with_admission(component, leaves, &mut admit)
 }
 
 fn materialize_asset_references(
@@ -562,3 +623,6 @@ fn asset_reference_parts(value: &ComponentValue) -> Option<(&str, &str)> {
     };
     Some((kind.as_str(), value.as_str()))
 }
+
+#[cfg(test)]
+mod tests;

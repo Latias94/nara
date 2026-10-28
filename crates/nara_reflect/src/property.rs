@@ -3,6 +3,7 @@
 use std::{
     error::Error,
     fmt::{self, Display, Formatter},
+    mem::size_of,
 };
 
 use nara_core::{ByteLimit, ItemLimit};
@@ -354,6 +355,15 @@ impl Error for ComponentPropertyError {
     }
 }
 
+/// Separates selector interpretation failure from the owning caller's work allowance.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ComponentPropertyAdmissionError<E> {
+    Property(ComponentPropertyError),
+    Admission(E),
+}
+
+type PropertyAdmission<'a> = dyn FnMut(usize, usize, usize) -> bool + 'a;
+
 /// Resolves against the caller's exact admitted current schema and current-version value.
 ///
 /// The schema owner supplies admission/lineage authority; this function does not select a
@@ -404,15 +414,66 @@ pub fn resolve_component_property_schema_claim<'schema>(
     path: &ComponentPropertyPath,
     budget: &mut ComponentPropertyReadBudget,
 ) -> Result<ComponentPropertySchemaClaim<'schema>, ComponentPropertyError> {
+    resolve_component_property_schema_claim_impl(schema, version, path, budget, None)
+}
+
+/// Resolves a selector through the same walker with pre-scan and pre-growth work admission.
+///
+/// The caller supplies an admitted schema and retains the shared read budget across lookups.
+/// Callback deltas count examined entries, logical identity bytes and modeled declaration
+/// scratch, excluding shared catalog storage. Refusal returns the exact caller error before
+/// the next declaration comparison or scratch allocation. Selector/version/depth guards and
+/// interpretation errors remain the same as the ordinary schema-claim entry point.
+pub fn resolve_component_property_schema_claim_with_admission<'schema, E>(
+    schema: &'schema ComponentSchema,
+    version: ComponentSchemaVersion,
+    path: &ComponentPropertyPath,
+    budget: &mut ComponentPropertyReadBudget,
+    mut admit: impl FnMut(usize, usize, usize) -> Result<(), E>,
+) -> Result<ComponentPropertySchemaClaim<'schema>, ComponentPropertyAdmissionError<E>> {
+    let mut refusal = None;
+    let result = {
+        let mut callback = |nodes, bytes, allocated| match admit(nodes, bytes, allocated) {
+            Ok(()) => true,
+            Err(error) => {
+                refusal = Some(error);
+                false
+            }
+        };
+        resolve_component_property_schema_claim_impl(
+            schema,
+            version,
+            path,
+            budget,
+            Some(&mut callback),
+        )
+    };
+    match refusal {
+        Some(error) => Err(ComponentPropertyAdmissionError::Admission(error)),
+        None => result.map_err(ComponentPropertyAdmissionError::Property),
+    }
+}
+
+fn resolve_component_property_schema_claim_impl<'schema>(
+    schema: &'schema ComponentSchema,
+    version: ComponentSchemaVersion,
+    path: &ComponentPropertyPath,
+    budget: &mut ComponentPropertyReadBudget,
+    mut admission: Option<&mut PropertyAdmission<'_>>,
+) -> Result<ComponentPropertySchemaClaim<'schema>, ComponentPropertyError> {
     if version != schema.version {
         return Err(ComponentPropertyError::VersionMismatch {
             expected: schema.version,
             actual: version,
         });
     }
-    budget.observe(path.logical_bytes()?)?;
-    let field = resolve_root_field(schema, &path.root, Some(&mut *budget))?;
-    let selected = resolve_root_location(field, None, path, Some(budget), None)?;
+    observe_read(
+        &mut Some(&mut *budget),
+        &mut admission,
+        path.logical_bytes()?,
+    )?;
+    let field = resolve_root_field(schema, &path.root, Some(&mut *budget), &mut admission)?;
+    let selected = resolve_root_location(field, None, path, Some(budget), None, admission)?;
     Ok(ComponentPropertySchemaClaim {
         field,
         shape: selected.shape,
@@ -432,7 +493,7 @@ pub fn resolve_component_property_in_root<'schema, 'value>(
     if field.id != path.root {
         return Err(ComponentPropertyError::UnknownRoot(path.root.clone()));
     }
-    let selected = resolve_root_location(field, Some(value), path, Some(budget), None)?;
+    let selected = resolve_root_location(field, Some(value), path, Some(budget), None, None)?;
     Ok(ResolvedComponentProperty {
         shape: selected.shape,
         value: selected
@@ -530,7 +591,7 @@ fn resolve_location<'schema, 'value>(
     validate_component_shape_budget(schema)
         .map_err(|(_, error)| ComponentPropertyError::InvalidSchema(error))?;
     admit_property_value(value, limits)?;
-    let root = resolve_root_field(schema, &path.root, None)?;
+    let root = resolve_root_field(schema, &path.root, None, &mut None)?;
     let current = value
         .get_path(&root.path)
         .map_err(ComponentPropertyError::ValueUnavailable)?;
@@ -540,6 +601,7 @@ fn resolve_location<'schema, 'value>(
         path,
         None,
         Some(root.path.segments().to_vec()),
+        None,
     )?;
     Ok((
         ResolvedComponentProperty {
@@ -566,13 +628,14 @@ fn resolve_root_location<'schema, 'value>(
     path: &ComponentPropertyPath,
     mut budget: Option<&mut ComponentPropertyReadBudget>,
     mut storage: Option<Vec<ComponentFieldPathSegment>>,
+    mut admission: Option<&mut PropertyAdmission<'_>>,
 ) -> Result<PropertyLocation<'schema, 'value>, ComponentPropertyError> {
     let mut shape = &root.shape;
     let mut declaration = Vec::new();
     let mut depth = 0;
     for (step, selector) in path.steps.iter().enumerate() {
         while let ComponentValueShape::Optional { value } = shape {
-            observe_read(&mut budget, 0)?;
+            observe_read(&mut budget, &mut admission, 0)?;
             if matches!(current, Some(ComponentValue::Null)) {
                 return Err(ComponentPropertyError::OptionalAbsent { step });
             }
@@ -582,6 +645,8 @@ fn resolve_root_location<'schema, 'value>(
         advance_declaration_depth(&mut depth)?;
         match selector {
             ComponentPropertyStep::Member(id) => {
+                reserve_declaration(&mut declaration, &mut admission)?;
+                admit_property_work(&mut admission, 0, 0, id.as_str().len())?;
                 declaration.push(ComponentMemberPathSegment::Member(id.clone()));
                 for tombstone in &root.member_tombstones {
                     if budget.is_some() {
@@ -590,7 +655,7 @@ fn resolve_root_location<'schema, 'value>(
                                 ComponentMemberPathSegment::Member(id) => id.as_str().len(),
                                 _ => 0,
                             };
-                            observe_read(&mut budget, bytes)?;
+                            observe_read(&mut budget, &mut admission, bytes)?;
                         }
                     }
                     if declaration.starts_with(tombstone.segments()) {
@@ -606,6 +671,7 @@ fn resolve_root_location<'schema, 'value>(
                 for member in members {
                     observe_read(
                         &mut budget,
+                        &mut admission,
                         member
                             .name
                             .len()
@@ -654,6 +720,7 @@ fn resolve_root_location<'schema, 'value>(
                     for member in members {
                         observe_read(
                             &mut budget,
+                            &mut admission,
                             member.name.len().saturating_add(
                                 member.id.as_ref().map_or(0, |id| id.as_str().len()),
                             ),
@@ -677,6 +744,7 @@ fn resolve_root_location<'schema, 'value>(
                     });
                 }
                 shape = item;
+                reserve_declaration(&mut declaration, &mut admission)?;
                 declaration.push(ComponentMemberPathSegment::ListItem);
                 let Some(value) = current else {
                     continue;
@@ -688,7 +756,7 @@ fn resolve_root_location<'schema, 'value>(
                 };
                 let mut found = None;
                 for (index, value) in items.iter().enumerate() {
-                    observe_read(&mut budget, member.name.len())?;
+                    observe_read(&mut budget, &mut admission, member.name.len())?;
                     let identity = value
                         .get(&member.name)
                         .filter(|value| value.kind() == expected)
@@ -697,7 +765,7 @@ fn resolve_root_location<'schema, 'value>(
                         ComponentValue::String(value) => value.len(),
                         _ => 8,
                     };
-                    observe_read(&mut budget, bytes)?;
+                    observe_read(&mut budget, &mut admission, bytes)?;
                     if key.matches(identity) && found.replace(index).is_some() {
                         return Err(ComponentPropertyError::AmbiguousListItem {
                             step,
@@ -721,7 +789,7 @@ fn resolve_root_location<'schema, 'value>(
                 let ComponentValueShape::Map { value: entry } = shape else {
                     return Err(ComponentPropertyError::ExpectedMap { step });
                 };
-                observe_read(&mut budget, key.len())?;
+                observe_read(&mut budget, &mut admission, key.len())?;
                 current = current
                     .map(|value| {
                         value
@@ -736,6 +804,7 @@ fn resolve_root_location<'schema, 'value>(
                     storage.push(ComponentFieldPathSegment::field(key));
                 }
                 shape = entry;
+                reserve_declaration(&mut declaration, &mut admission)?;
                 declaration.push(ComponentMemberPathSegment::MapEntry);
             }
         }
@@ -757,30 +826,93 @@ fn advance_declaration_depth(depth: &mut usize) -> Result<(), ComponentPropertyE
 
 fn observe_read(
     budget: &mut Option<&mut ComponentPropertyReadBudget>,
+    admission: &mut Option<&mut PropertyAdmission<'_>>,
     bytes: usize,
 ) -> Result<(), ComponentPropertyError> {
-    match budget {
-        Some(budget) => budget.observe(bytes),
-        None => Ok(()),
+    if let Some(admit) = admission.as_deref_mut() {
+        // Validate the shared read ceiling without consuming an observation denied by the
+        // caller. The ordinary path below retains its existing single budget update.
+        let next = budget
+            .as_deref()
+            .map(|budget| {
+                let mut next = *budget;
+                next.observe(bytes)?;
+                Ok::<_, ComponentPropertyError>(next)
+            })
+            .transpose()?;
+        if !admit(1, bytes, 0) {
+            return Err(ComponentPropertyError::ReadBudgetExceeded);
+        }
+        if let (Some(budget), Some(next)) = (budget.as_deref_mut(), next) {
+            *budget = next;
+        }
+        Ok(())
+    } else {
+        match budget {
+            Some(budget) => budget.observe(bytes),
+            None => Ok(()),
+        }
     }
+}
+
+fn admit_property_work(
+    admission: &mut Option<&mut PropertyAdmission<'_>>,
+    nodes: usize,
+    bytes: usize,
+    allocated: usize,
+) -> Result<(), ComponentPropertyError> {
+    if let Some(admit) = admission.as_deref_mut()
+        && !admit(nodes, bytes, allocated)
+    {
+        // The public admission entry point retains the exact caller error outside this
+        // internal carrier. No diagnostic or cloned selector is needed while unwinding.
+        return Err(ComponentPropertyError::ReadBudgetExceeded);
+    }
+    Ok(())
+}
+
+fn reserve_declaration(
+    declaration: &mut Vec<ComponentMemberPathSegment>,
+    admission: &mut Option<&mut PropertyAdmission<'_>>,
+) -> Result<(), ComponentPropertyError> {
+    if admission.is_none() || declaration.len() < declaration.capacity() {
+        return Ok(());
+    }
+    let capacity = declaration
+        .len()
+        .saturating_add(1)
+        .max(declaration.capacity().saturating_mul(2))
+        .max(4);
+    admit_property_work(
+        admission,
+        0,
+        0,
+        capacity.saturating_mul(size_of::<ComponentMemberPathSegment>()),
+    )?;
+    declaration.reserve_exact(capacity - declaration.len());
+    Ok(())
 }
 
 fn resolve_root_field<'schema>(
     schema: &'schema ComponentSchema,
     id: &ComponentFieldId,
     mut budget: Option<&mut ComponentPropertyReadBudget>,
+    admission: &mut Option<&mut PropertyAdmission<'_>>,
 ) -> Result<&'schema ComponentFieldSchema, ComponentPropertyError> {
     for tombstone in &schema.field_tombstones {
-        observe_read(&mut budget, tombstone.as_str().len())?;
+        observe_read(&mut budget, admission, tombstone.as_str().len())?;
         if tombstone == id {
             return Err(ComponentPropertyError::RetiredField(id.clone()));
         }
     }
     for field in &schema.fields {
-        observe_read(&mut budget, field.id.as_str().len())?;
+        observe_read(&mut budget, admission, field.id.as_str().len())?;
         if &field.id == id {
             return Ok(field);
         }
     }
     Err(ComponentPropertyError::UnknownRoot(id.clone()))
 }
+
+#[cfg(test)]
+mod admission_tests;

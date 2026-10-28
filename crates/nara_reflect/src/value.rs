@@ -140,7 +140,7 @@ impl ComponentValue {
     #[must_use]
     pub fn cost(&self) -> ComponentValueCost {
         let mut cost = ComponentValueCost::ZERO;
-        self.cost_up_to_impl(usize::MAX, usize::MAX, &mut cost);
+        self.cost_up_to_impl(usize::MAX, usize::MAX, &mut cost, None);
         cost
     }
 
@@ -157,8 +157,38 @@ impl ComponentValue {
         max_logical_bytes: usize,
     ) -> Option<ComponentValueCost> {
         let mut cost = ComponentValueCost::ZERO;
-        self.cost_up_to_impl(max_nodes, max_logical_bytes, &mut cost)
+        self.cost_up_to_impl(max_nodes, max_logical_bytes, &mut cost, None)
             .then_some(cost)
+    }
+
+    /// Admits canonical cost traversal scratch before each iterator-stack allocation.
+    ///
+    /// The returned cost and early refusal rules match `cost_up_to`. The callback accounts
+    /// complete replacement Vec requests in bytes, independently of retained value ownership.
+    /// No value tree or error path is copied, including when the caller refuses.
+    #[doc(hidden)]
+    pub fn cost_up_to_with_admission<E>(
+        &self,
+        max_nodes: usize,
+        max_logical_bytes: usize,
+        mut admit: impl FnMut(Option<usize>) -> Result<(), E>,
+    ) -> Result<Option<ComponentValueCost>, E> {
+        let mut refusal = None;
+        let mut cost = ComponentValueCost::ZERO;
+        let complete = {
+            let mut callback = |bytes| match admit(bytes) {
+                Ok(()) => true,
+                Err(error) => {
+                    refusal = Some(error);
+                    false
+                }
+            };
+            self.cost_up_to_impl(max_nodes, max_logical_bytes, &mut cost, Some(&mut callback))
+        };
+        match refusal {
+            Some(error) => Err(error),
+            None => Ok(complete.then_some(cost)),
+        }
     }
 
     fn cost_up_to_impl(
@@ -166,6 +196,7 @@ impl ComponentValue {
         max_nodes: usize,
         max_logical_bytes: usize,
         cost: &mut ComponentValueCost,
+        mut admission: Option<&mut dyn FnMut(Option<usize>) -> bool>,
     ) -> bool {
         const PERSISTENT_RUNTIME_ID_BYTES: usize = 16;
 
@@ -211,6 +242,23 @@ impl ComponentValue {
             }
 
             if children != 0 {
+                if let Some(admit) = admission.as_deref_mut()
+                    && pending.len() == pending.capacity()
+                {
+                    let capacity = pending
+                        .len()
+                        .checked_add(1)
+                        .map(|needed| needed.max(pending.capacity().saturating_mul(2)).max(4));
+                    if !admit(capacity.and_then(|capacity| {
+                        capacity.checked_mul(std::mem::size_of::<Frame<'_>>())
+                    })) {
+                        return false;
+                    }
+                    let Some(capacity) = capacity else {
+                        return false;
+                    };
+                    pending.reserve_exact(capacity - pending.len());
+                }
                 match value {
                     Self::List(values) => pending.push(Frame::List(values.iter())),
                     Self::Map(values) => pending.push(Frame::Map(values.iter())),
@@ -608,6 +656,48 @@ mod cost_traversal_tests {
     use super::{ComponentValue, ComponentValueCost};
 
     #[test]
+    fn admitted_cost_preserves_limits_and_refuses_before_each_scratch_growth() {
+        let mut source = ComponentValue::String("leaf".into());
+        for _ in 0..12 {
+            source = ComponentValue::List(vec![source]);
+        }
+        let mut requests = Vec::new();
+        let measured = source
+            .cost_up_to_with_admission(100, 100, |bytes| {
+                requests.push(bytes.unwrap());
+                Ok::<(), std::convert::Infallible>(())
+            })
+            .unwrap();
+        assert_eq!(measured, source.cost_up_to(100, 100));
+        assert!(requests.len() > 1);
+        for denied in 0..requests.len() {
+            let mut calls = 0;
+            let result = source.cost_up_to_with_admission(100, 100, |_| {
+                calls += 1;
+                if calls == denied + 1 {
+                    Err(denied)
+                } else {
+                    Ok(())
+                }
+            });
+            assert_eq!(result, Err(denied));
+            assert_eq!(calls, denied + 1);
+        }
+        for (nodes, bytes) in [(0, 100), (10, 100), (100, 3), (100, 4)] {
+            assert_eq!(
+                source
+                    .cost_up_to_with_admission(
+                        nodes,
+                        bytes,
+                        |_| Ok::<(), std::convert::Infallible>(())
+                    )
+                    .unwrap(),
+                source.cost_up_to(nodes, bytes)
+            );
+        }
+    }
+
+    #[test]
     fn wide_containers_reject_before_visiting_children() {
         let width = 1_024;
         let values = [
@@ -617,9 +707,9 @@ mod cost_traversal_tests {
 
         for value in values {
             let mut visited_cost = ComponentValueCost::ZERO;
-            assert!(!value.cost_up_to_impl(0, usize::MAX, &mut visited_cost));
+            assert!(!value.cost_up_to_impl(0, usize::MAX, &mut visited_cost, None));
             assert_eq!(visited_cost.nodes(), 0);
-            assert!(!value.cost_up_to_impl(width, usize::MAX, &mut visited_cost));
+            assert!(!value.cost_up_to_impl(width, usize::MAX, &mut visited_cost, None));
             assert_eq!(visited_cost.nodes(), 1);
         }
     }
@@ -632,7 +722,7 @@ mod cost_traversal_tests {
             logical_bytes: usize::MAX - 1,
         };
 
-        assert!(value.cost_up_to_impl(usize::MAX, usize::MAX, &mut cost));
+        assert!(value.cost_up_to_impl(usize::MAX, usize::MAX, &mut cost, None));
         assert_eq!(cost.nodes(), usize::MAX);
         assert_eq!(cost.logical_bytes(), usize::MAX);
     }
@@ -645,7 +735,7 @@ mod cost_traversal_tests {
         ]);
 
         let mut visited_cost = ComponentValueCost::ZERO;
-        assert!(!value.cost_up_to_impl(5, usize::MAX, &mut visited_cost));
+        assert!(!value.cost_up_to_impl(5, usize::MAX, &mut visited_cost, None));
         assert_eq!(visited_cost.nodes(), 2);
     }
 
@@ -657,7 +747,7 @@ mod cost_traversal_tests {
         ]);
 
         let mut visited_cost = ComponentValueCost::ZERO;
-        assert!(!value.cost_up_to_impl(usize::MAX, 8, &mut visited_cost));
+        assert!(!value.cost_up_to_impl(usize::MAX, 8, &mut visited_cost, None));
         assert_eq!(visited_cost.nodes(), 2);
     }
 
@@ -669,7 +759,7 @@ mod cost_traversal_tests {
         )]);
 
         let mut visited_cost = ComponentValueCost::ZERO;
-        assert!(!value.cost_up_to_impl(usize::MAX, 8, &mut visited_cost));
+        assert!(!value.cost_up_to_impl(usize::MAX, 8, &mut visited_cost, None));
         assert_eq!(visited_cost.nodes(), 2);
     }
 }

@@ -2778,6 +2778,82 @@ pub fn validate_component_value_with_limits(
     )
 }
 
+/// Keeps a source owner's exact refusal separate from component interpretation errors.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ComponentValueAdmissionError<E> {
+    Value(ComponentCodecError),
+    Admission(E),
+}
+
+impl<E> From<ComponentCodecError> for ComponentValueAdmissionError<E> {
+    fn from(error: ComponentCodecError) -> Self {
+        Self::Value(error)
+    }
+}
+
+type ValueValidationAdmission<'a, E> = dyn FnMut(usize, usize, usize) -> Result<(), E> + 'a;
+
+/// Validates a value against an already admitted schema with source-owned work admission.
+///
+/// Unlike the public boundary, this does not re-admit the schema's aggregate shape budget:
+/// AuthoringSchemaBasis has already done so. Defaults, presence, shape and path coverage still
+/// use the ordinary validators. Deltas cover visited work, logical bytes and modeled allocation
+/// bytes; scratch and potential semantic errors are admitted before their construction. Record
+/// and keyed-list sets use the existing 96-byte logical entry model, not allocator/RSS bounds.
+/// Preflight follows actual container data, stopping at scalar and opaque leaves. It performs no
+/// numeric, presence, asset parsing or key-uniqueness validation of its own.
+pub fn validate_component_value_with_admission<E>(
+    schema: &ComponentSchema,
+    value: &ComponentValue,
+    limits: ComponentValueMaterializationLimits,
+    mut admit: impl FnMut(usize, usize, usize) -> Result<(), E>,
+) -> Result<(), ComponentValueAdmissionError<E>> {
+    let effective = crate::effective::effective_component_value_with_admission(
+        schema, value, limits, &mut admit,
+    )
+    .map_err(|error| match error {
+        crate::effective::EffectiveValueAdmissionError::Value(error) => {
+            ComponentValueAdmissionError::Value(error)
+        }
+        crate::effective::EffectiveValueAdmissionError::Admission(error) => {
+            ComponentValueAdmissionError::Admission(error)
+        }
+    })?;
+    // sort_unstable allocates no scratch beyond the collected offsets. Charge comparison
+    // work against actual declaration lengths before constructing this temporary index.
+    let comparisons = (usize::BITS - schema.fields.len().leading_zeros()) as usize;
+    admit(
+        schema
+            .fields
+            .len()
+            .saturating_mul(comparisons.saturating_add(1))
+            .saturating_add(1),
+        0,
+        schema
+            .fields
+            .len()
+            .saturating_mul(std::mem::size_of::<usize>()),
+    )
+    .map_err(ComponentValueAdmissionError::Admission)?;
+    for field in &schema.fields {
+        admit(
+            1,
+            validation_path_bytes(field.path.segments())
+                .saturating_mul(comparisons.saturating_mul(2).saturating_add(1)),
+            0,
+        )
+        .map_err(ComponentValueAdmissionError::Admission)?;
+    }
+    let index = SchemaPathIndex::from_schema(schema);
+    validate_component_value_coverage_admitted(
+        schema,
+        &index,
+        effective.as_ref(),
+        false,
+        &mut Some(&mut admit),
+    )
+}
+
 fn validate_component_value_coverage(
     schema: &ComponentSchema,
     path_index: &SchemaPathIndex,
@@ -2792,17 +2868,41 @@ fn validate_component_value_coverage_with_presence(
     value: &ComponentValue,
     require_all_fields: bool,
 ) -> Result<(), ComponentCodecError> {
+    match validate_component_value_coverage_admitted::<std::convert::Infallible>(
+        schema,
+        path_index,
+        value,
+        require_all_fields,
+        &mut None,
+    ) {
+        Ok(()) => Ok(()),
+        Err(ComponentValueAdmissionError::Value(error)) => Err(error),
+        Err(ComponentValueAdmissionError::Admission(never)) => match never {},
+    }
+}
+
+fn validate_component_value_coverage_admitted<E>(
+    schema: &ComponentSchema,
+    path_index: &SchemaPathIndex,
+    value: &ComponentValue,
+    require_all_fields: bool,
+    admission: &mut Option<&mut ValueValidationAdmission<'_, E>>,
+) -> Result<(), ComponentValueAdmissionError<E>> {
     if schema.fields.is_empty() && matches!(value, ComponentValue::Map(fields) if fields.is_empty())
     {
         return Ok(());
     }
 
     for field in &schema.fields {
+        if let Some(admit) = admission.as_deref_mut() {
+            preflight_field_validation(field, value, admit)
+                .map_err(ComponentValueAdmissionError::Admission)?;
+        }
         match value.get_path(&field.path) {
             Ok(value) => {
                 if let Err(error) = field.shape.validate_value(value) {
                     if error.kind == ComponentShapeErrorKind::NumericInterval {
-                        return Err(numeric_range_error(&field.id));
+                        return Err(numeric_range_error(&field.id).into());
                     }
                     let path = ComponentFieldPath::new(
                         field
@@ -2815,7 +2915,8 @@ fn validate_component_value_coverage_with_presence(
                     return Err(ComponentCodecError::invalid_field(
                         path.to_string(),
                         error.to_string(),
-                    ));
+                    )
+                    .into());
                 }
             }
             Err(error)
@@ -2829,14 +2930,276 @@ fn validate_component_value_coverage_with_presence(
                     return Err(ComponentCodecError::invalid_field(
                         field.path.to_string(),
                         "a path compatible with the component schema",
-                    ));
+                    )
+                    .into());
                 }
             }
-            Err(_) => return Err(ComponentCodecError::missing_field(field.path.to_string())),
+            Err(_) => return Err(ComponentCodecError::missing_field(field.path.to_string()).into()),
         }
     }
 
-    validate_value_node_coverage(schema, path_index, value, &mut Vec::new())
+    validate_value_node_coverage(schema, path_index, value, &mut Vec::new(), admission)
+}
+
+const VALIDATION_BTREE_ENTRY_BYTES: usize = 96;
+const VALIDATION_PATH_PUSH_BYTES: usize = 8 * std::mem::size_of::<ComponentFieldPathSegment>();
+
+fn validation_path_bytes(path: &[ComponentFieldPathSegment]) -> usize {
+    path.iter().fold(0usize, |bytes, segment| {
+        bytes.saturating_add(match segment {
+            ComponentFieldPathSegment::Field(name) => name.len(),
+            ComponentFieldPathSegment::Index(_) => std::mem::size_of::<u32>(),
+        })
+    })
+}
+
+/// A data-dependent envelope for the one possible semantic error from a field. No error is
+/// constructed here. Debug string escaping needs at most ten bytes per source byte; four times
+/// the output length covers modeled String growth, including discarded earlier buffers.
+#[derive(Default)]
+struct FieldValidationErrorScratch {
+    segments: usize,
+    path_bytes: usize,
+    payload_bytes: usize,
+}
+
+impl FieldValidationErrorScratch {
+    fn path(&mut self, segments: usize, bytes: usize) {
+        self.segments = self.segments.max(segments);
+        self.path_bytes = self.path_bytes.max(bytes);
+    }
+
+    fn allocation_bytes(&self) -> usize {
+        let path = self.path_bytes.saturating_add(
+            self.segments
+                .saturating_mul(std::mem::size_of::<ComponentFieldPathSegment>()),
+        );
+        let displayed = self
+            .path_bytes
+            .saturating_add(self.segments.saturating_mul(12))
+            .saturating_add(6);
+        path.saturating_mul(2)
+            .saturating_add(self.payload_bytes)
+            .saturating_add(
+                displayed
+                    .saturating_mul(2)
+                    .saturating_add(self.payload_bytes.saturating_mul(10))
+                    .saturating_add(256)
+                    .saturating_mul(4),
+            )
+    }
+}
+
+fn preflight_field_validation<E>(
+    field: &ComponentFieldSchema,
+    value: &ComponentValue,
+    admit: &mut ValueValidationAdmission<'_, E>,
+) -> Result<(), E> {
+    let mut current = Some(value);
+    let mut prefix_bytes = 0usize;
+    let mut scratch = FieldValidationErrorScratch::default();
+    // get_path constructs child_path at every step, including successful lookups, and keeps
+    // a separately cloned visited path. Bound both before the original lookup is called.
+    for (offset, segment) in field.path.segments().iter().enumerate() {
+        let bytes = match segment {
+            ComponentFieldPathSegment::Field(name) => name.len(),
+            ComponentFieldPathSegment::Index(_) => 4,
+        };
+        prefix_bytes = prefix_bytes.saturating_add(bytes);
+        let owned = prefix_bytes.saturating_add(
+            (offset + 1).saturating_mul(std::mem::size_of::<ComponentFieldPathSegment>()),
+        );
+        admit(
+            1,
+            prefix_bytes,
+            owned
+                .saturating_mul(2)
+                .saturating_add(VALIDATION_PATH_PUSH_BYTES)
+                .saturating_add(bytes),
+        )?;
+        current = current.and_then(|value| match (segment, value) {
+            (ComponentFieldPathSegment::Field(name), ComponentValue::Map(fields)) => {
+                fields.get(name)
+            }
+            (ComponentFieldPathSegment::Index(index), ComponentValue::List(values)) => {
+                usize::try_from(*index)
+                    .ok()
+                    .and_then(|index| values.get(index))
+            }
+            _ => None,
+        });
+        if current.is_none() {
+            break;
+        }
+    }
+    let segments = field.path.segments().len();
+    let bytes = validation_path_bytes(field.path.segments());
+    scratch.path(segments, bytes);
+    scratch.payload_bytes = field.id.as_str().len();
+    if let Some(value) = current {
+        // validate_value first validates its shape declaration, even for opaque values.
+        preflight_validation_shape(&field.shape, segments, bytes, &mut scratch, admit)?;
+        preflight_validation_value(&field.shape, value, segments, bytes, &mut scratch, admit)?;
+    }
+    admit(0, 0, scratch.allocation_bytes())
+}
+
+fn preflight_validation_shape<E>(
+    shape: &crate::ComponentValueShape,
+    segments: usize,
+    bytes: usize,
+    scratch: &mut FieldValidationErrorScratch,
+    admit: &mut ValueValidationAdmission<'_, E>,
+) -> Result<(), E> {
+    use crate::ComponentValueShape as Shape;
+    admit(1, 0, 0)?;
+    scratch.path(segments, bytes);
+    match shape {
+        Shape::Record { members } => {
+            for member in members {
+                let id_bytes = member.id.as_ref().map_or(0, |id| id.as_str().len());
+                admit(
+                    1,
+                    member.name.len().saturating_add(id_bytes),
+                    VALIDATION_BTREE_ENTRY_BYTES
+                        .saturating_mul(1 + usize::from(member.id.is_some()))
+                        .saturating_add(VALIDATION_PATH_PUSH_BYTES)
+                        .saturating_add(member.name.len()),
+                )?;
+                scratch.payload_bytes = scratch.payload_bytes.max(member.name.len()).max(id_bytes);
+                preflight_validation_shape(
+                    &member.shape,
+                    segments + 1,
+                    bytes.saturating_add(member.name.len()),
+                    scratch,
+                    admit,
+                )?;
+            }
+        }
+        Shape::List { item } | Shape::KeyedList { item, .. } => {
+            if let Shape::KeyedList { key, .. } = shape {
+                admit(1, key.as_str().len(), 0)?;
+            }
+            preflight_validation_shape(item, segments, bytes, scratch, admit)?;
+        }
+        Shape::Map { value } | Shape::Optional { value } => {
+            preflight_validation_shape(value, segments, bytes, scratch, admit)?
+        }
+        _ => {}
+    }
+    Ok(())
+}
+
+fn preflight_validation_value<E>(
+    shape: &crate::ComponentValueShape,
+    value: &ComponentValue,
+    segments: usize,
+    bytes: usize,
+    scratch: &mut FieldValidationErrorScratch,
+    admit: &mut ValueValidationAdmission<'_, E>,
+) -> Result<(), E> {
+    use crate::ComponentValueShape as Shape;
+    admit(1, 0, 0)?;
+    scratch.path(segments, bytes);
+    match (shape, value) {
+        (Shape::Optional { .. }, ComponentValue::Null) => {}
+        (Shape::Optional { value: shape }, value) => {
+            preflight_validation_value(shape, value, segments, bytes, scratch, admit)?
+        }
+        (Shape::Record { members }, ComponentValue::Map(values)) => {
+            admit(
+                members.len(),
+                0,
+                members.len().saturating_mul(VALIDATION_BTREE_ENTRY_BYTES),
+            )?;
+            for member in members {
+                if let Some(value) = values.get(&member.name) {
+                    admit(
+                        1,
+                        member.name.len(),
+                        VALIDATION_PATH_PUSH_BYTES.saturating_add(member.name.len()),
+                    )?;
+                    preflight_validation_value(
+                        &member.shape,
+                        value,
+                        segments + 1,
+                        bytes.saturating_add(member.name.len()),
+                        scratch,
+                        admit,
+                    )?;
+                }
+            }
+            for name in values.keys() {
+                admit(1, name.len(), 0)?;
+                scratch.payload_bytes = scratch.payload_bytes.max(name.len());
+            }
+        }
+        (Shape::List { item } | Shape::KeyedList { item, .. }, ComponentValue::List(values)) => {
+            // This only locates the admitted key declaration to account for owned key strings.
+            // The original shape validator remains responsible for key validity and uniqueness.
+            let key_member = match (shape, item.as_ref()) {
+                (Shape::KeyedList { key, .. }, Shape::Record { members }) => {
+                    admit(members.len(), key.as_str().len(), 0)?;
+                    members
+                        .iter()
+                        .find(|member| member.id.as_ref() == Some(key))
+                }
+                _ => None,
+            };
+            for value in values {
+                admit(1, 4, VALIDATION_PATH_PUSH_BYTES)?;
+                preflight_validation_value(
+                    item,
+                    value,
+                    segments + 1,
+                    bytes.saturating_add(4),
+                    scratch,
+                    admit,
+                )?;
+                if let Some(member) = key_member {
+                    let key_bytes = match value.get(&member.name) {
+                        Some(ComponentValue::String(key)) => key.len(),
+                        _ => 0,
+                    };
+                    admit(
+                        1,
+                        key_bytes,
+                        VALIDATION_BTREE_ENTRY_BYTES.saturating_add(key_bytes.saturating_mul(2)),
+                    )?;
+                    scratch.payload_bytes = scratch.payload_bytes.max(key_bytes);
+                }
+            }
+        }
+        (Shape::Map { value: shape }, ComponentValue::Map(values)) => {
+            for (name, value) in values {
+                admit(
+                    1,
+                    name.len(),
+                    VALIDATION_PATH_PUSH_BYTES.saturating_add(name.len()),
+                )?;
+                preflight_validation_value(
+                    shape,
+                    value,
+                    segments + 1,
+                    bytes.saturating_add(name.len()),
+                    scratch,
+                    admit,
+                )?;
+            }
+        }
+        (Shape::AssetRef, ComponentValue::Map(values)) => {
+            // is_asset_reference_value parses an owned AssetPath, or owns rejected UUID text.
+            if let Some(ComponentValue::String(payload)) = values.get("value") {
+                let kind_bytes = match values.get("kind") {
+                    Some(ComponentValue::String(kind)) => kind.len(),
+                    _ => 0,
+                };
+                admit(1, kind_bytes.saturating_add(payload.len()), payload.len())?;
+            }
+        }
+        _ => {}
+    }
+    Ok(())
 }
 
 pub(crate) fn numeric_range_error(field: &ComponentFieldId) -> ComponentCodecError {
@@ -2851,45 +3214,65 @@ pub(crate) fn numeric_range_error(field: &ComponentFieldId) -> ComponentCodecErr
     )
 }
 
-fn validate_value_node_coverage(
+fn validate_value_node_coverage<E>(
     schema: &ComponentSchema,
     path_index: &SchemaPathIndex,
     value: &ComponentValue,
     path: &mut Vec<ComponentFieldPathSegment>,
-) -> Result<(), ComponentCodecError> {
+    admission: &mut Option<&mut ValueValidationAdmission<'_, E>>,
+) -> Result<(), ComponentValueAdmissionError<E>> {
+    if let Some(admit) = admission.as_deref_mut() {
+        let comparisons = (usize::BITS - schema.fields.len().leading_zeros()) as usize;
+        admit(
+            1,
+            validation_path_bytes(path).saturating_mul(comparisons.saturating_add(1)),
+            0,
+        )
+        .map_err(ComponentValueAdmissionError::Admission)?;
+    }
     if path.len() > MAX_SHAPE_DEPTH {
+        if let Some(admit) = admission.as_deref_mut() {
+            admit(0, 0, 128).map_err(ComponentValueAdmissionError::Admission)?;
+        }
         return Err(ComponentCodecError::Message(
             "component value coverage exceeds the schema path depth limit".to_owned(),
-        ));
+        )
+        .into());
     }
     let relation = path_index.relation(schema, path);
     if relation == SchemaPathRelation::Exact {
         return Ok(());
     }
     if path.len() == MAX_SHAPE_DEPTH {
-        return Err(component_value_not_declared_error(
-            &ComponentFieldPath::new(path.iter().cloned()),
-        ));
+        admit_coverage_error(path, admission)?;
+        return Err(component_value_not_declared_error(&ComponentFieldPath::new(
+            path.iter().cloned(),
+        ))
+        .into());
     }
 
     match value {
         ComponentValue::Map(fields) if !fields.is_empty() => {
             for (key, value) in fields {
+                admit_coverage_push(path, key.len(), admission)?;
                 path.push(ComponentFieldPathSegment::field(key));
-                validate_value_node_coverage(schema, path_index, value, path)?;
+                validate_value_node_coverage(schema, path_index, value, path, admission)?;
                 path.pop();
             }
             Ok(())
         }
         ComponentValue::List(values) if !values.is_empty() => {
             for (index, value) in values.iter().enumerate() {
-                let index = u32::try_from(index).map_err(|_| {
-                    component_value_not_declared_error(&ComponentFieldPath::new(
+                let Ok(index) = u32::try_from(index) else {
+                    admit_coverage_error(path, admission)?;
+                    return Err(component_value_not_declared_error(&ComponentFieldPath::new(
                         path.iter().cloned(),
                     ))
-                })?;
+                    .into());
+                };
+                admit_coverage_push(path, 0, admission)?;
                 path.push(ComponentFieldPathSegment::index(index));
-                validate_value_node_coverage(schema, path_index, value, path)?;
+                validate_value_node_coverage(schema, path_index, value, path, admission)?;
                 path.pop();
             }
             Ok(())
@@ -2899,10 +3282,59 @@ fn validate_value_node_coverage(
         {
             Ok(())
         }
-        _ => Err(component_value_not_declared_error(
-            &ComponentFieldPath::new(path.iter().cloned()),
-        )),
+        _ => {
+            admit_coverage_error(path, admission)?;
+            Err(
+                component_value_not_declared_error(&ComponentFieldPath::new(path.iter().cloned()))
+                    .into(),
+            )
+        }
     }
+}
+
+fn admit_coverage_push<E>(
+    path: &mut Vec<ComponentFieldPathSegment>,
+    name_bytes: usize,
+    admission: &mut Option<&mut ValueValidationAdmission<'_, E>>,
+) -> Result<(), ComponentValueAdmissionError<E>> {
+    if let Some(admit) = admission.as_deref_mut() {
+        let capacity = if path.len() == path.capacity() {
+            path.capacity().saturating_mul(2).max(4)
+        } else {
+            0
+        };
+        admit(
+            0,
+            name_bytes,
+            capacity
+                .saturating_mul(std::mem::size_of::<ComponentFieldPathSegment>())
+                .saturating_add(name_bytes),
+        )
+        .map_err(ComponentValueAdmissionError::Admission)?;
+        if capacity > 0 {
+            path.reserve_exact(capacity - path.len());
+        }
+    }
+    Ok(())
+}
+
+fn admit_coverage_error<E>(
+    path: &[ComponentFieldPathSegment],
+    admission: &mut Option<&mut ValueValidationAdmission<'_, E>>,
+) -> Result<(), ComponentValueAdmissionError<E>> {
+    if let Some(admit) = admission.as_deref_mut() {
+        let bytes = validation_path_bytes(path);
+        let owned = bytes.saturating_add(
+            path.len()
+                .saturating_mul(std::mem::size_of::<ComponentFieldPathSegment>()),
+        );
+        let displayed = bytes
+            .saturating_add(path.len().saturating_mul(12))
+            .saturating_add(64);
+        admit(0, 0, owned.saturating_add(displayed.saturating_mul(4)))
+            .map_err(ComponentValueAdmissionError::Admission)?;
+    }
+    Ok(())
 }
 
 fn component_value_not_declared_error(path: &ComponentFieldPath) -> ComponentCodecError {
@@ -2989,6 +3421,357 @@ fn build_schema_path_indexes(catalog: &ComponentSchemaCatalog) -> PathIndexes {
         .iter()
         .map(|schema| (schema.id.clone(), SchemaPathIndex::from_schema(schema)))
         .collect()
+}
+
+#[cfg(test)]
+mod value_validation_admission_tests {
+    use super::*;
+    use crate::{ComponentShapeMember, ComponentValueShape};
+
+    fn schema(shape: impl Into<ComponentValueShape>) -> ComponentSchema {
+        ComponentSchema::new(
+            ComponentTypeId::new("test.AdmittedValue"),
+            "Admitted value",
+            ComponentSchemaVersion::ONE,
+        )
+        .with_fields([ComponentFieldSchema::required(
+            ComponentFieldId::new("root"),
+            "Root",
+            ComponentFieldPath::from_fields(["root"]),
+            shape,
+        )])
+    }
+
+    fn root(value: ComponentValue) -> ComponentValue {
+        ComponentValue::map([("root".to_owned(), value)])
+    }
+
+    fn assert_equivalent(schema: &ComponentSchema, value: &ComponentValue) {
+        let limits = ComponentValueMaterializationLimits::default();
+        let expected = validate_component_value_with_limits(schema, value, limits);
+        let actual = validate_component_value_with_admission(schema, value, limits, |_, _, _| {
+            Ok::<(), ()>(())
+        });
+        assert_eq!(
+            actual,
+            expected.map_err(ComponentValueAdmissionError::Value)
+        );
+    }
+
+    #[test]
+    fn admission_preserves_presence_shape_numeric_and_coverage_errors() {
+        let numeric = schema(
+            ComponentValueShape::scalar(ComponentValueKind::U64)
+                .with_numeric_domain(ComponentNumericDomain::U8),
+        );
+        for value in [
+            ComponentValue::Map(BTreeMap::new()),
+            root(ComponentValue::U64(7)),
+            root(ComponentValue::U64(256)),
+            root(ComponentValue::Bool(false)),
+            ComponentValue::map([
+                ("root".to_owned(), ComponentValue::U64(7)),
+                ("undeclared".to_owned(), ComponentValue::Null),
+            ]),
+        ] {
+            assert_equivalent(&numeric, &value);
+        }
+        let record = schema(ComponentValueShape::record([(
+            "member".to_owned(),
+            ComponentValueShape::scalar(ComponentValueKind::Bool),
+        )]));
+        for value in [
+            root(ComponentValue::Map(BTreeMap::new())),
+            root(ComponentValue::map([(
+                "member".to_owned(),
+                ComponentValue::U64(1),
+            )])),
+            root(ComponentValue::map([
+                ("member".to_owned(), ComponentValue::Bool(true)),
+                ("undeclared\n\"".to_owned(), ComponentValue::Null),
+            ])),
+        ] {
+            assert_equivalent(&record, &value);
+        }
+    }
+
+    #[test]
+    fn admission_preserves_optional_path_incompatibility_and_default_validation() {
+        let optional = ComponentSchema::new(
+            ComponentTypeId::new("test.OptionalPath"),
+            "Optional path",
+            ComponentSchemaVersion::ONE,
+        )
+        .with_fields([ComponentFieldSchema::optional(
+            ComponentFieldId::new("nested"),
+            "Nested",
+            ComponentFieldPath::from_fields(["root", "nested"]),
+            ComponentValueKind::Bool,
+        )]);
+        assert_equivalent(&optional, &root(ComponentValue::U64(1)));
+        assert_equivalent(&optional, &ComponentValue::Map(BTreeMap::new()));
+
+        let defaulted = ComponentSchema::new(
+            ComponentTypeId::new("test.DefaultedValue"),
+            "Defaulted value",
+            ComponentSchemaVersion::ONE,
+        )
+        .with_fields([ComponentFieldSchema::optional_with_default(
+            ComponentFieldId::new("root"),
+            "Root",
+            ComponentFieldPath::from_fields(["root"]),
+            ComponentValueKind::U64,
+            ComponentValue::U64(5),
+        )]);
+        assert_equivalent(&defaulted, &ComponentValue::Map(BTreeMap::new()));
+        assert_equivalent(&defaulted, &root(ComponentValue::Bool(false)));
+    }
+
+    #[test]
+    fn numeric_interval_rejection_keeps_the_exact_domain_error() {
+        let schema = schema(
+            ComponentValueShape::scalar(ComponentValueKind::U64).with_numeric_interval(
+                crate::ComponentNumericInterval::U64 {
+                    min: None,
+                    max: Some(crate::ComponentNumericBound::Included(3)),
+                },
+            ),
+        );
+        let value = root(ComponentValue::U64(4));
+        let result = validate_component_value_with_admission(
+            &schema,
+            &value,
+            ComponentValueMaterializationLimits::default(),
+            |_, _, _| Ok::<(), ()>(()),
+        );
+        assert_eq!(
+            result,
+            Err(ComponentValueAdmissionError::Value(numeric_range_error(
+                &ComponentFieldId::new("root")
+            ),))
+        );
+        assert_equivalent(&schema, &value);
+    }
+
+    #[test]
+    fn default_expansion_retains_the_callers_explicit_limits() {
+        let mut schema = schema(ComponentValueKind::U64);
+        schema.fields[0].default_value = Some(ComponentValue::U64(1));
+        let limits = ComponentValueMaterializationLimits::new(
+            nara_core::ItemLimit::new(1).unwrap(),
+            nara_core::ByteLimit::new(1024).unwrap(),
+            nara_core::DepthLimit::new(64).unwrap(),
+        );
+        let value = ComponentValue::Map(BTreeMap::new());
+        let expected = validate_component_value_with_limits(&schema, &value, limits);
+        assert!(matches!(
+            expected,
+            Err(ComponentCodecError::MaterializationNodeLimit { .. })
+        ));
+        assert_eq!(
+            validate_component_value_with_admission(
+                &schema,
+                &value,
+                limits,
+                |_, _, _| Ok::<(), ()>(())
+            ),
+            expected.map_err(ComponentValueAdmissionError::Value)
+        );
+    }
+
+    fn keyed_fixture() -> (ComponentSchema, ComponentValue) {
+        let key = ComponentFieldId::new("stable-key");
+        let schema = schema(ComponentValueShape::keyed_list(
+            ComponentValueShape::record_members([
+                ComponentShapeMember::new("key", ComponentValueKind::String).with_id(key.clone()),
+                ComponentShapeMember::new("value", ComponentValueKind::U64),
+            ]),
+            key,
+        ));
+        let values = (0..3)
+            .map(|index| {
+                ComponentValue::map([
+                    (
+                        "key".to_owned(),
+                        ComponentValue::String(format!("key-{index}")),
+                    ),
+                    ("value".to_owned(), ComponentValue::U64(index)),
+                ])
+            })
+            .collect();
+        (schema, root(ComponentValue::List(values)))
+    }
+
+    #[test]
+    fn keyed_list_semantic_error_matches_the_original_validator() {
+        let (schema, _) = keyed_fixture();
+        let entry = ComponentValue::map([
+            (
+                "key".to_owned(),
+                ComponentValue::String("duplicate\n\"\\".repeat(1024)),
+            ),
+            ("value".to_owned(), ComponentValue::U64(1)),
+        ]);
+        let value = root(ComponentValue::List(vec![entry.clone(), entry]));
+        assert_equivalent(&schema, &value);
+        assert!(validate_component_value(&schema, &value).is_err());
+    }
+
+    #[test]
+    fn every_admission_boundary_preserves_the_exact_nonclone_refusal() {
+        let (schema, value) = keyed_fixture();
+        let limits = ComponentValueMaterializationLimits::default();
+        let mut boundaries = 0;
+        validate_component_value_with_admission(&schema, &value, limits, |_, _, _| {
+            boundaries += 1;
+            Ok::<(), ()>(())
+        })
+        .unwrap();
+        for stop in 1..=boundaries {
+            let mut calls = 0;
+            let token = Box::new(stop);
+            let identity = std::ptr::from_ref(token.as_ref());
+            let mut token = Some(token);
+            let result =
+                validate_component_value_with_admission(&schema, &value, limits, |_, _, _| {
+                    calls += 1;
+                    if calls == stop {
+                        Err(token.take().unwrap())
+                    } else {
+                        Ok(())
+                    }
+                });
+            let Err(ComponentValueAdmissionError::Admission(returned)) = result else {
+                panic!("expected exact admission refusal at callback {stop}");
+            };
+            assert_eq!(std::ptr::from_ref(returned.as_ref()), identity);
+            assert_eq!(calls, stop);
+        }
+        assert_equivalent(&schema, &value);
+    }
+
+    #[test]
+    fn refusal_precedes_shape_and_coverage_semantic_error_construction() {
+        let schema = schema(ComponentValueKind::Bool);
+        for value in [
+            root(ComponentValue::U64(1)),
+            ComponentValue::Map(BTreeMap::new()),
+            ComponentValue::map([
+                ("root".to_owned(), ComponentValue::Bool(true)),
+                ("undeclared".repeat(1024), ComponentValue::Null),
+            ]),
+        ] {
+            let mut boundaries = 0;
+            let result = validate_component_value_with_admission(
+                &schema,
+                &value,
+                ComponentValueMaterializationLimits::default(),
+                |_, _, _| {
+                    boundaries += 1;
+                    Ok::<(), usize>(())
+                },
+            );
+            assert!(matches!(
+                result,
+                Err(ComponentValueAdmissionError::Value(_))
+            ));
+            let mut calls = 0;
+            let result = validate_component_value_with_admission(
+                &schema,
+                &value,
+                ComponentValueMaterializationLimits::default(),
+                |_, _, _| {
+                    calls += 1;
+                    if calls == boundaries {
+                        Err(boundaries)
+                    } else {
+                        Ok(())
+                    }
+                },
+            );
+            assert_eq!(
+                result,
+                Err(ComponentValueAdmissionError::Admission(boundaries))
+            );
+            assert_eq!(calls, boundaries);
+        }
+    }
+
+    #[test]
+    fn values_without_references_still_charge_each_list_item() {
+        let schema = schema(ComponentValueShape::list(ComponentValueShape::scalar(
+            ComponentValueKind::Bool,
+        )));
+        let measure = |length| {
+            let mut nodes = 0;
+            let value = root(ComponentValue::List(vec![
+                ComponentValue::Bool(true);
+                length
+            ]));
+            validate_component_value_with_admission(
+                &schema,
+                &value,
+                ComponentValueMaterializationLimits::default(),
+                |visited, _, _| {
+                    nodes += visited;
+                    Ok::<(), ()>(())
+                },
+            )
+            .unwrap();
+            nodes
+        };
+        assert!(measure(128) >= measure(0) + 128);
+    }
+
+    #[test]
+    fn opaque_payload_is_not_scanned_or_charged_as_a_configured_worst_case() {
+        let schema = schema(ComponentValueShape::opaque(ComponentValueKind::List));
+        let measure = |length| {
+            let value = root(ComponentValue::List(vec![ComponentValue::Null; length]));
+            let mut cost = (0, 0, 0);
+            validate_component_value_with_admission(
+                &schema,
+                &value,
+                ComponentValueMaterializationLimits::default(),
+                |nodes, bytes, allocated| {
+                    cost.0 += nodes;
+                    cost.1 += bytes;
+                    cost.2 += allocated;
+                    Ok::<(), ()>(())
+                },
+            )
+            .unwrap();
+            cost
+        };
+        assert_eq!(measure(0), measure(16_384));
+    }
+
+    #[test]
+    fn asset_validation_parsing_scratch_is_admitted_from_actual_payload_length() {
+        let schema = schema(ComponentValueShape::AssetRef);
+        let measure = |length| {
+            let value = root(ComponentValue::map([
+                ("kind".to_owned(), ComponentValue::String("path".to_owned())),
+                (
+                    "value".to_owned(),
+                    ComponentValue::String("a".repeat(length)),
+                ),
+            ]));
+            let mut allocation = 0;
+            validate_component_value_with_admission(
+                &schema,
+                &value,
+                ComponentValueMaterializationLimits::default(),
+                |_, _, bytes| {
+                    allocation += bytes;
+                    Ok::<(), ()>(())
+                },
+            )
+            .unwrap();
+            allocation
+        };
+        assert!(measure(4096) >= measure(8) + 4088);
+    }
 }
 
 #[cfg(test)]

@@ -119,8 +119,13 @@ pub mod __macro_support {
 pub mod __private {
     pub use crate::asset_reference::{
         AssetReferenceCollectionError, collect_declared_effective_asset_references_with_admission,
+        collect_declared_field_asset_references_with_admission,
+        collect_declared_value_asset_references_with_admission,
     };
-    pub use crate::effective::effective_component_value_with_budget;
+    pub use crate::effective::{
+        EffectiveValueAdmissionError, effective_component_value_with_admission,
+        effective_component_value_with_budget,
+    };
     pub use crate::entity_reference::{
         DeclaredEntityReferencePlan, EntityReferencePlanError, plan_declared_entity_references,
         plan_declared_entity_references_with_admission, plan_declared_value_entity_references,
@@ -131,11 +136,17 @@ pub mod __private {
         validate_persistent_apply_support_topology, validate_persistent_export_coverage,
         validate_registered_persistent_apply_targets,
     };
+    pub use crate::property::{
+        ComponentPropertyAdmissionError, resolve_component_property_schema_claim_with_admission,
+    };
     pub use crate::provider::{
         ComponentSchemaOwnerRecord, ResolvedComponentSchemaProvider,
         scene_component_composition_fingerprint,
     };
-    pub use crate::registry::{ComponentRegistrySnapshotWitness, validate_schema_capabilities};
+    pub use crate::registry::{
+        ComponentRegistrySnapshotWitness, ComponentValueAdmissionError,
+        validate_component_value_with_admission, validate_schema_capabilities,
+    };
 
     use crate::{
         ComponentRegistry, ComponentRegistryError, ComponentRegistrySnapshot,

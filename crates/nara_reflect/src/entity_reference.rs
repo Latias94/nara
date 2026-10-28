@@ -575,37 +575,52 @@ pub(crate) fn collect_present_field_reference_leaves<'schema, 'value, R>(
     limits: EntityReferenceTraversalLimits,
     reference_kind: ComponentValueKind,
 ) -> Result<Vec<PresentReferenceLeaf<'schema, 'value>>, ComponentEntityReferenceRewriteError<R>> {
-    without_admission((|| {
-        let mut callback = |_, _, _| Ok::<(), std::convert::Infallible>(());
-        let mut admission = ReferenceAdmission {
-            callback: &mut callback,
-            maximum_bytes: limits.bytes().get(),
-        };
-        let _ = find_undeclared_reference_path(
-            value,
-            limits,
-            &BTreeSet::new(),
-            0,
-            0,
-            field.path(),
-            &mut admission,
-        )?;
-        let mut traversal =
-            PresentReferenceTraversal::new(limits, reference_kind, false, admission);
-        traversal.visit_field(field, value)?;
-        if let Some(path) = find_undeclared_reference_path(
-            value,
-            limits,
-            &traversal.entity_paths,
-            traversal.result_nodes,
-            traversal.result_bytes,
-            field.path(),
-            &mut traversal.admission,
-        )? {
-            return Err(ComponentEntityReferenceRewriteError::UndeclaredReference { path }.into());
-        }
-        Ok(traversal.references)
-    })())
+    without_admission(collect_present_field_reference_leaves_with_admission(
+        field,
+        value,
+        limits,
+        reference_kind,
+        false,
+        &mut |_, _, _| Ok::<(), std::convert::Infallible>(()),
+    ))
+}
+
+pub(crate) fn collect_present_field_reference_leaves_with_admission<'schema, 'value, R, E>(
+    field: &'schema ComponentFieldSchema,
+    value: &'value ComponentValue,
+    limits: EntityReferenceTraversalLimits,
+    reference_kind: ComponentValueKind,
+    admitted_schema: bool,
+    callback: &mut dyn FnMut(usize, usize, usize) -> Result<(), E>,
+) -> Result<Vec<PresentReferenceLeaf<'schema, 'value>>, ReferenceTraversalError<R, E>> {
+    let mut admission = ReferenceAdmission {
+        callback,
+        maximum_bytes: limits.bytes().get(),
+    };
+    let _ = find_undeclared_reference_path(
+        value,
+        limits,
+        &BTreeSet::new(),
+        0,
+        0,
+        field.path(),
+        &mut admission,
+    )?;
+    let mut traversal =
+        PresentReferenceTraversal::new(limits, reference_kind, admitted_schema, admission);
+    traversal.visit_field(field, value)?;
+    if let Some(path) = find_undeclared_reference_path(
+        value,
+        limits,
+        &traversal.entity_paths,
+        traversal.result_nodes,
+        traversal.result_bytes,
+        field.path(),
+        &mut traversal.admission,
+    )? {
+        return Err(ComponentEntityReferenceRewriteError::UndeclaredReference { path }.into());
+    }
+    Ok(traversal.references)
 }
 
 /// Traverses an already selected payload without rebasing it onto component storage.
@@ -616,38 +631,56 @@ pub(crate) fn collect_present_value_reference_leaves<'schema, 'value, R>(
     limits: EntityReferenceTraversalLimits,
     reference_kind: ComponentValueKind,
 ) -> Result<Vec<PresentReferenceLeaf<'schema, 'value>>, ComponentEntityReferenceRewriteError<R>> {
-    without_admission((|| {
-        let mut callback = |_, _, _| Ok::<(), std::convert::Infallible>(());
-        let mut admission = ReferenceAdmission {
-            callback: &mut callback,
-            maximum_bytes: limits.bytes().get(),
-        };
-        let root = ComponentFieldPath::empty();
-        let _ = find_undeclared_reference_path(
-            value,
-            limits,
-            &BTreeSet::new(),
-            0,
-            0,
-            &root,
-            &mut admission,
-        )?;
-        let mut traversal =
-            PresentReferenceTraversal::new(limits, reference_kind, false, admission);
-        traversal.visit_field_shape(field, shape, value, &root)?;
-        if let Some(path) = find_undeclared_reference_path(
-            value,
-            limits,
-            &traversal.entity_paths,
-            traversal.result_nodes,
-            traversal.result_bytes,
-            &root,
-            &mut traversal.admission,
-        )? {
-            return Err(ComponentEntityReferenceRewriteError::UndeclaredReference { path }.into());
-        }
-        Ok(traversal.references)
-    })())
+    without_admission(collect_present_value_reference_leaves_with_admission(
+        field,
+        shape,
+        value,
+        limits,
+        reference_kind,
+        false,
+        &mut |_, _, _| Ok::<(), std::convert::Infallible>(()),
+    ))
+}
+
+/// Borrows the selected shape and shares the ordinary payload walker's allocation boundaries.
+pub(crate) fn collect_present_value_reference_leaves_with_admission<'schema, 'value, R, E>(
+    field: &'schema ComponentFieldSchema,
+    shape: &ComponentValueShape,
+    value: &'value ComponentValue,
+    limits: EntityReferenceTraversalLimits,
+    reference_kind: ComponentValueKind,
+    admitted_schema: bool,
+    callback: &mut dyn FnMut(usize, usize, usize) -> Result<(), E>,
+) -> Result<Vec<PresentReferenceLeaf<'schema, 'value>>, ReferenceTraversalError<R, E>> {
+    let mut admission = ReferenceAdmission {
+        callback,
+        maximum_bytes: limits.bytes().get(),
+    };
+    let root = ComponentFieldPath::empty();
+    let _ = find_undeclared_reference_path(
+        value,
+        limits,
+        &BTreeSet::new(),
+        0,
+        0,
+        &root,
+        &mut admission,
+    )?;
+    let mut traversal =
+        PresentReferenceTraversal::new(limits, reference_kind, admitted_schema, admission);
+    traversal.visit_field_shape(field, shape, value, &root)?;
+    if let Some(path) = find_undeclared_reference_path(
+        value,
+        limits,
+        &traversal.entity_paths,
+        traversal.result_nodes,
+        traversal.result_bytes,
+        &root,
+        &mut traversal.admission,
+    )? {
+        return Err(ComponentEntityReferenceRewriteError::UndeclaredReference { path }.into());
+    }
+    Ok(traversal.references)
 }
 
 fn path_depth(path: &ComponentFieldPath) -> usize {

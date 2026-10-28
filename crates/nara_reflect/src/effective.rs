@@ -1,6 +1,6 @@
 //! Temporary default materialization for admitted component schemas.
 
-use std::{borrow::Cow, collections::BTreeMap};
+use std::{borrow::Cow, collections::BTreeMap, convert::Infallible, mem::size_of};
 
 use nara_core::{ByteLimit, DepthLimit, ItemLimit};
 
@@ -78,6 +78,65 @@ pub fn effective_component_value<'value>(
     Ok(Cow::Owned(effective))
 }
 
+/// Separates interpretation failure from the owning caller's preparation allowance.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum EffectiveValueAdmissionError<E> {
+    Value(ComponentCodecError),
+    Admission(E),
+}
+
+impl<E> From<ComponentCodecError> for EffectiveValueAdmissionError<E> {
+    fn from(error: ComponentCodecError) -> Self {
+        Self::Value(error)
+    }
+}
+
+/// Supplies defaults through the same plan and materializer, admitting temporary ownership first.
+///
+/// The schema and raw source must already be admitted. Callback deltas describe visited work,
+/// logical bytes and modeled allocation, excluding allocator capacity and shared schema storage.
+/// No insertion retains the borrowed source. A denied callback returns its exact error before
+/// the next lookup scratch, plan growth or complete effective-value copy.
+pub fn effective_component_value_with_admission<'value, E>(
+    schema: &ComponentSchema,
+    value: &'value ComponentValue,
+    limits: ComponentValueMaterializationLimits,
+    mut admit: impl FnMut(usize, usize, usize) -> Result<(), E>,
+) -> Result<Cow<'value, ComponentValue>, EffectiveValueAdmissionError<E>> {
+    let Some(plan) = plan_defaults_with_admission(schema, value, true, &mut admit)? else {
+        return Ok(Cow::Borrowed(value));
+    };
+    let mut refusal = None;
+    let cost = {
+        let mut callback = |nodes, bytes, allocated| {
+            admit(nodes, bytes, allocated).map_err(|error| {
+                refusal = Some(error);
+                // Allocation-free carrier; the exact caller error is returned below.
+                ComponentCodecError::MaterializationNodeLimit {
+                    observed: 0,
+                    maximum: 0,
+                }
+            })
+        };
+        preflight_materialization_cost(&plan, value, limits, Some(&mut callback))
+    };
+    if let Some(error) = refusal {
+        return Err(EffectiveValueAdmissionError::Admission(error));
+    }
+    let cost = cost?;
+    admit(
+        0,
+        0,
+        cost.nodes()
+            .saturating_mul(96)
+            .saturating_add(cost.logical_bytes()),
+    )
+    .map_err(EffectiveValueAdmissionError::Admission)?;
+    let mut effective = value.clone();
+    apply_plan(&plan, &mut effective)?;
+    Ok(Cow::Owned(effective))
+}
+
 /// Supplies defaults to an owned candidate without cloning its existing value tree.
 ///
 /// This has the same interpretation and prior-admission requirements as
@@ -111,6 +170,7 @@ pub fn effective_component_value_with_budget<'value>(
         maximum_depth,
         nodes: 0,
         bytes: 0,
+        admission: None,
     };
     budget.observe_tree(value, 1)?;
     let plan = plan_defaults(schema, value)?;
@@ -138,45 +198,113 @@ fn plan_defaults<'schema>(
     schema: &'schema ComponentSchema,
     value: &ComponentValue,
 ) -> Result<Option<DefaultPlan<'schema>>, ComponentCodecError> {
+    match plan_defaults_with_admission(
+        schema,
+        value,
+        false,
+        &mut |_, _, _| Ok::<(), Infallible>(()),
+    ) {
+        Ok(plan) => Ok(plan),
+        Err(EffectiveValueAdmissionError::Value(error)) => Err(error),
+        Err(EffectiveValueAdmissionError::Admission(error)) => match error {},
+    }
+}
+
+fn plan_defaults_with_admission<'schema, E>(
+    schema: &'schema ComponentSchema,
+    value: &ComponentValue,
+    account: bool,
+    admit: &mut impl FnMut(usize, usize, usize) -> Result<(), E>,
+) -> Result<Option<DefaultPlan<'schema>>, EffectiveValueAdmissionError<E>> {
     let mut missing = Vec::new();
     for field in schema.fields() {
+        if account {
+            admit(1, 0, 0).map_err(EffectiveValueAdmissionError::Admission)?;
+        }
         let Some(default) = field.default_value() else {
             continue;
         };
         if field.path().segments().len() > MAX_SHAPE_DEPTH {
-            return Err(materialization_error(
-                "default path exceeds admitted schema depth",
-            ));
+            return Err(materialization_error("default path exceeds admitted schema depth").into());
+        }
+        // get_path owns prefix paths, including on a missing-field return. Admit those
+        // bounded copies before lookup rather than constructing an error to measure it.
+        if account {
+            let path_bytes = field
+                .path()
+                .segments()
+                .iter()
+                .fold(0usize, |bytes, segment| {
+                    bytes
+                        .saturating_add(size_of::<ComponentFieldPathSegment>())
+                        .saturating_add(match segment {
+                            ComponentFieldPathSegment::Field(name) => name.len(),
+                            ComponentFieldPathSegment::Index(_) => 0,
+                        })
+                });
+            admit(
+                field.path().segments().len(),
+                path_bytes,
+                path_bytes.saturating_mul(field.path().segments().len().saturating_add(3)),
+            )
+            .map_err(EffectiveValueAdmissionError::Admission)?;
         }
         match value.get_path(field.path()) {
             Ok(_) => {}
             Err(ComponentFieldPathError::MissingField { .. })
             | Err(ComponentFieldPathError::IndexOutOfBounds { .. }) => {
+                if account && missing.len() == missing.capacity() {
+                    let capacity = missing
+                        .len()
+                        .saturating_add(1)
+                        .max(missing.capacity().saturating_mul(2))
+                        .max(4);
+                    admit(
+                        0,
+                        0,
+                        capacity
+                            .saturating_mul(
+                                size_of::<(&crate::ComponentFieldPath, &ComponentValue)>(),
+                            ),
+                    )
+                    .map_err(EffectiveValueAdmissionError::Admission)?;
+                    missing.reserve_exact(capacity - missing.len());
+                }
                 missing.push((field.path(), default));
             }
             Err(error) => {
                 return Err(ComponentCodecError::invalid_field(
                     field.path().to_string(),
                     error.to_string(),
-                ));
+                )
+                .into());
             }
         }
     }
     if missing.is_empty() {
         return Ok(None);
     }
-    missing.sort_by(|(left, _), (right, _)| left.cmp(right));
+    missing.sort_unstable_by(|(left, _), (right, _)| left.cmp(right));
     let mut plan = DefaultPlan::default();
     for (path, default) in missing {
         let mut current = &mut plan;
         for segment in path.segments() {
             if current.value.is_some() {
-                return Err(materialization_error("default paths overlap"));
+                return Err(materialization_error("default paths overlap").into());
+            }
+            if account && !current.children.contains_key(segment) {
+                admit(
+                    1,
+                    0,
+                    size_of::<(&ComponentFieldPathSegment, DefaultPlan<'_>)>()
+                        .saturating_add(6 * size_of::<usize>()),
+                )
+                .map_err(EffectiveValueAdmissionError::Admission)?;
             }
             current = current.children.entry(segment).or_default();
         }
         if current.value.is_some() || !current.children.is_empty() {
-            return Err(materialization_error("default paths overlap"));
+            return Err(materialization_error("default paths overlap").into());
         }
         current.value = Some(default);
     }
@@ -188,22 +316,33 @@ fn preflight_materialization(
     value: &ComponentValue,
     limits: ComponentValueMaterializationLimits,
 ) -> Result<(), ComponentCodecError> {
+    preflight_materialization_cost(plan, value, limits, None).map(|_| ())
+}
+
+fn preflight_materialization_cost<'admit>(
+    plan: &DefaultPlan<'_>,
+    value: &ComponentValue,
+    limits: ComponentValueMaterializationLimits,
+    admission: Option<&'admit mut MaterializationAdmission<'admit>>,
+) -> Result<ComponentValueCost, ComponentCodecError> {
     let mut budget = MaterializationBudget {
         maximum_nodes: limits.nodes().get(),
         maximum_bytes: limits.bytes().get(),
         maximum_depth: limits.depth(),
         nodes: 0,
         bytes: 0,
+        admission,
     };
     budget.observe_tree(value, 1)?;
-    preflight_plan(plan, Some(value), 1, &mut budget)
+    preflight_plan(plan, Some(value), 1, &mut budget)?;
+    Ok(ComponentValueCost::from_parts(budget.nodes, budget.bytes))
 }
 
 fn preflight_plan(
     plan: &DefaultPlan<'_>,
     existing: Option<&ComponentValue>,
     depth: usize,
-    budget: &mut MaterializationBudget,
+    budget: &mut MaterializationBudget<'_>,
 ) -> Result<(), ComponentCodecError> {
     if let Some(default) = plan.value {
         if existing.is_some() {
@@ -330,12 +469,16 @@ fn materialize_branch(plan: &DefaultPlan<'_>) -> Result<ComponentValue, Componen
     Ok(value)
 }
 
-struct MaterializationBudget {
+type MaterializationAdmission<'a> =
+    dyn FnMut(usize, usize, usize) -> Result<(), ComponentCodecError> + 'a;
+
+struct MaterializationBudget<'a> {
     maximum_nodes: usize,
     maximum_bytes: usize,
     maximum_depth: DepthLimit,
     nodes: usize,
     bytes: usize,
+    admission: Option<&'a mut MaterializationAdmission<'a>>,
 }
 
 pub(crate) fn validate_value_materialization_budget(
@@ -348,6 +491,7 @@ pub(crate) fn validate_value_materialization_budget(
         maximum_depth: limits.depth(),
         nodes: 0,
         bytes: 0,
+        admission: None,
     }
     .observe_tree(value, 1)
 }
@@ -361,13 +505,34 @@ enum ValueFrame<'value> {
     ),
 }
 
-impl MaterializationBudget {
+impl MaterializationBudget<'_> {
+    fn push_frame<'value>(
+        &mut self,
+        pending: &mut Vec<ValueFrame<'value>>,
+        frame: ValueFrame<'value>,
+    ) -> Result<(), ComponentCodecError> {
+        if let Some(admit) = self.admission.as_deref_mut()
+            && pending.len() == pending.capacity()
+        {
+            let capacity = pending
+                .len()
+                .saturating_add(1)
+                .max(pending.capacity().saturating_mul(2))
+                .max(4);
+            admit(0, 0, capacity.saturating_mul(size_of::<ValueFrame<'_>>()))?;
+            pending.reserve_exact(capacity - pending.len());
+        }
+        pending.push(frame);
+        Ok(())
+    }
+
     fn observe_tree(
         &mut self,
         value: &ComponentValue,
         depth: usize,
     ) -> Result<(), ComponentCodecError> {
-        let mut pending = vec![ValueFrame::Value(value, depth)];
+        let mut pending = Vec::new();
+        self.push_frame(&mut pending, ValueFrame::Value(value, depth))?;
         while let Some(frame) = pending.pop() {
             match frame {
                 ValueFrame::Value(value, depth) => {
@@ -382,20 +547,26 @@ impl MaterializationBudget {
                         }
                         ComponentValue::String(value) => self.observe_bytes(value.len())?,
                         ComponentValue::List(values) if !values.is_empty() => {
-                            pending.push(ValueFrame::List(
-                                values.iter(),
-                                depth
-                                    .checked_add(1)
-                                    .ok_or_else(|| depth_overflow(self.maximum_depth.get()))?,
-                            ));
+                            self.push_frame(
+                                &mut pending,
+                                ValueFrame::List(
+                                    values.iter(),
+                                    depth
+                                        .checked_add(1)
+                                        .ok_or_else(|| depth_overflow(self.maximum_depth.get()))?,
+                                ),
+                            )?;
                         }
                         ComponentValue::Map(values) if !values.is_empty() => {
-                            pending.push(ValueFrame::Map(
-                                values.iter(),
-                                depth
-                                    .checked_add(1)
-                                    .ok_or_else(|| depth_overflow(self.maximum_depth.get()))?,
-                            ));
+                            self.push_frame(
+                                &mut pending,
+                                ValueFrame::Map(
+                                    values.iter(),
+                                    depth
+                                        .checked_add(1)
+                                        .ok_or_else(|| depth_overflow(self.maximum_depth.get()))?,
+                                ),
+                            )?;
                         }
                         ComponentValue::List(_) | ComponentValue::Map(_) => {}
                         ComponentValue::EntityReference(EntityReference::SceneLocal { entity }) => {
@@ -409,15 +580,15 @@ impl MaterializationBudget {
                 }
                 ValueFrame::List(mut values, depth) => {
                     if let Some(value) = values.next() {
-                        pending.push(ValueFrame::List(values, depth));
-                        pending.push(ValueFrame::Value(value, depth));
+                        self.push_frame(&mut pending, ValueFrame::List(values, depth))?;
+                        self.push_frame(&mut pending, ValueFrame::Value(value, depth))?;
                     }
                 }
                 ValueFrame::Map(mut values, depth) => {
                     if let Some((key, value)) = values.next() {
                         self.observe_bytes(key.len())?;
-                        pending.push(ValueFrame::Map(values, depth));
-                        pending.push(ValueFrame::Value(value, depth));
+                        self.push_frame(&mut pending, ValueFrame::Map(values, depth))?;
+                        self.push_frame(&mut pending, ValueFrame::Value(value, depth))?;
                     }
                 }
             }
@@ -426,6 +597,9 @@ impl MaterializationBudget {
     }
 
     fn observe_node(&mut self, depth: usize) -> Result<(), ComponentCodecError> {
+        if let Some(admit) = self.admission.as_deref_mut() {
+            admit(1, 0, 0)?;
+        }
         if depth > self.maximum_depth.get() {
             return Err(ComponentCodecError::MaterializationDepthLimit {
                 observed: depth,
@@ -449,6 +623,9 @@ impl MaterializationBudget {
     }
 
     fn observe_bytes(&mut self, bytes: usize) -> Result<(), ComponentCodecError> {
+        if let Some(admit) = self.admission.as_deref_mut() {
+            admit(0, bytes, 0)?;
+        }
         self.bytes =
             self.bytes
                 .checked_add(bytes)
@@ -563,5 +740,158 @@ mod budget_tests {
             effective_component_value_with_budget(&schema, &effective, 2, 8, DepthLimit::ONE,),
             Err(ComponentCodecError::MaterializationDepthLimit { .. })
         ));
+    }
+
+    #[test]
+    fn admission_refuses_large_default_before_effective_tree_copy() {
+        let schema = defaulted(ComponentValue::String("x".repeat(64 * 1024)));
+        let source = ComponentValue::map([] as [(String, ComponentValue); 0]);
+        let mut observed_copy = false;
+        let result = effective_component_value_with_admission(
+            &schema,
+            &source,
+            ComponentValueMaterializationLimits::default(),
+            |_, _, allocated| {
+                if allocated >= 64 * 1024 {
+                    observed_copy = true;
+                    Err("copy refused")
+                } else {
+                    Ok(())
+                }
+            },
+        );
+        assert_eq!(
+            result,
+            Err(EffectiveValueAdmissionError::Admission("copy refused"))
+        );
+        assert!(observed_copy);
+        assert!(source.get("value").is_none());
+    }
+
+    #[test]
+    fn admission_keeps_no_insertion_borrowed_and_preserves_interpretation() {
+        let schema = defaulted(ComponentValue::String("fallback".into()));
+        let source = ComponentValue::map([("value", ComponentValue::String("explicit".into()))]);
+        let effective = effective_component_value_with_admission(
+            &schema,
+            &source,
+            ComponentValueMaterializationLimits::default(),
+            |_, _, _| Ok::<(), Infallible>(()),
+        )
+        .unwrap();
+        assert!(matches!(effective, Cow::Borrowed(_)));
+        let source = ComponentValue::map([] as [(String, ComponentValue); 0]);
+        let expected = effective_component_value(
+            &schema,
+            &source,
+            ComponentValueMaterializationLimits::default(),
+        )
+        .unwrap();
+        let actual = effective_component_value_with_admission(
+            &schema,
+            &source,
+            ComponentValueMaterializationLimits::default(),
+            |_, _, _| Ok::<(), Infallible>(()),
+        )
+        .unwrap();
+        assert_eq!(actual, expected);
+    }
+
+    #[test]
+    fn admission_refusal_precedes_default_path_error_construction() {
+        let schema = defaulted(ComponentValue::String("fallback".into()));
+        let source = ComponentValue::Null;
+        let result = effective_component_value_with_admission(
+            &schema,
+            &source,
+            ComponentValueMaterializationLimits::default(),
+            |_, _, _| Err("lookup refused"),
+        );
+        assert_eq!(
+            result,
+            Err(EffectiveValueAdmissionError::Admission("lookup refused"))
+        );
+        let result = effective_component_value_with_admission(
+            &schema,
+            &source,
+            ComponentValueMaterializationLimits::default(),
+            |_, _, _| Ok::<(), Infallible>(()),
+        );
+        assert_eq!(
+            result.unwrap_err(),
+            EffectiveValueAdmissionError::Value(
+                effective_component_value(
+                    &schema,
+                    &source,
+                    ComponentValueMaterializationLimits::default(),
+                )
+                .unwrap_err(),
+            )
+        );
+    }
+
+    #[test]
+    fn admission_preserves_borrowed_refusal_at_every_planning_and_preflight_boundary() {
+        #[derive(Debug)]
+        struct Refusal<'a>(&'a String);
+
+        let schema = defaulted(ComponentValue::String("default".into()));
+        let source = ComponentValue::map([(
+            "explicit",
+            ComponentValue::List(vec![
+                ComponentValue::String("retained".into()),
+                ComponentValue::Bool(true),
+            ]),
+        )]);
+        let mut observations = Vec::new();
+        effective_component_value_with_admission(
+            &schema,
+            &source,
+            ComponentValueMaterializationLimits::default(),
+            |nodes, bytes, allocated| {
+                observations.push((nodes, bytes, allocated));
+                Ok::<(), Infallible>(())
+            },
+        )
+        .unwrap();
+        assert!(
+            observations
+                .iter()
+                .any(|(nodes, _, allocated)| *nodes == 1 && *allocated == 0)
+        );
+        assert!(
+            observations
+                .iter()
+                .any(|(_, bytes, allocated)| *bytes > 0 && *allocated == 0)
+        );
+        assert!(
+            observations
+                .iter()
+                .any(|(nodes, bytes, allocated)| *nodes == 0 && *bytes == 0 && *allocated > 0)
+        );
+        let marker = "borrowed refusal".to_owned();
+        for denied in 0..observations.len() {
+            let mut calls = 0;
+            let result = effective_component_value_with_admission(
+                &schema,
+                &source,
+                ComponentValueMaterializationLimits::default(),
+                |_, _, _| {
+                    let current = calls;
+                    calls += 1;
+                    if current == denied {
+                        Err(Refusal(&marker))
+                    } else {
+                        Ok(())
+                    }
+                },
+            );
+            let Err(EffectiveValueAdmissionError::Admission(Refusal(actual))) = result else {
+                panic!("boundary {denied} must retain the exact caller refusal");
+            };
+            assert!(std::ptr::eq(actual, &marker));
+            assert_eq!(calls, denied + 1);
+            assert!(source.get("value").is_none());
+        }
     }
 }
