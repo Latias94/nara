@@ -1,6 +1,6 @@
 # Asset Import Ownership And Processed Runtime Delivery
 
-**Date:** 2026-10-29. **Status:** Implementation in progress.
+**Date:** 2026-10-29. **Status:** Source/import ownership qualified; compound Runtime delivery open.
 **Baseline:** `13a2744`.
 **Parent:** [Foundation rebaseline](2026-10-23-foundation-architecture-rebaseline-plan.md), R6/R7.
 
@@ -46,11 +46,16 @@ Each step is a reviewable dependency unit, not completion of all R6/R7. Local CA
 remote services, patch/DLC and universal all-platform qualification remain later work in the
 foundation plan.
 
+Step 1 is implemented as `c352614`, with independently consumed parsing, Check/Play/Scene and
+Editor metadata workflows. The [qualification](../knowledge/engineering/verification/2026-10/2026-10-28T233934Z-source-import-contracts-below-project-hosts-with-typed-read-errors-e617bfdd9a104fb69bdf3a20936f7d57.md)
+records actual tests, the corrected held-parser fixture, dependency proof and limits. Steps 2-4
+remain open; source preparation does not imply processed Runtime support.
+
 ## Owning Decisions
 
 [ADR 0103](../architecture/adr/0103-concrete-domain-owned-asset-import-execution.md) already admits
-typed operation facets below root orchestration. Its source-domain refinement must name the new
-executing contract when step 1 lands. It must not imply that selecting the source facet selects
+typed operation facets below root orchestration. Its source-domain refinement names the new
+executing contract independently of Runtime and cook. Selecting the source facet does not select
 Runtime decode or cook. [ADR 0110](../architecture/adr/0110-first-party-project-workflow-and-source-carrying-export.md)
 continues to own explicit source-carrying delivery.
 

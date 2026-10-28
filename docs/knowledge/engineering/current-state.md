@@ -3,7 +3,7 @@ type: "Current State"
 title: "Current Engineering State"
 description: "Derived summary of immutable engineering-memory shards."
 tags: ["engineering-memory", "derived"]
-source_fingerprint: "b36df7db2527f5dd18b7933ff1d90abf94c07956aa8e5aa2edb2879cd0498659"
+source_fingerprint: "07fe414431fd5a7943fac13c17e1ae18b5881170910681d23a5b6350c8ecb7c4"
 ---
 
 # Current State
@@ -12,8 +12,8 @@ source_fingerprint: "b36df7db2527f5dd18b7933ff1d90abf94c07956aa8e5aa2edb2879cd04
 
 This file is derived from immutable shards. Record new facts in shards, then render during integration.
 
-- Source fingerprint: `b36df7db2527f5dd18b7933ff1d90abf94c07956aa8e5aa2edb2879cd0498659`
-- Immutable records: 1017
+- Source fingerprint: `07fe414431fd5a7943fac13c17e1ae18b5881170910681d23a5b6350c8ecb7c4`
+- Immutable records: 1018
 - Active lane heads: 1
 
 # Active Registrations
@@ -69,6 +69,7 @@ This file is derived from immutable shards. Record new facts in shards, then ren
 
 # Recent Evidence
 
+- **Verification Evidence**: [Source import contracts below project Hosts with typed read errors](verification/2026-10/2026-10-28T233934Z-source-import-contracts-below-project-hosts-with-typed-read-errors-e617bfdd9a104fb69bdf3a20936f7d57.md) - Qualifies the pure executing source/import facet, concrete reader errors and migrated project and Editor consumers; processed Runtime delivery remains open.
 - **Subagent Finding**: [Source-carrying export still lacks an independent verified Runtime content entry](subagents/2026-10/2026-10-28T225432Z-source-carrying-export-still-lacks-an-independent-verified-runtime-content-entry-b9156a4b7e2043f09f3ab41b78cf3bf8.md) - Distinguishes build-machine Cargo and qualified source-carrying delivery from the remaining processed Runtime catalog and subsequent Scene loading boundary.
 - **Verification Evidence**: [Installed creation-only owner successor preserves sources history and separate execution approval](verification/2026-10/2026-10-28T223626Z-installed-creation-only-owner-successor-preserves-sources-history-and-separate-execution-approval-57dec00a6525410f9abb79ec24a99e69.md) - Qualifies an actual catalog generation upgrade with source-owned history preparation and retained publication recovery, within creation-only data semantics.
 - **Work Progress**: [Installed creation metadata successor production integration and paired catalog boundary](progress/2026-10/2026-10-28T221627Z-installed-creation-metadata-successor-production-integration-and-paired-catalog-boundary-ad2d225ed6fe4aaea906239dac114022.md) - Records explicit owner-change admission, fresh Adapter evidence, repeatable paired catalog capture and pending complete consumer qualification.
@@ -80,7 +81,6 @@ This file is derived from immutable shards. Record new facts in shards, then ren
 - **Work Progress**: [Reviewed real artifact unlink integration and incomplete publication follow-up](progress/2026-10/2026-10-28T182559Z-reviewed-real-artifact-unlink-integration-and-incomplete-publication-follow-up-1de5c56631a146318b4b1098eb0fdfd8.md) - Records real ready-artifact disposal, namespace and cleanup corrections, focused verification and the concrete incomplete-publication owner successor.
 - **Verification Evidence**: [Managed source-tool artifact store and project-owned text template replacement](verification/2026-10/2026-10-28T163225Z-managed-source-tool-artifact-store-and-project-owned-text-template-replacement-7c31339a78064eb8bc385a9bd82b372a.md) - Qualifies fixed managed artifact publication/inventory and explicit project-owned text import while removing mixed-content source protection and retaining future real reclamation.
 - **Verification Evidence**: [Retained source objects and truthful source-tool physical cleanup qualification](verification/2026-10/2026-10-28T150643Z-retained-source-objects-and-truthful-source-tool-physical-cleanup-qualification-13bc9f4599ef4e839fd608dcfd7f4aed.md) - Qualifies retained document and metadata aliases, superseded cleanup observation, and terminal process cleanup failure without claiming artifact reclamation.
-- **Verification Evidence**: [Accepted document protection and repairable installed-content close qualification](verification/2026-10/2026-10-28T132217Z-accepted-document-protection-and-repairable-installed-content-close-qualification-8a03235372c74fcbb4a02f7ee23eaca2.md) - Qualifies sticky accepted-edit protection, original snapshot persistence, failure repair and physical Close through actual Session, Application and managed/native consumers.
 
 # Integration Notes
 

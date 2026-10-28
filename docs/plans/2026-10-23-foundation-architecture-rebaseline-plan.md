@@ -470,7 +470,8 @@ selected-instance complete conversion, not outer-only unpack, cross-source Apply
 
 ## R6: Resource Facets, Durable Continuity And Local Artifact Store
 
-**Design:** D10, D11, D13. **State:** not started. **Owners:** asset/domain contracts and project Host.
+**Design:** D10, D11, D13. **State:** source/import ownership replacement qualified;
+processed Runtime and continuity remain unqualified. **Owners:** asset/domain contracts and project Host.
 
 Build one independent compound importer through typed source, Runtime decode, optional cook and
 Editor facets; separate format contracts from root/2D dependencies. Choose authored continuity
@@ -479,6 +480,12 @@ publication with tracked inputs; identity does not come from generated cache or 
 
 R6a is the facet/continuity/verified Runtime-product contract. R6b adds the durable recipe index
 and local CAS; it does not block an independently qualified R7 immutable base catalog.
+
+The [ordered importer and delivery plan](2026-10-29-asset-import-and-runtime-delivery-plan.md)
+first moves the existing executing source facet below root/Scene/2D while preserving all actual
+consumers, then qualifies compound continuity and processed delivery. Its
+[source-contract qualification](../knowledge/engineering/verification/2026-10/2026-10-28T233934Z-source-import-contracts-below-project-hosts-with-typed-read-errors-e617bfdd9a104fb69bdf3a20936f7d57.md)
+does not complete R6a or qualify a Runtime catalog.
 
 The [delivery-boundary audit](../knowledge/engineering/subagents/2026-10/2026-10-28T225432Z-source-carrying-export-still-lacks-an-independent-verified-runtime-content-entry-b9156a4b7e2043f09f3ab41b78cf3bf8.md)
 locates the actual source-carrying loader and starter build-policy dependencies and recommends
