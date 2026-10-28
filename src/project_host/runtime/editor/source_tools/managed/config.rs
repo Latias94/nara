@@ -11,11 +11,6 @@ use super::EditorSourceToolManagedError as Error;
 const TARGET: &str = ".NETCoreApp,Version=v10.0";
 
 pub(super) fn prepare_images(release: &PreparedEditorSourceToolRelease) -> Result<Vec<u8>, Error> {
-    if !release.requires().is_empty() {
-        return Err(Error::Contract(
-            "installed requirements need graph admission",
-        ));
-    }
     let stem = release
         .entry()
         .strip_suffix(".dll")

@@ -36,6 +36,7 @@ pub(super) enum ProcessFailure {
     StdoutLimit,
     StderrLimit,
     NonzeroExit,
+    Installation,
 }
 
 pub(super) struct ProcessRequest {
@@ -87,6 +88,11 @@ impl ProcessRequest {
         #[cfg(test)]
         if let Some(gate) = gates.before_spawn {
             gate.wait();
+        }
+        if let Some(installed) = &command.installed {
+            installed
+                .verify()
+                .map_err(|_| ProcessFailure::Installation)?;
         }
         if let Some(approved) = approved.as_ref() {
             approved.verify().map_err(|_| ProcessFailure::Spawn)?;

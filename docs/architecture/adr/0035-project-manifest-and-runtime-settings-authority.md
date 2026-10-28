@@ -38,15 +38,25 @@ override it through explicit `App` resources, but no engine subsystem should inv
 persistent project configuration source for the same setting.
 
 The integrated Editor's concrete local finite-tool lifecycle record is
-`.nara/source-tools/selection.json`. It alone records the selected installed artifact and desired
-enabled/disabled state for the current single tool slot. This is a local installation lifecycle
+`.nara/source-tools/selection.json`. It alone records the bounded installed set, exact required
+installation bindings and optional desired enabled/disabled selection for the current single tool
+slot. Disabled and nonselected installed members remain recorded. This is a local installation lifecycle
 record, not a second manifest setting, source dependency specification or portable package lock.
 `nara.toml` does not duplicate these fields or select executable tool code. The record binds a
 project-relative installation, nonzero installation ID, exact receipt/manifest digests and package
-identity. Native file IDs, runtime activation identities, launcher configuration and executable
+identity. Each declared requirement binds one exact member and its selected manifest; equal release
+bytes never choose an installation implicitly. The record rejects missing/extra bindings, cycles
+and ambiguous or overlapping installation directories. Registration is additive; withdrawal needs
+an original-observation review of all required dependents, including disabled members. A cascade
+lists and revalidates its complete affected set. The one record publishes those relationships and
+slot changes together. Native file IDs, runtime activation identities, launcher configuration and executable
 approval are never restored from it. Missing is unselected; invalid or inaccessible data does not
 become an empty record or permission to overwrite. Ordinary Open observes this data without a
 probe. Actual implementation and platform evidence remain in the local lifecycle plan and ledger.
+Installation relationships do not resolve source dependencies, automatically execute tools, extend
+assembly search paths or authorize deletion. A broken artifact may be withdrawn without deleting
+its files. The [installed-graph plan](../../plans/2026-10-28-installed-source-tool-graph-plan.md)
+owns the ordered replacement and actual workflow qualification.
 
 The manifest contract is:
 

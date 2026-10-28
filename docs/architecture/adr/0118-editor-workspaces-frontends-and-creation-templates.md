@@ -485,7 +485,14 @@ the default field renderer while admitted metadata still permits ordinary editin
 metadata follows existing unavailable/read-only rules. Text/caret/IME and widget instances remain
 frontend-local. This finite capability does not select a recursive UI language or a native ABI.
 
-The concrete single-slot installed selection is observed separately from its actual active route.
+The concrete installed set and optional single-slot selection are observed separately from the
+actual active route. Exact required installation bindings include disabled and nonselected members;
+registration and dependency-safe withdrawal belong to the same Session selection owner. A cascade
+review retains the complete reverse closure and original nominal basis. Mutation revalidates that
+observation, stops affected routing/review and publishes one complete graph/slot successor. Failed
+publication cannot restart stopped execution; uncertainty keeps actual evidence for reconciliation.
+Neither graph withdrawal nor a persisted receipt authorizes file reclamation. Required relations
+are installation constraints, not automatic execution or cross-installation assembly lookup.
 Its project-local lifecycle record follows ADR 0035; an enabled record on Open means awaiting
 explicit Host approval, not an executable activation. The Session reuses the same probe, proposal
 and retirement owner. Ready candidates publish desired selection before the sole route-promotion
@@ -493,8 +500,11 @@ step, preserving truthful post-publication refusal and uncertainty. Frontends co
 selection basis/result observations and submit explicit lifecycle actions; they neither serialize
 an independent selection nor recover file/process authority from project data. Disable withdraws
 execution immediately even if its separate durable update fails. File work and physical children
-remain Session close obligations. This contract does not add installed dependency solving,
-metadata adoption, removal authority or a second tool executor.
+remain Session close obligations. This contract does not add source dependency solving,
+file removal authority or a second tool executor. Required executable approval consumes actual
+graph/installation observations; standalone unresolved requirements still refuse. Reconciliation
+cannot keep an installed route whose exact required members disappeared. Implementation and
+bounded evidence belong to the installed-graph plan and ledger, separately from this decision.
 
 Local finite tool release preparation is code-free and separate from installation and approval.
 The Host supplies a strict source capability and its selected manifest digest. The release owner

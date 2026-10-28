@@ -1,45 +1,106 @@
 use super::*;
 
-fn desired() -> EditorSourceToolDesiredSelection {
-    EditorSourceToolDesiredSelection {
+fn entry(id: u8, package: &str, requirements: &[(u8, &str)]) -> Entry {
+    Entry {
         installed: EditorSourceToolInstalledSelection {
-            package: "test.stats".into(),
-            directory: "tools/stats".into(),
-            installation: [1; 32],
+            package: package.into(),
+            directory: format!("tools/install-{id}").into(),
+            installation: [id; 32],
             receipt: ContentDigest::from_parts(32, [2; 32]),
             manifest: ContentDigest::from_parts(64, [3; 32]),
         },
-        enabled: true,
+        requirements: requirements
+            .iter()
+            .map(|(id, package)| Binding {
+                package: (*package).into(),
+                installation: [*id; 32],
+            })
+            .collect(),
+    }
+}
+
+fn graph() -> Graph {
+    let installed = entry(1, "test.stats", &[]);
+    Graph {
+        desired: Some(Desired {
+            installed: installed.installed.clone(),
+            enabled: true,
+        }),
+        entries: vec![installed],
     }
 }
 
 fn record() -> String {
-    String::from_utf8(encode(&desired()).unwrap()).unwrap()
+    String::from_utf8(encode(&graph()).unwrap()).unwrap()
+}
+
+fn required_graph() -> Graph {
+    Graph::default()
+        .register(&[
+            entry(3, "test.consumer", &[(2, "test.other"), (1, "test.stats")]),
+            entry(2, "test.other", &[]),
+            entry(1, "test.stats", &[]),
+        ])
+        .unwrap()
 }
 
 #[test]
-fn canonical_selection_records_roundtrip_for_both_enablement_states() {
+fn canonical_graph_records_roundtrip_with_enabled_disabled_and_absent_desired() {
     for enabled in [true, false] {
-        let mut desired = desired();
-        desired.enabled = enabled;
+        let mut graph = graph();
+        graph.desired.as_mut().unwrap().enabled = enabled;
         let expected = format!(
-            "{{\"format_version\":1,\"installed\":{{\"package\":\"test.stats\",\"directory\":\"tools/stats\",\"installation\":{},\"receipt\":{{\"length\":32,\"hash\":{}}},\"manifest\":{{\"length\":64,\"hash\":{}}}}},\"desired_enabled\":{enabled}}}",
+            "{{\"format_version\":1,\"installed\":[{{\"package\":\"test.stats\",\"directory\":\"tools/install-1\",\"installation\":{},\"receipt\":{{\"length\":32,\"hash\":{}}},\"manifest\":{{\"length\":64,\"hash\":{}}},\"requires\":[]}}],\"desired\":{{\"installation\":{},\"enabled\":{enabled}}}}}",
             serde_json::to_string(&[1_u8; 32]).unwrap(),
             serde_json::to_string(&[2_u8; 32]).unwrap(),
             serde_json::to_string(&[3_u8; 32]).unwrap(),
+            serde_json::to_string(&[1_u8; 32]).unwrap(),
         );
-        let bytes = encode(&desired).unwrap();
+        let bytes = encode(&graph).unwrap();
         assert_eq!(bytes, expected.as_bytes());
         let decoded = decode(&bytes).unwrap();
-        assert_eq!(decoded, desired);
+        assert_eq!(decoded, graph);
         assert_eq!(encode(&decoded).unwrap(), bytes);
     }
+    let empty = b"{\"format_version\":1,\"installed\":[],\"desired\":null}";
+    assert_eq!(encode(&Graph::default()).unwrap(), empty);
+    assert_eq!(decode(empty).unwrap(), Graph::default());
+    assert_eq!(
+        decode(b"{\"format_version\":1,\"installed\":[]}").unwrap(),
+        Graph::default()
+    );
+    let graph = required_graph();
+    assert!(graph.desired.is_none());
+    assert_eq!(decode(&encode(&graph).unwrap()).unwrap(), graph);
 }
 
 #[test]
-fn rejects_malformed_missing_and_unknown_fields_without_an_empty_selection_alias() {
+fn encode_and_decode_canonicalize_member_and_requirement_order_without_changing_the_input() {
+    let canonical = required_graph();
+    let mut shuffled = canonical.clone();
+    shuffled.entries.reverse();
+    shuffled.entries[0].requirements.reverse();
+    let before = shuffled.clone();
+    let bytes = encode(&canonical).unwrap();
+    assert_eq!(encode(&shuffled).unwrap(), bytes);
+    assert_eq!(shuffled, before);
+
+    let input = String::from_utf8(bytes.clone()).unwrap();
+    let mut dto: SelectionRecord = serde_json::from_str(&input).unwrap();
+    dto.installed.reverse();
+    dto.installed[0].requires.reverse();
+    let shuffled_bytes = serde_json::to_vec(&dto).unwrap();
+    assert_ne!(shuffled_bytes, bytes);
+    let decoded = decode(&shuffled_bytes).unwrap();
+    assert_eq!(decoded, canonical);
+    assert_eq!(encode(&decoded).unwrap(), bytes);
+    assert_eq!(decoded.register(&shuffled.entries).unwrap(), canonical);
+}
+
+#[test]
+fn rejects_malformed_missing_unknown_and_previous_single_member_records() {
     let valid = record();
-    let cases = [
+    for input in [
         String::new(),
         "null".to_owned(),
         "{}".to_owned(),
@@ -48,91 +109,118 @@ fn rejects_malformed_missing_and_unknown_fields_without_an_empty_selection_alias
         format!("{valid} {{}}"),
         valid.replace("\"format_version\":1,", ""),
         valid.replace("\"package\":\"test.stats\",", ""),
-        valid.replace("\"directory\":\"tools/stats\",", ""),
-        valid.replace("\"desired_enabled\":true", "\"desired_enabled\":null"),
-        valid.replace("\"desired_enabled\":true", "\"desired_enabled\":1"),
-        valid.replace("\"desired_enabled\":true", "\"enabled\":true"),
+        valid.replace("\"directory\":\"tools/install-1\",", ""),
+        valid.replace(",\"requires\":[]", ""),
+        valid.replace("\"enabled\":true", "\"enabled\":null"),
+        valid.replace("\"enabled\":true", "\"enabled\":1"),
+        valid.replace("\"enabled\":true", "\"desired_enabled\":true"),
         valid.replace("\"length\":32,", ""),
         valid.replace("\"length\":32", "\"length\":-1"),
         valid.replace("\"length\":32", "\"length\":32.0"),
         valid.replacen('{', "{\"unknown\":true,", 1),
-        valid.replace("\"installed\":{", "\"installed\":{\"unknown\":true,"),
+        valid.replace("\"installed\":[{", "\"installed\":[{\"unknown\":true,"),
         valid.replace("\"receipt\":{", "\"receipt\":{\"unknown\":true,"),
         valid.replace("\"manifest\":{", "\"manifest\":{\"unknown\":true,"),
-        valid.replace("\"length\":32", "\"length\":32,\"blake3\":\"old\""),
-    ];
-    for input in cases {
-        assert_eq!(
-            decode(input.as_bytes()),
-            Err(EditorSourceToolSelectionError::InvalidRecord),
-            "accepted {input}",
-        );
-    }
-}
-
-#[test]
-fn rejects_duplicate_fields_at_every_object_level() {
-    let valid = record();
-    // Serialize the DTO itself to preserve field ordering for the whole installed object.
-    let parsed: SelectionRecord = serde_json::from_str(&valid).unwrap();
-    let installed_record = serde_json::to_string(&parsed.installed).unwrap();
-    let installation = serde_json::to_string(&[1_u8; 32]).unwrap();
-    let receipt_hash = serde_json::to_string(&[2_u8; 32]).unwrap();
-    let manifest_hash = serde_json::to_string(&[3_u8; 32]).unwrap();
-    let receipt = format!("{{\"length\":32,\"hash\":{receipt_hash}}}");
-    let manifest = format!("{{\"length\":64,\"hash\":{manifest_hash}}}");
-    for (field, value) in [
-        ("format_version", "1"),
-        ("installed", installed_record.as_str()),
-        ("desired_enabled", "true"),
-        ("package", "\"test.stats\""),
-        ("directory", "\"tools/stats\""),
-        ("installation", installation.as_str()),
-        ("receipt", receipt.as_str()),
-        ("manifest", manifest.as_str()),
-        ("length", "32"),
-        ("hash", receipt_hash.as_str()),
-        ("length", "64"),
-        ("hash", manifest_hash.as_str()),
+        valid.replace("\"desired\":{", "\"desired\":{\"unknown\":true,"),
     ] {
-        let original = format!("\"{field}\":{value}");
-        assert!(valid.contains(&original), "missing fixture field {field}");
-        let input = valid.replace(&original, &format!("{original},{original}"));
         assert_eq!(
             decode(input.as_bytes()),
-            Err(EditorSourceToolSelectionError::InvalidRecord),
-            "accepted duplicate {field}",
+            Err(Error::InvalidRecord),
+            "accepted {input}"
         );
     }
+    let dto: SelectionRecord = serde_json::from_str(&valid).unwrap();
+    let member = serde_json::to_string(&dto.installed[0]).unwrap();
+    let old = format!("{{\"format_version\":1,\"installed\":{member},\"desired_enabled\":true}}");
+    assert_eq!(decode(old.as_bytes()), Err(Error::InvalidRecord));
+    let required = String::from_utf8(encode(&required_graph()).unwrap()).unwrap();
+    let unknown_binding = required.replace("\"requires\":[{", "\"requires\":[{\"unknown\":true,");
+    assert_eq!(
+        decode(unknown_binding.as_bytes()),
+        Err(Error::InvalidRecord)
+    );
 }
 
 #[test]
-fn rejects_old_or_future_versions_and_noninteger_versions() {
+fn rejects_duplicate_and_escaped_duplicate_fields_at_every_object_level() {
+    let valid = record();
+    let dto: SelectionRecord = serde_json::from_str(&valid).unwrap();
+    for field in [
+        "format_version",
+        "installed",
+        "desired",
+        "package",
+        "directory",
+        "installation",
+        "receipt",
+        "manifest",
+        "length",
+        "hash",
+        "requires",
+        "enabled",
+    ] {
+        let input = valid.replace(
+            &format!("\"{field}\":"),
+            &format!("\"{field}\":null,\"{field}\":"),
+        );
+        assert_ne!(input, valid);
+        assert_eq!(
+            decode(input.as_bytes()),
+            Err(Error::InvalidRecord),
+            "{field}"
+        );
+    }
+    let duplicated_valid = valid.replace("\"enabled\":true", "\"enabled\":true,\"enabled\":true");
+    assert_eq!(
+        decode(duplicated_valid.as_bytes()),
+        Err(Error::InvalidRecord)
+    );
+    let escaped = valid.replace(
+        "\"package\":",
+        "\"p\\u0061ckage\":\"test.stats\",\"package\":",
+    );
+    assert_eq!(decode(escaped.as_bytes()), Err(Error::InvalidRecord));
+    let member = serde_json::to_string(&dto.installed[0]).unwrap();
+    let mut dto = dto;
+    dto.installed.push(serde_json::from_str(&member).unwrap());
+    assert_eq!(
+        decode(&serde_json::to_vec(&dto).unwrap()),
+        Err(Error::Graph)
+    );
+
+    let required = String::from_utf8(encode(&required_graph()).unwrap()).unwrap();
+    let mut dto: SelectionRecord = serde_json::from_str(&required).unwrap();
+    dto.installed[2].requires.push(RequirementRecord {
+        package: Cow::Borrowed("test.stats"),
+        installation: [1; 32],
+    });
+    assert_eq!(
+        decode(&serde_json::to_vec(&dto).unwrap()),
+        Err(Error::Graph)
+    );
+}
+
+#[test]
+fn rejects_unsupported_versions_and_noninteger_versions() {
     let valid = record();
     for version in ["0", "2", "4294967295"] {
         let input = valid.replace(
             "\"format_version\":1",
             &format!("\"format_version\":{version}"),
         );
-        assert_eq!(
-            decode(input.as_bytes()),
-            Err(EditorSourceToolSelectionError::UnsupportedFormat),
-        );
+        assert_eq!(decode(input.as_bytes()), Err(Error::UnsupportedFormat));
     }
     for version in ["-1", "1.0", "\"1\"", "null", "4294967296"] {
         let input = valid.replace(
             "\"format_version\":1",
             &format!("\"format_version\":{version}"),
         );
-        assert_eq!(
-            decode(input.as_bytes()),
-            Err(EditorSourceToolSelectionError::InvalidRecord),
-        );
+        assert_eq!(decode(input.as_bytes()), Err(Error::InvalidRecord));
     }
 }
 
 #[test]
-fn validates_package_and_nonzero_installation_on_encode_and_decode() {
+fn validates_package_nonzero_installation_and_complete_desired_facts() {
     for package in [
         "",
         "Stats",
@@ -141,40 +229,44 @@ fn validates_package_and_nonzero_installation_on_encode_and_decode() {
         "test stats",
         "stаts",
     ] {
-        let mut selection = desired();
-        selection.installed.package = package.into();
+        let mut graph = graph();
+        graph.desired = None;
+        graph.entries[0].installed.package = package.into();
+        assert_eq!(encode(&graph), Err(Error::InvalidRecord));
         assert_eq!(
-            encode(&selection),
-            Err(EditorSourceToolSelectionError::InvalidRecord)
-        );
-        let input = record().replace("test.stats", package);
-        assert_eq!(
-            decode(input.as_bytes()),
-            Err(EditorSourceToolSelectionError::InvalidRecord)
+            decode(record().replace("test.stats", package).as_bytes()),
+            Err(Error::InvalidRecord)
         );
     }
-    for (length, valid) in [(1, true), (128, true), (129, false)] {
-        let mut selection = desired();
-        selection.installed.package = "a".repeat(length).into();
-        assert_eq!(encode(&selection).is_ok(), valid);
-        let input = record().replace("test.stats", &"a".repeat(length));
-        assert_eq!(decode(input.as_bytes()).is_ok(), valid);
+    for (length, accepted) in [(1, true), (128, true), (129, false)] {
+        let mut graph = graph();
+        graph.desired = None;
+        graph.entries[0].installed.package = "a".repeat(length).into();
+        assert_eq!(encode(&graph).is_ok(), accepted);
+        assert_eq!(
+            decode(
+                record()
+                    .replace("test.stats", &"a".repeat(length))
+                    .as_bytes()
+            )
+            .is_ok(),
+            accepted
+        );
     }
-    let mut selection = desired();
-    selection.installed.package = "0.example_pkg-1".into();
-    assert_eq!(decode(&encode(&selection).unwrap()).unwrap(), selection);
-    selection.installed.installation = [0; 32];
-    assert_eq!(
-        encode(&selection),
-        Err(EditorSourceToolSelectionError::InvalidRecord)
-    );
     let input = record().replace(
         &serde_json::to_string(&[1_u8; 32]).unwrap(),
         &serde_json::to_string(&[0_u8; 32]).unwrap(),
     );
+    assert_eq!(decode(input.as_bytes()), Err(Error::InvalidRecord));
+    let mut graph = graph();
+    graph.desired.as_mut().unwrap().installed.manifest = ContentDigest::from_parts(64, [9; 32]);
+    assert_eq!(encode(&graph), Err(Error::Graph));
+    let valid = record();
+    let mut dto: SelectionRecord = serde_json::from_str(&valid).unwrap();
+    dto.desired.as_mut().unwrap().installation = [9; 32];
     assert_eq!(
-        decode(input.as_bytes()),
-        Err(EditorSourceToolSelectionError::InvalidRecord)
+        decode(&serde_json::to_vec(&dto).unwrap()),
+        Err(Error::Graph)
     );
 }
 
@@ -194,27 +286,24 @@ fn validates_fixed_width_byte_arrays_and_digest_lengths() {
     for original in [[1_u8; 32], [2; 32], [3; 32]] {
         let original = serde_json::to_string(&original).unwrap();
         for replacement in &arrays {
-            let input = valid.replace(&original, replacement);
             assert_eq!(
-                decode(input.as_bytes()),
-                Err(EditorSourceToolSelectionError::InvalidRecord)
+                decode(valid.replace(&original, replacement).as_bytes()),
+                Err(Error::InvalidRecord)
             );
         }
     }
-    for (field, original, limit) in [
-        ("receipt", 32, MAX_RECEIPT_BYTES),
-        ("manifest", 64, MAX_MANIFEST_BYTES),
-    ] {
+    for (field, original, limit) in [("receipt", 32, 4096), ("manifest", 64, 65_536)] {
         for length in [0, 1, limit, limit + 1, u64::MAX] {
-            let mut selection = desired();
+            let mut graph = graph();
+            graph.desired = None;
             let digest = ContentDigest::from_parts(length, [0; 32]);
             if field == "receipt" {
-                selection.installed.receipt = digest;
+                graph.entries[0].installed.receipt = digest;
             } else {
-                selection.installed.manifest = digest;
+                graph.entries[0].installed.manifest = digest;
             }
             let accepted = (1..=limit).contains(&length);
-            assert_eq!(encode(&selection).is_ok(), accepted, "{field}: {length}");
+            assert_eq!(encode(&graph).is_ok(), accepted, "{field}: {length}");
             let input = valid.replace(
                 &format!("\"length\":{original}"),
                 &format!("\"length\":{length}"),
@@ -229,8 +318,8 @@ fn validates_fixed_width_byte_arrays_and_digest_lengths() {
 }
 
 #[test]
-fn requires_a_canonical_bounded_project_relative_directory() {
-    let invalid = [
+fn validates_relative_paths_and_selection_parent_exclusion_before_publication() {
+    for directory in [
         "",
         "/tools",
         "C:/tools",
@@ -249,65 +338,204 @@ fn requires_a_canonical_bounded_project_relative_directory() {
         "tools/a:b",
         "tools/a?b",
         "tools/a\nb",
-    ];
-    for directory in invalid {
-        let mut selection = desired();
-        selection.installed.directory = directory.into();
+        ".nara",
+        ".NARA",
+        ".nara/source-tools",
+        ".NARA/Source-Tools",
+    ] {
+        let mut graph = graph();
+        graph.desired = None;
+        graph.entries[0].installed.directory = directory.into();
+        assert_eq!(encode(&graph), Err(Error::InvalidPath), "{directory}");
+        let valid = record();
+        let mut dto: SelectionRecord = serde_json::from_str(&valid).unwrap();
+        dto.installed[0].directory = Cow::Borrowed(directory);
         assert_eq!(
-            encode(&selection),
-            Err(EditorSourceToolSelectionError::InvalidPath),
-            "{directory}"
-        );
-        let mut record: SelectionRecord = serde_json::from_str(&record()).unwrap();
-        record.installed.directory = directory.to_owned();
-        let bytes = serde_json::to_vec(&record).unwrap();
-        assert_eq!(
-            decode(&bytes),
-            Err(EditorSourceToolSelectionError::InvalidPath),
+            decode(&serde_json::to_vec(&dto).unwrap()),
+            Err(Error::InvalidPath),
             "{directory}"
         );
     }
-    let maximum_directory = format!("{}/{}/c", "a".repeat(255), "b".repeat(254));
-    let oversized_directory = format!("{}/{}/c", "a".repeat(255), "b".repeat(255));
-    assert_eq!(maximum_directory.len(), MAX_DIRECTORY_BYTES);
-    assert_eq!(oversized_directory.len(), MAX_DIRECTORY_BYTES + 1);
     for (directory, accepted) in [
         (vec!["a"; 16].join("/"), true),
         (vec!["a"; 17].join("/"), false),
-        (format!("{}/{}", "a".repeat(255), "b".repeat(255)), true),
-        (maximum_directory, true),
-        (oversized_directory, false),
-        (format!("{}/{}/c", "a".repeat(254), "b".repeat(254)), true),
+        (format!("{}/{}/c", "a".repeat(255), "b".repeat(254)), true),
+        (format!("{}/{}/c", "a".repeat(255), "b".repeat(255)), false),
         ("a".repeat(256), false),
         ("tools/工具".to_owned(), true),
+        (".nara/source-tools/install-1".to_owned(), true),
     ] {
-        let mut selection = desired();
-        selection.installed.directory = directory.clone().into();
-        assert_eq!(encode(&selection).is_ok(), accepted, "{directory}");
-        let mut record: SelectionRecord = serde_json::from_str(&record()).unwrap();
-        record.installed.directory = directory;
+        let mut graph = graph();
+        graph.desired = None;
+        graph.entries[0].installed.directory = directory.clone().into();
+        assert_eq!(encode(&graph).is_ok(), accepted, "{directory}");
+        let valid = record();
+        let mut dto: SelectionRecord = serde_json::from_str(&valid).unwrap();
+        dto.installed[0].directory = Cow::Owned(directory);
+        assert_eq!(decode(&serde_json::to_vec(&dto).unwrap()).is_ok(), accepted);
+    }
+}
+
+#[test]
+fn decode_rejects_directory_aliases_overlaps_missing_targets_package_mismatches_and_cycles() {
+    let original = required_graph();
+    let valid = String::from_utf8(encode(&original).unwrap()).unwrap();
+    for directory in [
+        "tools/install-1",
+        "TOOLS/INSTALL-1",
+        "tools/INSTALL-1/child",
+        "TOOLS",
+    ] {
+        let mut dto: SelectionRecord = serde_json::from_str(&valid).unwrap();
+        dto.installed[1].directory = Cow::Borrowed(directory);
         assert_eq!(
-            decode(&serde_json::to_vec(&record).unwrap()).is_ok(),
-            accepted
+            decode(&serde_json::to_vec(&dto).unwrap()),
+            Err(Error::Graph)
+        );
+    }
+    for case in 0..5 {
+        let mut dto: SelectionRecord = serde_json::from_str(&valid).unwrap();
+        match case {
+            0 => dto.installed[2].requires[0].installation = [9; 32],
+            1 => dto.installed[2].requires[0].package = Cow::Borrowed("wrong.package"),
+            2 => {
+                dto.installed[2].requires[0] = RequirementRecord {
+                    package: Cow::Borrowed("test.consumer"),
+                    installation: [3; 32],
+                }
+            }
+            3 => dto.installed[0].requires.push(RequirementRecord {
+                package: Cow::Borrowed("test.consumer"),
+                installation: [3; 32],
+            }),
+            _ => dto.installed[2].requires[0].installation = [0; 32],
+        }
+        assert_eq!(
+            decode(&serde_json::to_vec(&dto).unwrap()),
+            Err(Error::Graph)
         );
     }
 }
 
 #[test]
-fn checks_record_byte_limit_before_parsing_and_accepts_the_exact_boundary() {
-    for (length, accepted) in [(4095, true), (4096, true), (4097, false)] {
-        let mut bytes = encode(&desired()).unwrap();
+fn checks_byte_limit_before_parsing_and_structural_limits_before_domain_decode() {
+    for (length, accepted) in [(65_535, true), (65_536, true), (65_537, false)] {
+        let mut bytes = encode(&graph()).unwrap();
         bytes.resize(length, b' ');
         let result = decode(&bytes);
         assert_eq!(result.is_ok(), accepted);
         if !accepted {
-            assert_eq!(result, Err(EditorSourceToolSelectionError::TooLarge));
+            assert_eq!(result, Err(Error::TooLarge));
         }
     }
     assert_eq!(
         decode(&vec![b'!'; BYTE_LIMIT as usize + 1]),
-        Err(EditorSourceToolSelectionError::TooLarge)
+        Err(Error::TooLarge)
     );
+    let deep = format!("{}0{}", "[".repeat(9), "]".repeat(9));
+    assert_eq!(decode(deep.as_bytes()), Err(Error::InvalidRecord));
+    let oversized_string = format!("\"{}\"", "a".repeat(MAX_DIRECTORY_BYTES + 1));
+    assert_eq!(
+        decode(oversized_string.as_bytes()),
+        Err(Error::InvalidRecord)
+    );
+    let excessive_container = format!("[{}]", vec!["null"; MAX_ENTRIES + 1].join(","));
+    assert_eq!(
+        decode(excessive_container.as_bytes()),
+        Err(Error::InvalidRecord)
+    );
+}
+
+#[test]
+fn admits_exact_graph_bounds_and_rejects_excess_outgoing_and_aggregate_edges() {
+    let mut entries: Vec<_> = (1..=32)
+        .map(|id| entry(id, &format!("test.p{id}"), &[]))
+        .collect();
+    for index in 16..24 {
+        let requirements = entries[..16]
+            .iter()
+            .map(|target| Binding {
+                package: target.installed.package.clone(),
+                installation: target.installed.installation,
+            })
+            .collect();
+        entries[index].requirements = requirements;
+    }
+    let graph = Graph::default().register(&entries).unwrap();
+    let bytes = encode(&graph).unwrap();
+    assert_eq!(decode(&bytes).unwrap(), graph);
+    let text = String::from_utf8(bytes).unwrap();
+    for case in 0..3 {
+        let mut dto: SelectionRecord = serde_json::from_str(&text).unwrap();
+        match case {
+            0 => dto.installed[16].requires.push(RequirementRecord {
+                package: Cow::Borrowed("test.p32"),
+                installation: [32; 32],
+            }),
+            1 => dto.installed[24].requires.push(RequirementRecord {
+                package: Cow::Borrowed("test.p1"),
+                installation: [1; 32],
+            }),
+            _ => dto.installed.push(InstalledRecord {
+                package: Cow::Borrowed("test.extra"),
+                directory: Cow::Borrowed("tools/extra"),
+                installation: [33; 32],
+                receipt: DigestRecord {
+                    length: 32,
+                    hash: [2; 32],
+                },
+                manifest: DigestRecord {
+                    length: 64,
+                    hash: [3; 32],
+                },
+                requires: Vec::new(),
+            }),
+        }
+        assert!(decode(&serde_json::to_vec(&dto).unwrap()).is_err());
+    }
+}
+
+#[test]
+fn output_buffer_stops_at_byte_limit_without_appending_a_partial_chunk() {
+    let mut output = RecordBytes {
+        bytes: vec![0; BYTE_LIMIT as usize - 1],
+        oversized: false,
+    };
+    assert!(output.write_all(&[1, 2]).is_err());
+    assert!(output.oversized);
+    assert_eq!(output.bytes.len(), BYTE_LIMIT as usize - 1);
+    output.write_all(&[1]).unwrap();
+    assert_eq!(output.bytes.len(), BYTE_LIMIT as usize);
+    assert!(output.write_all(&[2]).is_err());
+    assert_eq!(output.bytes.len(), BYTE_LIMIT as usize);
+}
+
+#[test]
+fn encode_rejects_a_valid_graph_whose_canonical_json_exceeds_the_publication_limit() {
+    let mut entries: Vec<_> = (1_u8..=32)
+        .map(|id| {
+            let mut entry = entry(id, &format!("p{id:02}{}", "a".repeat(125)), &[]);
+            entry.installed.installation = [id + 223; 32];
+            entry.installed.directory =
+                format!("{}/{}/{id:02}", "a".repeat(255), "b".repeat(253)).into();
+            entry.installed.receipt = ContentDigest::from_parts(4096, [255; 32]);
+            entry.installed.manifest = ContentDigest::from_parts(65_536, [255; 32]);
+            entry
+        })
+        .collect();
+    for index in 16..24 {
+        let requirements = entries[..16]
+            .iter()
+            .map(|target| Binding {
+                package: target.installed.package.clone(),
+                installation: target.installed.installation,
+            })
+            .collect();
+        entries[index].requirements = requirements;
+    }
+    let graph = Graph::default().register(&entries).unwrap();
+    graph.validate().unwrap();
+    assert_eq!(encode(&graph), Err(Error::TooLarge));
 }
 
 #[cfg(any(windows, target_os = "linux"))]
@@ -411,13 +639,13 @@ mod filesystem {
         let fixture = Fixture::new();
         let root = fixture.capability(CapabilityRights::ReadOnly, TrustMode::Untrusted);
         let loaded = load(&root).unwrap();
-        assert_eq!(loaded.desired, None);
+        assert_eq!(loaded.graph, Graph::default());
         assert!(loaded.host.is_none());
         assert_eq!(fs::read_dir(&fixture.directory).unwrap().count(), 0);
 
         fs::create_dir(fixture.directory.join(METADATA_DIRECTORY)).unwrap();
         let loaded = load(&root).unwrap();
-        assert_eq!(loaded.desired, None);
+        assert_eq!(loaded.graph, Graph::default());
         assert!(loaded.host.is_none());
         assert_eq!(
             fs::read_dir(fixture.directory.join(METADATA_DIRECTORY))
@@ -433,7 +661,7 @@ mod filesystem {
         fixture.create_parents();
         let root = fixture.capability(CapabilityRights::ReadOnly, TrustMode::Untrusted);
         let loaded = load(&root).unwrap();
-        assert_eq!(loaded.desired, None);
+        assert_eq!(loaded.graph, Graph::default());
         let host = loaded.host.unwrap();
         assert_eq!(host.binding(), FilePublicationBinding::Missing);
         assert_eq!(host.accepted_source_observation(), None);
@@ -449,13 +677,13 @@ mod filesystem {
     fn loaded_host_pins_the_actual_decoded_leaf_after_rename_and_unlink() {
         let fixture = Fixture::new();
         fixture.create_parents();
-        let bytes = encode(&desired()).unwrap();
+        let bytes = encode(&graph()).unwrap();
         fixture.write_record(&bytes);
         let root = fixture.capability(CapabilityRights::ReadOnly, TrustMode::Untrusted);
         let observed = root.open_file_exact(&fixed_path(SELECTION_PATH)).unwrap();
         let identity = observed.identity();
         let loaded = load(&root).unwrap();
-        assert_eq!(loaded.desired, Some(desired()));
+        assert_eq!(loaded.graph, graph());
         let host = loaded.host.unwrap();
         drop(observed);
         let digest = ContentDigest::of_bytes(&bytes);
@@ -489,31 +717,22 @@ mod filesystem {
         fixture.create_parents();
         let root = fixture.capability(CapabilityRights::ReadWrite, TrustMode::Untrusted);
         for (bytes, expected) in [
-            (
-                b"not JSON".to_vec(),
-                EditorSourceToolSelectionError::InvalidRecord,
-            ),
+            (b"not JSON".to_vec(), Error::InvalidRecord),
             (
                 record().replacen('{', "{\"unknown\":true,", 1).into_bytes(),
-                EditorSourceToolSelectionError::InvalidRecord,
+                Error::InvalidRecord,
             ),
             (
                 record()
                     .replace("\"format_version\":1", "\"format_version\":2")
                     .into_bytes(),
-                EditorSourceToolSelectionError::UnsupportedFormat,
+                Error::UnsupportedFormat,
             ),
-            (
-                vec![b'!'; BYTE_LIMIT as usize + 1],
-                EditorSourceToolSelectionError::TooLarge,
-            ),
+            (vec![b'!'; BYTE_LIMIT as usize + 1], Error::TooLarge),
         ] {
             fixture.write_record(&bytes);
             assert_eq!(load(&root).unwrap_err(), expected);
-            assert_eq!(
-                create_missing_host(&root).unwrap_err(),
-                EditorSourceToolSelectionError::Changed
-            );
+            assert_eq!(create_missing_host(&root).unwrap_err(), Error::Changed);
             assert_eq!(
                 fs::read(fixture.directory.join(SELECTION_PATH)).unwrap(),
                 bytes
@@ -535,12 +754,9 @@ mod filesystem {
         assert_eq!(host.binding(), FilePublicationBinding::Missing);
         assert!(fixture.directory.join(".nara/source-tools").is_dir());
         assert!(!fixture.directory.join(SELECTION_PATH).exists());
-        let bytes = encode(&desired()).unwrap();
+        let bytes = encode(&graph()).unwrap();
         fixture.write_record(&bytes);
-        assert_eq!(
-            create_missing_host(&root).unwrap_err(),
-            EditorSourceToolSelectionError::Changed
-        );
+        assert_eq!(create_missing_host(&root).unwrap_err(), Error::Changed);
         assert_eq!(
             fs::read(fixture.directory.join(SELECTION_PATH)).unwrap(),
             bytes
@@ -555,7 +771,7 @@ mod filesystem {
         let mut host = create_missing_host(&root).unwrap();
         let bytes = b"another writer owns this leaf";
         fixture.write_record(bytes);
-        let result = host.publish(&encode(&desired()).unwrap());
+        let result = host.publish(&encode(&graph()).unwrap());
         assert!(matches!(
             result,
             FilePublicationOutcome::Rejected(FilePublicationRejection::TargetChanged)
@@ -572,10 +788,7 @@ mod filesystem {
     fn explicit_creation_preserves_read_only_rights_without_creating_directories() {
         let fixture = Fixture::new();
         let root = fixture.capability(CapabilityRights::ReadOnly, TrustMode::Untrusted);
-        assert_eq!(
-            create_missing_host(&root).unwrap_err(),
-            EditorSourceToolSelectionError::ReadOnly
-        );
+        assert_eq!(create_missing_host(&root).unwrap_err(), Error::ReadOnly);
         assert_eq!(fs::read_dir(&fixture.directory).unwrap().count(), 0);
     }
 
@@ -611,7 +824,7 @@ mod filesystem {
             let fixture = Fixture::new();
             fs::create_dir(fixture.directory.join(alias_metadata)).unwrap();
             fs::create_dir(fixture.directory.join(alias_metadata).join(alias_tools)).unwrap();
-            let bytes = encode(&desired()).unwrap();
+            let bytes = encode(&graph()).unwrap();
             fs::write(
                 fixture
                     .directory
@@ -622,14 +835,8 @@ mod filesystem {
             )
             .unwrap();
             let root = fixture.capability(CapabilityRights::ReadWrite, TrustMode::Untrusted);
-            assert_eq!(
-                load(&root).unwrap_err(),
-                EditorSourceToolSelectionError::InvalidPath
-            );
-            assert_eq!(
-                create_missing_host(&root).unwrap_err(),
-                EditorSourceToolSelectionError::InvalidPath
-            );
+            assert_eq!(load(&root).unwrap_err(), Error::InvalidPath);
+            assert_eq!(create_missing_host(&root).unwrap_err(), Error::InvalidPath);
             assert_eq!(
                 fs::read(
                     fixture

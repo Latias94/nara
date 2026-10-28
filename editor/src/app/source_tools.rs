@@ -5,14 +5,16 @@ use std::{collections::BTreeMap, time::Duration};
 use nara::{
     project_host::{
         EditorProjectSession, EditorSourceToolDefinition, EditorSourceToolManagedHost,
-        PreparedEditorSourceToolSelection,
+        PreparedEditorSourceToolInstallations, PreparedEditorSourceToolSelection,
+        PreparedEditorSourceToolWithdrawal,
     },
     reflect::ComponentValue,
     tooling::{
         EditorDocumentQueryBasis, EditorSourceToolActivationId, EditorSourceToolAttemptId,
-        EditorSourceToolCommit, EditorSourceToolError, EditorSourceToolIntent,
-        EditorSourceToolRequestId, EditorSourceToolReview, EditorSourceToolSelectionBasis,
-        EditorSourceToolSelectionError, EditorSourceToolSelectionView, EditorSourceToolView,
+        EditorSourceToolCommit, EditorSourceToolError, EditorSourceToolInstallationRequest,
+        EditorSourceToolIntent, EditorSourceToolRequestId, EditorSourceToolReview,
+        EditorSourceToolSelectionBasis, EditorSourceToolSelectionError,
+        EditorSourceToolSelectionView, EditorSourceToolView, EditorSourceToolWithdrawalMode,
     },
 };
 
@@ -46,6 +48,58 @@ impl EditorApplicationSourceToolSubmission {
 }
 
 impl EditorApplication {
+    /// Prepares an additive installed set against the original project/selection observation.
+    pub fn prepare_source_tool_installations(
+        &self,
+        basis: &EditorSourceToolSelectionBasis,
+        project: nara::fs::DirectoryCapability,
+        requests: &[EditorSourceToolInstallationRequest],
+    ) -> Result<PreparedEditorSourceToolInstallations, EditorSourceToolSelectionError> {
+        self.authoring_edit_session()
+            .map_err(|_| EditorSourceToolSelectionError::Closing)?
+            .prepare_source_tool_installations(basis, project, requests)
+    }
+
+    pub fn register_source_tool_installations(
+        &mut self,
+        prepared: PreparedEditorSourceToolInstallations,
+    ) -> Result<EditorSourceToolAttemptId, EditorSourceToolSelectionError> {
+        let result = self
+            .state
+            .workspace_mut()
+            .ok_or(EditorSourceToolSelectionError::Closing)?
+            .session
+            .register_source_tool_installations(prepared);
+        self.drive_editor_frame(Duration::ZERO, true, false);
+        result
+    }
+
+    pub fn prepare_source_tool_withdrawal(
+        &self,
+        basis: &EditorSourceToolSelectionBasis,
+        installation: &[u8; 32],
+        mode: EditorSourceToolWithdrawalMode,
+    ) -> Result<PreparedEditorSourceToolWithdrawal, EditorSourceToolSelectionError> {
+        self.authoring_edit_session()
+            .map_err(|_| EditorSourceToolSelectionError::Closing)?
+            .prepare_source_tool_withdrawal(basis, installation, mode)
+    }
+
+    /// Confirms graph withdrawal; actual files and admitted Schema retain their owners.
+    pub fn withdraw_source_tool_installations(
+        &mut self,
+        prepared: PreparedEditorSourceToolWithdrawal,
+    ) -> Result<EditorSourceToolAttemptId, EditorSourceToolSelectionError> {
+        let result = self
+            .state
+            .workspace_mut()
+            .ok_or(EditorSourceToolSelectionError::Closing)?
+            .session
+            .withdraw_source_tool_installations(prepared);
+        self.drive_editor_frame(Duration::ZERO, true, false);
+        result
+    }
+
     /// Bounded code-free Host preparation; this does not probe or enable the tool.
     pub fn prepare_installed_source_tool_selection(
         &self,

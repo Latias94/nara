@@ -250,7 +250,7 @@ impl Project {
         }
     }
 
-    pub(super) fn persisted(&self) -> Vec<u8> {
+    pub(in crate::project_host::runtime::editor::source_tools) fn persisted(&self) -> Vec<u8> {
         fs::read(self.root.join(SCENE)).unwrap()
     }
 }
@@ -344,19 +344,22 @@ pub(super) fn attach(
 }
 
 #[derive(Clone, Copy, Debug)]
-pub(super) enum GatePoint {
+pub(in crate::project_host::runtime::editor::source_tools) enum GatePoint {
     BeforeSpawn,
     BeforeIoReturn,
 }
 
-pub(super) struct HeldProcess {
+pub(in crate::project_host::runtime::editor::source_tools) struct HeldProcess {
     gate: Arc<process::ProcessTestGate>,
     release: mpsc::Sender<()>,
     watchdog: Option<JoinHandle<()>>,
 }
 
 impl HeldProcess {
-    pub(super) fn arm(editor: &mut EditorProjectSession, point: GatePoint) -> Self {
+    pub(in crate::project_host::runtime::editor::source_tools) fn arm(
+        editor: &mut EditorProjectSession,
+        point: GatePoint,
+    ) -> Self {
         let gate = Arc::new(process::ProcessTestGate::default());
         editor.source_tools.next_gates = match point {
             GatePoint::BeforeSpawn => process::ProcessTestGates {
@@ -382,7 +385,7 @@ impl HeldProcess {
         }
     }
 
-    pub(super) fn wait_until_entered(&self) {
+    pub(in crate::project_host::runtime::editor::source_tools) fn wait_until_entered(&self) {
         let deadline = Instant::now() + WAIT;
         while !self.gate.entered.load(Ordering::Acquire) {
             assert!(
@@ -393,17 +396,23 @@ impl HeldProcess {
         }
     }
 
-    pub(super) fn release(&self) {
+    pub(in crate::project_host::runtime::editor::source_tools) fn release(&self) {
         self.gate.release.store(true, Ordering::Release);
         let _ = self.release.send(());
     }
 
-    pub(super) fn assert_pending(&self, returned: &TaskReturnObserver) {
+    pub(in crate::project_host::runtime::editor::source_tools) fn assert_pending(
+        &self,
+        returned: &TaskReturnObserver,
+    ) {
         assert!(!self.gate.release.load(Ordering::Acquire));
         assert_eq!(returned.state(), TaskReturnState::Pending);
     }
 
-    pub(super) fn poll<T>(&self, poll: impl FnOnce() -> T) -> T {
+    pub(in crate::project_host::runtime::editor::source_tools) fn poll<T>(
+        &self,
+        poll: impl FnOnce() -> T,
+    ) -> T {
         let started = Instant::now();
         let result = poll();
         assert!(

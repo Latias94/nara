@@ -99,9 +99,22 @@ impl EditorSourceToolManagedHost {
     ///
     /// The returned definition still needs the ordinary Session describe probe before activation.
     /// This neither registers project metadata nor persists enablement. Required Package
-    /// relationships reject until the installed-graph owner can validate them. The namespace is
+    /// relationships use Session graph preparation and reject at this standalone entry. The namespace is
     /// not consulted again for package execution: each invocation streams these same owned bytes.
     pub fn approve_installation(
+        &self,
+        installation: EditorSourceToolInstallationInspection,
+    ) -> Result<EditorSourceToolDefinition, EditorSourceToolManagedError> {
+        if !installation.release().requires().is_empty() {
+            return Err(EditorSourceToolManagedError::Contract(
+                "installed requirements need graph admission",
+            ));
+        }
+        self.approve_graph_installation(installation)
+    }
+
+    /// The Session selection owner has already admitted the complete exact required closure.
+    pub(in crate::project_host::runtime::editor::source_tools) fn approve_graph_installation(
         &self,
         installation: EditorSourceToolInstallationInspection,
     ) -> Result<EditorSourceToolDefinition, EditorSourceToolManagedError> {

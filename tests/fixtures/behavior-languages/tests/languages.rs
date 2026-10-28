@@ -4,6 +4,8 @@
 mod authoring_project;
 #[path = "support/enemy_stats.rs"]
 mod enemy_stats;
+#[path = "support/installed_graph.rs"]
+mod installed_graph;
 #[path = "support/local_release.rs"]
 mod local_release;
 #[path = "support/managed_bootstrap.rs"]

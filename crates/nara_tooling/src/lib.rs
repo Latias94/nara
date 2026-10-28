@@ -118,12 +118,14 @@ pub use source_asset_import::{
 pub use source_tools::{
     EditorSourceToolAction, EditorSourceToolActionOutcome, EditorSourceToolActivationId,
     EditorSourceToolActive, EditorSourceToolAttemptId, EditorSourceToolCommit,
-    EditorSourceToolDesiredSelection, EditorSourceToolError, EditorSourceToolInstalledSelection,
+    EditorSourceToolDesiredSelection, EditorSourceToolError, EditorSourceToolInstallationRequest,
+    EditorSourceToolInstalledEntry, EditorSourceToolInstalledSelection,
     EditorSourceToolIntegerProperty, EditorSourceToolIntent, EditorSourceToolRequestId,
-    EditorSourceToolReview, EditorSourceToolReviewSummary, EditorSourceToolSelectionAttempt,
-    EditorSourceToolSelectionBasis, EditorSourceToolSelectionError,
-    EditorSourceToolSelectionOutcome, EditorSourceToolSelectionPhase,
-    EditorSourceToolSelectionView, EditorSourceToolView,
+    EditorSourceToolRequirementBinding, EditorSourceToolReview, EditorSourceToolReviewSummary,
+    EditorSourceToolSelectionAttempt, EditorSourceToolSelectionBasis,
+    EditorSourceToolSelectionError, EditorSourceToolSelectionOutcome,
+    EditorSourceToolSelectionPhase, EditorSourceToolSelectionView, EditorSourceToolView,
+    EditorSourceToolWithdrawalMode,
 };
 pub use workspace::{
     CommittedEditorDocumentConstruction, CommittedEditorPrefabConversion, EditorDocumentDigest,

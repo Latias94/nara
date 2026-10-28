@@ -3,7 +3,7 @@ type: "Current State"
 title: "Current Engineering State"
 description: "Derived summary of immutable engineering-memory shards."
 tags: ["engineering-memory", "derived"]
-source_fingerprint: "8497962f74651529e0d08cde5f73df213bb1c5ad8a4632d1bacc155f30e7681f"
+source_fingerprint: "c1886e304fd7b640e830d56c4076010f1fc7aa498f096f3d5ea2c53a3ef5da8d"
 ---
 
 # Current State
@@ -12,8 +12,8 @@ source_fingerprint: "8497962f74651529e0d08cde5f73df213bb1c5ad8a4632d1bacc155f30e
 
 This file is derived from immutable shards. Record new facts in shards, then render during integration.
 
-- Source fingerprint: `8497962f74651529e0d08cde5f73df213bb1c5ad8a4632d1bacc155f30e7681f`
-- Immutable records: 1001
+- Source fingerprint: `c1886e304fd7b640e830d56c4076010f1fc7aa498f096f3d5ea2c53a3ef5da8d`
+- Immutable records: 1002
 - Active lane heads: 1
 
 # Active Registrations
@@ -69,6 +69,7 @@ This file is derived from immutable shards. Record new facts in shards, then ren
 
 # Recent Evidence
 
+- **Verification Evidence**: [Exact installed source-tool graph and dependency-safe withdrawal](verification/2026-10/2026-10-28T095430Z-exact-installed-source-tool-graph-and-dependency-safe-withdrawal-0c433a90f253423da28da2b3e275bff8.md) - Replaces the single-member selection record with bounded exact installed relationships, shared capture admission and Session-owned withdrawal with independent managed/Application/native consumers.
 - **Verification Evidence**: [Schema adoption failure provenance and truthful cancellation](verification/2026-10/2026-10-28T085355Z-schema-adoption-failure-provenance-and-truthful-cancellation-b8fcde768b2e4e36a93355796a5f6224.md) - Retains source/history owning reports and actual worker failures through Session and Application without inventing failures for pure cancellation.
 - **Verification Evidence**: [Whole Session installed schema owner adoption and explicit publication recovery](verification/2026-10/2026-10-28T080917Z-whole-session-installed-schema-owner-adoption-and-explicit-publication-recovery-5a02037cad1b4af49cbec2b24306524a.md) - Records code-free installed metadata preparation, current dirty sources, actual publication and no-write reconciliation with physical custody and native consumer qualification.
 - **Verification Evidence**: [Owned source history and whole-workspace schema preparation](verification/2026-10/2026-10-28T061611Z-owned-source-history-and-whole-workspace-schema-preparation-a4021ad50ca24035b6530ae233b9dff3.md) - Records bounded frozen input handoff and exact original publication checks without claiming complete Session adoption.
@@ -80,7 +81,6 @@ This file is derived from immutable shards. Record new facts in shards, then ren
 - **Verification Evidence**: [Source-owned schema reclassification with exact retained history and bounded interpretation](verification/2026-10/2026-10-28T032419Z-source-owned-schema-reclassification-with-exact-retained-history-and-bounded-interpretation-becb85b221e241aebeb4845c692a7379.md) - Qualifies the additive source/history owner and records the actual-demand historical composition boundary before whole-Session adoption.
 - **Work Progress**: [Source-owned additive schema reclassification and retained history integration in progress](progress/2026-10/2026-10-28T023202Z-source-owned-additive-schema-reclassification-and-retained-history-integration-in-progress-3f8038175810499ab6477d801c8903d2.md) - Records the in-progress source/history replacement and concrete budget, nominal identity and shared preparation interfaces before qualification.
 - **Verification Evidence**: [Recipe schema refresh preserves independently admitted owner lineage](verification/2026-10/2026-10-28T014807Z-recipe-schema-refresh-preserves-independently-admitted-owner-lineage-8afcd1ede3dc4451ac719a1a236e9c85.md) - Qualifies bounded owner-preserving refresh and records the reviewed source/history successor design without claiming Session adoption.
-- **Verification Evidence**: [Durable installed source-tool selection and independent paired attempt qualification](verification/2026-10/2026-10-28T012206Z-durable-installed-source-tool-selection-and-independent-paired-attempt-qualification-3a4a90d3cc3042e5b89e8fa20e314c22.md) - Qualifies code-free desired selection, approved installation enablement and physical lifetime through Session, Application and native Editor consumers.
 
 # Integration Notes
 

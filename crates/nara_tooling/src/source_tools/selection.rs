@@ -35,6 +35,35 @@ pub struct EditorSourceToolInstalledSelection {
     pub manifest: ContentDigest,
 }
 
+/// One declared package requirement bound to an exact installed member.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct EditorSourceToolRequirementBinding {
+    pub package: Arc<str>,
+    pub installation: [u8; 32],
+}
+
+/// Recorded installation facts and explicit requirements, without executable approval.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct EditorSourceToolInstalledEntry {
+    pub installed: EditorSourceToolInstalledSelection,
+    pub requirements: Vec<EditorSourceToolRequirementBinding>,
+}
+
+/// Code-free installation inspection requested through the owning project capability.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct EditorSourceToolInstallationRequest {
+    pub directory: Arc<str>,
+    pub receipt: ContentDigest,
+    pub requirements: Vec<EditorSourceToolRequirementBinding>,
+}
+
+/// Whether withdrawal may include members that require the selected installation.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum EditorSourceToolWithdrawalMode {
+    RejectDependents,
+    Cascade,
+}
+
 /// Durable user intent. Enablement still requires independent Host approval and Session admission.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct EditorSourceToolDesiredSelection {
@@ -91,6 +120,12 @@ pub enum EditorSourceToolSelectionError {
     TaskRejected,
     #[error("the selected source-tool installation could not be admitted")]
     Installation,
+    #[error("the installed source-tool graph is invalid or exceeds its limits")]
+    Graph,
+    #[error("other installed source tools require this installation")]
+    RequiredDependents,
+    #[error("source-tool installation capture exceeded its shared byte-work allowance")]
+    CaptureBudget,
     #[error("the selected source tool does not match the admitted Schema")]
     Schema,
     #[error("the prepared source-tool activation could not be promoted")]
@@ -100,6 +135,8 @@ pub enum EditorSourceToolSelectionError {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum EditorSourceToolSelectionOutcome {
     Observed,
+    Registered,
+    Withdrawn,
     Enabled,
     Disabled,
     PublishedWithoutActivation,
@@ -122,6 +159,7 @@ pub struct EditorSourceToolSelectionAttempt {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct EditorSourceToolSelectionView {
     pub basis: EditorSourceToolSelectionBasis,
+    pub installed: Vec<EditorSourceToolInstalledEntry>,
     pub desired: Option<EditorSourceToolDesiredSelection>,
     pub active_origin: Option<EditorSourceToolInstalledSelection>,
     pub phase: EditorSourceToolSelectionPhase,

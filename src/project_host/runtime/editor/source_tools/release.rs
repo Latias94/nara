@@ -20,6 +20,34 @@ pub use installation::{
 
 use manifest::{MANIFEST_NAME, MAX_MANIFEST_BYTES, Manifest, MemberKind};
 
+const MAX_RELEASE_CAPTURE_BYTES: u64 = manifest::MAX_TOTAL_BYTES + MAX_MANIFEST_BYTES;
+
+/// One operation's cumulative declared byte-work allowance, independent of per-release limits.
+/// Admissions are not refunded after failed reads or when a captured release is dropped.
+pub(in crate::project_host::runtime::editor::source_tools) struct ReleaseCaptureBudget {
+    remaining_bytes: usize,
+}
+
+impl ReleaseCaptureBudget {
+    pub(in crate::project_host::runtime::editor::source_tools) fn new(
+        maximum_bytes: usize,
+    ) -> Self {
+        Self {
+            remaining_bytes: maximum_bytes,
+        }
+    }
+
+    fn admit(&mut self, byte_length: u64) -> Result<(), EditorSourceToolReleaseError> {
+        let byte_length = usize::try_from(byte_length)
+            .map_err(|_| EditorSourceToolReleaseError::CaptureBudget)?;
+        self.remaining_bytes = self
+            .remaining_bytes
+            .checked_sub(byte_length)
+            .ok_or(EditorSourceToolReleaseError::CaptureBudget)?;
+        Ok(())
+    }
+}
+
 /// The role of a captured file. Content has no installation destination or execution authority.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum EditorSourceToolReleaseMemberKind {
@@ -138,6 +166,8 @@ pub enum EditorSourceToolReleaseError {
     SourceTrust,
     #[error("the selected manifest exceeds the local tool release allowance")]
     ManifestLimit,
+    #[error("the local tool release capture exceeds the shared byte-work allowance")]
+    CaptureBudget,
     #[error("the local tool release manifest is invalid: {0}")]
     Manifest(&'static str),
     #[error("the release targets another Editor host")]
@@ -167,11 +197,26 @@ impl PreparedEditorSourceToolRelease {
         root: &DirectoryCapability,
         expected_manifest: ContentDigest,
     ) -> Result<Self, EditorSourceToolReleaseError> {
+        let maximum_bytes = usize::try_from(MAX_RELEASE_CAPTURE_BYTES)
+            .map_err(|_| EditorSourceToolReleaseError::CaptureBudget)?;
+        Self::capture_with_budget(
+            root,
+            expected_manifest,
+            &mut ReleaseCaptureBudget::new(maximum_bytes),
+        )
+    }
+
+    /// Captures with the caller's shared allowance without relaxing per-release admission.
+    pub(in crate::project_host::runtime::editor::source_tools) fn capture_with_budget(
+        root: &DirectoryCapability,
+        expected_manifest: ContentDigest,
+        budget: &mut ReleaseCaptureBudget,
+    ) -> Result<Self, EditorSourceToolReleaseError> {
         require_strict_source(root)?;
         if expected_manifest.length() == 0 || expected_manifest.length() > MAX_MANIFEST_BYTES {
             return Err(EditorSourceToolReleaseError::ManifestLimit);
         }
-        let manifest_bytes = capture_member(root, MANIFEST_NAME, expected_manifest)?;
+        let manifest_bytes = capture_member(root, MANIFEST_NAME, expected_manifest, budget)?;
         let manifest =
             Manifest::decode(&manifest_bytes).map_err(EditorSourceToolReleaseError::Manifest)?;
         if current_host_target() != Some(manifest.host_target.as_str()) {
@@ -180,7 +225,7 @@ impl PreparedEditorSourceToolRelease {
 
         let mut members = Vec::with_capacity(manifest.files.len());
         for member in manifest.files {
-            let bytes = capture_member(root, &member.path, member.digest)?;
+            let bytes = capture_member(root, &member.path, member.digest, budget)?;
             members.push(EditorSourceToolReleaseMember {
                 path: member.path,
                 kind: match member.kind {
@@ -313,7 +358,10 @@ fn capture_member(
     root: &DirectoryCapability,
     member: &str,
     expected: ContentDigest,
+    budget: &mut ReleaseCaptureBudget,
 ) -> Result<Box<[u8]>, EditorSourceToolReleaseError> {
+    // Charge before opening or allocating, and retain the charge on every failure path.
+    budget.admit(expected.length())?;
     let read = || {
         let path = RelativePath::new(member)?;
         let file = root.open_file_exact(&path)?;
@@ -357,3 +405,12 @@ fn current_host_target() -> Option<&'static str> {
     )
 ))]
 mod tests;
+
+#[cfg(all(
+    test,
+    any(
+        all(target_os = "windows", target_arch = "x86_64", target_env = "msvc"),
+        all(target_os = "linux", target_arch = "x86_64", target_env = "gnu")
+    )
+))]
+mod capture_tests;

@@ -10,8 +10,8 @@ use nara_fs::{
 };
 
 use super::{
-    EditorSourceToolReleaseMemberKind, PreparedEditorSourceToolRelease, ReleaseMetadata,
-    manifest::MANIFEST_NAME,
+    EditorSourceToolReleaseMemberKind, PreparedEditorSourceToolRelease, ReleaseCaptureBudget,
+    ReleaseMetadata, manifest::MANIFEST_NAME,
 };
 
 mod receipt;
@@ -363,6 +363,25 @@ impl EditorSourceToolInstallationInspection {
         root: &DirectoryCapability,
         expected_receipt: ContentDigest,
     ) -> Result<Self, EditorSourceToolInstallationError> {
+        let maximum_bytes = usize::try_from(super::MAX_RELEASE_CAPTURE_BYTES + MAX_RECEIPT_BYTES)
+            .map_err(|_| {
+            EditorSourceToolInstallationError::Inspection(
+                super::EditorSourceToolReleaseError::CaptureBudget,
+            )
+        })?;
+        Self::read_with_budget(
+            root,
+            expected_receipt,
+            &mut ReleaseCaptureBudget::new(maximum_bytes),
+        )
+    }
+
+    /// Shares one byte-work allowance across receipt, manifest and all declared payload reads.
+    pub(in crate::project_host::runtime::editor::source_tools) fn read_with_budget(
+        root: &DirectoryCapability,
+        expected_receipt: ContentDigest,
+        budget: &mut ReleaseCaptureBudget,
+    ) -> Result<Self, EditorSourceToolInstallationError> {
         super::require_strict_source(root)
             .map_err(EditorSourceToolInstallationError::Inspection)?;
         if expected_receipt.length() == 0 || expected_receipt.length() > MAX_RECEIPT_BYTES {
@@ -371,13 +390,16 @@ impl EditorSourceToolInstallationInspection {
             ));
         }
         let directory = root.share();
-        let bytes = super::capture_member(&directory, RECEIPT_NAME, expected_receipt)
+        let bytes = super::capture_member(&directory, RECEIPT_NAME, expected_receipt, budget)
             .map_err(EditorSourceToolInstallationError::Inspection)?;
         let receipt = EditorSourceToolInstallationReceipt::decode(&bytes)
             .map_err(EditorSourceToolInstallationError::Receipt)?;
-        let release =
-            PreparedEditorSourceToolRelease::capture(&directory, receipt.manifest_digest())
-                .map_err(EditorSourceToolInstallationError::Inspection)?;
+        let release = PreparedEditorSourceToolRelease::capture_with_budget(
+            &directory,
+            receipt.manifest_digest(),
+            budget,
+        )
+        .map_err(EditorSourceToolInstallationError::Inspection)?;
         verify_inventory(
             &directory,
             release

@@ -139,8 +139,9 @@ pub use runtime::{
     EditorSourceToolInstallationReceipt, EditorSourceToolInstalledMember,
     EditorSourceToolManagedError, EditorSourceToolManagedHost, EditorSourceToolManagedHostDigests,
     EditorSourceToolReleaseError, EditorSourceToolReleaseMember, EditorSourceToolReleaseMemberKind,
-    EditorSourceToolReleaseRequirement, PreparedEditorSourceToolRelease,
-    PreparedEditorSourceToolSelection, SupervisedDesktopSourceAdmissionError,
+    EditorSourceToolReleaseRequirement, PreparedEditorSourceToolInstallations,
+    PreparedEditorSourceToolRelease, PreparedEditorSourceToolSelection,
+    PreparedEditorSourceToolWithdrawal, SupervisedDesktopSourceAdmissionError,
     SupervisedDesktopSourceAuthority, TrustedCompiledEditorProjectIntent,
     admit_supervised_desktop_source_receipt,
 };

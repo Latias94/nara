@@ -86,7 +86,8 @@ local relationships are checked; unsupported sources, roles, migration and targe
    `approve_installation` binds an inspection's captured images to an ordinary Session definition.
    Qualify this implementation with the actual installed V1/V2 consumer, negative metadata/graph
    probes and held acquisition/IO return. Its presence alone does not close this step or durable
-   selection, and unsupported required relationships still reject.
+   selection. Standalone approval still rejects required relationships; selected exact installed
+   relationships use the installed-graph successor's Session preparation.
    Prepare exact artifact custody before invoking the existing probe; same-Schema V2 coexists
    with the predecessor until readiness and the chosen publication cut. Define receipt versus
    routing order inside the actual Session/coordinator boundary. Candidate failure preserves V1;
@@ -146,8 +147,9 @@ until the relevant file custody physically closes. Qualify these shared consumer
 the durable selection record on that publisher.
 
 ADRs 0047/0118 adopt release preparation and the receipt-last artifact publication boundary.
-Installed graph selection, durable enablement, metadata adoption and removal require their owning
-amendments when designed. ADRs 0020/0035/0114/0098 retain current source, execution and Schema
+ADRs 0035/0118 now adopt the selected bounded installed-set/desired-slot replacement and exact
+dependency withdrawal under its successor plan. Metadata adoption has its own qualified owner;
+file reclamation requires its owning amendments when designed. ADRs 0020/0035/0114/0098 retain current source, execution and Schema
 identity authority. ADRs
 0050/0070 supply the filesystem rules; a new required primitive needs its own proved contract.
 The July Package plan remains requirements-only beyond explicitly adopted slices. Change its
@@ -192,10 +194,12 @@ enable/update/removal, evolved metadata, reclaimer and UI workflow remain in pro
 
 ## Project-Local Selection Contract
 
-Use the existing single active tool slot and the real installed EnemyStats V1/invalid/V2 consumer.
-Keep exact installed requirements rejected until a graph owner binds each declaration to a
-particular installation. Do not use this slot's selection as an inventory of all installed tools
-or as evidence that disabled dependents can be removed.
+The qualified predecessor used the existing single active tool slot and the real installed
+EnemyStats V1/invalid/V2 consumer. The
+[installed-graph successor](2026-10-28-installed-source-tool-graph-plan.md) now replaces its
+single-member data model with a bounded installed set, exact requirement bindings and independent
+optional desired slot. Its linked bounded qualification owns exact dependency-safe graph
+withdrawal; the earlier single-slot evidence does not establish that successor or file reclamation.
 
 The selected contract is a bounded project-local lifecycle record at
 `.nara/source-tools/selection.json`, separate from the artifact's ready receipt. ADR 0035
@@ -205,10 +209,13 @@ It is not a source dependency specification, an execution grant or a machine-ind
 lock. Project-external destinations remain usable by explicit session-only approval; durable
 reopening outside the caller-issued project capability needs a separate concrete contract.
 
-The canonical format starts at 1 and is bounded to 4 KiB. A selected record binds a project-relative
+The successor canonical format remains 1 and is bounded to 64 KiB, 32 installed members and 128
+aggregate edges, with at most 16 requirements per member. Each member binds a project-relative
 installation directory, nonzero installation ID, exact ready-receipt digest, manifest digest and
-package identity, plus desired enabled/disabled state. Resolve those relationships through actual
-code-free inspection. Do not store a native `FileIdentity`, active invocation ID, launcher path,
+package identity plus explicit requirement-to-installation bindings. The optional desired slot
+names one member and enabled/disabled intent. Resolve those relationships through actual code-free
+inspection with one shared capture allowance. Reject installation roots containing the fixed
+selection parent; dedicated installation descendants remain valid. Do not store a native `FileIdentity`, active invocation ID, launcher path,
 approval flag or deletion authority. Missing means unselected; corrupt, unsupported, oversized
 and inaccessible records are distinct failures that block blind overwrite. Disabled retains the
 selected installation. Fresh Open observes data and leaves enabled selections awaiting explicit
@@ -249,3 +256,6 @@ results. The [selection qualification](../knowledge/engineering/verification/202
 owns the implemented single-slot scope and its actual evidence. It does not close installed
 dependency selection, metadata adoption/evolved lineage, protected-content removal or this full
 lifecycle plan.
+The installed-graph successor separately qualifies exact required selection and reviewed graph
+withdrawal. Metadata adoption has its separate generation-one owner evidence. Protected-content
+reclamation, evolved lineage and the full local lifecycle remain open.

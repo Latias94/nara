@@ -1173,5 +1173,98 @@ fn csharp_source_tool_application_preserves_review_and_exact_commit_result() {
             .join("EnemyStatsTool.dll")
             .is_file()
     );
+    let document = reopened
+        .current_frame()
+        .unwrap()
+        .workspace()
+        .active_document
+        .unwrap();
+    let original_basis = reopened.document_query_basis(document).unwrap();
+    let selection = reopened.source_tool_selection_view().unwrap();
+    let prepared = reopened
+        .prepare_source_tool_installations(
+            &selection.basis,
+            installed.root.share(),
+            &[nara::tooling::EditorSourceToolInstallationRequest {
+                directory: INSTALLATION.into(),
+                receipt: installed.receipt,
+                requirements: Vec::new(),
+            }],
+        )
+        .unwrap();
+    let registered = reopened
+        .register_source_tool_installations(prepared)
+        .unwrap();
+    let view = settle_tool(&mut reopened);
+    assert_eq!(
+        view.selection
+            .as_ref()
+            .unwrap()
+            .operation
+            .as_ref()
+            .unwrap()
+            .attempt,
+        registered
+    );
+    assert_eq!(
+        view.selection
+            .as_ref()
+            .unwrap()
+            .operation
+            .as_ref()
+            .unwrap()
+            .outcome,
+        Some(EditorSourceToolSelectionOutcome::Registered)
+    );
+    let desired = view.selection.as_ref().unwrap().desired.as_ref().unwrap();
+    let selection = reopened.source_tool_selection_view().unwrap();
+    let prepared = reopened
+        .prepare_source_tool_withdrawal(
+            &selection.basis,
+            &desired.installed.installation,
+            nara::tooling::EditorSourceToolWithdrawalMode::RejectDependents,
+        )
+        .unwrap();
+    assert_eq!(prepared.installations().len(), 1);
+    drop(prepared);
+    assert_eq!(reopened.source_tool_selection_view().unwrap(), selection);
+    let prepared = reopened
+        .prepare_source_tool_withdrawal(
+            &selection.basis,
+            &desired.installed.installation,
+            nara::tooling::EditorSourceToolWithdrawalMode::Cascade,
+        )
+        .unwrap();
+    let withdrawn = reopened
+        .withdraw_source_tool_installations(prepared)
+        .unwrap();
+    let view = settle_tool(&mut reopened);
+    let selection = view.selection.as_ref().unwrap();
+    assert_eq!(selection.operation.as_ref().unwrap().attempt, withdrawn);
+    assert_eq!(
+        selection.operation.as_ref().unwrap().outcome,
+        Some(EditorSourceToolSelectionOutcome::Withdrawn)
+    );
+    assert!(selection.installed.is_empty() && selection.desired.is_none());
+    assert_eq!(
+        reopened.document_query_basis(document).unwrap(),
+        original_basis
+    );
+    assert!(
+        fixture
+            .root
+            .join(INSTALLATION)
+            .join("EnemyStatsTool.dll")
+            .is_file()
+    );
+    assert_eq!(fs::read(&scene_path).unwrap(), saved_bytes);
+    close(&mut reopened);
+
+    let mut reopened = fixture.open_with_expected_state(EditorApplicationState::AuthoringReady);
+    let view = settle_tool(&mut reopened);
+    let selection = view.selection.as_ref().unwrap();
+    assert!(selection.installed.is_empty() && selection.desired.is_none());
+    assert!(view.active.is_none() && view.attempt.is_none());
+    assert_eq!(fs::read(&scene_path).unwrap(), saved_bytes);
     close(&mut reopened);
 }

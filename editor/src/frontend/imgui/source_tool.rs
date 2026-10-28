@@ -272,6 +272,10 @@ impl SourceToolWidgets {
                         Some(EditorSourceToolSelectionOutcome::Observed) => "observed".to_owned(),
                         Some(EditorSourceToolSelectionOutcome::Enabled) => "enabled".to_owned(),
                         Some(EditorSourceToolSelectionOutcome::Disabled) => "disabled".to_owned(),
+                        Some(EditorSourceToolSelectionOutcome::Registered) => {
+                            "registered".to_owned()
+                        }
+                        Some(EditorSourceToolSelectionOutcome::Withdrawn) => "withdrawn".to_owned(),
                         Some(EditorSourceToolSelectionOutcome::PublishedWithoutActivation) => {
                             "published without activation".to_owned()
                         }

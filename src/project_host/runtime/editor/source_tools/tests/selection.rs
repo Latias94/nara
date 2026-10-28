@@ -34,14 +34,15 @@ fn record(enabled: bool) -> Value {
     // Construct the wire record independently of the production store encoder.
     json!({
         "format_version": 1,
-        "installed": {
+        "installed": [{
             "package": installed.package.as_ref(),
             "directory": installed.directory.as_ref(),
             "installation": installed.installation,
             "receipt": { "length": 32, "hash": *installed.receipt.as_bytes() },
             "manifest": { "length": 64, "hash": *installed.manifest.as_bytes() },
-        },
-        "desired_enabled": enabled,
+            "requires": [],
+        }],
+        "desired": { "installation": installed.installation, "enabled": enabled },
     })
 }
 

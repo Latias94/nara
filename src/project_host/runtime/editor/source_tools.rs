@@ -46,8 +46,11 @@ pub use release::{
     EditorSourceToolReleaseError, EditorSourceToolReleaseMember, EditorSourceToolReleaseMemberKind,
     EditorSourceToolReleaseRequirement, PreparedEditorSourceToolRelease,
 };
-pub use selection::PreparedEditorSourceToolSelection;
 pub(super) use selection::SELECTION_PATH;
+pub use selection::{
+    PreparedEditorSourceToolInstallations, PreparedEditorSourceToolSelection,
+    PreparedEditorSourceToolWithdrawal,
+};
 #[cfg(test)]
 mod tests;
 
@@ -67,6 +70,7 @@ pub struct EditorSourceToolCommand {
     working_directory: PathBuf,
     timeout: Duration,
     approved: Option<Arc<managed::ApprovedManagedLaunch>>,
+    installed: Option<Arc<selection::InstalledToolClosure>>,
 }
 
 impl EditorSourceToolCommand {
@@ -96,6 +100,7 @@ impl EditorSourceToolCommand {
             working_directory,
             timeout,
             approved: None,
+            installed: None,
         })
     }
 
@@ -173,6 +178,7 @@ struct Activation {
     active: EditorSourceToolActive,
     definition: EditorSourceToolDefinition,
     origin: Option<nara_tooling::EditorSourceToolInstalledSelection>,
+    requirements: Vec<nara_tooling::EditorSourceToolInstalledEntry>,
 }
 
 struct Invocation {
@@ -592,7 +598,9 @@ impl EditorProjectSession {
     fn ensure_source_tool_admission(&self) -> Result<(), EditorSourceToolError> {
         if !self.accepts_new_work() || self.pending_workspace_intent.is_some() {
             Err(EditorSourceToolError::Closing)
-        } else if self.schema_adoption_fenced() {
+        } else if self.schema_adoption_fenced()
+            || self.source_tools.selection.graph_mutation_pending()
+        {
             Err(EditorSourceToolError::Busy)
         } else {
             Ok(())
@@ -982,6 +990,7 @@ fn take_reply(task: &mut ProcessTask, sequence: u64) -> Result<WireResult, Edito
                 Failure::StdoutLimit => "stdout-limit",
                 Failure::StderrLimit => "stderr-limit",
                 Failure::NonzeroExit => "nonzero-exit",
+                Failure::Installation => "required-installation",
             })
         })?,
         _ => return Err(EditorSourceToolError::Process("task-terminal")),

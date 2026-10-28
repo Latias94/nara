@@ -5,10 +5,11 @@ use std::sync::{Arc, Mutex, TryLockError};
 use nara_fs::{DirectoryCapability, RelativePath};
 use nara_tasks::{TaskPools, TaskReturnState};
 use nara_tooling::{
-    EditorSourceToolDesiredSelection, EditorSourceToolInstalledSelection,
-    EditorSourceToolSelectionAttempt, EditorSourceToolSelectionBasis,
-    EditorSourceToolSelectionError as Error, EditorSourceToolSelectionOutcome as Outcome,
-    EditorSourceToolSelectionPhase as Phase, EditorSourceToolSelectionView,
+    EditorSourceToolDesiredSelection, EditorSourceToolInstalledEntry,
+    EditorSourceToolInstalledSelection, EditorSourceToolSelectionAttempt,
+    EditorSourceToolSelectionBasis, EditorSourceToolSelectionError as Error,
+    EditorSourceToolSelectionOutcome as Outcome, EditorSourceToolSelectionPhase as Phase,
+    EditorSourceToolSelectionView,
 };
 
 use super::*;
@@ -19,9 +20,15 @@ use crate::project_host::runtime::editor::persistence::{HostCustody, RetainedHos
 
 #[cfg(all(test, any(windows, target_os = "linux")))]
 mod admission_tests;
+mod graph;
+mod installed_graph;
 mod store;
 #[cfg(test)]
 mod tests;
+
+pub(super) use graph::InstalledToolClosure;
+pub use graph::{PreparedEditorSourceToolInstallations, PreparedEditorSourceToolWithdrawal};
+use installed_graph::Graph;
 
 pub(in crate::project_host::runtime::editor) const SELECTION_PATH: &str = store::SELECTION_PATH;
 
@@ -34,6 +41,8 @@ pub struct PreparedEditorSourceToolSelection {
     root: DirectoryCapability,
     desired: EditorSourceToolDesiredSelection,
     definition: EditorSourceToolDefinition,
+    graph: Graph,
+    basis: Option<EditorSourceToolSelectionBasis>,
 }
 
 impl PreparedEditorSourceToolSelection {
@@ -68,12 +77,15 @@ impl PreparedEditorSourceToolSelection {
             },
             enabled: true,
         };
-        store::encode(&desired)?;
-        verify_installation(&project, &desired.installed)?;
+        let graph = Graph::default().select(desired.clone())?;
+        store::encode(&graph)?;
+        graph::verify_entries(&project, &graph.entries)?;
         Ok(Self {
             root: project,
             desired,
             definition,
+            graph,
+            basis: None,
         })
     }
 
@@ -83,27 +95,9 @@ impl PreparedEditorSourceToolSelection {
     }
 }
 
-fn verify_installation(
-    root: &DirectoryCapability,
-    expected: &EditorSourceToolInstalledSelection,
-) -> Result<(), Error> {
-    let path = RelativePath::new(expected.directory.as_ref()).map_err(|_| Error::InvalidPath)?;
-    let directory = root
-        .open_directory_exact(&path)
-        .map_err(|_| Error::Installation)?;
-    let inspection = EditorSourceToolInstallationInspection::read(&directory, expected.receipt)
-        .map_err(|_| Error::Installation)?;
-    if inspection.receipt().installation_id() != &expected.installation
-        || inspection.receipt().manifest_digest() != expected.manifest
-        || inspection.release().package() != expected.package.as_ref()
-    {
-        return Err(Error::Installation);
-    }
-    Ok(())
-}
-
 pub(super) struct EnableSelection {
-    desired: EditorSourceToolDesiredSelection,
+    graph: Graph,
+    closure: Vec<EditorSourceToolInstalledEntry>,
     approved_project: DirectoryCapability,
     fence: EditorSourceToolSelectionBasis,
     predecessor: Option<EditorSourceToolActivationId>,
@@ -118,7 +112,7 @@ pub(super) struct ReadyTool {
 
 pub(super) struct SelectionState {
     basis: EditorSourceToolSelectionBasis,
-    desired: Option<EditorSourceToolDesiredSelection>,
+    graph: Graph,
     host: Option<RetainedHost<FilePublicationHost>>,
     phase: Phase,
     operation: Option<EditorSourceToolSelectionAttempt>,
@@ -137,7 +131,7 @@ impl Default for SelectionState {
     fn default() -> Self {
         Self {
             basis: EditorSourceToolSelectionBasis::issue(),
-            desired: None,
+            graph: Graph::default(),
             host: None,
             phase: Phase::Loading,
             operation: None,
@@ -178,7 +172,8 @@ impl SelectionState {
     ) -> EditorSourceToolSelectionView {
         EditorSourceToolSelectionView {
             basis: self.basis.clone(),
-            desired: self.desired.clone(),
+            installed: self.graph.entries.clone(),
+            desired: self.graph.desired.clone(),
             active_origin,
             phase: self.phase,
             operation: self.operation.clone(),
@@ -201,6 +196,16 @@ impl SelectionState {
             Phase::Unavailable => Err(self.error.clone().unwrap_or(Error::Read)),
             _ => Err(Error::Busy),
         }
+    }
+
+    pub(super) fn graph_mutation_pending(&self) -> bool {
+        self.phase == Phase::Reconciling
+            || self.pending.as_ref().is_some_and(|pending| {
+                matches!(
+                    pending.mutation,
+                    Some(Mutation::Register | Mutation::Withdraw)
+                )
+            })
     }
 
     fn finish(&mut self, attempt: EditorSourceToolAttemptId, outcome: Outcome) {
@@ -262,22 +267,44 @@ impl SelectionState {
     }
 }
 
+#[derive(Debug, Clone, Copy)]
+enum Mutation {
+    Enable,
+    Disable,
+    Register,
+    Withdraw,
+}
+
 enum IoRequest {
-    Observe,
+    Observe {
+        route: Option<graph::RouteObservation>,
+        graph: Graph,
+    },
     Publish {
-        desired: EditorSourceToolDesiredSelection,
+        graph: Graph,
+        mutation: Mutation,
+        verify: Vec<EditorSourceToolInstalledEntry>,
         host: Option<RetainedHost<FilePublicationHost>>,
         approved_project: Option<DirectoryCapability>,
     },
 }
 
 struct Loaded {
-    desired: Option<EditorSourceToolDesiredSelection>,
+    graph: Graph,
     host: Option<RetainedHost<FilePublicationHost>>,
+    revoke: Option<EditorSourceToolActivationId>,
+    linked: Option<(
+        EditorSourceToolActivationId,
+        Vec<EditorSourceToolInstalledEntry>,
+    )>,
 }
 
 enum IoResult {
     Observed(Loaded),
+    ObservationRefused {
+        error: Error,
+        revoke: Option<EditorSourceToolActivationId>,
+    },
     Published {
         host: RetainedHost<FilePublicationHost>,
         evidence: FilePublicationEvidence,
@@ -299,7 +326,8 @@ struct PendingIo {
     work: Arc<Mutex<IoWork>>,
     task: Option<TaskHandle<()>>,
     attempt: EditorSourceToolAttemptId,
-    desired: Option<EditorSourceToolDesiredSelection>,
+    graph: Option<Graph>,
+    mutation: Option<Mutation>,
     reconcile: bool,
 }
 
@@ -313,9 +341,11 @@ impl PendingIo {
         reconcile: bool,
         #[cfg(test)] gate: Option<tests::IoGate>,
     ) -> Self {
-        let desired = match &request {
-            IoRequest::Publish { desired, .. } => Some(desired.clone()),
-            IoRequest::Observe => None,
+        let (graph, mutation) = match &request {
+            IoRequest::Publish {
+                graph, mutation, ..
+            } => (Some(graph.clone()), Some(*mutation)),
+            IoRequest::Observe { .. } => (None, None),
         };
         let work = Arc::new(Mutex::new(IoWork {
             request: Some(request),
@@ -355,7 +385,8 @@ impl PendingIo {
             work,
             task,
             attempt,
-            desired,
+            graph,
+            mutation,
             reconcile,
         }
     }
@@ -387,23 +418,60 @@ fn run_io(
     request: IoRequest,
 ) -> Result<IoResult, Error> {
     match request {
-        IoRequest::Observe => {
-            let loaded = store::load(root)?;
+        IoRequest::Observe { route, graph } => {
+            let linked = route
+                .as_ref()
+                .map(|route| route.entries(root, &graph))
+                .transpose();
+            let loaded = match store::load(root) {
+                Ok(loaded) => loaded,
+                Err(error) => {
+                    return Ok(IoResult::ObservationRefused {
+                        error,
+                        revoke: route
+                            .filter(|_| {
+                                linked.as_ref().map_or(true, |linked| {
+                                    linked.as_ref().is_some_and(|entries| !entries.is_empty())
+                                })
+                            })
+                            .map(|route| route.activation),
+                    });
+                }
+            };
+            let retain_link = match (&route, &linked) {
+                (Some(route), Ok(Some(entries))) if !entries.is_empty() => {
+                    Some((route.activation.clone(), entries.clone()))
+                }
+                _ => None,
+            };
+            let revoke = route
+                .filter(|_| match &linked {
+                    Err(_) => true,
+                    Ok(Some(entries)) => entries
+                        .iter()
+                        .any(|entry| !loaded.graph.entries.contains(entry)),
+                    Ok(None) => false,
+                })
+                .map(|route| route.activation);
             let host = match loaded.host {
                 Some(host) => Some(custody.retain_publication(host).ok_or(Error::Closing)?),
                 None => None,
             };
             Ok(IoResult::Observed(Loaded {
-                desired: loaded.desired,
+                graph: loaded.graph,
                 host,
+                revoke,
+                linked: retain_link,
             }))
         }
         IoRequest::Publish {
-            desired,
+            graph,
+            mutation: _,
+            verify,
             host,
             approved_project,
         } => {
-            if desired.enabled {
+            if !verify.is_empty() {
                 let approved = approved_project.as_ref().ok_or(Error::NotApproved)?;
                 if !root
                     .same_object(approved)
@@ -411,9 +479,9 @@ fn run_io(
                 {
                     return Err(Error::RootMismatch);
                 }
-                verify_installation(approved, &desired.installed)?;
+                graph::verify_entries(approved, &verify)?;
             }
-            let bytes = store::encode(&desired)?;
+            let bytes = store::encode(&graph)?;
             let host = match host {
                 Some(host) => host,
                 None => custody
@@ -522,17 +590,7 @@ impl EditorProjectSession {
         {
             return Err(Error::RootMismatch);
         }
-        let root = project;
-        let path = RelativePath::new(directory).map_err(|_| Error::InvalidPath)?;
-        let installed = root
-            .open_directory_exact(&path)
-            .map_err(|_| Error::Installation)?;
-        let inspection = EditorSourceToolInstallationInspection::read(&installed, receipt)
-            .map_err(|_| Error::Installation)?;
-        let definition = host
-            .approve_installation(inspection)
-            .map_err(|_| Error::NotApproved)?;
-        PreparedEditorSourceToolSelection::new(root, directory, definition)
+        graph::prepare_required_selection(self, project, directory, receipt, host)
     }
 
     pub(in crate::project_host::runtime::editor) fn initialize_source_tool_selection(&mut self) {
@@ -547,7 +605,10 @@ impl EditorProjectSession {
             self.source_project_root(),
             self.authoring_runtime.host_custody().clone(),
             self.authoring_runtime.persistence_tasks(),
-            IoRequest::Observe,
+            IoRequest::Observe {
+                route: None,
+                graph: Graph::default(),
+            },
             attempt,
             false,
             #[cfg(test)]
@@ -580,6 +641,13 @@ impl EditorProjectSession {
         self.advance_source_tools();
         self.source_tools.selection.check_basis(basis)?;
         self.source_tools.selection.writable()?;
+        if prepared
+            .basis
+            .as_ref()
+            .is_some_and(|prepared| prepared != basis)
+        {
+            return Err(Error::StaleBasis);
+        }
         if !prepared
             .root
             .same_object(&self.source_project_root())
@@ -588,6 +656,15 @@ impl EditorProjectSession {
             return Err(Error::RootMismatch);
         }
         self.validate_installed_tool_schema(&prepared.definition)?;
+        let graph = if prepared.basis.is_some() {
+            prepared.graph
+        } else {
+            self.source_tools
+                .selection
+                .graph
+                .select(prepared.desired.clone())?
+        };
+        let closure = graph.closure(&prepared.desired.installed.installation)?;
         let predecessor = self
             .source_tools
             .active
@@ -606,7 +683,8 @@ impl EditorProjectSession {
             .as_mut()
             .expect("enable admitted one probe")
             .selection = Some(EnableSelection {
-            desired: prepared.desired,
+            graph,
+            closure,
             approved_project: prepared.root,
             fence: fence.clone(),
             predecessor,
@@ -682,7 +760,14 @@ impl EditorProjectSession {
             self.source_project_root(),
             self.authoring_runtime.host_custody().clone(),
             self.authoring_runtime.persistence_tasks(),
-            IoRequest::Observe,
+            IoRequest::Observe {
+                route: self
+                    .source_tools
+                    .active
+                    .as_ref()
+                    .map(graph::RouteObservation::of),
+                graph: self.source_tools.selection.graph.clone(),
+            },
             attempt.clone(),
             true,
             #[cfg(test)]
@@ -729,7 +814,8 @@ impl EditorProjectSession {
             .selection
             .as_ref()
             .expect("durable readiness has a selection");
-        let desired = selected.desired.clone();
+        let graph = selected.graph.clone();
+        let verify = selected.closure.clone();
         let approved_project = selected.approved_project.share();
         let attempt = ready.attempt.clone();
         let selection = &mut self.source_tools.selection;
@@ -747,7 +833,9 @@ impl EditorProjectSession {
             self.authoring_runtime.host_custody().clone(),
             self.authoring_runtime.persistence_tasks(),
             IoRequest::Publish {
-                desired,
+                graph,
+                mutation: Mutation::Enable,
+                verify,
                 host: self.source_tools.selection.host.clone(),
                 approved_project: Some(approved_project),
             },
@@ -771,6 +859,11 @@ impl EditorProjectSession {
         ready: ReadyTool,
         origin: Option<EditorSourceToolInstalledSelection>,
     ) {
+        let requirements = ready
+            .selection
+            .as_ref()
+            .map(|selected| selected.closure.clone())
+            .unwrap_or_default();
         self.source_tools.selection.invalidate_route_successor();
         self.source_tools.retire_invocation();
         self.source_tools.latest = None;
@@ -778,6 +871,7 @@ impl EditorProjectSession {
             active: ready.active,
             definition: ready.definition,
             origin,
+            requirements,
         });
         self.source_tools.request_error = None;
     }
@@ -789,13 +883,13 @@ impl EditorProjectSession {
                 .finish(attempt, Outcome::Failed(error));
             return;
         }
-        let Some(mut desired) = self.source_tools.selection.desired.clone() else {
+        if self.source_tools.selection.graph.desired.is_none() {
             self.source_tools
                 .selection
                 .finish(attempt, Outcome::Disabled);
             return;
-        };
-        desired.enabled = false;
+        }
+        let graph = self.source_tools.selection.graph.disabled();
         self.source_tools.selection.phase = Phase::Publishing;
         #[cfg(test)]
         let gate = self.source_tools.selection.next_io_gate.take();
@@ -804,7 +898,9 @@ impl EditorProjectSession {
             self.authoring_runtime.host_custody().clone(),
             self.authoring_runtime.persistence_tasks(),
             IoRequest::Publish {
-                desired,
+                graph,
+                mutation: Mutation::Disable,
+                verify: Vec::new(),
                 host: self.source_tools.selection.host.clone(),
                 approved_project: None,
             },
@@ -828,12 +924,30 @@ impl EditorProjectSession {
             .expect("polled one selection IO");
         match result {
             Ok(IoResult::Observed(loaded)) => {
+                if self
+                    .source_tools
+                    .active
+                    .as_ref()
+                    .is_some_and(|active| loaded.revoke.as_ref() == Some(active.active.id()))
+                {
+                    self.source_tools.cancel();
+                }
+                if let Some((activation, entries)) = loaded.linked {
+                    if let Some(active) = self
+                        .source_tools
+                        .active
+                        .as_mut()
+                        .filter(|active| active.active.id() == &activation)
+                    {
+                        active.requirements = entries;
+                    }
+                }
                 let selection = &mut self.source_tools.selection;
                 if let Some(previous) = selection.host.take() {
                     previous.retire();
                 }
                 selection.host = loaded.host;
-                selection.desired = loaded.desired;
+                selection.graph = loaded.graph;
                 selection.evidence = None;
                 selection.phase = Phase::Idle;
                 selection.finish(
@@ -845,6 +959,20 @@ impl EditorProjectSession {
                     },
                 );
             }
+            Ok(IoResult::ObservationRefused { error, revoke }) => {
+                if self
+                    .source_tools
+                    .active
+                    .as_ref()
+                    .is_some_and(|active| revoke.as_ref() == Some(active.active.id()))
+                {
+                    self.source_tools.cancel();
+                }
+                let selection = &mut self.source_tools.selection;
+                selection.ready = None;
+                selection.phase = Phase::Unavailable;
+                selection.finish(pending.attempt, Outcome::Failed(error));
+            }
             Ok(IoResult::Published {
                 host,
                 evidence,
@@ -854,10 +982,9 @@ impl EditorProjectSession {
                 self.source_tools.selection.host = Some(host);
                 self.source_tools.selection.evidence = Some(evidence);
                 if accepted {
-                    let desired = pending
-                        .desired
-                        .expect("a publication retains its selection");
-                    self.source_tools.selection.desired = Some(desired.clone());
+                    let graph = pending.graph.expect("a publication retains its graph");
+                    let desired = graph.desired.clone();
+                    self.source_tools.selection.graph = graph;
                     self.source_tools.selection.phase = Phase::Idle;
                     let outcome = if let Some(ready) = ready {
                         let selected = ready
@@ -878,15 +1005,24 @@ impl EditorProjectSession {
                                 .validate_installed_tool_schema(&ready.definition)
                                 .is_ok()
                         {
-                            self.promote_source_tool(ready, Some(desired.installed));
+                            self.promote_source_tool(
+                                ready,
+                                desired.map(|desired| desired.installed),
+                            );
                             Outcome::Enabled
                         } else {
                             Outcome::PublishedWithoutActivation
                         }
-                    } else if desired.enabled {
-                        Outcome::PublishedWithoutActivation
                     } else {
-                        Outcome::Disabled
+                        match pending
+                            .mutation
+                            .expect("a publication retains its operation")
+                        {
+                            Mutation::Register => Outcome::Registered,
+                            Mutation::Withdraw => Outcome::Withdrawn,
+                            Mutation::Disable => Outcome::Disabled,
+                            Mutation::Enable => Outcome::PublishedWithoutActivation,
+                        }
                     };
                     self.source_tools.selection.finish(pending.attempt, outcome);
                 } else {
@@ -912,7 +1048,7 @@ impl EditorProjectSession {
                 selection.ready = None;
                 selection.phase = if error == Error::RequiresReconcile {
                     Phase::RequiresReconcile
-                } else if pending.desired.is_none() {
+                } else if pending.graph.is_none() {
                     Phase::Unavailable
                 } else {
                     Phase::Idle

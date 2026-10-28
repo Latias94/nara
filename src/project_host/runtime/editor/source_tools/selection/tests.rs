@@ -181,7 +181,8 @@ mod native {
     fn seed(project: &Project) -> Vec<u8> {
         let path = project.root.join(SELECTION_PATH);
         fs::create_dir_all(path.parent().unwrap()).unwrap();
-        let bytes = store::encode(&desired(true)).unwrap();
+        let graph = Graph::default().select(desired(true)).unwrap();
+        let bytes = store::encode(&graph).unwrap();
         fs::write(path, &bytes).unwrap();
         bytes
     }
@@ -238,7 +239,7 @@ mod native {
             // The actual write has finished, but the worker and its work mutex remain held.
             let disk =
                 store::decode(&fs::read(project.root.join(SELECTION_PATH)).unwrap()).unwrap();
-            assert_eq!(disk, desired(false));
+            assert_eq!(disk.desired, Some(desired(false)));
             for _ in 0..3 {
                 held.poll(|| editor.drive_editor_frame(Duration::ZERO));
                 held.assert_pending(&returned);
@@ -292,6 +293,53 @@ mod native {
                 Err(EditorSourceToolError::StaleAttempt)
             );
             assert_eq!(editor.source_tool_view(), before);
+        });
+    }
+
+    #[test]
+    fn reconciling_fences_new_execution_while_disable_remains_available() {
+        let project = Project::new();
+        seed(&project);
+        project.run(|editor| {
+            loaded(editor);
+            editor.enable_source_tool(project.tool()).unwrap();
+            wait(editor, |editor| !editor.source_tool_view().probing);
+            let active = editor.source_tool_view().active.unwrap().id().clone();
+            let original = editor.source_tool_selection_view();
+            let held = hold(editor, IoPhase::AfterWork);
+            let reconcile = editor
+                .reconcile_source_tool_selection(&original.basis)
+                .unwrap();
+            let returned = returned(editor);
+            held.wait_until_entered();
+            assert_eq!(
+                editor.source_tool_selection_view().phase,
+                Phase::Reconciling
+            );
+            assert_eq!(
+                held.poll(|| editor.enable_source_tool(project.tool())),
+                Err(EditorSourceToolError::Busy)
+            );
+            let document = editor.workspace().active_document().unwrap();
+            let basis = editor.document_query_basis(document).unwrap();
+            assert_eq!(
+                held.poll(|| editor.request_source_tool(
+                    &active,
+                    &basis,
+                    EditorSourceToolIntent::Attach {
+                        entity: nara_scene::SceneEntityId::new("target").unwrap()
+                    },
+                    BTreeMap::new(),
+                )),
+                Err(EditorSourceToolError::Busy)
+            );
+            assert_eq!(editor.source_tool_view().active.unwrap().id(), &active);
+            held.poll(|| editor.disable_source_tool(&active)).unwrap();
+            assert!(editor.source_tool_view().active.is_none());
+            held.assert_pending(&returned);
+            held.release();
+            wait_for_outcome(editor, Lane::Operation, &reconcile, Outcome::Reconciled);
+            assert!(editor.source_tool_view().active.is_none());
         });
     }
 
@@ -447,8 +495,213 @@ mod native {
                 },
                 enabled: true,
             };
-            verify_installation(&project_root, &desired.installed).unwrap();
+            graph::verify_entries(
+                &project_root,
+                &Graph::default().select(desired.clone()).unwrap().entries,
+            )
+            .unwrap();
             (desired, project_root)
+        }
+
+        #[test]
+        fn registration_revalidates_payload_before_publishing_and_keeps_source_usable() {
+            use nara_tooling::EditorSourceToolInstallationRequest;
+
+            let project = Project::new();
+            let (desired, root) = installed_selection(&project);
+            project.run(|editor| {
+                let initial = loaded(editor);
+                let source = project.persisted();
+                let request = EditorSourceToolInstallationRequest {
+                    directory: Arc::clone(&desired.installed.directory),
+                    receipt: desired.installed.receipt,
+                    requirements: Vec::new(),
+                };
+                let prepared = editor
+                    .prepare_source_tool_installations(
+                        &initial.basis,
+                        root.share(),
+                        &[request.clone()],
+                    )
+                    .unwrap();
+                let bytes =
+                    fs::read(project.root.join("tools/finite-source-payload/Tool.dll")).unwrap();
+                let held = hold(editor, IoPhase::BeforeWork);
+                let attempt = editor.register_source_tool_installations(prepared).unwrap();
+                held.wait_until_entered();
+                fs::write(
+                    project.root.join("tools/finite-source-payload/Tool.dll"),
+                    b"changed after review",
+                )
+                .unwrap();
+                held.release();
+                wait_for_outcome(
+                    editor,
+                    Lane::Operation,
+                    &attempt,
+                    Outcome::Failed(Error::Installation),
+                );
+                assert!(editor.source_tool_selection_view().installed.is_empty());
+                assert!(!project.root.join(SELECTION_PATH).exists());
+                assert!(editor.source_tool_view().active.is_none());
+                assert_eq!(project.persisted(), source);
+
+                fs::write(
+                    project.root.join("tools/finite-source-payload/Tool.dll"),
+                    bytes,
+                )
+                .unwrap();
+                let basis = editor.source_tool_selection_view().basis;
+                let prepared = editor
+                    .prepare_source_tool_installations(&basis, root.share(), &[request])
+                    .unwrap();
+                let attempt = editor.register_source_tool_installations(prepared).unwrap();
+                wait_for_outcome(editor, Lane::Operation, &attempt, Outcome::Registered);
+                assert_eq!(editor.source_tool_selection_view().installed.len(), 1);
+                assert!(editor.source_tool_selection_view().desired.is_none());
+                assert_eq!(project.persisted(), source);
+            });
+        }
+
+        #[test]
+        fn confirmed_withdrawal_keeps_files_and_failed_publication_never_restarts_the_route() {
+            use nara_tooling::EditorSourceToolWithdrawalMode;
+
+            let project = Project::new();
+            let (desired, root) = installed_selection(&project);
+            project.run(|editor| {
+                loaded(editor);
+                let attempt = ready(editor, &project, desired.clone(), root);
+                wait_for_outcome(editor, Lane::Operation, &attempt, Outcome::Enabled);
+                let source = project.persisted();
+                let initial = editor.source_tool_selection_view();
+                let prepared = editor
+                    .prepare_source_tool_withdrawal(
+                        &initial.basis,
+                        &desired.installed.installation,
+                        EditorSourceToolWithdrawalMode::RejectDependents,
+                    )
+                    .unwrap();
+                assert_eq!(prepared.installations().len(), 1);
+                assert!(editor.source_tool_view().active.is_some());
+                drop(prepared);
+                assert_eq!(editor.source_tool_selection_view(), initial);
+                let prepared = editor
+                    .prepare_source_tool_withdrawal(
+                        &initial.basis,
+                        &desired.installed.installation,
+                        EditorSourceToolWithdrawalMode::Cascade,
+                    )
+                    .unwrap();
+                let held = hold(editor, IoPhase::BeforeWork);
+                let attempt = editor.withdraw_source_tool_installations(prepared).unwrap();
+                held.wait_until_entered();
+                assert!(editor.source_tool_view().active.is_none());
+                fs::write(
+                    project.root.join(SELECTION_PATH),
+                    b"external selection edit",
+                )
+                .unwrap();
+                held.release();
+                wait_for_outcome(
+                    editor,
+                    Lane::Operation,
+                    &attempt,
+                    Outcome::Failed(Error::Changed),
+                );
+                assert!(editor.source_tool_view().active.is_none());
+                assert_eq!(
+                    editor.source_tool_selection_view().installed,
+                    initial.installed
+                );
+                assert!(
+                    project
+                        .root
+                        .join("tools/finite-source-payload/Tool.dll")
+                        .exists()
+                );
+                assert_eq!(
+                    fs::read(project.root.join(SELECTION_PATH)).unwrap(),
+                    b"external selection edit"
+                );
+                assert_eq!(project.persisted(), source);
+            });
+        }
+
+        #[test]
+        fn graph_withdrawal_publication_does_not_claim_held_invocation_physical_return() {
+            use super::super::super::super::tests::fixture::{GatePoint, HeldProcess};
+            use nara_tooling::EditorSourceToolWithdrawalMode;
+
+            for point in [GatePoint::BeforeSpawn, GatePoint::BeforeIoReturn] {
+                let project = Project::new();
+                let (desired, root) = installed_selection(&project);
+                project.run(|editor| {
+                    loaded(editor);
+                    let attempt = ready(editor, &project, desired.clone(), root);
+                    wait_for_outcome(editor, Lane::Operation, &attempt, Outcome::Enabled);
+                    let source = project.persisted();
+                    let activation = editor.source_tool_view().active.unwrap().id().clone();
+                    let held = HeldProcess::arm(editor, point);
+                    let document = editor.workspace().active_document().unwrap();
+                    let basis = editor.document_query_basis(document).unwrap();
+                    let request = editor
+                        .request_source_tool(
+                            &activation,
+                            &basis,
+                            EditorSourceToolIntent::Attach {
+                                entity: nara_scene::SceneEntityId::new("target").unwrap(),
+                            },
+                            BTreeMap::new(),
+                        )
+                        .unwrap();
+                    let returned = editor
+                        .source_tools
+                        .invocation
+                        .as_ref()
+                        .unwrap()
+                        .task
+                        .return_observer();
+                    held.wait_until_entered();
+                    let selection = editor.source_tool_selection_view();
+                    let prepared = held
+                        .poll(|| {
+                            editor.prepare_source_tool_withdrawal(
+                                &selection.basis,
+                                &desired.installed.installation,
+                                EditorSourceToolWithdrawalMode::Cascade,
+                            )
+                        })
+                        .unwrap();
+                    let attempt = held
+                        .poll(|| editor.withdraw_source_tool_installations(prepared))
+                        .unwrap();
+                    wait_for_outcome(editor, Lane::Operation, &attempt, Outcome::Withdrawn);
+                    held.assert_pending(&returned);
+                    let view = editor.source_tool_view();
+                    assert!(view.active.is_none() && view.review.is_none() && view.retiring);
+                    assert!(view.selection.as_ref().unwrap().installed.is_empty());
+                    assert_eq!(project.persisted(), source);
+                    let progress = held.poll(|| editor.advance_close());
+                    assert!(matches!(
+                        progress,
+                        EditorProjectCloseProgress::Incomplete { .. }
+                    ));
+                    assert!(!progress.task_shutdown().is_complete());
+                    held.assert_pending(&returned);
+                    held.release();
+                    wait(editor, |editor| !editor.source_tool_view().retiring);
+                    assert_eq!(returned.state(), TaskReturnState::Returned);
+                    assert!(editor.accept_source_tool_review(&request).is_err());
+                    assert_eq!(project.persisted(), source);
+                    assert!(
+                        project
+                            .root
+                            .join("tools/finite-source-payload/Tool.dll")
+                            .exists()
+                    );
+                });
+            }
         }
 
         fn ready(
@@ -488,7 +741,8 @@ mod native {
                 definition,
                 attempt: attempt.clone(),
                 selection: Some(EnableSelection {
-                    desired,
+                    graph: Graph::default().select(desired.clone()).unwrap(),
+                    closure: Graph::default().select(desired.clone()).unwrap().entries,
                     approved_project,
                     fence,
                     predecessor,
@@ -523,8 +777,9 @@ mod native {
                     } else {
                         assert_eq!(
                             store::decode(&fs::read(project.root.join(SELECTION_PATH)).unwrap())
-                                .unwrap(),
-                            desired
+                                .unwrap()
+                                .desired,
+                            Some(desired.clone())
                         );
                     }
                     let disable = held
@@ -562,8 +817,9 @@ mod native {
                     assert_attempt(editor, Lane::Disable, &disable, None);
                     assert_eq!(
                         store::decode(&fs::read(project.root.join(SELECTION_PATH)).unwrap())
-                            .unwrap(),
-                        desired
+                            .unwrap()
+                            .desired,
+                        Some(desired.clone())
                     );
                     assert!(editor.source_tool_view().active.is_none());
                     disabling.release();
@@ -582,8 +838,9 @@ mod native {
                     );
                     assert_eq!(
                         store::decode(&fs::read(project.root.join(SELECTION_PATH)).unwrap())
-                            .unwrap(),
-                        disabled
+                            .unwrap()
+                            .desired,
+                        Some(disabled)
                     );
                     assert!(editor.source_tool_view().active.is_none());
                 });
@@ -650,8 +907,10 @@ mod native {
                     assert!(editor.source_tool_selection_view().active_origin.is_none());
                 }
                 assert_eq!(
-                    store::decode(&fs::read(project.root.join(SELECTION_PATH)).unwrap()).unwrap(),
-                    desired
+                    store::decode(&fs::read(project.root.join(SELECTION_PATH)).unwrap())
+                        .unwrap()
+                        .desired,
+                    Some(desired)
                 );
             });
         }
@@ -727,8 +986,10 @@ mod native {
                 assert_eq!(pending.len(), before.len() + 1);
                 let temporary = pending.iter().find(|path| !before.contains(path)).unwrap();
                 assert_eq!(
-                    store::decode(&fs::read(temporary).unwrap()).unwrap(),
-                    desired(false)
+                    store::decode(&fs::read(temporary).unwrap())
+                        .unwrap()
+                        .desired,
+                    Some(desired(false))
                 );
                 assert_eq!(
                     fs::read(project.root.join(SELECTION_PATH)).unwrap(),

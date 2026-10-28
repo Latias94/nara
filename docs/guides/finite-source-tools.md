@@ -8,9 +8,10 @@ No drawing toolkit or gameplay VM is involved.
 
 Ordinary project Open never executes a tool. Code-free release capture, receipt-last artifact
 publication and explicitly approved captured-image execution have separate concrete APIs below.
-The project-local desired-selection workflow is being qualified under the
-[local lifecycle plan](../plans/2026-10-28-local-source-tool-release-plan.md); installed dependency
-resolution, safe removal and a public language SDK remain separate work.
+The project-local installed graph and desired-selection workflow follow the
+[local lifecycle plan](../plans/2026-10-28-local-source-tool-release-plan.md) and
+[installed-graph successor](../plans/2026-10-28-installed-source-tool-graph-plan.md).
+Safe file reclamation and a public language SDK remain separate work.
 Raw development command paths are trusted local configuration, not immutable installed release
 identity.
 
@@ -191,15 +192,17 @@ ambient process authority; this adapter is not a sandbox.
 
 Approval and successful Session activation are independent of durable desired selection. Fresh
 Open does not start a tool because its receipt exists. Schema metadata must already be admitted
-in the project; fresh-project adoption, evolved lineage, required-dependent selection and safe
-update/removal remain in the lifecycle plan.
+in the project; missing-owner adoption uses the operation above. Existing-owner evolution and
+safe content reclamation remain in the lifecycle plan.
 
 ## Select A Project-Local Installed Tool
 
-The current single tool slot records desired selection in `.nara/source-tools/selection.json`.
-This format-1 record is bounded to 4 KiB and contains package identity, a project-relative
-installation directory, a nonzero installation ID, exact receipt/manifest digests and desired
-enabled state. It contains no launcher, native file identity, active invocation ID or approval
+The installed set and optional single execution slot share `.nara/source-tools/selection.json`.
+This format-1 record is bounded to 64 KiB, 32 members, 128 aggregate required edges and 16 outgoing
+requirements per member. Each member has package identity, a project-relative installation
+directory, a nonzero installation ID, exact receipt/manifest digests and explicit package-to-
+installation bindings. The desired slot names one member and enabled/disabled intent.
+It contains no launcher, native file identity, active invocation ID or approval
 flag. The installation receipt remains a separate artifact fact. No duplicate setting belongs
 in `nara.toml`.
 
@@ -253,7 +256,51 @@ explicit Host approval. Missing means unselected; corrupt, inaccessible, oversiz
 records are failures that block blind overwrite. `reconcile_source_tool_selection(&basis)` admits
 fresh disk data without approving or executing code. Project-external installations remain an
 explicit session-only workflow. Complete dependency-safe removal and Package UI are separate
-work; this record is not an installed graph or deletion ledger.
+work; the installed graph grants no file deletion authority.
+
+## Register Requirements And Review Graph Withdrawal
+
+`prepare_source_tool_installations(&basis, project, requests)` prepares an additive installed-set
+successor without executing code. Each `EditorSourceToolInstallationRequest` supplies a directory,
+receipt digest and explicit `EditorSourceToolRequirementBinding` values naming exact installation
+IDs. Binding a package to the first matching release is never implicit. Multiple identical release
+installations remain distinct. Repeating an exact member is allowed; rebinding an existing member,
+missing or extra declarations, mismatched release digests, cycles and overlapping directories
+reject. Installation roots cannot contain the fixed selection parent; a dedicated descendant of
+`.nara/source-tools` is allowed. `register_source_tool_installations(prepared)` confirms that
+original basis, then rechecks actual artifacts in background before publishing the complete graph.
+Observe its attempt until Registered or Failed; an admitted request alone is not publication.
+
+Preparation and revalidation charge receipt, manifest and payload bytes against one shared
+128 MiB work allowance before reading/allocating. This is a logical byte-work bound, not an RSS
+or filesystem deadline. The ordinary requirement-free enable can add its selected member in the
+same publication. Required tools must first have their complete graph admitted. Session preparation
+then approves the selected captured images through the same managed Host; raw standalone approval
+continues to reject unresolved requirements. Dependencies are installed relationships, not automatic
+execution or cross-installation assembly search paths. Every release provides its own complete
+managed image closure. Required installations are checked again in the worker before invocation.
+
+Disable keeps all installed members and their relationships. To withdraw a member, call
+`prepare_source_tool_withdrawal(&basis, &installation_id, mode)`. RejectDependents refuses if any
+other member requires it, including a disabled or nonselected member. Cascade exposes the complete
+affected set through `installations()`. Dropping this review changes nothing. Confirm it with
+`withdraw_source_tool_installations(prepared)`; any intervening graph or route change makes it
+stale. Affected routing and retained proposals stop before the graph publication. A failed durable
+update cannot restart them. Withdrawn reports the graph result; a child or pipe can still be
+physically Pending. Ordinary Close retains that obligation until actual return.
+
+Executable installation provenance remains independent of `active_origin`: a session-only
+activation that actually uses a registered installation is also subject to its withdrawal.
+Read-only review compares the held approved directory with the named project object without
+re-reading payloads. An implicated unreadable installation conservatively loses its route; an
+unrelated installation or a proven different external object does not. Explicit reconciliation
+does its association/read work in the existing background owner, retains positively proven
+relations, and stops the original linked route on missing or unavailable graph data. New tool
+execution is fenced during reconciliation; Disable, source editing and Close remain available.
+
+Withdrawal removes no files and revokes no admitted Schema or source/history. Broken installations
+can be withdrawn without passing complete artifact inspection. Modified/adopted content protection
+and exact-object file reclamation remain the next distinct lifecycle operation.
 
 ## Configure A Trusted Development Command And Probe
 

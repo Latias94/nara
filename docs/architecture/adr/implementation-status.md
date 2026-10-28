@@ -165,6 +165,15 @@ retains the original Workspace source/history report, source diagnostics, operat
 task rejection through Session/Application. Pure cancellation creates no failure, while actual
 worker failure and publication facts remain independently observable. This closes diagnostic
 transport for the bounded adoption operation, not installed dependency/removal or Schema evolution.
+The [installed-graph successor](../../knowledge/engineering/verification/2026-10/2026-10-28T095430Z-exact-installed-source-tool-graph-and-dependency-safe-withdrawal-0c433a90f253423da28da2b3e275bff8.md)
+replaces the unreleased single-member selection record with bounded exact installed relationships
+and independent desired intent. Disabled dependents block ordinary withdrawal; reviewed cascade
+stales on graph/route drift and stops implicated execution independently of publication and
+physical return. Shared capture admission, same-facts external/native distinction and retained
+positive route association have actual public/managed evidence. Root/Tooling857, independent28,
+C# Application and selected Windows/DX12 paths pass within the linked source/platform scope.
+Withdrawal does not reclaim files, recover created-content custody, migrate existing Schema or
+complete the local installation lifecycle. Full R1b and the foundation Goal remain active.
 The [documentation verification](../../knowledge/engineering/verification/2026-10/2026-10-23T115037Z-foundation-architecture-rebaseline-documentation-checks-and-adversarial-closure-33c8c794baf142ee964468a01248af17.md)
 records inventory/link/status checks and the scoped adversarial correction/recheck. No Cargo,
 performance or native trajectory was re-executed for this design-only unit.

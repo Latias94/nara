@@ -54,6 +54,8 @@ fn returned_session_only_probe_invalidates_original_durable_enable_before_admiss
                 enabled: true,
             },
             definition: project.tool(),
+            graph: Graph::default(),
+            basis: None,
         };
         assert_eq!(
             editor.enable_installed_source_tool(&original.basis, prepared),
