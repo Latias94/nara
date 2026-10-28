@@ -80,9 +80,9 @@ pub use editor::{
     EditorSourceToolManagedHostDigests, EditorSourceToolReleaseError,
     EditorSourceToolReleaseMember, EditorSourceToolReleaseMemberKind,
     EditorSourceToolReleaseRequirement, PreparedEditorSourceToolArtifacts,
-    PreparedEditorSourceToolInstallations, PreparedEditorSourceToolRelease,
-    PreparedEditorSourceToolSelection, PreparedEditorSourceToolTemplateImport,
-    PreparedEditorSourceToolWithdrawal,
+    PreparedEditorSourceToolInstallations, PreparedEditorSourceToolReclamation,
+    PreparedEditorSourceToolRelease, PreparedEditorSourceToolSelection,
+    PreparedEditorSourceToolTemplateImport, PreparedEditorSourceToolWithdrawal,
 };
 
 mod plugin_diagnostics;

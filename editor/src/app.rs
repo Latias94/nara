@@ -1,4 +1,5 @@
 use std::{
+    collections::BTreeMap,
     fs::File,
     io,
     path::{Path, PathBuf},
@@ -395,7 +396,7 @@ pub struct EditorApplication {
     open_host: EditorProjectOpenHost,
     failed_open: Option<EditorProjectOpenFailure>,
     failed_open_close_evidence: Option<nara::app::RuntimeCloseEvidence>,
-    failed_session_close_receipt: Option<EditorProjectCloseReceipt>,
+    failed_session_close_receipts: BTreeMap<u64, EditorProjectCloseReceipt>,
     final_exit_committed: bool,
     initial_request: Option<EditorProjectRequest>,
     native_ready: bool,
@@ -443,7 +444,7 @@ impl EditorApplication {
             open_host: EditorProjectOpenHost::new().with_source_asset_importers(importers),
             failed_open: None,
             failed_open_close_evidence: None,
-            failed_session_close_receipt: None,
+            failed_session_close_receipts: BTreeMap::new(),
             final_exit_committed: false,
             initial_request,
             native_ready: false,
@@ -489,7 +490,7 @@ impl EditorApplication {
             open_host,
             failed_open: None,
             failed_open_close_evidence: None,
-            failed_session_close_receipt: None,
+            failed_session_close_receipts: BTreeMap::new(),
             final_exit_committed: false,
             initial_request: None,
             native_ready: false,
@@ -1675,13 +1676,13 @@ impl EditorApplication {
                 let close_progress = match &mut self.state {
                     EditorProductState::AuthoringReady(project)
                     | EditorProductState::AuthoringDegraded(project) => {
-                        Some(project.session.advance_close())
+                        Some((project.generation, project.session.advance_close()))
                     }
                     _ => None,
                 };
                 if matches!(
                     &close_progress,
-                    Some(EditorProjectCloseProgress::Incomplete { .. })
+                    Some((_, EditorProjectCloseProgress::Incomplete { .. }))
                 ) {
                     self.defer_session_close_retry();
                     return EditorApplicationUpdate {
@@ -1689,7 +1690,9 @@ impl EditorApplication {
                         exit_ready: false,
                     };
                 }
-                let Some(EditorProjectCloseProgress::Complete(receipt)) = close_progress else {
+                let Some((generation, EditorProjectCloseProgress::Complete(receipt))) =
+                    close_progress
+                else {
                     self.session_retirement = None;
                     self.session_close_retry_at = None;
                     return EditorApplicationUpdate {
@@ -1697,7 +1700,7 @@ impl EditorApplication {
                         exit_ready: false,
                     };
                 };
-                self.retain_session_close_failure(receipt);
+                self.retain_session_close_failure(generation, receipt);
                 if self.project_open_retirement_pending() {
                     self.defer_session_close_retry();
                     return EditorApplicationUpdate {
@@ -2127,7 +2130,7 @@ impl EditorApplication {
                         };
                     }
                     EditorProjectCloseProgress::Complete(receipt) => {
-                        self.retain_session_close_failure(receipt);
+                        self.retain_session_close_failure(retained.generation, receipt);
                         self.session_close_retry_at = None;
                         self.state = EditorProductState::from_published(candidate);
                         actions_observed = true;
@@ -2308,12 +2311,31 @@ impl EditorApplication {
     #[doc(hidden)]
     #[must_use]
     pub fn failed_session_close_receipt(&self) -> Option<&EditorProjectCloseReceipt> {
-        self.failed_session_close_receipt.as_ref()
+        self.failed_session_close_receipts
+            .first_key_value()
+            .map(|(_, receipt)| receipt)
     }
 
-    fn retain_session_close_failure(&mut self, receipt: EditorProjectCloseReceipt) {
+    /// Every failed Session Close, keyed by its original workspace entry generation.
+    ///
+    /// Complete receipts, including unpublished reclamation results, survive Session release.
+    /// Repeated Close polls for the same Session retain one receipt; later Sessions never replace
+    /// earlier evidence. Entries remain available for the lifetime of this Application.
+    #[doc(hidden)]
+    #[must_use]
+    pub fn failed_session_close_receipts(&self) -> &BTreeMap<u64, EditorProjectCloseReceipt> {
+        &self.failed_session_close_receipts
+    }
+
+    fn retain_session_close_failure(
+        &mut self,
+        generation: u64,
+        receipt: EditorProjectCloseReceipt,
+    ) {
         if receipt.has_cleanup_failure() {
-            self.failed_session_close_receipt.get_or_insert(receipt);
+            self.failed_session_close_receipts
+                .entry(generation)
+                .or_insert(receipt);
         }
     }
 

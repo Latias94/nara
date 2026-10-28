@@ -5,6 +5,7 @@ use std::{
     time::{Duration, Instant},
 };
 
+use nara_fs::{FileCapability, FsError};
 use nara_scene::SceneAuthoringRevision;
 use nara_tasks::{
     TaskDomainKey, TaskHandle, TaskPoolKind, TaskReturnState, TaskSpawnRequest, TaskTerminal,
@@ -118,6 +119,31 @@ pub(super) struct EditorSceneCapture {
 }
 
 impl EditorSceneCapture {
+    /// Checks the schema retained by the accepted preview, including its last good capture.
+    pub(super) fn source_object_in_use(&self, candidate: &FileCapability) -> Result<bool, FsError> {
+        match &self.captured {
+            Some(capture) => capture.validation.source_object_in_use(candidate),
+            None => Ok(false),
+        }
+    }
+
+    /// Pending capture work must be fenced and physically returned by the Session first.
+    pub(super) fn collect_reclamation_sources(
+        &self,
+        output: &mut Vec<FileCapability>,
+    ) -> Result<(), FsError> {
+        if self.pending.is_some() {
+            return Err(FsError::Unproven {
+                operation: nara_fs::FsOperation::InspectHandle,
+                proof: "scene capture work has not physically returned",
+            });
+        }
+        if let Some(capture) = &self.captured {
+            capture.validation.collect_reclamation_sources(output)?;
+        }
+        Ok(())
+    }
+
     /// Published preview packets do not block adoption; admitted capture work does.
     pub(super) fn schema_adoption_pending(&self) -> bool {
         self.pending.is_some()

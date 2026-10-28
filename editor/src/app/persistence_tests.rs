@@ -913,6 +913,87 @@ fn replacement_handoff_retains_session_cleanup_failure_through_a_clean_successor
 }
 
 #[test]
+fn failed_session_close_receipts_retain_two_actual_sessions_and_the_first_failure() {
+    let fixture = PersistenceFixture::trusted();
+    let mut application = fixture.open_with_shutdown_failure();
+    let first_generation = application.workspace_generation().unwrap();
+    assert!(application.failed_session_close_receipts().is_empty());
+    start_trusted_play(&mut application);
+    application.request_close_project();
+    let deadline = Instant::now() + Duration::from_secs(10);
+    while application.current_frame().is_some() {
+        assert!(Instant::now() < deadline, "first Session did not close");
+        application.advance(Duration::ZERO);
+        std::thread::sleep(Duration::from_millis(1));
+    }
+    assert_eq!(application.state(), EditorApplicationState::ProjectManager);
+    let first = application.failed_session_close_receipt().unwrap().clone();
+    assert!(first.has_play_cleanup_failure());
+    assert!(first.task_shutdown().is_complete());
+    assert_eq!(application.failed_session_close_receipts().len(), 1);
+    assert_eq!(
+        application
+            .failed_session_close_receipts()
+            .get(&first_generation),
+        Some(&first)
+    );
+
+    // Ordinary shell Open is data-only. Admit the next actual compiled Session through the same
+    // trusted Host, using the Application's entry allocator rather than a fabricated receipt.
+    let session = application
+        .open_host
+        .open_trusted_compiled(
+            super::open_project_root(&fixture.root).unwrap(),
+            TrustedCompiledEditorProjectIntent::new()
+                .with_profile("desktop")
+                .with_recipe(
+                    ProductRecipe::new()
+                        .add_plugin::<SessionShutdownFailure>()
+                        .unwrap(),
+                ),
+        )
+        .unwrap();
+    let second_generation = application.allocate_entry_generation();
+    assert!(second_generation > first_generation);
+    application.state =
+        super::EditorProductState::from_published(super::PublishedEditorProject::new(
+            second_generation,
+            super::EditorProjectRequest::new(fixture.root.clone(), Some("desktop".to_owned())),
+            session,
+            application.supervised_play_wake.clone(),
+        ));
+    assert_eq!(application.workspace_generation(), Some(second_generation));
+    start_trusted_play(&mut application);
+
+    // Exercise replacement handoff as well as the first Session's Close Project path.
+    assert!(application.request_project_replacement(&fixture.root, Some("desktop".to_owned())));
+    let deadline = Instant::now() + Duration::from_secs(10);
+    while application.state() == EditorApplicationState::OpeningReplacement {
+        assert!(Instant::now() < deadline, "second Session did not retire");
+        application.advance(Duration::ZERO);
+        std::thread::sleep(Duration::from_millis(1));
+    }
+    assert_eq!(application.state(), EditorApplicationState::AuthoringReady);
+    let second = application
+        .failed_session_close_receipts()
+        .get(&second_generation)
+        .expect("the second Session's actual failed Close must be retained")
+        .clone();
+    assert!(second.has_play_cleanup_failure());
+    assert!(second.task_shutdown().is_complete());
+    let expected = std::collections::BTreeMap::from([
+        (first_generation, first.clone()),
+        (second_generation, second),
+    ]);
+    assert_eq!(application.failed_session_close_receipts(), &expected);
+    assert_eq!(application.failed_session_close_receipt(), Some(&first));
+
+    close(&mut application);
+    assert_eq!(application.failed_session_close_receipts(), &expected);
+    assert_eq!(application.failed_session_close_receipt(), Some(&first));
+}
+
+#[test]
 fn startup_preparation_exit_revokes_initial_and_replacement_publication() {
     let root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../reference-game");
     let source = root.join("scenes/startup.scene.json");

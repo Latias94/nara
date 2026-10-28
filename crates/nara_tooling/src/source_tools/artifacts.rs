@@ -4,7 +4,10 @@ use std::sync::Arc;
 
 use nara_fs::ContentDigest;
 
-use super::{EditorSourceToolAttemptId, EditorSourceToolInstalledSelection};
+use super::{
+    EditorSourceToolAttemptId, EditorSourceToolInstalledSelection,
+    EditorSourceToolReclamationRecord,
+};
 
 operation_id!(EditorSourceToolArtifactBasis);
 
@@ -91,6 +94,8 @@ pub enum EditorSourceToolArtifactOutcome {
     Observed,
     Registered,
     Reconciled,
+    /// An exact reclamation intent or results record was published and accepted.
+    ReclamationRecorded,
     /// The exact inventory was published and accepted before executor cleanup failed.
     /// The accepted installations remain observable; this does not certify successful cleanup.
     PublishedWithCleanupFailure,
@@ -105,13 +110,14 @@ pub struct EditorSourceToolArtifactAttempt {
 
 /// Inventory publication and actual work return are independent of graph selection and approval.
 ///
-/// An unavailable inventory does not prevent ordinary document Save, Reopen or Close. A future
-/// reclamation owner must separately retain a reviewed intent and actual per-member unlink
-/// results; neither these observations nor serialized installation IDs authorize deletion.
+/// An unavailable inventory does not prevent ordinary document Save, Reopen or Close. Recovery
+/// records retain reviewed intent and actual per-member results without authorizing deletion or
+/// automatic resumption. Fresh reclamation requires a new explicit review of live objects.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct EditorSourceToolArtifactView {
     pub basis: EditorSourceToolArtifactBasis,
     pub installations: Vec<EditorSourceToolArtifactInstallation>,
+    pub reclamations: Vec<EditorSourceToolReclamationRecord>,
     pub phase: EditorSourceToolArtifactPhase,
     pub operation: Option<EditorSourceToolArtifactAttempt>,
     pub error: Option<EditorSourceToolArtifactError>,

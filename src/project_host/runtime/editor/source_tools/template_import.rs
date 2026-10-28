@@ -299,6 +299,7 @@ impl EditorProjectSession {
             return Err(Error::StaleBasis);
         }
         if self.source_tools.template_import.pending()
+            || self.source_tools.reclamation_fenced()
             || self.source_tools.selection.schema_adoption_pending()
             || self.source_tools.probe.is_some()
         {

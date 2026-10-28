@@ -94,6 +94,31 @@ pub(crate) struct AuthoringSourceFact {
 }
 
 impl AuthoringSourceFact {
+    /// Retains the same opened object whose historical source observation was validated.
+    fn collect_reclamation_source(
+        &self,
+        root: &DirectoryCapability,
+        output: &mut Vec<FileCapability>,
+    ) -> Result<(), FsError> {
+        let path = RelativePath::new(self.project_path.as_str())?;
+        let file = root.open_file_exact(&path)?;
+        if file.identity() != self.identity {
+            return Err(FsError::IdentityMismatch {
+                expected: self.identity,
+                actual: file.identity(),
+            });
+        }
+        if file.parent_identity() != self.parent_identity {
+            return Err(FsError::Unproven {
+                operation: nara_fs::FsOperation::InspectHandle,
+                proof: "the historical source parent no longer matches",
+            });
+        }
+        file.verify_digest(self.digest, self.digest.length())?;
+        output.push(file);
+        Ok(())
+    }
+
     pub(super) fn native_metadata(
         project_path: ProjectPath,
         identity: FileIdentity,
@@ -622,6 +647,24 @@ pub(crate) struct AuthoringProjectSessionSnapshot {
 }
 
 impl AuthoringProjectSessionSnapshot {
+    /// Checks retained schema handles; historical sources are collected separately.
+    pub(crate) fn source_object_in_use(&self, candidate: &FileCapability) -> Result<bool, FsError> {
+        self.schema.source_object_in_use(candidate)
+    }
+
+    /// Collects the bounded historical source set once for all reclamation candidates.
+    /// An error invalidates the entire collection, including any files already appended.
+    pub(crate) fn collect_reclamation_sources(
+        &self,
+        output: &mut Vec<FileCapability>,
+    ) -> Result<(), FsError> {
+        self.schema.collect_reclamation_sources(output)?;
+        for source in self.source_facts.iter() {
+            source.collect_reclamation_source(&self.schema.project_root, output)?;
+        }
+        Ok(())
+    }
+
     #[cfg(feature = "tooling")]
     pub(crate) fn source_index_scan_pending(&self) -> bool {
         self.source_index.schema_adoption_pending()

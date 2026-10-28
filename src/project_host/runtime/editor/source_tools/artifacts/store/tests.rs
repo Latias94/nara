@@ -113,6 +113,7 @@ fn inventory() -> Inventory {
             ],
             installed,
         }],
+        reclamations: Vec::new(),
     }
 }
 
@@ -192,7 +193,7 @@ fn corrupt_unsupported_oversized_and_nonregular_records_never_become_empty() {
     for (bytes, expected) in [
         (b"not JSON".to_vec(), Error::InvalidRecord),
         (
-            br#"{"format_version":2,"installations":[]}"#.to_vec(),
+            br#"{"format_version":2,"installations":[],"reclamations":[]}"#.to_vec(),
             Error::UnsupportedFormat,
         ),
         (vec![b'!'; BYTE_LIMIT as usize + 1], Error::TooLarge),

@@ -386,7 +386,10 @@ impl EditorProjectSession {
         if !self.accepts_new_work() {
             return Err(Error::Closing);
         }
-        if self.schema_adoption_fenced() || self.source_tools.probe.is_some() {
+        if self.schema_adoption_fenced()
+            || self.source_tools.probe.is_some()
+            || self.source_tools.reclamation_fenced()
+        {
             return Err(Error::Busy);
         }
         self.source_tools.selection.check_basis(basis)?;

@@ -356,12 +356,38 @@ impl EditorSourceToolInstallationPlan {
         });
         // Exact read handles have held every created object continuously before writers close.
         staged.writers.clear();
+        // Relinquish directory-creation DELETE access while retaining the exact live object.
+        // Otherwise our own creation handle prevents later restrictive namespace custody.
+        let observed = parent
+            .open_directory_exact(
+                &RelativePath::from_components([self.destination.clone()])
+                    .expect("one admitted destination component"),
+            )
+            .and_then(|directory| {
+                if directory.same_object(&staging)? {
+                    Ok(directory)
+                } else {
+                    Err(FsError::CapabilityIdentityDrift {
+                        operation: nara_fs::FsOperation::OpenDirectory,
+                    })
+                }
+            });
+        let (directory, verification) = match observed {
+            Ok(directory) => (directory, verification),
+            Err(source) => (
+                staging,
+                verification.and(Err(EditorSourceToolInstallationError::Member {
+                    member: self.project_path.clone(),
+                    source,
+                })),
+            ),
+        };
         let installation = EditorSourceToolInstallation {
             project_root: self.project_root,
             parent,
             destination: self.destination,
             project_path: self.project_path,
-            directory: staging,
+            directory,
             metadata: self.release.metadata,
             receipt,
             receipt_digest,

@@ -18,8 +18,15 @@ use nara_tooling::{
     EditorDocumentMutation, EditorDocumentTabModel, EditorExtensionCommand,
     EditorExtensionDocument, EditorExtensionDocumentError, EditorPersistenceAction,
     EditorPersistenceRequestResult, EditorPersistenceResult, EditorSourceToolArtifactOutcome,
-    EditorSourceToolArtifactPhase, EditorSourceToolSelectionError,
-    EditorSourceToolSelectionOutcome, EditorSourceToolTemplateImportOutcome,
+    EditorSourceToolArtifactPhase, EditorSourceToolAttemptId,
+    EditorSourceToolReclamationError as ReclamationError,
+    EditorSourceToolReclamationMemberState as ReclamationMemberState,
+    EditorSourceToolReclamationOutcome as ReclamationOutcome,
+    EditorSourceToolReclamationPhase as ReclamationPhase,
+    EditorSourceToolReclamationRecordPhase as ReclamationRecordPhase,
+    EditorSourceToolReclamationView, EditorSourceToolSelectionError,
+    EditorSourceToolSelectionOutcome, EditorSourceToolSelectionPhase,
+    EditorSourceToolSelectionView, EditorSourceToolTemplateImportOutcome,
     EditorSourceToolTemplateImportView, EditorSourceToolWithdrawalMode,
     EditorWorkspaceCommandReport,
 };
@@ -28,7 +35,7 @@ use super::{
     ARTIFACT_PATH, PACKAGE_A, PACKAGE_B, RECORD_PATH, SAMPLE, TIMEOUT, artifact_installation,
     assert_artifact_installations, assert_artifact_outcome, assert_installations,
     assert_installed_bytes, assert_no_execution, binding, install_owned, original, project_root,
-    request, settle_artifacts, settle_selection,
+    request, settle_artifacts,
 };
 use crate::{
     authoring_project::{Project, assert_history, close, schema_bundle},
@@ -251,8 +258,54 @@ fn settle_import(
     }
 }
 
+fn settle_selection(editor: &mut EditorProjectSession) -> EditorSourceToolSelectionView {
+    let deadline = Instant::now() + TIMEOUT;
+    loop {
+        editor.drive_editor_frame(Duration::ZERO);
+        let view = editor.source_tool_selection_view();
+        if view.phase == EditorSourceToolSelectionPhase::Idle
+            && !editor.source_tool_view().has_pending_work()
+            && view
+                .operation
+                .as_ref()
+                .is_some_and(|operation| operation.outcome.is_some())
+        {
+            assert!(view.error.is_none(), "{view:?}");
+            return view;
+        }
+        assert!(
+            Instant::now() < deadline,
+            "Installed graph did not physically return: {view:?}"
+        );
+        std::thread::sleep(Duration::from_millis(1));
+    }
+}
+
+fn settle_reclamation(
+    editor: &mut EditorProjectSession,
+    attempt: &EditorSourceToolAttemptId,
+) -> EditorSourceToolReclamationView {
+    let deadline = Instant::now() + TIMEOUT;
+    loop {
+        editor.drive_editor_frame(Duration::ZERO);
+        let view = editor.source_tool_reclamation_view();
+        if view.attempt.as_ref() == Some(attempt)
+            && view.phase == ReclamationPhase::Terminal
+            && !view.physical_work_pending
+            && !view.record_publication_pending
+        {
+            return view;
+        }
+        assert!(
+            Instant::now() < deadline,
+            "Reviewed artifact reclamation did not return: {view:?}"
+        );
+        std::thread::sleep(Duration::from_millis(1));
+    }
+}
+
 #[test]
-fn csharp_template_import_is_project_owned_through_history_save_reopen_and_graph_withdrawal() {
+fn csharp_template_import_history_survives_reviewed_artifact_reclamation_and_fresh_open() {
     let (_v1_directory, v1) = installed_variant("V1");
     let (_v2_directory, v2) = installed_variant("V2");
     let project = Project::new(
@@ -657,10 +710,66 @@ fn csharp_template_import_is_project_owned_through_history_save_reopen_and_graph
     assert_text_frame(&editor, &tab, changed);
     assert_eq!(editor.source_tool_artifact_view(), inventory);
 
+    // Retain a real redo entry across withdrawal and reclamation of the original template.
+    let revision = tab.revision;
+    let report = editor
+        .dispatch_editor_actions(EditorActionBatch::new(
+            editor.current_frame().revision(),
+            [
+                EditorAction::Extension(EditorExtensionCommand::new::<SampleText>(
+                    document,
+                    revision,
+                    SetText("Project-owned history after template import.\n".into()),
+                )),
+                EditorAction::Mutate(EditorDocumentMutation::Undo {
+                    document,
+                    base_revision: revision.next(),
+                }),
+            ],
+        ))
+        .unwrap();
+    assert_eq!(
+        report.outcomes(),
+        &[
+            applied_text(document, revision.next(), true),
+            applied_text(document, revision.next().next(), false),
+        ]
+    );
+    editor.drive_editor_frame(Duration::ZERO);
+    tab = editor
+        .current_frame()
+        .workspace()
+        .document(document)
+        .unwrap()
+        .clone();
+    assert_eq!(
+        tab.history,
+        DocumentHistoryStatus {
+            undo_depth: 0,
+            redo_depth: 1,
+        }
+    );
+    assert_text_frame(&editor, &tab, changed);
+
     // An unknown sibling is retained; it does not extend the bounded artifact inventory.
     let unknown = format!("{}/samples/unlisted.txt", owner1.project_path());
     fs::write(project.root().join(&unknown), b"unlisted artifact sibling").unwrap();
-    installed_bytes.insert(unknown, b"unlisted artifact sibling".to_vec());
+    installed_bytes.insert(unknown.clone(), b"unlisted artifact sibling".to_vec());
+    let initial_reclamation = editor.source_tool_reclamation_view();
+    assert_eq!(initial_reclamation.phase, ReclamationPhase::Idle);
+    assert!(inventory.reclamations.is_empty());
+    // Nonselected and disabled graph members are still installed, including the dependent.
+    for entry in [&a1, &a2, &dependent] {
+        assert!(matches!(
+            editor.prepare_source_tool_reclamation(
+                &inventory.basis,
+                &registered.basis,
+                root.share(),
+                &entry.installed.installation,
+            ),
+            Err(ReclamationError::StillInstalled)
+        ));
+    }
     assert!(matches!(
         editor.prepare_source_tool_withdrawal(
             &registered.basis,
@@ -711,6 +820,169 @@ fn csharp_template_import_is_project_owned_through_history_save_reopen_and_graph
     assert_eq!(project.read(), original());
     assert_eq!(fs::read(project.scene_path()).unwrap(), scene_bytes);
     assert_no_execution(&editor);
+
+    let graph_bytes = fs::read(project.root().join(RECORD_PATH)).unwrap();
+    let prepared = editor
+        .prepare_source_tool_reclamation(
+            &inventory.basis,
+            &withdrawn.basis,
+            root.share(),
+            &a1.installed.installation,
+        )
+        .unwrap();
+    assert!(prepared.creation_custody());
+    let review = prepared.record().clone();
+    assert_ne!(review.id, [0; 32]);
+    assert_eq!(review.installation, a1.installed.installation);
+    assert_eq!(review.phase, ReclamationRecordPhase::Intent);
+    assert_eq!(review.members.len(), owner1.members().len());
+    assert_eq!(
+        review
+            .members
+            .iter()
+            .map(|member| (member.path.to_string(), member.state))
+            .collect::<BTreeMap<_, _>>(),
+        owner1
+            .members()
+            .iter()
+            .map(|member| (member.path().to_owned(), ReclamationMemberState::Pending))
+            .collect::<BTreeMap<_, _>>()
+    );
+    drop(prepared);
+    assert_eq!(editor.source_tool_reclamation_view(), initial_reclamation);
+    assert_eq!(editor.source_tool_artifact_view(), inventory);
+    assert_eq!(editor.source_tool_selection_view(), withdrawn);
+    assert_eq!(
+        fs::read(project.root().join(ARTIFACT_PATH)).unwrap(),
+        inventory_bytes
+    );
+    assert_eq!(
+        fs::read(project.root().join(RECORD_PATH)).unwrap(),
+        graph_bytes
+    );
+    assert_installed_bytes(&project, &installed_bytes);
+    assert_text_frame(&editor, &tab, changed);
+
+    // Even an identical graph publication invalidates the original graph observation.
+    let stale = editor
+        .prepare_source_tool_reclamation(
+            &inventory.basis,
+            &withdrawn.basis,
+            root.share(),
+            &a1.installed.installation,
+        )
+        .unwrap();
+    let prepared = editor
+        .prepare_source_tool_installations(&withdrawn.basis, root.share(), &[request(&a2)])
+        .unwrap();
+    let original_graph_basis = withdrawn.basis.clone();
+    editor.register_source_tool_installations(prepared).unwrap();
+    let withdrawn = settle_selection(&mut editor);
+    assert_ne!(withdrawn.basis, original_graph_basis);
+    assert_installations(&withdrawn.installed, &[a2.clone()]);
+    assert!(matches!(
+        editor.confirm_source_tool_reclamation(stale),
+        Err(ReclamationError::StaleBasis)
+    ));
+    assert_eq!(editor.source_tool_reclamation_view(), initial_reclamation);
+    assert_eq!(editor.source_tool_artifact_view(), inventory);
+    assert_eq!(
+        fs::read(project.root().join(RECORD_PATH)).unwrap(),
+        graph_bytes
+    );
+    assert_installed_bytes(&project, &installed_bytes);
+
+    // A fresh inventory observation also cannot silently refresh an older removal review.
+    let stale = editor
+        .prepare_source_tool_reclamation(
+            &inventory.basis,
+            &withdrawn.basis,
+            root.share(),
+            &a1.installed.installation,
+        )
+        .unwrap();
+    let prepared = editor
+        .prepare_source_tool_artifact_observation(&inventory.basis, &a1.installed.installation)
+        .unwrap();
+    let original_artifact_basis = inventory.basis.clone();
+    let attempt = editor.commit_source_tool_artifacts(prepared).unwrap();
+    let inventory = settle_artifacts(&mut editor);
+    assert_ne!(inventory.basis, original_artifact_basis);
+    assert_artifact_outcome(
+        &inventory,
+        &attempt,
+        EditorSourceToolArtifactOutcome::Observed,
+    );
+    assert!(matches!(
+        editor.confirm_source_tool_reclamation(stale),
+        Err(ReclamationError::StaleBasis)
+    ));
+    assert_eq!(editor.source_tool_reclamation_view(), initial_reclamation);
+    assert_eq!(
+        fs::read(project.root().join(ARTIFACT_PATH)).unwrap(),
+        inventory_bytes
+    );
+    assert_installed_bytes(&project, &installed_bytes);
+    assert_text_frame(&editor, &tab, changed);
+
+    let prepared = editor
+        .prepare_source_tool_reclamation(
+            &inventory.basis,
+            &withdrawn.basis,
+            root.share(),
+            &a1.installed.installation,
+        )
+        .unwrap();
+    let reviewed = prepared.record().clone();
+    assert_eq!(reviewed.members, review.members);
+    assert_installed_bytes(&project, &installed_bytes);
+    let attempt = editor.confirm_source_tool_reclamation(prepared).unwrap();
+    let reclaimed = settle_reclamation(&mut editor, &attempt);
+    assert_eq!(reclaimed.outcome, Some(ReclamationOutcome::Complete));
+    assert!(reclaimed.error.is_none(), "{reclaimed:?}");
+    let results = reclaimed.record.unwrap();
+    assert_eq!(results.id, reviewed.id);
+    assert_eq!(results.installation, reviewed.installation);
+    assert_eq!(results.phase, ReclamationRecordPhase::Results);
+    let mut expected_results = reviewed;
+    expected_results.phase = ReclamationRecordPhase::Results;
+    for member in &mut expected_results.members {
+        member.state = ReclamationMemberState::Removed;
+        let path = format!("{}/{}", owner1.project_path(), member.path);
+        assert!(
+            !project.root().join(&path).exists(),
+            "Selected artifact survived: {path}"
+        );
+        installed_bytes.remove(&path).unwrap();
+    }
+    assert_eq!(results, expected_results);
+    let inventory = settle_artifacts(&mut editor);
+    assert_eq!(inventory.reclamations, [results.clone()]);
+    let reclaimed_bytes = fs::read(project.root().join(ARTIFACT_PATH)).unwrap();
+    assert_ne!(reclaimed_bytes, inventory_bytes);
+    assert_eq!(
+        fs::read(project.root().join(RECORD_PATH)).unwrap(),
+        graph_bytes
+    );
+    assert_eq!(
+        fs::read(project.root().join(&unknown)).unwrap(),
+        b"unlisted artifact sibling"
+    );
+    assert_installed_bytes(&project, &installed_bytes);
+    assert_text_frame(&editor, &tab, changed);
+    assert_eq!(
+        fs::read_to_string(project.root().join(source)).unwrap(),
+        changed
+    );
+    assert_eq!(editor.source_tool_selection_view(), withdrawn);
+    assert_eq!(editor.document_query_basis(scene).unwrap(), scene_basis);
+    assert_eq!(
+        editor.current_frame().workspace().document(scene),
+        Some(&scene_tab)
+    );
+    assert_history(&editor, scene, 0, 0);
+    assert_eq!(fs::read(project.scene_path()).unwrap(), scene_bytes);
+    assert_no_execution(&editor);
     close(&mut editor);
     drop(editor);
 
@@ -721,7 +993,21 @@ fn csharp_template_import_is_project_owned_through_history_save_reopen_and_graph
     let inventory = settle_artifacts(&mut reopened);
     assert_eq!(inventory.phase, EditorSourceToolArtifactPhase::Idle);
     assert!(inventory.error.is_none());
-    assert_artifact_installations(&inventory.installations, &expected_inventory);
+    assert_eq!(inventory.reclamations, [results.clone()]);
+    assert_eq!(inventory.installations.len(), expected_inventory.len());
+    for expected in &expected_inventory {
+        assert!(
+            inventory
+                .installations
+                .iter()
+                .any(|entry| entry.installed == expected.installed)
+        );
+    }
+    let fresh_reclamation = reopened.source_tool_reclamation_view();
+    assert_eq!(fresh_reclamation.phase, ReclamationPhase::Idle);
+    assert!(fresh_reclamation.attempt.is_none() && fresh_reclamation.outcome.is_none());
+    assert!(!fresh_reclamation.physical_work_pending);
+    assert!(!fresh_reclamation.record_publication_pending);
     reopened
         .register_extension_document::<SampleText>()
         .unwrap();
@@ -738,15 +1024,37 @@ fn csharp_template_import_is_project_owned_through_history_save_reopen_and_graph
     assert_text_frame(&reopened, fresh_tab, changed);
     assert_eq!(
         fs::read(project.root().join(ARTIFACT_PATH)).unwrap(),
-        inventory_bytes
+        reclaimed_bytes
+    );
+    for member in &results.members {
+        assert!(
+            !project
+                .root()
+                .join(owner1.project_path())
+                .join(member.path.as_ref())
+                .exists()
+        );
+    }
+    assert_eq!(
+        fs::read(project.root().join(RECORD_PATH)).unwrap(),
+        graph_bytes
+    );
+    assert_eq!(
+        fs::read(project.root().join(&unknown)).unwrap(),
+        b"unlisted artifact sibling"
     );
     assert_installed_bytes(&project, &installed_bytes);
     assert_eq!(fs::read(project.scene_path()).unwrap(), scene_bytes);
     assert_no_execution(&reopened);
+    assert!(reopened.source_tool_view().attempt.is_none());
     close(&mut reopened);
     assert_eq!(
         fs::read_to_string(project.root().join(source)).unwrap(),
         changed
+    );
+    assert_eq!(
+        fs::read(project.root().join(ARTIFACT_PATH)).unwrap(),
+        reclaimed_bytes
     );
     assert_installed_bytes(&project, &installed_bytes);
 }

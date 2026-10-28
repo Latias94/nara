@@ -323,6 +323,18 @@ impl<T: Send + 'static> Pending<T> {
 }
 
 impl EditorSchemaOwnerAdoptionHost {
+    /// Observes retained source inputs independently of logical operation completion.
+    pub(super) fn reclamation_blocked(&self) -> bool {
+        self.fenced()
+            || self.start.is_some()
+            || self.work.is_some()
+            || self.candidate.is_some()
+            || self.published.is_some()
+            || self.publication_host.is_some()
+            || !self.captures.is_empty()
+            || self.attachment_failure.is_some()
+    }
+
     pub(super) fn fenced(&self) -> bool {
         matches!(
             self.view.phase,

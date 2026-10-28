@@ -4,7 +4,9 @@ use std::{
 };
 
 use nara_asset::{AssetPath, AssetRecord, AssetRef, AssetSourceKind, Handle, StableAssetId};
-use nara_fs::{ContentDigest, DirectoryCapability, FileIdentity, RelativePath};
+use nara_fs::{
+    ContentDigest, DirectoryCapability, FileCapability, FileIdentity, FsError, RelativePath,
+};
 use nara_image::{ImageAsset, ImageImportSettings, ImageImportedAsset};
 use nara_tasks::{
     TaskDomainKey, TaskHandle, TaskPoolKind, TaskRejectReason, TaskReturnState, TaskSpawnRequest,
@@ -74,6 +76,40 @@ pub(super) struct EditorImageHydrationSource {
 }
 
 impl EditorImageHydrationSource {
+    pub(super) fn collect_reclamation_sources(
+        &self,
+        root: &DirectoryCapability,
+        output: &mut Vec<FileCapability>,
+    ) -> Result<(), FsError> {
+        if root.identity() != self.project_root_identity {
+            return Err(FsError::IdentityMismatch {
+                expected: self.project_root_identity,
+                actual: root.identity(),
+            });
+        }
+        let source = root.open_file_exact(&self.source_path)?;
+        if source.identity() != self.source_identity {
+            return Err(FsError::IdentityMismatch {
+                expected: self.source_identity,
+                actual: source.identity(),
+            });
+        }
+        if let Some(digest) = self.source_digest {
+            source.verify_digest(digest, digest.length())?;
+        }
+        let metadata = root.open_file_exact(&self.metadata_path)?;
+        if metadata.identity() != self.metadata_identity {
+            return Err(FsError::IdentityMismatch {
+                expected: self.metadata_identity,
+                actual: metadata.identity(),
+            });
+        }
+        metadata.verify_digest(self.metadata_digest, self.metadata_digest.length())?;
+        output.push(source);
+        output.push(metadata);
+        Ok(())
+    }
+
     fn captured(
         project: &AuthoringProjectSessionSnapshot,
         source: &AuthoringAssetSource,
@@ -249,6 +285,30 @@ pub(super) struct EditorImageHydrationHost {
 }
 
 impl EditorImageHydrationHost {
+    /// Collects retained queued inputs without admitting, cancelling or polling work.
+    pub(super) fn collect_reclamation_sources(
+        &self,
+        root: &DirectoryCapability,
+        output: &mut Vec<FileCapability>,
+    ) -> Result<(), FsError> {
+        if self.pending.is_some() {
+            return Err(FsError::Unproven {
+                operation: nara_fs::FsOperation::InspectHandle,
+                proof: "image hydration work has not physically returned",
+            });
+        }
+        for source in &self.queued {
+            source.collect_reclamation_sources(root, output)?;
+        }
+        for (source, image) in &self.rechecks {
+            source.collect_reclamation_sources(root, output)?;
+            if let Some(captured) = image.capture_source() {
+                captured.collect_reclamation_sources(root, output)?;
+            }
+        }
+        Ok(())
+    }
+
     pub(super) fn initialize(
         &mut self,
         project: &AuthoringProjectSessionSnapshot,

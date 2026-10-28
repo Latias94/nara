@@ -142,6 +142,16 @@ impl EditorProjectSession {
     }
 
     pub(crate) fn request_play(&mut self, command: EditorPlayCommand) -> EditorPlayRequestResult {
+        if self.source_tools.reclamation_fenced()
+            && matches!(
+                command,
+                EditorPlayCommand::Play
+                    | EditorPlayCommand::Restart
+                    | EditorPlayCommand::RunLastGood
+            )
+        {
+            return EditorPlayRequestResult::Rejected(EditorPlayRejection::Busy);
+        }
         if self.closing
             && !matches!(
                 command,

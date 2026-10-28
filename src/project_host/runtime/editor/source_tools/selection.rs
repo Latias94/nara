@@ -151,6 +151,75 @@ impl Default for SelectionState {
 }
 
 impl SelectionState {
+    pub(super) fn require_reclamation_absence(
+        &self,
+        basis: &EditorSourceToolSelectionBasis,
+        installation: &[u8; 32],
+        directory: &str,
+        root: &DirectoryCapability,
+    ) -> Result<(), nara_tooling::EditorSourceToolReclamationError> {
+        use nara_tooling::EditorSourceToolReclamationError as Rejection;
+        if basis != &self.basis {
+            return Err(Rejection::StaleBasis);
+        }
+        if self.phase != Phase::Idle {
+            return Err(Rejection::RequiresReconcile);
+        }
+        if self.schema_adoption_pending() {
+            return Err(Rejection::Busy);
+        }
+        if self.graph.entries.iter().any(|entry| {
+            &entry.installed.installation == installation
+                || entry.installed.directory.eq_ignore_ascii_case(directory)
+        }) {
+            return Err(Rejection::StillInstalled);
+        }
+        let root = root.strict_read_only().map_err(|_| Rejection::Read)?;
+        let path = RelativePath::new(SELECTION_PATH).expect("fixed selection path");
+        match root.open_file_exact(&path) {
+            Ok(current) => {
+                let host = self.host.as_ref().ok_or(Rejection::Changed)?;
+                host.try_with(|host| {
+                    let Some((_, _, digest)) = host.accepted_source_observation() else { return Err(Rejection::RequiresReconcile); };
+                    if !host.same_source_object(&current).map_err(|_| Rejection::Read)? {
+                        return Err(Rejection::Changed);
+                    }
+                    current.verify_digest(digest, store::BYTE_LIMIT).map_err(|_| Rejection::Changed)?;
+                    Ok(())
+                }).ok_or(Rejection::Busy)?
+            }
+            Err(nara_fs::FsError::Io { source, .. }) if source.kind() == std::io::ErrorKind::NotFound => {
+                match &self.host {
+                    None => Ok(()),
+                    Some(host) => host.try_with(|host| {
+                        if !host.uncertain() && matches!(host.binding(), crate::project_host::file_publication::FilePublicationBinding::Missing) {
+                            Ok(())
+                        } else { Err(Rejection::Changed) }
+                    }).ok_or(Rejection::Busy)?,
+                }
+            }
+            Err(_) => Err(Rejection::Read),
+        }?;
+        let directory = root
+            .open_directory_exact(&RelativePath::new(directory).map_err(|_| Rejection::Read)?)
+            .map_err(|_| Rejection::Read)?;
+        for entry in &self.graph.entries {
+            let installed = root
+                .open_directory_exact(
+                    &RelativePath::new(entry.installed.directory.as_ref())
+                        .map_err(|_| Rejection::Read)?,
+                )
+                .map_err(|_| Rejection::RequiresReconcile)?;
+            if installed
+                .same_object(&directory)
+                .map_err(|_| Rejection::Read)?
+            {
+                return Err(Rejection::StillInstalled);
+            }
+        }
+        Ok(())
+    }
+
     /// Retained selection intent can still publish or promote after all process jobs return.
     pub(super) fn schema_adoption_pending(&self) -> bool {
         self.pending.is_some()
@@ -621,6 +690,9 @@ impl EditorProjectSession {
         basis: &EditorSourceToolSelectionBasis,
         prepared: PreparedEditorSourceToolSelection,
     ) -> Result<EditorSourceToolAttemptId, Error> {
+        if self.source_tools.reclamation_fenced() {
+            return Err(Error::Busy);
+        }
         if !self.accepts_new_work() {
             return Err(Error::Closing);
         }
@@ -694,6 +766,9 @@ impl EditorProjectSession {
         &mut self,
         basis: &EditorSourceToolSelectionBasis,
     ) -> Result<EditorSourceToolAttemptId, Error> {
+        if self.source_tools.reclamation_fenced() {
+            return Err(Error::Busy);
+        }
         if !self.accepts_new_work() {
             return Err(Error::Closing);
         }
@@ -732,6 +807,9 @@ impl EditorProjectSession {
         &mut self,
         basis: &EditorSourceToolSelectionBasis,
     ) -> Result<EditorSourceToolAttemptId, Error> {
+        if self.source_tools.reclamation_fenced() {
+            return Err(Error::Busy);
+        }
         if !self.accepts_new_work() {
             return Err(Error::Closing);
         }

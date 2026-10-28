@@ -46,6 +46,8 @@ mod artifacts;
 pub use artifacts::*;
 mod template_import;
 pub use template_import::*;
+mod reclamation;
+pub use reclamation::*;
 
 /// Explicit source intent retained by the Host rather than returned by the child.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -282,6 +284,7 @@ pub struct EditorSourceToolView {
     pub selection: Option<EditorSourceToolSelectionView>,
     pub artifacts: Option<EditorSourceToolArtifactView>,
     pub template_import: Option<EditorSourceToolTemplateImportView>,
+    pub reclamation: Option<EditorSourceToolReclamationView>,
 }
 
 impl EditorSourceToolView {
@@ -308,6 +311,10 @@ impl EditorSourceToolView {
                 .template_import
                 .as_ref()
                 .is_some_and(|import| import.physical_work_pending)
+            || self
+                .reclamation
+                .as_ref()
+                .is_some_and(|reclamation| reclamation.physical_work_pending)
     }
 }
 

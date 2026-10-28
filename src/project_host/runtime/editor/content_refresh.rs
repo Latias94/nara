@@ -126,7 +126,7 @@ impl EditorProjectSession {
         &mut self,
         action: EditorProjectContentAction,
     ) -> EditorProjectContentRefreshRequestResult {
-        if !self.accepts_new_work() {
+        if !self.accepts_new_work() || self.source_tools.reclamation_fenced() {
             return EditorProjectContentRefreshRequestResult::Rejected(
                 EditorProjectContentRefreshRejection::RetryNotAvailable,
             );

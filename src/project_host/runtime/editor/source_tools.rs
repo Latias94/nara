@@ -40,6 +40,7 @@ mod artifact_store;
 mod artifacts;
 mod managed;
 mod process;
+mod reclamation;
 mod release;
 mod selection;
 mod template_import;
@@ -48,6 +49,7 @@ pub use artifacts::PreparedEditorSourceToolArtifacts;
 pub use managed::{
     EditorSourceToolManagedError, EditorSourceToolManagedHost, EditorSourceToolManagedHostDigests,
 };
+pub use reclamation::PreparedEditorSourceToolReclamation;
 pub use release::{
     EditorSourceToolInstallation, EditorSourceToolInstallationError,
     EditorSourceToolInstallationInspection, EditorSourceToolInstallationOrphan,
@@ -247,11 +249,24 @@ pub(super) struct EditorSourceTools {
     selection: selection::SelectionState,
     artifacts: artifacts::ArtifactState,
     template_import: template_import::TemplateImportState,
+    reclamation: reclamation::ReclamationState,
     #[cfg(test)]
     next_gates: process::ProcessTestGates,
 }
 
 impl EditorSourceTools {
+    pub(super) fn reclamation_fenced(&self) -> bool {
+        self.reclamation.fenced()
+    }
+
+    pub(super) fn cancel_reclamation(&mut self) {
+        self.reclamation.cancel();
+    }
+
+    pub(super) fn reclamation_settled(&self) -> bool {
+        !self.reclamation.pending()
+    }
+
     pub(super) fn cancel_template_import(&self) {
         self.template_import.cancel();
     }
@@ -262,6 +277,7 @@ impl EditorSourceTools {
             || self.selection.schema_adoption_pending()
             || self.artifacts.pending()
             || self.template_import.pending()
+            || self.reclamation.pending()
     }
 
     /// Physical work can settle despite failure; callers must also inspect process cleanup failure.
@@ -278,6 +294,9 @@ impl EditorSourceTools {
         &self,
         candidate: &FileCapability,
     ) -> Result<(), SourceAdmissionError> {
+        if self.reclamation.fenced() {
+            return Err(SourceAdmissionError::HostUnavailable);
+        }
         if self
             .artifacts
             .contains_source_object(candidate)
@@ -385,6 +404,7 @@ impl EditorSourceTools {
             ),
             artifacts: Some(self.artifacts.view()),
             template_import: Some(self.template_import.view()),
+            reclamation: Some(self.reclamation.view()),
         }
     }
 }
@@ -667,6 +687,7 @@ impl EditorProjectSession {
             Err(EditorSourceToolError::Closing)
         } else if self.schema_adoption_fenced()
             || self.source_tools.selection.graph_mutation_pending()
+            || self.source_tools.reclamation.fenced()
         {
             Err(EditorSourceToolError::Busy)
         } else {
@@ -853,6 +874,7 @@ impl EditorProjectSession {
     pub(super) fn advance_source_tools(&mut self) {
         self.advance_source_tool_artifacts();
         self.advance_source_tool_template_import();
+        self.advance_source_tool_reclamation();
         self.authoring_runtime.host_custody().retry_cleanup();
         self.advance_source_tool_selection();
         let cleanup_failed = &mut self.source_tools.process_cleanup_failed;

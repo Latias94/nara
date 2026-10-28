@@ -170,6 +170,11 @@ impl EditorProjectSession {
         relative_path: &str,
         kind: AuthoringDocumentKind,
     ) -> EditorDocumentOpenRequestResult {
+        if self.source_tools.reclamation_fenced() {
+            return EditorDocumentOpenRequestResult::Rejected {
+                code: "project.editor.document-open-busy",
+            };
+        }
         if !self.accepts_new_work()
             || self.schema_adoption_fenced()
             || self.pending_document_open.is_some()

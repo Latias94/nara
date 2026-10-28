@@ -23,7 +23,7 @@ use crate::project_host::{
 };
 
 mod io;
-mod record;
+pub(super) mod record;
 mod store;
 #[cfg(all(test, windows))]
 mod tests;
@@ -95,10 +95,38 @@ impl Default for ArtifactState {
 }
 
 impl ArtifactState {
+    #[cfg(all(test, windows))]
+    pub(super) fn test_decode_reclamations(
+        bytes: &[u8],
+    ) -> Vec<nara_tooling::EditorSourceToolReclamationRecord> {
+        record::decode(bytes)
+            .expect("valid artifact inventory")
+            .reclamations
+    }
+
+    #[cfg(all(test, windows))]
+    pub(super) fn test_fail_next_publication(
+        &self,
+    ) -> crate::project_host::file_publication::CleanupTestControl {
+        self.host
+            .as_ref()
+            .expect("inventory publication host is admitted")
+            .try_with(|host| host.test_fail_after_write())
+            .expect("test publisher is available")
+    }
+
+    #[cfg(all(test, windows))]
+    pub(super) fn test_allow_publication_cleanup(&self) {
+        if let Some(host) = &self.host {
+            host.try_with(|host| host.test_allow_cleanup());
+        }
+    }
+
     pub(super) fn view(&self) -> EditorSourceToolArtifactView {
         EditorSourceToolArtifactView {
             basis: self.basis.clone(),
             installations: self.inventory.installations.clone(),
+            reclamations: self.inventory.reclamations.clone(),
             phase: self.phase,
             operation: self.operation.clone(),
             error: self.error.clone(),
@@ -108,6 +136,40 @@ impl ArtifactState {
 
     pub(super) fn pending(&self) -> bool {
         self.pending.is_some() || self.host.as_ref().is_some_and(RetainedHost::has_cleanup)
+    }
+
+    pub(super) fn reclamation_entry(
+        &self,
+        basis: &EditorSourceToolArtifactBasis,
+        installation: &[u8; 32],
+    ) -> Result<EditorSourceToolArtifactInstallation, Error> {
+        self.require_basis(basis)?;
+        self.inventory
+            .installations
+            .iter()
+            .find(|entry| &entry.installed.installation == installation)
+            .cloned()
+            .ok_or(Error::Unregistered)
+    }
+
+    pub(super) fn creation_custody(
+        &self,
+        installation: &[u8; 32],
+    ) -> Option<&Arc<EditorSourceToolInstallation>> {
+        self.created.get(installation)
+    }
+
+    pub(super) fn release_creation_custody(&mut self, installation: &[u8; 32]) {
+        self.created.remove(installation);
+    }
+
+    pub(super) fn same_reclamation_facts(
+        &self,
+        basis: &EditorSourceToolArtifactBasis,
+        expected: &EditorSourceToolArtifactInstallation,
+    ) -> Result<bool, Error> {
+        let current = self.reclamation_entry(basis, &expected.installed.installation)?;
+        Ok(record::same_facts(&current, expected))
     }
 
     pub(super) fn publication_host(&self) -> Option<&RetainedHost<FilePublicationHost>> {
@@ -295,6 +357,9 @@ impl EditorProjectSession {
         &mut self,
         basis: &EditorSourceToolArtifactBasis,
     ) -> Result<EditorSourceToolAttemptId, Error> {
+        if self.source_tools.reclamation.pending() {
+            return Err(Error::Busy);
+        }
         if !self.accepts_new_work() || self.schema_adoption_fenced() {
             return Err(Error::Closing);
         }
@@ -314,6 +379,9 @@ impl EditorProjectSession {
     ) -> Result<(), Error> {
         if !self.accepts_new_work() || self.schema_adoption_fenced() {
             return Err(Error::Closing);
+        }
+        if self.source_tools.reclamation.fenced() {
+            return Err(Error::Busy);
         }
         self.source_tools.artifacts.require_basis(basis)
     }
@@ -336,7 +404,10 @@ impl EditorProjectSession {
         Ok(())
     }
 
-    fn require_unowned_artifact_object(&self, current: &FileCapability) -> Result<(), Error> {
+    pub(super) fn require_unowned_artifact_object(
+        &self,
+        current: &FileCapability,
+    ) -> Result<(), Error> {
         let check = |host: &mut FilePublicationHost| {
             exclude_publication_alias(
                 current,
@@ -379,6 +450,37 @@ impl EditorProjectSession {
             lane.host.try_with(check).ok_or(Error::Busy)?.map_err(map)?;
         }
         Ok(())
+    }
+
+    /// Only the admitted reclamation owner publishes its exact intent/result through this lane.
+    pub(super) fn publish_reclamation_record(
+        &mut self,
+        basis: &EditorSourceToolArtifactBasis,
+        record: &nara_tooling::EditorSourceToolReclamationRecord,
+    ) -> Result<EditorSourceToolAttemptId, Error> {
+        // Already owned removal must settle its result before Close shuts its publisher down.
+        // This private drain permission cannot admit a new intent during Close.
+        if !self.authoring_runtime.host_custody().is_accepting()
+            || self.schema_adoption_fenced()
+            || (self.closing
+                && record.phase != nara_tooling::EditorSourceToolReclamationRecordPhase::Results)
+        {
+            return Err(Error::Closing);
+        }
+        let state = &self.source_tools.artifacts;
+        state.require_basis(basis)?;
+        let prepared = state.prepare(
+            self.source_project_root(),
+            state.inventory.with_reclamation(record)?,
+            None,
+            Outcome::ReclamationRecorded,
+        )?;
+        let request = io::Request::Publish {
+            bytes: Arc::clone(&prepared.bytes),
+            host: self.source_tools.artifacts.host.clone(),
+            registration: None,
+        };
+        Ok(self.start_artifact_work(request, Some(prepared), false))
     }
 
     fn start_artifact_work(

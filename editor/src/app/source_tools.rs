@@ -6,18 +6,20 @@ use nara::{
     project_host::{
         EditorProjectSession, EditorSourceToolDefinition, EditorSourceToolInstallation,
         EditorSourceToolManagedHost, PreparedEditorSourceToolArtifacts,
-        PreparedEditorSourceToolInstallations, PreparedEditorSourceToolSelection,
-        PreparedEditorSourceToolTemplateImport, PreparedEditorSourceToolWithdrawal,
+        PreparedEditorSourceToolInstallations, PreparedEditorSourceToolReclamation,
+        PreparedEditorSourceToolSelection, PreparedEditorSourceToolTemplateImport,
+        PreparedEditorSourceToolWithdrawal,
     },
     reflect::ComponentValue,
     tooling::{
         EditorDocumentQueryBasis, EditorSourceToolActivationId, EditorSourceToolArtifactBasis,
         EditorSourceToolArtifactError, EditorSourceToolArtifactView, EditorSourceToolAttemptId,
         EditorSourceToolCommit, EditorSourceToolError, EditorSourceToolInstallationRequest,
-        EditorSourceToolIntent, EditorSourceToolRequestId, EditorSourceToolReview,
-        EditorSourceToolSelectionBasis, EditorSourceToolSelectionError,
-        EditorSourceToolSelectionView, EditorSourceToolTemplateImportError,
-        EditorSourceToolTemplateImportView, EditorSourceToolView, EditorSourceToolWithdrawalMode,
+        EditorSourceToolIntent, EditorSourceToolReclamationError, EditorSourceToolReclamationView,
+        EditorSourceToolRequestId, EditorSourceToolReview, EditorSourceToolSelectionBasis,
+        EditorSourceToolSelectionError, EditorSourceToolSelectionView,
+        EditorSourceToolTemplateImportError, EditorSourceToolTemplateImportView,
+        EditorSourceToolView, EditorSourceToolWithdrawalMode,
     },
 };
 
@@ -53,6 +55,70 @@ impl EditorApplicationSourceToolSubmission {
 }
 
 impl EditorApplication {
+    pub fn source_tool_reclamation_view(
+        &self,
+    ) -> Result<EditorSourceToolReclamationView, EditorSourceToolError> {
+        Ok(self
+            .state
+            .published()
+            .ok_or(EditorSourceToolError::Closing)?
+            .session
+            .source_tool_reclamation_view())
+    }
+
+    pub fn prepare_source_tool_reclamation(
+        &self,
+        artifacts: &EditorSourceToolArtifactBasis,
+        selection: &EditorSourceToolSelectionBasis,
+        project: nara::fs::DirectoryCapability,
+        installation: &[u8; 32],
+    ) -> Result<PreparedEditorSourceToolReclamation, EditorSourceToolReclamationError> {
+        self.authoring_edit_session()
+            .map_err(|_| EditorSourceToolReclamationError::Closing)?
+            .prepare_source_tool_reclamation(artifacts, selection, project, installation)
+    }
+
+    pub fn confirm_source_tool_reclamation(
+        &mut self,
+        prepared: PreparedEditorSourceToolReclamation,
+    ) -> Result<EditorSourceToolAttemptId, EditorSourceToolReclamationError> {
+        let result = self
+            .authoring_edit_session_mut()
+            .map_err(|_| EditorSourceToolReclamationError::Closing)?
+            .confirm_source_tool_reclamation(prepared);
+        self.drive_editor_frame(Duration::ZERO, true, false);
+        result
+    }
+
+    pub fn cancel_source_tool_reclamation(
+        &mut self,
+        attempt: &EditorSourceToolAttemptId,
+    ) -> Result<(), EditorSourceToolReclamationError> {
+        let result = self
+            .state
+            .published_mut()
+            .ok_or(EditorSourceToolReclamationError::Closing)?
+            .session
+            .cancel_source_tool_reclamation(attempt);
+        self.drive_editor_frame(Duration::ZERO, true, false);
+        result
+    }
+
+    pub fn retry_source_tool_reclamation_record(
+        &mut self,
+        attempt: &EditorSourceToolAttemptId,
+        basis: &EditorSourceToolArtifactBasis,
+    ) -> Result<(), EditorSourceToolReclamationError> {
+        let result = self
+            .state
+            .published_mut()
+            .ok_or(EditorSourceToolReclamationError::Closing)?
+            .session
+            .retry_source_tool_reclamation_record(attempt, basis);
+        self.drive_editor_frame(Duration::ZERO, true, false);
+        result
+    }
+
     pub fn source_tool_template_import_view(
         &self,
     ) -> Result<EditorSourceToolTemplateImportView, EditorSourceToolError> {

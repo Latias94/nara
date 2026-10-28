@@ -304,6 +304,7 @@ impl EditorProjectSession {
     ) -> Result<(), Rejection> {
         if self.closing
             || self.schema_adoption_fenced()
+            || self.source_tools.reclamation_fenced()
             || self.source_asset_import.has_pending_work()
             || matches!(
                 self.image_import.state(),

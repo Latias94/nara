@@ -681,6 +681,42 @@ pub(crate) struct AuthoringSchemaReceipt {
 }
 
 impl AuthoringSchemaReceipt {
+    /// Compares retained schema files without reopening names or reading their contents.
+    pub(crate) fn source_object_in_use(&self, candidate: &FileCapability) -> Result<bool, FsError> {
+        Ok(self.manifest.capability.same_object(candidate)?
+            || self.bundle.capability().same_object(candidate)?)
+    }
+
+    /// Validates current schema names against the retained objects before retaining those opens.
+    fn collect_reclamation_sources(&self, output: &mut Vec<FileCapability>) -> Result<(), FsError> {
+        for (path, retained, digest) in [
+            (
+                PROJECT_MANIFEST_PATH,
+                &self.manifest.capability,
+                self.manifest.digest,
+            ),
+            (
+                self.bundle.path().as_str(),
+                self.bundle.capability(),
+                self.bundle.digest(),
+            ),
+        ] {
+            let file = self
+                .project_root
+                .open_file_exact(&RelativePath::new(path)?)?;
+            if !file.same_object(retained)? || file.parent_identity() != retained.parent_identity()
+            {
+                return Err(FsError::Unproven {
+                    operation: nara_fs::FsOperation::InspectHandle,
+                    proof: "the retained schema source no longer matches its current name and parent",
+                });
+            }
+            file.verify_digest(digest, digest.length())?;
+            output.push(file);
+        }
+        Ok(())
+    }
+
     #[must_use]
     pub(crate) const fn attempt_generation(&self) -> AuthoringProjectAttemptGeneration {
         self.attempt
@@ -969,6 +1005,119 @@ mod tests {
             AssetPath::new(format!("prefabs/{name}.prefab.json")).unwrap(),
             SourceDocumentKind::Prefab,
         ))
+    }
+
+    #[test]
+    fn reclamation_schema_query_tracks_retained_objects_after_equal_byte_replacement() {
+        let project = TestAuthoringProject::new(
+            "reclamation-schema",
+            schema_bundle("nara.test.authoring", "nara.test.Transform"),
+        );
+        let schema = AuthoringProjectAdmissionHost::default()
+            .prepare(project.capability(), None)
+            .unwrap()
+            .admit_bundle()
+            .unwrap()
+            .publish();
+        let original = fs::read(project.root.join(BUNDLE_PATH)).unwrap();
+        let moved_path = "schemas/retained.bundle.json";
+        fs::rename(
+            project.root.join(BUNDLE_PATH),
+            project.root.join(moved_path),
+        )
+        .unwrap();
+        fs::write(project.root.join(BUNDLE_PATH), original).unwrap();
+
+        // Independent Host sessions must compare actual objects, not scoped FileIdentity values.
+        let root = project.capability();
+        let moved = root
+            .open_file_exact(&RelativePath::new(moved_path).unwrap())
+            .unwrap();
+        let replacement = root
+            .open_file_exact(&RelativePath::new(BUNDLE_PATH).unwrap())
+            .unwrap();
+        assert!(schema.source_object_in_use(&moved).unwrap());
+        assert!(!schema.source_object_in_use(&replacement).unwrap());
+        assert!(schema.collect_reclamation_sources(&mut Vec::new()).is_err());
+    }
+
+    #[test]
+    fn reclamation_source_collection_retains_validated_objects_and_refuses_drift() {
+        let project = TestAuthoringProject::new(
+            "reclamation-sources",
+            schema_bundle("nara.test.authoring", "nara.test.Transform"),
+        );
+        project.write_startup_manifest();
+        for directory in ["assets", "scenes", "prefabs"] {
+            fs::create_dir_all(project.root.join(directory)).unwrap();
+        }
+        let path = "scenes/startup.scene.json";
+        let bytes = SceneDocument::default().to_json_string().unwrap();
+        fs::write(project.root.join(path), &bytes).unwrap();
+        let schema = AuthoringProjectAdmissionHost::default()
+            .prepare(project.capability(), None)
+            .unwrap()
+            .admit_bundle()
+            .unwrap()
+            .publish();
+        let snapshot = PreparedAuthoringProject::new(schema, Box::new([]))
+            .admit_startup_closure()
+            .unwrap()
+            .publish()
+            .into_session_snapshot()
+            .unwrap();
+        let validation = snapshot.startup_source_validation();
+        fs::write(project.root.join(path), format!("{bytes} ")).unwrap();
+        assert!(
+            snapshot
+                .collect_reclamation_sources(&mut Vec::new())
+                .is_err()
+        );
+        assert!(
+            validation
+                .collect_reclamation_sources(&mut Vec::new())
+                .is_err()
+        );
+        fs::write(project.root.join(path), &bytes).unwrap();
+        let mut sources = Vec::new();
+        snapshot.collect_reclamation_sources(&mut sources).unwrap();
+        validation
+            .collect_reclamation_sources(&mut Vec::new())
+            .unwrap();
+
+        let moved_path = "scenes/retained.scene.json";
+        fs::rename(project.root.join(path), project.root.join(moved_path)).unwrap();
+        let moved = project
+            .capability()
+            .open_file_exact(&RelativePath::new(moved_path).unwrap())
+            .unwrap();
+        assert!(
+            sources
+                .iter()
+                .any(|source| source.same_object(&moved).unwrap())
+        );
+        assert!(
+            snapshot
+                .collect_reclamation_sources(&mut Vec::new())
+                .is_err()
+        );
+        assert!(
+            validation
+                .collect_reclamation_sources(&mut Vec::new())
+                .is_err()
+        );
+
+        fs::write(project.root.join(path), &bytes).unwrap();
+        assert!(
+            snapshot
+                .collect_reclamation_sources(&mut Vec::new())
+                .is_err()
+        );
+        assert!(
+            validation
+                .collect_reclamation_sources(&mut Vec::new())
+                .is_err()
+        );
     }
 
     #[test]

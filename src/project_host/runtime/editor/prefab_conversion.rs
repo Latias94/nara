@@ -109,6 +109,11 @@ pub(super) struct EditorPrefabConversionHost {
 }
 
 impl EditorPrefabConversionHost {
+    /// A reviewed candidate retains sources even when no worker remains pending.
+    pub(super) fn reclamation_blocked(&self) -> bool {
+        self.pending.is_some() || self.prepared.is_some()
+    }
+
     /// Pending ownership survives cancellation until `advance_prefab_conversion` observes return.
     pub(super) fn schema_adoption_pending(&self) -> bool {
         self.pending.is_some()
@@ -224,7 +229,7 @@ impl EditorProjectSession {
         basis: EditorDocumentQueryBasis,
         anchor: SceneEntityId,
     ) -> Outcome {
-        if self.schema_adoption_fenced() {
+        if self.schema_adoption_fenced() || self.source_tools.reclamation_fenced() {
             return rejected(None, Rejection::Busy);
         }
         if !self.accepts_new_work() || self.pending_workspace_intent.is_some() {

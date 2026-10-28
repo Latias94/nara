@@ -842,6 +842,9 @@ impl EditorProjectSession {
         if let EditorPersistenceCommand::AcknowledgeResult { attempt } = command {
             return self.acknowledge_persistence_attempt(attempt);
         }
+        if !self.source_tools.reclamation_settled() {
+            return EditorPersistenceRequestResult::Refused(EditorPersistenceRejection::Busy);
+        }
         if !self.accepts_new_work()
             || self.schema_adoption_fenced()
             || self.persistence.has_pending_work()

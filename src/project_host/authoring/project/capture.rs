@@ -163,6 +163,24 @@ pub(crate) struct AuthoringSourceValidation {
 }
 
 impl AuthoringSourceValidation {
+    /// Checks retained schema handles; historical sources are collected separately.
+    pub(crate) fn source_object_in_use(&self, candidate: &FileCapability) -> Result<bool, FsError> {
+        self.schema.source_object_in_use(candidate)
+    }
+
+    /// Keeps source observations available even after decoded capture data is released.
+    /// An error invalidates the entire collection, including any files already appended.
+    pub(crate) fn collect_reclamation_sources(
+        &self,
+        output: &mut Vec<FileCapability>,
+    ) -> Result<(), FsError> {
+        self.schema.collect_reclamation_sources(output)?;
+        for source in self.sources.iter() {
+            source.collect_reclamation_source(&self.schema.project_root, output)?;
+        }
+        Ok(())
+    }
+
     pub(super) fn new(
         schema: Arc<AuthoringSchemaReceipt>,
         sources: Arc<[Arc<AuthoringSourceFact>]>,
@@ -237,6 +255,23 @@ pub(super) fn charge_open_prefab_inputs(
 }
 
 impl AuthoringDocumentCapture {
+    /// Checks retained schema handles; historical sources are collected separately.
+    pub(crate) fn source_object_in_use(&self, candidate: &FileCapability) -> Result<bool, FsError> {
+        self.authority.source_object_in_use(candidate)
+    }
+
+    /// An error invalidates the entire collection, including any files already appended.
+    pub(crate) fn collect_reclamation_sources(
+        &self,
+        output: &mut Vec<FileCapability>,
+    ) -> Result<(), FsError> {
+        self.authority.collect_reclamation_sources(output)?;
+        for source in self.source_facts.iter() {
+            source.collect_reclamation_source(&self.authority.project_root, output)?;
+        }
+        Ok(())
+    }
+
     pub(crate) const fn readiness(&self) -> AuthoringProjectReadiness {
         self.readiness
     }

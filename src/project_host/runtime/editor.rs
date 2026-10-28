@@ -93,9 +93,9 @@ pub use source_tools::{
     EditorSourceToolManagedHostDigests, EditorSourceToolReleaseError,
     EditorSourceToolReleaseMember, EditorSourceToolReleaseMemberKind,
     EditorSourceToolReleaseRequirement, PreparedEditorSourceToolArtifacts,
-    PreparedEditorSourceToolInstallations, PreparedEditorSourceToolRelease,
-    PreparedEditorSourceToolSelection, PreparedEditorSourceToolTemplateImport,
-    PreparedEditorSourceToolWithdrawal,
+    PreparedEditorSourceToolInstallations, PreparedEditorSourceToolReclamation,
+    PreparedEditorSourceToolRelease, PreparedEditorSourceToolSelection,
+    PreparedEditorSourceToolTemplateImport, PreparedEditorSourceToolWithdrawal,
 };
 #[cfg(feature = "runtime-ui")]
 use ui_authoring::EditorUiAuthoringProjectionCache;
@@ -930,6 +930,7 @@ pub struct EditorProjectCloseReceipt {
     task_shutdown: TaskShutdownReport,
     authoring_cleanup_failed: bool,
     play_cleanup_failure: Option<super::ProjectRuntimeCloseObservation>,
+    unpublished_reclamation: Option<nara_tooling::EditorSourceToolReclamationView>,
 }
 
 impl EditorProjectCloseReceipt {
@@ -937,12 +938,14 @@ impl EditorProjectCloseReceipt {
         task_shutdown: TaskShutdownReport,
         authoring_cleanup_failed: bool,
         play_cleanup_failure: Option<super::ProjectRuntimeCloseObservation>,
+        unpublished_reclamation: Option<nara_tooling::EditorSourceToolReclamationView>,
     ) -> Self {
         debug_assert!(task_shutdown.is_complete());
         Self {
             task_shutdown,
             authoring_cleanup_failed,
             play_cleanup_failure,
+            unpublished_reclamation,
         }
     }
 
@@ -975,6 +978,16 @@ impl EditorProjectCloseReceipt {
         self.authoring_cleanup_failed
             || self.has_play_cleanup_failure()
             || self.task_shutdown.has_cleanup_failure()
+            || self.unpublished_reclamation.is_some()
+    }
+
+    /// Actual retained removal results whose record could not be published before physical Close.
+    /// Disk may still contain the earlier Intent; it must not be interpreted as Removed on Open.
+    #[must_use]
+    pub fn unpublished_reclamation(
+        &self,
+    ) -> Option<&nara_tooling::EditorSourceToolReclamationView> {
+        self.unpublished_reclamation.as_ref()
     }
 }
 
@@ -1023,6 +1036,7 @@ impl Drop for EditorProjectSession {
         self.prefab_conversion.cancel();
         self.source_tools.cancel();
         self.source_tools.cancel_template_import();
+        self.source_tools.cancel_reclamation();
         self.cancel_pending_document_open();
     }
 }
@@ -1036,9 +1050,20 @@ impl EditorProjectSession {
     /// this poll does not claim to preempt an OS call or roll back published bytes.
     #[doc(hidden)]
     pub fn advance_close(&mut self) -> EditorProjectCloseProgress {
+        self.closing = true;
         self.source_tools.cancel();
         self.source_tools.cancel_template_import();
-        self.closing = true;
+        self.source_tools.cancel_reclamation();
+        if !self.source_tools.reclamation_settled() {
+            self.advance_source_tools();
+            if !self.source_tools.reclamation_settled() {
+                return EditorProjectCloseProgress::Incomplete {
+                    task_shutdown: self.session_task_shutdown(&TaskShutdownReport::default()),
+                    file_cleanup_pending: true,
+                    play_cleanup_pending: false,
+                };
+            }
+        }
         self.schema_owner_adoption.cancel();
         self.advance_schema_owner_adoption();
         self.source_tools.cancel();
@@ -1095,6 +1120,12 @@ impl EditorProjectSession {
                             || self.authoring_runtime.has_close_failure(),
                         self.trusted_compiled()
                             .and_then(|lane| lane.close_summary.failure().cloned()),
+                        {
+                            let reclamation = self.source_tool_reclamation_view();
+                            reclamation
+                                .record_publication_pending
+                                .then_some(reclamation)
+                        },
                     ))
                 } else {
                     EditorProjectCloseProgress::Incomplete {
@@ -1196,7 +1227,7 @@ impl EditorProjectSession {
     }
 
     pub(crate) fn request_project_source_index_refresh(&mut self) -> bool {
-        if !self.accepts_new_work() {
+        if !self.accepts_new_work() || self.source_tools.reclamation_fenced() {
             return false;
         }
         self.authoring_project_mut()
@@ -1293,7 +1324,7 @@ impl EditorProjectSession {
         expected_detail_revision: u64,
         settings: ImageImportSettings,
     ) -> image_import::EditorImageImportRequestResult {
-        if !self.accepts_new_work() {
+        if !self.accepts_new_work() || self.source_tools.reclamation_fenced() {
             return image_import::EditorImageImportRequestResult::Rejected(
                 image_import::EditorImageImportFailure::Busy,
             );

@@ -1692,7 +1692,7 @@ fn source_exclusion_reserves_renamed_tool_metadata_objects_after_actual_admissio
         ),
         (
             super::super::source_tools::ARTIFACTS_PATH,
-            br#"{"format_version":1,"installations":[]}"#.as_slice(),
+            br#"{"format_version":1,"installations":[],"reclamations":[]}"#.as_slice(),
         ),
     ] {
         let fixture = Fixture::new();

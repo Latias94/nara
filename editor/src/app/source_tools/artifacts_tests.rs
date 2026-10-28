@@ -1,8 +1,9 @@
-//! Public Application artifact inventory and project-owned text-template import.
+//! Public Application template import and explicitly reviewed artifact reclamation.
 
 #![cfg(all(windows, target_arch = "x86_64", target_env = "msvc"))]
 
 use std::{
+    collections::BTreeMap,
     fs,
     os::windows::fs::OpenOptionsExt,
     sync::Arc,
@@ -34,8 +35,14 @@ use nara::{
         EditorSourceToolArtifactError as Error, EditorSourceToolArtifactOutcome as Outcome,
         EditorSourceToolArtifactPhase as Phase, EditorSourceToolArtifactView,
         EditorSourceToolAttemptId, EditorSourceToolInstallationRequest,
-        EditorSourceToolSelectionPhase, EditorSourceToolTemplateImportOutcome,
-        EditorSourceToolTemplateImportView, EditorSourceToolWithdrawalMode,
+        EditorSourceToolReclamationError as ReclamationError,
+        EditorSourceToolReclamationMemberState as ReclamationMemberState,
+        EditorSourceToolReclamationOutcome as ReclamationOutcome,
+        EditorSourceToolReclamationPhase as ReclamationPhase,
+        EditorSourceToolReclamationRecordPhase as ReclamationRecordPhase,
+        EditorSourceToolReclamationView, EditorSourceToolSelectionPhase,
+        EditorSourceToolTemplateImportOutcome, EditorSourceToolTemplateImportView,
+        EditorSourceToolWithdrawalMode,
     },
 };
 use serde_json::json;
@@ -192,6 +199,7 @@ fn settle_selection(application: &mut EditorApplication) {
         application.advance(Duration::ZERO);
         let view = application.source_tool_selection_view().unwrap();
         if view.phase == EditorSourceToolSelectionPhase::Idle
+            && !application.source_tool_view().unwrap().has_pending_work()
             && view
                 .operation
                 .as_ref()
@@ -230,8 +238,31 @@ fn settle_import(
     }
 }
 
+fn settle_reclamation(
+    application: &mut EditorApplication,
+    attempt: &EditorSourceToolAttemptId,
+) -> EditorSourceToolReclamationView {
+    let deadline = Instant::now() + TIMEOUT;
+    loop {
+        application.advance(Duration::ZERO);
+        let view = application.source_tool_reclamation_view().unwrap();
+        if view.attempt.as_ref() == Some(attempt)
+            && view.phase == ReclamationPhase::Terminal
+            && !view.physical_work_pending
+            && !view.record_publication_pending
+        {
+            return view;
+        }
+        assert!(
+            Instant::now() < deadline,
+            "Reviewed artifact reclamation did not return: {view:?}"
+        );
+        std::thread::sleep(Duration::from_millis(1));
+    }
+}
+
 #[test]
-fn application_imports_a_project_owned_text_copy_and_withdrawal_preserves_both_owners() {
+fn application_reclaims_reviewed_artifacts_and_reopens_results_without_deleting_the_import() {
     let fixture = PersistenceFixture::new();
     let installation = install_release(&fixture);
     let root = project_root(&fixture);
@@ -243,6 +274,18 @@ fn application_imports_a_project_owned_text_copy_and_withdrawal_preserves_both_o
     let id = *installation.receipt().installation_id();
     let sample_path = fixture.root.join(installation.project_path()).join(SAMPLE);
     let baseline = fs::read(&sample_path).unwrap();
+    let installed_bytes: BTreeMap<_, _> = installation
+        .members()
+        .iter()
+        .map(|member| {
+            let path = fixture
+                .root
+                .join(installation.project_path())
+                .join(member.path());
+            let bytes = fs::read(&path).unwrap();
+            (path, bytes)
+        })
+        .collect();
     let mut application =
         fixture.open_with_expected_state(EditorApplicationState::AuthoringDegraded);
     let loaded = settle_artifacts(&mut application, None);
@@ -282,6 +325,18 @@ fn application_imports_a_project_owned_text_copy_and_withdrawal_preserves_both_o
         .unwrap();
     settle_selection(&mut application);
     let selection = application.source_tool_selection_view().unwrap();
+    let initial_reclamation = application.source_tool_reclamation_view().unwrap();
+    assert_eq!(initial_reclamation.phase, ReclamationPhase::Idle);
+    assert!(inventory.reclamations.is_empty());
+    assert!(matches!(
+        application.prepare_source_tool_reclamation(
+            &inventory.basis,
+            &selection.basis,
+            root.share(),
+            &id,
+        ),
+        Err(ReclamationError::StillInstalled)
+    ));
     let initial_import = application.source_tool_template_import_view().unwrap();
     let documents = application
         .current_frame()
@@ -341,6 +396,11 @@ fn application_imports_a_project_owned_text_copy_and_withdrawal_preserves_both_o
     let tool = application.source_tool_view().unwrap();
     assert!(tool.active.is_none() && !tool.probing && !tool.working && !tool.retiring);
     assert!(tool.attempt.is_none());
+    let unknown = fixture
+        .root
+        .join(installation.project_path())
+        .join("samples/unlisted.txt");
+    fs::write(&unknown, b"unknown artifact sibling").unwrap();
     let prepared = application
         .prepare_source_tool_withdrawal(
             &selection.basis,
@@ -352,15 +412,121 @@ fn application_imports_a_project_owned_text_copy_and_withdrawal_preserves_both_o
         .withdraw_source_tool_installations(prepared)
         .unwrap();
     settle_selection(&mut application);
-    assert!(
-        application
-            .source_tool_selection_view()
-            .unwrap()
-            .installed
-            .is_empty()
-    );
+    let withdrawn = application.source_tool_selection_view().unwrap();
+    assert!(withdrawn.installed.is_empty());
     assert_eq!(fs::read(fixture.root.join(source)).unwrap(), baseline);
     assert_eq!(fs::read(&sample_path).unwrap(), baseline);
+    let graph_path = fixture.root.join(".nara/source-tools/selection.json");
+    let graph_bytes = fs::read(&graph_path).unwrap();
+    let prepared = application
+        .prepare_source_tool_reclamation(&inventory.basis, &withdrawn.basis, root.share(), &id)
+        .unwrap();
+    assert!(prepared.creation_custody());
+    let review = prepared.record().clone();
+    assert_ne!(review.id, [0; 32]);
+    assert_eq!(review.installation, id);
+    assert_eq!(review.phase, ReclamationRecordPhase::Intent);
+    assert_eq!(review.members.len(), installation.members().len());
+    assert_eq!(
+        review
+            .members
+            .iter()
+            .map(|member| (member.path.to_string(), member.state))
+            .collect::<BTreeMap<_, _>>(),
+        installation
+            .members()
+            .iter()
+            .map(|member| (member.path().to_owned(), ReclamationMemberState::Pending))
+            .collect::<BTreeMap<_, _>>()
+    );
+    drop(prepared);
+    assert_eq!(
+        application.source_tool_reclamation_view().unwrap(),
+        initial_reclamation
+    );
+    assert_eq!(application.source_tool_artifact_view().unwrap(), inventory);
+    assert_eq!(application.source_tool_selection_view().unwrap(), withdrawn);
+    assert_eq!(
+        application.current_frame().unwrap().workspace().documents,
+        documents
+    );
+    assert_eq!(
+        fs::read(fixture.root.join(RECORD)).unwrap(),
+        inventory_bytes
+    );
+    assert_eq!(fs::read(&graph_path).unwrap(), graph_bytes);
+    assert_eq!(fs::read(&unknown).unwrap(), b"unknown artifact sibling");
+    assert_eq!(fs::read(fixture.root.join(source)).unwrap(), baseline);
+    for (path, bytes) in &installed_bytes {
+        assert_eq!(&fs::read(path).unwrap(), bytes, "{}", path.display());
+    }
+
+    let stale = application
+        .prepare_source_tool_reclamation(&inventory.basis, &withdrawn.basis, root.share(), &id)
+        .unwrap();
+    let prepared = application
+        .prepare_source_tool_artifact_observation(&inventory.basis, &id)
+        .unwrap();
+    let original_artifact_basis = inventory.basis.clone();
+    let attempt = application.commit_source_tool_artifacts(prepared).unwrap();
+    let inventory = settle_artifacts(&mut application, Some(&attempt));
+    assert_ne!(inventory.basis, original_artifact_basis);
+    assert!(matches!(
+        application.confirm_source_tool_reclamation(stale),
+        Err(ReclamationError::StaleBasis)
+    ));
+    assert_eq!(
+        application.source_tool_reclamation_view().unwrap(),
+        initial_reclamation
+    );
+    assert_eq!(application.source_tool_artifact_view().unwrap(), inventory);
+    assert_eq!(
+        fs::read(fixture.root.join(RECORD)).unwrap(),
+        inventory_bytes
+    );
+    for (path, bytes) in &installed_bytes {
+        assert_eq!(&fs::read(path).unwrap(), bytes, "{}", path.display());
+    }
+
+    let prepared = application
+        .prepare_source_tool_reclamation(&inventory.basis, &withdrawn.basis, root.share(), &id)
+        .unwrap();
+    let mut expected_results = prepared.record().clone();
+    assert_eq!(expected_results.members, review.members);
+    let attempt = application
+        .confirm_source_tool_reclamation(prepared)
+        .unwrap();
+    let reclaimed = settle_reclamation(&mut application, &attempt);
+    assert_eq!(reclaimed.outcome, Some(ReclamationOutcome::Complete));
+    assert!(reclaimed.error.is_none(), "{reclaimed:?}");
+    expected_results.phase = ReclamationRecordPhase::Results;
+    for member in &mut expected_results.members {
+        member.state = ReclamationMemberState::Removed;
+    }
+    assert_eq!(reclaimed.record.as_ref(), Some(&expected_results));
+    let results = expected_results;
+    let inventory = settle_artifacts(&mut application, None);
+    assert_eq!(inventory.reclamations, [results.clone()]);
+    let reclaimed_bytes = fs::read(fixture.root.join(RECORD)).unwrap();
+    assert_ne!(reclaimed_bytes, inventory_bytes);
+    for path in installed_bytes.keys() {
+        assert!(
+            !path.exists(),
+            "Selected artifact survived: {}",
+            path.display()
+        );
+    }
+    assert_eq!(fs::read(&unknown).unwrap(), b"unknown artifact sibling");
+    assert_eq!(fs::read(&graph_path).unwrap(), graph_bytes);
+    assert_eq!(fs::read(fixture.root.join(source)).unwrap(), baseline);
+    assert_eq!(application.source_tool_selection_view().unwrap(), withdrawn);
+    assert_eq!(
+        application.current_frame().unwrap().workspace().documents,
+        documents
+    );
+    let tool = application.source_tool_view().unwrap();
+    assert!(tool.active.is_none() && !tool.probing && !tool.working && !tool.retiring);
+    assert!(tool.attempt.is_none());
     close(&mut application);
     drop(application);
 
@@ -368,6 +534,7 @@ fn application_imports_a_project_owned_text_copy_and_withdrawal_preserves_both_o
     let inventory = settle_artifacts(&mut reopened, None);
     assert_eq!(inventory.phase, Phase::Idle);
     assert_eq!(inventory.installations.len(), 1);
+    assert_eq!(inventory.reclamations, [results.clone()]);
     settle_selection(&mut reopened);
     let selection = reopened.source_tool_selection_view().unwrap();
     assert!(selection.installed.is_empty() && selection.desired.is_none());
@@ -375,9 +542,76 @@ fn application_imports_a_project_owned_text_copy_and_withdrawal_preserves_both_o
     let tool = reopened.source_tool_view().unwrap();
     assert!(tool.active.is_none() && !tool.probing && !tool.working && !tool.retiring);
     assert!(tool.attempt.is_none());
+    let fresh_reclamation = reopened.source_tool_reclamation_view().unwrap();
+    assert_eq!(fresh_reclamation.phase, ReclamationPhase::Idle);
+    assert!(fresh_reclamation.attempt.is_none() && fresh_reclamation.outcome.is_none());
+    assert!(!fresh_reclamation.physical_work_pending);
+    assert!(!fresh_reclamation.record_publication_pending);
     assert_eq!(fs::read(fixture.root.join(source)).unwrap(), baseline);
-    assert_eq!(fs::read(&sample_path).unwrap(), baseline);
+    assert_eq!(
+        fs::read(fixture.root.join(RECORD)).unwrap(),
+        reclaimed_bytes
+    );
+    assert_eq!(fs::read(&graph_path).unwrap(), graph_bytes);
+    for path in installed_bytes.keys() {
+        assert!(
+            !path.exists(),
+            "Deleted artifact reappeared: {}",
+            path.display()
+        );
+    }
+    assert_eq!(fs::read(&unknown).unwrap(), b"unknown artifact sibling");
+
+    // A new explicit review observes absence; persisted Removed facts grant no live authority.
+    let deadline = Instant::now() + TIMEOUT;
+    let prepared = loop {
+        match reopened.prepare_source_tool_reclamation(
+            &inventory.basis,
+            &selection.basis,
+            root.share(),
+            &id,
+        ) {
+            Ok(prepared) => break prepared,
+            Err(ReclamationError::Busy) => {}
+            Err(error) => panic!("fresh original-basis review was rejected: {error:?}"),
+        }
+        assert!(
+            Instant::now() < deadline,
+            "fresh Open sources did not physically return"
+        );
+        reopened.advance(Duration::ZERO);
+        std::thread::yield_now();
+    };
+    assert!(!prepared.creation_custody());
+    let missing = prepared.record();
+    assert_ne!(missing.id, results.id);
+    assert_eq!(missing.installation, id);
+    assert_eq!(missing.phase, ReclamationRecordPhase::Intent);
+    let mut expected_missing = results;
+    expected_missing.id = missing.id;
+    expected_missing.phase = ReclamationRecordPhase::Intent;
+    for member in &mut expected_missing.members {
+        member.state = ReclamationMemberState::Missing;
+    }
+    assert_eq!(missing, &expected_missing);
+    drop(prepared);
+    assert_eq!(
+        reopened.source_tool_reclamation_view().unwrap(),
+        fresh_reclamation
+    );
+    assert_eq!(reopened.source_tool_artifact_view().unwrap(), inventory);
+    assert_eq!(
+        fs::read(fixture.root.join(RECORD)).unwrap(),
+        reclaimed_bytes
+    );
+    assert_eq!(fs::read(&unknown).unwrap(), b"unknown artifact sibling");
     close(&mut reopened);
+    assert_eq!(fs::read(fixture.root.join(source)).unwrap(), baseline);
+    assert_eq!(
+        fs::read(fixture.root.join(RECORD)).unwrap(),
+        reclaimed_bytes
+    );
+    assert_eq!(fs::read(&unknown).unwrap(), b"unknown artifact sibling");
 }
 
 #[test]

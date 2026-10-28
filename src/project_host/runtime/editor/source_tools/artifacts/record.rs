@@ -1,4 +1,4 @@
-//! Bounded installation facts. Decoding never reconstructs live object or deletion authority.
+//! Bounded installation and recovery facts, without live object or deletion authority.
 
 use std::{
     borrow::Cow,
@@ -8,7 +8,12 @@ use std::{
 
 use nara_core::{ByteLimit, DepthLimit, ItemLimit, SerdeShapeLimits, preflight_serde_shape};
 use nara_fs::{ContentDigest, RelativeComponent, RelativePath};
-use nara_tooling::EditorSourceToolInstalledSelection;
+use nara_tooling::{
+    EditorSourceToolInstalledSelection, EditorSourceToolReclamationMember as ReclamationMember,
+    EditorSourceToolReclamationMemberState as ReclamationMemberState,
+    EditorSourceToolReclamationRecord as Reclamation,
+    EditorSourceToolReclamationRecordPhase as ReclamationPhase,
+};
 use serde::{Deserialize, Serialize};
 
 pub(super) use nara_tooling::{
@@ -19,6 +24,7 @@ pub(super) use nara_tooling::{
 
 pub(super) const BYTE_LIMIT: u64 = 2 * 1024 * 1024;
 pub(super) const MAX_INSTALLATIONS: usize = 32;
+pub(super) const MAX_RECLAMATIONS: usize = 32;
 pub(super) const MAX_MEMBERS: usize = 66;
 const MAX_PAYLOADS: usize = 64;
 const MAX_PATH_BYTES: usize = 512;
@@ -32,11 +38,14 @@ const RECEIPT_NAME: &str = ".nara-installation.json";
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub(super) struct Inventory {
     pub(super) installations: Vec<Installation>,
+    pub(super) reclamations: Vec<Reclamation>,
 }
 
 impl Inventory {
     pub(super) fn validate(&self) -> Result<(), Error> {
-        if self.installations.len() > MAX_INSTALLATIONS {
+        if self.installations.len() > MAX_INSTALLATIONS
+            || self.reclamations.len() > MAX_RECLAMATIONS
+        {
             return Err(Error::TooLarge);
         }
         for (index, installation) in self.installations.iter().enumerate() {
@@ -48,6 +57,15 @@ impl Inventory {
                         .directory
                         .eq_ignore_ascii_case(&installation.installed.directory)
             }) {
+                return Err(Error::InvalidRecord);
+            }
+        }
+        for (index, reclamation) in self.reclamations.iter().enumerate() {
+            self.validate_reclamation(reclamation)?;
+            if self.reclamations[..index]
+                .iter()
+                .any(|previous| previous.installation == reclamation.installation)
+            {
                 return Err(Error::InvalidRecord);
             }
         }
@@ -79,11 +97,71 @@ impl Inventory {
         Ok(next)
     }
 
+    /// Replaces only this installation's recovery facts after a new explicit review.
+    /// Validating or decoding the record never recreates that review's live authority.
+    pub(super) fn with_reclamation(&self, reclamation: &Reclamation) -> Result<Self, Error> {
+        self.validate()?;
+        self.validate_reclamation(reclamation)?;
+        let existing = self
+            .reclamations
+            .iter()
+            .position(|entry| entry.installation == reclamation.installation);
+        if existing.is_none() && self.reclamations.len() == MAX_RECLAMATIONS {
+            return Err(Error::TooLarge);
+        }
+        let mut next = self.clone();
+        match existing {
+            Some(index) => next.reclamations[index] = reclamation.clone(),
+            None => next.reclamations.push(reclamation.clone()),
+        }
+        next.canonicalize();
+        Ok(next)
+    }
+
+    fn validate_reclamation(&self, reclamation: &Reclamation) -> Result<(), Error> {
+        if reclamation.members.len() > MAX_MEMBERS {
+            return Err(Error::TooLarge);
+        }
+        if reclamation.id == [0; 32] {
+            return Err(Error::InvalidRecord);
+        }
+        let installation = self
+            .installations
+            .iter()
+            .find(|entry| entry.installed.installation == reclamation.installation)
+            .ok_or(Error::Unregistered)?;
+        let mut paths = BTreeSet::new();
+        for member in &reclamation.members {
+            validate_path(&member.path)?;
+            if !installation
+                .members
+                .iter()
+                .any(|registered| registered.path == member.path)
+                || !paths.insert(member.path.as_ref())
+                || (reclamation.phase == ReclamationPhase::Intent
+                    && !matches!(
+                        member.state,
+                        ReclamationMemberState::Pending | ReclamationMemberState::Missing
+                    ))
+            {
+                return Err(Error::InvalidRecord);
+            }
+        }
+        Ok(())
+    }
+
     fn canonicalize(&mut self) {
         self.installations
             .sort_unstable_by_key(|entry| entry.installed.installation);
         for installation in &mut self.installations {
             installation
+                .members
+                .sort_unstable_by(|left, right| left.path.cmp(&right.path));
+        }
+        self.reclamations
+            .sort_unstable_by_key(|entry| entry.installation);
+        for reclamation in &mut self.reclamations {
+            reclamation
                 .members
                 .sort_unstable_by(|left, right| left.path.cmp(&right.path));
         }
@@ -224,6 +302,8 @@ struct Record<'a> {
     format_version: u32,
     #[serde(borrow)]
     installations: Vec<InstallationRecord<'a>>,
+    #[serde(borrow)]
+    reclamations: Vec<ReclamationRecord<'a>>,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -248,6 +328,80 @@ struct MemberRecord<'a> {
     role: RoleRecord,
     baseline: DigestRecord,
     observation: ObservationRecord,
+}
+
+#[derive(Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct ReclamationRecord<'a> {
+    id: [u8; 32],
+    installation: [u8; 32],
+    phase: ReclamationPhaseRecord,
+    #[serde(borrow)]
+    members: Vec<ReclamationMemberRecord<'a>>,
+}
+
+#[derive(Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct ReclamationMemberRecord<'a> {
+    #[serde(borrow)]
+    path: Cow<'a, str>,
+    state: ReclamationMemberStateRecord,
+}
+
+#[derive(Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+enum ReclamationPhaseRecord {
+    Intent,
+    Results,
+}
+
+impl From<ReclamationPhase> for ReclamationPhaseRecord {
+    fn from(phase: ReclamationPhase) -> Self {
+        match phase {
+            ReclamationPhase::Intent => Self::Intent,
+            ReclamationPhase::Results => Self::Results,
+        }
+    }
+}
+
+impl From<ReclamationPhaseRecord> for ReclamationPhase {
+    fn from(phase: ReclamationPhaseRecord) -> Self {
+        match phase {
+            ReclamationPhaseRecord::Intent => Self::Intent,
+            ReclamationPhaseRecord::Results => Self::Results,
+        }
+    }
+}
+
+#[derive(Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+enum ReclamationMemberStateRecord {
+    Pending,
+    Removed,
+    Missing,
+    Failed,
+}
+
+impl From<ReclamationMemberState> for ReclamationMemberStateRecord {
+    fn from(state: ReclamationMemberState) -> Self {
+        match state {
+            ReclamationMemberState::Pending => Self::Pending,
+            ReclamationMemberState::Removed => Self::Removed,
+            ReclamationMemberState::Missing => Self::Missing,
+            ReclamationMemberState::Failed => Self::Failed,
+        }
+    }
+}
+
+impl From<ReclamationMemberStateRecord> for ReclamationMemberState {
+    fn from(state: ReclamationMemberStateRecord) -> Self {
+        match state {
+            ReclamationMemberStateRecord::Pending => Self::Pending,
+            ReclamationMemberStateRecord::Removed => Self::Removed,
+            ReclamationMemberStateRecord::Missing => Self::Missing,
+            ReclamationMemberStateRecord::Failed => Self::Failed,
+        }
+    }
 }
 
 #[derive(Serialize, Deserialize)]
@@ -359,6 +513,28 @@ pub(super) fn encode(inventory: &Inventory) -> Result<Vec<u8>, Error> {
         })
         .collect();
     installations.sort_unstable_by_key(|entry| entry.installation);
+    let mut reclamations: Vec<_> = inventory
+        .reclamations
+        .iter()
+        .map(|entry| {
+            let mut members: Vec<_> = entry
+                .members
+                .iter()
+                .map(|member| ReclamationMemberRecord {
+                    path: Cow::Borrowed(&member.path),
+                    state: member.state.into(),
+                })
+                .collect();
+            members.sort_unstable_by(|left, right| left.path.cmp(&right.path));
+            ReclamationRecord {
+                id: entry.id,
+                installation: entry.installation,
+                phase: entry.phase.into(),
+                members,
+            }
+        })
+        .collect();
+    reclamations.sort_unstable_by_key(|entry| entry.installation);
     let mut output = RecordBytes {
         bytes: Vec::new(),
         oversized: false,
@@ -368,6 +544,7 @@ pub(super) fn encode(inventory: &Inventory) -> Result<Vec<u8>, Error> {
         &Record {
             format_version: 1,
             installations,
+            reclamations,
         },
     )
     .is_err()
@@ -399,6 +576,11 @@ pub(super) fn decode(bytes: &[u8]) -> Result<Inventory, Error> {
     if record.format_version != 1 {
         return Err(Error::UnsupportedFormat);
     }
+    if record.installations.len() > MAX_INSTALLATIONS
+        || record.reclamations.len() > MAX_RECLAMATIONS
+    {
+        return Err(Error::TooLarge);
+    }
     let mut inventory = Inventory {
         installations: record
             .installations
@@ -419,6 +601,23 @@ pub(super) fn decode(bytes: &[u8]) -> Result<Inventory, Error> {
                         role: member.role.into(),
                         baseline: member.baseline.into(),
                         observation: member.observation.into(),
+                    })
+                    .collect(),
+            })
+            .collect(),
+        reclamations: record
+            .reclamations
+            .into_iter()
+            .map(|entry| Reclamation {
+                id: entry.id,
+                installation: entry.installation,
+                phase: entry.phase.into(),
+                members: entry
+                    .members
+                    .into_iter()
+                    .map(|member| ReclamationMember {
+                        path: member.path.as_ref().into(),
+                        state: member.state.into(),
                     })
                     .collect(),
             })

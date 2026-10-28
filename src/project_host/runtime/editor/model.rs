@@ -42,9 +42,10 @@ impl EditorProjectSession {
             return self.publish_editor_frame(scan_work_observed);
         }
         let schema_fenced = self.schema_adoption_fenced();
+        let source_work_fenced = schema_fenced || self.source_tools.reclamation_fenced();
         let open_before = self.document_open_view();
         let mut scan_work_observed = match &mut self.execution {
-            super::EditorExecutionLane::Authoring(project) if schema_fenced => {
+            super::EditorExecutionLane::Authoring(project) if source_work_fenced => {
                 project.observe_source_index()
             }
             super::EditorExecutionLane::Authoring(project) => {
@@ -53,7 +54,7 @@ impl EditorProjectSession {
             super::EditorExecutionLane::TrustedCompiled(_) => false,
         };
         scan_work_observed |= self.advance_document_open();
-        if schema_fenced {
+        if source_work_fenced {
             self.drain_schema_adoption_image_work();
             self.drain_schema_adoption_source_asset_import();
             #[cfg(feature = "presentation-2d")]
@@ -62,7 +63,7 @@ impl EditorProjectSession {
             self.advance_editor_image_import();
             self.advance_source_asset_import();
         }
-        if self.trusted_compiled().is_some() {
+        if self.trusted_compiled().is_some() && !source_work_fenced {
             self.resume_content_refresh_after_runtime_retirement();
             self.advance_project_content_refresh();
         }
@@ -78,7 +79,7 @@ impl EditorProjectSession {
         self.advance_workspace_retirement();
         scan_work_observed |= open_before != self.document_open_view();
         #[cfg(feature = "presentation-2d")]
-        if !self.schema_adoption_fenced() {
+        if !self.schema_adoption_fenced() && !self.source_tools.reclamation_fenced() {
             self.drive_editor_preview();
         }
         self.publish_editor_frame(scan_work_observed)

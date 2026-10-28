@@ -4,10 +4,12 @@ use std::{
 };
 
 use nara_asset::{
-    AssetId, AssetMeta, AssetMetaCandidate, AssetMetaIdentity, AssetPath, AssetRecord,
+    AssetId, AssetMeta, AssetMetaCandidate, AssetMetaIdentity, AssetPath, AssetRecord, AssetRef,
     AssetSourceKind, AssetVersion, SourceHash, StableAssetId,
 };
-use nara_fs::{ContentDigest, FileIdentity, RelativePath};
+use nara_fs::{
+    ContentDigest, DirectoryCapability, FileCapability, FileIdentity, FsError, RelativePath,
+};
 use nara_image::ImageImportSettings;
 use nara_tasks::{TaskReturnObserver, TaskReturnState};
 use nara_tilemap::{TileSetSource, TileSetSourceFileLimits};
@@ -279,6 +281,62 @@ impl Default for EditorImageImportHost {
 }
 
 impl EditorImageImportHost {
+    /// Collects live objects for last-good pixels and queued hydration inputs once per review.
+    /// An error invalidates the entire collection, including any files already appended.
+    pub(crate) fn collect_reclamation_sources(
+        &self,
+        root: &DirectoryCapability,
+        output: &mut Vec<FileCapability>,
+    ) -> Result<(), FsError> {
+        let unavailable = || FsError::Unproven {
+            operation: nara_fs::FsOperation::InspectHandle,
+            proof: "an image source observation is unavailable or work has not physically returned",
+        };
+        if self.schema_adoption_pending() {
+            return Err(unavailable());
+        }
+        for (path, image) in self.last_good.iter() {
+            if let Some(source) = image.capture_source() {
+                source.collect_reclamation_sources(root, output)?;
+                continue;
+            }
+            let catalog = self.catalog.as_ref().ok_or_else(unavailable)?;
+            if catalog.root_identity() != root.identity() {
+                return Err(unavailable());
+            }
+            let entry = catalog
+                .image_entry(&AssetRef::Path(path.clone()))
+                .ok_or_else(unavailable)?;
+            let EditorImageMetadataStatus::Ready(receipt) = entry.metadata() else {
+                return Err(unavailable());
+            };
+            if receipt.stable_id() != image.stable_id() {
+                return Err(unavailable());
+            }
+            let source_path = RelativePath::new(entry.project_relative_path())?;
+            let source = root.open_file_exact(&source_path)?;
+            if source.identity() != image.source_identity() {
+                return Err(FsError::IdentityMismatch {
+                    expected: image.source_identity(),
+                    actual: source.identity(),
+                });
+            }
+            source.verify_digest(image.source_digest(), image.source_digest().length())?;
+            let metadata_path = RelativePath::new(entry.metadata_project_relative_path())?;
+            let metadata = root.open_file_exact(&metadata_path)?;
+            if metadata.identity() != receipt.identity() {
+                return Err(FsError::IdentityMismatch {
+                    expected: receipt.identity(),
+                    actual: metadata.identity(),
+                });
+            }
+            metadata.verify_digest(receipt.digest(), receipt.digest().length())?;
+            output.push(source);
+            output.push(metadata);
+        }
+        self.hydration.collect_reclamation_sources(root, output)
+    }
+
     #[must_use]
     pub(crate) fn metadata_snapshot(
         &self,
