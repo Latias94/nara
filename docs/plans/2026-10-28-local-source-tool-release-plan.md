@@ -187,16 +187,16 @@ reuses release capture plus complete inventory. It does not reconstruct created-
 admit a project Schema, satisfy dependencies or approve execution. Full local Package selection,
 enable/update/removal, evolved metadata, reclaimer and UI workflow remain in progress above.
 
-## Next Concrete Selection Unit
+## Project-Local Selection Contract
 
 Use the existing single active tool slot and the real installed EnemyStats V1/invalid/V2 consumer.
 Keep exact installed requirements rejected until a graph owner binds each declaration to a
 particular installation. Do not use this slot's selection as an inventory of all installed tools
 or as evidence that disabled dependents can be removed.
 
-The selected design direction is a bounded project-local lifecycle record at
-`.nara/source-tools/selection.json`, separate from the artifact's ready receipt. Before
-implementation, reconcile ADR 0035's settings authority explicitly: this record owns the local
+The selected contract is a bounded project-local lifecycle record at
+`.nara/source-tools/selection.json`, separate from the artifact's ready receipt. ADR 0035
+reconciles settings authority explicitly: this record owns the local
 installed selection and desired enabled/disabled state, with no duplicate `nara.toml` setting.
 It is not a source dependency specification, an execution grant or a machine-independent package
 lock. Project-external destinations remain usable by explicit session-only approval; durable
@@ -228,9 +228,21 @@ return. Session Close does not rewrite the desired state. Late IO after Disable 
 report actual publication and cleanup facts but cannot recover route-promotion authority.
 Reconciliation only admits disk data; it never grants approval or starts execution.
 
+The Session retains two named attempt observations: Observe/Enable/Reconcile in `operation`,
+and immediate/durable Disable in `disable`. Each has an original attempt and pending/terminal
+outcome and survives until another operation is explicitly admitted in that same lane. A pending
+Disable rejects another Disable. Publication and deferred Disable may complete together without
+losing either terminal result; repeated Close cannot rewrite them. Unified cancellation completes
+a durable probe by its original attempt rather than inferring ownership from its current phase.
+Post-publication admission checks both the selected current parent and the retained leaf object;
+matching leaf bytes/identity alone cannot rebind a publisher to a replacement parent.
+
 The complete unit needs original-observation refusal, two installations of identical release bytes,
 changed receipt/content, held publication, disk/route divergence, Disable/Close during publication,
 write failure while stopped, and fresh Open without execution. Extend the independent Session,
 Application and selected native Inspector/panel consumer. Preserve one executor, proposal owner,
 history and physical close path; evolve the owning ADRs and implementation ledger with actual
-results. This design direction does not establish durable selection or close the lifecycle plan.
+results. The [selection qualification](../knowledge/engineering/verification/2026-10/2026-10-28T012206Z-durable-installed-source-tool-selection-and-independent-paired-attempt-qualification-3a4a90d3cc3042e5b89e8fa20e314c22.md)
+owns the implemented single-slot scope and its actual evidence. It does not close installed
+dependency selection, metadata adoption/evolved lineage, protected-content removal or this full
+lifecycle plan.

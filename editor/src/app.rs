@@ -2449,6 +2449,7 @@ fn dispatch_close_resolution_actions(
                 | EditorAction::Play(EditorPlayAction::RetryRetirement)
                 | EditorAction::SourceTool(
                     nara::tooling::EditorSourceToolAction::Disable { .. }
+                        | nara::tooling::EditorSourceToolAction::DisableInstalled { .. }
                         | nara::tooling::EditorSourceToolAction::CancelAttempt { .. }
                 )
         ) {

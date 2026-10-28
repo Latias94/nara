@@ -51,6 +51,13 @@ flowchart LR
 - Adapter-wide capability matrices are conservative. Proof that depends on a concrete root handle,
   runtime kernel, sandbox, volume, or filesystem is stored on the issued capability and exposed by
   `DirectoryCapability::resolution_tier`; a compile-target check alone cannot report it as proven.
+- `DirectoryCapability::same_object` returns `Result<bool, FsError>` by comparing proven native
+  identity observations of two continuously live directory handles, including independent Host
+  imports. It never reopens a pathname and fails closed when identity proof is unavailable. This
+  lets a consumer bind a caller-issued strict installation capability to an already-opened project
+  root without elevating either capability's authority. Equality does not equate session-scoped
+  `FileIdentity` values or merge trust, rights, or generations. This is ordinary live-object proof,
+  not immutable-content evidence or a persistent ID.
 - `Unsupported` means the adapter, platform, or filesystem explicitly lacks the required primitive.
   `Unproven` means the primitive may exist, but sufficient evidence was unavailable for this object
   or runtime environment. Both fail closed for strict operations.

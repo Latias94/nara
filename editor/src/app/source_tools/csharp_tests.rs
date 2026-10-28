@@ -1,16 +1,24 @@
-//! Actual C# child qualification through the public Application source-tool boundary.
+//! Durable installed C# selection through the public Application source-tool boundary.
 
 use std::{
     collections::BTreeMap,
     fs,
-    path::PathBuf,
+    os::windows::fs::OpenOptionsExt,
+    path::{Path, PathBuf},
     sync::Arc,
     time::{Duration, Instant},
 };
 
 use nara::{
+    fs::{
+        CapabilityRights, ContentDigest, DirectoryCapability, HostCapabilityOptions,
+        RelativeComponent, TrustMode,
+    },
     project_host::{
-        EditorSourceToolCommand, EditorSourceToolDefinition, advanced::built_in_schema_providers,
+        EditorSourceToolInstallationOutcome, EditorSourceToolInstallationPlan,
+        EditorSourceToolManagedHost, EditorSourceToolManagedHostDigests,
+        PreparedEditorSourceToolRelease, advanced::built_in_schema_providers,
+        open_explicit_product_project_root,
     },
     reflect::{
         AuthoringSchemaBundle, AuthoringSchemaBundleOwner, ComponentFieldId, ComponentPropertyPath,
@@ -22,11 +30,14 @@ use nara::{
         ScenePatchOperation, ScenePlacement, ScenePlacementOwner,
     },
     tooling::{
-        EditorAction, EditorActionBatch, EditorActionOutcome, EditorDocumentId,
-        EditorDocumentMutation, EditorDocumentQueryRejection, EditorPropertyRead,
-        EditorPropertyReadLimits, EditorPropertyTarget, EditorPropertyValue,
-        EditorSourceToolAction, EditorSourceToolActionOutcome, EditorSourceToolError,
-        EditorSourceToolIntent, EditorSourceToolView,
+        EditorAction, EditorActionBatch, EditorActionOutcome, EditorCloseDecision,
+        EditorDocumentId, EditorDocumentMutation, EditorDocumentQueryRejection,
+        EditorPersistenceAction, EditorPersistenceRequestResult, EditorPersistenceResult,
+        EditorPropertyRead, EditorPropertyReadLimits, EditorPropertyTarget, EditorPropertyValue,
+        EditorSourceToolAction, EditorSourceToolActionOutcome, EditorSourceToolAttemptId,
+        EditorSourceToolDesiredSelection, EditorSourceToolError, EditorSourceToolIntent,
+        EditorSourceToolSelectionError, EditorSourceToolSelectionOutcome,
+        EditorSourceToolSelectionPhase, EditorSourceToolView,
     },
 };
 
@@ -38,15 +49,172 @@ use crate::app::{
 const STATS: &str = "trial.enemy.EnemyStats";
 const NAME: &str = "nara.scene.Name";
 const TIMEOUT: Duration = Duration::from_secs(30);
+const INSTALLATION: &str = "installed-tool";
+const SELECTION: &str = ".nara/source-tools/selection.json";
+
+struct InstalledSourceTool {
+    root: DirectoryCapability,
+    receipt: ContentDigest,
+    host: EditorSourceToolManagedHost,
+}
+
+fn install_tool(project: &Path, artifacts: &Path, executable: &Path) -> InstalledSourceTool {
+    let source = project.join("tool-release-source");
+    fs::create_dir(&source).unwrap();
+    let mut files = Vec::new();
+    for member in [
+        "EnemyStatsTool.dll",
+        "EnemyStatsTool.deps.json",
+        "EnemyStatsTool.runtimeconfig.json",
+        "enemy-stats.catalog.json",
+    ] {
+        let bytes = fs::read(artifacts.join(member)).unwrap();
+        fs::write(source.join(member), &bytes).unwrap();
+        let digest = ContentDigest::of_bytes(&bytes);
+        let hash: String = digest
+            .as_bytes()
+            .iter()
+            .map(|byte| format!("{byte:02x}"))
+            .collect();
+        files.push(serde_json::json!({
+            "path": member,
+            "length": digest.length(),
+            "blake3": hash,
+            "kind": "tool",
+        }));
+    }
+    let manifest = serde_json::to_vec(&serde_json::json!({
+        "format_version": 1,
+        "package": "trial.enemy-stats",
+        "release": "1",
+        "host_target": "x86_64-pc-windows-msvc",
+        "authority": "trusted_process",
+        "protocol_version": 1,
+        "owner": "trial.enemy-stats",
+        "component": STATS,
+        "catalog": "enemy-stats.catalog.json",
+        "entry": "EnemyStatsTool.dll",
+        "requires": [],
+        "files": files,
+    }))
+    .unwrap();
+    fs::write(source.join("nara-tool.json"), &manifest).unwrap();
+    let captured = PreparedEditorSourceToolRelease::capture(
+        &open_explicit_product_project_root(&source).unwrap(),
+        ContentDigest::of_bytes(&manifest),
+    )
+    .unwrap();
+    let handle = fs::OpenOptions::new()
+        .read(true)
+        .share_mode(7)
+        .custom_flags(0x0200_0000 | 0x0020_0000)
+        .open(project)
+        .unwrap();
+    let root = DirectoryCapability::from_host_handle(
+        handle,
+        HostCapabilityOptions::new(CapabilityRights::ReadWrite, TrustMode::Untrusted),
+    )
+    .unwrap();
+    let plan = EditorSourceToolInstallationPlan::new(
+        root.share(),
+        RelativeComponent::new(INSTALLATION).unwrap(),
+        captured,
+    )
+    .unwrap();
+    let installation = match plan.publish() {
+        EditorSourceToolInstallationOutcome::Published(installation) => installation,
+        other => panic!("Actual project-root release publication failed: {other:?}"),
+    };
+    let receipt = installation.receipt_digest();
+    drop(installation);
+    let bootstrap = PathBuf::from(
+        std::env::var_os("NARA_SOURCE_TOOL_BOOTSTRAP_DIR")
+            .expect("Runner supplies the actual managed Host output directory"),
+    );
+    let digest = |path: &Path| ContentDigest::of_bytes(&fs::read(path).unwrap());
+    let host = EditorSourceToolManagedHost::new(
+        open_explicit_product_project_root(executable.parent().unwrap()).unwrap(),
+        open_explicit_product_project_root(&bootstrap).unwrap(),
+        EditorSourceToolManagedHostDigests {
+            launcher: digest(executable),
+            bootstrap: digest(&bootstrap.join("Nara.SourceToolHost.dll")),
+            deps: digest(&bootstrap.join("Nara.SourceToolHost.deps.json")),
+            runtimeconfig: digest(&bootstrap.join("Nara.SourceToolHost.runtimeconfig.json")),
+        },
+        &std::env::var("NARA_SOURCE_TOOL_FRAMEWORK").unwrap(),
+        TIMEOUT,
+    )
+    .unwrap();
+    InstalledSourceTool {
+        root,
+        receipt,
+        host,
+    }
+}
+
+fn enable_installed_tool(
+    application: &mut EditorApplication,
+    installed: &InstalledSourceTool,
+) -> EditorSourceToolAttemptId {
+    let selection = application.source_tool_selection_view().unwrap();
+    let prepared = application
+        .prepare_installed_source_tool_selection(
+            installed.root.share(),
+            INSTALLATION,
+            installed.receipt,
+            &installed.host,
+        )
+        .unwrap();
+    let before = application.source_tool_selection_view().unwrap();
+    assert_eq!(
+        before, selection,
+        "Host preparation must not activate or publish"
+    );
+    application
+        .enable_installed_source_tool(&selection.basis, prepared)
+        .unwrap()
+}
+
+fn assert_selection(
+    view: &EditorSourceToolView,
+    desired: &EditorSourceToolDesiredSelection,
+    active: bool,
+) {
+    let selection = view.selection.as_ref().unwrap();
+    assert_eq!(selection.phase, EditorSourceToolSelectionPhase::Idle);
+    assert!(selection.error.is_none(), "{selection:?}");
+    assert_eq!(selection.desired.as_ref(), Some(desired));
+    assert_eq!(
+        selection.active_origin.as_ref(),
+        active.then_some(&desired.installed),
+    );
+    assert_eq!(view.active.is_some(), active);
+}
 
 fn settle_tool(application: &mut EditorApplication) -> EditorSourceToolView {
     let deadline = Instant::now() + TIMEOUT;
     loop {
         application.advance(Duration::ZERO);
         let view = application.current_frame().unwrap().source_tool().clone();
-        if !view.has_pending_work() {
+        if !view.has_pending_work()
+            && view.selection.as_ref().is_some_and(|selection| {
+                selection
+                    .operation
+                    .as_ref()
+                    .is_some_and(|operation| operation.outcome.is_some())
+                    && selection
+                        .disable
+                        .as_ref()
+                        .is_none_or(|disable| disable.outcome.is_some())
+            })
+        {
             assert!(
-                view.attempt_error.is_none() && view.request_error.is_none(),
+                view.attempt_error.is_none()
+                    && view.request_error.is_none()
+                    && view.selection.as_ref().is_some_and(|selection| {
+                        selection.error.is_none()
+                            && selection.phase == EditorSourceToolSelectionPhase::Idle
+                    }),
                 "{view:?}"
             );
             return view;
@@ -207,14 +375,7 @@ fn csharp_source_tool_application_preserves_review_and_exact_commit_result() {
     let scene_path = fixture.root.join("worlds/entry.scene.json");
     fs::write(&scene_path, source.to_json_string().unwrap()).unwrap();
     let original_bytes = fs::read(&scene_path).unwrap();
-    let command = EditorSourceToolCommand::new(
-        executable,
-        vec![directory.join("EnemyStatsTool.dll").into_os_string()],
-        directory,
-        TIMEOUT,
-    )
-    .unwrap();
-    let definition = EditorSourceToolDefinition::new(command, owner.clone(), component).unwrap();
+    let installed = install_tool(&fixture.root, &directory, &executable);
     let mut application = fixture.open_with_expected_state(EditorApplicationState::AuthoringReady);
     let document = application
         .current_frame()
@@ -231,16 +392,36 @@ fn csharp_source_tool_application_preserves_review_and_exact_commit_result() {
             .component_schema_owner(&ComponentTypeId::new(STATS)),
         Some(owner.owner_id()),
     );
-    assert!(
-        application
-            .current_frame()
-            .unwrap()
-            .source_tool()
-            .active
-            .is_none()
+    let opened = settle_tool(&mut application);
+    assert!(opened.active.is_none() && opened.attempt.is_none() && opened.review.is_none());
+    let selection = opened.selection.as_ref().unwrap();
+    assert!(selection.desired.is_none() && selection.active_origin.is_none());
+    assert_eq!(
+        selection.operation.as_ref().unwrap().outcome,
+        Some(EditorSourceToolSelectionOutcome::Observed),
     );
-    let attempt = application.enable_source_tool(definition.clone()).unwrap();
+    assert!(!fixture.root.join(SELECTION).exists());
+    let attempt = enable_installed_tool(&mut application, &installed);
     let ready = settle_tool(&mut application);
+    let enabled = ready.selection.as_ref().unwrap().desired.clone().unwrap();
+    assert!(enabled.enabled);
+    assert_eq!(enabled.installed.package.as_ref(), "trial.enemy-stats");
+    assert_eq!(enabled.installed.directory.as_ref(), INSTALLATION);
+    assert_eq!(enabled.installed.receipt, installed.receipt);
+    assert_selection(&ready, &enabled, true);
+    let operation = ready
+        .selection
+        .as_ref()
+        .unwrap()
+        .operation
+        .as_ref()
+        .unwrap();
+    assert_eq!(operation.attempt, attempt);
+    assert_eq!(
+        operation.outcome,
+        Some(EditorSourceToolSelectionOutcome::Enabled)
+    );
+    let selection_bytes = fs::read(fixture.root.join(SELECTION)).unwrap();
     let active = ready.active.as_ref().unwrap();
     assert_eq!(active.owner(), owner.owner_id());
     assert_eq!(active.component(), &ComponentTypeId::new(STATS));
@@ -475,12 +656,17 @@ fn csharp_source_tool_application_preserves_review_and_exact_commit_result() {
         },
         value: 99,
     };
-    let deferred_disable = EditorSourceToolAction::Disable {
-        activation: activation.clone(),
+    let deferred_disable = EditorSourceToolAction::DisableInstalled {
+        basis: application.source_tool_selection_view().unwrap().basis,
     };
-    let replacement = application.enable_source_tool(definition).unwrap();
+    let replacement = enable_installed_tool(&mut application, &installed);
     let ready = settle_tool(&mut application);
     assert_eq!(ready.attempt.as_ref(), Some(&replacement));
+    assert_selection(&ready, &enabled, true);
+    assert_eq!(
+        fs::read(fixture.root.join(SELECTION)).unwrap(),
+        selection_bytes
+    );
     let next_activation = ready.active.as_ref().unwrap().id().clone();
     assert_ne!(next_activation, activation);
     for deferred in [deferred_request, deferred_property] {
@@ -491,7 +677,7 @@ fn csharp_source_tool_application_preserves_review_and_exact_commit_result() {
     }
     assert!(matches!(
         source_action(&mut application, deferred_disable),
-        EditorSourceToolActionOutcome::Disabled(Err(EditorSourceToolError::StaleActivation))
+        EditorSourceToolActionOutcome::Selection(Err(EditorSourceToolSelectionError::StaleBasis))
     ));
     assert_eq!(
         application.document_query_basis(document).unwrap(),
@@ -513,21 +699,45 @@ fn csharp_source_tool_application_preserves_review_and_exact_commit_result() {
         panic!("The second facet request was not admitted");
     };
     assert!(settle_tool(&mut application).review.is_some());
-    assert!(matches!(
-        source_action(
-            &mut application,
-            EditorSourceToolAction::Disable {
-                activation: next_activation,
-            }
-        ),
-        EditorSourceToolActionOutcome::Disabled(Ok(()))
-    ));
+    let selection = application.source_tool_selection_view().unwrap();
+    application.request_close_project();
+    let cancel_close = application
+        .current_frame()
+        .unwrap()
+        .workspace_intent()
+        .decision_prompt()
+        .expect("the tool-authored dirty source requires a Close decision")
+        .resolve(EditorCloseDecision::Cancel);
+    let EditorSourceToolActionOutcome::Selection(Ok(disable_attempt)) = source_action(
+        &mut application,
+        EditorSourceToolAction::DisableInstalled {
+            basis: selection.basis,
+        },
+    ) else {
+        panic!("The installed source-tool disable was not admitted");
+    };
     assert!(
         application
             .current_frame()
             .unwrap()
             .source_tool()
             .active
+            .is_none()
+    );
+    let frame = application.current_frame().unwrap();
+    application.submit_and_drive(
+        EditorActionBatch::new(
+            frame.revision(),
+            [EditorAction::WorkspaceIntent(cancel_close)],
+        ),
+        Duration::ZERO,
+    );
+    assert!(
+        application
+            .current_frame()
+            .unwrap()
+            .workspace_intent()
+            .decision_prompt()
             .is_none()
     );
     assert!(matches!(
@@ -537,6 +747,39 @@ fn csharp_source_tool_application_preserves_review_and_exact_commit_result() {
         ),
         EditorSourceToolActionOutcome::Accepted(Err(EditorSourceToolError::Disabled))
     ));
+    let disabled = settle_tool(&mut application);
+    let mut desired_disabled = enabled.clone();
+    desired_disabled.enabled = false;
+    assert_selection(&disabled, &desired_disabled, false);
+    let disable = disabled
+        .selection
+        .as_ref()
+        .unwrap()
+        .disable
+        .as_ref()
+        .unwrap();
+    assert_eq!(disable.attempt, disable_attempt);
+    assert_eq!(
+        disable.outcome,
+        Some(EditorSourceToolSelectionOutcome::Disabled)
+    );
+    assert_eq!(
+        disabled.selection.as_ref().unwrap().operation,
+        selection.operation
+    );
+    assert_eq!(
+        disabled
+            .selection
+            .as_ref()
+            .unwrap()
+            .operation
+            .as_ref()
+            .unwrap()
+            .outcome,
+        Some(EditorSourceToolSelectionOutcome::Enabled),
+    );
+    let disabled_bytes = fs::read(fixture.root.join(SELECTION)).unwrap();
+    assert_ne!(disabled_bytes, selection_bytes);
     assert_eq!(
         application.document_query_basis(document).unwrap(),
         unchanged
@@ -557,5 +800,177 @@ fn csharp_source_tool_application_preserves_review_and_exact_commit_result() {
         read_property(&mut application, document, &enemy, STATS, "health").unwrap(),
         EditorPropertyValue::Present(ComponentValue::I64(100))
     );
+    replay(&mut application, document, true);
+    replay(&mut application, document, true);
+    let frame = application.current_frame().unwrap();
+    let basis = application.document_query_basis(document).unwrap();
+    let saved_revision = basis.revision;
+    let saved = application.submit_and_drive(
+        EditorActionBatch::new(
+            frame.revision(),
+            [EditorAction::Persistence(EditorPersistenceAction::Save {
+                document,
+                base_revision: saved_revision,
+            })],
+        ),
+        Duration::ZERO,
+    );
+    assert!(matches!(
+        saved.actions(),
+        [EditorApplicationActionDispatch::Dispatched(
+            EditorActionOutcome::Persistence(EditorPersistenceRequestResult::Accepted { .. })
+        )]
+    ));
+    let deadline = Instant::now() + TIMEOUT;
+    loop {
+        application.advance(Duration::ZERO);
+        let frame = application.current_frame().unwrap();
+        if frame.persistence().operation().is_none() {
+            assert!(matches!(
+                frame.persistence().result(),
+                Some(EditorPersistenceResult::Saved { document: actual, revision, .. })
+                    if actual == document && revision == saved_revision
+            ));
+            assert!(!frame.workspace().document(document).unwrap().dirty);
+            assert_eq!(
+                frame
+                    .workspace()
+                    .document(document)
+                    .unwrap()
+                    .history
+                    .undo_depth,
+                2
+            );
+            break;
+        }
+        assert!(Instant::now() < deadline, "Application Save did not settle");
+        std::thread::sleep(Duration::from_millis(1));
+    }
+    let saved_bytes = fs::read(&scene_path).unwrap();
+    assert_ne!(saved_bytes, original_bytes);
+    let attempt = enable_installed_tool(&mut application, &installed);
+    let reenabled = settle_tool(&mut application);
+    assert_selection(&reenabled, &enabled, true);
+    assert_eq!(
+        reenabled
+            .selection
+            .as_ref()
+            .unwrap()
+            .operation
+            .as_ref()
+            .unwrap()
+            .attempt,
+        attempt
+    );
+    assert_eq!(
+        reenabled.selection.as_ref().unwrap().disable,
+        disabled.selection.as_ref().unwrap().disable,
+    );
+    assert_eq!(
+        fs::read(fixture.root.join(SELECTION)).unwrap(),
+        selection_bytes
+    );
     close(&mut application);
+    drop(application);
+
+    let mut reopened = fixture.open_with_expected_state(EditorApplicationState::AuthoringReady);
+    let opened = settle_tool(&mut reopened);
+    assert_selection(&opened, &enabled, false);
+    assert!(opened.attempt.is_none() && opened.request.is_none() && opened.review.is_none());
+    assert_eq!(
+        opened
+            .selection
+            .as_ref()
+            .unwrap()
+            .operation
+            .as_ref()
+            .unwrap()
+            .outcome,
+        Some(EditorSourceToolSelectionOutcome::Observed),
+    );
+    assert_eq!(
+        fs::read(fixture.root.join(SELECTION)).unwrap(),
+        selection_bytes
+    );
+    let document = reopened
+        .current_frame()
+        .unwrap()
+        .workspace()
+        .active_document
+        .unwrap();
+    let frame = reopened.current_frame().unwrap();
+    let tab = frame.workspace().document(document).unwrap();
+    assert_eq!(tab.history.undo_depth, 0);
+    assert_eq!(tab.history.redo_depth, 0);
+    assert!(!tab.dirty);
+    for entity in [&enemy, &created] {
+        assert_eq!(
+            read_property(&mut reopened, document, entity, STATS, "health").unwrap(),
+            EditorPropertyValue::Present(ComponentValue::I64(125)),
+        );
+    }
+    let selection = reopened.source_tool_selection_view().unwrap();
+    let EditorSourceToolActionOutcome::Selection(Ok(disable_attempt)) = source_action(
+        &mut reopened,
+        EditorSourceToolAction::DisableInstalled {
+            basis: selection.basis,
+        },
+    ) else {
+        panic!("The saved installed selection could not be disabled without activation");
+    };
+    let disabled = settle_tool(&mut reopened);
+    assert_selection(&disabled, &desired_disabled, false);
+    let disable = disabled
+        .selection
+        .as_ref()
+        .unwrap()
+        .disable
+        .as_ref()
+        .unwrap();
+    assert_eq!(disable.attempt, disable_attempt);
+    assert_eq!(
+        disable.outcome,
+        Some(EditorSourceToolSelectionOutcome::Disabled)
+    );
+    assert_eq!(
+        disabled.selection.as_ref().unwrap().operation,
+        selection.operation
+    );
+    assert_eq!(
+        disabled
+            .selection
+            .as_ref()
+            .unwrap()
+            .operation
+            .as_ref()
+            .unwrap()
+            .outcome,
+        Some(EditorSourceToolSelectionOutcome::Observed),
+    );
+    assert!(disabled.attempt.is_none() && disabled.request.is_none() && disabled.review.is_none());
+    assert_eq!(
+        fs::read(fixture.root.join(SELECTION)).unwrap(),
+        disabled_bytes
+    );
+    assert_eq!(fs::read(&scene_path).unwrap(), saved_bytes);
+    close(&mut reopened);
+    drop(reopened);
+
+    let mut reopened = fixture.open_with_expected_state(EditorApplicationState::AuthoringReady);
+    let opened = settle_tool(&mut reopened);
+    assert_selection(&opened, &desired_disabled, false);
+    assert!(opened.attempt.is_none() && opened.request.is_none() && opened.review.is_none());
+    assert_eq!(
+        fs::read(fixture.root.join(SELECTION)).unwrap(),
+        disabled_bytes
+    );
+    assert_eq!(fs::read(&scene_path).unwrap(), saved_bytes);
+    assert!(
+        fixture
+            .root
+            .join(INSTALLATION)
+            .join("EnemyStatsTool.dll")
+            .is_file()
+    );
+    close(&mut reopened);
 }

@@ -68,13 +68,13 @@ pub(super) fn proposal() -> Output {
     }))
 }
 
-pub(super) struct Project {
-    pub(super) root: PathBuf,
-    pub(super) owner: ComponentSchemaOwnerSnapshot,
+pub(in crate::project_host::runtime::editor::source_tools) struct Project {
+    pub(in crate::project_host::runtime::editor::source_tools) root: PathBuf,
+    pub(in crate::project_host::runtime::editor::source_tools) owner: ComponentSchemaOwnerSnapshot,
 }
 
 impl Project {
-    pub(super) fn new() -> Self {
+    pub(in crate::project_host::runtime::editor::source_tools) fn new() -> Self {
         let root = std::env::temp_dir().join(format!(
             "nara_source_tool_session_{}_{}",
             std::process::id(),
@@ -165,7 +165,9 @@ impl Project {
         }))
     }
 
-    pub(super) fn tool(&self) -> EditorSourceToolDefinition {
+    pub(in crate::project_host::runtime::editor::source_tools) fn tool(
+        &self,
+    ) -> EditorSourceToolDefinition {
         self.tool_with(self.description(), proposal(), Duration::from_secs(10))
     }
 
@@ -183,7 +185,9 @@ impl Project {
         .unwrap()
     }
 
-    pub(super) fn run(&self, test: impl FnOnce(&mut EditorProjectSession)) {
+    pub(in crate::project_host::runtime::editor::source_tools) fn open(
+        &self,
+    ) -> EditorProjectSession {
         // Match the real metadata authoring fixture: admit bundle, adapters and startup closure.
         #[cfg(windows)]
         let directory = {
@@ -217,6 +221,14 @@ impl Project {
         wait(&mut editor, |editor| {
             !editor.project_source_index_work_pending()
         });
+        editor
+    }
+
+    pub(in crate::project_host::runtime::editor::source_tools) fn run(
+        &self,
+        test: impl FnOnce(&mut EditorProjectSession),
+    ) {
+        let mut editor = self.open();
         let result = catch_unwind(AssertUnwindSafe(|| test(&mut editor)));
         let deadline = Instant::now() + WAIT;
         loop {
@@ -287,7 +299,7 @@ pub(super) fn snapshot(editor: &EditorProjectSession) -> Snapshot {
     }
 }
 
-pub(super) fn wait(
+pub(in crate::project_host::runtime::editor::source_tools) fn wait(
     editor: &mut EditorProjectSession,
     ready: impl Fn(&EditorProjectSession) -> bool,
 ) {

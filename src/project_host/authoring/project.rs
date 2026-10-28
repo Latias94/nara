@@ -703,6 +703,10 @@ impl AuthoringProjectSessionSnapshot {
         self.schema.project_root()
     }
 
+    pub(crate) fn authoring_bundle(&self) -> &AuthoringSchemaBundle {
+        self.schema.bundle()
+    }
+
     #[must_use]
     pub(crate) fn manifest_digest(&self) -> ContentDigest {
         self.schema.manifest_digest()

@@ -40,6 +40,9 @@ operation_id!(EditorSourceToolAttemptId);
 operation_id!(EditorSourceToolRequestId);
 operation_id!(EditorSourceToolActivationId);
 
+mod selection;
+pub use selection::*;
+
 /// Explicit source intent retained by the Host rather than returned by the child.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum EditorSourceToolIntent {
@@ -266,12 +269,24 @@ pub struct EditorSourceToolView {
     pub review: Option<EditorSourceToolReviewSummary>,
     pub attempt_error: Option<EditorSourceToolError>,
     pub request_error: Option<EditorSourceToolError>,
+    pub selection: Option<EditorSourceToolSelectionView>,
 }
 
 impl EditorSourceToolView {
     #[must_use]
-    pub const fn has_pending_work(&self) -> bool {
-        self.probing || self.working || self.retiring
+    pub fn has_pending_work(&self) -> bool {
+        self.probing
+            || self.working
+            || self.retiring
+            || self.selection.as_ref().is_some_and(|selection| {
+                matches!(
+                    selection.phase,
+                    EditorSourceToolSelectionPhase::Loading
+                        | EditorSourceToolSelectionPhase::Probing
+                        | EditorSourceToolSelectionPhase::Publishing
+                        | EditorSourceToolSelectionPhase::Reconciling
+                )
+            })
     }
 }
 
@@ -350,6 +365,12 @@ pub enum EditorSourceToolAction {
     CancelAttempt {
         attempt: EditorSourceToolAttemptId,
     },
+    DisableInstalled {
+        basis: EditorSourceToolSelectionBasis,
+    },
+    ReconcileSelection {
+        basis: EditorSourceToolSelectionBasis,
+    },
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -358,6 +379,7 @@ pub enum EditorSourceToolActionOutcome {
     Accepted(Result<EditorSourceToolCommit, EditorSourceToolError>),
     Disabled(Result<(), EditorSourceToolError>),
     Cancelled(Result<(), EditorSourceToolError>),
+    Selection(Result<EditorSourceToolAttemptId, EditorSourceToolSelectionError>),
 }
 
 #[cfg(test)]

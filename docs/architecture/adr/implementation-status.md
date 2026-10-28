@@ -95,6 +95,16 @@ language 22, actual managed/Application and three selected Windows/DX12 native t
 Read handles remain mutable-content observations; existing replacement remains detect-only.
 Windows parent-directory rename can require physical Close. This prerequisite does not implement
 durable tool selection, all source-capture identity lifetimes or complete the local lifecycle plan.
+The [durable selection successor](../../knowledge/engineering/verification/2026-10/2026-10-28T012206Z-durable-installed-source-tool-selection-and-independent-paired-attempt-qualification-3a4a90d3cc3042e5b89e8fa20e314c22.md)
+adds bounded project-local desired selection, code-free Open/reconciliation, exact approved
+installation provenance and ready -> file publication -> route promotion through the same Session.
+Separate operation/Disable observations preserve both co-terminal outcomes; stale returned-probe
+admission, replaced parents, held IO, Close and abnormal-Drop cleanup have focused regressions.
+Root/public persistence 702, filesystem 87, Tooling 86, Editor 245 and rebuilt independent language
+24 cases pass; the actual C# Application and selected durable native Inspector/panel trajectory
+pass. The selected evidence retains its exact platform and final-check scope. Metadata is
+pre-admitted; fresh-project adoption/evolved lineage, installed dependent closure, protected content,
+safe removal and complete Package UI remain open. This is not full R1b or foundation completion.
 The [documentation verification](../../knowledge/engineering/verification/2026-10/2026-10-23T115037Z-foundation-architecture-rebaseline-documentation-checks-and-adversarial-closure-33c8c794baf142ee964468a01248af17.md)
 records inventory/link/status checks and the scoped adversarial correction/recheck. No Cargo,
 performance or native trajectory was re-executed for this design-only unit.

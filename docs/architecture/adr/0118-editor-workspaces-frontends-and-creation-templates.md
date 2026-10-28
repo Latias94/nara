@@ -454,6 +454,17 @@ the default field renderer while admitted metadata still permits ordinary editin
 metadata follows existing unavailable/read-only rules. Text/caret/IME and widget instances remain
 frontend-local. This finite capability does not select a recursive UI language or a native ABI.
 
+The concrete single-slot installed selection is observed separately from its actual active route.
+Its project-local lifecycle record follows ADR 0035; an enabled record on Open means awaiting
+explicit Host approval, not an executable activation. The Session reuses the same probe, proposal
+and retirement owner. Ready candidates publish desired selection before the sole route-promotion
+step, preserving truthful post-publication refusal and uncertainty. Frontends consume immutable
+selection basis/result observations and submit explicit lifecycle actions; they neither serialize
+an independent selection nor recover file/process authority from project data. Disable withdraws
+execution immediately even if its separate durable update fails. File work and physical children
+remain Session close obligations. This contract does not add installed dependency solving,
+metadata adoption, removal authority or a second tool executor.
+
 Local finite tool release preparation is code-free and separate from installation and approval.
 The Host supplies a strict source capability and its selected manifest digest. The release owner
 admits bounded target/protocol/trust metadata and exact relationship declarations, then captures

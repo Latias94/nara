@@ -113,8 +113,13 @@ impl EditorSourceToolManagedHost {
             command.approved = Some(Arc::new(ApprovedManagedLaunch {
                 host: Arc::clone(&self.custody),
                 prefix: prefix.into(),
-                installation: *installation.receipt().installation_id(),
-                manifest: release.manifest_digest(),
+                provenance: ApprovedInstallationProvenance {
+                    directory: installation.directory().share(),
+                    package: Arc::from(release.package()),
+                    installation: *installation.receipt().installation_id(),
+                    receipt: installation.receipt_digest(),
+                    manifest: release.manifest_digest(),
+                },
             }));
             EditorSourceToolDefinition::new(
                 command,
@@ -135,21 +140,51 @@ pub(super) struct ApprovedManagedLaunch {
     #[cfg(windows)]
     host: Arc<HostCustody>,
     prefix: Arc<[u8]>,
+    provenance: ApprovedInstallationProvenance,
+}
+
+/// Immutable inspected installation facts, separate from Host and captured-image custody.
+struct ApprovedInstallationProvenance {
+    directory: DirectoryCapability,
+    package: Arc<str>,
     installation: [u8; 32],
+    receipt: ContentDigest,
     manifest: ContentDigest,
 }
 
 impl fmt::Debug for ApprovedManagedLaunch {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("ApprovedManagedLaunch")
-            .field("installation", &self.installation)
-            .field("manifest", &self.manifest)
+            .field("package", &self.provenance.package)
+            .field("installation", &self.provenance.installation)
+            .field("directory_identity", &self.provenance.directory.identity())
+            .field("receipt_digest", &self.provenance.receipt)
+            .field("manifest", &self.provenance.manifest)
             .field("input_bytes", &self.prefix.len())
             .finish_non_exhaustive()
     }
 }
 
 impl ApprovedManagedLaunch {
+    /// Borrows the approved directory, package, installation ID, receipt and manifest digests.
+    pub(super) fn installation_facts(
+        &self,
+    ) -> (
+        &DirectoryCapability,
+        &str,
+        &[u8; 32],
+        ContentDigest,
+        ContentDigest,
+    ) {
+        (
+            &self.provenance.directory,
+            &self.provenance.package,
+            &self.provenance.installation,
+            self.provenance.receipt,
+            self.provenance.manifest,
+        )
+    }
+
     pub(super) fn prefix(&self) -> &[u8] {
         &self.prefix
     }

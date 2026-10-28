@@ -8,9 +8,10 @@ use nara_tooling::{
 };
 
 mod child;
-mod fixture;
+pub(super) mod fixture;
 mod lifecycle;
 mod rejection;
+mod selection;
 
 use child::Output;
 use fixture::{

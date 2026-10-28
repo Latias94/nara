@@ -138,8 +138,9 @@ pub use runtime::{
     EditorSourceToolManagedError, EditorSourceToolManagedHost, EditorSourceToolManagedHostDigests,
     EditorSourceToolReleaseError, EditorSourceToolReleaseMember, EditorSourceToolReleaseMemberKind,
     EditorSourceToolReleaseRequirement, PreparedEditorSourceToolRelease,
-    SupervisedDesktopSourceAdmissionError, SupervisedDesktopSourceAuthority,
-    TrustedCompiledEditorProjectIntent, admit_supervised_desktop_source_receipt,
+    PreparedEditorSourceToolSelection, SupervisedDesktopSourceAdmissionError,
+    SupervisedDesktopSourceAuthority, TrustedCompiledEditorProjectIntent,
+    admit_supervised_desktop_source_receipt,
 };
 #[cfg(all(
     feature = "runtime-2d",

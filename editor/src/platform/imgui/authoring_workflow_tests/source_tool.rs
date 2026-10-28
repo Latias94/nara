@@ -1,4 +1,4 @@
-//! Actual installed C# images captured and approved for proposals through native Editor widgets.
+//! Durable installed C# selection and proposals through native Editor widgets.
 
 use std::os::windows::fs::OpenOptionsExt;
 
@@ -8,7 +8,6 @@ use nara::{
         RelativeComponent, TrustMode,
     },
     project_host::{
-        EditorSourceToolDefinition, EditorSourceToolInstallationInspection,
         EditorSourceToolInstallationOutcome, EditorSourceToolInstallationPlan,
         EditorSourceToolManagedHost, EditorSourceToolManagedHostDigests,
         PreparedEditorSourceToolRelease, advanced::built_in_schema_providers,
@@ -25,7 +24,10 @@ use nara::{
         SceneEntityRecord, SceneOccurrenceKey, ScenePatchOperation, SourceDocumentKey,
         SourceDocumentKind, retire_and_despawn_scene_instance,
     },
-    tooling::{EditorSourceToolIntent, EditorSourceToolRequestId, EditorSourceToolView},
+    tooling::{
+        EditorSourceToolDesiredSelection, EditorSourceToolIntent, EditorSourceToolRequestId,
+        EditorSourceToolSelectionOutcome, EditorSourceToolSelectionPhase, EditorSourceToolView,
+    },
 };
 
 use super::*;
@@ -43,12 +45,22 @@ const PROPERTY_PREVIEW: &str = "source-tool:integer:prepare";
 const PROPERTY_ACCEPT: &str = "source-tool:integer:accept";
 const PANEL_ATTACH: &str = "source-tool:attach-or-edit";
 const PANEL_ACCEPT: &str = "source-tool:accept";
+const PANEL_DISABLE: &str = "source-tool:disable";
+const PANEL_DISABLE_SAVED: &str = "source-tool:disable-saved";
+const INSTALLATION: &str = "installed-tool";
+const SELECTION: &str = ".nara/source-tools/selection.json";
 
 struct SourceToolFixture {
     project: InteractionProject,
     owner: ComponentSchemaOwnerSnapshot,
-    definition: EditorSourceToolDefinition,
+    installed: InstalledSourceTool,
     original: SceneDocument,
+}
+
+struct InstalledSourceTool {
+    root: DirectoryCapability,
+    receipt: ContentDigest,
+    host: EditorSourceToolManagedHost,
 }
 
 impl SourceToolFixture {
@@ -124,21 +136,21 @@ impl SourceToolFixture {
                 .map_err(|error| error.to_string())?,
         )
         .map_err(|error| error.to_string())?;
-        let definition = approved_installed_tool(&project, &directory, &executable)?;
+        let installed = installed_tool(&project, &directory, &executable)?;
         Ok(Self {
             project,
             owner,
-            definition,
+            installed,
             original,
         })
     }
 }
 
-fn approved_installed_tool(
+fn installed_tool(
     project: &InteractionProject,
     artifacts: &Path,
     executable: &Path,
-) -> Result<EditorSourceToolDefinition, String> {
+) -> Result<InstalledSourceTool, String> {
     let source = project.root.join("tool-release-source");
     fs::create_dir(&source).map_err(|error| error.to_string())?;
     let mut files = Vec::new();
@@ -196,8 +208,8 @@ fn approved_installed_tool(
     )
     .map_err(|error| error.to_string())?;
     let plan = EditorSourceToolInstallationPlan::new(
-        parent,
-        RelativeComponent::new("installed-tool").map_err(|error| error.to_string())?,
+        parent.share(),
+        RelativeComponent::new(INSTALLATION).map_err(|error| error.to_string())?,
         captured,
     )
     .map_err(|error| error.to_string())?;
@@ -209,11 +221,7 @@ fn approved_installed_tool(
             ));
         }
     };
-    let inspection = EditorSourceToolInstallationInspection::read(
-        installation.directory(),
-        installation.receipt_digest(),
-    )
-    .map_err(|error| error.to_string())?;
+    let receipt = installation.receipt_digest();
     let bootstrap = PathBuf::from(
         std::env::var_os("NARA_SOURCE_TOOL_BOOTSTRAP_DIR")
             .ok_or("NARA_SOURCE_TOOL_BOOTSTRAP_DIR must name the actual prebuilt managed Host")?,
@@ -244,15 +252,12 @@ fn approved_installed_tool(
         TOOL_TIMEOUT,
     )
     .map_err(|error| error.to_string())?;
-    let definition = host
-        .approve_installation(inspection)
-        .map_err(|error| error.to_string())?;
     drop(installation);
-    // Only this fixture's freshly published DLL is removed. Native probe and proposal must
-    // execute the approved captured images without consulting the installed entry path again.
-    fs::remove_file(project.root.join("installed-tool/EnemyStatsTool.dll"))
-        .map_err(|error| error.to_string())?;
-    Ok(definition)
+    Ok(InstalledSourceTool {
+        root: parent,
+        receipt,
+        host,
+    })
 }
 
 struct SourceToolObservation {
@@ -260,6 +265,8 @@ struct SourceToolObservation {
     history: [usize; 4],
     health: [i64; 4],
     saved: SceneDocument,
+    desired: EditorSourceToolDesiredSelection,
+    selection_bytes: Vec<u8>,
 }
 
 struct SourceToolApplication<'a> {
@@ -314,7 +321,7 @@ impl ApplicationHandler for SourceToolApplication<'_> {
                 // the old Application before a completely fresh Open can acquire saved source.
                 let presents =
                     run_native_workflow(event_loop, &self.fixture.project.root, |workflow| {
-                        workflow.reopen_source_tool(self.fixture, &observed.saved)
+                        workflow.reopen_source_tool(self.fixture, &observed)
                     })?;
                 Ok((observed, presents))
             })());
@@ -357,8 +364,22 @@ impl AuthoringWorkflow<'_> {
         for _ in 0..4 {
             self.paint(|_| {})?;
         }
-        let view = self.frame()?.source_tool().clone();
-        if view != EditorSourceToolView::default() {
+        let view = self.settle_actual_source_tool()?;
+        let selection = view
+            .selection
+            .as_ref()
+            .ok_or("ordinary Open did not observe the installed selection")?;
+        if view.active.is_some()
+            || view.attempt.is_some()
+            || view.request.is_some()
+            || view.review.is_some()
+            || selection.active_origin.is_some()
+            || selection.phase != EditorSourceToolSelectionPhase::Idle
+            || selection.error.is_some()
+            || selection.operation.as_ref().is_none_or(|operation| {
+                operation.outcome != Some(EditorSourceToolSelectionOutcome::Observed)
+            })
+        {
             return Err(format!(
                 "ordinary Open executed or activated a source tool: {view:?}"
             ));
@@ -374,8 +395,26 @@ impl AuthoringWorkflow<'_> {
             let view = self.frame()?.source_tool().clone();
             // An after-paint owner drive can publish completion for the following redraw.
             // Require a paint which actually started from that terminal tool observation.
-            if !view.has_pending_work() && view == presented {
-                if view.attempt_error.is_some() || view.request_error.is_some() {
+            if !view.has_pending_work()
+                && view == presented
+                && view.selection.as_ref().is_some_and(|selection| {
+                    selection
+                        .operation
+                        .as_ref()
+                        .is_some_and(|operation| operation.outcome.is_some())
+                        && selection
+                            .disable
+                            .as_ref()
+                            .is_none_or(|disable| disable.outcome.is_some())
+                })
+            {
+                if view.attempt_error.is_some()
+                    || view.request_error.is_some()
+                    || view
+                        .selection
+                        .as_ref()
+                        .is_some_and(|selection| selection.error.is_some())
+                {
                     return Err(format!("the actual C# tool failed: {view:?}"));
                 }
                 return Ok(view);
@@ -385,6 +424,59 @@ impl AuthoringWorkflow<'_> {
             }
             std::thread::sleep(Duration::from_millis(1));
         }
+    }
+
+    fn enable_installed_source_tool(
+        &mut self,
+        fixture: &SourceToolFixture,
+    ) -> Result<EditorSourceToolView, String> {
+        let selection = self
+            .application
+            .source_tool_selection_view()
+            .map_err(|error| error.to_string())?;
+        let prepared = self
+            .application
+            .prepare_installed_source_tool_selection(
+                fixture.installed.root.share(),
+                INSTALLATION,
+                fixture.installed.receipt,
+                &fixture.installed.host,
+            )
+            .map_err(|error| error.to_string())?;
+        let installed = prepared.selection().clone();
+        if self
+            .application
+            .source_tool_selection_view()
+            .map_err(|error| error.to_string())?
+            != selection
+        {
+            return Err("Host preparation changed the installed selection".into());
+        }
+        let attempt = self
+            .application
+            .enable_installed_source_tool(&selection.basis, prepared)
+            .map_err(|error| error.to_string())?;
+        let view = self.settle_actual_source_tool()?;
+        let selection = view
+            .selection
+            .as_ref()
+            .ok_or("enabled selection is missing")?;
+        if selection.phase != EditorSourceToolSelectionPhase::Idle
+            || selection
+                .desired
+                .as_ref()
+                .is_none_or(|desired| !desired.enabled || desired.installed != installed)
+            || selection.active_origin.as_ref() != Some(&installed)
+            || selection.operation.as_ref().is_none_or(|operation| {
+                operation.attempt != attempt
+                    || operation.outcome != Some(EditorSourceToolSelectionOutcome::Enabled)
+            })
+        {
+            return Err(format!(
+                "installed selection was not durably enabled: {view:?}"
+            ));
+        }
+        Ok(view)
     }
 
     fn selected_stats(&self) -> Result<(i64, i64), String> {
@@ -528,10 +620,20 @@ impl AuthoringWorkflow<'_> {
         if self.selected_stats()? != (100, 10) || self.history()? != 0 || self.dirty()? {
             return Err("ordinary Open did not preserve clean initial Stats(100, 10)".into());
         }
-        self.application
-            .enable_source_tool(fixture.definition.clone())
-            .map_err(|error| error.to_string())?;
-        let ready = self.settle_actual_source_tool()?;
+        if self
+            .application
+            .source_tool_selection_view()
+            .map_err(|error| error.to_string())?
+            .desired
+            .is_some()
+            || fixture.project.root.join(SELECTION).exists()
+        {
+            return Err("ordinary Open unexpectedly created an installed selection".into());
+        }
+        let ready = self.enable_installed_source_tool(fixture)?;
+        let enabled = ready.selection.as_ref().unwrap().desired.clone().unwrap();
+        let selection_bytes =
+            fs::read(fixture.project.root.join(SELECTION)).map_err(|error| error.to_string())?;
         let active = ready
             .active
             .as_ref()
@@ -680,10 +782,7 @@ impl AuthoringWorkflow<'_> {
             return Err("typing an unsubmitted parameter draft executed a child".into());
         }
         // Probe the same prebuilt DLL again: a new activation cannot inherit this old draft.
-        self.application
-            .enable_source_tool(fixture.definition.clone())
-            .map_err(|error| error.to_string())?;
-        let replacement = self.settle_actual_source_tool()?;
+        let replacement = self.enable_installed_source_tool(fixture)?;
         let replacement_id = replacement
             .active
             .as_ref()
@@ -711,14 +810,49 @@ impl AuthoringWorkflow<'_> {
         }
         self.replace_text(BONUS_INPUT, "333")?;
         self.application
-            .disable_source_tool(&replacement_id)
-            .map_err(|error| error.to_string())?;
+            .panel_workspace_mut()
+            .layout_mut()
+            .set_visible(panel, true);
+        for _ in 0..4 {
+            self.paint(|_| {})?;
+        }
+        self.source_tool_control(PANEL_DISABLE)?;
         self.paint(|context| context.io_mut().add_key_event(Key::Enter, true))?;
         self.paint(|context| context.io_mut().add_key_event(Key::Enter, false))?;
         for _ in 0..4 {
             self.paint(|_| {})?;
         }
-        let disabled = self.frame()?.source_tool().clone();
+        let disabled = self.settle_actual_source_tool()?;
+        let selection = disabled
+            .selection
+            .as_ref()
+            .ok_or("disabled selection is missing")?;
+        let mut desired_disabled = enabled.clone();
+        desired_disabled.enabled = false;
+        if selection.desired.as_ref() != Some(&desired_disabled)
+            || selection.active_origin.is_some()
+            || selection.disable.as_ref().is_none_or(|disable| {
+                disable.outcome != Some(EditorSourceToolSelectionOutcome::Disabled)
+            })
+            || selection.operation != replaced.selection.as_ref().unwrap().operation
+            || selection.operation.as_ref().is_none_or(|operation| {
+                operation.outcome != Some(EditorSourceToolSelectionOutcome::Enabled)
+            })
+            || fs::read(fixture.project.root.join(SELECTION)).map_err(|error| error.to_string())?
+                == selection_bytes
+        {
+            return Err(format!(
+                "native DisableInstalled did not persist: {disabled:?}"
+            ));
+        }
+        let disable_observation = selection.disable.clone();
+        self.application
+            .panel_workspace_mut()
+            .layout_mut()
+            .set_visible(panel, false);
+        for _ in 0..3 {
+            self.paint(|_| {})?;
+        }
         let after_disable = self
             .application
             .document_query_basis(document)
@@ -752,6 +886,19 @@ impl AuthoringWorkflow<'_> {
             return Err("the actual Save widget did not persist the tool-authored source".into());
         }
         let saved = read_scene(&source)?;
+        // Leave an enabled durable request for fresh Open to observe without running a child.
+        let reenabled = self.enable_installed_source_tool(fixture)?;
+        if reenabled
+            .selection
+            .as_ref()
+            .and_then(|selection| selection.desired.as_ref())
+            != Some(&enabled)
+            || reenabled.selection.as_ref().unwrap().disable != disable_observation
+            || fs::read(fixture.project.root.join(SELECTION)).map_err(|error| error.to_string())?
+                != selection_bytes
+        {
+            return Err("explicit re-enable did not restore the same installed selection".into());
+        }
         if project_code
             != fs::read(fixture.project.root.join("src/lib.rs"))
                 .map_err(|error| error.to_string())?
@@ -769,20 +916,22 @@ impl AuthoringWorkflow<'_> {
             ],
             health: [initial_health, accepted_health, undo_health, redo_health],
             saved,
+            desired: enabled,
+            selection_bytes,
         })
     }
 
     fn reopen_source_tool(
         mut self,
         fixture: &SourceToolFixture,
-        saved: &SceneDocument,
+        observed: &SourceToolObservation,
     ) -> Result<u64, String> {
         self.open_source_tool_document()?;
         if self.selected_stats()? != (125, 10)
             || self.history()? != 0
             || self.dirty()?
             || control_rect(&format!("field:{STATS}:health")).is_none()
-            || read_scene(&fixture.project.root.join(SCENE))? != *saved
+            || read_scene(&fixture.project.root.join(SCENE))? != observed.saved
         {
             return Err(
                 "fresh Application Open did not read saved owner-tagged Stats without activation"
@@ -792,6 +941,61 @@ impl AuthoringWorkflow<'_> {
         self.click("entity:recruit")?;
         if self.selected_stats()? != (100, 10) || self.history()? != 0 {
             return Err("fresh Open lost the panel-authored attached Stats".into());
+        }
+        let selection = self
+            .application
+            .source_tool_selection_view()
+            .map_err(|error| error.to_string())?;
+        if selection.desired.as_ref() != Some(&observed.desired)
+            || selection.active_origin.is_some()
+            || fs::read(fixture.project.root.join(SELECTION)).map_err(|error| error.to_string())?
+                != observed.selection_bytes
+        {
+            return Err(
+                "fresh Open did not observe the saved enabled request without activation".into(),
+            );
+        }
+        let observed_operation = selection.operation.clone();
+        self.open_source_tool_panel()?;
+        self.source_tool_control(PANEL_DISABLE_SAVED)?;
+        let disabled = self.settle_actual_source_tool()?;
+        let selection = disabled
+            .selection
+            .as_ref()
+            .ok_or("saved selection disappeared")?;
+        let mut desired_disabled = observed.desired.clone();
+        desired_disabled.enabled = false;
+        if disabled.active.is_some()
+            || disabled.attempt.is_some()
+            || disabled.request.is_some()
+            || disabled.review.is_some()
+            || selection.desired.as_ref() != Some(&desired_disabled)
+            || selection.active_origin.is_some()
+            || selection.disable.as_ref().is_none_or(|disable| {
+                disable.outcome != Some(EditorSourceToolSelectionOutcome::Disabled)
+            })
+            || selection.operation != observed_operation
+            || selection.operation.as_ref().is_none_or(|operation| {
+                operation.outcome != Some(EditorSourceToolSelectionOutcome::Observed)
+            })
+            || fs::read(fixture.project.root.join(SELECTION)).map_err(|error| error.to_string())?
+                == observed.selection_bytes
+            || read_scene(&fixture.project.root.join(SCENE))? != observed.saved
+            || self.history()? != 0
+            || self.dirty()?
+        {
+            return Err(
+                "native DisableInstalled did not persist the unapproved saved request".into(),
+            );
+        }
+        if !fixture
+            .project
+            .root
+            .join(INSTALLATION)
+            .join("EnemyStatsTool.dll")
+            .is_file()
+        {
+            return Err("durable selection unexpectedly removed the installed DLL".into());
         }
         Ok(self.presents)
     }

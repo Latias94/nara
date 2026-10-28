@@ -2,7 +2,7 @@
 
 **Status**: Accepted
 **Date**: 2026-07-09
-**Last Revised**: 2026-10-24
+**Last Revised**: 2026-10-28
 **Refines**: ADR 0020: Project Source Layout
 **Refined By**: ADR 0039: Main Loop, Time Domains, Pause, and Runtime State; ADR 0041: Input Routing,
 Actions, Text Input, UI Focus, and Accessibility; ADR 0046: Plugin Metadata and Default Plugin
@@ -36,6 +36,17 @@ manifest authority.
 `nara.toml` is the project-level settings authority for file-backed projects. Runtime embedding may
 override it through explicit `App` resources, but no engine subsystem should invent a second
 persistent project configuration source for the same setting.
+
+The integrated Editor's concrete local finite-tool lifecycle record is
+`.nara/source-tools/selection.json`. It alone records the selected installed artifact and desired
+enabled/disabled state for the current single tool slot. This is a local installation lifecycle
+record, not a second manifest setting, source dependency specification or portable package lock.
+`nara.toml` does not duplicate these fields or select executable tool code. The record binds a
+project-relative installation, nonzero installation ID, exact receipt/manifest digests and package
+identity. Native file IDs, runtime activation identities, launcher configuration and executable
+approval are never restored from it. Missing is unselected; invalid or inaccessible data does not
+become an empty record or permission to overwrite. Ordinary Open observes this data without a
+probe. Actual implementation and platform evidence remain in the local lifecycle plan and ledger.
 
 The manifest contract is:
 

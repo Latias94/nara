@@ -4,6 +4,10 @@
 
 This file is a derived view of immutable shards. It is refreshed only during integration.
 
+## 2026-10-28
+* **Verification Evidence**: [Durable installed source-tool selection and independent paired attempt qualification](verification/2026-10/2026-10-28T012206Z-durable-installed-source-tool-selection-and-independent-paired-attempt-qualification-3a4a90d3cc3042e5b89e8fa20e314c22.md) - Qualifies code-free desired selection, approved installation enablement and physical lifetime through Session, Application and native Editor consumers.
+* **Work Progress**: [Durable installed tool selection and paired attempt integration in progress](progress/2026-10/2026-10-28T010718Z-durable-installed-tool-selection-and-paired-attempt-integration-in-progress-9621f4a6d44249569e458a0e4006fa4a.md) - Records the current single-slot selection replacement, independent review corrections and live qualification boundary.
+
 ## 2026-10-27
 * **Verification Evidence**: [Continuous file publication and editor source custody qualification](verification/2026-10/2026-10-27T233313Z-continuous-file-publication-and-editor-source-custody-qualification-d9a0d6253fc3473ab82093b446048d9c.md) - Qualifies live leaf custody across publication, fresh authoring admission and pending image imports, with public, managed and native consumers.
 * **Verification Evidence**: [Captured managed tool images through the Session and exact finite child custody](verification/2026-10/2026-10-27T221624Z-captured-managed-tool-images-through-the-session-and-exact-finite-child-custody-b852454a4fe841548bed563ca97d071e.md) - Records approved machine runtime and immutable image execution, strict managed graph admission, native cancellation custody, actual installed V1 V2 consumers and qualification limits.
@@ -131,5 +135,3 @@ This file is a derived view of immutable shards. It is refreshed only during int
 ## 2026-10-23
 * **Verification Evidence**: [Disposable Scene projection epochs and stable native preview qualification](verification/2026-10/2026-10-23T225800Z-disposable-scene-projection-epochs-and-stable-native-preview-qualification-2478d897135549daacbc8d1fbc90b9d9.md) - Qualify complete-domain Scene epochs while retaining shared authoring owners and renderer producer identity.
 * **Work Progress**: [Projection lifetime next-unit design and measurement boundary](progress/2026-10/2026-10-23T211757Z-projection-lifetime-next-unit-design-and-measurement-boundary-d55f02e666d0487987d1a1f8b1d9c8b6.md) - Ground the remaining R5c preview-history pressure and compare explicit epoch handoff with owner-specific incremental projection; no production selection yet.
-* **Verification Evidence**: [Trusted Play source continuity and source-local Close qualification](verification/2026-10/2026-10-23T210921Z-trusted-play-source-continuity-and-source-local-close-qualification-61897d1b17744e2aaff6fc6efb1594a7.md) - Qualify the R5c trusted Play source through cancellation, Game handoff and physical retirement without stopping unrelated documents.
-* **Verification Evidence**: [Additive Scene and Prefab Open qualification](verification/2026-10/2026-10-23T202313Z-additive-scene-and-prefab-open-qualification-d0b1fc894dd2419fa1cf43c9e39eb79d.md) - Removes same-kind predecessor retirement, retains per-document Host custody, and qualifies explicit Close and public/native multi-document workflows.

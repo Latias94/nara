@@ -92,6 +92,8 @@ fn real_windows_installation_preserves_created_objects_and_reopens_receipt_selec
     let inspected =
         EditorSourceToolInstallationInspection::read(&reopened, expected_receipt).unwrap();
     assert_eq!(inspected.receipt().installation_id(), &installed_id);
+    assert_eq!(inspected.receipt_digest(), expected_receipt);
+    assert_eq!(inspected.directory_identity(), reopened.identity());
     assert_eq!(inspected.release().manifest_digest(), expected_manifest);
     assert_eq!(
         inspected
@@ -103,6 +105,85 @@ fn real_windows_installation_preserves_created_objects_and_reopens_receipt_selec
             .bytes(),
         b"editable sample"
     );
+}
+
+#[test]
+fn inspection_retains_the_live_read_only_root_without_execution_or_deletion() {
+    use std::os::windows::fs::OpenOptionsExt;
+
+    let source = Release::new();
+    let installation = published(plan(&source).publish());
+    let expected_receipt = installation.receipt_digest();
+    drop(installation);
+    let installed = source.directory.join("installed");
+    let open_root = |sharing| {
+        fs::OpenOptions::new()
+            .read(true)
+            .share_mode(sharing)
+            .custom_flags(0x0200_0000 | 0x0020_0000)
+            .open(&installed)
+    };
+    let root = DirectoryCapability::from_host_handle(
+        open_root(7).unwrap(),
+        HostCapabilityOptions::new(CapabilityRights::ReadOnly, TrustMode::Untrusted),
+    )
+    .unwrap();
+    let identity = root.identity();
+    let inspected = EditorSourceToolInstallationInspection::read(&root, expected_receipt).unwrap();
+    drop(root);
+    assert_eq!(inspected.directory_identity(), identity);
+    assert_eq!(
+        inspected.directory().options().rights(),
+        CapabilityRights::ReadOnly
+    );
+    // Only the inspection now owns the directory handle; an exclusive read must still conflict.
+    let exclusive = open_root(0).unwrap_err();
+    assert_eq!(
+        exclusive.raw_os_error(),
+        Some(windows_sys::Win32::Foundation::ERROR_SHARING_VIOLATION as i32),
+        "the live inspected read handle must prevent an exclusive open: {exclusive}",
+    );
+    assert_eq!(
+        inspected
+            .directory()
+            .open_file_exact(&RelativePath::new("Tool.dll").unwrap())
+            .unwrap()
+            .read_to_end_bounded(128)
+            .unwrap(),
+        b"not an executable; capture must only read"
+    );
+    drop(inspected);
+    assert!(
+        open_root(0).is_ok(),
+        "inspection retirement must close its root"
+    );
+    assert_eq!(
+        fs::read(installed.join("Tool.dll")).unwrap(),
+        b"not an executable; capture must only read"
+    );
+}
+
+#[test]
+fn inspection_binds_exact_receipt_bytes_instead_of_reencoded_facts() {
+    let source = Release::new();
+    let installation = published(plan(&source).publish());
+    let original_digest = installation.receipt_digest();
+    let original_receipt = installation.receipt().clone();
+    drop(installation);
+    let receipt_path = source.directory.join("installed/.nara-installation.json");
+    let mut bytes = fs::read(&receipt_path).unwrap();
+    bytes.push(b'\n');
+    let expected_receipt = ContentDigest::of_bytes(&bytes);
+    assert_ne!(expected_receipt, original_digest);
+    fs::write(&receipt_path, &bytes).unwrap();
+    let root = parent(&source)
+        .open_directory_exact(&RelativePath::new("installed").unwrap())
+        .unwrap();
+    assert!(EditorSourceToolInstallationInspection::read(&root, original_digest).is_err());
+    let inspected = EditorSourceToolInstallationInspection::read(&root, expected_receipt).unwrap();
+    assert_eq!(inspected.receipt(), &original_receipt);
+    assert_eq!(inspected.receipt_digest(), expected_receipt);
+    assert_eq!(fs::read(&receipt_path).unwrap(), bytes);
 }
 
 #[test]

@@ -1,0 +1,662 @@
+use super::*;
+
+fn desired() -> EditorSourceToolDesiredSelection {
+    EditorSourceToolDesiredSelection {
+        installed: EditorSourceToolInstalledSelection {
+            package: "test.stats".into(),
+            directory: "tools/stats".into(),
+            installation: [1; 32],
+            receipt: ContentDigest::from_parts(32, [2; 32]),
+            manifest: ContentDigest::from_parts(64, [3; 32]),
+        },
+        enabled: true,
+    }
+}
+
+fn record() -> String {
+    String::from_utf8(encode(&desired()).unwrap()).unwrap()
+}
+
+#[test]
+fn canonical_selection_records_roundtrip_for_both_enablement_states() {
+    for enabled in [true, false] {
+        let mut desired = desired();
+        desired.enabled = enabled;
+        let expected = format!(
+            "{{\"format_version\":1,\"installed\":{{\"package\":\"test.stats\",\"directory\":\"tools/stats\",\"installation\":{},\"receipt\":{{\"length\":32,\"hash\":{}}},\"manifest\":{{\"length\":64,\"hash\":{}}}}},\"desired_enabled\":{enabled}}}",
+            serde_json::to_string(&[1_u8; 32]).unwrap(),
+            serde_json::to_string(&[2_u8; 32]).unwrap(),
+            serde_json::to_string(&[3_u8; 32]).unwrap(),
+        );
+        let bytes = encode(&desired).unwrap();
+        assert_eq!(bytes, expected.as_bytes());
+        let decoded = decode(&bytes).unwrap();
+        assert_eq!(decoded, desired);
+        assert_eq!(encode(&decoded).unwrap(), bytes);
+    }
+}
+
+#[test]
+fn rejects_malformed_missing_and_unknown_fields_without_an_empty_selection_alias() {
+    let valid = record();
+    let cases = [
+        String::new(),
+        "null".to_owned(),
+        "{}".to_owned(),
+        "[]".to_owned(),
+        valid[..valid.len() - 1].to_owned(),
+        format!("{valid} {{}}"),
+        valid.replace("\"format_version\":1,", ""),
+        valid.replace("\"package\":\"test.stats\",", ""),
+        valid.replace("\"directory\":\"tools/stats\",", ""),
+        valid.replace("\"desired_enabled\":true", "\"desired_enabled\":null"),
+        valid.replace("\"desired_enabled\":true", "\"desired_enabled\":1"),
+        valid.replace("\"desired_enabled\":true", "\"enabled\":true"),
+        valid.replace("\"length\":32,", ""),
+        valid.replace("\"length\":32", "\"length\":-1"),
+        valid.replace("\"length\":32", "\"length\":32.0"),
+        valid.replacen('{', "{\"unknown\":true,", 1),
+        valid.replace("\"installed\":{", "\"installed\":{\"unknown\":true,"),
+        valid.replace("\"receipt\":{", "\"receipt\":{\"unknown\":true,"),
+        valid.replace("\"manifest\":{", "\"manifest\":{\"unknown\":true,"),
+        valid.replace("\"length\":32", "\"length\":32,\"blake3\":\"old\""),
+    ];
+    for input in cases {
+        assert_eq!(
+            decode(input.as_bytes()),
+            Err(EditorSourceToolSelectionError::InvalidRecord),
+            "accepted {input}",
+        );
+    }
+}
+
+#[test]
+fn rejects_duplicate_fields_at_every_object_level() {
+    let valid = record();
+    // Serialize the DTO itself to preserve field ordering for the whole installed object.
+    let parsed: SelectionRecord = serde_json::from_str(&valid).unwrap();
+    let installed_record = serde_json::to_string(&parsed.installed).unwrap();
+    let installation = serde_json::to_string(&[1_u8; 32]).unwrap();
+    let receipt_hash = serde_json::to_string(&[2_u8; 32]).unwrap();
+    let manifest_hash = serde_json::to_string(&[3_u8; 32]).unwrap();
+    let receipt = format!("{{\"length\":32,\"hash\":{receipt_hash}}}");
+    let manifest = format!("{{\"length\":64,\"hash\":{manifest_hash}}}");
+    for (field, value) in [
+        ("format_version", "1"),
+        ("installed", installed_record.as_str()),
+        ("desired_enabled", "true"),
+        ("package", "\"test.stats\""),
+        ("directory", "\"tools/stats\""),
+        ("installation", installation.as_str()),
+        ("receipt", receipt.as_str()),
+        ("manifest", manifest.as_str()),
+        ("length", "32"),
+        ("hash", receipt_hash.as_str()),
+        ("length", "64"),
+        ("hash", manifest_hash.as_str()),
+    ] {
+        let original = format!("\"{field}\":{value}");
+        assert!(valid.contains(&original), "missing fixture field {field}");
+        let input = valid.replace(&original, &format!("{original},{original}"));
+        assert_eq!(
+            decode(input.as_bytes()),
+            Err(EditorSourceToolSelectionError::InvalidRecord),
+            "accepted duplicate {field}",
+        );
+    }
+}
+
+#[test]
+fn rejects_old_or_future_versions_and_noninteger_versions() {
+    let valid = record();
+    for version in ["0", "2", "4294967295"] {
+        let input = valid.replace(
+            "\"format_version\":1",
+            &format!("\"format_version\":{version}"),
+        );
+        assert_eq!(
+            decode(input.as_bytes()),
+            Err(EditorSourceToolSelectionError::UnsupportedFormat),
+        );
+    }
+    for version in ["-1", "1.0", "\"1\"", "null", "4294967296"] {
+        let input = valid.replace(
+            "\"format_version\":1",
+            &format!("\"format_version\":{version}"),
+        );
+        assert_eq!(
+            decode(input.as_bytes()),
+            Err(EditorSourceToolSelectionError::InvalidRecord),
+        );
+    }
+}
+
+#[test]
+fn validates_package_and_nonzero_installation_on_encode_and_decode() {
+    for package in [
+        "",
+        "Stats",
+        "test/stats",
+        "test+stats",
+        "test stats",
+        "stаts",
+    ] {
+        let mut selection = desired();
+        selection.installed.package = package.into();
+        assert_eq!(
+            encode(&selection),
+            Err(EditorSourceToolSelectionError::InvalidRecord)
+        );
+        let input = record().replace("test.stats", package);
+        assert_eq!(
+            decode(input.as_bytes()),
+            Err(EditorSourceToolSelectionError::InvalidRecord)
+        );
+    }
+    for (length, valid) in [(1, true), (128, true), (129, false)] {
+        let mut selection = desired();
+        selection.installed.package = "a".repeat(length).into();
+        assert_eq!(encode(&selection).is_ok(), valid);
+        let input = record().replace("test.stats", &"a".repeat(length));
+        assert_eq!(decode(input.as_bytes()).is_ok(), valid);
+    }
+    let mut selection = desired();
+    selection.installed.package = "0.example_pkg-1".into();
+    assert_eq!(decode(&encode(&selection).unwrap()).unwrap(), selection);
+    selection.installed.installation = [0; 32];
+    assert_eq!(
+        encode(&selection),
+        Err(EditorSourceToolSelectionError::InvalidRecord)
+    );
+    let input = record().replace(
+        &serde_json::to_string(&[1_u8; 32]).unwrap(),
+        &serde_json::to_string(&[0_u8; 32]).unwrap(),
+    );
+    assert_eq!(
+        decode(input.as_bytes()),
+        Err(EditorSourceToolSelectionError::InvalidRecord)
+    );
+}
+
+#[test]
+fn validates_fixed_width_byte_arrays_and_digest_lengths() {
+    let valid = record();
+    let arrays = [
+        "[]".to_owned(),
+        serde_json::to_string(&vec![1_u8; 31]).unwrap(),
+        serde_json::to_string(&vec![1_u8; 33]).unwrap(),
+        format!("[-1,{}]", vec!["1"; 31].join(",")),
+        format!("[256,{}]", vec!["1"; 31].join(",")),
+        format!("[1.0,{}]", vec!["1"; 31].join(",")),
+        "\"hex\"".to_owned(),
+        "null".to_owned(),
+    ];
+    for original in [[1_u8; 32], [2; 32], [3; 32]] {
+        let original = serde_json::to_string(&original).unwrap();
+        for replacement in &arrays {
+            let input = valid.replace(&original, replacement);
+            assert_eq!(
+                decode(input.as_bytes()),
+                Err(EditorSourceToolSelectionError::InvalidRecord)
+            );
+        }
+    }
+    for (field, original, limit) in [
+        ("receipt", 32, MAX_RECEIPT_BYTES),
+        ("manifest", 64, MAX_MANIFEST_BYTES),
+    ] {
+        for length in [0, 1, limit, limit + 1, u64::MAX] {
+            let mut selection = desired();
+            let digest = ContentDigest::from_parts(length, [0; 32]);
+            if field == "receipt" {
+                selection.installed.receipt = digest;
+            } else {
+                selection.installed.manifest = digest;
+            }
+            let accepted = (1..=limit).contains(&length);
+            assert_eq!(encode(&selection).is_ok(), accepted, "{field}: {length}");
+            let input = valid.replace(
+                &format!("\"length\":{original}"),
+                &format!("\"length\":{length}"),
+            );
+            assert_eq!(
+                decode(input.as_bytes()).is_ok(),
+                accepted,
+                "{field}: {length}"
+            );
+        }
+    }
+}
+
+#[test]
+fn requires_a_canonical_bounded_project_relative_directory() {
+    let invalid = [
+        "",
+        "/tools",
+        "C:/tools",
+        "tools\\stats",
+        "tools//stats",
+        "tools/",
+        ".",
+        "..",
+        "./tools",
+        "tools/./stats",
+        "tools/../stats",
+        "tools/stats.",
+        "tools/stats ",
+        "tools/NUL",
+        "tools/con.txt",
+        "tools/a:b",
+        "tools/a?b",
+        "tools/a\nb",
+    ];
+    for directory in invalid {
+        let mut selection = desired();
+        selection.installed.directory = directory.into();
+        assert_eq!(
+            encode(&selection),
+            Err(EditorSourceToolSelectionError::InvalidPath),
+            "{directory}"
+        );
+        let mut record: SelectionRecord = serde_json::from_str(&record()).unwrap();
+        record.installed.directory = directory.to_owned();
+        let bytes = serde_json::to_vec(&record).unwrap();
+        assert_eq!(
+            decode(&bytes),
+            Err(EditorSourceToolSelectionError::InvalidPath),
+            "{directory}"
+        );
+    }
+    let maximum_directory = format!("{}/{}/c", "a".repeat(255), "b".repeat(254));
+    let oversized_directory = format!("{}/{}/c", "a".repeat(255), "b".repeat(255));
+    assert_eq!(maximum_directory.len(), MAX_DIRECTORY_BYTES);
+    assert_eq!(oversized_directory.len(), MAX_DIRECTORY_BYTES + 1);
+    for (directory, accepted) in [
+        (vec!["a"; 16].join("/"), true),
+        (vec!["a"; 17].join("/"), false),
+        (format!("{}/{}", "a".repeat(255), "b".repeat(255)), true),
+        (maximum_directory, true),
+        (oversized_directory, false),
+        (format!("{}/{}/c", "a".repeat(254), "b".repeat(254)), true),
+        ("a".repeat(256), false),
+        ("tools/工具".to_owned(), true),
+    ] {
+        let mut selection = desired();
+        selection.installed.directory = directory.clone().into();
+        assert_eq!(encode(&selection).is_ok(), accepted, "{directory}");
+        let mut record: SelectionRecord = serde_json::from_str(&record()).unwrap();
+        record.installed.directory = directory;
+        assert_eq!(
+            decode(&serde_json::to_vec(&record).unwrap()).is_ok(),
+            accepted
+        );
+    }
+}
+
+#[test]
+fn checks_record_byte_limit_before_parsing_and_accepts_the_exact_boundary() {
+    for (length, accepted) in [(4095, true), (4096, true), (4097, false)] {
+        let mut bytes = encode(&desired()).unwrap();
+        bytes.resize(length, b' ');
+        let result = decode(&bytes);
+        assert_eq!(result.is_ok(), accepted);
+        if !accepted {
+            assert_eq!(result, Err(EditorSourceToolSelectionError::TooLarge));
+        }
+    }
+    assert_eq!(
+        decode(&vec![b'!'; BYTE_LIMIT as usize + 1]),
+        Err(EditorSourceToolSelectionError::TooLarge)
+    );
+}
+
+#[cfg(any(windows, target_os = "linux"))]
+mod filesystem {
+    use std::{
+        fs,
+        path::PathBuf,
+        sync::atomic::{AtomicU64, Ordering},
+        time::{SystemTime, UNIX_EPOCH},
+    };
+
+    use nara_fs::{HostCapabilityOptions, TrustMode};
+
+    use crate::project_host::file_publication::{
+        FilePublicationBinding, FilePublicationOutcome, FilePublicationRejection,
+    };
+
+    use super::*;
+
+    static NEXT_FIXTURE: AtomicU64 = AtomicU64::new(1);
+    const MOVED_PATH: &str = ".nara/source-tools/original.json";
+
+    struct Fixture {
+        directory: PathBuf,
+    }
+
+    impl Fixture {
+        fn new() -> Self {
+            let stamp = SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap()
+                .as_nanos();
+            let sequence = NEXT_FIXTURE.fetch_add(1, Ordering::Relaxed);
+            let directory = std::env::temp_dir().join(format!(
+                "nara-selection-store-{}-{stamp}-{sequence}",
+                std::process::id(),
+            ));
+            fs::create_dir(&directory).unwrap();
+            Self { directory }
+        }
+
+        fn capability(&self, rights: CapabilityRights, trust: TrustMode) -> DirectoryCapability {
+            #[cfg(windows)]
+            let file = {
+                use std::os::windows::fs::OpenOptionsExt;
+                use windows_sys::Win32::Storage::FileSystem::{
+                    FILE_FLAG_BACKUP_SEMANTICS, FILE_FLAG_OPEN_REPARSE_POINT, FILE_SHARE_DELETE,
+                    FILE_SHARE_READ, FILE_SHARE_WRITE,
+                };
+
+                fs::OpenOptions::new()
+                    .read(true)
+                    .share_mode(FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE)
+                    .custom_flags(FILE_FLAG_BACKUP_SEMANTICS | FILE_FLAG_OPEN_REPARSE_POINT)
+                    .open(&self.directory)
+                    .unwrap()
+            };
+            #[cfg(target_os = "linux")]
+            let file = fs::File::open(&self.directory).unwrap();
+            DirectoryCapability::from_host_handle(file, HostCapabilityOptions::new(rights, trust))
+                .unwrap()
+        }
+
+        fn create_parents(&self) {
+            fs::create_dir(self.directory.join(METADATA_DIRECTORY)).unwrap();
+            fs::create_dir(self.directory.join(".nara/source-tools")).unwrap();
+        }
+
+        fn write_record(&self, bytes: &[u8]) {
+            fs::write(self.directory.join(SELECTION_PATH), bytes).unwrap();
+        }
+    }
+
+    impl Drop for Fixture {
+        fn drop(&mut self) {
+            // Every path is an exclusively created, known fixture object; never recurse.
+            for path in [SELECTION_PATH, MOVED_PATH, ".nara", ".nara/source-tools"] {
+                let path = self.directory.join(path);
+                match fs::symlink_metadata(&path) {
+                    Ok(metadata) if !metadata.is_dir() || metadata.is_symlink() => {
+                        fs::remove_file(path).unwrap();
+                    }
+                    Ok(_) => {}
+                    Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+                    Err(error) => panic!("fixture leaf inspection failed: {error}"),
+                }
+            }
+            for path in [SELECTION_PATH, ".nara/source-tools", ".nara"] {
+                match fs::remove_dir(self.directory.join(path)) {
+                    Ok(()) => {}
+                    Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+                    Err(error) => panic!("fixture directory cleanup failed: {error}"),
+                }
+            }
+            fs::remove_dir(&self.directory).unwrap();
+        }
+    }
+
+    #[test]
+    fn loading_missing_directories_is_read_only_and_does_not_create_them() {
+        let fixture = Fixture::new();
+        let root = fixture.capability(CapabilityRights::ReadOnly, TrustMode::Untrusted);
+        let loaded = load(&root).unwrap();
+        assert_eq!(loaded.desired, None);
+        assert!(loaded.host.is_none());
+        assert_eq!(fs::read_dir(&fixture.directory).unwrap().count(), 0);
+
+        fs::create_dir(fixture.directory.join(METADATA_DIRECTORY)).unwrap();
+        let loaded = load(&root).unwrap();
+        assert_eq!(loaded.desired, None);
+        assert!(loaded.host.is_none());
+        assert_eq!(
+            fs::read_dir(fixture.directory.join(METADATA_DIRECTORY))
+                .unwrap()
+                .count(),
+            0
+        );
+    }
+
+    #[test]
+    fn existing_parent_and_missing_leaf_bind_missing_without_any_write() {
+        let fixture = Fixture::new();
+        fixture.create_parents();
+        let root = fixture.capability(CapabilityRights::ReadOnly, TrustMode::Untrusted);
+        let loaded = load(&root).unwrap();
+        assert_eq!(loaded.desired, None);
+        let host = loaded.host.unwrap();
+        assert_eq!(host.binding(), FilePublicationBinding::Missing);
+        assert_eq!(host.accepted_source_observation(), None);
+        assert_eq!(
+            fs::read_dir(fixture.directory.join(".nara/source-tools"))
+                .unwrap()
+                .count(),
+            0
+        );
+    }
+
+    #[test]
+    fn loaded_host_pins_the_actual_decoded_leaf_after_rename_and_unlink() {
+        let fixture = Fixture::new();
+        fixture.create_parents();
+        let bytes = encode(&desired()).unwrap();
+        fixture.write_record(&bytes);
+        let root = fixture.capability(CapabilityRights::ReadOnly, TrustMode::Untrusted);
+        let observed = root.open_file_exact(&fixed_path(SELECTION_PATH)).unwrap();
+        let identity = observed.identity();
+        let loaded = load(&root).unwrap();
+        assert_eq!(loaded.desired, Some(desired()));
+        let host = loaded.host.unwrap();
+        drop(observed);
+        let digest = ContentDigest::of_bytes(&bytes);
+        assert_eq!(
+            host.binding(),
+            FilePublicationBinding::Existing { identity, digest }
+        );
+        let observation = host.accepted_source_observation().unwrap();
+        assert_eq!(observation.0, identity);
+        assert_eq!(observation.2, digest);
+
+        fs::rename(
+            fixture.directory.join(SELECTION_PATH),
+            fixture.directory.join(MOVED_PATH),
+        )
+        .unwrap();
+        fixture.write_record(b"a different current leaf");
+        assert_eq!(host.test_accepted_source_bytes().unwrap(), bytes);
+        fs::remove_file(fixture.directory.join(MOVED_PATH)).unwrap();
+        assert_eq!(host.test_accepted_source_bytes().unwrap(), bytes);
+        assert_eq!(host.accepted_source_observation(), Some(observation));
+        assert_eq!(
+            fs::read(fixture.directory.join(SELECTION_PATH)).unwrap(),
+            b"a different current leaf"
+        );
+    }
+
+    #[test]
+    fn corrupt_unknown_and_oversized_records_never_become_empty_or_get_overwritten() {
+        let fixture = Fixture::new();
+        fixture.create_parents();
+        let root = fixture.capability(CapabilityRights::ReadWrite, TrustMode::Untrusted);
+        for (bytes, expected) in [
+            (
+                b"not JSON".to_vec(),
+                EditorSourceToolSelectionError::InvalidRecord,
+            ),
+            (
+                record().replacen('{', "{\"unknown\":true,", 1).into_bytes(),
+                EditorSourceToolSelectionError::InvalidRecord,
+            ),
+            (
+                record()
+                    .replace("\"format_version\":1", "\"format_version\":2")
+                    .into_bytes(),
+                EditorSourceToolSelectionError::UnsupportedFormat,
+            ),
+            (
+                vec![b'!'; BYTE_LIMIT as usize + 1],
+                EditorSourceToolSelectionError::TooLarge,
+            ),
+        ] {
+            fixture.write_record(&bytes);
+            assert_eq!(load(&root).unwrap_err(), expected);
+            assert_eq!(
+                create_missing_host(&root).unwrap_err(),
+                EditorSourceToolSelectionError::Changed
+            );
+            assert_eq!(
+                fs::read(fixture.directory.join(SELECTION_PATH)).unwrap(),
+                bytes
+            );
+            assert_eq!(
+                fs::read_dir(fixture.directory.join(".nara/source-tools"))
+                    .unwrap()
+                    .count(),
+                1
+            );
+        }
+    }
+
+    #[test]
+    fn explicit_creation_prepares_only_fixed_directories_and_refuses_existing_selection() {
+        let fixture = Fixture::new();
+        let root = fixture.capability(CapabilityRights::ReadWrite, TrustMode::Untrusted);
+        let host = create_missing_host(&root).unwrap();
+        assert_eq!(host.binding(), FilePublicationBinding::Missing);
+        assert!(fixture.directory.join(".nara/source-tools").is_dir());
+        assert!(!fixture.directory.join(SELECTION_PATH).exists());
+        let bytes = encode(&desired()).unwrap();
+        fixture.write_record(&bytes);
+        assert_eq!(
+            create_missing_host(&root).unwrap_err(),
+            EditorSourceToolSelectionError::Changed
+        );
+        assert_eq!(
+            fs::read(fixture.directory.join(SELECTION_PATH)).unwrap(),
+            bytes
+        );
+        assert!(!host.has_cleanup());
+    }
+
+    #[test]
+    fn missing_binding_uses_no_replace_when_a_later_writer_claims_the_leaf() {
+        let fixture = Fixture::new();
+        let root = fixture.capability(CapabilityRights::ReadWrite, TrustMode::Untrusted);
+        let mut host = create_missing_host(&root).unwrap();
+        let bytes = b"another writer owns this leaf";
+        fixture.write_record(bytes);
+        let result = host.publish(&encode(&desired()).unwrap());
+        assert!(matches!(
+            result,
+            FilePublicationOutcome::Rejected(FilePublicationRejection::TargetChanged)
+        ));
+        assert_eq!(
+            fs::read(fixture.directory.join(SELECTION_PATH)).unwrap(),
+            bytes
+        );
+        assert_eq!(host.binding(), FilePublicationBinding::Missing);
+        assert!(!host.has_cleanup());
+    }
+
+    #[test]
+    fn explicit_creation_preserves_read_only_rights_without_creating_directories() {
+        let fixture = Fixture::new();
+        let root = fixture.capability(CapabilityRights::ReadOnly, TrustMode::Untrusted);
+        assert_eq!(
+            create_missing_host(&root).unwrap_err(),
+            EditorSourceToolSelectionError::ReadOnly
+        );
+        assert_eq!(fs::read_dir(&fixture.directory).unwrap().count(), 0);
+    }
+
+    #[test]
+    fn non_directory_parents_and_nonregular_leaf_are_never_missing() {
+        let fixture = Fixture::new();
+        let root = fixture.capability(CapabilityRights::ReadOnly, TrustMode::Untrusted);
+        fs::write(fixture.directory.join(METADATA_DIRECTORY), b"keep").unwrap();
+        assert!(load(&root).is_err());
+        assert_eq!(
+            fs::read(fixture.directory.join(METADATA_DIRECTORY)).unwrap(),
+            b"keep"
+        );
+        fs::remove_file(fixture.directory.join(METADATA_DIRECTORY)).unwrap();
+        fs::create_dir(fixture.directory.join(METADATA_DIRECTORY)).unwrap();
+        fs::write(fixture.directory.join(".nara/source-tools"), b"keep").unwrap();
+        assert!(load(&root).is_err());
+        fs::remove_file(fixture.directory.join(".nara/source-tools")).unwrap();
+        fs::create_dir(fixture.directory.join(".nara/source-tools")).unwrap();
+        fs::create_dir(fixture.directory.join(SELECTION_PATH)).unwrap();
+        assert!(load(&root).is_err());
+        assert!(fixture.directory.join(SELECTION_PATH).is_dir());
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn case_aliases_of_each_fixed_component_reject_without_writes() {
+        for (alias_metadata, alias_tools, alias_leaf) in [
+            (".NARA", "Source-Tools", "Selection.json"),
+            (".nara", "Source-Tools", "selection.json"),
+            (".nara", "source-tools", "Selection.json"),
+        ] {
+            let fixture = Fixture::new();
+            fs::create_dir(fixture.directory.join(alias_metadata)).unwrap();
+            fs::create_dir(fixture.directory.join(alias_metadata).join(alias_tools)).unwrap();
+            let bytes = encode(&desired()).unwrap();
+            fs::write(
+                fixture
+                    .directory
+                    .join(alias_metadata)
+                    .join(alias_tools)
+                    .join(alias_leaf),
+                &bytes,
+            )
+            .unwrap();
+            let root = fixture.capability(CapabilityRights::ReadWrite, TrustMode::Untrusted);
+            assert_eq!(
+                load(&root).unwrap_err(),
+                EditorSourceToolSelectionError::InvalidPath
+            );
+            assert_eq!(
+                create_missing_host(&root).unwrap_err(),
+                EditorSourceToolSelectionError::InvalidPath
+            );
+            assert_eq!(
+                fs::read(
+                    fixture
+                        .directory
+                        .join(alias_metadata)
+                        .join(alias_tools)
+                        .join(alias_leaf),
+                )
+                .unwrap(),
+                bytes,
+            );
+        }
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn dangling_symlink_is_rejected_instead_of_treated_as_missing() {
+        let fixture = Fixture::new();
+        fixture.create_parents();
+        std::os::unix::fs::symlink("absent", fixture.directory.join(SELECTION_PATH)).unwrap();
+        let root = fixture.capability(CapabilityRights::ReadWrite, TrustMode::Untrusted);
+        assert!(load(&root).is_err());
+        assert!(create_missing_host(&root).is_err());
+        assert!(
+            fs::symlink_metadata(fixture.directory.join(SELECTION_PATH))
+                .unwrap()
+                .is_symlink()
+        );
+    }
+}

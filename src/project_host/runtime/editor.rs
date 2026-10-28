@@ -87,6 +87,7 @@ pub use source_tools::{
     EditorSourceToolManagedHostDigests, EditorSourceToolReleaseError,
     EditorSourceToolReleaseMember, EditorSourceToolReleaseMemberKind,
     EditorSourceToolReleaseRequirement, PreparedEditorSourceToolRelease,
+    PreparedEditorSourceToolSelection,
 };
 #[cfg(feature = "runtime-ui")]
 use ui_authoring::EditorUiAuthoringProjectionCache;
@@ -1639,6 +1640,7 @@ impl EditorProjectSession {
             };
             #[cfg(feature = "presentation-2d")]
             session.initialize_authoring_scene_capture();
+            session.initialize_source_tool_selection();
             session.publish_editor_frame(false);
             Ok(session)
         })();
@@ -1890,6 +1892,7 @@ impl EditorProjectSession {
                 #[cfg(feature = "runtime-ui")]
                 ui_authoring_projection_cache: None,
             };
+            session.initialize_source_tool_selection();
             session.publish_editor_frame(false);
             Ok(session)
         })();

@@ -3,7 +3,7 @@ type: "Current State"
 title: "Current Engineering State"
 description: "Derived summary of immutable engineering-memory shards."
 tags: ["engineering-memory", "derived"]
-source_fingerprint: "bd30d67dc04c94f8276762cfc5118c2827bc712e7e34fac1fef605c2c4eb2eb5"
+source_fingerprint: "c4e9c46a48804035d4f0a59d69eef2f03412492e6d40f54d3534272df241ab00"
 ---
 
 # Current State
@@ -12,8 +12,8 @@ source_fingerprint: "bd30d67dc04c94f8276762cfc5118c2827bc712e7e34fac1fef605c2c4e
 
 This file is derived from immutable shards. Record new facts in shards, then render during integration.
 
-- Source fingerprint: `bd30d67dc04c94f8276762cfc5118c2827bc712e7e34fac1fef605c2c4eb2eb5`
-- Immutable records: 988
+- Source fingerprint: `c4e9c46a48804035d4f0a59d69eef2f03412492e6d40f54d3534272df241ab00`
+- Immutable records: 990
 - Active lane heads: 1
 
 # Active Registrations
@@ -69,6 +69,8 @@ This file is derived from immutable shards. Record new facts in shards, then ren
 
 # Recent Evidence
 
+- **Verification Evidence**: [Durable installed source-tool selection and independent paired attempt qualification](verification/2026-10/2026-10-28T012206Z-durable-installed-source-tool-selection-and-independent-paired-attempt-qualification-3a4a90d3cc3042e5b89e8fa20e314c22.md) - Qualifies code-free desired selection, approved installation enablement and physical lifetime through Session, Application and native Editor consumers.
+- **Work Progress**: [Durable installed tool selection and paired attempt integration in progress](progress/2026-10/2026-10-28T010718Z-durable-installed-tool-selection-and-paired-attempt-integration-in-progress-9621f4a6d44249569e458a0e4006fa4a.md) - Records the current single-slot selection replacement, independent review corrections and live qualification boundary.
 - **Verification Evidence**: [Continuous file publication and editor source custody qualification](verification/2026-10/2026-10-27T233313Z-continuous-file-publication-and-editor-source-custody-qualification-d9a0d6253fc3473ab82093b446048d9c.md) - Qualifies live leaf custody across publication, fresh authoring admission and pending image imports, with public, managed and native consumers.
 - **Verification Evidence**: [Captured managed tool images through the Session and exact finite child custody](verification/2026-10/2026-10-27T221624Z-captured-managed-tool-images-through-the-session-and-exact-finite-child-custody-b852454a4fe841548bed563ca97d071e.md) - Records approved machine runtime and immutable image execution, strict managed graph admission, native cancellation custody, actual installed V1 V2 consumers and qualification limits.
 - **Verification Evidence**: [Shared Windows process image evidence and explicit installed tool runtime trust partition](verification/2026-10/2026-10-27T213708Z-shared-windows-process-image-evidence-and-explicit-installed-tool-runtime-trust-partition-814f24baa3964ef5ae5708602aaca655.md) - Records extraction of exact native image checks from Play, actual process-image and generation tests, and the bounded machine-runtime trust decision without claiming installed execution.
@@ -79,8 +81,6 @@ This file is derived from immutable shards. Record new facts in shards, then ren
 - **Verification Evidence**: [Production finite source tools and exact physical close observations](verification/2026-10/2026-10-27T180941Z-production-finite-source-tools-and-exact-physical-close-observations-fc2363973364434096d350ae4a8d762c.md) - Qualifies Session/Application-owned trusted child proposals, deletes the displaced tool bridge, and fixes concurrent result and physical-close observations.
 - **Verification Evidence**: [Complete observation bases at public authoring preparation ingress](verification/2026-10/2026-10-27T155752Z-complete-observation-bases-at-public-authoring-preparation-ingress-d45451eaca544ad2b50a55a66a0ce496.md) - Qualifies full source/Schema observation checks in Workspace, Session, Application and Panel preparation without a second transaction owner.
 - **Verification Evidence**: [Concrete EnemyStats semantic proposals through the public Project Session](verification/2026-10/2026-10-27T152916Z-concrete-enemystats-semantic-proposals-through-the-public-project-session-1acb9412a2544e98b059654fe5ec2ca7.md) - Qualifies concrete C# source proposals, exact preparation and stale-result refusal through existing Scene and Project Session owners.
-- **Verification Evidence**: [Public Scene language consumer and obsolete representation runtime removal](verification/2026-10/2026-10-27T145608Z-public-scene-language-consumer-and-obsolete-representation-runtime-removal-67783a7cb8514ce9bbb7957670b4ec37.md) - Qualifies public Scene and real Session adoption by experimental languages, preserving physical code custody and removing the displaced Runtime.
-- **Verification Evidence**: [Mixed Scene product selection and content-to-runtime admission qualification](verification/2026-10/2026-10-27T141025Z-mixed-scene-product-selection-and-content-to-runtime-admission-qualification-7c90588821aa4e8da374958ef2e436e4.md) - Qualifies exact mixed definitions through recipes, strict content and managed publication; records remaining language and Editor work.
 
 # Integration Notes
 

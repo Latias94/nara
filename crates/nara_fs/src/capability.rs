@@ -140,6 +140,22 @@ impl DirectoryCapability {
         self.inner.identity
     }
 
+    /// Compares two continuously live directory objects, including independent Host sessions.
+    ///
+    /// This does not merge capabilities, change trust/rights or equate their session identities.
+    /// Both platform observations must prove native identity. No pathname is reopened.
+    pub fn same_object(&self, other: &Self) -> Result<bool, FsError> {
+        let left = platform::facts(&self.inner.file)?;
+        let right = platform::facts(&other.inner.file)?;
+        if !left.identity_proven || !right.identity_proven {
+            return Err(FsError::Unproven {
+                operation: FsOperation::InspectHandle,
+                proof: "comparing live directories requires proven native object identity",
+            });
+        }
+        Ok(left.identity == right.identity)
+    }
+
     /// Shares the same Host-issued directory authority without creating a new session or
     /// re-resolving an ambient path.
     #[must_use]

@@ -447,6 +447,122 @@ fn identity_is_scoped_to_capability_session_and_generation() {
     assert!(format!("{:?}", file.identity()).contains("<sensitive>"));
 }
 
+#[cfg(any(windows, target_os = "linux"))]
+#[test]
+fn directory_same_object_matches_independent_imports_without_equating_sessions() {
+    let root = TestRoot::new();
+    let first = portable_read_only(&root);
+    let second = portable_read_only(&root);
+    let first_identity = first.identity();
+    let second_identity = second.identity();
+
+    assert_ne!(first_identity.session(), second_identity.session());
+    assert_eq!(first_identity.generation(), second_identity.generation());
+    assert_ne!(first_identity, second_identity);
+    assert!(first.same_object(&second).unwrap());
+    assert!(second.same_object(&first).unwrap());
+    assert_eq!(first.identity(), first_identity);
+    assert_eq!(second.identity(), second_identity);
+}
+
+#[cfg(any(windows, target_os = "linux"))]
+#[test]
+fn directory_same_object_rejects_different_live_roots() {
+    let first_root = TestRoot::new();
+    let second_root = TestRoot::new();
+    let first = portable_read_only(&first_root);
+    let second = portable_read_only(&second_root);
+
+    assert!(!first.same_object(&second).unwrap());
+    assert!(!second.same_object(&first).unwrap());
+}
+
+#[cfg(any(windows, target_os = "linux"))]
+#[test]
+fn directory_same_object_preserves_strict_and_trusted_authority() {
+    let root = TestRoot::new();
+    fs::write(root.path().join("value.txt"), b"value").unwrap();
+    fs::hard_link(root.path().join("value.txt"), root.path().join("alias.txt")).unwrap();
+    let trusted = trusted_read_write(&root);
+    let trusted_options = trusted.options();
+    let trusted_identity = trusted.identity();
+    let trusted_resolution = trusted.resolution_tier();
+
+    for trust in [TrustMode::Untrusted, TrustMode::Recovery] {
+        let strict_options =
+            HostCapabilityOptions::new(CapabilityRights::ReadOnly, trust).with_generation(7);
+        let strict =
+            DirectoryCapability::from_host_handle(host_directory(root.path()), strict_options)
+                .unwrap();
+        let strict_identity = strict.identity();
+        let strict_resolution = strict.resolution_tier();
+
+        assert_ne!(strict_identity.generation(), trusted_identity.generation());
+        assert!(strict.same_object(&trusted).unwrap());
+        assert!(trusted.same_object(&strict).unwrap());
+        assert_eq!(strict.options(), strict_options);
+        assert_eq!(trusted.options(), trusted_options);
+        assert_eq!(strict.identity(), strict_identity);
+        assert_eq!(trusted.identity(), trusted_identity);
+        assert_eq!(strict.resolution_tier(), strict_resolution);
+        assert_eq!(trusted.resolution_tier(), trusted_resolution);
+        assert!(matches!(
+            strict.open_file(&relative("value.txt")),
+            Err(FsError::MultipleLinks { links: 2 })
+        ));
+        assert_eq!(
+            trusted
+                .open_file(&relative("value.txt"))
+                .unwrap()
+                .read_to_end_bounded(5)
+                .unwrap(),
+            b"value"
+        );
+        assert!(matches!(
+            strict.create_child_directory(&component("trusted-child")),
+            Err(FsError::ReadOnlyCapability {
+                operation: nara_fs::FsOperation::CreateDirectory
+            })
+        ));
+    }
+
+    let child = trusted
+        .create_child_directory(&component("trusted-child"))
+        .unwrap();
+    assert_eq!(child.options(), trusted_options);
+}
+
+#[cfg(any(windows, target_os = "linux"))]
+#[test]
+fn directory_same_object_uses_kept_handles_after_name_replacement() {
+    let root = TestRoot::new();
+    let original = root.path().join("authority");
+    let moved = root.path().join("moved-authority");
+    fs::create_dir(&original).unwrap();
+    let options = HostCapabilityOptions::new(CapabilityRights::ReadOnly, TrustMode::Untrusted);
+    let first = DirectoryCapability::from_host_handle(host_directory(&original), options).unwrap();
+    let second = DirectoryCapability::from_host_handle(host_directory(&original), options).unwrap();
+    let first_identity = first.identity();
+    let second_identity = second.identity();
+    assert!(first.same_object(&second).unwrap());
+
+    fs::rename(&original, &moved).unwrap();
+
+    // The original name is absent while both imported handles remain live.
+    assert!(first.same_object(&second).unwrap());
+    assert!(second.same_object(&first).unwrap());
+
+    fs::create_dir(&original).unwrap();
+    let replacement =
+        DirectoryCapability::from_host_handle(host_directory(&original), options).unwrap();
+
+    assert!(first.same_object(&second).unwrap());
+    assert!(!first.same_object(&replacement).unwrap());
+    assert!(!second.same_object(&replacement).unwrap());
+    assert_eq!(first.identity(), first_identity);
+    assert_eq!(second.identity(), second_identity);
+}
+
 #[test]
 fn imported_file_authority_is_limited_to_its_opened_handle() {
     let root = TestRoot::new();

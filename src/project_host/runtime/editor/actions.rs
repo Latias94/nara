@@ -414,6 +414,16 @@ impl EditorProjectSession {
             EditorSourceToolAction::CancelAttempt { attempt } => EditorActionOutcome::SourceTool(
                 EditorSourceToolActionOutcome::Cancelled(self.cancel_source_tool_attempt(&attempt)),
             ),
+            EditorSourceToolAction::DisableInstalled { basis } => {
+                EditorActionOutcome::SourceTool(EditorSourceToolActionOutcome::Selection(
+                    self.disable_installed_source_tool(&basis),
+                ))
+            }
+            EditorSourceToolAction::ReconcileSelection { basis } => {
+                EditorActionOutcome::SourceTool(EditorSourceToolActionOutcome::Selection(
+                    self.reconcile_source_tool_selection(&basis),
+                ))
+            }
         }
     }
 

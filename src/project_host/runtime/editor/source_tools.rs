@@ -34,6 +34,7 @@ use super::{EditorEditPreparationError, EditorProjectSession};
 mod managed;
 mod process;
 mod release;
+mod selection;
 pub use managed::{
     EditorSourceToolManagedError, EditorSourceToolManagedHost, EditorSourceToolManagedHostDigests,
 };
@@ -45,6 +46,8 @@ pub use release::{
     EditorSourceToolReleaseError, EditorSourceToolReleaseMember, EditorSourceToolReleaseMemberKind,
     EditorSourceToolReleaseRequirement, PreparedEditorSourceToolRelease,
 };
+pub use selection::PreparedEditorSourceToolSelection;
+pub(super) use selection::SELECTION_PATH;
 #[cfg(test)]
 mod tests;
 
@@ -168,6 +171,7 @@ impl From<EditorEditPreparationError> for EditorSourceToolError {
 struct Activation {
     active: EditorSourceToolActive,
     definition: EditorSourceToolDefinition,
+    origin: Option<nara_tooling::EditorSourceToolInstalledSelection>,
 }
 
 struct Invocation {
@@ -194,6 +198,7 @@ struct Probe {
     sequence: u64,
     definition: EditorSourceToolDefinition,
     task: ProcessTask,
+    selection: Option<selection::EnableSelection>,
 }
 
 struct PendingInvocation {
@@ -214,11 +219,18 @@ pub(super) struct EditorSourceTools {
     sequence: u64,
     attempt_error: Option<EditorSourceToolError>,
     request_error: Option<EditorSourceToolError>,
+    selection: selection::SelectionState,
     #[cfg(test)]
     next_gates: process::ProcessTestGates,
 }
 
 impl EditorSourceTools {
+    pub(super) fn selection_read_source(
+        &self,
+    ) -> Result<Option<crate::project_host::file_publication::FilePublicationReadSource>, ()> {
+        self.selection.read_source()
+    }
+
     fn jobs(&self) -> usize {
         usize::from(self.probe.is_some())
             + usize::from(self.invocation.is_some())
@@ -242,12 +254,19 @@ impl EditorSourceTools {
     }
 
     pub(super) fn cancel(&mut self) {
+        self.selection.revoke_promotion();
         self.active = None;
         self.latest = None;
         self.request_error = None;
         self.retire_invocation();
         if let Some(probe) = self.probe.take() {
             self.attempt_error = Some(EditorSourceToolError::Process("cancelled"));
+            if probe.selection.is_some() {
+                self.selection.fail_probe(
+                    probe.attempt.clone(),
+                    nara_tooling::EditorSourceToolSelectionError::ProbeCancelled,
+                );
+            }
             probe.task.cancel();
             self.retiring.push(probe.task);
         }
@@ -281,6 +300,13 @@ impl EditorSourceTools {
             review,
             attempt_error: self.attempt_error.clone(),
             request_error: self.request_error.clone(),
+            selection: Some(
+                self.selection.view(
+                    self.active
+                        .as_ref()
+                        .and_then(|active| active.origin.clone()),
+                ),
+            ),
         }
     }
 }
@@ -358,6 +384,15 @@ impl EditorProjectSession {
     ) -> Result<EditorSourceToolAttemptId, EditorSourceToolError> {
         self.ensure_source_tool_admission()?;
         self.advance_source_tools();
+        self.start_source_tool_probe(definition)
+    }
+
+    /// Admits one probe without advancing the owner or replacing a caller's observation.
+    fn start_source_tool_probe(
+        &mut self,
+        definition: EditorSourceToolDefinition,
+    ) -> Result<EditorSourceToolAttemptId, EditorSourceToolError> {
+        self.ensure_source_tool_admission()?;
         if self.source_tools.probe.is_some() || self.source_tools.jobs() >= MAX_JOBS {
             return Err(EditorSourceToolError::Busy);
         }
@@ -379,6 +414,7 @@ impl EditorProjectSession {
             sequence,
             definition,
             task,
+            selection: None,
         });
         Ok(attempt)
     }
@@ -422,6 +458,10 @@ impl EditorProjectSession {
         self.source_tools.attempt_error = Some(EditorSourceToolError::Process("cancelled"));
         probe.task.cancel();
         self.source_tools.retiring.push(probe.task);
+        self.source_tool_probe_failed(
+            attempt.clone(),
+            nara_tooling::EditorSourceToolSelectionError::ProbeCancelled,
+        );
         self.advance_source_tools();
         Ok(())
     }
@@ -728,6 +768,7 @@ impl EditorProjectSession {
     }
 
     pub(super) fn advance_source_tools(&mut self) {
+        self.advance_source_tool_selection();
         self.source_tools
             .retiring
             .retain(|task| task.return_observer().state() == TaskReturnState::Pending);
@@ -784,15 +825,20 @@ impl EditorProjectSession {
                 .and_then(|active| self.ensure_source_tool_admission().map(|()| active));
             match result {
                 Ok(active) => {
-                    self.source_tools.retire_invocation();
-                    self.source_tools.latest = None;
-                    self.source_tools.active = Some(Activation {
+                    self.source_tool_ready(selection::ReadyTool {
                         active,
                         definition: probe.definition,
+                        attempt: probe.attempt,
+                        selection: probe.selection,
                     });
-                    self.source_tools.request_error = None;
                 }
-                Err(error) => self.source_tools.attempt_error = Some(error),
+                Err(error) => {
+                    self.source_tools.attempt_error = Some(error);
+                    self.source_tool_probe_failed(
+                        probe.attempt,
+                        nara_tooling::EditorSourceToolSelectionError::ProbeFailed,
+                    );
+                }
             }
         }
         if self

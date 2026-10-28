@@ -8,6 +8,8 @@ use std::{
     time::{Duration, Instant},
 };
 
+#[cfg(all(target_os = "windows", target_arch = "x86_64", target_env = "msvc"))]
+use nara_engine::project_host::PreparedEditorSourceToolSelection;
 use nara_engine::project_host::{
     EditorProjectSession, EditorSourceToolCommand, EditorSourceToolDefinition,
 };
@@ -24,7 +26,8 @@ use nara_tooling::{
     EditorEntityQueryLimits, EditorEntityQueryPosition, EditorPropertyTarget,
     EditorSourceToolAction, EditorSourceToolActionOutcome, EditorSourceToolActivationId,
     EditorSourceToolCommit, EditorSourceToolError, EditorSourceToolIntent,
-    EditorSourceToolRequestId, EditorSourceToolView,
+    EditorSourceToolRequestId, EditorSourceToolSelectionError, EditorSourceToolSelectionOutcome,
+    EditorSourceToolSelectionPhase, EditorSourceToolSelectionView, EditorSourceToolView,
 };
 
 use super::{
@@ -63,6 +66,114 @@ pub(super) fn approved_managed_host() -> nara_engine::project_host::EditorSource
         TIMEOUT,
     )
     .unwrap()
+}
+
+#[cfg(all(target_os = "windows", target_arch = "x86_64", target_env = "msvc"))]
+fn project_root_capability(project: &Project) -> nara_engine::fs::DirectoryCapability {
+    use std::os::windows::fs::OpenOptionsExt;
+
+    use nara_engine::fs::{
+        CapabilityRights, DirectoryCapability, HostCapabilityOptions, TrustMode,
+    };
+
+    let directory = std::fs::OpenOptions::new()
+        .read(true)
+        .share_mode(0x1 | 0x2 | 0x4)
+        .custom_flags(0x0200_0000 | 0x0020_0000)
+        .open(project.root())
+        .unwrap();
+    DirectoryCapability::from_host_handle(
+        directory,
+        HostCapabilityOptions::new(CapabilityRights::ReadWrite, TrustMode::Untrusted),
+    )
+    .unwrap()
+}
+
+#[cfg(all(target_os = "windows", target_arch = "x86_64", target_env = "msvc"))]
+fn install_variant_in_project(
+    root: &nara_engine::fs::DirectoryCapability,
+    variant: &str,
+    destination: &str,
+) -> nara_engine::project_host::EditorSourceToolInstallationInspection {
+    use super::local_release::installed_variant;
+    use nara_engine::{
+        fs::RelativeComponent,
+        project_host::{
+            EditorSourceToolInstallationInspection, EditorSourceToolInstallationOutcome,
+            EditorSourceToolInstallationPlan, PreparedEditorSourceToolRelease,
+            open_explicit_product_project_root,
+        },
+    };
+
+    let (source_installation_parent, source_installation) = installed_variant(variant);
+    let source = tempfile::tempdir().unwrap();
+    std::fs::write(
+        source.path().join("nara-tool.json"),
+        source_installation.release().manifest_bytes(),
+    )
+    .unwrap();
+    for member in source_installation.release().members() {
+        let path = std::path::PathBuf::from(member.path());
+        if let Some(parent) = path.parent() {
+            std::fs::create_dir_all(source.path().join(parent)).unwrap();
+        }
+        std::fs::write(source.path().join(path), member.bytes()).unwrap();
+    }
+    let source_root = open_explicit_product_project_root(source.path()).unwrap();
+    let captured = PreparedEditorSourceToolRelease::capture(
+        &source_root,
+        source_installation.release().manifest_digest(),
+    )
+    .unwrap();
+    let plan = EditorSourceToolInstallationPlan::new(
+        root.share(),
+        RelativeComponent::new(destination).unwrap(),
+        captured,
+    )
+    .unwrap();
+    let installation = match plan.publish() {
+        EditorSourceToolInstallationOutcome::Published(installation) => installation,
+        other => panic!("Actual project-root release publication failed: {other:?}"),
+    };
+    let receipt = installation.receipt_digest();
+    let inspected =
+        EditorSourceToolInstallationInspection::read(installation.directory(), receipt).unwrap();
+    drop(installation);
+    drop(source_root);
+    drop(source_installation);
+    drop(source_installation_parent);
+    inspected
+}
+
+fn settle_selection(editor: &mut EditorProjectSession) -> EditorSourceToolSelectionView {
+    let deadline = Instant::now() + TIMEOUT;
+    loop {
+        let view = editor.source_tool_selection_view();
+        // A retained terminal observation in one lane cannot settle pending work in the other.
+        if view
+            .operation
+            .as_ref()
+            .is_some_and(|operation| operation.outcome.is_some())
+            && view
+                .disable
+                .as_ref()
+                .is_none_or(|disable| disable.outcome.is_some())
+            && matches!(
+                view.phase,
+                EditorSourceToolSelectionPhase::Idle
+                    | EditorSourceToolSelectionPhase::Unavailable
+                    | EditorSourceToolSelectionPhase::RequiresReconcile
+            )
+        {
+            return view;
+        }
+        assert!(
+            Instant::now() < deadline,
+            "Durable source-tool selection did not settle: {view:?}"
+        );
+        editor.drive_editor_frame(Duration::ZERO);
+        std::thread::sleep(Duration::from_millis(1));
+    }
 }
 
 #[cfg(all(target_os = "windows", target_arch = "x86_64", target_env = "msvc"))]
@@ -152,6 +263,365 @@ fn csharp_installed_images_use_original_bytes_and_failed_update_preserves_the_se
         .unwrap();
     assert_stats(&reopened, document, "enemy", 103);
     close(&mut reopened);
+}
+
+#[cfg(all(target_os = "windows", target_arch = "x86_64", target_env = "msvc"))]
+#[test]
+fn csharp_installed_source_tool_selection_persists_v1_switches_v2_and_disables() {
+    let definition = definition();
+    let host = approved_managed_host();
+    let project = Project::new(&schema_bundle(&definition.owner), &original(), "json");
+    let root = project_root_capability(&project);
+    let v1_a = install_variant_in_project(&root, "V1", "installed-v1-a");
+    let v1_a_receipt = v1_a.receipt_digest();
+    let v1_b = install_variant_in_project(&root, "V1", "installed-v1-b");
+    let v2 = install_variant_in_project(&root, "V2", "installed-v2");
+    let v2_receipt = v2.receipt_digest();
+    let invalid = install_variant_in_project(&root, "INVALID", "installed-invalid");
+    let invalid_receipt = invalid.receipt_digest();
+    assert_ne!(
+        v1_a.receipt().installation_id(),
+        v1_b.receipt().installation_id()
+    );
+    let v1_a = host.approve_installation(v1_a).unwrap();
+
+    assert!(matches!(
+        PreparedEditorSourceToolSelection::new(root.share(), "installed-v1-b", v1_a.clone()),
+        Err(EditorSourceToolSelectionError::RootMismatch)
+    ));
+
+    let mut editor = project.open();
+    let document = editor.current_frame().workspace().active_document.unwrap();
+    let loaded = settle_selection(&mut editor);
+    assert_eq!(loaded.phase, EditorSourceToolSelectionPhase::Idle);
+    assert!(loaded.desired.is_none());
+    assert!(loaded.active_origin.is_none());
+    assert!(matches!(
+        loaded
+            .operation
+            .as_ref()
+            .and_then(|operation| operation.outcome.as_ref()),
+        Some(EditorSourceToolSelectionOutcome::Observed)
+    ));
+
+    let cancelled = editor
+        .prepare_installed_source_tool_selection(
+            root.share(),
+            "installed-v1-a",
+            v1_a_receipt,
+            &host,
+        )
+        .unwrap();
+    let cancelled_attempt = editor
+        .enable_installed_source_tool(&loaded.basis, cancelled)
+        .unwrap();
+    let probing = editor.source_tool_selection_view();
+    assert_eq!(probing.phase, EditorSourceToolSelectionPhase::Probing);
+    let disable_attempt = editor
+        .disable_installed_source_tool(&probing.basis)
+        .unwrap();
+    let cancelled = settle_selection(&mut editor);
+    let operation = cancelled.operation.as_ref().unwrap();
+    assert_eq!(operation.attempt, cancelled_attempt);
+    assert_eq!(
+        operation.outcome,
+        Some(EditorSourceToolSelectionOutcome::Failed(
+            EditorSourceToolSelectionError::ProbeCancelled,
+        ))
+    );
+    let disable = cancelled.disable.as_ref().unwrap();
+    assert_eq!(disable.attempt, disable_attempt);
+    assert_eq!(
+        disable.outcome,
+        Some(EditorSourceToolSelectionOutcome::Disabled)
+    );
+    assert!(cancelled.desired.is_none());
+    assert!(cancelled.active_origin.is_none());
+    assert!(
+        !project
+            .root()
+            .join(".nara/source-tools/selection.json")
+            .exists()
+    );
+
+    let prepared = editor
+        .prepare_installed_source_tool_selection(
+            root.share(),
+            "installed-v1-a",
+            v1_a_receipt,
+            &host,
+        )
+        .unwrap();
+    let prepared_selection = prepared.selection().clone();
+    assert_eq!(prepared_selection.package.as_ref(), "trial.enemy-stats");
+    assert_eq!(prepared_selection.directory.as_ref(), "installed-v1-a");
+    let started = Instant::now();
+    let attempt = editor
+        .enable_installed_source_tool(&cancelled.basis, prepared)
+        .unwrap();
+    let enabled = settle_selection(&mut editor);
+    let v1_enable = started.elapsed();
+    assert_eq!(enabled.phase, EditorSourceToolSelectionPhase::Idle);
+    assert!(matches!(
+        enabled.operation.as_ref(),
+        Some(operation)
+            if operation.attempt == attempt
+                && operation.outcome == Some(EditorSourceToolSelectionOutcome::Enabled)
+    ));
+    let v1_selection = enabled.desired.clone().unwrap();
+    assert!(v1_selection.enabled);
+    assert_eq!(v1_selection.installed.directory.as_ref(), "installed-v1-a");
+    assert_eq!(v1_selection.installed, prepared_selection);
+    assert_eq!(enabled.active_origin, Some(v1_selection.installed.clone()));
+    let active_view = editor.source_tool_view();
+    let active = active_view.active.as_ref().unwrap();
+    assert_eq!(active.owner(), definition.owner.owner_id());
+    assert_eq!(active.component(), &kind(STATS));
+    let selection_disk_v1 =
+        std::fs::read(project.root().join(".nara/source-tools/selection.json")).unwrap();
+
+    // The probe uses captured approved images, but durable publication must freshly inspect
+    // the selected installation. Exercise both exact receipt bytes and declared payload drift.
+    for member in [".nara-installation.json", "EnemyStatsTool.dll"] {
+        let prepared = editor
+            .prepare_installed_source_tool_selection(
+                root.share(),
+                "installed-v2",
+                v2_receipt,
+                &host,
+            )
+            .unwrap();
+        let path = project.root().join("installed-v2").join(member);
+        let original = std::fs::read(&path).unwrap();
+        let mut changed = original.clone();
+        changed.push(b'\n');
+        std::fs::write(&path, changed).unwrap();
+        let observed = editor.source_tool_selection_view();
+        let attempt = editor
+            .enable_installed_source_tool(&observed.basis, prepared)
+            .unwrap();
+        let refused = settle_selection(&mut editor);
+        std::fs::write(path, original).unwrap();
+        let operation = refused.operation.as_ref().unwrap();
+        assert_eq!(operation.attempt, attempt);
+        assert_eq!(
+            operation.outcome,
+            Some(EditorSourceToolSelectionOutcome::Failed(
+                EditorSourceToolSelectionError::Installation,
+            )),
+            "{member}"
+        );
+        assert!(editor.source_tool_view().attempt_error.is_none());
+        assert_eq!(refused.desired, Some(v1_selection.clone()));
+        assert_eq!(refused.active_origin, Some(v1_selection.installed.clone()));
+        assert_eq!(
+            std::fs::read(project.root().join(".nara/source-tools/selection.json")).unwrap(),
+            selection_disk_v1,
+        );
+    }
+
+    let invalid_prepared = editor
+        .prepare_installed_source_tool_selection(
+            root.share(),
+            "installed-invalid",
+            invalid_receipt,
+            &host,
+        )
+        .unwrap();
+    let selection_basis = editor.source_tool_selection_view().basis.clone();
+    let started = Instant::now();
+    let invalid_attempt = editor
+        .enable_installed_source_tool(&selection_basis, invalid_prepared)
+        .unwrap();
+    let rejected = settle_selection(&mut editor);
+    let rejected_update = started.elapsed();
+    assert_eq!(
+        rejected.operation.as_ref().unwrap().attempt,
+        invalid_attempt
+    );
+    assert!(matches!(
+        rejected.operation.as_ref().unwrap().outcome,
+        Some(EditorSourceToolSelectionOutcome::Failed(
+            EditorSourceToolSelectionError::ProbeFailed
+        ))
+    ));
+    assert_eq!(
+        editor.source_tool_view().attempt_error,
+        Some(EditorSourceToolError::Declaration)
+    );
+    assert_eq!(
+        std::fs::read(project.root().join(".nara/source-tools/selection.json")).unwrap(),
+        selection_disk_v1
+    );
+    let after_invalid = editor.source_tool_selection_view();
+    assert_eq!(after_invalid.desired, Some(v1_selection.clone()));
+    assert_eq!(
+        after_invalid.active_origin,
+        Some(v1_selection.installed.clone())
+    );
+    assert!(editor.source_tool_review().is_none());
+
+    attach(&mut editor, document);
+    let basis = editor.document_query_basis(document).unwrap();
+    let started = Instant::now();
+    let old_review = request_review(
+        &mut editor,
+        &basis,
+        EditorSourceToolIntent::Edit {
+            entity: id("enemy"),
+        },
+        40,
+    );
+    let proposal_review = started.elapsed();
+    let prepared = editor
+        .prepare_installed_source_tool_selection(root.share(), "installed-v2", v2_receipt, &host)
+        .unwrap();
+    let selection_basis = editor.source_tool_selection_view().basis.clone();
+    let started = Instant::now();
+    let attempt = editor
+        .enable_installed_source_tool(&selection_basis, prepared)
+        .unwrap();
+    let switched = settle_selection(&mut editor);
+    let v2_enable = started.elapsed();
+    assert!(matches!(
+        switched.operation.as_ref(),
+        Some(operation)
+            if operation.attempt == attempt
+                && operation.outcome == Some(EditorSourceToolSelectionOutcome::Enabled)
+    ));
+    let v2_selection = switched.desired.clone().unwrap();
+    assert!(v2_selection.enabled);
+    assert_eq!(v2_selection.installed.directory.as_ref(), "installed-v2");
+    assert_eq!(switched.active_origin, Some(v2_selection.installed.clone()));
+    assert_ne!(switched.active_origin, Some(v1_selection.installed.clone()));
+    assert!(editor.source_tool_view().active.is_some());
+    assert!(editor.source_tool_review().is_none());
+    assert!(matches!(
+        editor.accept_source_tool_review(&old_review),
+        Err(EditorSourceToolError::StaleRequest)
+    ));
+
+    let selection_disk_v2 =
+        std::fs::read(project.root().join(".nara/source-tools/selection.json")).unwrap();
+    assert_ne!(selection_disk_v2, selection_disk_v1);
+    let selection_basis = editor.source_tool_selection_view().basis.clone();
+    let started = Instant::now();
+    let attempt = editor
+        .disable_installed_source_tool(&selection_basis)
+        .unwrap();
+    assert!(editor.source_tool_view().active.is_none());
+    assert!(editor.source_tool_selection_view().active_origin.is_none());
+    let disabled = settle_selection(&mut editor);
+    let disable_selection = started.elapsed();
+    assert!(matches!(
+        disabled.disable.as_ref(),
+        Some(disable)
+            if disable.attempt == attempt
+                && disable.outcome == Some(EditorSourceToolSelectionOutcome::Disabled)
+    ));
+    assert_eq!(disabled.operation, switched.operation);
+    let retained = disabled.desired.clone().unwrap();
+    assert!(!retained.enabled);
+    assert_eq!(retained.installed, v2_selection.installed);
+    assert!(disabled.active_origin.is_none());
+    assert_ne!(
+        std::fs::read(project.root().join(".nara/source-tools/selection.json")).unwrap(),
+        selection_disk_v2
+    );
+    close(&mut editor);
+    drop(editor);
+
+    let mut reopened = project.open();
+    let document = reopened
+        .current_frame()
+        .workspace()
+        .active_document
+        .unwrap();
+    let reopened_selection = settle_selection(&mut reopened);
+    assert_eq!(
+        reopened_selection.phase,
+        EditorSourceToolSelectionPhase::Idle
+    );
+    assert_eq!(reopened_selection.desired, Some(retained));
+    assert!(reopened_selection.active_origin.is_none());
+    assert!(reopened.source_tool_view().active.is_none());
+    assert!(!reopened.source_tool_view().probing);
+    assert_value(
+        &reopened,
+        document,
+        "enemy",
+        NAME,
+        "value",
+        ComponentValue::String("Guard".into()),
+    );
+
+    let prepared = reopened
+        .prepare_installed_source_tool_selection(root.share(), "installed-v2", v2_receipt, &host)
+        .unwrap();
+    let selection_basis = reopened_selection.basis.clone();
+    let attempt = reopened
+        .enable_installed_source_tool(&selection_basis, prepared)
+        .unwrap();
+    let reenabled = settle_selection(&mut reopened);
+    assert!(matches!(
+        reenabled.operation.as_ref(),
+        Some(operation)
+            if operation.attempt == attempt
+                && operation.outcome == Some(EditorSourceToolSelectionOutcome::Enabled)
+    ));
+    assert_eq!(
+        reenabled.active_origin,
+        Some(reenabled.desired.unwrap().installed)
+    );
+    assert!(reopened.source_tool_view().active.is_some());
+    close(&mut reopened);
+    eprintln!(
+        "Installed EnemyStats single-run debug observations: v1-enable={v1_enable:?}, \
+         rejected-update={rejected_update:?}, proposal-to-review={proposal_review:?}, \
+         v2-enable={v2_enable:?}, disable-selection={disable_selection:?}"
+    );
+}
+
+#[test]
+fn malformed_installed_source_tool_selection_keeps_ordinary_document_usable() {
+    let definition = definition();
+    let project = Project::new(&schema_bundle(&definition.owner), &original(), "json");
+    std::fs::create_dir_all(project.root().join(".nara/source-tools")).unwrap();
+    std::fs::write(
+        project.root().join(".nara/source-tools/selection.json"),
+        b"not-json",
+    )
+    .unwrap();
+
+    let mut editor = project.open();
+    let document = editor.current_frame().workspace().active_document.unwrap();
+    let selection = settle_selection(&mut editor);
+    assert_eq!(selection.phase, EditorSourceToolSelectionPhase::Unavailable);
+    assert!(selection.desired.is_none());
+    assert!(selection.active_origin.is_none());
+    assert!(matches!(
+        selection
+            .operation
+            .as_ref()
+            .and_then(|operation| operation.outcome.as_ref()),
+        Some(EditorSourceToolSelectionOutcome::Failed(
+            EditorSourceToolSelectionError::InvalidRecord
+        ))
+    ));
+    assert_eq!(
+        selection.error,
+        Some(EditorSourceToolSelectionError::InvalidRecord)
+    );
+    assert!(editor.source_tool_view().active.is_none());
+    assert_value(
+        &editor,
+        document,
+        "enemy",
+        NAME,
+        "value",
+        ComponentValue::String("Guard".into()),
+    );
+    close(&mut editor);
 }
 
 fn kind(value: &str) -> ComponentTypeId {

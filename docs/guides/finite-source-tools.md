@@ -6,11 +6,13 @@ The Project Session owns activation, requests, review and acceptance. Scene/Pref
 generated entity IDs, inverse patches, history and persistence retain their existing owners.
 No drawing toolkit or gameplay VM is involved.
 
-This is explicit command configuration for a concrete tool. Ordinary project Open never executes
-the command. A separate code-free local release capture API prepares declared artifact bytes;
-persistent installation, approved installed execution, dependency resolution and a public language
-SDK remain separate work. Raw command paths are trusted local configuration, not immutable
-installed release identity.
+Ordinary project Open never executes a tool. Code-free release capture, receipt-last artifact
+publication and explicitly approved captured-image execution have separate concrete APIs below.
+The project-local desired-selection workflow is being qualified under the
+[local lifecycle plan](../plans/2026-10-28-local-source-tool-release-plan.md); installed dependency
+resolution, metadata adoption, safe removal and a public language SDK remain separate work.
+Raw development command paths are trusted local configuration, not immutable installed release
+identity.
 
 ## Prepare A Local Release
 
@@ -137,10 +139,71 @@ probing/configuration and unresolved installed requirements reject. Content memb
 implicitly imported or made available as a package filesystem. Fully trusted tool code retains
 ambient process authority; this adapter is not a sandbox.
 
-Approval and successful Session activation are not durable enablement or complete Package
-selection. Fresh Open does not start a tool because its receipt exists. Schema metadata must
-already be admitted in the project; fresh-project adoption, evolved lineage, required-dependent
-selection, update/removal and the installed native UI workflow remain in the lifecycle plan.
+Approval and successful Session activation are independent of durable desired selection. Fresh
+Open does not start a tool because its receipt exists. Schema metadata must already be admitted
+in the project; fresh-project adoption, evolved lineage, required-dependent selection and safe
+update/removal remain in the lifecycle plan.
+
+## Select A Project-Local Installed Tool
+
+The current single tool slot records desired selection in `.nara/source-tools/selection.json`.
+This format-1 record is bounded to 4 KiB and contains package identity, a project-relative
+installation directory, a nonzero installation ID, exact receipt/manifest digests and desired
+enabled state. It contains no launcher, native file identity, active invocation ID or approval
+flag. The installation receipt remains a separate artifact fact. No duplicate setting belongs
+in `nara.toml`.
+
+Supply a Host-issued strict capability for the actual project root, the selected installation
+directory and its observed ready-receipt digest. Independently imported project capabilities may
+have different capability-session identities; the filesystem owner compares their continuously
+live native directory objects without combining authority or reopening a pathname.
+
+```rust,ignore
+let prepared = session.prepare_installed_source_tool_selection(
+    approved_project_root,
+    "tools/enemy-stats",
+    selected_receipt_digest,
+    &host,
+)?;
+let observed = session.source_tool_selection_view();
+let attempt = session.enable_installed_source_tool(&observed.basis, prepared)?;
+```
+
+Preparation performs bounded code-free installation inspection and explicit managed Host approval;
+call it during Host preparation, never while painting. Enablement consumes the original selection
+basis. Drive the ordinary Session and correlate the durable outcome with the returned attempt.
+Enable admission first observes completed work, then validates that original basis. A returned replacement
+may therefore reject an older enable request as stale; callers must not silently refresh and replay it.
+The selection view keeps Observe/Enable/Reconcile in `operation` and Disable in `disable`.
+Each observation contains its original attempt and an optional outcome: absent means pending.
+The two terminal observations survive until another operation is explicitly accepted in their
+own lane, including when both finish during the same owner drive. A pending Disable refuses a
+second Disable instead of accepting an operation whose result could be lost.
+A matching exited probe first produces a ready candidate. Only then does background IO publish
+desired selection. Route promotion rechecks the Session, original selection basis, predecessor
+route and admitted Schema. Invalid probes preserve the existing route and selection bytes.
+
+`desired` and `active_origin` in the selection view are separate observations. A published update
+whose route can no longer be promoted reports `PublishedWithoutActivation`; it does not roll back
+the saved record or pretend the candidate became active. `ProbeFailed` refers to the tool attempt
+diagnostic, while `NotApproved` means matching Host approval was absent. A cancelled probe reports
+`ProbeCancelled`, including cancellation by Disable or Close. Cancelling a ready publication
+only revokes route promotion and retains the actual eventual IO outcome. Published selection does
+not strengthen the shared file publisher's detect-only
+replacement or prove crash durability.
+
+`disable_installed_source_tool(&basis)` revokes execution and retained review immediately, then
+persists Disabled separately. A failed write leaves execution stopped. Disabling retains the
+installed identity and deletes no artifact. Session Close preserves desired state; late IO cannot
+restore activation. Physical process, pipe, task and file-cleanup retirement remain observable
+through their existing owners.
+
+Fresh Open reads the record without executing a describe probe. An enabled record awaits fresh
+explicit Host approval. Missing means unselected; corrupt, inaccessible, oversized and unsupported
+records are failures that block blind overwrite. `reconcile_source_tool_selection(&basis)` admits
+fresh disk data without approving or executing code. Project-external installations remain an
+explicit session-only workflow. Complete dependency-safe removal and Package UI are separate
+work; this record is not an installed graph or deletion ledger.
 
 ## Configure A Trusted Development Command And Probe
 

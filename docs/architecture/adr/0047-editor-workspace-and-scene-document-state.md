@@ -217,6 +217,25 @@ Rules:
   object lifetime, not immutable bytes or stronger predecessor conflict protection. Native sharing
   rules can consequently refuse parent-directory rename while a document remains open; physical
   Close releases its custody before that operation is retried.
+- Installed finite-tool selection is a separate concrete file lifecycle, never a Scene Save lane
+  or document-history edit. After complete probe readiness, desired-selection publication precedes
+  route promotion in the same Session owner. Filesystem publication and route promotion are not
+  one atomic transaction: a published successor refused by current Session/Schema/attempt admission
+  remains visible as disk successor / active predecessor, without automatic disk rollback.
+  Uncertainty blocks blind retry until explicit data-only reconciliation. Durable disable revokes
+  execution and review immediately, then persists Disabled; persistence failure does not restart
+  execution. Close retires admitted IO and children without rewriting desired state. Fresh Open and
+  reconciliation never recover Host approval or invoke a describe probe.
+  Observe/Enable/Reconcile retain one named attempt observation; Disable retains a separate one.
+  Each keeps pending or terminal state until the next explicitly accepted operation in its own
+  lane. Co-terminal publication and Disable cannot overwrite each other's outcome, and a pending
+  Disable refuses a duplicate. Cancelling a durable probe completes that original attempt even
+  when Disable or Close initiated cancellation; cancelling a ready publication waits for its
+  real IO outcome. Final file admission verifies the retained parent relationship as well as
+  the leaf object and content, including after a same-object move into a replaced parent.
+  Enable admission observes returned work before validating the caller's original selection basis and
+  capturing its predecessor. Shared probe admission cannot implicitly advance another operation
+  after that validation or replace a stale observation with a fresh fence.
 - Save is an owned operation across frames. Admission captures the checkpoint and the matching
   authoring re-admission basis together. Encoding, preservation validation and file publication
   may run on the existing task pools; only the Workspace owner consumes the resulting receipt.

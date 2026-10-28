@@ -263,6 +263,10 @@ impl FilePublicationHost {
         self.uncertain
     }
 
+    pub(in crate::project_host) fn parent_identity(&self) -> FileIdentity {
+        self.parent.identity()
+    }
+
     /// Returns the last accepted observation without inspecting the filesystem.
     pub(in crate::project_host) fn accepted_source_observation(
         &self,

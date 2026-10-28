@@ -82,10 +82,14 @@ impl EditorSourceToolInstalledMember {
     }
 }
 
-/// Code-free inspection after opening a persisted installation. Grants no created-file custody.
-#[derive(Debug)]
+/// Code-free inspection retaining the exact live directory and ready-receipt byte observation.
+///
+/// The retained directory preserves inspected-object continuity, not created-file provenance or
+/// deletion authority. Captured release bytes remain independent of later namespace changes.
 pub struct EditorSourceToolInstallationInspection {
+    directory: DirectoryCapability,
     receipt: EditorSourceToolInstallationReceipt,
+    receipt_digest: ContentDigest,
     release: PreparedEditorSourceToolRelease,
 }
 
@@ -366,29 +370,61 @@ impl EditorSourceToolInstallationInspection {
                 "invalid receipt byte length",
             ));
         }
-        let bytes = super::capture_member(root, RECEIPT_NAME, expected_receipt)
+        let directory = root.share();
+        let bytes = super::capture_member(&directory, RECEIPT_NAME, expected_receipt)
             .map_err(EditorSourceToolInstallationError::Inspection)?;
         let receipt = EditorSourceToolInstallationReceipt::decode(&bytes)
             .map_err(EditorSourceToolInstallationError::Receipt)?;
-        let release = PreparedEditorSourceToolRelease::capture(root, receipt.manifest_digest())
-            .map_err(EditorSourceToolInstallationError::Inspection)?;
+        let release =
+            PreparedEditorSourceToolRelease::capture(&directory, receipt.manifest_digest())
+                .map_err(EditorSourceToolInstallationError::Inspection)?;
         verify_inventory(
-            root,
+            &directory,
             release
                 .members()
                 .iter()
                 .map(|member| member.path())
                 .chain([MANIFEST_NAME, RECEIPT_NAME]),
         )?;
-        Ok(Self { receipt, release })
+        Ok(Self {
+            directory,
+            receipt,
+            receipt_digest: expected_receipt,
+            release,
+        })
     }
     #[must_use]
     pub fn receipt(&self) -> &EditorSourceToolInstallationReceipt {
         &self.receipt
     }
+    /// Digest of the exact inspected ready-receipt bytes, without re-encoding the parsed facts.
+    #[must_use]
+    pub const fn receipt_digest(&self) -> ContentDigest {
+        self.receipt_digest
+    }
+    /// Identity of the continuously retained inspected directory, not a durable trust identifier.
+    #[must_use]
+    pub fn directory_identity(&self) -> FileIdentity {
+        self.directory.identity()
+    }
+    pub(in super::super) fn directory(&self) -> &DirectoryCapability {
+        &self.directory
+    }
     #[must_use]
     pub fn release(&self) -> &PreparedEditorSourceToolRelease {
         &self.release
+    }
+}
+
+impl fmt::Debug for EditorSourceToolInstallationInspection {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("EditorSourceToolInstallationInspection")
+            .field("package", &self.release.package())
+            .field("installation", self.receipt.installation_id())
+            .field("directory_identity", &self.directory_identity())
+            .field("receipt_digest", &self.receipt_digest)
+            .field("manifest", &self.release.manifest_digest())
+            .finish_non_exhaustive()
     }
 }
 

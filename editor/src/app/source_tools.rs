@@ -3,12 +3,16 @@
 use std::{collections::BTreeMap, time::Duration};
 
 use nara::{
-    project_host::{EditorProjectSession, EditorSourceToolDefinition},
+    project_host::{
+        EditorProjectSession, EditorSourceToolDefinition, EditorSourceToolManagedHost,
+        PreparedEditorSourceToolSelection,
+    },
     reflect::ComponentValue,
     tooling::{
         EditorDocumentQueryBasis, EditorSourceToolActivationId, EditorSourceToolAttemptId,
         EditorSourceToolCommit, EditorSourceToolError, EditorSourceToolIntent,
-        EditorSourceToolRequestId, EditorSourceToolReview, EditorSourceToolView,
+        EditorSourceToolRequestId, EditorSourceToolReview, EditorSourceToolSelectionBasis,
+        EditorSourceToolSelectionError, EditorSourceToolSelectionView, EditorSourceToolView,
     },
 };
 
@@ -42,6 +46,69 @@ impl EditorApplicationSourceToolSubmission {
 }
 
 impl EditorApplication {
+    /// Bounded code-free Host preparation; this does not probe or enable the tool.
+    pub fn prepare_installed_source_tool_selection(
+        &self,
+        project: nara::fs::DirectoryCapability,
+        directory: &str,
+        receipt: nara::fs::ContentDigest,
+        host: &EditorSourceToolManagedHost,
+    ) -> Result<PreparedEditorSourceToolSelection, EditorSourceToolSelectionError> {
+        self.authoring_edit_session()
+            .map_err(|_| EditorSourceToolSelectionError::Closing)?
+            .prepare_installed_source_tool_selection(project, directory, receipt, host)
+    }
+
+    /// Observes desired disk data and actual routing without granting execution approval.
+    pub fn source_tool_selection_view(
+        &self,
+    ) -> Result<EditorSourceToolSelectionView, EditorSourceToolError> {
+        Ok(self.authoring_edit_session()?.source_tool_selection_view())
+    }
+
+    pub fn enable_installed_source_tool(
+        &mut self,
+        basis: &EditorSourceToolSelectionBasis,
+        prepared: PreparedEditorSourceToolSelection,
+    ) -> Result<EditorSourceToolAttemptId, EditorSourceToolSelectionError> {
+        let result = self
+            .state
+            .workspace_mut()
+            .ok_or(EditorSourceToolSelectionError::Closing)?
+            .session
+            .enable_installed_source_tool(basis, prepared);
+        self.drive_editor_frame(Duration::ZERO, true, false);
+        result
+    }
+
+    pub fn disable_installed_source_tool(
+        &mut self,
+        basis: &EditorSourceToolSelectionBasis,
+    ) -> Result<EditorSourceToolAttemptId, EditorSourceToolSelectionError> {
+        let result = self
+            .state
+            .workspace_mut()
+            .ok_or(EditorSourceToolSelectionError::Closing)?
+            .session
+            .disable_installed_source_tool(basis);
+        self.drive_editor_frame(Duration::ZERO, true, false);
+        result
+    }
+
+    pub fn reconcile_source_tool_selection(
+        &mut self,
+        basis: &EditorSourceToolSelectionBasis,
+    ) -> Result<EditorSourceToolAttemptId, EditorSourceToolSelectionError> {
+        let result = self
+            .state
+            .workspace_mut()
+            .ok_or(EditorSourceToolSelectionError::Closing)?
+            .session
+            .reconcile_source_tool_selection(basis);
+        self.drive_editor_frame(Duration::ZERO, true, false);
+        result
+    }
+
     /// Observes the current project's tool without executing it or refreshing its request.
     pub fn source_tool_view(&self) -> Result<EditorSourceToolView, EditorSourceToolError> {
         Ok(self.authoring_edit_session()?.source_tool_view())

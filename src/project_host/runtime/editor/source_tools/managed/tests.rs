@@ -70,8 +70,13 @@ fn command() -> (EditorSourceToolCommand, Weak<HostCustody>) {
     command.approved = Some(Arc::new(ApprovedManagedLaunch {
         host: Arc::clone(&host.custody),
         prefix: prefix.into(),
-        installation: [1; 32],
-        manifest,
+        provenance: ApprovedInstallationProvenance {
+            directory: host.custody.bootstrap.share(),
+            package: Arc::from("nara.test.custody"),
+            installation: [1; 32],
+            receipt: manifest,
+            manifest,
+        },
     }));
     (command, weak)
 }

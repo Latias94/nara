@@ -120,12 +120,16 @@ That hidden-window trajectory prepares through the health property control and a
 the shared Source Tool panel, verifies a single Undo/Redo, the ordinary armor control, Attach,
 activation/parameter retirement, generic fallback, Save, physical Close and fresh Open. Rust
 materializes the saved component data through public Scene bindings. Both native scopes must
-present. The current fixture publishes and inspects a real local tool artifact, explicitly
-approves its managed Host, then removes only the fixture's installed DLL before native probing.
-The widgets therefore exercise captured managed images rather than the development tool path.
-This qualifies that bounded approved-artifact input, not the full install/update/remove UI,
-durable enablement, a language SDK, executable gameplay publications or the future custom-drawn
-UI runtime. Historical evidence before this fixture replacement retains its development-path scope.
+present. The current fixture publishes and inspects a real project-local tool artifact and
+explicitly approves its managed Host. Application preparation and durable enablement publish the
+selection record before route promotion. The native panel exercises Disable for an active installed
+origin, then Save and physical Close. A fresh Open observes an enabled desired record without
+probing or activating it, and the panel's Disable saved selection persists Disabled without code
+execution. Installed DLLs remain in place in this durable workflow; the independent session-only
+consumer separately proves invocation from captured bytes after removing the installed entry.
+This is a bounded installed-selection trajectory, not the full install/update/remove UI, a language
+SDK, executable gameplay publications or the future custom-drawn UI runtime. Record actual results
+for this source revision; earlier evidence retains its original development/captured-image scope.
 
 For trusted Play source association and source-local document Close, also execute:
 

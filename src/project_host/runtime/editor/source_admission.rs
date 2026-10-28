@@ -146,7 +146,9 @@ impl EditorProjectSession {
         project_path: &str,
         current: &FileCapability,
     ) -> Result<(), SourceAdmissionError> {
-        if self.exact_source_owner(project_path).is_some() {
+        if project_path == super::source_tools::SELECTION_PATH
+            || self.exact_source_owner(project_path).is_some()
+        {
             return Err(SourceAdmissionError::AlreadyOpen);
         }
         for lane in self.scene_lanes.values() {
@@ -168,6 +170,13 @@ impl EditorProjectSession {
                 .host
                 .try_with(|host| host.read_source())
                 .ok_or(SourceAdmissionError::HostUnavailable)?;
+            exclude_file_alias(current, source)?;
+        }
+        if let Some(source) = self
+            .source_tools
+            .selection_read_source()
+            .map_err(|_| SourceAdmissionError::HostUnavailable)?
+        {
             exclude_file_alias(current, source)?;
         }
         Ok(())

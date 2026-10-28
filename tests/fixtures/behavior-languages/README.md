@@ -106,7 +106,11 @@ involved. See the [finite source-tool guide](../../../docs/guides/finite-source-
 
 On Windows the runner also selects the ignored window-free Application test against the same
 actual C# executable. It exercises Application review, exact successful receipts and source/history
-delegation. This separate test requires the runner's artifact environment; ordinary Editor tests
+delegation through an explicitly approved project-local installation. Desired enablement, Disable,
+Save, physical Close and fresh Open use the public durable-selection owner; Open observes enabled
+data without executing it. Independent consumers also retain V1 on a rejected installed update,
+switch to V2, reject stale reviews and compare separately installed copies of identical release
+bytes. This separate test requires the runner's artifact environment; ordinary Editor tests
 do not silently substitute another child or count it as native UI qualification.
 
 Pass `--native-editor` on Windows to append the explicit DX12 native Editor qualification after

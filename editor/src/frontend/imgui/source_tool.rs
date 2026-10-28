@@ -9,6 +9,7 @@ use nara::{
         EditorFrameModel, EditorPropertyTarget, EditorSourceToolAction,
         EditorSourceToolActionOutcome, EditorSourceToolActivationId, EditorSourceToolActive,
         EditorSourceToolError, EditorSourceToolIntent, EditorSourceToolReview,
+        EditorSourceToolSelectionOutcome, EditorSourceToolSelectionPhase,
     },
 };
 
@@ -250,6 +251,92 @@ impl SourceToolWidgets {
         if let Some(error) = &view.request_error {
             ui.text_wrapped(format!("Tool request: {}", bounded(error)));
         }
+        if let Some(selection) = &view.selection {
+            let phase = match selection.phase {
+                EditorSourceToolSelectionPhase::Loading => "reading saved selection...",
+                EditorSourceToolSelectionPhase::Idle => "idle",
+                EditorSourceToolSelectionPhase::Probing => "probing approved selection...",
+                EditorSourceToolSelectionPhase::Publishing => "publishing saved selection...",
+                EditorSourceToolSelectionPhase::Reconciling => "reconciling saved selection...",
+                EditorSourceToolSelectionPhase::Unavailable => "unavailable",
+                EditorSourceToolSelectionPhase::RequiresReconcile => "requires reconciliation",
+            };
+            ui.text_wrapped(format!("Selection phase: {phase}"));
+            for (label, attempt) in [
+                ("Selection operation", selection.operation.as_ref()),
+                ("Disable operation", selection.disable.as_ref()),
+            ] {
+                if let Some(attempt) = attempt {
+                    let status = match &attempt.outcome {
+                        None => "pending".to_owned(),
+                        Some(EditorSourceToolSelectionOutcome::Observed) => "observed".to_owned(),
+                        Some(EditorSourceToolSelectionOutcome::Enabled) => "enabled".to_owned(),
+                        Some(EditorSourceToolSelectionOutcome::Disabled) => "disabled".to_owned(),
+                        Some(EditorSourceToolSelectionOutcome::PublishedWithoutActivation) => {
+                            "published without activation".to_owned()
+                        }
+                        Some(EditorSourceToolSelectionOutcome::Reconciled) => {
+                            "reconciled".to_owned()
+                        }
+                        Some(EditorSourceToolSelectionOutcome::Failed(error)) => {
+                            format!("failed: {error}")
+                        }
+                    };
+                    ui.text_wrapped(format!("{label}: {status}"));
+                }
+            }
+            if let Some(desired) = &selection.desired {
+                ui.text_wrapped(format!(
+                    "Installed selection: {} ({})",
+                    desired.installed.package,
+                    if desired.enabled {
+                        "enabled"
+                    } else {
+                        "disabled"
+                    }
+                ));
+                if desired.enabled && selection.active_origin.as_ref() != Some(&desired.installed) {
+                    ui.text_wrapped(
+                        "The saved selection is awaiting explicit Host approval and activation.",
+                    );
+                }
+                if view.active.is_none()
+                    && button(
+                        ui,
+                        "Disable saved selection",
+                        "source-tool:disable-saved",
+                        self.available(true),
+                    )
+                {
+                    action = self.offer(
+                        EditorSourceToolAction::DisableInstalled {
+                            basis: selection.basis.clone(),
+                        },
+                        SubmissionKind::Lifecycle,
+                    );
+                }
+            }
+            if let Some(error) = &selection.error {
+                ui.text_wrapped(format!("Installed selection: {error}"));
+            }
+            if matches!(
+                selection.phase,
+                nara::tooling::EditorSourceToolSelectionPhase::Unavailable
+                    | nara::tooling::EditorSourceToolSelectionPhase::RequiresReconcile
+            ) && button(
+                ui,
+                "Read saved selection",
+                "source-tool:reconcile",
+                self.available(true),
+            ) {
+                action = self.offer(
+                    EditorSourceToolAction::ReconcileSelection {
+                        basis: selection.basis.clone(),
+                    },
+                    SubmissionKind::Lifecycle,
+                );
+            }
+        }
         self.show_feedback(ui);
         let Some(active) = &view.active else {
             ui.text_disabled("No source tool is enabled by this Host");
@@ -263,8 +350,17 @@ impl SourceToolWidgets {
             self.available(true),
         ) {
             action = self.offer(
-                EditorSourceToolAction::Disable {
-                    activation: active.id().clone(),
+                match view
+                    .selection
+                    .as_ref()
+                    .filter(|selection| selection.active_origin.is_some())
+                {
+                    Some(selection) => EditorSourceToolAction::DisableInstalled {
+                        basis: selection.basis.clone(),
+                    },
+                    None => EditorSourceToolAction::Disable {
+                        activation: active.id().clone(),
+                    },
                 },
                 SubmissionKind::Lifecycle,
             );
@@ -427,6 +523,13 @@ impl SourceToolWidgets {
             }
         };
         let error = match outcome {
+            EditorSourceToolActionOutcome::Selection(result) => {
+                self.feedback = Some(match result {
+                    Ok(_) => "Installed selection requested. Observe its durable result separately from physical retirement.".to_owned(),
+                    Err(error) => format!("Installed selection: {error}"),
+                });
+                return;
+            }
             EditorSourceToolActionOutcome::Requested(Ok(_)) => {
                 self.feedback =
                     Some("Proposal requested. Waiting for the Session's review.".to_owned());
