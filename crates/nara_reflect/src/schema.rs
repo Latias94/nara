@@ -309,6 +309,29 @@ impl ComponentSchema {
         self.authoring_initial_value.as_ref()
     }
 
+    /// Compares the complete declaration except its creation-only initial value.
+    ///
+    /// Stored definitions, including aliases, defaults and wire versions, must match exactly.
+    /// This borrows both declarations and performs no allocation or canonicalization.
+    #[must_use]
+    pub fn same_definition_except_initial_value(&self, other: &Self) -> bool {
+        let Self {
+            id,
+            aliases,
+            version,
+            capabilities,
+            fields,
+            field_tombstones,
+            authoring_initial_value: _,
+        } = self;
+        id == &other.id
+            && aliases == &other.aliases
+            && version == &other.version
+            && capabilities == &other.capabilities
+            && fields == &other.fields
+            && field_tombstones == &other.field_tombstones
+    }
+
     #[must_use]
     pub const fn id(&self) -> &ComponentTypeId {
         &self.id

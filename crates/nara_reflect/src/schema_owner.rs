@@ -5,6 +5,15 @@ use crate::{
     PersistentComponentSchemaOwnerId, registry::prepare_owner_catalogs,
 };
 
+/// The explicit metadata operation requested for one persistent schema owner.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ComponentSchemaOwnerChange {
+    /// Adds an owner absent from the admitted composition.
+    Add,
+    /// Advances an existing owner while changing only component creation metadata.
+    CreationMetadata,
+}
+
 /// An immutable, data-only admission of one owner's current catalog and lineage boundary.
 ///
 /// This contains no native bindings or executable callbacks and does not require serialization.
@@ -62,9 +71,41 @@ impl ComponentSchemaOwnerSnapshot {
             .map(|index| &self.current().components()[index])
     }
 
+    /// Proves an immediate, creation-only successor of the actual admitted owner.
+    ///
+    /// A release's self-consistent lineage is insufficient: its complete predecessor must
+    /// equal `previous.current()`. At least one initial value must change, while all stored
+    /// definitions, component coverage and tombstones remain exactly equal.
+    #[must_use]
+    pub fn is_creation_metadata_successor_of(&self, previous: &Self) -> bool {
+        if self.owner_id() != previous.owner_id()
+            || self.predecessor() != Some(previous.current())
+            || self.current().type_tombstones() != previous.current().type_tombstones()
+            || self.current().components().len() != previous.current().components().len()
+        {
+            return false;
+        }
+        let mut changed = false;
+        for (current, previous) in self
+            .current()
+            .components()
+            .iter()
+            .zip(previous.current().components())
+        {
+            if !current.same_definition_except_initial_value(previous) {
+                return false;
+            }
+            changed |= current.authoring_initial_value() != previous.authoring_initial_value();
+        }
+        changed
+    }
+
     /// Tests exact admission identity, not catalog-content or fingerprint equality.
     #[must_use]
     pub fn ptr_eq(&self, other: &Self) -> bool {
         Arc::ptr_eq(&self.0, &other.0)
     }
 }
+
+#[cfg(test)]
+mod tests;

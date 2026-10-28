@@ -99,7 +99,7 @@ pub use schema::{
     ComponentShapeError, ComponentShapeErrorKind, ComponentShapeMember, ComponentTypeId,
     ComponentTypeIdError, ComponentValueKind, ComponentValueShape,
 };
-pub use schema_owner::ComponentSchemaOwnerSnapshot;
+pub use schema_owner::{ComponentSchemaOwnerChange, ComponentSchemaOwnerSnapshot};
 pub use value::{ComponentFloat, ComponentValue, ComponentValueCost, ComponentValueError};
 
 #[doc(hidden)]

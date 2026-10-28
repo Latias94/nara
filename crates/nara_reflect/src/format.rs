@@ -14,9 +14,49 @@ use nara_core::{
 
 use crate::{
     CatalogFingerprint, ComponentRegistryError, ComponentSchema, ComponentSchemaCatalog,
-    ComponentTypeId, ComponentValueShape,
+    ComponentSchemaOwnerSnapshot, ComponentTypeId, ComponentValueShape,
+    PersistentComponentSchemaOwnerId,
     registry::{prepare_catalog_candidate, validate_catalog_contents},
 };
+
+impl ComponentSchemaOwnerSnapshot {
+    /// Admits a current catalog and its complete immediate predecessor through one file owner.
+    ///
+    /// Byte and declaration allowances apply to the pair together. Shape preflight applies to
+    /// each actual file. The predecessor is a lineage boundary, not a recursively decoded chain;
+    /// its contents and boundary fields are validated by the ordinary owner admission. This
+    /// grants no executable authority and does not require generation-one predecessor bytes.
+    pub fn from_json_catalogs(
+        owner: PersistentComponentSchemaOwnerId,
+        current: &[u8],
+        predecessor: Option<&[u8]>,
+        limits: ComponentCatalogFileLimits,
+    ) -> Result<Self, ComponentCatalogFileError> {
+        let observed = current
+            .len()
+            .checked_add(predecessor.map_or(0, <[u8]>::len))
+            .ok_or(ComponentCatalogFileError::EncodedBytesExceeded {
+                observed: usize::MAX,
+                maximum: limits.encoded_bytes().get(),
+            })?;
+        if observed > limits.encoded_bytes().get() {
+            return Err(ComponentCatalogFileError::EncodedBytesExceeded {
+                observed,
+                maximum: limits.encoded_bytes().get(),
+            });
+        }
+        let predecessor = predecessor
+            .map(|bytes| decode_json_payload(bytes, limits))
+            .transpose()?;
+        let current = decode_json_payload(current, limits)?;
+        let mut counts = ComponentCatalogCounts::default();
+        if let Some(predecessor) = &predecessor {
+            accumulate_catalog_budget(predecessor, limits, &mut counts)?;
+        }
+        accumulate_catalog_budget(&current, limits, &mut counts)?;
+        Self::admit(owner, current, predecessor).map_err(ComponentCatalogFileError::Catalog)
+    }
+}
 
 #[derive(serde::Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -434,6 +474,13 @@ fn decode_json(
     predecessor: Option<&ComponentSchemaCatalog>,
     limits: ComponentCatalogFileLimits,
 ) -> Result<ComponentSchemaCatalog, ComponentCatalogFileError> {
+    finish_catalog(decode_json_payload(encoded, limits)?, predecessor, limits)
+}
+
+fn decode_json_payload(
+    encoded: &[u8],
+    limits: ComponentCatalogFileLimits,
+) -> Result<ComponentSchemaCatalog, ComponentCatalogFileError> {
     let contract = file_contract()?;
     let envelope = decode_persistent_file_with_preflight(
         encoded,
@@ -452,7 +499,7 @@ fn decode_json(
         },
     )
     .map_err(|error| map_decode_error(ComponentCatalogFileEncoding::Json, error))?;
-    finish_catalog(envelope.into_payload().into(), predecessor, limits)
+    Ok(envelope.into_payload().into())
 }
 
 fn decode_ron(
