@@ -57,7 +57,8 @@ pub use prefab_conversion::{
 };
 pub use prepared_edit::PreparedEditorDocumentEdit;
 pub use schema_reclassification::{
-    EditorWorkspaceSchemaReclassificationCommit, PreparedEditorWorkspaceSchemaReclassification,
+    EditorWorkspaceSchemaReclassificationCommit, EditorWorkspaceSchemaReclassificationRequest,
+    PreparedEditorWorkspaceSchemaReclassification,
 };
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]

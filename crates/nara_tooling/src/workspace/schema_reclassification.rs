@@ -4,13 +4,15 @@ use std::{mem::size_of, sync::Arc};
 
 use nara_scene::{
     __private::{
-        PrefabSchemaReclassificationCommit, PreparedPrefabSchemaSource, PreparedSceneSchemaSource,
+        PrefabSchemaReclassificationCommit, PrefabSchemaReclassificationRequest,
+        PreparedPrefabSchemaSource, PreparedSceneSchemaSource,
         RetainedSchemaReclassificationSource, SceneSchemaReclassificationCommit,
-        borrow_prepared_prefab_schema_source, borrow_prepared_scene_schema_source,
-        require_schema_reclassification_successor,
+        SceneSchemaReclassificationRequest, borrow_prepared_prefab_schema_source,
+        borrow_prepared_scene_schema_source, require_schema_reclassification_successor,
     },
     AuthoringSchemaBasis, PreparedPrefabSchemaReclassification,
-    PreparedSceneSchemaReclassification, SchemaReclassificationWork,
+    PreparedSceneSchemaReclassification, SchemaReclassificationLimits, SchemaReclassificationUsage,
+    SchemaReclassificationWork,
 };
 
 use super::{
@@ -29,6 +31,63 @@ pub struct PreparedEditorWorkspaceSchemaReclassification {
     previous: AuthoringSchemaBasis,
     successor: AuthoringSchemaBasis,
     sources: Vec<PreparedSource>,
+    usage: SchemaReclassificationUsage,
+}
+
+/// One bounded, move-only preparation request; it owns no live Workspace or publication authority.
+#[doc(hidden)]
+#[derive(Debug)]
+pub struct EditorWorkspaceSchemaReclassificationRequest {
+    owner: Arc<EditorWorkspacePersistenceIdentity>,
+    previous: AuthoringSchemaBasis,
+    successor: AuthoringSchemaBasis,
+    active: Option<EditorDocumentId>,
+    sources: Vec<SourceRequest>,
+    work: SchemaReclassificationWork,
+}
+
+#[derive(Debug)]
+struct SourceRequest {
+    document: EditorDocumentId,
+    binding: Option<EditorDocumentSourceBinding>,
+    request: SourceRequestKind,
+}
+
+#[derive(Debug)]
+enum SourceRequestKind {
+    Scene(SceneSchemaReclassificationRequest),
+    Prefab(PrefabSchemaReclassificationRequest),
+}
+
+impl EditorWorkspaceSchemaReclassificationRequest {
+    pub fn prepare(
+        mut self,
+    ) -> Result<PreparedEditorWorkspaceSchemaReclassification, EditorWorkspaceCommandReport> {
+        let mut sources = Vec::with_capacity(self.sources.len());
+        for source in self.sources {
+            let classification = match source.request {
+                SourceRequestKind::Scene(request) => request
+                    .prepare(&mut self.work)
+                    .map(SourceClassification::Scene),
+                SourceRequestKind::Prefab(request) => request
+                    .prepare(&mut self.work)
+                    .map(SourceClassification::Prefab),
+            }
+            .map_err(|report| source_report(self.active, source.document, report))?;
+            sources.push(PreparedSource {
+                document: source.document,
+                binding: source.binding,
+                classification,
+            });
+        }
+        Ok(PreparedEditorWorkspaceSchemaReclassification {
+            owner: self.owner,
+            previous: self.previous,
+            successor: self.successor,
+            sources,
+            usage: self.work.usage(),
+        })
+    }
 }
 
 #[derive(Debug)]
@@ -70,6 +129,42 @@ impl EditorWorkspaceSchemaReclassificationCommit<'_> {
 }
 
 impl PreparedEditorWorkspaceSchemaReclassification {
+    #[must_use]
+    pub const fn usage(&self) -> SchemaReclassificationUsage {
+        self.usage
+    }
+
+    /// Borrows the exact frozen input for finite Host capture. This does not observe live state;
+    /// publication still requires `validate` and exclusive whole-set binding.
+    #[doc(hidden)]
+    pub fn scene_snapshot(
+        &self,
+        document: EditorDocumentId,
+    ) -> Option<PreparedSceneSchemaSource<'_>> {
+        let index = self
+            .sources
+            .binary_search_by_key(&document, |source| source.document)
+            .ok()?;
+        match &self.sources[index].classification {
+            SourceClassification::Scene(source) => Some(source.source_view()),
+            SourceClassification::Prefab(_) => None,
+        }
+    }
+
+    #[doc(hidden)]
+    pub fn prefab_snapshot(
+        &self,
+        document: EditorDocumentId,
+    ) -> Option<PreparedPrefabSchemaSource<'_>> {
+        let index = self
+            .sources
+            .binary_search_by_key(&document, |source| source.document)
+            .ok()?;
+        match &self.sources[index].classification {
+            SourceClassification::Prefab(source) => Some(source.source_view()),
+            SourceClassification::Scene(_) => None,
+        }
+    }
     #[must_use]
     pub const fn schema_basis(&self) -> &AuthoringSchemaBasis {
         &self.successor
@@ -218,6 +313,57 @@ impl PreparedEditorWorkspaceSchemaReclassification {
 }
 
 impl EditorWorkspace {
+    /// Freezes the complete source/history inputs under one allowance before background execution.
+    #[doc(hidden)]
+    pub fn capture_schema_reclassification(
+        &self,
+        previous: &AuthoringSchemaBasis,
+        successor: &AuthoringSchemaBasis,
+        limits: SchemaReclassificationLimits,
+    ) -> Result<EditorWorkspaceSchemaReclassificationRequest, EditorWorkspaceCommandReport> {
+        let mut work = SchemaReclassificationWork::new(limits);
+        let storage_per_source = size_of::<SourceRequest>()
+            .checked_add(size_of::<PreparedSource>())
+            .and_then(|bytes| bytes.checked_add(size_of::<SourceCommit<'_>>()));
+        let incumbents = self.retain_schema_sources(
+            previous,
+            successor,
+            &mut work,
+            storage_per_source,
+            size_of::<EditorWorkspaceSchemaReclassificationRequest>(),
+        )?;
+        let mut sources = Vec::with_capacity(self.documents.len());
+        for ((document, slot), (_, incumbent)) in self.documents.iter().zip(incumbents) {
+            let request = match slot {
+                EditorDocumentSlot::Scene(slot) => slot
+                    .session
+                    .capture_schema_reclassification(successor, &mut work, incumbent)
+                    .map(SourceRequestKind::Scene),
+                EditorDocumentSlot::Prefab(slot) => slot
+                    .session
+                    .capture_schema_reclassification(successor, &mut work, incumbent)
+                    .map(SourceRequestKind::Prefab),
+                EditorDocumentSlot::Extension(_) => {
+                    unreachable!("unsupported owners were checked before allocation")
+                }
+            }
+            .map_err(|report| source_report(self.active_document, *document, report))?;
+            sources.push(SourceRequest {
+                document: *document,
+                binding: slot.source_binding().cloned(),
+                request,
+            });
+        }
+        Ok(EditorWorkspaceSchemaReclassificationRequest {
+            owner: Arc::clone(&self.persistence_identity),
+            previous: previous.clone(),
+            successor: successor.clone(),
+            active: self.active_document,
+            sources,
+            work,
+        })
+    }
+
     /// Prepares the complete set against one nominal successor without changing any live source.
     ///
     /// All incumbent sources/classifications/history are charged before the first successor.
@@ -229,48 +375,15 @@ impl EditorWorkspace {
         successor: &AuthoringSchemaBasis,
         work: &mut SchemaReclassificationWork,
     ) -> Result<PreparedEditorWorkspaceSchemaReclassification, EditorWorkspaceCommandReport> {
-        // Check unsupported owners and exact prior admissions before any preparation allocation.
-        for (document, slot) in &self.documents {
-            if matches!(slot, EditorDocumentSlot::Extension(_))
-                || slot.authoring_schema_basis().as_ref() != Some(previous)
-            {
-                return Err(refused(
-                    self.active_document,
-                    Some(*document),
-                    "Every open source must share the original authoring Schema basis",
-                ));
-            }
-        }
-        require_schema_reclassification_successor(previous, successor)
-            .map_err(|report| source_report_for_set(self.active_document, report))?;
-        let storage = size_of::<PreparedSource>()
-            .checked_add(size_of::<(
-                EditorDocumentId,
-                RetainedSchemaReclassificationSource,
-            )>())
-            .and_then(|bytes| bytes.checked_add(size_of::<SourceCommit<'_>>()))
-            .and_then(|bytes| bytes.checked_mul(self.documents.len()))
-            .and_then(|bytes| {
-                bytes.checked_add(size_of::<PreparedEditorWorkspaceSchemaReclassification>())
-            });
-        work.retain_preparation_storage(storage.unwrap_or(usize::MAX))
-            .map_err(|report| source_report_for_set(self.active_document, report))?;
-        let mut incumbents = Vec::with_capacity(self.documents.len());
-        for (document, slot) in &self.documents {
-            let incumbent = match slot {
-                EditorDocumentSlot::Scene(slot) => {
-                    slot.session.retain_schema_reclassification_source(work)
-                }
-                EditorDocumentSlot::Prefab(slot) => {
-                    slot.session.retain_schema_reclassification_source(work)
-                }
-                EditorDocumentSlot::Extension(_) => {
-                    unreachable!("unsupported owners were checked before allocation")
-                }
-            }
-            .map_err(|report| source_report(self.active_document, *document, report))?;
-            incumbents.push((*document, incumbent));
-        }
+        let storage_per_source =
+            size_of::<PreparedSource>().checked_add(size_of::<SourceCommit<'_>>());
+        let incumbents = self.retain_schema_sources(
+            previous,
+            successor,
+            work,
+            storage_per_source,
+            size_of::<PreparedEditorWorkspaceSchemaReclassification>(),
+        )?;
         let mut sources = Vec::with_capacity(self.documents.len());
         for ((document, slot), (retained_document, incumbent)) in
             self.documents.iter().zip(incumbents)
@@ -305,7 +418,63 @@ impl EditorWorkspace {
             previous: previous.clone(),
             successor: successor.clone(),
             sources,
+            usage: work.usage(),
         })
+    }
+
+    fn retain_schema_sources(
+        &self,
+        previous: &AuthoringSchemaBasis,
+        successor: &AuthoringSchemaBasis,
+        work: &mut SchemaReclassificationWork,
+        storage_per_source: Option<usize>,
+        fixed_storage: usize,
+    ) -> Result<
+        Vec<(EditorDocumentId, RetainedSchemaReclassificationSource)>,
+        EditorWorkspaceCommandReport,
+    > {
+        // Both direct and owned preparation use this one complete input admission.
+        for (document, slot) in &self.documents {
+            if matches!(slot, EditorDocumentSlot::Extension(_))
+                || slot.authoring_schema_basis().as_ref() != Some(previous)
+            {
+                return Err(refused(
+                    self.active_document,
+                    Some(*document),
+                    "Every open source must share the original authoring Schema basis",
+                ));
+            }
+        }
+        require_schema_reclassification_successor(previous, successor)
+            .map_err(|report| source_report_for_set(self.active_document, report))?;
+        let storage = storage_per_source
+            .and_then(|bytes| {
+                bytes.checked_add(size_of::<(
+                    EditorDocumentId,
+                    RetainedSchemaReclassificationSource,
+                )>())
+            })
+            .and_then(|bytes| bytes.checked_mul(self.documents.len()))
+            .and_then(|bytes| bytes.checked_add(fixed_storage));
+        work.retain_preparation_storage(storage.unwrap_or(usize::MAX))
+            .map_err(|report| source_report_for_set(self.active_document, report))?;
+        let mut incumbents = Vec::with_capacity(self.documents.len());
+        for (document, slot) in &self.documents {
+            let incumbent = match slot {
+                EditorDocumentSlot::Scene(slot) => {
+                    slot.session.retain_schema_reclassification_source(work)
+                }
+                EditorDocumentSlot::Prefab(slot) => {
+                    slot.session.retain_schema_reclassification_source(work)
+                }
+                EditorDocumentSlot::Extension(_) => {
+                    unreachable!("unsupported owners were checked before allocation")
+                }
+            }
+            .map_err(|report| source_report(self.active_document, *document, report))?;
+            incumbents.push((*document, incumbent));
+        }
+        Ok(incumbents)
     }
 
     /// Binds every original source exclusively before returning an infallible whole-set commit.

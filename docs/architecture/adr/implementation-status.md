@@ -140,6 +140,14 @@ usage, stale observations and exact attachment failure have actual-file evidence
 is preserved; a later Undo may expose a diagnosed composition conflict and Redo its repair. No
 Cartesian dependency-history validator is required. Whole Session publication/reconciliation,
 immediate preview invalidation and installed-owner/native adoption remain unimplemented.
+The [owned-source preparation successor](../../knowledge/engineering/verification/2026-10/2026-10-28T061611Z-owned-source-history-and-whole-workspace-schema-preparation-a4021ad50ca24035b6530ae233b9dff3.md)
+adds bounded frozen Scene/Prefab history inputs and a complete Workspace request for finite Host
+Tasks. Direct and owned paths share classification/history proof; output pins the original source
+Arc, and exact original Workspace/source checks still fence publication. Actual worker and Compute
+Task consumers cover immutable snapshots, stale live edits, source Drop, calibrated budgets and
+both real conversion-history branches. This does not implement the Session operation, its physical
+IO/Close coordination or native installed adoption. Caller-side capture scans/copy have no measured
+responsiveness claim; source and project budget models remain logical rather than RSS deadlines.
 The [documentation verification](../../knowledge/engineering/verification/2026-10/2026-10-23T115037Z-foundation-architecture-rebaseline-documentation-checks-and-adversarial-closure-33c8c794baf142ee964468a01248af17.md)
 records inventory/link/status checks and the scoped adversarial correction/recheck. No Cargo,
 performance or native trajectory was re-executed for this design-only unit.

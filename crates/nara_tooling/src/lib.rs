@@ -140,4 +140,5 @@ pub use workspace::{
 pub use workspace::{
     EditorExtensionDocumentCandidate, EditorPersistenceAuthority, EditorPersistenceCheckpoint,
     EditorPersistenceCommit, EditorWorkspaceSchemaReclassificationCommit,
+    EditorWorkspaceSchemaReclassificationRequest,
 };

@@ -78,8 +78,14 @@ bytes does not recreate that nominal basis.
    content-state identity, upgrade flag, history contents/cost, saved state and selection. Mark
    an existing Scene projection dirty. Old prepared edits/queries reject their old basis.
    This proves source replay, not eager activation of dormant overlay payloads. Preserve those
-   payloads even when malformed in isolation; actual-demand history qualification belongs to
-   the Host preparation below and must reuse this traversal/preparation kernel.
+   payloads even when malformed in isolation. Current selected composition remains Host-owned
+   and does not expand this source-history guarantee into all-history preview validity.
+   A finite background request freezes exact current document/classification Arcs and retained
+   patch/scope/cost entries. Charge the complete live incumbent set and owning history copy before
+   allocation; no new source/content identities or temporary authoring Session are constructed.
+   Owned and direct preparation share the same classification and history kernel. Prepared output
+   pins its exact original document for further Host capture without borrowing live Workspace;
+   original set/revision/basis revalidation is still required before exclusive publication.
 2. **Bundle successor custody.** Prepare the composed bundle and ordinary engine-owned Adapters
    from code-free installation inspection. Reuse bounded bundle decoding/encoding and existing
    root/manifest observations. Add a narrow handoff from the actual admitted bundle leaf into

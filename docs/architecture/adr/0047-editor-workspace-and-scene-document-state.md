@@ -210,6 +210,12 @@ Rules:
   extension and native-only owners refuse explicitly. All source guards bind under exclusive
   Workspace access before an infallible classification-only swap; source Arcs, content states,
   history, selection, saved checkpoints and persistence custody remain in their owners.
+  A bounded owned preparation request may share original immutable source/classification handles
+  and copy exact retained history entries/scopes after admission, for the Session's finite Tasks.
+  All live incumbents are charged before copied inputs or successor work. The request owns no live
+  Workspace, source allocator or publication guard and creates no new source/content identity.
+  Returned preparation pins original source snapshots for actual Host capture; those snapshots
+  do not observe subsequent live edits or replace the original whole-set publication check.
   This source proof does not grant file publication, executable approval or current effective
   dependency validity. The Project Session must prepare those facts and its matching receipt
   before publishing, then adopt project and Workspace in the same owner turn. A known published

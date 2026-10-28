@@ -2496,6 +2496,7 @@ dependencies = [
  "nara_reflect",
  "nara_scene",
  "nara_sprite",
+ "nara_tasks",
  "nara_transform",
  "thiserror 2.0.18",
 ]

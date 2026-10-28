@@ -46,6 +46,11 @@ receipt and immediate preview invalidation; source preparation alone does not co
 Retained Undo/Redo keeps source replayability; a later selected source may produce composition
 diagnostics and recover through the ordinary repair path. Adoption does not prove all historical
 dependency combinations can preview.
+Finite background preparation consumes a bounded owned snapshot of the complete source/history
+inputs, preserving exact conversion scope and original identity. Direct and owned paths use the
+same source proof. Tasks remain Host-owned; Tooling creates no executor. A returned candidate
+retains original document Arcs for capture and revalidates its complete original Workspace before
+exclusive publication, even if the live sources were edited, reopened or closed during preparation.
 
 Future custom UI reuses these semantic boundaries and render-view handoff, but may replace all widget, layout, focus and docking code.
 Sharing rendering does not require sharing the runtime game's complete UI toolkit.

@@ -1155,3 +1155,178 @@ fn every_incumbent_is_admitted_before_the_first_malformed_successor_is_classifie
     assert_eq!(report.document, Some(last));
     assert_eq!(snapshot(&workspace), before);
 }
+
+#[test]
+fn finite_task_prepares_frozen_sources_and_only_the_original_live_set_can_adopt() {
+    use nara_tasks::{
+        TaskDomainKey, TaskPoolConfig, TaskPoolKind, TaskPools, TaskSpawnRequest, TaskTerminal,
+    };
+    use std::{
+        sync::mpsc,
+        thread,
+        time::{Duration, Instant},
+    };
+    for change_after_capture in [false, true] {
+        let previous = empty_basis();
+        let next = successor();
+        let mut workspace = EditorWorkspace::new();
+        let documents = open_pair(&mut workspace, &previous);
+        for document in documents {
+            apply_patch(&mut workspace, document, "retained");
+            apply_patch(&mut workspace, document, "redo");
+            replay(&mut workspace, document, true);
+        }
+        let before = snapshot(&workspace);
+        let original_scene = workspace
+            .scene(documents[0])
+            .unwrap()
+            .session()
+            .shared_document();
+        let original_prefab = workspace
+            .prefab(documents[1])
+            .unwrap()
+            .session()
+            .shared_document();
+        let request = workspace
+            .capture_schema_reclassification(&previous, &next, Default::default())
+            .unwrap();
+        assert_eq!(snapshot(&workspace), before);
+        let pools = TaskPools::try_new_lazy(
+            TaskPoolConfig::threaded(
+                nara_core::ItemLimit::ONE,
+                nara_core::ItemLimit::ONE,
+                nara_core::ItemLimit::ONE,
+            )
+            .unwrap(),
+        )
+        .unwrap();
+        let (entered_tx, entered_rx) = mpsc::channel();
+        let (release_tx, release_rx) = mpsc::channel();
+        let mut task = pools
+            .spawn(
+                TaskPoolKind::Compute,
+                TaskSpawnRequest::new(1, TaskDomainKey::new(0x7363_6865_6d61)),
+                move |_| {
+                    entered_tx.send(()).unwrap();
+                    release_rx.recv().unwrap();
+                    request.prepare()
+                },
+            )
+            .into_handle()
+            .unwrap();
+        entered_rx.recv_timeout(Duration::from_secs(5)).unwrap();
+        if change_after_capture {
+            apply_patch(&mut workspace, documents[1], "newer-source");
+        }
+        let live = snapshot(&workspace);
+        release_tx.send(()).unwrap();
+        let deadline = Instant::now() + Duration::from_secs(5);
+        let prepared = loop {
+            if let Some(result) = task.try_take() {
+                match result {
+                    TaskTerminal::Completed(Ok(prepared)) => break prepared,
+                    result => panic!("finite source preparation failed: {result:?}"),
+                }
+            }
+            assert!(
+                Instant::now() < deadline,
+                "finite preparation did not return"
+            );
+            thread::yield_now();
+        };
+        assert!(pools.shutdown_blocking().unwrap().is_complete());
+        assert_eq!(snapshot(&workspace), live);
+        assert_eq!(prepared.schema_basis(), &next);
+        assert!(prepared.usage().work_bytes > 0);
+        assert!(Arc::ptr_eq(
+            &prepared
+                .scene_snapshot(documents[0])
+                .unwrap()
+                .shared_document(),
+            &original_scene
+        ));
+        assert!(Arc::ptr_eq(
+            &prepared
+                .prefab_snapshot(documents[1])
+                .unwrap()
+                .shared_document(),
+            &original_prefab
+        ));
+        assert!(prepared.prefab_snapshot(documents[0]).is_none());
+        assert!(prepared.scene_snapshot(documents[1]).is_none());
+        if change_after_capture {
+            assert_refused(&prepared.validate(&workspace).unwrap_err());
+            assert_refused(
+                &workspace
+                    .bind_schema_reclassification(prepared)
+                    .unwrap_err(),
+            );
+            assert_eq!(snapshot(&workspace), live);
+        } else {
+            prepared.validate(&workspace).unwrap();
+            workspace
+                .bind_schema_reclassification(prepared)
+                .unwrap()
+                .commit();
+            for document in documents {
+                assert_eq!(
+                    workspace
+                        .document_query_basis(document)
+                        .unwrap()
+                        .schema
+                        .as_ref(),
+                    Some(&next)
+                );
+                replay(&mut workspace, document, true);
+                replay(&mut workspace, document, false);
+                replay(&mut workspace, document, false);
+            }
+        }
+    }
+}
+
+#[test]
+fn owned_input_outlives_its_workspace_without_gaining_publication_authority() {
+    let previous = empty_basis();
+    let next = successor();
+    let mut original = EditorWorkspace::new();
+    let documents = open_pair(&mut original, &previous);
+    let scene = original
+        .scene(documents[0])
+        .unwrap()
+        .session()
+        .shared_document();
+    let prefab = original
+        .prefab(documents[1])
+        .unwrap()
+        .session()
+        .shared_document();
+    let request = original
+        .capture_schema_reclassification(&previous, &next, Default::default())
+        .unwrap();
+    drop(original);
+    let prepared = request.prepare().unwrap();
+    assert!(Arc::ptr_eq(
+        &prepared
+            .scene_snapshot(documents[0])
+            .unwrap()
+            .shared_document(),
+        &scene
+    ));
+    assert!(Arc::ptr_eq(
+        &prepared
+            .prefab_snapshot(documents[1])
+            .unwrap()
+            .shared_document(),
+        &prefab
+    ));
+    let mut replacement = EditorWorkspace::new();
+    assert_eq!(documents, open_pair(&mut replacement, &previous));
+    let before = snapshot(&replacement);
+    assert_refused(
+        &replacement
+            .bind_schema_reclassification(prepared)
+            .unwrap_err(),
+    );
+    assert_eq!(snapshot(&replacement), before);
+}
