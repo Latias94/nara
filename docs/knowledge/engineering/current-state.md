@@ -3,7 +3,7 @@ type: "Current State"
 title: "Current Engineering State"
 description: "Derived summary of immutable engineering-memory shards."
 tags: ["engineering-memory", "derived"]
-source_fingerprint: "af53d4a75f14f582473d856eec5a881802a688796331e82d8fd4efdae88ff006"
+source_fingerprint: "e41cbe2fff87211732e8546e9f697e341a8a7fe84be68967b42363caeb078d6b"
 ---
 
 # Current State
@@ -12,8 +12,8 @@ source_fingerprint: "af53d4a75f14f582473d856eec5a881802a688796331e82d8fd4efdae88
 
 This file is derived from immutable shards. Record new facts in shards, then render during integration.
 
-- Source fingerprint: `af53d4a75f14f582473d856eec5a881802a688796331e82d8fd4efdae88ff006`
-- Immutable records: 993
+- Source fingerprint: `e41cbe2fff87211732e8546e9f697e341a8a7fe84be68967b42363caeb078d6b`
+- Immutable records: 994
 - Active lane heads: 1
 
 # Active Registrations
@@ -69,6 +69,7 @@ This file is derived from immutable shards. Record new facts in shards, then ren
 
 # Recent Evidence
 
+- **Subagent Finding**: [Host schema adoption seams after source history qualification](subagents/2026-10/2026-10-28T033218Z-host-schema-adoption-seams-after-source-history-qualification-656e522708f64f469f6623e660467e9a.md) - Maps actual bundle, capture, Workspace and Session ownership and records proposed streaming historical proof without a second interpreter.
 - **Verification Evidence**: [Source-owned schema reclassification with exact retained history and bounded interpretation](verification/2026-10/2026-10-28T032419Z-source-owned-schema-reclassification-with-exact-retained-history-and-bounded-interpretation-becb85b221e241aebeb4845c692a7379.md) - Qualifies the additive source/history owner and records the actual-demand historical composition boundary before whole-Session adoption.
 - **Work Progress**: [Source-owned additive schema reclassification and retained history integration in progress](progress/2026-10/2026-10-28T023202Z-source-owned-additive-schema-reclassification-and-retained-history-integration-in-progress-3f8038175810499ab6477d801c8903d2.md) - Records the in-progress source/history replacement and concrete budget, nominal identity and shared preparation interfaces before qualification.
 - **Verification Evidence**: [Recipe schema refresh preserves independently admitted owner lineage](verification/2026-10/2026-10-28T014807Z-recipe-schema-refresh-preserves-independently-admitted-owner-lineage-8afcd1ede3dc4451ac719a1a236e9c85.md) - Qualifies bounded owner-preserving refresh and records the reviewed source/history successor design without claiming Session adoption.
@@ -80,7 +81,6 @@ This file is derived from immutable shards. Record new facts in shards, then ren
 - **Verification Evidence**: [Local tool artifact publication with a final ready receipt and continuous file custody](verification/2026-10/2026-10-27T210523Z-local-tool-artifact-publication-with-a-final-ready-receipt-and-continuous-file-custody-4443d7b18348430884f7015082c9e304.md) - Records the Windows populated-directory rename counterexample, receipt-last artifact publication, incomplete and post-commit facts, continuous file custody and actual local C# consumers.
 - **Verification Evidence**: [Code-free local finite tool release capture and lifecycle owner design](verification/2026-10/2026-10-27T201403Z-code-free-local-finite-tool-release-capture-and-lifecycle-owner-design-1f12c7706bd44248adec1203402d167e.md) - Qualifies immutable declared artifact capture before installation, records pinned placement findings and the remaining local Package ownership and activation boundaries.
 - **Verification Evidence**: [Finite source tool property facets and shared native review qualification](verification/2026-10/2026-10-27T193225Z-finite-source-tool-property-facets-and-shared-native-review-qualification-c47581dc5dfa45038a38a6aea5b2d4be.md) - Records the UI-neutral Tooling replacement, exact activation and revocation corrections, shared panel and Inspector candidate, actual C# and DX12 workflow, independent review and bounded cleanup.
-- **Work Progress**: [Inline source tool facet contract and frontend integration in progress](progress/2026-10/2026-10-27T185417Z-inline-source-tool-facet-contract-and-frontend-integration-in-progress-cd9355db64e64f6b8ff437035268bdc0.md) - Records the shared Tooling replacement, explicit activation routing and active disjoint implementation lanes before complete production qualification.
 
 # Integration Notes
 
