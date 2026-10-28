@@ -1,25 +1,25 @@
 # Source-Tool Artifact And Project-Source Ownership
 
 **Date:** 2026-10-28. **Status:** Owning ADRs amended; managed artifact publication/inventory,
-project-owned text import and reviewed registered-artifact reclamation implemented.
-Incomplete-publication recovery has separate public/native qualification; native template import
-remains open.
+project-owned text import, closed native Prefab import and reviewed registered-artifact reclamation
+implemented. Incomplete-publication recovery and native Prefab import have separate evidence;
+Scene/image collections, external bindings and complete management controls remain open.
 **Research baseline:** `874bfc0`.
 
 The [implementation plan](../plans/2026-10-28-managed-source-tool-artifacts-plan.md) continues
-the complete finite-tool lifecycle. This design does not qualify a production reclaimer or
-replace the full foundation Goal with a file-management task.
+the complete finite-tool lifecycle. Linked evidence owns implementation qualification; this
+design does not replace the full foundation Goal with a file-management task.
 
 ## Problem And Evidence
 
-The installed release currently treats every declared member, including `Content`, as part of
-its verified artifact. `PreparedEditorSourceToolRelease::capture` captures those bytes;
-`release::installation` inspects them again before admitting installed execution. Editing a
-sample inside that installation therefore also damages its release observation.
+At the research baseline, the mixed-content installation treated every declared member,
+including `Content`, as part of its verified artifact. `PreparedEditorSourceToolRelease::capture`
+captured those bytes; `release::installation` inspected them again before admitting installed
+execution. Editing a sample inside that installation therefore damaged its release observation.
 
-The protection implementation compensates by recording modification/adoption and intercepting
-five document acceptance seams. When the optional content record is unavailable,
-`source_tool_content_persistence_rejection` and `source_tool_content_ready_for_close` can gate
+The predecessor protection implementation compensated by recording modification/adoption and
+intercepting five document acceptance seams. When the optional content record was unavailable,
+`source_tool_content_persistence_rejection` and `source_tool_content_ready_for_close` could gate
 an ordinary edited document whose installation membership is still unknown. The previous
 qualification establishes that implementation's behavior; it does not make this ownership
 coupling desirable.
@@ -108,8 +108,10 @@ deletion, a second executor or a universal transaction framework.
 
 ## Import Is A Source Boundary
 
-The first independent consumer can import the actual finite text sample. That establishes a
-bounded copy workflow, not arbitrary Scene/Prefab template correctness.
+The text-import predecessor establishes a bounded copy workflow. The
+[native Prefab successor](../plans/2026-10-29-native-prefab-template-import-plan.md) implements
+closed Prefab collection copying with format-owned identity and reference remapping. Neither
+workflow qualifies arbitrary Scene/image collections or explicit external-reference bindings.
 
 Native source formats need their existing owner to prepare identity and references:
 
@@ -146,6 +148,16 @@ Failed asynchronous registration retains actual custody for explicit reconcile/r
 Both kinds reuse the same publisher/review/reclaimer and one canonical format-1 reader.
 The [implementation continuity](../knowledge/engineering/progress/2026-10/2026-10-28T182559Z-reviewed-real-artifact-unlink-integration-and-incomplete-publication-follow-up-1de5c56631a146318b4b1098eb0fdfd8.md)
 records concrete source gaps and the proposed next unit; it is not qualification of that successor.
+
+Closed native Prefab import now retains a fixed prepared copy through the same import Tasks lane,
+publishes one absent destination directory and freshly admits its members after staging handles
+close. Stable destinations receive new sidecars against the original indexed metadata set;
+location destinations use independent full project coordinates without interpreting unrelated
+asset metadata. Source and Reflect owners remap declared internal references. Failed staging or
+post-publication admission retains actual directory/member facts and live custody until explicit
+owner transfer. No imported project copy enters artifact reclamation. The
+[native Prefab evidence](../knowledge/engineering/verification/2026-10/2026-10-28T211402Z-native-prefab-template-identity-remapping-and-retained-publication-qualification-288aa15af1244e52b81c3c364689d633.md)
+owns actual verification and the remaining scope.
 
 Canonical formats remain version 1 because the product has not shipped. No old reader,
 conversion helper, compatibility alias or migration guide is required. Existing historical

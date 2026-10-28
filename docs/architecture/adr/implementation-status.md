@@ -228,6 +228,19 @@ with 38 explicit skips; all 31 independent language consumers and the separately
 managed cancellation, Application and Windows/DX12 workflows pass. The linked evidence owns
 static checks and platform limits. Native-format template identity/remapping, existing-owner
 Schema evolution, complete management controls and the full foundation Goal remain open.
+The [native Prefab successor](../../knowledge/engineering/verification/2026-10/2026-10-28T211402Z-native-prefab-template-identity-remapping-and-retained-publication-qualification-288aa15af1244e52b81c3c364689d633.md)
+adds source-owned closed Prefab collection copying/import. Reflect rewrites observed declared
+leaves; Scene remaps complete source/overlay/reference identities through its production compiler;
+Host fixes target identities, sidecars and encoded bytes against original project/Schema/index
+observations. The existing import Tasks lane publishes an absent directory, freshly admits its
+members and retains actual partial or published-without-admission custody through physical return
+and explicit owner transfer. Independent consumers verify two copies, ordinary source history and
+Save/Reopen after actual artifact withdrawal/unlink. Its linked evidence owns final build, test,
+review and selected native scope. Final source libraries pass 592; Host/Tooling/Editor/filesystem
+libraries pass 1,258 with 38 explicit skips. All 33 independent consumers and separately selected
+actual managed/Application/Windows-DX12 workflows pass; correctness Clippy, minimal feature and
+root/fixture formatting checks pass. Scene/image collections, external bindings, existing-owner
+Schema evolution, full management controls and the complete R1b/foundation Goal remain open.
 The [documentation verification](../../knowledge/engineering/verification/2026-10/2026-10-23T115037Z-foundation-architecture-rebaseline-documentation-checks-and-adversarial-closure-33c8c794baf142ee964468a01248af17.md)
 records inventory/link/status checks and the scoped adversarial correction/recheck. No Cargo,
 performance or native trajectory was re-executed for this design-only unit.

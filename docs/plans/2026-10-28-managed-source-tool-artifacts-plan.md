@@ -29,9 +29,11 @@ Registered-artifact review, intent, actual unlink and partial-result recovery no
 [implementation evidence](../knowledge/engineering/verification/2026-10/2026-10-28T185322Z-reviewed-registered-artifact-unlink-and-truthful-partial-recovery-qualification-4c85687a35ef4b54b24b3fc98b6e5083.md).
 The [incomplete-publication successor](../knowledge/engineering/verification/2026-10/2026-10-28T194040Z-incomplete-artifact-publication-custody-and-unified-reviewed-recovery-e4c2d017cc7f4000ac1b38588809102a.md)
 replaces the ready-only inventory model with actual Ready/Incomplete facts, retained handover and
-registration recovery through the same reclaimer. Its evidence owns actual qualification. Native
-template identity/remapping and complete management controls remain open; the full lifecycle and
-foundation Goal are not closed by these artifact workflows.
+registration recovery through the same reclaimer. Its evidence owns actual qualification. The
+[native Prefab successor](2026-10-29-native-prefab-template-import-plan.md) implements closed
+Prefab collection copying/import with source-owned identities, sidecars and reference remapping.
+Scene/image collections, explicit external bindings and complete management controls remain open;
+the full lifecycle and foundation Goal are not closed by these artifact workflows.
 
 ### 1. Complete Existing Ownership Observations
 
@@ -70,6 +72,9 @@ existing source owner. Update/install/remove must never overwrite or reclaim tha
 Qualify the actual independent text sample first. Native Scene/Prefab/asset templates require
 owner-prepared identities, sidecars and reference closure remapping before claiming support.
 Do not generalize an opaque text copy into native-format qualification.
+The [native Prefab successor](2026-10-29-native-prefab-template-import-plan.md) implements the
+next closed Prefab/sidecar workflow through those owners; its linked evidence owns actual
+qualification without implying arbitrary Scene/image/external-binding support.
 
 After replacement coverage exists, remove the old mixed content record, accepted-touch
 interception and optional-ledger gates on ordinary Save/Reopen/Close. Preserve the existing

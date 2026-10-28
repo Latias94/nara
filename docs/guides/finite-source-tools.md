@@ -186,15 +186,86 @@ registered extension document owner; editing, Undo/Redo, Save and Reopen use tha
 and persistence. Later installation updates, graph withdrawal and artifact disposal never follow
 the copy's origin to overwrite or delete it. Another import uses another absent destination.
 
-This finite text-copy workflow does not qualify native Scene/Prefab/asset template import.
-Those formats require their owners to allocate destination identities and sidecars and remap
-references before support can be claimed. Generic `DirectoryCapability::unlink_file` remains
-available as the exact-object primitive. The operation below reclaims registered artifacts and
-preserves mixed results for both ready and incomplete publications. Native template remapping and
-Package Manager controls remain under
+The native Prefab workflow below separately prepares source identities, sidecars and references.
+Scene/image closures and external bindings require further owner-specific workflows. Generic
+`DirectoryCapability::unlink_file` remains available as the exact-object primitive.
+The reclamation operation below preserves mixed results for both ready and incomplete
+publications. Full native template support and Package Manager controls remain under
 the [managed artifact plan](../plans/2026-10-28-managed-source-tool-artifacts-plan.md). Inventory
 observations and graph withdrawal alone grant no deletion authority; default-stream digest
 equality does not cover alternate streams or authorize whole-file disposal.
+
+## Import A Native Prefab Template
+
+Declare a descriptor and each Prefab document as release `Content`. For stable input identity,
+also declare each document's adjacent `<member>.meta` file. A descriptor is bounded JSON data:
+
+```json
+{
+  "format_version": 1,
+  "kind": "prefab_template",
+  "source_universe": "cc4db9bc-388c-44be-91c5-c74fa2c08147",
+  "native_document_identity": "project_location",
+  "prefabs_root": "prefabs",
+  "entry": "prefabs/main.prefab.json",
+  "documents": [
+    { "member": "samples/main.prefab.json", "path": "prefabs/main.prefab.json" },
+    { "member": "samples/child.prefab.ron", "path": "prefabs/child.prefab.ron" }
+  ]
+}
+```
+
+`member` names an exact captured Content file. `path` is its original complete project coordinate;
+the declared `prefabs_root` separates that coordinate from Prefab-root-relative lookup paths.
+Location identity uses the original universe and complete path. `stable_metadata` requires a
+matching native Prefab sidecar with its logical root-relative path and kind. It is never inferred
+from the installation directory. JSON and RON documents may coexist in one finite closure.
+
+Prepare through Session or Application using
+`EditorSourceToolPrefabTemplateImportRequest::new(installation_id, descriptor_member,
+destination_directory)` and `prepare_source_tool_prefab_template_import(&selection_basis,
+project_root, request)`. The destination must be an absent directory below the current configured
+Prefabs root, with an existing exact-spelling parent. Inspect `entry()` and every `files()` member's
+relative `path()`, fixed `bytes()`, `digest()` and optional source-document `source()` key.
+Preparation and dropping the candidate create no files and change no working document or history.
+
+The copy uses the project's current identity policy. Stable destinations receive fresh metadata
+IDs and regenerated sidecars; location destinations receive their own full project coordinates.
+Stable-ID allocation checks the originally admitted source-index metadata and copied set for
+identity conflicts. Location copies allocate no stable IDs and do not interpret unrelated asset
+metadata; their destination coordinates and original source-index/root observations remain checked.
+This is a bounded observation of indexed roots, not a perpetual global identity reservation.
+Document-local entity IDs remain local. Nested source references, overlay bases and all hop
+constraints are remapped to the same copy. Schema owners remain unchanged. Repeated import into
+another absent directory creates an independent copy.
+
+The supported subset is a complete closure of at most 32 Prefabs. Every stored component needs
+its current admitted Schema and matching owner, including inactive overlay payloads. All declared
+asset references must resolve inside the copied set. Persistent entity references and unbound
+external assets refuse. Complete payload defaults are materialized before reference rewriting;
+an Absent property with a reference-bearing default refuses. Ordinary strings are unchanged.
+Descriptor size is 64 KiB; captured and encoded output have separate 64 MiB aggregate limits,
+and Scene applies request-wide declaration, value, depth and interpretation-work limits.
+
+Confirm the fixed candidate with `commit_source_tool_prefab_template_import(candidate)`. It uses
+the same attempt/view/cancellation and Tasks owner as text import. A stale project, selection,
+Schema or source-index observation refuses rather than silently allocating another set of IDs.
+Observe actual physical return separately. `PrefabImported` means the exact directory was
+published and its current document/sidecar members passed fresh admission. It does not activate
+a tool or open a document. Use ordinary Browser refresh/Open for subsequent editing and saving.
+
+`PrefabPublishedWithoutAdmission` still means the directory was published. `PrefabNotPublished`
+retains actual created paths and a staging path when the filesystem reports an orphan. An entered
+publication retains its actual result after cancellation. `source_tool_prefab_template_publication()`
+exposes the concrete directory outcome after return; the Close receipt's `template_import()`
+retains its final immutable observation. Closing those handles does not delete project files.
+An unresolved native publication prevents another import from overwriting its retained result.
+Use `take_source_tool_prefab_template_publication(&attempt)` to explicitly transfer that
+move-only owner for recovery or inspection before preparing another import. This transfers live
+facts and handles, not automatic deletion permission; the actual files remain project-owned.
+No recursive cleanup, whole-file immutability or power-failure durability is claimed. Ordinary
+source admission waits while native import is physically pending so staged members cannot acquire
+a competing document owner during publication.
 
 ## Review And Reclaim Withdrawn Artifacts
 

@@ -136,10 +136,13 @@ SDK, executable gameplay publications or the future custom-drawn UI runtime. Rec
 for this source revision; earlier evidence retains its original development/captured-image scope.
 Integrated installations now use `.nara/source-tools/artifacts/<name>`. The independent Session
 consumer additionally imports a declared text template into an ordinary project copy and verifies
-history, Save/Reopen and withdrawal preservation; window-free Application tests exercise that
-public copy operation and unavailable inventory without document persistence gates. The native
-trajectory above retains its tool/facet/selection scope. No newly drawn import/reclamation control
-or native Scene/Prefab template remapping follows from those window-free results.
+history, Save/Reopen and withdrawal preservation. Its separate native-format Prefab consumers
+check complete closed-collection identity/reference remapping, two independent copies, ordinary
+editing/persistence and preservation after actual managed-artifact unlink. Window-free Application
+tests exercise the public import operations and unavailable inventory without document persistence
+gates. The native trajectory above retains its tool/facet/selection scope. Those window-free
+source-format results do not qualify newly drawn import/reclamation controls, arbitrary Scene or
+asset template collections, or the future custom-drawn frontend.
 
 For trusted Play source association and source-local document Close, also execute:
 

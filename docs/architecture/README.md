@@ -151,8 +151,15 @@ adds reviewed intent, real per-member unlink, partial/result-publication recover
 Session/Application Close evidence. The
 [incomplete-publication successor](../knowledge/engineering/verification/2026-10/2026-10-28T194040Z-incomplete-artifact-publication-custody-and-unified-reviewed-recovery-e4c2d017cc7f4000ac1b38588809102a.md)
 uses actual partial publication facts and retained cleanup/reader handover through that same
-reclaimer. Native-format template remapping remains open. Each evidence record owns its actual
-results and platform scope.
+reclaimer. The [native Prefab successor](../plans/2026-10-29-native-prefab-template-import-plan.md)
+implements closed Prefab collection copying/import through source-owned identity and reference
+remapping. Scene/image closures, explicit external bindings, complete management controls and
+full R1b remain open. Each evidence record owns its actual results and platform scope.
+
+The [installed creation-metadata evolution plan](../plans/2026-10-29-installed-owner-creation-metadata-evolution-plan.md)
+continues the separate existing-owner question after additive adoption. It proposes one real
+catalog successor with unchanged stored values/history and explicit tool retirement/approval;
+the design is not implementation or general Schema migration evidence.
 
 The [per-document persistence-custody design](editor-document-persistence-custody-design.md)
 specifies R5c's concrete replacement for the integrated Host's per-kind file lanes. It separates

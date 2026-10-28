@@ -1,7 +1,7 @@
 ---
 title: Native Prefab template identity and reference preparation
 date: 2026-10-29
-status: in-progress
+status: qualified for the closed native Prefab collection workflow
 related_plan: 2026-10-28-managed-source-tool-artifacts-plan.md
 ---
 
@@ -81,6 +81,23 @@ The parent owns Cargo and root formatting with `CARGO_BUILD_JOBS=1` and shared `
 Reflect worker owns only asset-reference helpers/exports/tests; Scene worker owns only the new
 Prefab-copy module/exports/tests; parent owns Host/Tooling/Application integration and documents.
 Workers do not format, run Cargo or commit. Preserve concurrent work and untouched `vendor/`.
+
+## Qualified Result
+
+Filesystem retained creation is `0bd3d62`, Reflect reference rewriting is `a2a06f0`, Scene copying
+is `c533ad1` and Host/Tooling/Application plus the independent workflow are `d98f39a`. The
+[verification record](../knowledge/engineering/verification/2026-10/2026-10-28T211402Z-native-prefab-template-identity-remapping-and-retained-publication-qualification-288aa15af1244e52b81c3c364689d633.md)
+records 592 source-library passes, 1,258 final Host/Tooling/Editor/filesystem passes with 38 explicit
+skips, 33 independent consumers and separately selected actual managed/Application/Windows-DX12
+passes. Correctness Clippy, minimal feature and root/fixture formatting checks pass. That native
+selection retains its tool/facet/selection scope; Prefab import/reclamation uses the independent
+window-free source-format consumer. No newly drawn import control is qualified.
+
+The closed Prefab unit is complete within those limits. The parent lifecycle and complete
+foundation Goal remain active. Scene/image closures, external bindings, general asset templates
+and complete management/custom-drawn UI remain separate. The
+[creation-metadata evolution plan](2026-10-29-installed-owner-creation-metadata-evolution-plan.md)
+is the next planned existing-owner workflow, not an implemented Schema migration capability.
 
 ## References
 

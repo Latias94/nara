@@ -3,7 +3,7 @@ type: "Current State"
 title: "Current Engineering State"
 description: "Derived summary of immutable engineering-memory shards."
 tags: ["engineering-memory", "derived"]
-source_fingerprint: "dbf1fb8a252172e0f98dec66054db813045d0473b78b29f1722cbf94a5caff24"
+source_fingerprint: "13adf247c038760ed246034ef31aae2b3d982dcceca15bfb6112344e0f832d94"
 ---
 
 # Current State
@@ -12,8 +12,8 @@ source_fingerprint: "dbf1fb8a252172e0f98dec66054db813045d0473b78b29f1722cbf94a5c
 
 This file is derived from immutable shards. Record new facts in shards, then render during integration.
 
-- Source fingerprint: `dbf1fb8a252172e0f98dec66054db813045d0473b78b29f1722cbf94a5caff24`
-- Immutable records: 1011
+- Source fingerprint: `13adf247c038760ed246034ef31aae2b3d982dcceca15bfb6112344e0f832d94`
+- Immutable records: 1014
 - Active lane heads: 1
 
 # Active Registrations
@@ -69,6 +69,9 @@ This file is derived from immutable shards. Record new facts in shards, then ren
 
 # Recent Evidence
 
+- **Subagent Finding**: [Installed existing-owner evolution is a separate transaction after additive adoption](subagents/2026-10/2026-10-28T214506Z-installed-existing-owner-evolution-is-a-separate-transaction-after-additive-adoption-6b701a39429c41ddbc273c80bab9474c.md) - Records four current refusal boundaries and a creation-metadata-only installed tool successor workflow without claiming value migration or implementation.
+- **Verification Evidence**: [Native Prefab template identity remapping and retained publication qualification](verification/2026-10/2026-10-28T211402Z-native-prefab-template-identity-remapping-and-retained-publication-qualification-288aa15af1244e52b81c3c364689d633.md) - Qualifies source-owned closed Prefab copying and explicit project publication with exact native identities, reference remaps and retained failure custody.
+- **Work Progress**: [Native Prefab template copy and publication integration](progress/2026-10/2026-10-28T210026Z-native-prefab-template-copy-and-publication-integration-261a364ec6af4ce5bae5c11cd70b1dc8.md) - Records source-owned copying, actual publication integration and independently reviewed custody corrections before final qualification.
 - **Verification Evidence**: [Incomplete artifact publication custody and unified reviewed recovery](verification/2026-10/2026-10-28T194040Z-incomplete-artifact-publication-custody-and-unified-reviewed-recovery-e4c2d017cc7f4000ac1b38588809102a.md) - Records actual partial publication, preserved cleanup handover, common artifact format and real access-denied public recovery without fabricating a ready installation.
 - **Verification Evidence**: [Reviewed registered artifact unlink and truthful partial recovery qualification](verification/2026-10/2026-10-28T185322Z-reviewed-registered-artifact-unlink-and-truthful-partial-recovery-qualification-4c85687a35ef4b54b24b3fc98b6e5083.md) - Qualifies actual ready-artifact intent, per-member unlink, cancellation, result publication debt and exact Session/Application retention; incomplete publications remain open.
 - **Work Progress**: [Reviewed real artifact unlink integration and incomplete publication follow-up](progress/2026-10/2026-10-28T182559Z-reviewed-real-artifact-unlink-integration-and-incomplete-publication-follow-up-1de5c56631a146318b4b1098eb0fdfd8.md) - Records real ready-artifact disposal, namespace and cleanup corrections, focused verification and the concrete incomplete-publication owner successor.
@@ -78,9 +81,6 @@ This file is derived from immutable shards. Record new facts in shards, then ren
 - **Work Progress**: [Accepted document content protection integration and close recovery](progress/2026-10/2026-10-28T130259Z-accepted-document-content-protection-integration-and-close-recovery-c332720c1d2b451d91cd31e85c7a0711.md) - Records the known-versus-published protection correction, independent close/recovery findings and intermediate verification before final qualification.
 - **Verification Evidence**: [Exact-object file unlink and durable installed-content protection](verification/2026-10/2026-10-28T114302Z-exact-object-file-unlink-and-durable-installed-content-protection-995675b08109422ab0f90b15d6004546.md) - Qualifies generic Windows unlink separately from bounded Session management/adoption, explicit protection repair and real managed/public/native consumers; complete reclamation remains open.
 - **Work Progress**: [Protected installed content integration and explicit unlink authority correction](progress/2026-10/2026-10-28T112021Z-protected-installed-content-integration-and-explicit-unlink-authority-correction-10774d33b8b844fcb33ed785e034d011.md) - Records native ADS counterexamples, concrete exact-object unlink, ongoing content protection integration and review corrections without claiming complete reclamation.
-- **Verification Evidence**: [Exact installed source-tool graph and dependency-safe withdrawal](verification/2026-10/2026-10-28T095430Z-exact-installed-source-tool-graph-and-dependency-safe-withdrawal-0c433a90f253423da28da2b3e275bff8.md) - Replaces the single-member selection record with bounded exact installed relationships, shared capture admission and Session-owned withdrawal with independent managed/Application/native consumers.
-- **Verification Evidence**: [Schema adoption failure provenance and truthful cancellation](verification/2026-10/2026-10-28T085355Z-schema-adoption-failure-provenance-and-truthful-cancellation-b8fcde768b2e4e36a93355796a5f6224.md) - Retains source/history owning reports and actual worker failures through Session and Application without inventing failures for pure cancellation.
-- **Verification Evidence**: [Whole Session installed schema owner adoption and explicit publication recovery](verification/2026-10/2026-10-28T080917Z-whole-session-installed-schema-owner-adoption-and-explicit-publication-recovery-5a02037cad1b4af49cbec2b24306524a.md) - Records code-free installed metadata preparation, current dirty sources, actual publication and no-write reconciliation with physical custody and native consumer qualification.
 
 # Integration Notes
 

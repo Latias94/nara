@@ -189,7 +189,11 @@ actual public/native qualification. Its first capture API is not an installed or
 The [owner-adoption successor](2026-10-28-authoring-owner-adoption-plan.md) addresses the current
 installed consumer's pre-admitted metadata premise through source-owned reclassification/history,
 bundle publication and whole-Session adoption. New-owner adoption, existing-owner evolution and
-installed graph/removal retain distinct acceptance; the full R1b workflow must join them.
+installed graph/removal retain distinct acceptance; the full R1b workflow must join them. The
+[creation-metadata evolution plan](2026-10-29-installed-owner-creation-metadata-evolution-plan.md)
+selects the next bounded existing-owner transaction: unchanged stored values/history, one actual
+catalog successor and separately retired/approved tool execution. It is planned, not implemented
+or value-migration qualification.
 The [protected-content successor](2026-10-28-protected-source-tool-content-plan.md) continues
 the qualified exact graph through durable modification/adoption facts and reviewed reclamation.
 Actual Windows named-stream creation during restrictive default-stream custody exposes a
@@ -210,7 +214,10 @@ adds reviewed intent, actual unlink, partial recovery and retained result-public
 physical Close. The
 [incomplete-publication replacement](../knowledge/engineering/verification/2026-10/2026-10-28T194040Z-incomplete-artifact-publication-custody-and-unified-reviewed-recovery-e4c2d017cc7f4000ac1b38588809102a.md)
 adds actual partial artifact facts, retained cleanup handover and registration recovery using the
-same reclaimer. Native template identity/remapping and full management controls remain open;
+same reclaimer. The [native Prefab successor](2026-10-29-native-prefab-template-import-plan.md)
+adds closed Prefab collection copying/import with source-owned identities, sidecars and reference
+remapping, fixed preparation and retained directory publication. Scene/image collections, explicit
+external bindings, existing-owner Schema evolution and full management controls remain open;
 this is not a complete R1b claim.
 
 Acceptance: panel/session parity, exact result, one Undo, Save/Reopen, rejected/stale proposal,
