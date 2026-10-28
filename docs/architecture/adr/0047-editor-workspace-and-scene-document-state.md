@@ -13,6 +13,8 @@ with independent file evidence and complete content authorization
 **Amended**: 2026-10-28 to separate code-free local release capture from installation and activation
 **Amended**: 2026-10-28 to prepare additive Schema classification for the complete open set
 **Refines**: ADR 0015, ADR 0026, ADR 0034, ADR 0038, ADR 0043
+**Amended**: 2026-10-28 to retain installed-content protection independently of graph withdrawal;
+management facts do not recover creation or deletion authority on Open
 **Refined By**: [ADR 0104](0104-host-owned-editor-workspace-installation.md): Host-Owned Editor
 Workspace Installation
 
@@ -176,6 +178,15 @@ Rules:
   source preparation, review and history. Pending native/input custody spans actual process and
   pipe return after logical cancellation. Runtime/bootstrap approval is a separate Host-issued
   prerequisite, not persistent package or document authority.
+  Installed-content protection uses a separate bounded Session ledger through that same owned
+  file publication/task custody. Actual installation handles may transfer creation provenance;
+  serialized management data never does. Explicit sample adoption and observed modification
+  survive installed-graph withdrawal and ordinary Close/Open as data facts. A prepared protection
+  successor writes nothing until its original-basis confirmation. Publication uncertainty and
+  cleanup remain observable; a re-observation cannot clear protection already admitted by the
+  current Session. No source edit, automatic execution or deletion follows from this record.
+  ADR 0118 and the [content plan](../../plans/2026-10-28-protected-source-tool-content-plan.md)
+  own the finite management/adoption and remaining complete reclamation scope.
 - Retained construction uses that same source owner. Workspace routes the original complete
   query basis plus the draft's exact source/Schema basis, and carries a nominal prepared
   construction with its fixed local mapping. A new query cannot authorize an obsolete draft.

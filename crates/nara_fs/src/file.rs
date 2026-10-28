@@ -100,6 +100,22 @@ impl FileCapability {
         self.identity
     }
 
+    /// Compares two continuously live file objects, including independent Host sessions.
+    ///
+    /// Both fresh native observations must prove object identity. This neither reopens a name
+    /// nor equates session-scoped identities, merges rights/trust, or proves immutable content.
+    pub fn same_object(&self, other: &Self) -> Result<bool, FsError> {
+        let left = platform::facts(&self.file)?;
+        let right = platform::facts(&other.file)?;
+        if !left.identity_proven || !right.identity_proven {
+            return Err(FsError::Unproven {
+                operation: FsOperation::InspectHandle,
+                proof: "comparing live files requires proven native object identity",
+            });
+        }
+        Ok(left.identity == right.identity)
+    }
+
     #[must_use]
     pub const fn parent_identity(&self) -> Option<FileIdentity> {
         self.parent_identity
@@ -489,6 +505,45 @@ mod tests {
     use std::io;
 
     use super::write_at_offset;
+
+    #[cfg(any(unix, windows))]
+    #[test]
+    fn same_object_rejects_unproven_fresh_native_identity() {
+        use std::{
+            fs::{self, OpenOptions},
+            sync::atomic::{AtomicU64, Ordering},
+        };
+
+        use crate::{FileCapability, FsError, FsOperation, TrustMode, platform};
+
+        static SEQUENCE: AtomicU64 = AtomicU64::new(0);
+        let path = std::env::temp_dir().join(format!(
+            "nara_fs_file_identity_{}_{}",
+            std::process::id(),
+            SEQUENCE.fetch_add(1, Ordering::Relaxed)
+        ));
+        let file = OpenOptions::new()
+            .read(true)
+            .write(true)
+            .create_new(true)
+            .open(&path)
+            .unwrap();
+        let other = file.try_clone().unwrap();
+        let mut facts = platform::facts(&file).unwrap();
+        let first = FileCapability::from_host_handle(file, TrustMode::TrustedLocal, 0).unwrap();
+        let second = FileCapability::from_host_handle(other, TrustMode::TrustedLocal, 1).unwrap();
+        facts.identity_proven = false;
+        let result = platform::with_test_facts_override(facts, || first.same_object(&second));
+        assert!(matches!(
+            result,
+            Err(FsError::Unproven {
+                operation: FsOperation::InspectHandle,
+                ..
+            })
+        ));
+        drop((first, second));
+        fs::remove_file(path).unwrap();
+    }
 
     #[test]
     fn write_offset_advances_by_partial_count_and_continues_at_that_position() {

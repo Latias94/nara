@@ -80,6 +80,10 @@ impl EditorSourceToolInstalledMember {
     pub const fn sync_receipt(&self) -> FileSyncReceipt {
         self.sync
     }
+
+    pub(in crate::project_host::runtime::editor::source_tools) fn file(&self) -> &FileCapability {
+        &self.file
+    }
 }
 
 /// Code-free inspection retaining the exact live directory and ready-receipt byte observation.

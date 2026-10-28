@@ -99,6 +99,9 @@ local relationships are checked; unsupported sources, roles, migration and targe
    for this single slot if exposed honestly; unrelated resource owners are not a substitute.
    Reclaim only proven unmodified managed files after physical return; explicit adoption revokes
    deletion authority even if bytes still match. Retain cleanup/recovery facts across Close/Open.
+   The [protected-content successor](2026-10-28-protected-source-tool-content-plan.md) separates
+   continuous creation custody from durable protection facts and fresh explicit removal review;
+   its first prerequisite qualifies a same-object stable-content filesystem primitive.
 5. **Public and native consumer.** Complete the actual tool workflow without fixture-owned
    execution, installation or proposal interpretation. Exercise invalid/missing/oversized/aliased
    artifacts, wrong digest/target, failed V2, stale review, changed content, adoption, disabled

@@ -614,6 +614,7 @@ impl EditorProjectSession {
             #[cfg(test)]
             gate,
         ));
+        self.initialize_source_tool_content();
     }
 
     /// Observes desired disk selection separately from the actual active route; performs no IO.

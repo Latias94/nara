@@ -504,6 +504,54 @@ pub(crate) fn discard_directory_exact(directory: &File) -> Result<(), FsError> {
     imp::discard_directory_exact(directory)
 }
 
+pub(crate) fn preflight_unlink(parent: &File) -> Result<(), FsError> {
+    #[cfg(windows)]
+    {
+        imp::preflight_unlink(parent)
+    }
+    #[cfg(not(windows))]
+    {
+        let _ = parent;
+        Err(FsError::Unsupported {
+            operation: crate::FsOperation::Unlink,
+            capability: "exact-object unlink has no qualified platform adapter",
+        })
+    }
+}
+
+pub(crate) fn open_file_for_unlink(
+    parent: &File,
+    name: &RelativeComponent,
+) -> Result<File, FsError> {
+    #[cfg(windows)]
+    {
+        imp::open_file_for_unlink(parent, name)
+    }
+    #[cfg(not(windows))]
+    {
+        let _ = (parent, name);
+        Err(FsError::Unsupported {
+            operation: crate::FsOperation::Unlink,
+            capability: "exact-object unlink has no qualified platform adapter",
+        })
+    }
+}
+
+pub(crate) fn unlink_open_file(file: &File) -> Result<(), FsError> {
+    #[cfg(windows)]
+    {
+        imp::unlink_open_file(file)
+    }
+    #[cfg(not(windows))]
+    {
+        let _ = file;
+        Err(FsError::Unsupported {
+            operation: crate::FsOperation::Unlink,
+            capability: "exact-object unlink has no qualified platform adapter",
+        })
+    }
+}
+
 pub(crate) fn discard_temporary(
     parent: &File,
     file: &File,

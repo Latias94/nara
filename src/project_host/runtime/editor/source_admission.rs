@@ -2,7 +2,6 @@ use nara_fs::{DirectoryCapability, FileCapability, FsError, RelativePath};
 use nara_tooling::EditorDocumentId;
 
 use super::{EditorExecutionLane, EditorProjectSession};
-use crate::project_host::file_publication::FilePublicationReadSource;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(super) enum SourceAdmissionError {
@@ -146,38 +145,58 @@ impl EditorProjectSession {
         project_path: &str,
         current: &FileCapability,
     ) -> Result<(), SourceAdmissionError> {
-        if project_path == super::source_tools::SELECTION_PATH
+        if project_path.eq_ignore_ascii_case(super::source_tools::SELECTION_PATH)
+            || project_path.eq_ignore_ascii_case(super::source_tools::CONTENT_PATH)
             || self.exact_source_owner(project_path).is_some()
         {
             return Err(SourceAdmissionError::AlreadyOpen);
+        }
+        // Reserve the current metadata objects even before parsing or Host admission succeeds.
+        let root = self
+            .source_project_root()
+            .strict_read_only()
+            .map_err(|_| SourceAdmissionError::SourceRead)?;
+        for reserved in [
+            super::source_tools::SELECTION_PATH,
+            super::source_tools::CONTENT_PATH,
+        ] {
+            let path = RelativePath::new(reserved).expect("fixed source-tool metadata path");
+            exclude_file_alias(current, root.open_file_exact(&path))?;
         }
         for lane in self.scene_lanes.values() {
             let source = lane
                 .host
                 .try_with(|host| host.read_source())
                 .ok_or(SourceAdmissionError::HostUnavailable)?;
-            exclude_file_alias(current, source)?;
+            exclude_file_alias(current, source.open())?;
         }
         for lane in self.prefab_lanes.values() {
             let source = lane
                 .host
                 .try_with(|host| host.read_source())
                 .ok_or(SourceAdmissionError::HostUnavailable)?;
-            exclude_file_alias(current, source)?;
+            exclude_file_alias(current, source.open())?;
         }
         for lane in self.extension_documents.lanes() {
             let source = lane
                 .host
                 .try_with(|host| host.read_source())
                 .ok_or(SourceAdmissionError::HostUnavailable)?;
-            exclude_file_alias(current, source)?;
+            exclude_file_alias(current, source.open())?;
         }
         if let Some(source) = self
             .source_tools
             .selection_read_source()
             .map_err(|_| SourceAdmissionError::HostUnavailable)?
         {
-            exclude_file_alias(current, source)?;
+            exclude_file_alias(current, source.open())?;
+        }
+        if let Some(source) = self
+            .source_tools
+            .content_read_source()
+            .map_err(|_| SourceAdmissionError::HostUnavailable)?
+        {
+            exclude_file_alias(current, source.open())?;
         }
         Ok(())
     }
@@ -203,14 +222,17 @@ fn matches_project_path(project_path: &str, root: &str, logical_path: &str) -> b
 
 fn exclude_file_alias(
     current: &FileCapability,
-    source: FilePublicationReadSource,
+    source: Result<FileCapability, FsError>,
 ) -> Result<(), SourceAdmissionError> {
-    // Reopening through retained parent custody observes atomic replacement and directory rename.
-    match source.open() {
-        Ok(retained) if retained.identity() == current.identity() => {
-            Err(SourceAdmissionError::AlreadyOpen)
-        }
-        Ok(_) => Ok(()),
+    // Live-object comparison also covers capabilities issued by independent Host sessions.
+    match source {
+        Ok(retained) => match retained
+            .same_object(current)
+            .map_err(|_| SourceAdmissionError::SourceRead)?
+        {
+            true => Err(SourceAdmissionError::AlreadyOpen),
+            false => Ok(()),
+        },
         Err(FsError::Io { source, .. }) if source.kind() == std::io::ErrorKind::NotFound => Ok(()),
         Err(_) => Err(SourceAdmissionError::SourceRead),
     }

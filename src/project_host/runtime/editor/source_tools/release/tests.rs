@@ -15,13 +15,13 @@ use super::*;
 
 static NEXT_RELEASE: AtomicU64 = AtomicU64::new(1);
 
-pub(super) struct Release {
+pub(in crate::project_host::runtime::editor::source_tools) struct Release {
     pub(super) directory: PathBuf,
     pub(super) manifest: Value,
 }
 
 impl Release {
-    pub(super) fn new() -> Self {
+    pub(in crate::project_host::runtime::editor::source_tools) fn new() -> Self {
         let directory = std::env::temp_dir().join(format!(
             "nara_local_tool_release_{}_{}",
             std::process::id(),
@@ -83,7 +83,10 @@ impl Release {
         }
     }
 
-    pub(super) fn root(&self, trust: TrustMode) -> DirectoryCapability {
+    pub(in crate::project_host::runtime::editor::source_tools) fn root(
+        &self,
+        trust: TrustMode,
+    ) -> DirectoryCapability {
         #[cfg(windows)]
         let directory = {
             use std::os::windows::fs::OpenOptionsExt;
@@ -103,7 +106,9 @@ impl Release {
         .unwrap()
     }
 
-    pub(super) fn write_manifest(&self) -> ContentDigest {
+    pub(in crate::project_host::runtime::editor::source_tools) fn write_manifest(
+        &self,
+    ) -> ContentDigest {
         let bytes = serde_json::to_vec(&self.manifest).unwrap();
         fs::write(self.directory.join(MANIFEST_NAME), &bytes).unwrap();
         ContentDigest::of_bytes(&bytes)

@@ -479,6 +479,88 @@ fn directory_same_object_rejects_different_live_roots() {
 
 #[cfg(any(windows, target_os = "linux"))]
 #[test]
+fn file_same_object_compares_live_objects_across_independent_sessions() {
+    let root = TestRoot::new();
+    fs::write(root.path().join("original.bin"), b"same bytes").unwrap();
+    fs::write(root.path().join("copy.bin"), b"same bytes").unwrap();
+    let first_parent = portable_read_only(&root);
+    let second_parent = portable_read_only(&root);
+    let first = first_parent
+        .open_child_file(&component("original.bin"))
+        .unwrap();
+    let second = second_parent
+        .open_child_file(&component("original.bin"))
+        .unwrap();
+    let copy = second_parent
+        .open_child_file(&component("copy.bin"))
+        .unwrap();
+    let first_identity = first.identity();
+    let second_identity = second.identity();
+
+    assert_ne!(first_identity.session(), second_identity.session());
+    assert_ne!(first_identity, second_identity);
+    assert!(first.same_object(&second).unwrap());
+    assert!(second.same_object(&first).unwrap());
+    assert!(!first.same_object(&copy).unwrap());
+    assert_eq!(first.identity(), first_identity);
+    assert_eq!(second.identity(), second_identity);
+    assert_eq!(first.rights(), CapabilityRights::ReadOnly);
+    assert_eq!(second.rights(), CapabilityRights::ReadOnly);
+
+    fs::rename(
+        root.path().join("original.bin"),
+        root.path().join("moved.bin"),
+    )
+    .unwrap();
+    fs::write(root.path().join("original.bin"), b"same bytes").unwrap();
+    let replacement = second_parent
+        .open_child_file(&component("original.bin"))
+        .unwrap();
+    assert!(first.same_object(&second).unwrap());
+    assert!(!first.same_object(&replacement).unwrap());
+    assert_eq!(first.identity(), first_identity);
+    assert_eq!(second.identity(), second_identity);
+}
+
+#[cfg(any(windows, target_os = "linux"))]
+#[test]
+fn file_same_object_preserves_independent_rights_trust_and_generation() {
+    let root = TestRoot::new();
+    let writable_parent = trusted_read_write(&root);
+    let mut created = writable_parent
+        .create_child_file(&component("value.txt"))
+        .unwrap();
+    created.writer().unwrap().write_all(b"value").unwrap();
+    let independent_parent = DirectoryCapability::from_host_handle(
+        host_directory(root.path()),
+        HostCapabilityOptions::new(CapabilityRights::ReadOnly, TrustMode::Untrusted)
+            .with_generation(7),
+    )
+    .unwrap();
+    let independent = independent_parent
+        .open_child_file(&component("value.txt"))
+        .unwrap();
+    let created_identity = created.identity();
+    let independent_identity = independent.identity();
+    assert_ne!(created_identity.session(), independent_identity.session());
+    assert_ne!(
+        created_identity.generation(),
+        independent_identity.generation()
+    );
+    assert!(created.same_object(&independent).unwrap());
+    assert!(independent.same_object(&created).unwrap());
+    assert_eq!(created.identity(), created_identity);
+    assert_eq!(created.rights(), CapabilityRights::ReadWrite);
+    assert_eq!(created.trust(), TrustMode::TrustedLocal);
+    assert_eq!(independent.identity(), independent_identity);
+    assert_eq!(independent.rights(), CapabilityRights::ReadOnly);
+    assert_eq!(independent.trust(), TrustMode::Untrusted);
+    created.writer().unwrap().write_all(b"!").unwrap();
+    assert_eq!(independent.read_to_end_bounded(6).unwrap(), b"value!");
+}
+
+#[cfg(any(windows, target_os = "linux"))]
+#[test]
 fn directory_same_object_preserves_strict_and_trusted_authority() {
     let root = TestRoot::new();
     fs::write(root.path().join("value.txt"), b"value").unwrap();
@@ -1809,26 +1891,161 @@ fn unsupported_directory_enumeration_matches_the_platform_matrix() {
 }
 
 #[test]
-fn remaining_deferred_public_primitives_fail_explicitly_and_match_the_matrix() {
+fn reserved_rename_remains_explicitly_unsupported() {
     let root = TestRoot::new();
     fs::write(root.path().join("value.txt"), b"value").unwrap();
     let capability = portable_read_write(&root);
-    let identity = capability
-        .open_file(&relative("value.txt"))
-        .unwrap()
-        .identity();
     let matrix = platform_capability_matrix();
 
-    assert_eq!(matrix.relative_unlink(), ProofStatus::Unsupported);
     assert_eq!(matrix.non_overwrite_rename(), ProofStatus::Unsupported);
-    assert!(matches!(
-        capability.unlink_file(&relative("value.txt"), identity),
-        Err(FsError::Unsupported { .. })
-    ));
     assert!(matches!(
         capability.rename_file_no_replace(&component("value.txt"), &component("moved.txt")),
         Err(FsError::Unsupported { .. })
     ));
+}
+
+#[test]
+fn relative_unlink_matrix_reports_exact_object_support_independently_of_content_policy() {
+    let expected = if cfg!(all(windows, target_arch = "x86_64")) {
+        ProofStatus::Proven
+    } else {
+        ProofStatus::Unsupported
+    };
+    assert_eq!(platform_capability_matrix().relative_unlink(), expected);
+}
+
+#[cfg(all(windows, target_arch = "x86_64"))]
+#[test]
+fn windows_regular_file_open_reports_a_directory_without_losing_native_kind_evidence() {
+    let root = TestRoot::new();
+    fs::create_dir(root.path().join("directory")).unwrap();
+    let capability = portable_read_only(&root);
+    assert!(matches!(
+        capability.open_file(&relative("directory")),
+        Err(FsError::NotRegularFile)
+    ));
+    assert!(root.path().join("directory").is_dir());
+}
+
+#[cfg(all(windows, target_arch = "x86_64"))]
+#[test]
+fn explicit_unlink_removes_the_observed_object_while_its_reader_remains_usable() {
+    let root = TestRoot::new();
+    fs::create_dir(root.path().join("nested")).unwrap();
+    fs::write(root.path().join("nested/value.txt"), b"value").unwrap();
+    let capability = portable_read_write(&root);
+    let independent_parent = portable_read_only(&root);
+    let observed = independent_parent
+        .open_file(&relative("nested/value.txt"))
+        .unwrap();
+    let receipt = capability
+        .unlink_file(&relative("nested/value.txt"), &observed)
+        .unwrap();
+    assert_eq!(
+        receipt.source_binding(),
+        PublicationSourceBinding::HandleBound
+    );
+    assert_eq!(receipt.name_removed(), StageStatus::Achieved);
+    assert_eq!(receipt.parent_directory_synced(), StageStatus::Unsupported);
+    assert!(!root.path().join("nested/value.txt").exists());
+    assert_eq!(observed.read_to_end_bounded(5).unwrap(), b"value");
+    fs::write(root.path().join("nested/value.txt"), b"replacement").unwrap();
+    let replacement = capability.open_file(&relative("nested/value.txt")).unwrap();
+    assert!(!observed.same_object(&replacement).unwrap());
+    assert!(matches!(
+        capability.unlink_file(&relative("nested/value.txt"), &observed),
+        Err(FsError::IdentityMismatch { .. })
+    ));
+    assert_eq!(
+        fs::read(root.path().join("nested/value.txt")).unwrap(),
+        b"replacement"
+    );
+}
+
+#[cfg(all(windows, target_arch = "x86_64"))]
+#[test]
+fn explicit_unlink_rejects_readonly_rights_conflicting_writers_and_multilink_objects() {
+    use std::os::windows::fs::OpenOptionsExt;
+
+    let root = TestRoot::new();
+    fs::write(root.path().join("value.txt"), b"value").unwrap();
+    let writable = portable_read_write(&root);
+    let readonly = portable_read_only(&root);
+    let observed = readonly.open_file(&relative("value.txt")).unwrap();
+    assert!(matches!(
+        readonly.unlink_file(&relative("value.txt"), &observed),
+        Err(FsError::ReadOnlyCapability {
+            operation: nara_fs::FsOperation::Unlink
+        })
+    ));
+    let writer = OpenOptions::new()
+        .write(true)
+        .share_mode(3)
+        .open(root.path().join("value.txt"))
+        .unwrap();
+    assert!(matches!(
+        writable.unlink_file(&relative("value.txt"), &observed),
+        Err(FsError::Io { .. })
+    ));
+    assert_eq!(fs::read(root.path().join("value.txt")).unwrap(), b"value");
+    drop(writer);
+    let original_permissions = fs::metadata(root.path().join("value.txt"))
+        .unwrap()
+        .permissions();
+    let mut readonly_permissions = original_permissions.clone();
+    readonly_permissions.set_readonly(true);
+    fs::set_permissions(root.path().join("value.txt"), readonly_permissions).unwrap();
+    let readonly_result = writable.unlink_file(&relative("value.txt"), &observed);
+    fs::set_permissions(root.path().join("value.txt"), original_permissions).unwrap();
+    assert!(matches!(readonly_result, Err(FsError::Io { .. })));
+    assert_eq!(fs::read(root.path().join("value.txt")).unwrap(), b"value");
+    fs::hard_link(root.path().join("value.txt"), root.path().join("alias.txt")).unwrap();
+    assert!(matches!(
+        writable.unlink_file(&relative("value.txt"), &observed),
+        Err(FsError::MultipleLinks { .. })
+    ));
+    assert_eq!(fs::read(root.path().join("alias.txt")).unwrap(), b"value");
+}
+
+#[cfg(all(windows, target_arch = "x86_64"))]
+#[test]
+fn explicit_unlink_authorizes_the_whole_object_without_claiming_unchanged_bytes() {
+    use std::os::windows::fs::OpenOptionsExt;
+
+    let root = TestRoot::new();
+    fs::write(root.path().join("value.txt"), b"before").unwrap();
+    let capability = portable_read_write(&root);
+    let observed = capability.open_file(&relative("value.txt")).unwrap();
+    // Whole-object deletion is explicitly authorized; this API is not installer reclamation.
+    fs::write(root.path().join("value.txt"), b"edited").unwrap();
+    fs::write(root.path().join("value.txt:user-note"), b"alternate stream").unwrap();
+    let mut writer = OpenOptions::new()
+        .write(true)
+        .share_mode(7)
+        .open(root.path().join("value.txt"))
+        .unwrap();
+    let receipt = capability
+        .unlink_file(&relative("value.txt"), &observed)
+        .unwrap();
+    assert_eq!(receipt.name_removed(), StageStatus::Achieved);
+    assert!(!root.path().join("value.txt").exists());
+    assert_eq!(observed.read_to_end_bounded(6).unwrap(), b"edited");
+    writer.write_all(b"after!").unwrap();
+    assert_eq!(observed.read_to_end_bounded(6).unwrap(), b"after!");
+}
+
+#[cfg(not(windows))]
+#[test]
+fn unlink_without_exact_object_adapter_preserves_the_named_file() {
+    let root = TestRoot::new();
+    fs::write(root.path().join("value.txt"), b"value").unwrap();
+    let capability = portable_read_write(&root);
+    let observed = capability.open_file(&relative("value.txt")).unwrap();
+    assert!(matches!(
+        capability.unlink_file(&relative("value.txt"), &observed),
+        Err(FsError::Unsupported { .. })
+    ));
+    assert_eq!(fs::read(root.path().join("value.txt")).unwrap(), b"value");
 }
 
 #[cfg(target_os = "linux")]

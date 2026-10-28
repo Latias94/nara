@@ -3,7 +3,7 @@ type: "Current State"
 title: "Current Engineering State"
 description: "Derived summary of immutable engineering-memory shards."
 tags: ["engineering-memory", "derived"]
-source_fingerprint: "c1886e304fd7b640e830d56c4076010f1fc7aa498f096f3d5ea2c53a3ef5da8d"
+source_fingerprint: "7c28e14cdac8879a9a7c1c489abb02cbaf92e245296ba340a491ef91a424b9a6"
 ---
 
 # Current State
@@ -12,8 +12,8 @@ source_fingerprint: "c1886e304fd7b640e830d56c4076010f1fc7aa498f096f3d5ea2c53a3ef
 
 This file is derived from immutable shards. Record new facts in shards, then render during integration.
 
-- Source fingerprint: `c1886e304fd7b640e830d56c4076010f1fc7aa498f096f3d5ea2c53a3ef5da8d`
-- Immutable records: 1002
+- Source fingerprint: `7c28e14cdac8879a9a7c1c489abb02cbaf92e245296ba340a491ef91a424b9a6`
+- Immutable records: 1004
 - Active lane heads: 1
 
 # Active Registrations
@@ -69,6 +69,8 @@ This file is derived from immutable shards. Record new facts in shards, then ren
 
 # Recent Evidence
 
+- **Verification Evidence**: [Exact-object file unlink and durable installed-content protection](verification/2026-10/2026-10-28T114302Z-exact-object-file-unlink-and-durable-installed-content-protection-995675b08109422ab0f90b15d6004546.md) - Qualifies generic Windows unlink separately from bounded Session management/adoption, explicit protection repair and real managed/public/native consumers; complete reclamation remains open.
+- **Work Progress**: [Protected installed content integration and explicit unlink authority correction](progress/2026-10/2026-10-28T112021Z-protected-installed-content-integration-and-explicit-unlink-authority-correction-10774d33b8b844fcb33ed785e034d011.md) - Records native ADS counterexamples, concrete exact-object unlink, ongoing content protection integration and review corrections without claiming complete reclamation.
 - **Verification Evidence**: [Exact installed source-tool graph and dependency-safe withdrawal](verification/2026-10/2026-10-28T095430Z-exact-installed-source-tool-graph-and-dependency-safe-withdrawal-0c433a90f253423da28da2b3e275bff8.md) - Replaces the single-member selection record with bounded exact installed relationships, shared capture admission and Session-owned withdrawal with independent managed/Application/native consumers.
 - **Verification Evidence**: [Schema adoption failure provenance and truthful cancellation](verification/2026-10/2026-10-28T085355Z-schema-adoption-failure-provenance-and-truthful-cancellation-b8fcde768b2e4e36a93355796a5f6224.md) - Retains source/history owning reports and actual worker failures through Session and Application without inventing failures for pure cancellation.
 - **Verification Evidence**: [Whole Session installed schema owner adoption and explicit publication recovery](verification/2026-10/2026-10-28T080917Z-whole-session-installed-schema-owner-adoption-and-explicit-publication-recovery-5a02037cad1b4af49cbec2b24306524a.md) - Records code-free installed metadata preparation, current dirty sources, actual publication and no-write reconciliation with physical custody and native consumer qualification.
@@ -79,8 +81,6 @@ This file is derived from immutable shards. Record new facts in shards, then ren
 - **Work Progress**: [Bundle owner successor and current source capture integration in progress](progress/2026-10/2026-10-28T041003Z-bundle-owner-successor-and-current-source-capture-integration-in-progress-92c27e57b33f494f8505ae9d834233c9.md) - Records snapshot-preserving composition, live accepted leaf handoff, nominal current-source capture and remaining historical and Session adoption work.
 - **Subagent Finding**: [Host schema adoption seams after source history qualification](subagents/2026-10/2026-10-28T033218Z-host-schema-adoption-seams-after-source-history-qualification-656e522708f64f469f6623e660467e9a.md) - Maps actual bundle, capture, Workspace and Session ownership and records proposed streaming historical proof without a second interpreter.
 - **Verification Evidence**: [Source-owned schema reclassification with exact retained history and bounded interpretation](verification/2026-10/2026-10-28T032419Z-source-owned-schema-reclassification-with-exact-retained-history-and-bounded-interpretation-becb85b221e241aebeb4845c692a7379.md) - Qualifies the additive source/history owner and records the actual-demand historical composition boundary before whole-Session adoption.
-- **Work Progress**: [Source-owned additive schema reclassification and retained history integration in progress](progress/2026-10/2026-10-28T023202Z-source-owned-additive-schema-reclassification-and-retained-history-integration-in-progress-3f8038175810499ab6477d801c8903d2.md) - Records the in-progress source/history replacement and concrete budget, nominal identity and shared preparation interfaces before qualification.
-- **Verification Evidence**: [Recipe schema refresh preserves independently admitted owner lineage](verification/2026-10/2026-10-28T014807Z-recipe-schema-refresh-preserves-independently-admitted-owner-lineage-8afcd1ede3dc4451ac719a1a236e9c85.md) - Qualifies bounded owner-preserving refresh and records the reviewed source/history successor design without claiming Session adoption.
 
 # Integration Notes
 

@@ -190,6 +190,10 @@ The [owner-adoption successor](2026-10-28-authoring-owner-adoption-plan.md) addr
 installed consumer's pre-admitted metadata premise through source-owned reclassification/history,
 bundle publication and whole-Session adoption. New-owner adoption, existing-owner evolution and
 installed graph/removal retain distinct acceptance; the full R1b workflow must join them.
+The [protected-content successor](2026-10-28-protected-source-tool-content-plan.md) continues
+the qualified exact graph through durable modification/adoption facts and reviewed reclamation.
+Actual Windows named-stream creation during restrictive default-stream custody exposes a
+whole-file deletion-proof gap; management/adoption can proceed without qualifying reclamation.
 
 Acceptance: panel/session parity, exact result, one Undo, Save/Reopen, rejected/stale proposal,
 delayed completion after newer requests, multiple observers and bounded structured diagnostic

@@ -25,8 +25,8 @@ use windows_sys::Win32::{
     Foundation::{
         ERROR_ALREADY_EXISTS, ERROR_CALL_NOT_IMPLEMENTED, ERROR_FILE_EXISTS,
         ERROR_INVALID_FUNCTION, ERROR_INVALID_PARAMETER, ERROR_NOT_SAME_DEVICE,
-        ERROR_NOT_SUPPORTED, RtlNtStatusToDosError, STATUS_BUFFER_OVERFLOW, STATUS_NO_MORE_FILES,
-        STATUS_NO_SUCH_FILE, UNICODE_STRING,
+        ERROR_NOT_SUPPORTED, RtlNtStatusToDosError, STATUS_BUFFER_OVERFLOW,
+        STATUS_FILE_IS_A_DIRECTORY, STATUS_NO_MORE_FILES, STATUS_NO_SUCH_FILE, UNICODE_STRING,
     },
     Storage::FileSystem::{
         DELETE, FILE_ATTRIBUTE_DEVICE, FILE_ATTRIBUTE_DIRECTORY, FILE_ATTRIBUTE_NORMAL,
@@ -229,7 +229,11 @@ pub(crate) const fn capability_matrix() -> PlatformCapabilityMatrix {
         } else {
             ProofStatus::Unsupported
         },
-        relative_unlink: ProofStatus::Unsupported,
+        relative_unlink: if cfg!(target_arch = "x86_64") {
+            ProofStatus::Proven
+        } else {
+            ProofStatus::Unsupported
+        },
         non_overwrite_rename: ProofStatus::Unsupported,
     }
 }
@@ -730,6 +734,84 @@ pub(crate) fn discard_temporary(
     }
 }
 
+pub(crate) fn preflight_unlink(parent: &File) -> Result<(), FsError> {
+    if !cfg!(target_arch = "x86_64") || windows_1809_or_later() == Some(false) {
+        return Err(FsError::Unsupported {
+            operation: FsOperation::Unlink,
+            capability: "handle-bound POSIX file unlink requires Windows x86-64 1809+ on local NTFS",
+        });
+    }
+    if windows_1809_or_later().is_none() {
+        return Err(FsError::Unproven {
+            operation: FsOperation::Unlink,
+            proof: "the Windows version required by POSIX unlink is unavailable",
+        });
+    }
+    match volume_semantics(parent) {
+        WindowsVolumeSemantics::LocalNtfs => Ok(()),
+        WindowsVolumeSemantics::LocalRefs | WindowsVolumeSemantics::OtherLocal => {
+            Err(FsError::Unsupported {
+                operation: FsOperation::Unlink,
+                capability: "POSIX file unlink is qualified only on local NTFS",
+            })
+        }
+        WindowsVolumeSemantics::Remote | WindowsVolumeSemantics::Unproven => {
+            Err(FsError::Unproven {
+                operation: FsOperation::Unlink,
+                proof: "the live parent cannot prove the required local unlink semantics",
+            })
+        }
+    }
+}
+
+pub(crate) fn open_file_for_unlink(
+    parent: &File,
+    name: &RelativeComponent,
+) -> Result<File, FsError> {
+    nt_open_with_share_mode(
+        parent,
+        name,
+        FILE_READ_ATTRIBUTES | SYNCHRONIZE | DELETE,
+        FILE_OPEN,
+        FILE_NON_DIRECTORY_FILE,
+        FsOperation::Unlink,
+        FILE_SHARE_READ | FILE_SHARE_WRITE,
+    )
+}
+
+pub(crate) fn unlink_open_file(file: &File) -> Result<(), FsError> {
+    let disposition = FILE_DISPOSITION_INFO_EX {
+        Flags: FILE_DISPOSITION_FLAG_DELETE | FILE_DISPOSITION_FLAG_POSIX_SEMANTICS,
+    };
+    // SAFETY: the private caller owns this live regular-file handle with DELETE access. The
+    // matching disposition buffer remains initialized and live for the synchronous call.
+    let succeeded = unsafe {
+        SetFileInformationByHandle(
+            raw_handle(file),
+            FileDispositionInfoEx,
+            ptr::addr_of!(disposition).cast(),
+            size_of_val(&disposition) as u32,
+        )
+    };
+    if succeeded != 0 {
+        return Ok(());
+    }
+    let error = io::Error::last_os_error();
+    match error.raw_os_error().map(|code| code as u32) {
+        Some(ERROR_NOT_SUPPORTED | ERROR_CALL_NOT_IMPLEMENTED | ERROR_INVALID_FUNCTION) => {
+            Err(FsError::Unsupported {
+                operation: FsOperation::Unlink,
+                capability: "the live filesystem does not implement POSIX file disposition",
+            })
+        }
+        Some(ERROR_INVALID_PARAMETER) => Err(FsError::Unproven {
+            operation: FsOperation::Unlink,
+            proof: "the live filesystem rejected the required POSIX file disposition flags",
+        }),
+        _ => Err(FsError::io(FsOperation::Unlink, error)),
+    }
+}
+
 pub(crate) fn replace_temporary(
     parent: &File,
     temporary: &File,
@@ -949,6 +1031,26 @@ fn nt_open(
     type_option: u32,
     operation: FsOperation,
 ) -> Result<File, FsError> {
+    nt_open_with_share_mode(
+        parent,
+        component,
+        desired_access,
+        disposition,
+        type_option,
+        operation,
+        FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
+    )
+}
+
+fn nt_open_with_share_mode(
+    parent: &File,
+    component: &RelativeComponent,
+    desired_access: u32,
+    disposition: u32,
+    type_option: u32,
+    operation: FsOperation,
+    share_mode: u32,
+) -> Result<File, FsError> {
     let mut name = wide_component(component.as_os_str());
     let length = name
         .len()
@@ -984,13 +1086,16 @@ fn nt_open(
             &mut status_block,
             ptr::null(),
             FILE_ATTRIBUTE_NORMAL,
-            FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
+            share_mode,
             disposition,
             FILE_SYNCHRONOUS_IO_NONALERT | FILE_OPEN_REPARSE_POINT | type_option,
             ptr::null(),
             0,
         )
     };
+    if status == STATUS_FILE_IS_A_DIRECTORY {
+        return Err(FsError::NotRegularFile);
+    }
     if status < 0 {
         // SAFETY: conversion accepts the returned NTSTATUS value.
         let code = unsafe { RtlNtStatusToDosError(status) };
@@ -1308,3 +1413,7 @@ mod tests {
         }
     }
 }
+
+#[cfg(all(test, target_arch = "x86_64"))]
+#[path = "windows/file_removal_tests.rs"]
+mod file_removal_tests;

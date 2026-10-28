@@ -92,9 +92,9 @@ pub use source_tools::{
     EditorSourceToolInstalledMember, EditorSourceToolManagedError, EditorSourceToolManagedHost,
     EditorSourceToolManagedHostDigests, EditorSourceToolReleaseError,
     EditorSourceToolReleaseMember, EditorSourceToolReleaseMemberKind,
-    EditorSourceToolReleaseRequirement, PreparedEditorSourceToolInstallations,
-    PreparedEditorSourceToolRelease, PreparedEditorSourceToolSelection,
-    PreparedEditorSourceToolWithdrawal,
+    EditorSourceToolReleaseRequirement, PreparedEditorSourceToolContent,
+    PreparedEditorSourceToolInstallations, PreparedEditorSourceToolRelease,
+    PreparedEditorSourceToolSelection, PreparedEditorSourceToolWithdrawal,
 };
 #[cfg(feature = "runtime-ui")]
 use ui_authoring::EditorUiAuthoringProjectionCache;

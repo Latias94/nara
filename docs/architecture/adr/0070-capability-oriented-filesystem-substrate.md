@@ -172,6 +172,36 @@ this cursor contract.
 - Handle-bound authorization is not a content snapshot. A caller requiring immutable input verifies
   an expected digest during the read or copies into an engine-owned immutable candidate before use.
 
+### Explicit unlink and protected reclamation
+
+`DirectoryCapability::unlink_file(path, &observed)` is an explicitly authorized filesystem
+operation. A read-write parent supplies deletion authority; a continuously live leaf supplies the
+expected object. The adapter resolves the current leaf strictly, acquires its own DELETE handle,
+and compares actual live objects before setting disposition on that same handle. Reject reparse,
+multi-link and unproven objects, volume transitions and different current objects. The former
+bare-identity Unsupported placeholder is replaced without a compatibility entry point.
+
+The first adapter supports Windows x86-64, Windows 10 1809+ and local NTFS. It requests attributes
+and DELETE access, excludes competing delete/rename opens, and uses handle-bound POSIX disposition
+without overriding read-only attributes. Default-stream writes are not prohibited by this generic
+operation. Explicit authorization covers the complete file, including alternate data streams.
+Unix and other unqualified adapters return Unsupported with preservation and no stat/name/unlink
+fallback. ReFS is not included in this narrower implementation qualification.
+
+The receipt records namespace removal after the deleting handle closes, separately from parent
+synchronization and physical storage release. Other retained readers may keep data alive, and a
+later object may occupy the same name. No permanent name-absence or crash-durable deletion follows.
+
+Installation reclamation is a stronger domain policy. Generic unlink does not prove unchanged
+bytes, creation provenance, sample adoption, document ownership or physical-user retirement.
+An actual NTFS candidate probe with restrictive default-stream read/delete custody still permits
+creating and modifying alternate streams. A default-stream digest therefore cannot authorize
+automatic whole-file unchanged-content reclamation. Byte-range locks also cannot exclude mapped
+writes. The domain must obtain its complete proof and explicit review before invoking unlink;
+neither a receipt nor an equal digest recovers historical creation authority. The
+[content plan](../../plans/2026-10-28-protected-source-tool-content-plan.md) owns that still-open
+consumer. This stronger gap is not a reason to remove the independently useful generic primitive.
+
 ### Platform evidence matrix
 
 - **Windows reference contract:** Windows 10 version 1809 or later, or the corresponding Windows
@@ -243,12 +273,13 @@ cleanup/orphan outcomes, file/directory sync reporting, locking, positional read
 digest verification. Windows handle-bound temporary discard is included; Unix discard deliberately
 leaves a recoverable orphan rather than risking deletion of the wrong name.
 
-One reserved public operation remains explicitly `Unsupported` and is not counted as implemented
-foundation capability:
+The explicit live-object unlink replaces the old identity-only stub. Its platform matrix axis
+describes exact-object removal, not unchanged-content reclamation. The following stronger domain
+operation remains unavailable:
 
 | Reserved primitive | First owning unit | Completion rule |
 |---|---|---|
-| Relative identity-guarded unlink and orphan reclamation | Proposed ADR 0091 persistence/recovery | Add a platform-specific exact-object or explicitly weaker recovery primitive in `nara_fs`; editor persistence/recovery must not reproduce `stat + unlink`. |
+| Protected exact-object file reclamation | [Installed content plan](../../plans/2026-10-28-protected-source-tool-content-plan.md), with Proposed ADR 0091 retaining broader recovery scope | Prove the complete removed object's stable content and exact handle binding, including Windows alternate streams; do not substitute `stat + unlink` or default-stream equality. |
 
 The completed [Editor Project Browser and Source Index v1](../../plans/2026-08-19-001-feat-editor-project-browser-and-source-index-v1-plan.md)
 plan implements the previously reserved handle-bound enumeration primitive and its first Host and

@@ -89,6 +89,53 @@ This is an artifact preparation/publication API, not the complete Package Manage
 select an installed graph, satisfy declared requirements, adopt project Schema, approve a launcher,
 enable a tool or complete update/removal. Those operations remain in the local lifecycle plan.
 
+## Retain Installed Content And Adopt Samples
+
+Keep a successful `EditorSourceToolInstallation` in an `Arc` when transferring its live
+created-member custody into a Project Session or Application. Observe `source_tool_content_view()`
+and wait for its initial read and actual pending work to return. Then call
+`prepare_source_tool_content_management(&basis, project_relative_directory, Arc::clone(&installation))`.
+The returned candidate describes the finite member baselines and protection facts. Preparation
+and dropping the candidate write nothing. `commit_source_tool_content(candidate)` confirms that
+original successor; observe its eventual operation outcome separately from the returned attempt.
+A changed Session basis or different actual project directory refuses the candidate.
+
+`prepare_source_tool_content_adoption(&basis, &installation_id, &["samples/readme.txt"])` prepares
+explicit project ownership of declared Content members. Confirm through the same commit API.
+Adoption changes no source, history, graph or executable approval. It remains set even while
+bytes equal the release baseline. Unknown members and tool/metadata members cannot be adopted
+as samples. An imported project copy is outside this member set; management never follows its
+origin to delete that copy.
+
+`prepare_source_tool_content_observation(&basis, &installation_id)` observes declared member
+presence and bounded default-stream digests without requiring the whole installation to remain
+a valid executable release. Confirming that candidate retains observed modification. Restoring
+baseline bytes or registering the same installation again cannot clear admitted modification
+or adoption. Unknown siblings remain untouched. This records observations; it cannot discover
+an external change that was reverted entirely between observations. Complete protection at
+every accepted document-edit boundary remains subsequent work.
+
+The separate bounded `.nara/source-tools/content.json` preserves up to 32 installations,
+66 members each and 2 MiB of data, including installations already withdrawn from the graph.
+Capacity refusal never evicts protection records. `physical_work_pending` includes actual task
+return and publication cleanup. Publication drift or uncertainty retains the existing facts;
+`reconcile_source_tool_content(&basis)` explicitly reads the current record without writing.
+Within the current Session reconciliation cannot discard known entries, change their immutable
+baselines or clear known protection.
+If disk protection is weaker, the result is `NeedsProtectionPublication`, with
+`protection_publication_pending` and `RequiresReconcile`, rather than a successful durable
+reconciliation. Prepare an explicit adoption or observation successor against that returned basis
+and confirm it to republish the retained protection. A failed or uncertain publication requires
+another fresh read before repair. Read-only reconciliation itself never rewrites disk.
+
+Fresh Open reads the ledger without recovering historical creation custody, approving code or
+deleting any file. An unavailable/corrupt record preserves installed files. A pending recovery
+fact is not permission to resume deletion. Whole-file reclamation remains unqualified: actual
+Windows probes show that restrictive default-stream custody still allows named alternate-stream
+creation/modification. Default-stream digest equality therefore cannot authorize destroying the
+complete file. See the [protected-content plan](../plans/2026-10-28-protected-source-tool-content-plan.md)
+for the complete workflow and remaining native proof.
+
 ## Review And Adopt A Missing Schema Owner
 
 An installed catalog does not change the metadata already admitted by an open Session. Use

@@ -233,6 +233,10 @@ impl PlatformCapabilityMatrix {
     }
 
     #[must_use]
+    /// Explicitly authorized relative unlink of the same live regular-file object.
+    ///
+    /// This does not establish unchanged content, all-stream hashing or domain ownership.
+    /// Each parent still needs its live supported-volume and platform checks.
     pub const fn relative_unlink(self) -> ProofStatus {
         self.relative_unlink
     }

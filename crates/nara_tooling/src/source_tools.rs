@@ -42,6 +42,8 @@ operation_id!(EditorSourceToolActivationId);
 
 mod selection;
 pub use selection::*;
+mod content;
+pub use content::*;
 
 /// Explicit source intent retained by the Host rather than returned by the child.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -270,6 +272,7 @@ pub struct EditorSourceToolView {
     pub attempt_error: Option<EditorSourceToolError>,
     pub request_error: Option<EditorSourceToolError>,
     pub selection: Option<EditorSourceToolSelectionView>,
+    pub content: Option<EditorSourceToolContentView>,
 }
 
 impl EditorSourceToolView {
@@ -286,6 +289,15 @@ impl EditorSourceToolView {
                         | EditorSourceToolSelectionPhase::Publishing
                         | EditorSourceToolSelectionPhase::Reconciling
                 )
+            })
+            || self.content.as_ref().is_some_and(|content| {
+                content.physical_work_pending
+                    || matches!(
+                        content.phase,
+                        EditorSourceToolContentPhase::Loading
+                            | EditorSourceToolContentPhase::Publishing
+                            | EditorSourceToolContentPhase::Reconciling
+                    )
             })
     }
 }

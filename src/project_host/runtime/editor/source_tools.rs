@@ -22,19 +22,22 @@ use nara_tasks::{
 use nara_tooling::{
     EditorDocumentQueryBasis, EditorPropertyRead, EditorPropertyReadLimits, EditorPropertyTarget,
     EditorPropertyValue, EditorSourceToolActivationId, EditorSourceToolActive,
-    EditorSourceToolAttemptId, EditorSourceToolCommit, EditorSourceToolError,
-    EditorSourceToolIntegerProperty, EditorSourceToolIntent, EditorSourceToolRequestId,
-    EditorSourceToolReview, EditorSourceToolReviewSummary, EditorSourceToolView,
-    PreparedEditorDocumentConstruction,
+    EditorSourceToolAttemptId, EditorSourceToolCommit, EditorSourceToolContentView,
+    EditorSourceToolError, EditorSourceToolIntegerProperty, EditorSourceToolIntent,
+    EditorSourceToolRequestId, EditorSourceToolReview, EditorSourceToolReviewSummary,
+    EditorSourceToolView, PreparedEditorDocumentConstruction,
 };
 use serde::{Deserialize, Serialize};
 
 use super::{EditorEditPreparationError, EditorProjectSession};
 
+mod content;
 mod managed;
 mod process;
 mod release;
 mod selection;
+pub(super) use content::CONTENT_PATH;
+pub use content::PreparedEditorSourceToolContent;
 pub use managed::{
     EditorSourceToolManagedError, EditorSourceToolManagedHost, EditorSourceToolManagedHostDigests,
 };
@@ -227,6 +230,7 @@ pub(super) struct EditorSourceTools {
     attempt_error: Option<EditorSourceToolError>,
     request_error: Option<EditorSourceToolError>,
     selection: selection::SelectionState,
+    content: content::ContentState,
     #[cfg(test)]
     next_gates: process::ProcessTestGates,
 }
@@ -234,13 +238,19 @@ pub(super) struct EditorSourceTools {
 impl EditorSourceTools {
     /// Selection IO and deferred promotion are separate from process jobs.
     pub(super) fn schema_adoption_pending(&self) -> bool {
-        self.jobs() != 0 || self.selection.schema_adoption_pending()
+        self.jobs() != 0 || self.selection.schema_adoption_pending() || self.content.pending()
     }
 
     pub(super) fn selection_read_source(
         &self,
     ) -> Result<Option<crate::project_host::file_publication::FilePublicationReadSource>, ()> {
         self.selection.read_source()
+    }
+
+    pub(super) fn content_read_source(
+        &self,
+    ) -> Result<Option<crate::project_host::file_publication::FilePublicationReadSource>, ()> {
+        self.content.read_source()
     }
 
     fn jobs(&self) -> usize {
@@ -284,7 +294,7 @@ impl EditorSourceTools {
         }
     }
 
-    pub(super) fn view(&self) -> EditorSourceToolView {
+    pub(super) fn view(&self, content: EditorSourceToolContentView) -> EditorSourceToolView {
         let review = self
             .reviewed
             .as_ref()
@@ -319,6 +329,7 @@ impl EditorSourceTools {
                         .and_then(|active| active.origin.clone()),
                 ),
             ),
+            content: Some(content),
         }
     }
 }
@@ -374,7 +385,7 @@ struct WireWrite {
 impl EditorProjectSession {
     #[must_use]
     pub fn source_tool_view(&self) -> EditorSourceToolView {
-        self.source_tools.view()
+        self.source_tools.view(self.source_tool_content_view())
     }
 
     #[must_use]
@@ -784,6 +795,7 @@ impl EditorProjectSession {
     }
 
     pub(super) fn advance_source_tools(&mut self) {
+        self.advance_source_tool_content();
         self.source_tools
             .selection
             .observe_schema_adoption_cleanup();

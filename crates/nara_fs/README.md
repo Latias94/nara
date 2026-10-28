@@ -65,6 +65,28 @@ and the opened link's stored name rather than its separate short-name alias. Lin
 per-directory case-insensitive Unicode lookup; a Unix compile target is not exact-name evidence.
 These references explain the mechanism, not a claim of executed platform qualification.
 
+## Explicit File Unlink
+
+`DirectoryCapability::unlink_file(&path, &observed)` deletes one current regular-file link
+through a read-write parent. Keep the observed `FileCapability` alive; a bare copied file ID is
+insufficient. The adapter opens a deleting handle relative to the verified parent, compares the
+actual live objects and sets disposition on that same handle. A different same-name object
+rejects before mutation. Read-only authority, reparse points, multi-link files and unavailable
+identity also reject.
+
+This explicitly authorizes deletion of the whole object, including its alternate data streams.
+It does not require unchanged bytes and does not decide installation ownership, sample adoption
+or document protection. The caller supplies those domain policies. In particular, default-stream
+digest equality cannot establish whole-file unchanged-content reclamation.
+
+The first qualified adapter is Windows x86-64, Windows 10 1809+ and local NTFS. It uses DELETE and
+attribute access, shares read/write access, excludes competing rename/delete opens and consumes
+the exact deleting handle after successful POSIX disposition. Read-only file attributes are
+honored. `FileUnlinkReceipt` reports the namespace cut; independent read handles may still access
+the old object, and a new object may later occupy its name. Parent-directory crash durability
+and physical disk-space release are not claimed. Unix and other unqualified adapters return
+Unsupported without a name-based fallback.
+
 ## Directory Publication
 
 Directory publication is a move-only transaction:

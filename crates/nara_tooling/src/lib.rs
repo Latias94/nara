@@ -118,6 +118,10 @@ pub use source_asset_import::{
 pub use source_tools::{
     EditorSourceToolAction, EditorSourceToolActionOutcome, EditorSourceToolActivationId,
     EditorSourceToolActive, EditorSourceToolAttemptId, EditorSourceToolCommit,
+    EditorSourceToolContentAttempt, EditorSourceToolContentBasis, EditorSourceToolContentError,
+    EditorSourceToolContentInstallation, EditorSourceToolContentMember,
+    EditorSourceToolContentObservation, EditorSourceToolContentOutcome,
+    EditorSourceToolContentPhase, EditorSourceToolContentRole, EditorSourceToolContentView,
     EditorSourceToolDesiredSelection, EditorSourceToolError, EditorSourceToolInstallationRequest,
     EditorSourceToolInstalledEntry, EditorSourceToolInstalledSelection,
     EditorSourceToolIntegerProperty, EditorSourceToolIntent, EditorSourceToolRequestId,

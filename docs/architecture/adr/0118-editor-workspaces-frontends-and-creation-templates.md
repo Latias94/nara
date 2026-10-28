@@ -535,6 +535,39 @@ cleanup does not prove unchanged/adopted content. A persisted receipt supports b
 inspection only: it cannot recover creation custody, select a Package graph, admit open-document
 metadata, approve executable code or grant deletion. Those product lifecycle owners remain separate.
 
+Installed-content protection has its own bounded `.nara/source-tools/content.json` record,
+independent of selection so withdrawn installations retain their facts. Session preparation accepts
+actual live installation custody, verifies its project-relative directory association and publishes
+the finite declared member baselines through the existing Tasks/FilePublicationHost owner. Retain
+at most 32 installations and 66 members per installation within a 2 MiB record; capacity refusal
+never evicts protection. Registration repeats cannot replace immutable facts or clear observed
+modification/adoption. Explicit adoption of declared Content members makes them project-owned
+without editing a source, rewriting history or following imported-copy origins.
+
+Preparation and dropped candidates write nothing. Confirmation consumes the original nominal
+content basis and exact protection successor; stale candidates reject. An admitted observation
+can set sticky modification and current presence/failure facts, but an equal default-stream digest
+is no immutable whole-object or deletion proof. Unknown siblings are untouched. Record publication,
+admission, cleanup and actual task return remain separate; uncertain publication requires explicit
+reconciliation. A Session re-observation cannot clear its already known protection or discard
+known installations. Corrupt/unavailable records preserve files, rather than becoming an empty
+ledger eligible for blind overwrite.
+If the current disk record has weaker protection, retain the stronger facts and actual read Host,
+report NeedsProtectionPublication/RequiresReconcile, and require explicit original-basis candidate
+publication. An in-memory OR is not durable reconciliation. The prepared preview retains the
+complete creation-custody projection and exact encoded candidate bytes; confirmation does not
+refresh either behind the review. Content pending/terminal observations enter the existing
+immutable frame and its ordinary change/polling path, including actual publication-cleanup debt.
+
+Fresh Open reads management/recovery data without recovering historical creation custody,
+execution approval or permission to delete. This record and its filesystem aliases are reserved
+from ordinary source-document admission. No reclaim operation follows automatically from Open,
+graph withdrawal, an equal digest or an adopted Schema. Complete edited-document protection and
+reviewed reclamation remain subject to the
+[protected-content plan](../../plans/2026-10-28-protected-source-tool-content-plan.md), including
+the currently unresolved all-stream deletion proof. The bounded management/adoption contract does
+not close the complete local release lifecycle.
+
 The initial framework-dependent installed-tool design admits a Host-approved machine runtime as
 an explicit trusted platform prerequisite. Approval names its configured launcher/root, requested
 framework/version and loading policy; finite observations support admission and drift reporting.

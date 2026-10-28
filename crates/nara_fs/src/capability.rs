@@ -733,17 +733,6 @@ impl DirectoryCapability {
         DirectoryEnumerationSession::begin(self.share(), limits)
     }
 
-    pub fn unlink_file(
-        &self,
-        _path: &RelativePath,
-        _expected: FileIdentity,
-    ) -> Result<(), FsError> {
-        Err(FsError::Unsupported {
-            operation: FsOperation::Unlink,
-            capability: "relative identity-guarded unlink is deferred to U29/U30",
-        })
-    }
-
     pub fn rename_file_no_replace(
         &self,
         _source: &RelativeComponent,
@@ -753,6 +742,76 @@ impl DirectoryCapability {
             operation: FsOperation::Rename,
             capability: "same-capability non-overwrite rename is deferred to U26",
         })
+    }
+
+    /// Explicitly unlinks the current relative name only if it still denotes `observed`.
+    ///
+    /// The read-write parent supplies deletion authority. Both the original observed leaf and
+    /// the newly opened deleting handle remain alive through the native identity comparison;
+    /// a copied historical ID cannot authorize deleting a replacement. Strict traversal rejects
+    /// reparse points, volume changes, unproven identities and multi-link files. Native failure
+    /// performs no name-based fallback. Existing conflicting writers or deleters can refuse it.
+    ///
+    /// Authorization covers the entire file, including alternate data streams. This primitive
+    /// does not validate unchanged content, installation ownership, adoption or document state.
+    /// Those policies belong to its caller; default-stream digest equality cannot supply them.
+    /// Success removes the opened link, while retained readers may keep its data accessible.
+    /// The initial implementation supports Windows x86-64, Windows 10 1809+ and local NTFS;
+    /// other adapters explicitly return Unsupported without stat/name/unlink emulation.
+    pub fn unlink_file(
+        &self,
+        path: &RelativePath,
+        observed: &FileCapability,
+    ) -> Result<crate::FileUnlinkReceipt, FsError> {
+        self.ensure_write(FsOperation::Unlink)?;
+        platform::preflight_unlink(&self.inner.file)?;
+        require_strict_resolution(self.inner.resolution, FsOperation::Unlink)?;
+        // Force strict traversal even when the trusted Host originally issued broader rights.
+        let strict = Self {
+            inner: Arc::new(DirectoryInner {
+                file: self
+                    .inner
+                    .file
+                    .try_clone()
+                    .map_err(|source| FsError::io(FsOperation::CloneHandle, source))?,
+                identity: self.inner.identity,
+                root_native: self.inner.root_native,
+                options: HostCapabilityOptions {
+                    trust: TrustMode::Untrusted,
+                    ..self.inner.options
+                },
+                resolution: self.inner.resolution,
+            }),
+        };
+        let (parent, name) = strict.resolve_file_parent(path)?;
+        let parent_facts = platform::facts(&parent.inner.file)?;
+        validate_directory_facts(&parent.inner, parent_facts)?;
+        if parent_facts.identity != parent.identity().native() {
+            return Err(FsError::CapabilityIdentityDrift {
+                operation: FsOperation::Unlink,
+            });
+        }
+        let deleting = platform::open_file_for_unlink(&parent.inner.file, &name)?;
+        let current = platform::facts(&deleting)?;
+        validate_file_facts(&parent.inner, current)?;
+        let original = platform::facts(&observed.file)?;
+        let identity = FileIdentity::new(
+            parent.identity().session(),
+            parent.identity().generation(),
+            current.identity,
+        );
+        if current.identity != original.identity {
+            return Err(FsError::IdentityMismatch {
+                expected: observed.identity(),
+                actual: identity,
+            });
+        }
+        validate_file_facts(&parent.inner, original)?;
+        platform::unlink_open_file(&deleting)?;
+        // The POSIX link-removal cut is closing the exact disposition-setting handle. The
+        // borrowed original observation may continue reading the unlinked object afterward.
+        drop(deleting);
+        Ok(crate::FileUnlinkReceipt::new(identity, parent.identity()))
     }
 
     pub(crate) fn inspect_optional_file(

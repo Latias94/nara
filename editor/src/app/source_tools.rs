@@ -4,14 +4,16 @@ use std::{collections::BTreeMap, time::Duration};
 
 use nara::{
     project_host::{
-        EditorProjectSession, EditorSourceToolDefinition, EditorSourceToolManagedHost,
+        EditorProjectSession, EditorSourceToolDefinition, EditorSourceToolInstallation,
+        EditorSourceToolManagedHost, PreparedEditorSourceToolContent,
         PreparedEditorSourceToolInstallations, PreparedEditorSourceToolSelection,
         PreparedEditorSourceToolWithdrawal,
     },
     reflect::ComponentValue,
     tooling::{
         EditorDocumentQueryBasis, EditorSourceToolActivationId, EditorSourceToolAttemptId,
-        EditorSourceToolCommit, EditorSourceToolError, EditorSourceToolInstallationRequest,
+        EditorSourceToolCommit, EditorSourceToolContentBasis, EditorSourceToolContentError,
+        EditorSourceToolContentView, EditorSourceToolError, EditorSourceToolInstallationRequest,
         EditorSourceToolIntent, EditorSourceToolRequestId, EditorSourceToolReview,
         EditorSourceToolSelectionBasis, EditorSourceToolSelectionError,
         EditorSourceToolSelectionView, EditorSourceToolView, EditorSourceToolWithdrawalMode,
@@ -48,6 +50,73 @@ impl EditorApplicationSourceToolSubmission {
 }
 
 impl EditorApplication {
+    /// Observes protection facts separately from executable selection and graph withdrawal.
+    pub fn source_tool_content_view(
+        &self,
+    ) -> Result<EditorSourceToolContentView, EditorSourceToolError> {
+        Ok(self.authoring_edit_session()?.source_tool_content_view())
+    }
+
+    pub fn prepare_source_tool_content_management(
+        &self,
+        basis: &EditorSourceToolContentBasis,
+        directory: &str,
+        installation: std::sync::Arc<EditorSourceToolInstallation>,
+    ) -> Result<PreparedEditorSourceToolContent, EditorSourceToolContentError> {
+        self.authoring_edit_session()
+            .map_err(|_| EditorSourceToolContentError::Closing)?
+            .prepare_source_tool_content_management(basis, directory, installation)
+    }
+
+    pub fn prepare_source_tool_content_adoption(
+        &self,
+        basis: &EditorSourceToolContentBasis,
+        installation: &[u8; 32],
+        paths: &[&str],
+    ) -> Result<PreparedEditorSourceToolContent, EditorSourceToolContentError> {
+        self.authoring_edit_session()
+            .map_err(|_| EditorSourceToolContentError::Closing)?
+            .prepare_source_tool_content_adoption(basis, installation, paths)
+    }
+
+    pub fn prepare_source_tool_content_observation(
+        &self,
+        basis: &EditorSourceToolContentBasis,
+        installation: &[u8; 32],
+    ) -> Result<PreparedEditorSourceToolContent, EditorSourceToolContentError> {
+        self.authoring_edit_session()
+            .map_err(|_| EditorSourceToolContentError::Closing)?
+            .prepare_source_tool_content_observation(basis, installation)
+    }
+
+    pub fn commit_source_tool_content(
+        &mut self,
+        prepared: PreparedEditorSourceToolContent,
+    ) -> Result<EditorSourceToolAttemptId, EditorSourceToolContentError> {
+        let result = self
+            .state
+            .workspace_mut()
+            .ok_or(EditorSourceToolContentError::Closing)?
+            .session
+            .commit_source_tool_content(prepared);
+        self.drive_editor_frame(Duration::ZERO, true, false);
+        result
+    }
+
+    pub fn reconcile_source_tool_content(
+        &mut self,
+        basis: &EditorSourceToolContentBasis,
+    ) -> Result<EditorSourceToolAttemptId, EditorSourceToolContentError> {
+        let result = self
+            .state
+            .workspace_mut()
+            .ok_or(EditorSourceToolContentError::Closing)?
+            .session
+            .reconcile_source_tool_content(basis);
+        self.drive_editor_frame(Duration::ZERO, true, false);
+        result
+    }
+
     /// Prepares an additive installed set against the original project/selection observation.
     pub fn prepare_source_tool_installations(
         &self,

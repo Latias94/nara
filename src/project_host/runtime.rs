@@ -79,9 +79,9 @@ pub use editor::{
     EditorSourceToolInstalledMember, EditorSourceToolManagedError, EditorSourceToolManagedHost,
     EditorSourceToolManagedHostDigests, EditorSourceToolReleaseError,
     EditorSourceToolReleaseMember, EditorSourceToolReleaseMemberKind,
-    EditorSourceToolReleaseRequirement, PreparedEditorSourceToolInstallations,
-    PreparedEditorSourceToolRelease, PreparedEditorSourceToolSelection,
-    PreparedEditorSourceToolWithdrawal,
+    EditorSourceToolReleaseRequirement, PreparedEditorSourceToolContent,
+    PreparedEditorSourceToolInstallations, PreparedEditorSourceToolRelease,
+    PreparedEditorSourceToolSelection, PreparedEditorSourceToolWithdrawal,
 };
 
 mod plugin_diagnostics;

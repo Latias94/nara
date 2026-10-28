@@ -6,6 +6,7 @@ use std::{
     collections::BTreeMap,
     fs,
     os::windows::fs::OpenOptionsExt,
+    sync::Arc,
     time::{Duration, Instant},
 };
 
@@ -15,17 +16,22 @@ use nara_engine::{
         RelativeComponent, TrustMode,
     },
     project_host::{
-        EditorProjectSession, EditorSourceToolInstallationInspection,
+        EditorProjectSession, EditorSourceToolInstallation, EditorSourceToolInstallationInspection,
         EditorSourceToolInstallationOutcome, EditorSourceToolInstallationPlan,
-        PreparedEditorSourceToolRelease, open_explicit_product_project_root,
+        EditorSourceToolReleaseMemberKind, PreparedEditorSourceToolRelease,
+        open_explicit_product_project_root,
     },
 };
 use nara_reflect::{ComponentSchemaVersion, ComponentTypeId, ComponentValue};
 use nara_scene::{SceneComponentRecord, SceneDocument, SceneEntityRecord};
 use nara_tooling::{
-    EditorDocumentId, EditorSourceToolError, EditorSourceToolInstallationRequest,
-    EditorSourceToolInstalledEntry, EditorSourceToolInstalledSelection, EditorSourceToolIntent,
-    EditorSourceToolRequestId, EditorSourceToolRequirementBinding, EditorSourceToolSelectionError,
+    EditorDocumentId, EditorSourceToolAttemptId, EditorSourceToolContentError,
+    EditorSourceToolContentInstallation, EditorSourceToolContentMember,
+    EditorSourceToolContentObservation, EditorSourceToolContentOutcome,
+    EditorSourceToolContentPhase, EditorSourceToolContentRole, EditorSourceToolContentView,
+    EditorSourceToolError, EditorSourceToolInstallationRequest, EditorSourceToolInstalledEntry,
+    EditorSourceToolInstalledSelection, EditorSourceToolIntent, EditorSourceToolRequestId,
+    EditorSourceToolRequirementBinding, EditorSourceToolSelectionError,
     EditorSourceToolSelectionOutcome, EditorSourceToolSelectionPhase,
     EditorSourceToolSelectionView, EditorSourceToolWithdrawalMode,
 };
@@ -46,7 +52,467 @@ const PACKAGE_C: &str = "trial.enemy-stats-independent";
 const STATS: &str = "trial.enemy.EnemyStats";
 const NAME: &str = "nara.scene.Name";
 const RECORD_PATH: &str = ".nara/source-tools/selection.json";
+const CONTENT_PATH: &str = ".nara/source-tools/content.json";
+const SAMPLE: &str = "samples/readme.txt";
 const TIMEOUT: Duration = Duration::from_secs(30);
+
+#[test]
+fn csharp_installed_content_retains_adoption_and_observed_modification_after_withdrawal_and_open() {
+    let (_template_directory, template) = installed_variant("V1");
+    let project = Project::new(
+        &schema_bundle(template.release().schema_owner()),
+        &original(),
+        "json",
+    );
+    let root = project_root(&project);
+    let (adopted, adopted_owner) = install_owned(
+        &root,
+        template.release(),
+        "installed-adopted",
+        PACKAGE_A,
+        None,
+    );
+    let (modified, modified_owner) = install_owned(
+        &root,
+        template.release(),
+        "installed-modified",
+        PACKAGE_A,
+        None,
+    );
+    assert_eq!(adopted.installed.manifest, modified.installed.manifest);
+    assert_ne!(
+        adopted.installed.installation,
+        modified.installed.installation
+    );
+    let mut expected_adopted = content_installation(&adopted, &adopted_owner);
+    let mut expected_modified = content_installation(&modified, &modified_owner);
+    let mut installed_bytes = BTreeMap::new();
+    for (entry, owner) in [(&adopted, &adopted_owner), (&modified, &modified_owner)] {
+        for member in owner.members() {
+            let path = format!("{}/{}", entry.installed.directory, member.path());
+            let bytes = fs::read(project.root().join(&path)).unwrap();
+            assert_eq!(ContentDigest::of_bytes(&bytes), member.digest());
+            installed_bytes.insert(path, bytes);
+        }
+    }
+    let source_bytes = fs::read(project.scene_path()).unwrap();
+    let mut editor = project.open();
+    let document = editor.current_frame().workspace().active_document.unwrap();
+    let source_basis = editor.document_query_basis(document).unwrap();
+    let selection = settle_selection(&mut editor);
+    let content = settle_content(&mut editor);
+    assert_eq!(content.phase, EditorSourceToolContentPhase::Idle);
+    assert!(content.error.is_none());
+    assert!(matches!(
+        content.operation.as_ref().unwrap().outcome,
+        Some(EditorSourceToolContentOutcome::Observed)
+    ));
+    assert!(content.installations.is_empty());
+    assert!(selection.installed.is_empty());
+    assert!(!project.root().join(CONTENT_PATH).exists());
+    assert_no_execution(&editor);
+
+    let cancelled = editor
+        .prepare_source_tool_content_management(
+            &content.basis,
+            adopted.installed.directory.as_ref(),
+            Arc::clone(&adopted_owner),
+        )
+        .unwrap();
+    assert_content_installations(
+        &cancelled.installations(),
+        std::slice::from_ref(&expected_adopted),
+    );
+    drop(cancelled);
+    assert_eq!(editor.source_tool_content_view(), content);
+    assert_eq!(editor.source_tool_selection_view(), selection);
+    assert_eq!(editor.document_query_basis(document).unwrap(), source_basis);
+    assert_history(&editor, document, 0, 0);
+    assert_no_execution(&editor);
+    assert!(!project.root().join(CONTENT_PATH).exists());
+    assert!(!project.root().join(RECORD_PATH).exists());
+    assert_eq!(fs::read(project.scene_path()).unwrap(), source_bytes);
+    assert_installed_bytes(&project, &installed_bytes);
+
+    let prepared = editor
+        .prepare_source_tool_content_management(
+            &content.basis,
+            adopted.installed.directory.as_ref(),
+            Arc::clone(&adopted_owner),
+        )
+        .unwrap();
+    let attempt = editor.commit_source_tool_content(prepared).unwrap();
+    let managed = settle_content(&mut editor);
+    assert_content_outcome(&managed, &attempt, EditorSourceToolContentOutcome::Managed);
+    assert_content_installations(
+        &managed.installations,
+        std::slice::from_ref(&expected_adopted),
+    );
+    let prepared = editor
+        .prepare_source_tool_content_management(
+            &managed.basis,
+            modified.installed.directory.as_ref(),
+            Arc::clone(&modified_owner),
+        )
+        .unwrap();
+    let attempt = editor.commit_source_tool_content(prepared).unwrap();
+    let managed = settle_content(&mut editor);
+    assert_content_outcome(&managed, &attempt, EditorSourceToolContentOutcome::Managed);
+    assert_content_installations(
+        &managed.installations,
+        &[expected_adopted.clone(), expected_modified.clone()],
+    );
+    let managed_bytes = fs::read(project.root().join(CONTENT_PATH)).unwrap();
+    assert_eq!(editor.source_tool_selection_view(), selection);
+    assert_eq!(editor.document_query_basis(document).unwrap(), source_basis);
+    assert_history(&editor, document, 0, 0);
+    assert_no_execution(&editor);
+    assert!(editor.source_tool_view().attempt.is_none());
+    assert!(!project.root().join(RECORD_PATH).exists());
+    assert_eq!(fs::read(project.scene_path()).unwrap(), source_bytes);
+    assert_installed_bytes(&project, &installed_bytes);
+
+    let prepared = editor
+        .prepare_source_tool_installations(
+            &selection.basis,
+            root.share(),
+            &[request(&adopted), request(&modified)],
+        )
+        .unwrap();
+    let attempt = editor.register_source_tool_installations(prepared).unwrap();
+    let registered = settle_selection(&mut editor);
+    assert!(matches!(
+        registered.operation.as_ref(),
+        Some(operation) if operation.attempt == attempt
+            && operation.outcome == Some(EditorSourceToolSelectionOutcome::Registered)
+    ));
+    assert_installations(&registered.installed, &[adopted.clone(), modified.clone()]);
+    assert_eq!(editor.source_tool_content_view(), managed);
+    assert_no_execution(&editor);
+    let host = approved_managed_host();
+    let prepared = editor
+        .prepare_installed_source_tool_selection(
+            root.share(),
+            adopted.installed.directory.as_ref(),
+            adopted.installed.receipt,
+            &host,
+        )
+        .unwrap();
+    let attempt = editor
+        .enable_installed_source_tool(&registered.basis, prepared)
+        .unwrap();
+    let enabled = settle_selection(&mut editor);
+    assert!(matches!(
+        enabled.operation.as_ref(),
+        Some(operation) if operation.attempt == attempt
+            && operation.outcome == Some(EditorSourceToolSelectionOutcome::Enabled)
+    ));
+    assert_eq!(enabled.active_origin.as_ref(), Some(&adopted.installed));
+    let active = editor.source_tool_view();
+    assert_eq!(active.attempt.as_ref(), Some(&attempt));
+    assert!(active.attempt_error.is_none(), "{active:?}");
+    assert_eq!(
+        active.active.as_ref().unwrap().owner(),
+        template.release().schema_owner().owner_id()
+    );
+    assert_eq!(
+        active.active.as_ref().unwrap().component(),
+        &ComponentTypeId::new(STATS)
+    );
+
+    let attached = review(
+        &mut editor,
+        document,
+        EditorSourceToolIntent::Attach {
+            entity: id("enemy"),
+        },
+        0,
+    );
+    let reviewed_tool = editor.source_tool_view();
+    let reviewed_patch = editor.source_tool_review().unwrap().patch().clone();
+    let reviewed_inverse = editor.source_tool_review().unwrap().inverse().clone();
+    let selection_bytes = fs::read(project.root().join(RECORD_PATH)).unwrap();
+    // Keep this exact pre-adoption successor; committing it later must not rebase its facts.
+    let stale = editor
+        .prepare_source_tool_content_observation(&managed.basis, &adopted.installed.installation)
+        .unwrap();
+    let stale_installations = stale.installations();
+    let prepared = editor
+        .prepare_source_tool_content_adoption(
+            &managed.basis,
+            &adopted.installed.installation,
+            &[SAMPLE],
+        )
+        .unwrap();
+    assert_eq!(editor.source_tool_content_view(), managed);
+    assert_eq!(
+        fs::read(project.root().join(CONTENT_PATH)).unwrap(),
+        managed_bytes
+    );
+    assert_installed_bytes(&project, &installed_bytes);
+    let attempt = editor.commit_source_tool_content(prepared).unwrap();
+    let protected = settle_content(&mut editor);
+    assert_content_outcome(
+        &protected,
+        &attempt,
+        EditorSourceToolContentOutcome::Adopted,
+    );
+    expected_adopted
+        .members
+        .iter_mut()
+        .find(|member| member.path.as_ref() == SAMPLE)
+        .unwrap()
+        .adopted = true;
+    assert_content_installations(
+        &protected.installations,
+        &[expected_adopted.clone(), expected_modified.clone()],
+    );
+    assert_ne!(protected.basis, managed.basis);
+    assert_eq!(stale.installations(), stale_installations);
+    assert_eq!(stale_installations.len(), 2);
+    assert!(
+        stale_installations
+            .iter()
+            .flat_map(|installation| &installation.members)
+            .all(|member| !member.adopted && !member.modified)
+    );
+    let adopted_bytes = fs::read(project.root().join(CONTENT_PATH)).unwrap();
+    assert_ne!(adopted_bytes, managed_bytes);
+    assert!(matches!(
+        editor.commit_source_tool_content(stale),
+        Err(EditorSourceToolContentError::StaleBasis)
+    ));
+    assert_eq!(editor.source_tool_content_view(), protected);
+    assert_eq!(editor.source_tool_selection_view(), enabled);
+    let mut expected_tool = reviewed_tool;
+    expected_tool.content = Some(protected.clone());
+    assert_eq!(editor.source_tool_view(), expected_tool);
+    assert_eq!(editor.source_tool_review().unwrap().request(), &attached);
+    assert_eq!(
+        editor.source_tool_review().unwrap().patch(),
+        &reviewed_patch
+    );
+    assert_eq!(
+        editor.source_tool_review().unwrap().inverse(),
+        &reviewed_inverse
+    );
+    assert_eq!(editor.document_query_basis(document).unwrap(), source_basis);
+    assert_history(&editor, document, 0, 0);
+    assert_eq!(fs::read(project.scene_path()).unwrap(), source_bytes);
+    assert_eq!(
+        fs::read(project.root().join(CONTENT_PATH)).unwrap(),
+        adopted_bytes
+    );
+    assert_eq!(
+        fs::read(project.root().join(RECORD_PATH)).unwrap(),
+        selection_bytes
+    );
+    assert_installed_bytes(&project, &installed_bytes);
+    accept(&mut editor, document, &attached);
+    assert_stats(&editor, document, 100);
+    assert_history(&editor, document, 1, 0);
+    let edited = review(
+        &mut editor,
+        document,
+        EditorSourceToolIntent::Edit {
+            entity: id("enemy"),
+        },
+        25,
+    );
+    accept(&mut editor, document, &edited);
+    assert_stats(&editor, document, 125);
+    assert_history(&editor, document, 2, 0);
+    let edited_basis = editor.document_query_basis(document).unwrap();
+    let edited_tool = editor.source_tool_view();
+
+    // Add user files only after the actual command's exact release checks have completed.
+    let unknown = "installed-modified/samples/user-notes.txt";
+    let user_bytes = b"Project notes outside the declared release inventory.\n".to_vec();
+    fs::write(project.root().join(unknown), &user_bytes).unwrap();
+    installed_bytes.insert(unknown.into(), user_bytes);
+    let sample = format!("{}/{}", modified.installed.directory, SAMPLE);
+    let baseline = installed_bytes[&sample].clone();
+    let changed = b"Project-authored EnemyStats sample.\n".to_vec();
+    assert_ne!(
+        ContentDigest::of_bytes(&changed),
+        ContentDigest::of_bytes(&baseline)
+    );
+    fs::write(project.root().join(&sample), &changed).unwrap();
+    installed_bytes.insert(sample.clone(), changed);
+    let prepared = editor
+        .prepare_source_tool_content_observation(&protected.basis, &modified.installed.installation)
+        .unwrap();
+    assert_eq!(editor.source_tool_content_view(), protected);
+    assert_eq!(
+        fs::read(project.root().join(CONTENT_PATH)).unwrap(),
+        adopted_bytes
+    );
+    assert_installed_bytes(&project, &installed_bytes);
+    let attempt = editor.commit_source_tool_content(prepared).unwrap();
+    let observed = settle_content(&mut editor);
+    assert_content_outcome(
+        &observed,
+        &attempt,
+        EditorSourceToolContentOutcome::Observed,
+    );
+    expected_modified
+        .members
+        .iter_mut()
+        .find(|member| member.path.as_ref() == SAMPLE)
+        .unwrap()
+        .modified = true;
+    assert_content_installations(
+        &observed.installations,
+        &[expected_adopted.clone(), expected_modified.clone()],
+    );
+    let modified_bytes = fs::read(project.root().join(CONTENT_PATH)).unwrap();
+    assert_ne!(modified_bytes, adopted_bytes);
+    assert_installed_bytes(&project, &installed_bytes);
+    fs::write(project.root().join(&sample), &baseline).unwrap();
+    installed_bytes.insert(sample, baseline);
+    let prepared = editor
+        .prepare_source_tool_content_observation(&observed.basis, &modified.installed.installation)
+        .unwrap();
+    let attempt = editor.commit_source_tool_content(prepared).unwrap();
+    let restored = settle_content(&mut editor);
+    assert_content_outcome(
+        &restored,
+        &attempt,
+        EditorSourceToolContentOutcome::Observed,
+    );
+    assert_content_installations(
+        &restored.installations,
+        &[expected_adopted.clone(), expected_modified.clone()],
+    );
+    assert_eq!(
+        fs::read(project.root().join(CONTENT_PATH)).unwrap(),
+        modified_bytes
+    );
+    assert_eq!(editor.source_tool_selection_view(), enabled);
+    let mut expected_tool = edited_tool;
+    expected_tool.content = Some(restored.clone());
+    assert_eq!(editor.source_tool_view(), expected_tool);
+    assert_eq!(editor.document_query_basis(document).unwrap(), edited_basis);
+    assert_stats(&editor, document, 125);
+    assert_history(&editor, document, 2, 0);
+    assert_eq!(fs::read(project.scene_path()).unwrap(), source_bytes);
+    assert_installed_bytes(&project, &installed_bytes);
+
+    let mut withdrawn = enabled;
+    for entry in [&adopted, &modified] {
+        let prepared = editor
+            .prepare_source_tool_withdrawal(
+                &withdrawn.basis,
+                &entry.installed.installation,
+                EditorSourceToolWithdrawalMode::RejectDependents,
+            )
+            .unwrap();
+        assert_installations(prepared.installations(), std::slice::from_ref(entry));
+        let attempt = editor.withdraw_source_tool_installations(prepared).unwrap();
+        withdrawn = settle_selection(&mut editor);
+        assert!(matches!(
+            withdrawn.operation.as_ref(),
+            Some(operation) if operation.attempt == attempt
+                && operation.outcome == Some(EditorSourceToolSelectionOutcome::Withdrawn)
+        ));
+        settle_tool(&mut editor);
+        assert_eq!(editor.source_tool_content_view(), restored);
+        assert_eq!(editor.document_query_basis(document).unwrap(), edited_basis);
+        assert_stats(&editor, document, 125);
+        assert_history(&editor, document, 2, 0);
+        assert_eq!(fs::read(project.scene_path()).unwrap(), source_bytes);
+        assert_eq!(
+            fs::read(project.root().join(CONTENT_PATH)).unwrap(),
+            modified_bytes
+        );
+        assert_installed_bytes(&project, &installed_bytes);
+        assert_no_execution(&editor);
+    }
+    assert!(withdrawn.installed.is_empty());
+    assert!(withdrawn.desired.is_none());
+    assert!(withdrawn.active_origin.is_none());
+    replay(&mut editor, document, false);
+    assert_stats(&editor, document, 100);
+    assert_history(&editor, document, 1, 1);
+    replay(&mut editor, document, true);
+    assert_stats(&editor, document, 125);
+    assert_history(&editor, document, 2, 0);
+    for (entity, name) in [("enemy", "Guard"), ("guide", "Guide")] {
+        assert_value(
+            &editor,
+            document,
+            entity,
+            NAME,
+            "value",
+            ComponentValue::String(name.into()),
+        );
+    }
+    save(&mut editor, document);
+    assert_history(&editor, document, 2, 0);
+    let saved = project.read();
+    assert_ne!(saved, original());
+    let saved_bytes = fs::read(project.scene_path()).unwrap();
+    let graph_bytes = fs::read(project.root().join(RECORD_PATH)).unwrap();
+    assert_eq!(editor.source_tool_content_view(), restored);
+    assert_eq!(
+        fs::read(project.root().join(CONTENT_PATH)).unwrap(),
+        modified_bytes
+    );
+    assert_installed_bytes(&project, &installed_bytes);
+    close(&mut editor);
+    assert_no_execution(&editor);
+    drop(editor);
+    drop(adopted_owner);
+    drop(modified_owner);
+
+    let mut reopened = project.open();
+    let document = reopened
+        .current_frame()
+        .workspace()
+        .active_document
+        .unwrap();
+    let selection = settle_selection(&mut reopened);
+    let content = settle_content(&mut reopened);
+    assert!(selection.installed.is_empty());
+    assert!(selection.desired.is_none());
+    assert!(selection.active_origin.is_none());
+    assert_eq!(content.phase, EditorSourceToolContentPhase::Idle);
+    assert!(content.error.is_none());
+    assert!(matches!(
+        content.operation.as_ref().unwrap().outcome,
+        Some(EditorSourceToolContentOutcome::Observed)
+    ));
+    expected_adopted.creation_custody = false;
+    expected_modified.creation_custody = false;
+    assert_content_installations(
+        &content.installations,
+        &[expected_adopted, expected_modified],
+    );
+    assert_no_execution(&reopened);
+    assert!(reopened.source_tool_view().attempt.is_none());
+    assert!(reopened.source_tool_view().request.is_none());
+    assert_stats(&reopened, document, 125);
+    assert_history(&reopened, document, 0, 0);
+    assert_eq!(project.read(), saved);
+    assert_eq!(fs::read(project.scene_path()).unwrap(), saved_bytes);
+    assert_eq!(
+        fs::read(project.root().join(RECORD_PATH)).unwrap(),
+        graph_bytes
+    );
+    assert_eq!(
+        fs::read(project.root().join(CONTENT_PATH)).unwrap(),
+        modified_bytes
+    );
+    assert_installed_bytes(&project, &installed_bytes);
+    close(&mut reopened);
+    assert_no_execution(&reopened);
+    assert_eq!(fs::read(project.scene_path()).unwrap(), saved_bytes);
+    assert_eq!(
+        fs::read(project.root().join(CONTENT_PATH)).unwrap(),
+        modified_bytes
+    );
+    assert_installed_bytes(&project, &installed_bytes);
+}
 
 #[test]
 fn csharp_installed_graph_keeps_exact_disabled_dependents_and_confirms_fresh_cascade() {
@@ -1031,6 +1497,19 @@ fn install(
     package: &str,
     required: Option<(&str, ContentDigest)>,
 ) -> EditorSourceToolInstalledEntry {
+    install_owned(project, template, destination, package, required).0
+}
+
+fn install_owned(
+    project: &DirectoryCapability,
+    template: &PreparedEditorSourceToolRelease,
+    destination: &str,
+    package: &str,
+    required: Option<(&str, ContentDigest)>,
+) -> (
+    EditorSourceToolInstalledEntry,
+    Arc<EditorSourceToolInstallation>,
+) {
     let source = tempfile::tempdir().unwrap();
     for member in template.members() {
         let path = source.path().join(member.path());
@@ -1075,7 +1554,7 @@ fn install(
         installation.receipt_digest(),
     )
     .unwrap();
-    EditorSourceToolInstalledEntry {
+    let entry = EditorSourceToolInstalledEntry {
         installed: EditorSourceToolInstalledSelection {
             package: inspected.release().package().into(),
             directory: destination.into(),
@@ -1084,7 +1563,86 @@ fn install(
             manifest: inspected.release().manifest_digest(),
         },
         requirements: Vec::new(),
+    };
+    (entry, Arc::new(installation))
+}
+
+fn content_installation(
+    entry: &EditorSourceToolInstalledEntry,
+    owner: &EditorSourceToolInstallation,
+) -> EditorSourceToolContentInstallation {
+    EditorSourceToolContentInstallation {
+        installed: entry.installed.clone(),
+        members: owner
+            .members()
+            .iter()
+            .map(|member| EditorSourceToolContentMember {
+                path: member.path().into(),
+                role: match member.kind() {
+                    Some(EditorSourceToolReleaseMemberKind::Tool) => {
+                        EditorSourceToolContentRole::Tool
+                    }
+                    Some(EditorSourceToolReleaseMemberKind::Content) => {
+                        EditorSourceToolContentRole::Content
+                    }
+                    None => EditorSourceToolContentRole::Metadata,
+                },
+                baseline: member.digest(),
+                modified: false,
+                adopted: false,
+                observation: EditorSourceToolContentObservation::Present,
+            })
+            .collect(),
+        creation_custody: true,
     }
+}
+
+fn assert_content_installations(
+    actual: &[EditorSourceToolContentInstallation],
+    expected: &[EditorSourceToolContentInstallation],
+) {
+    assert_eq!(actual.len(), expected.len(), "{actual:?}");
+    for expected in expected {
+        let installation = actual
+            .iter()
+            .find(|installation| installation.installed == expected.installed)
+            .unwrap_or_else(|| panic!("Missing exact content entry {expected:?}: {actual:?}"));
+        assert_eq!(installation.creation_custody, expected.creation_custody);
+        assert_eq!(
+            installation.members.len(),
+            expected.members.len(),
+            "{installation:?}"
+        );
+        for member in &expected.members {
+            assert!(
+                installation.members.contains(member),
+                "Missing complete content member {member:?}: {installation:?}"
+            );
+        }
+    }
+}
+
+fn assert_installed_bytes(project: &Project, expected: &BTreeMap<String, Vec<u8>>) {
+    for (path, bytes) in expected {
+        assert_eq!(
+            &fs::read(project.root().join(path)).unwrap(),
+            bytes,
+            "{path}"
+        );
+    }
+}
+
+fn assert_content_outcome(
+    view: &EditorSourceToolContentView,
+    attempt: &EditorSourceToolAttemptId,
+    outcome: EditorSourceToolContentOutcome,
+) {
+    assert_eq!(view.phase, EditorSourceToolContentPhase::Idle, "{view:?}");
+    assert!(view.error.is_none(), "{view:?}");
+    assert!(!view.physical_work_pending, "{view:?}");
+    let operation = view.operation.as_ref().unwrap();
+    assert_eq!(&operation.attempt, attempt);
+    assert_eq!(operation.outcome.as_ref(), Some(&outcome));
 }
 
 fn binding(target: &EditorSourceToolInstalledEntry) -> EditorSourceToolRequirementBinding {
@@ -1150,6 +1708,33 @@ fn settle_selection(editor: &mut EditorProjectSession) -> EditorSourceToolSelect
         assert!(
             Instant::now() < deadline,
             "Installed graph did not settle: {view:?}"
+        );
+        editor.drive_editor_frame(Duration::ZERO);
+        std::thread::sleep(Duration::from_millis(1));
+    }
+}
+
+fn settle_content(editor: &mut EditorProjectSession) -> EditorSourceToolContentView {
+    let deadline = Instant::now() + TIMEOUT;
+    loop {
+        let view = editor.source_tool_content_view();
+        if !view.physical_work_pending
+            && view
+                .operation
+                .as_ref()
+                .is_some_and(|operation| operation.outcome.is_some())
+            && matches!(
+                view.phase,
+                EditorSourceToolContentPhase::Idle
+                    | EditorSourceToolContentPhase::Unavailable
+                    | EditorSourceToolContentPhase::RequiresReconcile
+            )
+        {
+            return view;
+        }
+        assert!(
+            Instant::now() < deadline,
+            "Installed content did not settle: {view:?}"
         );
         editor.drive_editor_frame(Duration::ZERO);
         std::thread::sleep(Duration::from_millis(1));

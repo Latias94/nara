@@ -170,7 +170,7 @@ impl EditorProjectSession {
                     self.field_feedback.clone(),
                 )
                 .with_image_import(image_import_view, image_import_work_pending)
-                .with_source_tool(self.source_tools.view())
+                .with_source_tool(self.source_tool_view())
                 .with_source_asset_import(
                     source_asset_import,
                     self.source_asset_import.has_pending_work(),

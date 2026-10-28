@@ -17,6 +17,7 @@ mod platform;
 mod proof;
 mod replace;
 mod sync;
+mod unlink;
 
 pub use capability::{CapabilityRights, DirectoryCapability, HostCapabilityOptions, TrustMode};
 pub use digest::{ContentDigest, DigestLimit};
@@ -48,6 +49,7 @@ pub use replace::{
     ExpectedTarget, ReplaceReceipt, TemporaryFile, TemporaryFileCleanup, TemporaryFileFailure,
 };
 pub use sync::{DirectorySyncReceipt, FileSyncReceipt};
+pub use unlink::FileUnlinkReceipt;
 
 pub(crate) use identity::{FileFacts, NativeFileIdentity};
 
