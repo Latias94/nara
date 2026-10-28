@@ -176,6 +176,17 @@ impl PartialEq for AuthoringSchemaBundle {
 }
 
 impl AuthoringSchemaBundle {
+    /// Composes already admitted owner snapshots without replacing their admission authority.
+    ///
+    /// The snapshots retain their canonical current and predecessor catalogs and exact shared
+    /// identity. Bundle-wide owner and aggregate catalog limits still apply, as do ownership
+    /// claims from both catalogs and their type tombstones. Input order is canonicalized.
+    pub fn from_owner_snapshots(
+        owners: impl IntoIterator<Item = ComponentSchemaOwnerSnapshot>,
+    ) -> Result<Self, AuthoringSchemaBundleError> {
+        bundle_from_owner_snapshots(owners, AuthoringSchemaBundleLimits::default())
+    }
+
     /// Projects trusted executable provider catalogs into a data-only authoring bundle.
     ///
     /// This executes only each definition's deterministic current and predecessor catalog
@@ -549,7 +560,7 @@ fn finish_bundle(
         }
         InputOrdering::RequireCanonical => validate_owner_order(&owners)?,
     }
-    validate_duplicate_owners(&owners)?;
+    validate_duplicate_owners(owners.iter().map(AuthoringSchemaBundleOwner::owner_id))?;
 
     let mut counts = ComponentCatalogCounts::default();
     let mut admitted_owners = Vec::with_capacity(owners.len());
@@ -599,6 +610,38 @@ fn finish_bundle(
         admitted_owners.push(admitted);
     }
 
+    finish_admitted_bundle(admitted_owners)
+}
+
+fn bundle_from_owner_snapshots(
+    owners: impl IntoIterator<Item = ComponentSchemaOwnerSnapshot>,
+    limits: AuthoringSchemaBundleLimits,
+) -> Result<AuthoringSchemaBundle, AuthoringSchemaBundleError> {
+    // Do not collect or reserve using a caller-controlled size_hint. Each admitted snapshot
+    // enters this Vec only after both the owner count and combined catalog budget allow it.
+    let mut admitted_owners = Vec::new();
+    let mut counts = ComponentCatalogCounts::default();
+    for owner in owners {
+        validate_owner_count(admitted_owners.len().saturating_add(1), limits)?;
+        accumulate_catalog_budget(owner.current(), limits.catalogs(), &mut counts)?;
+        if let Some(predecessor) = owner.predecessor() {
+            accumulate_catalog_budget(predecessor, limits.catalogs(), &mut counts)?;
+        }
+        admitted_owners.push(owner);
+    }
+    finish_admitted_bundle(admitted_owners)
+}
+
+/// Shared composition boundary after owner-local admission and aggregate budget checks.
+fn finish_admitted_bundle(
+    mut admitted_owners: Vec<ComponentSchemaOwnerSnapshot>,
+) -> Result<AuthoringSchemaBundle, AuthoringSchemaBundleError> {
+    admitted_owners.sort_by(|left, right| left.owner_id().cmp(right.owner_id()));
+    validate_duplicate_owners(
+        admitted_owners
+            .iter()
+            .map(ComponentSchemaOwnerSnapshot::owner_id),
+    )?;
     validate_component_ownership(&admitted_owners)?;
     let fingerprint = SchemaCompositionFingerprint::from_persistent_owner_catalogs(
         admitted_owners
@@ -638,15 +681,17 @@ fn validate_owner_order(
     Ok(())
 }
 
-fn validate_duplicate_owners(
-    owners: &[AuthoringSchemaBundleOwner],
+fn validate_duplicate_owners<'a>(
+    owners: impl IntoIterator<Item = &'a PersistentComponentSchemaOwnerId>,
 ) -> Result<(), AuthoringSchemaBundleError> {
-    for pair in owners.windows(2) {
-        if pair[0].owner_id() == pair[1].owner_id() {
+    let mut previous = None;
+    for owner in owners {
+        if previous == Some(owner) {
             return Err(AuthoringSchemaBundleError::DuplicateOwner {
-                owner: pair[0].owner_id().clone(),
+                owner: owner.clone(),
             });
         }
+        previous = Some(owner);
     }
     Ok(())
 }
@@ -757,3 +802,6 @@ impl Error for JsonDecodeError {
         }
     }
 }
+
+#[cfg(test)]
+mod owner_snapshots_tests;
