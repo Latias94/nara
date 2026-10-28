@@ -44,6 +44,7 @@ mod extension;
 mod prefab_conversion;
 mod prefab_declarations;
 mod prepared_edit;
+mod schema_reclassification;
 pub use construction::{CommittedEditorDocumentConstruction, PreparedEditorDocumentConstruction};
 pub use extension::{
     EditorExtensionCommand, EditorExtensionDocument, EditorExtensionDocumentCandidate,
@@ -55,6 +56,9 @@ pub use prefab_conversion::{
     EditorPrefabConversionRequest, PreparedEditorPrefabConversion,
 };
 pub use prepared_edit::PreparedEditorDocumentEdit;
+pub use schema_reclassification::{
+    EditorWorkspaceSchemaReclassificationCommit, PreparedEditorWorkspaceSchemaReclassification,
+};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct EditorDocumentId(u64);

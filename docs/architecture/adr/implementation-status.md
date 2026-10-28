@@ -121,8 +121,17 @@ adds snapshot-preserving bundle composition, actual accepted leaf/target attachm
 Scene capture using the original dirty Prefab Arcs under one prepared nominal basis. Complete
 lineage no-op and stale/wrong-target/budget refusals retain actual observations. ADR 0114 adopts
 the metadata successor boundary. The full project receipt, actual selected historical composition,
-whole Workspace/Session adoption, publication/reconciliation and native installed-owner workflow
+whole Session adoption, publication/reconciliation and native installed-owner workflow
 remain unimplemented; neither source proof nor this internal handoff closes them.
+The [whole-Workspace successor](../../knowledge/engineering/verification/2026-10/2026-10-28T050925Z-whole-workspace-schema-preparation-and-shared-immutable-published-sources-dc568b9954884122a24a9f8a25491451.md)
+adds one move-only candidate for the exact complete open Scene/Prefab set, all-incumbent admission
+before successor classification and exclusive all-source binding before infallible swaps. Foreign
+workspaces, stale final sources, changed bindings/reopen and unsupported owners refuse without
+partial publication; source/history/selection/saved checkpoints remain in place. Published sources
+now share immutable document/classification Arcs through fork and Session transfer, with independent
+source identities and history. ADRs 0047/0118 own the Workspace cut; ADR 0114 distinguishes saved
+startup observations from dirty working captures. The linked evidence qualifies this source unit,
+not the matching project receipt, historical effective-demand proof or installed Session adoption.
 The [documentation verification](../../knowledge/engineering/verification/2026-10/2026-10-23T115037Z-foundation-architecture-rebaseline-documentation-checks-and-adversarial-closure-33c8c794baf142ee964468a01248af17.md)
 records inventory/link/status checks and the scoped adversarial correction/recheck. No Cargo,
 performance or native trajectory was re-executed for this design-only unit.

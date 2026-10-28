@@ -34,6 +34,16 @@ points, including retained construction preparation; frontend adapters do not re
 validate-then-prepare protocol. The Scene/Prefab source owner's candidate and commit admission
 remain authoritative. Refreshing an old proposal's basis is not permitted.
 No universal widget tree, generic command transport, parallel undo system or Editor kernel crate is required.
+
+Additive Schema-owner adoption uses the same Workspace/document owners, rather than reopening
+documents or replacing their history. A move-only preparation covers the exact complete open
+Scene/Prefab set under one successor admission. All incumbents enter its finite source allowance
+before any successor classification, and all exclusive source guards bind before an infallible
+whole-set swap. Navigation, field selection, content/saved identities and persistence owners are
+preserved. Native-only or unsupported extension sources refuse explicitly. The Project Session
+separately owns actual current/historical composition, metadata publication, its matching project
+receipt and immediate preview invalidation; source preparation alone does not complete adoption.
+
 Future custom UI reuses these semantic boundaries and render-view handoff, but may replace all widget, layout, focus and docking code.
 Sharing rendering does not require sharing the runtime game's complete UI toolkit.
 

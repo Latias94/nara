@@ -11,6 +11,7 @@ with independent file evidence and complete content authorization
 **Amended**: 2026-10-28 to retain finite trusted tool execution and review in the Project Session
 **Amended**: 2026-10-28 to share complete tool observations and activation-bound actions across frontends
 **Amended**: 2026-10-28 to separate code-free local release capture from installation and activation
+**Amended**: 2026-10-28 to prepare additive Schema classification for the complete open set
 **Refines**: ADR 0015, ADR 0026, ADR 0034, ADR 0038, ADR 0043
 **Refined By**: [ADR 0104](0104-host-owned-editor-workspace-installation.md): Host-Owned Editor
 Workspace Installation
@@ -201,6 +202,18 @@ Rules:
   `AuthoringSchemaBasis` identifies the retained immutable data-only schema/Adapter admission.
   Both survive ordinary edits and Save. Reopen changes the source incarnation even when it
   preserves the schema admission. Neither projection grants mutation or persistence authority.
+- Additive Schema recovery prepares every open Scene and Prefab against one exact successor
+  admission, including inactive dirty sources and retained Undo/Redo. The Workspace charges all
+  incumbent source/classification/history retention before preparing its first successor and
+  binds the exact open set, source incarnations/revisions, prior admissions and source bindings.
+  A foreign workspace, changed set or stale source refuses the whole operation. Unsupported
+  extension and native-only owners refuse explicitly. All source guards bind under exclusive
+  Workspace access before an infallible classification-only swap; source Arcs, content states,
+  history, selection, saved checkpoints and persistence custody remain in their owners.
+  This source proof does not grant file publication, executable approval or actual historical
+  dependency validity. The Project Session must prepare those facts and its matching receipt
+  before publishing, then adopt project and Workspace in the same owner turn. A known published
+  bundle that cannot be adopted remains an explicit published-without-adoption outcome.
 - Authoring revision remains monotonic for conflict detection. Dirty state compares the current
   opaque content-state identity with the receipt-backed saved content-state identity, with
   source-upgrade-required as an additional dirty condition.

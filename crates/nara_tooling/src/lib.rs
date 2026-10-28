@@ -134,10 +134,10 @@ pub use workspace::{
     EditorSceneModel, EditorSceneSessionPublicationError, EditorSceneSlot, EditorSceneTabModel,
     EditorSelectionSet, EditorWorkspace, EditorWorkspaceCommand, EditorWorkspaceCommandReport,
     EditorWorkspaceModel, PreparedEditorDocumentConstruction, PreparedEditorDocumentEdit,
-    PreparedEditorPrefabConversion,
+    PreparedEditorPrefabConversion, PreparedEditorWorkspaceSchemaReclassification,
 };
 #[doc(hidden)]
 pub use workspace::{
     EditorExtensionDocumentCandidate, EditorPersistenceAuthority, EditorPersistenceCheckpoint,
-    EditorPersistenceCommit,
+    EditorPersistenceCommit, EditorWorkspaceSchemaReclassificationCommit,
 };

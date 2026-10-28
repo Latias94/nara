@@ -119,7 +119,7 @@ native evidence, current ADR/guide updates and deletion of its replaced paths. R
 reasons to delay all integration until wave 7. Rewrite a module internally when necessary; keep
 the integrated product at coherent verified checkpoints rather than preserving old public APIs.
 
-### Current First Unit
+### Initial Executable Unit
 
 R1a replaces the direct Application submission's boolean-only return with owned per-action
 dispatch observations and a separate subsequent drive update. It is a production boundary

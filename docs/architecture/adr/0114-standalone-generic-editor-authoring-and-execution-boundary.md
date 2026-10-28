@@ -142,6 +142,15 @@ during preparation still describe the incumbent bundle. They are not a successor
 must not be relabeled as successor bytes or file identity. The prepared data and actual accepted
 bundle leaf join only after known file publication, without another catalog or basis admission.
 
+The retained startup root stays paired with its own saved-file observation; it is not implicitly
+the latest Save or a dirty working root. Successor preparation obtains an exactly observed saved
+startup under the same admitted basis, using a bounded source read when necessary. It must not
+attach a newer digest to an older retained document or discard working-capture revisions to
+present unsaved content as saved. Immutable Published source/classification handles may be shared
+with independently owned Sessions; history/source lineage remains Session-owned. Sharing does not
+admit a new basis or permit arbitrary document/classification pairs. Actual dirty Scene/Prefab
+captures retain their participant revisions and cannot use a disk-only startup-preview seed.
+
 The shared publisher binds while the admitted incumbent leaf is alive and transfers the actual
 accepted successor capability into its receipt. Original project root, manifest, bundle, parent
 and source observations are revalidated before writing. Same owner/content is AlreadyAdmitted

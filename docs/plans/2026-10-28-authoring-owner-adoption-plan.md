@@ -93,6 +93,16 @@ bytes does not recreate that nominal basis.
    and asset database, unresolved dependencies, source facts/stable lookups, readiness, diagnostics
    and budget usage. Rebuild or explicitly invalidate the source index bound to the old bundle
    leaf/digest. Capture uses the successor working copy of every already-open dirty Prefab.
+   Keep startup's saved root and each dirty working root distinct. The original project snapshot
+   is not a cache of the latest accepted Save: do not attach a new persistence digest to its old
+   document or discard a working capture's revision to make it look like a saved startup root.
+   Capture the actual saved startup through the existing source owner with the already admitted
+   successor basis, or retain an exactly paired saved source/observation. A bounded fresh saved
+   source read is allowed; a second nominal Schema admission and reopening live sessions are not.
+   Share immutable published document/classification Arcs through existing Session construction
+   instead of adding a duplicate source-snapshot representation or hidden fork deep copies.
+   Current dirty captures retain their participant revisions; never seed them through the ordinary
+   startup-preview initializer that assumes disk-only Prefabs and zero unsaved participants.
    Closed raw Prefabs retain actual-demand composition: do not force independent strict publication
    of a source whose invalid payload is lawfully repaired/discarded by an outer declaration.
    Extend the same history preparation traversal to validate actual selected composition for
