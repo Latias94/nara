@@ -160,6 +160,11 @@ real C# Application and Windows/DX12 missing-owner-to-Inspector/panel/history/Sa
 consumers pass. This is native Application adoption plus existing widgets, not a new installer
 UI, existing-owner migration, installed dependency/removal closure, language SDK or full R1b.
 The full foundation Goal remains active; the linked evidence retains platform/performance limits.
+The [terminal failure successor](../../knowledge/engineering/verification/2026-10/2026-10-28T085355Z-schema-adoption-failure-provenance-and-truthful-cancellation-b8fcde768b2e4e36a93355796a5f6224.md)
+retains the original Workspace source/history report, source diagnostics, operation/phase and typed
+task rejection through Session/Application. Pure cancellation creates no failure, while actual
+worker failure and publication facts remain independently observable. This closes diagnostic
+transport for the bounded adoption operation, not installed dependency/removal or Schema evolution.
 The [documentation verification](../../knowledge/engineering/verification/2026-10/2026-10-23T115037Z-foundation-architecture-rebaseline-documentation-checks-and-adversarial-closure-33c8c794baf142ee964468a01248af17.md)
 records inventory/link/status checks and the scoped adversarial correction/recheck. No Cargo,
 performance or native trajectory was re-executed for this design-only unit.

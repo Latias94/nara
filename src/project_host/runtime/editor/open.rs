@@ -5,8 +5,8 @@ use nara_fs::DirectoryCapability;
 
 use crate::project_host::authoring::{
     AuthoringProjectAdmissionError, AuthoringProjectAdmissionHost, AuthoringProjectReceipt,
-    AuthoringProjectSourceAdmissionError, AuthoringSourceKind, PreparedAuthoringProject,
-    PreparedAuthoringSchemaBasis, project_authoring_adapters,
+    AuthoringProjectSourceAdmissionError, PreparedAuthoringProject, PreparedAuthoringSchemaBasis,
+    project_authoring_adapters,
 };
 
 use super::{EditorProjectOpenError, EditorProjectSession, single_error};
@@ -437,84 +437,7 @@ fn bundle_failure(
 }
 
 fn source_failure(error: AuthoringProjectSourceAdmissionError) -> EditorProjectOpenFailure {
-    let (relative_source, diagnostics) = match error {
-        AuthoringProjectSourceAdmissionError::NativeSource(error) => {
-            let mut diagnostics = DiagnosticReport::default();
-            diagnostics.push(error.diagnostic());
-            (None, diagnostics)
-        }
-        AuthoringProjectSourceAdmissionError::SourcePublication { path, source, .. } => {
-            (Some(path.as_str().to_owned()), source.into_diagnostics())
-        }
-        AuthoringProjectSourceAdmissionError::SourceStructure { path, source, .. } => {
-            (Some(path.as_str().to_owned()), source.into_diagnostics())
-        }
-        AuthoringProjectSourceAdmissionError::CompilationBudget(diagnostics) => (None, diagnostics),
-        AuthoringProjectSourceAdmissionError::SourceChanged { path, .. } => (
-            Some(path.as_str().to_owned()),
-            single_error(
-                "project.editor.authoring-source-changed",
-                "A required source changed during authoring capture; retry project admission",
-            ),
-        ),
-        AuthoringProjectSourceAdmissionError::SourcePath { path, .. }
-        | AuthoringProjectSourceAdmissionError::SourceHost { path, .. }
-        | AuthoringProjectSourceAdmissionError::SourceIdentityKindConflict { path }
-        | AuthoringProjectSourceAdmissionError::SourceTooLarge { path, .. }
-        | AuthoringProjectSourceAdmissionError::UnsupportedSourceEncoding { path, .. }
-        | AuthoringProjectSourceAdmissionError::SourceFormat { path, .. }
-        | AuthoringProjectSourceAdmissionError::DocumentSourcePath { path, .. } => (
-            Some(path.as_str().to_owned()),
-            single_error(
-                "project.editor.authoring-source-rejected",
-                "A required project source could not be admitted for authoring",
-            ),
-        ),
-        AuthoringProjectSourceAdmissionError::AssetMetadataFormat { path, .. }
-        | AuthoringProjectSourceAdmissionError::AssetIdentity { path, .. } => (
-            Some(path.as_str().to_owned()),
-            single_error(
-                "project.editor.authoring-asset-rejected",
-                "A required project asset could not be admitted for authoring",
-            ),
-        ),
-        AuthoringProjectSourceAdmissionError::AssetMetadataPathMismatch { requested, .. } => (
-            Some(requested.as_str().to_owned()),
-            single_error(
-                "project.editor.authoring-asset-metadata-mismatch",
-                "Asset metadata does not describe its requested project source",
-            ),
-        ),
-        AuthoringProjectSourceAdmissionError::AssetMetadataChanged { path } => (
-            Some(path.as_str().to_owned()),
-            single_error(
-                "project.editor.authoring-asset-metadata-source-changed",
-                "Asset metadata changed during stable reference lookup; retry project admission",
-            ),
-        ),
-        AuthoringProjectSourceAdmissionError::MissingStartupScene => (
-            Some("nara.toml".to_owned()),
-            single_error(
-                "project.editor.startup-scene-missing",
-                "The selected project profile does not declare a startup Scene",
-            ),
-        ),
-        AuthoringProjectSourceAdmissionError::SourceDirectoryPath { kind, .. }
-        | AuthoringProjectSourceAdmissionError::SourceDirectoryHost { kind, .. } => (
-            source_directory_name(kind).map(str::to_owned),
-            single_error(
-                "project.editor.authoring-source-directory-rejected",
-                "A required project source directory could not be admitted",
-            ),
-        ),
-        _ => (
-            None,
-            single_error(
-                "project.editor.startup-closure-rejected",
-                "The startup authoring closure could not be admitted",
-            ),
-        ),
-    };
+    let (relative_source, diagnostics) = super::authoring_sources::authoring_source_failure(error);
     failure(
         EditorProjectOpenPhase::StartupClosure,
         EditorProjectOpenFailureSource::ProjectSource,
@@ -563,15 +486,6 @@ fn session_failure(error: EditorProjectOpenError) -> EditorProjectOpenFailure {
         repair_hint: "Repair the source authority conflict and retry; no candidate session was published.",
         error,
         startup: None,
-    }
-}
-
-fn source_directory_name(kind: AuthoringSourceKind) -> Option<&'static str> {
-    match kind {
-        AuthoringSourceKind::ProjectManifest | AuthoringSourceKind::SchemaBundle => None,
-        AuthoringSourceKind::Scene => Some("scenes"),
-        AuthoringSourceKind::Prefab => Some("prefabs"),
-        AuthoringSourceKind::AssetMetadata | AuthoringSourceKind::AssetSource => Some("assets"),
     }
 }
 

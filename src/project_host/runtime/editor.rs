@@ -79,8 +79,9 @@ pub use presentation::{
 #[cfg(feature = "presentation-2d")]
 pub use preview::{EditorPreviewCandidate, EditorPreviewContentStamp, EditorPreviewHit};
 pub use schema_owner::{
-    EditorSchemaOwnerAdoptionError, EditorSchemaOwnerAdoptionId, EditorSchemaOwnerAdoptionOutcome,
-    EditorSchemaOwnerAdoptionPhase, EditorSchemaOwnerAdoptionView,
+    EditorSchemaOwnerAdoptionError, EditorSchemaOwnerAdoptionFailure, EditorSchemaOwnerAdoptionId,
+    EditorSchemaOwnerAdoptionOutcome, EditorSchemaOwnerAdoptionPhase,
+    EditorSchemaOwnerAdoptionView,
 };
 pub use source_asset_import::{EditorSourceAssetDomain, EditorSourceAssetImporters};
 pub use source_tools::{

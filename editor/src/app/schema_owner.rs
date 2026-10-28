@@ -6,7 +6,8 @@ use nara::{
     diagnostic::DiagnosticReport,
     fs::{ContentDigest, ReplaceReceipt},
     project_host::{
-        EditorSchemaOwnerAdoptionError, EditorSchemaOwnerAdoptionId, EditorSchemaOwnerAdoptionView,
+        EditorSchemaOwnerAdoptionError, EditorSchemaOwnerAdoptionFailure,
+        EditorSchemaOwnerAdoptionId, EditorSchemaOwnerAdoptionView,
     },
     scene::PrefabExpansionFailure,
     tooling::EditorDocumentId,
@@ -15,6 +16,14 @@ use nara::{
 use super::EditorApplication;
 
 impl EditorApplication {
+    /// Borrows the retained failure even while this project's physical Close is pending.
+    pub fn schema_owner_adoption_failure(&self) -> Option<&EditorSchemaOwnerAdoptionFailure> {
+        self.state
+            .published()?
+            .session
+            .schema_owner_adoption_failure()
+    }
+
     pub fn schema_owner_adoption_view(
         &self,
     ) -> Result<&EditorSchemaOwnerAdoptionView, EditorSchemaOwnerAdoptionError> {

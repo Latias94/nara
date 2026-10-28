@@ -123,6 +123,16 @@ receipt. External declaration/owner changes refuse instead of merging behind an 
 No automatic rollback or source/history discard follows. Terminal acknowledgement is available
 only after the operation's task return and temporary-file cleanup have completed.
 
+`schema_owner_adoption_failure()` borrows a terminal failure separately from the Review and
+publication evidence. It identifies the original operation and phase, and retains the actual
+Workspace source/history report or source diagnostics, document and safe project-relative source
+when available. Task admission failures retain the original typed rejection. Cancellation alone
+does not create a failure; a cancelled operation can still retain an actual failure returned by
+its worker. The Application exposes the same observation while it still holds the project,
+including pending physical Close. Acknowledging the terminal operation, starting a new one or
+beginning explicit reconciliation clears this failure. Diagnostic limits and truncation remain
+those of the owning reports; arbitrary native error strings are not presented.
+
 ## Approve Captured Managed Images
 
 The concrete managed adapter uses the Host-owned

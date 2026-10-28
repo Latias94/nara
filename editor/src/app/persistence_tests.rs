@@ -92,6 +92,59 @@ fn settle_background_imports(application: &mut EditorApplication) {
     }
 }
 
+#[test]
+fn application_retains_schema_adoption_failure_until_acknowledged() {
+    use nara::project_host::{
+        EditorSchemaOwnerAdoptionError, EditorSchemaOwnerAdoptionOutcome,
+        EditorSchemaOwnerAdoptionPhase,
+    };
+
+    let fixture = PersistenceFixture::new();
+    let mut application = fixture.open();
+    settle_background_imports(&mut application);
+    let document = application
+        .current_frame()
+        .unwrap()
+        .workspace()
+        .active_document
+        .unwrap();
+    let basis = application.document_query_basis(document).unwrap();
+    let source = fixture.root.join("worlds/entry.scene.json");
+    let original = fs::read(&source).unwrap();
+    let operation = application
+        .prepare_installed_schema_owner(
+            "tools/missing",
+            nara::fs::ContentDigest::of_bytes(b"missing installation"),
+        )
+        .unwrap();
+    let deadline = Instant::now() + Duration::from_secs(10);
+    while application.schema_owner_adoption_view().unwrap().phase
+        != EditorSchemaOwnerAdoptionPhase::Terminal
+    {
+        assert!(Instant::now() < deadline, "metadata failure did not return");
+        application.advance(Duration::ZERO);
+        std::thread::sleep(Duration::from_millis(1));
+    }
+    assert_eq!(
+        application.schema_owner_adoption_view().unwrap().outcome,
+        Some(EditorSchemaOwnerAdoptionOutcome::Failed(
+            EditorSchemaOwnerAdoptionError::Installation
+        ))
+    );
+    let failure = application.schema_owner_adoption_failure().unwrap();
+    assert_eq!(failure.operation(), Some(operation));
+    assert_eq!(failure.phase(), EditorSchemaOwnerAdoptionPhase::Inspecting);
+    assert_eq!(failure.relative_source(), Some("tools/missing"));
+    assert!(failure.diagnostics().has_errors());
+    assert_eq!(application.document_query_basis(document).unwrap(), basis);
+    assert_eq!(fs::read(&source).unwrap(), original);
+    application
+        .acknowledge_schema_owner_adoption(operation)
+        .unwrap();
+    assert!(application.schema_owner_adoption_failure().is_none());
+    close(&mut application);
+}
+
 #[cfg(windows)]
 #[test]
 fn application_source_tool_reviews_commits_and_revokes_old_requests() {

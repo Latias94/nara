@@ -264,3 +264,9 @@ Inspector/panel interaction; no new installation/adoption widget or complete Pac
 is claimed. Existing-owner evolution, dependency-safe removal and the full foundation Goal
 remain active independent units. Admission performance and richer terminal failure projection
 retain the limits recorded in that evidence.
+
+The [terminal failure successor](../knowledge/engineering/verification/2026-10/2026-10-28T085355Z-schema-adoption-failure-provenance-and-truthful-cancellation-b8fcde768b2e4e36a93355796a5f6224.md)
+adds the owning source/history report and source diagnostics to retained Session/Application
+failure observations, independently of cancellation and actual publication evidence. Explicit
+task rejection and execution-before-start cancellation remain distinct. This closes the earlier
+diagnostic-transport limitation; admission latency and allocation locality remain unmeasured.

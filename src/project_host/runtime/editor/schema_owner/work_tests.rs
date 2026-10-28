@@ -60,11 +60,30 @@ fn panicked_started_work_requires_reconciliation_instead_of_inventing_an_unpubli
         assert!(Instant::now() < deadline);
         std::thread::yield_now();
     };
-    assert_eq!(
-        result,
-        Err(EditorSchemaOwnerAdoptionError::RequiresReconcile)
-    );
+    assert_eq!(result, Err(WorkError::Unobserved));
     let report = pools.shutdown_blocking().unwrap();
     assert!(report.is_complete());
     assert!(report.has_cleanup_failure());
+}
+
+#[test]
+fn rejected_finite_work_exposes_its_original_task_admission_reason() {
+    let pools = pools();
+    assert!(pools.shutdown_blocking().unwrap().is_complete());
+    let mut pending = Pending::start(&pools, || Ok::<(), Failure>(()));
+    assert!(pending.task.is_none());
+    let result = pending.poll().unwrap();
+    let failure = work_error(
+        result,
+        pending.rejection,
+        EditorSchemaOwnerAdoptionPhase::Preparing,
+    )
+    .unwrap();
+    assert_eq!(failure.reason(), EditorSchemaOwnerAdoptionError::Task);
+    assert_eq!(failure.phase(), EditorSchemaOwnerAdoptionPhase::Preparing);
+    let rejection = failure.task_rejection().unwrap();
+    assert_eq!(rejection.reason, nara_tasks::TaskRejectReason::PoolClosed);
+    assert_eq!(rejection.return_state, TaskReturnState::Returned);
+    assert!(failure.diagnostics().has_errors());
+    assert!(failure.source_report().is_none());
 }

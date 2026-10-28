@@ -5,6 +5,8 @@
     all(target_os = "linux", target_arch = "x86_64", target_env = "gnu")
 ))]
 
+mod failures;
+
 use std::{
     fs,
     panic::{AssertUnwindSafe, catch_unwind, resume_unwind},

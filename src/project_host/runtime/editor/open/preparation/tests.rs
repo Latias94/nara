@@ -383,6 +383,39 @@ fn rejected(progress: EditorProjectOpenProgress) -> EditorProjectOpenFailure {
 }
 
 #[test]
+fn configured_source_directory_failure_preserves_role_without_inventing_a_path() {
+    let project = StartupProject::new();
+    let manifest = project.root.join("nara.toml");
+    let contents = fs::read_to_string(&manifest).unwrap();
+    fs::write(
+        &manifest,
+        contents.replace("scenes = \"scenes\"", "scenes = \"worlds\""),
+    )
+    .unwrap();
+    let mut host = EditorProjectOpenHost::new();
+    let ready = project.ready(&mut host);
+    let attempt = expect_pending(host.advance(ready));
+    let failure = rejected(drive_startup(&mut host, attempt));
+    assert_eq!(failure.phase(), EditorProjectOpenPhase::StartupClosure);
+    assert_eq!(
+        failure.source(),
+        EditorProjectOpenFailureSource::ProjectSource
+    );
+    assert!(failure.relative_source().is_none());
+    let diagnostic = failure.diagnostics().iter().next().unwrap();
+    assert_eq!(
+        diagnostic.code().as_str(),
+        "project.editor.authoring-source-directory-rejected"
+    );
+    assert!(
+        diagnostic
+            .summary()
+            .as_str()
+            .contains("Scene source directory")
+    );
+}
+
+#[test]
 fn first_submission_failure_is_exact_and_same_host_retries_only_after_partial_worker_join() {
     let project = StartupProject::new();
     let mut host = EditorProjectOpenHost::new();

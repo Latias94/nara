@@ -68,7 +68,8 @@ mod desktop_verification;
 mod editor;
 #[cfg(feature = "tooling")]
 pub use editor::{
-    EditorExtensionDocumentHostError, EditorSchemaOwnerAdoptionError, EditorSchemaOwnerAdoptionId,
+    EditorExtensionDocumentHostError, EditorSchemaOwnerAdoptionError,
+    EditorSchemaOwnerAdoptionFailure, EditorSchemaOwnerAdoptionId,
     EditorSchemaOwnerAdoptionOutcome, EditorSchemaOwnerAdoptionPhase,
     EditorSchemaOwnerAdoptionView, EditorSourceAssetDomain, EditorSourceAssetImporters,
     EditorSourceToolCommand, EditorSourceToolDefinition, EditorSourceToolInstallation,

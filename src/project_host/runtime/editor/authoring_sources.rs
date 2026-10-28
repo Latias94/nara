@@ -11,6 +11,9 @@ use crate::project_host::authoring::{
 
 use super::EditorProjectSession;
 
+mod failure;
+pub(super) use failure::authoring_source_failure;
+
 #[derive(Clone, PartialEq, Eq)]
 pub(super) struct AuthoringSourceSelection {
     pub(super) document: EditorDocumentId,

@@ -32,6 +32,10 @@ use crate::project_host::{
 const DOMAIN: TaskDomainKey = TaskDomainKey::new(0x7363_6865_6d61_6f77);
 static NEXT_OPERATION: AtomicU64 = AtomicU64::new(1);
 
+mod failure;
+use EditorSchemaOwnerAdoptionFailure as Failure;
+pub use failure::EditorSchemaOwnerAdoptionFailure;
+
 /// Process-local operation identity; no filesystem or executable authority follows from it.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct EditorSchemaOwnerAdoptionId(u64);
@@ -211,9 +215,9 @@ impl AttachmentFailure {
 }
 
 enum Work {
-    Inspect(Pending<Result<Inspected, EditorSchemaOwnerAdoptionError>>),
-    Prepare(Pending<Result<Candidate, EditorSchemaOwnerAdoptionError>>),
-    Publish(Pending<Result<Published, EditorSchemaOwnerAdoptionError>>),
+    Inspect(Pending<Result<Inspected, Failure>>),
+    Prepare(Pending<Result<Candidate, Failure>>),
+    Publish(Pending<Result<Published, Failure>>),
 }
 
 #[derive(Default)]
@@ -228,6 +232,7 @@ pub(super) struct EditorSchemaOwnerAdoptionHost {
     captures: Vec<(EditorDocumentId, AuthoringDocumentCapture)>,
     installation: Option<(Arc<str>, ContentDigest)>,
     attachment_failure: Option<AttachmentFailure>,
+    failure: Option<Failure>,
     cancelled: bool,
     #[cfg(test)]
     next_publication_gate: Option<Box<dyn FnOnce() + Send>>,
@@ -241,7 +246,16 @@ struct Job<T> {
 struct Pending<T> {
     job: Arc<Mutex<Job<T>>>,
     task: Option<TaskHandle<()>>,
+    rejection: Option<nara_tasks::TaskRejection>,
 }
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum WorkError {
+    CancelledBeforeStart,
+    Unavailable,
+    Unobserved,
+}
+
 impl<T: Send + 'static> Pending<T> {
     fn start(pools: &TaskPools, run: impl FnOnce() -> T + Send + 'static) -> Self {
         let job = Arc::new(Mutex::new(Job {
@@ -250,7 +264,7 @@ impl<T: Send + 'static> Pending<T> {
             result: None,
         }));
         let worker = Arc::clone(&job);
-        let task = pools
+        let admitted = pools
             .spawn(
                 TaskPoolKind::Io,
                 TaskSpawnRequest::new(0, DOMAIN),
@@ -264,11 +278,18 @@ impl<T: Send + 'static> Pending<T> {
                     job.result = Some(run());
                 },
             )
-            .into_handle()
-            .ok();
-        Self { job, task }
+            .into_handle();
+        let (task, rejection) = match admitted {
+            Ok(task) => (Some(task), None),
+            Err(rejection) => (None, Some(rejection)),
+        };
+        Self {
+            job,
+            task,
+            rejection,
+        }
     }
-    fn poll(&mut self) -> Option<Result<T, EditorSchemaOwnerAdoptionError>> {
+    fn poll(&mut self) -> Option<Result<T, WorkError>> {
         if self
             .task
             .as_ref()
@@ -281,11 +302,18 @@ impl<T: Send + 'static> Pending<T> {
             Err(TryLockError::WouldBlock) => return None,
             Err(TryLockError::Poisoned(error)) => error.into_inner(),
         };
-        Some(job.result.take().ok_or(if job.started {
-            EditorSchemaOwnerAdoptionError::RequiresReconcile
-        } else {
-            EditorSchemaOwnerAdoptionError::Task
-        }))
+        Some(match job.result.take() {
+            Some(result) => Ok(result),
+            None if job.started => Err(WorkError::Unobserved),
+            None if self
+                .task
+                .as_ref()
+                .is_some_and(|task| task.cancellation_token().is_cancelled()) =>
+            {
+                Err(WorkError::CancelledBeforeStart)
+            }
+            None => Err(WorkError::Unavailable),
+        })
     }
     fn cancel(&self) {
         if let Some(task) = &self.task {
@@ -368,6 +396,11 @@ impl EditorSchemaOwnerAdoptionHost {
 impl EditorProjectSession {
     pub fn schema_owner_adoption_view(&self) -> &EditorSchemaOwnerAdoptionView {
         &self.schema_owner_adoption.view
+    }
+
+    /// Retains exact failure facts independently of cancellation and actual publication evidence.
+    pub fn schema_owner_adoption_failure(&self) -> Option<&EditorSchemaOwnerAdoptionFailure> {
+        self.schema_owner_adoption.failure.as_ref()
     }
 
     /// Begins code-free installed metadata inspection. It neither enables the tool nor approves execution.
@@ -478,6 +511,7 @@ impl EditorProjectSession {
             reconcile: true,
         });
         self.schema_owner_adoption.cancelled = false;
+        self.schema_owner_adoption.failure = None;
         Ok(id)
     }
 
@@ -672,7 +706,9 @@ impl EditorProjectSession {
                         EditorSchemaOwnerAdoptionOutcome::AlreadyAdmitted
                     },
                 ),
-                Some(result) => self.finish_schema_work_error(Some(work_error(result))),
+                Some(result) => {
+                    self.finish_schema_work_return(result, task.rejection, Phase::Inspecting)
+                }
             },
             Work::Prepare(task) => {
                 match task.poll() {
@@ -691,30 +727,67 @@ impl EditorProjectSession {
                         self.schema_owner_adoption.view.phase = Phase::Review;
                     }
                     Some(Ok(Ok(_candidate))) => {
-                        self.finish_schema_work_error(Some(EditorSchemaOwnerAdoptionError::Stale));
+                        if self.closing || self.schema_owner_adoption.cancelled {
+                            self.schema_owner_adoption
+                                .finish(EditorSchemaOwnerAdoptionOutcome::Cancelled);
+                        } else {
+                            self.finish_schema_work_error(EditorSchemaOwnerAdoptionError::Stale);
+                        }
                     }
-                    Some(result) => self.finish_schema_work_error(Some(work_error(result))),
+                    Some(result) => {
+                        self.finish_schema_work_return(result, task.rejection, Phase::Preparing)
+                    }
                 }
             }
             Work::Publish(task) => match task.poll() {
                 None => self.schema_owner_adoption.work = Some(work),
                 Some(Ok(Ok(published))) => self.accept_schema_publication(published),
-                Some(Err(EditorSchemaOwnerAdoptionError::RequiresReconcile)) => self
-                    .schema_owner_adoption
-                    .finish(EditorSchemaOwnerAdoptionOutcome::Uncertain),
-                Some(result) => self.finish_schema_work_error(Some(work_error(result))),
+                Some(Err(WorkError::Unobserved)) => {
+                    self.record_schema_failure(Failure::new(
+                        EditorSchemaOwnerAdoptionError::RequiresReconcile,
+                        Phase::Publishing,
+                    ));
+                    self.schema_owner_adoption
+                        .finish(EditorSchemaOwnerAdoptionOutcome::Uncertain);
+                }
+                Some(result) => {
+                    self.finish_schema_work_return(result, task.rejection, Phase::Publishing)
+                }
             },
         }
     }
 
-    fn finish_schema_work_error(&mut self, error: Option<EditorSchemaOwnerAdoptionError>) {
+    fn finish_schema_work_error(&mut self, error: EditorSchemaOwnerAdoptionError) {
+        self.finish_schema_failure(Failure::new(error, self.schema_owner_adoption.view.phase));
+    }
+
+    fn finish_schema_work_return<T>(
+        &mut self,
+        result: Result<Result<T, Failure>, WorkError>,
+        rejection: Option<nara_tasks::TaskRejection>,
+        phase: EditorSchemaOwnerAdoptionPhase,
+    ) {
+        match work_error(result, rejection, phase) {
+            Some(failure) => self.finish_schema_failure(failure),
+            None => self
+                .schema_owner_adoption
+                .finish(EditorSchemaOwnerAdoptionOutcome::Cancelled),
+        }
+    }
+
+    fn record_schema_failure(&mut self, mut failure: Failure) {
+        failure.bind_operation(self.schema_owner_adoption.view.operation);
+        self.schema_owner_adoption.failure = Some(failure);
+    }
+
+    fn finish_schema_failure(&mut self, failure: Failure) {
+        let reason = failure.reason();
+        self.record_schema_failure(failure);
         self.schema_owner_adoption.finish(
             if self.closing || self.schema_owner_adoption.cancelled {
                 EditorSchemaOwnerAdoptionOutcome::Cancelled
             } else {
-                EditorSchemaOwnerAdoptionOutcome::Failed(
-                    error.unwrap_or(EditorSchemaOwnerAdoptionError::Task),
-                )
+                EditorSchemaOwnerAdoptionOutcome::Failed(reason)
             },
         );
     }
@@ -731,28 +804,53 @@ impl EditorProjectSession {
                         )
                         + std::mem::size_of::<(EditorDocumentId, AuthoringDocumentCapture)>(),
                 )
-                .ok_or(EditorSchemaOwnerAdoptionError::Preparation)?;
+                .ok_or_else(|| {
+                    Failure::new(
+                        EditorSchemaOwnerAdoptionError::Preparation,
+                        EditorSchemaOwnerAdoptionPhase::Preparing,
+                    )
+                })?;
             metadata
                 .owner
                 .retain_operation_inputs(buffers)
-                .map_err(|_| EditorSchemaOwnerAdoptionError::Preparation)?;
+                .map_err(|_| {
+                    Failure::new(
+                        EditorSchemaOwnerAdoptionError::Preparation,
+                        EditorSchemaOwnerAdoptionPhase::Preparing,
+                    )
+                })?;
             let documents = self.workspace.__document_ids();
             let selection_bytes = documents
                 .iter()
                 .try_fold(0_usize, |total, &id| {
                     total.checked_add(self.authoring_source_selection_retained_bytes(id)?)
                 })
-                .ok_or(EditorSchemaOwnerAdoptionError::Stale)?;
+                .ok_or_else(|| {
+                    Failure::new(
+                        EditorSchemaOwnerAdoptionError::Stale,
+                        EditorSchemaOwnerAdoptionPhase::Preparing,
+                    )
+                })?;
             metadata
                 .owner
                 .retain_operation_inputs(selection_bytes)
-                .map_err(|_| EditorSchemaOwnerAdoptionError::Preparation)?;
+                .map_err(|_| {
+                    Failure::new(
+                        EditorSchemaOwnerAdoptionError::Preparation,
+                        EditorSchemaOwnerAdoptionPhase::Preparing,
+                    )
+                })?;
             let sources = documents
                 .into_iter()
                 .map(|id| {
                     self.authoring_source_selection(id)
                         .filter(|source| source.receipt.is_some())
-                        .ok_or(EditorSchemaOwnerAdoptionError::Stale)
+                        .ok_or_else(|| {
+                            Failure::new(
+                                EditorSchemaOwnerAdoptionError::Stale,
+                                EditorSchemaOwnerAdoptionPhase::Preparing,
+                            )
+                        })
                 })
                 .collect::<Result<Vec<_>, _>>()?;
             let workspace = self
@@ -762,7 +860,9 @@ impl EditorProjectSession {
                     metadata.owner.schema_basis(),
                     Default::default(),
                 )
-                .map_err(|_| EditorSchemaOwnerAdoptionError::Preparation)?;
+                .map_err(|report| {
+                    Failure::workspace(report, EditorSchemaOwnerAdoptionPhase::Preparing)
+                })?;
             Ok((sources, workspace))
         })();
         match result {
@@ -774,7 +874,7 @@ impl EditorProjectSession {
                 self.schema_owner_adoption.view.phase = EditorSchemaOwnerAdoptionPhase::Preparing;
             }
             Err(error) => {
-                self.finish_schema_work_error(Some(error));
+                self.finish_schema_failure(error);
             }
         }
     }
@@ -840,7 +940,7 @@ impl EditorProjectSession {
                 };
                 self.schema_owner_adoption.captures = captures;
                 if live {
-                    match self
+                    let report = match self
                         .workspace
                         .bind_schema_reclassification(candidate.workspace)
                     {
@@ -856,8 +956,12 @@ impl EditorProjectSession {
                             self.publish_editor_frame(true);
                             return;
                         }
-                        Err(_) => {}
-                    }
+                        Err(report) => report,
+                    };
+                    self.record_schema_failure(Failure::workspace(
+                        report,
+                        EditorSchemaOwnerAdoptionPhase::Publishing,
+                    ));
                 }
                 self.schema_owner_adoption.published = Some(PublishedProject { project, evidence });
                 self.schema_owner_adoption
@@ -869,7 +973,12 @@ impl EditorProjectSession {
                 self.schema_owner_adoption
                     .finish(EditorSchemaOwnerAdoptionOutcome::Uncertain);
             }
-            _ => self.finish_schema_work_error(Some(EditorSchemaOwnerAdoptionError::Publication)),
+            Publication::Written(FilePublicationOutcome::Rejected(reason)) => {
+                self.finish_schema_failure(Failure::publication_rejected(reason))
+            }
+            Publication::Written(FilePublicationOutcome::Failed(stage)) => {
+                self.finish_schema_failure(Failure::publication_failed(stage))
+            }
         }
     }
 
@@ -877,7 +986,7 @@ impl EditorProjectSession {
         let observed = match candidate.metadata.owner.attach_observed() {
             Ok(observed) => observed,
             Err(_) => {
-                self.finish_schema_work_error(Some(EditorSchemaOwnerAdoptionError::Preparation));
+                self.finish_schema_work_error(EditorSchemaOwnerAdoptionError::Preparation);
                 return;
             }
         };
@@ -886,9 +995,7 @@ impl EditorProjectSession {
             match capture.attach_observed(&observed) {
                 Ok(capture) => captures.push((document, capture)),
                 Err(_) => {
-                    self.finish_schema_work_error(Some(
-                        EditorSchemaOwnerAdoptionError::Preparation,
-                    ));
+                    self.finish_schema_work_error(EditorSchemaOwnerAdoptionError::Preparation);
                     return;
                 }
             }
@@ -898,29 +1005,43 @@ impl EditorProjectSession {
             Err(failure) => {
                 self.schema_owner_adoption.attachment_failure =
                     Some(AttachmentFailure::ObservedProject(failure));
-                self.finish_schema_work_error(Some(EditorSchemaOwnerAdoptionError::Preparation));
+                self.finish_schema_work_error(EditorSchemaOwnerAdoptionError::Preparation);
                 return;
             }
         };
         let project = match receipt.into_session_snapshot() {
             Ok(project) => project,
             Err(_) => {
-                self.finish_schema_work_error(Some(EditorSchemaOwnerAdoptionError::Preparation));
+                self.finish_schema_work_error(EditorSchemaOwnerAdoptionError::Preparation);
                 return;
             }
         };
         if !live {
-            self.finish_schema_work_error(Some(EditorSchemaOwnerAdoptionError::Stale));
+            if self.closing || self.schema_owner_adoption.cancelled {
+                self.schema_owner_adoption
+                    .finish(EditorSchemaOwnerAdoptionOutcome::Cancelled);
+            } else {
+                self.finish_schema_work_error(EditorSchemaOwnerAdoptionError::Stale);
+            }
             return;
         }
-        let Ok(guard) = self
+        let failure = match self
             .workspace
             .bind_schema_reclassification(candidate.workspace)
-        else {
-            self.finish_schema_work_error(Some(EditorSchemaOwnerAdoptionError::Stale));
-            return;
+        {
+            Ok(guard) => {
+                guard.commit();
+                None
+            }
+            Err(report) => Some(report),
         };
-        guard.commit();
+        if let Some(report) = failure {
+            self.finish_schema_failure(Failure::workspace(
+                report,
+                EditorSchemaOwnerAdoptionPhase::Publishing,
+            ));
+            return;
+        }
         self.execution = EditorExecutionLane::Authoring(project);
         self.adopt_schema_project_index();
         self.schema_owner_adoption.captures = captures;
@@ -975,22 +1096,29 @@ impl EditorProjectSession {
     }
 }
 
-fn inspect(
-    start: Start,
-    custody: HostCustody,
-) -> Result<Inspected, EditorSchemaOwnerAdoptionError> {
+fn inspect(start: Start, custody: HostCustody) -> Result<Inspected, Failure> {
+    let phase = EditorSchemaOwnerAdoptionPhase::Inspecting;
     let directory = start
         .input
         .project_root()
         .strict_read_only()
-        .map_err(|_| EditorSchemaOwnerAdoptionError::Installation)?
-        .open_directory_exact(
-            &RelativePath::new(start.directory.as_ref())
-                .map_err(|_| EditorSchemaOwnerAdoptionError::Installation)?,
-        )
-        .map_err(|_| EditorSchemaOwnerAdoptionError::Installation)?;
+        .map_err(|_| {
+            Failure::new(EditorSchemaOwnerAdoptionError::Installation, phase)
+                .at_source(Some(&start.directory))
+        })?
+        .open_directory_exact(&RelativePath::new(start.directory.as_ref()).map_err(|_| {
+            Failure::new(EditorSchemaOwnerAdoptionError::Installation, phase)
+                .at_source(Some(&start.directory))
+        })?)
+        .map_err(|_| {
+            Failure::new(EditorSchemaOwnerAdoptionError::Installation, phase)
+                .at_source(Some(&start.directory))
+        })?;
     let inspection = EditorSourceToolInstallationInspection::read(&directory, start.receipt)
-        .map_err(|_| EditorSchemaOwnerAdoptionError::Installation)?;
+        .map_err(|_| {
+            Failure::new(EditorSchemaOwnerAdoptionError::Installation, phase)
+                .at_source(Some(&start.directory))
+        })?;
     let installation = Installation {
         directory: start.directory,
         receipt: start.receipt,
@@ -1003,7 +1131,7 @@ fn inspect(
         match start
             .input
             .prepare_observed_owner(inspection.release().schema_owner())
-            .map_err(|_| EditorSchemaOwnerAdoptionError::Schema)?
+            .map_err(|error| Failure::metadata(error, phase))?
         {
             AuthoringSchemaOwnerReconciliation::Observed(owner) => {
                 return Ok(Inspected::Prepared(Metadata {
@@ -1019,14 +1147,14 @@ fn inspect(
         start
             .input
             .prepare_owner(inspection.release().schema_owner())
-            .map_err(|_| EditorSchemaOwnerAdoptionError::Schema)?
+            .map_err(|error| Failure::metadata(error, phase))?
     };
     match preparation {
         AuthoringSchemaOwnerPreparation::AlreadyAdmitted => Ok(Inspected::AlreadyAdmitted),
         AuthoringSchemaOwnerPreparation::Prepared { owner, publication } => {
             let publisher = custody
                 .retain_publication(publication)
-                .ok_or(EditorSchemaOwnerAdoptionError::Closing)?;
+                .ok_or_else(|| Failure::new(EditorSchemaOwnerAdoptionError::Closing, phase))?;
             Ok(Inspected::Prepared(Metadata {
                 input: start.input,
                 installation,
@@ -1041,43 +1169,63 @@ fn prepare(
     mut metadata: Metadata,
     sources: Vec<AuthoringSourceSelection>,
     request: EditorWorkspaceSchemaReclassificationRequest,
-) -> Result<Candidate, EditorSchemaOwnerAdoptionError> {
+) -> Result<Candidate, Failure> {
+    let phase = EditorSchemaOwnerAdoptionPhase::Preparing;
     let workspace = request
         .prepare()
-        .map_err(|_| EditorSchemaOwnerAdoptionError::Preparation)?;
+        .map_err(|report| Failure::workspace(report, phase))?;
     let mut prefabs = Vec::with_capacity(sources.len());
     for source in &sources {
         if let Some(view) = workspace.prefab_snapshot(source.document) {
             prefabs.push(
                 AuthoringPrefabSessionSnapshot::capture_prepared(
-                    source
-                        .receipt
-                        .as_ref()
-                        .ok_or(EditorSchemaOwnerAdoptionError::Stale)?,
+                    source.receipt.as_ref().ok_or_else(|| {
+                        Failure::new(EditorSchemaOwnerAdoptionError::Stale, phase)
+                    })?,
                     view,
                 )
-                .map_err(|_| EditorSchemaOwnerAdoptionError::Preparation)?,
+                .map_err(|error| {
+                    Failure::source(
+                        error,
+                        EditorSchemaOwnerAdoptionError::Preparation,
+                        phase,
+                        Some(source.document),
+                    )
+                })?,
             );
         }
     }
     let project = metadata
         .owner
         .prepare_project_input(&metadata.input, &prefabs)
-        .map_err(|_| EditorSchemaOwnerAdoptionError::Preparation)?;
+        .map_err(|error| {
+            Failure::source(
+                error,
+                EditorSchemaOwnerAdoptionError::Preparation,
+                phase,
+                None,
+            )
+        })?;
     let mut current = Vec::with_capacity(sources.len());
     for source in &sources {
         if let Some(view) = workspace.scene_snapshot(source.document) {
             let capture = metadata
                 .owner
                 .capture_scene(
-                    source
-                        .receipt
-                        .as_ref()
-                        .ok_or(EditorSchemaOwnerAdoptionError::Stale)?,
+                    source.receipt.as_ref().ok_or_else(|| {
+                        Failure::new(EditorSchemaOwnerAdoptionError::Stale, phase)
+                    })?,
                     view,
                     &prefabs,
                 )
-                .map_err(|_| EditorSchemaOwnerAdoptionError::Preparation)?;
+                .map_err(|error| {
+                    Failure::source(
+                        error,
+                        EditorSchemaOwnerAdoptionError::Preparation,
+                        phase,
+                        Some(source.document),
+                    )
+                })?;
             current.push((source.document, capture));
         }
     }
@@ -1093,42 +1241,69 @@ fn prepare(
 fn publish(
     mut candidate: Candidate,
     #[cfg(test)] gate: Option<Box<dyn FnOnce() + Send>>,
-) -> Result<Published, EditorSchemaOwnerAdoptionError> {
+) -> Result<Published, Failure> {
+    let phase = EditorSchemaOwnerAdoptionPhase::Publishing;
     let installation = &candidate.metadata.installation;
     let directory = candidate
         .metadata
         .input
         .project_root()
         .strict_read_only()
-        .map_err(|_| EditorSchemaOwnerAdoptionError::Installation)?
-        .open_directory_exact(
-            &RelativePath::new(installation.directory.as_ref())
-                .map_err(|_| EditorSchemaOwnerAdoptionError::Installation)?,
-        )
-        .map_err(|_| EditorSchemaOwnerAdoptionError::Installation)?;
+        .map_err(|_| {
+            Failure::new(EditorSchemaOwnerAdoptionError::Installation, phase)
+                .at_source(Some(&installation.directory))
+        })?
+        .open_directory_exact(&RelativePath::new(installation.directory.as_ref()).map_err(
+            |_| {
+                Failure::new(EditorSchemaOwnerAdoptionError::Installation, phase)
+                    .at_source(Some(&installation.directory))
+            },
+        )?)
+        .map_err(|_| {
+            Failure::new(EditorSchemaOwnerAdoptionError::Installation, phase)
+                .at_source(Some(&installation.directory))
+        })?;
     if directory.identity() != installation.identity {
-        return Err(EditorSchemaOwnerAdoptionError::Installation);
+        return Err(
+            Failure::new(EditorSchemaOwnerAdoptionError::Installation, phase)
+                .at_source(Some(&installation.directory)),
+        );
     }
     let inspection = EditorSourceToolInstallationInspection::read(&directory, installation.receipt)
-        .map_err(|_| EditorSchemaOwnerAdoptionError::Installation)?;
+        .map_err(|_| {
+            Failure::new(EditorSchemaOwnerAdoptionError::Installation, phase)
+                .at_source(Some(&installation.directory))
+        })?;
     if inspection.receipt().manifest_digest() != installation.manifest
         || inspection.release().package() != installation.package.as_ref()
     {
-        return Err(EditorSchemaOwnerAdoptionError::Installation);
+        return Err(
+            Failure::new(EditorSchemaOwnerAdoptionError::Installation, phase)
+                .at_source(Some(&installation.directory)),
+        );
     }
     candidate
         .metadata
         .owner
         .validate()
-        .map_err(|_| EditorSchemaOwnerAdoptionError::Stale)?;
+        .map_err(|error| Failure::metadata(error, phase))?;
     candidate
         .project
         .validate(&mut candidate.metadata.owner)
-        .map_err(|_| EditorSchemaOwnerAdoptionError::Stale)?;
-    for (_, capture) in &candidate.current {
+        .map_err(|error| {
+            Failure::source(error, EditorSchemaOwnerAdoptionError::Stale, phase, None)
+        })?;
+    for (document, capture) in &candidate.current {
         capture
             .validate(&mut candidate.metadata.owner)
-            .map_err(|_| EditorSchemaOwnerAdoptionError::Stale)?;
+            .map_err(|error| {
+                Failure::source(
+                    error,
+                    EditorSchemaOwnerAdoptionError::Stale,
+                    phase,
+                    Some(*document),
+                )
+            })?;
     }
     let outcome = match &candidate.metadata.publisher {
         Some(publisher) => {
@@ -1136,7 +1311,7 @@ fn publish(
             Publication::Written(
                 publisher
                     .with_worker(|host| host.publish(&bytes))
-                    .ok_or(EditorSchemaOwnerAdoptionError::Closing)?,
+                    .ok_or_else(|| Failure::new(EditorSchemaOwnerAdoptionError::Closing, phase))?,
             )
         }
         None => Publication::Observed,
@@ -1149,11 +1324,25 @@ fn publish(
 }
 
 fn work_error<T>(
-    result: Result<Result<T, EditorSchemaOwnerAdoptionError>, EditorSchemaOwnerAdoptionError>,
-) -> EditorSchemaOwnerAdoptionError {
+    result: Result<Result<T, Failure>, WorkError>,
+    rejection: Option<nara_tasks::TaskRejection>,
+    phase: EditorSchemaOwnerAdoptionPhase,
+) -> Option<Failure> {
     match result {
-        Err(error) | Ok(Err(error)) => error,
-        Ok(Ok(_)) => EditorSchemaOwnerAdoptionError::Operation,
+        Ok(Err(error)) => Some(error),
+        Err(WorkError::CancelledBeforeStart) => None,
+        Err(WorkError::Unavailable) => Some(match rejection {
+            Some(rejection) => Failure::rejected(rejection, phase),
+            None => Failure::new(EditorSchemaOwnerAdoptionError::Task, phase),
+        }),
+        Err(WorkError::Unobserved) => Some(Failure::new(
+            EditorSchemaOwnerAdoptionError::RequiresReconcile,
+            phase,
+        )),
+        Ok(Ok(_)) => Some(Failure::new(
+            EditorSchemaOwnerAdoptionError::Operation,
+            phase,
+        )),
     }
 }
 
