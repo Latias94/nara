@@ -17,8 +17,8 @@ use nara::{
     },
     project_host::{
         EditorSourceToolInstallation, EditorSourceToolInstallationOutcome,
-        EditorSourceToolInstallationPlan, PreparedEditorSourceToolRelease,
-        open_explicit_product_project_root,
+        EditorSourceToolInstallationPlan, EditorSourceToolPrefabTemplateImportRequest,
+        PreparedEditorSourceToolRelease, open_explicit_product_project_root,
     },
     reflect::{
         ComponentCapability, ComponentFieldId, ComponentFieldPath, ComponentFieldSchema,
@@ -26,8 +26,8 @@ use nara::{
         ComponentValue, ComponentValueKind,
     },
     scene::{
-        SceneEntityId, SceneEntityRecord, ScenePatchDocument, ScenePatchOperation, ScenePlacement,
-        ScenePlacementOwner,
+        PrefabDocument, SceneEntityId, SceneEntityRecord, ScenePatchDocument, ScenePatchOperation,
+        ScenePlacement, ScenePlacementOwner,
     },
     tooling::{
         EditorAction, EditorActionBatch, EditorActionOutcome, EditorDocumentMutation,
@@ -96,6 +96,15 @@ fn install_release(fixture: &PersistenceFixture) -> Arc<EditorSourceToolInstalla
             "tool",
         ),
         (SAMPLE, b"EnemyStats text template".to_vec(), "content"),
+        ("samples/empty.prefab.json", PrefabDocument::default().to_json_string().unwrap().into_bytes(), "content"),
+        ("samples/native-template.json", serde_json::to_vec(&json!({
+            "format_version":1, "kind":"prefab_template",
+            "source_universe":"cc4db9bc-388c-44be-91c5-c74fa2c08147",
+            "native_document_identity":"project_location", "prefabs_root":"library/blueprints",
+            "entry":"library/blueprints/empty.prefab.json", "documents":[
+                {"member":"samples/empty.prefab.json","path":"library/blueprints/empty.prefab.json"}
+            ],
+        })).unwrap(), "content"),
     ] {
         fs::write(source.join(path), &bytes).unwrap();
         let digest = ContentDigest::of_bytes(&bytes);
@@ -259,6 +268,97 @@ fn settle_reclamation(
         );
         std::thread::sleep(Duration::from_millis(1));
     }
+}
+
+#[test]
+fn application_prepares_and_publishes_native_template_with_the_same_attempt_and_owner() {
+    let fixture = PersistenceFixture::new();
+    let installation = install_release(&fixture);
+    let root = project_root(&fixture);
+    let mut application =
+        fixture.open_with_expected_state(EditorApplicationState::AuthoringDegraded);
+    settle_selection(&mut application);
+    let observed = application.source_tool_selection_view().unwrap();
+    let graph = application
+        .prepare_source_tool_installations(
+            &observed.basis,
+            root.share(),
+            &[EditorSourceToolInstallationRequest {
+                directory: installation.project_path().into(),
+                receipt: installation.receipt_digest(),
+                requirements: Vec::new(),
+            }],
+        )
+        .unwrap();
+    application
+        .register_source_tool_installations(graph)
+        .unwrap();
+    settle_selection(&mut application);
+    let deadline = Instant::now() + TIMEOUT;
+    while application
+        .current_frame()
+        .unwrap()
+        .project_browser()
+        .has_pending_work()
+    {
+        assert!(Instant::now() < deadline);
+        application.advance(Duration::ZERO);
+        std::thread::sleep(Duration::from_millis(1));
+    }
+    let documents = application
+        .current_frame()
+        .unwrap()
+        .workspace()
+        .documents
+        .clone();
+    let prepared = application
+        .prepare_source_tool_prefab_template_import(
+            &application.source_tool_selection_view().unwrap().basis,
+            root.share(),
+            EditorSourceToolPrefabTemplateImportRequest::new(
+                *installation.receipt().installation_id(),
+                "samples/native-template.json",
+                "blueprints/copied",
+            ),
+        )
+        .unwrap();
+    assert!(!fixture.root.join(prepared.destination()).exists());
+    assert_eq!(prepared.entry(), "blueprints/copied/empty.prefab.json");
+    let count = prepared.files().len();
+    let attempt = application
+        .commit_source_tool_prefab_template_import(prepared)
+        .unwrap();
+    let view = settle_import(&mut application, &attempt);
+    assert!(
+        matches!(
+            view.outcome,
+            Some(EditorSourceToolTemplateImportOutcome::PrefabImported { .. })
+        ),
+        "{view:?}"
+    );
+    assert_eq!(
+        application.current_frame().unwrap().workspace().documents,
+        documents
+    );
+    assert_eq!(
+        application
+            .source_tool_prefab_template_publication()
+            .unwrap()
+            .retained_files(),
+        count
+    );
+    let publication = application
+        .take_source_tool_prefab_template_publication(&attempt)
+        .unwrap();
+    assert_eq!(publication.created_members().len(), count);
+    drop(publication);
+    assert!(
+        fixture
+            .root
+            .join("blueprints/copied/empty.prefab.json")
+            .is_file()
+    );
+    close(&mut application);
 }
 
 #[test]

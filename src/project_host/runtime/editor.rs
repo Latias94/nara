@@ -92,12 +92,14 @@ pub use source_tools::{
     EditorSourceToolInstallationOrphan, EditorSourceToolInstallationOutcome,
     EditorSourceToolInstallationPlan, EditorSourceToolInstallationReceipt,
     EditorSourceToolInstalledMember, EditorSourceToolManagedError, EditorSourceToolManagedHost,
-    EditorSourceToolManagedHostDigests, EditorSourceToolReleaseError,
-    EditorSourceToolReleaseMember, EditorSourceToolReleaseMemberKind,
+    EditorSourceToolManagedHostDigests, EditorSourceToolPrefabTemplateFile,
+    EditorSourceToolPrefabTemplateImportRequest, EditorSourceToolPrefabTemplatePublication,
+    EditorSourceToolReleaseError, EditorSourceToolReleaseMember, EditorSourceToolReleaseMemberKind,
     EditorSourceToolReleaseRequirement, PreparedEditorSourceToolArtifacts,
-    PreparedEditorSourceToolInstallations, PreparedEditorSourceToolReclamation,
-    PreparedEditorSourceToolRelease, PreparedEditorSourceToolSelection,
-    PreparedEditorSourceToolTemplateImport, PreparedEditorSourceToolWithdrawal,
+    PreparedEditorSourceToolInstallations, PreparedEditorSourceToolPrefabTemplateImport,
+    PreparedEditorSourceToolReclamation, PreparedEditorSourceToolRelease,
+    PreparedEditorSourceToolSelection, PreparedEditorSourceToolTemplateImport,
+    PreparedEditorSourceToolWithdrawal,
 };
 #[cfg(feature = "runtime-ui")]
 use ui_authoring::EditorUiAuthoringProjectionCache;
@@ -933,6 +935,7 @@ pub struct EditorProjectCloseReceipt {
     authoring_cleanup_failed: bool,
     play_cleanup_failure: Option<super::ProjectRuntimeCloseObservation>,
     unpublished_reclamation: Option<nara_tooling::EditorSourceToolReclamationView>,
+    template_import: Option<nara_tooling::EditorSourceToolTemplateImportView>,
 }
 
 impl EditorProjectCloseReceipt {
@@ -941,6 +944,7 @@ impl EditorProjectCloseReceipt {
         authoring_cleanup_failed: bool,
         play_cleanup_failure: Option<super::ProjectRuntimeCloseObservation>,
         unpublished_reclamation: Option<nara_tooling::EditorSourceToolReclamationView>,
+        template_import: Option<nara_tooling::EditorSourceToolTemplateImportView>,
     ) -> Self {
         debug_assert!(task_shutdown.is_complete());
         Self {
@@ -948,6 +952,7 @@ impl EditorProjectCloseReceipt {
             authoring_cleanup_failed,
             play_cleanup_failure,
             unpublished_reclamation,
+            template_import,
         }
     }
 
@@ -990,6 +995,12 @@ impl EditorProjectCloseReceipt {
         &self,
     ) -> Option<&nara_tooling::EditorSourceToolReclamationView> {
         self.unpublished_reclamation.as_ref()
+    }
+
+    /// Actual import outcome retained after physical Close, including a published or staged copy.
+    #[must_use]
+    pub fn template_import(&self) -> Option<&nara_tooling::EditorSourceToolTemplateImportView> {
+        self.template_import.as_ref()
     }
 }
 
@@ -1127,6 +1138,10 @@ impl EditorProjectSession {
                             reclamation
                                 .record_publication_pending
                                 .then_some(reclamation)
+                        },
+                        {
+                            let import = self.source_tool_template_import_view();
+                            import.attempt.is_some().then_some(import)
                         },
                     ))
                 } else {

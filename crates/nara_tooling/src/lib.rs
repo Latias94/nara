@@ -134,8 +134,8 @@ pub use source_tools::{
     EditorSourceToolSelectionBasis, EditorSourceToolSelectionError,
     EditorSourceToolSelectionOutcome, EditorSourceToolSelectionPhase,
     EditorSourceToolSelectionView, EditorSourceToolTemplateImportError,
-    EditorSourceToolTemplateImportOutcome, EditorSourceToolTemplateImportView,
-    EditorSourceToolView, EditorSourceToolWithdrawalMode,
+    EditorSourceToolTemplateImportMember, EditorSourceToolTemplateImportOutcome,
+    EditorSourceToolTemplateImportView, EditorSourceToolView, EditorSourceToolWithdrawalMode,
 };
 pub use workspace::{
     CommittedEditorDocumentConstruction, CommittedEditorPrefabConversion, EditorDocumentDigest,

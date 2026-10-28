@@ -7,9 +7,11 @@ use nara::{
         EditorProjectSession, EditorSourceToolArtifactCommitError, EditorSourceToolDefinition,
         EditorSourceToolIncompleteArtifactRegistrationError, EditorSourceToolIncompletePublication,
         EditorSourceToolInstallation, EditorSourceToolManagedHost,
+        EditorSourceToolPrefabTemplateImportRequest, EditorSourceToolPrefabTemplatePublication,
         PreparedEditorSourceToolArtifacts, PreparedEditorSourceToolInstallations,
-        PreparedEditorSourceToolReclamation, PreparedEditorSourceToolSelection,
-        PreparedEditorSourceToolTemplateImport, PreparedEditorSourceToolWithdrawal,
+        PreparedEditorSourceToolPrefabTemplateImport, PreparedEditorSourceToolReclamation,
+        PreparedEditorSourceToolSelection, PreparedEditorSourceToolTemplateImport,
+        PreparedEditorSourceToolWithdrawal,
     },
     reflect::ComponentValue,
     tooling::{
@@ -156,6 +158,41 @@ impl EditorApplication {
         result
     }
 
+    pub fn prepare_source_tool_prefab_template_import(
+        &self,
+        basis: &EditorSourceToolSelectionBasis,
+        project: nara::fs::DirectoryCapability,
+        request: EditorSourceToolPrefabTemplateImportRequest,
+    ) -> Result<PreparedEditorSourceToolPrefabTemplateImport, EditorSourceToolTemplateImportError>
+    {
+        self.authoring_edit_session()
+            .map_err(|_| EditorSourceToolTemplateImportError::Closing)?
+            .prepare_source_tool_prefab_template_import(basis, project, request)
+    }
+
+    pub fn commit_source_tool_prefab_template_import(
+        &mut self,
+        prepared: PreparedEditorSourceToolPrefabTemplateImport,
+    ) -> Result<EditorSourceToolAttemptId, EditorSourceToolTemplateImportError> {
+        let result = self
+            .state
+            .published_mut()
+            .ok_or(EditorSourceToolTemplateImportError::Closing)?
+            .session
+            .commit_source_tool_prefab_template_import(prepared);
+        self.drive_editor_frame(Duration::ZERO, true, false);
+        result
+    }
+
+    pub fn source_tool_prefab_template_publication(
+        &self,
+    ) -> Option<&EditorSourceToolPrefabTemplatePublication> {
+        self.state
+            .published()?
+            .session
+            .source_tool_prefab_template_publication()
+    }
+
     pub fn cancel_source_tool_template_import(
         &mut self,
         attempt: &EditorSourceToolAttemptId,
@@ -168,6 +205,18 @@ impl EditorApplication {
             .cancel_source_tool_template_import(attempt);
         self.drive_editor_frame(Duration::ZERO, true, false);
         result
+    }
+
+    pub fn take_source_tool_prefab_template_publication(
+        &mut self,
+        attempt: &EditorSourceToolAttemptId,
+    ) -> Result<EditorSourceToolPrefabTemplatePublication, EditorSourceToolTemplateImportError>
+    {
+        self.state
+            .published_mut()
+            .ok_or(EditorSourceToolTemplateImportError::Closing)?
+            .session
+            .take_source_tool_prefab_template_publication(attempt)
     }
 
     /// Observes artifact inventory separately from executable selection and graph withdrawal.

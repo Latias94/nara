@@ -1,4 +1,4 @@
-//! Observations of one explicit project-owned text-template copy.
+//! Observations of one explicit project-owned template import.
 
 use std::sync::Arc;
 
@@ -20,8 +20,20 @@ pub enum EditorSourceToolTemplateImportError {
     Capability,
     #[error("the template or destination path is invalid")]
     InvalidPath,
-    #[error("only declared finite UTF-8 text templates and .txt destinations are supported")]
+    #[error("the declared template or destination format is unsupported")]
     UnsupportedTemplate,
+    #[error("the native template descriptor is invalid")]
+    InvalidDescriptor,
+    #[error("the original authoring Schema is unavailable or changed")]
+    SchemaUnavailable,
+    #[error("the native Prefab closure could not be interpreted and remapped")]
+    InvalidPrefab,
+    #[error("native template identities conflict with the project or another copied member")]
+    IdentityConflict,
+    #[error("the finite template import exceeded its budget")]
+    BudgetExceeded,
+    #[error("template import was cancelled after staging began")]
+    Cancelled,
     #[error("the selected installation is unavailable or differs from its exact graph entry")]
     Installation,
     #[error("the destination already exists")]
@@ -36,6 +48,13 @@ pub enum EditorSourceToolTemplateImportError {
     TaskRejected,
     #[error("template publication has no certain completion observation")]
     RequiresReconcile,
+}
+
+/// Exact intended project bytes, independent of directory publication and later source admission.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct EditorSourceToolTemplateImportMember {
+    pub path: Arc<str>,
+    pub digest: ContentDigest,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -56,6 +75,28 @@ pub enum EditorSourceToolTemplateImportOutcome {
         destination: Arc<str>,
         digest: ContentDigest,
         parent_directory_sync: StageStatus,
+    },
+    PrefabImported {
+        destination: Arc<str>,
+        entry: Arc<str>,
+        members: Arc<[EditorSourceToolTemplateImportMember]>,
+        parent_directory_sync: StageStatus,
+    },
+    /// The directory is published even when its current source members fail admission.
+    PrefabPublishedWithoutAdmission {
+        destination: Arc<str>,
+        entry: Arc<str>,
+        members: Arc<[EditorSourceToolTemplateImportMember]>,
+        parent_directory_sync: StageStatus,
+        error: EditorSourceToolTemplateImportError,
+    },
+    /// Staging may remain. Created paths are facts, never automatic cleanup authority.
+    PrefabNotPublished {
+        destination: Arc<str>,
+        staging: Option<Arc<str>>,
+        created: Arc<[EditorSourceToolTemplateImportMember]>,
+        created_directories: Arc<[Arc<str>]>,
+        error: EditorSourceToolTemplateImportError,
     },
     Cancelled,
     Failed(EditorSourceToolTemplateImportError),

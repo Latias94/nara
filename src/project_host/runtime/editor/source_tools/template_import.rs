@@ -1,4 +1,4 @@
-//! Explicit finite text copies use the existing task and no-replace publication owners.
+//! Explicit finite template copies use the existing Tasks and publication owners.
 
 use std::{
     fmt,
@@ -29,6 +29,12 @@ use crate::project_host::{
 };
 
 const BYTE_LIMIT: u64 = 16 * 1024 * 1024;
+
+mod prefab;
+pub use prefab::{
+    EditorSourceToolPrefabTemplateFile, EditorSourceToolPrefabTemplateImportRequest,
+    EditorSourceToolPrefabTemplatePublication, PreparedEditorSourceToolPrefabTemplateImport,
+};
 
 #[cfg(all(test, windows))]
 mod tests;
@@ -80,11 +86,17 @@ pub(super) struct TemplateImportState {
     pending: Option<Pending>,
     host: Option<RetainedHost<FilePublicationHost>>,
     evidence: Option<FilePublicationEvidence>,
+    native_publication: Option<EditorSourceToolPrefabTemplatePublication>,
+    native_pending: bool,
     #[cfg(all(test, windows))]
     next_gate: Option<Arc<tests::IoGate>>,
 }
 
 impl TemplateImportState {
+    pub(super) fn native_pending(&self) -> bool {
+        self.native_pending && self.pending.is_some()
+    }
+
     pub(super) fn pending(&self) -> bool {
         self.pending.is_some() || self.host.as_ref().is_some_and(|host| !host.is_retired())
     }
@@ -218,13 +230,44 @@ impl EditorProjectSession {
             .host_custody()
             .retain_publication(host)
             .ok_or(Error::Closing)?;
+        self.start_template_import(
+            ImportRequest::Text {
+                prepared,
+                publisher: host.clone(),
+            },
+            Some(host),
+        )
+    }
+
+    /// Confirms the fixed native copy without allocating new source identities or recapturing bytes.
+    pub fn commit_source_tool_prefab_template_import(
+        &mut self,
+        prepared: PreparedEditorSourceToolPrefabTemplateImport,
+    ) -> Result<EditorSourceToolAttemptId, Error> {
+        self.advance_source_tools();
+        prefab::validate_session(self, &prepared)?;
+        if !self
+            .source_tool_selection_view()
+            .installed
+            .contains(&prepared.installation)
+        {
+            return Err(Error::StaleBasis);
+        }
+        self.start_template_import(ImportRequest::Prefab(prepared), None)
+    }
+
+    fn start_template_import(
+        &mut self,
+        prepared: ImportRequest,
+        host: Option<RetainedHost<FilePublicationHost>>,
+    ) -> Result<EditorSourceToolAttemptId, Error> {
+        let native_pending = matches!(&prepared, ImportRequest::Prefab(_));
         let work = Arc::new(Mutex::new(Work {
             request: Some(prepared),
             started: false,
             result: None,
         }));
         let retained = Arc::clone(&work);
-        let publisher = host.clone();
         #[cfg(all(test, windows))]
         let gate = self.source_tools.template_import.next_gate.take();
         let spawned = self
@@ -243,7 +286,27 @@ impl EditorProjectSession {
                         .take()
                         .expect("one import consumes one candidate");
                     work.started = true;
-                    work.result = Some(publish(&request, &publisher));
+                    work.result = Some(match request {
+                        ImportRequest::Text {
+                            prepared,
+                            publisher,
+                        } => publish(&prepared, &publisher).map(|(outcome, evidence)| {
+                            CompletedImport {
+                                outcome,
+                                evidence,
+                                native: None,
+                            }
+                        }),
+                        ImportRequest::Prefab(prepared) => {
+                            prefab::publish(&prepared, || context.is_cancelled()).map(
+                                |(outcome, native)| CompletedImport {
+                                    outcome,
+                                    evidence: None,
+                                    native: Some(native),
+                                },
+                            )
+                        }
+                    });
                     #[cfg(all(test, windows))]
                     if let Some(gate) = gate {
                         gate.wait_after_io();
@@ -258,11 +321,13 @@ impl EditorProjectSession {
         let attempt = EditorSourceToolAttemptId::issue();
         let state = &mut self.source_tools.template_import;
         state.evidence = None;
+        state.native_publication = None;
+        state.native_pending = native_pending;
         state.view = EditorSourceToolTemplateImportView {
             attempt: Some(attempt.clone()),
             ..Default::default()
         };
-        state.host = Some(host);
+        state.host = host;
         state.pending = Some(Pending {
             task,
             rejected_return,
@@ -274,6 +339,35 @@ impl EditorProjectSession {
     #[must_use]
     pub fn source_tool_template_import_view(&self) -> EditorSourceToolTemplateImportView {
         self.source_tools.template_import.view()
+    }
+
+    /// Borrows the actual native directory result after its task has physically returned.
+    #[must_use]
+    pub fn source_tool_prefab_template_publication(
+        &self,
+    ) -> Option<&EditorSourceToolPrefabTemplatePublication> {
+        self.source_tools
+            .template_import
+            .native_publication
+            .as_ref()
+    }
+
+    /// Transfers the last native publication's actual custody for explicit recovery or inspection.
+    pub fn take_source_tool_prefab_template_publication(
+        &mut self,
+        attempt: &EditorSourceToolAttemptId,
+    ) -> Result<EditorSourceToolPrefabTemplatePublication, Error> {
+        let state = &mut self.source_tools.template_import;
+        if state.view.attempt.as_ref() != Some(attempt) {
+            return Err(Error::StaleBasis);
+        }
+        if state.pending() {
+            return Err(Error::Busy);
+        }
+        state
+            .native_publication
+            .take()
+            .ok_or(Error::RequiresReconcile)
     }
 
     /// Revokes future work for this exact attempt; an entered publication retains its real result.
@@ -305,19 +399,31 @@ impl EditorProjectSession {
         {
             return Err(Error::Busy);
         }
+        if self
+            .source_tools
+            .template_import
+            .native_publication
+            .as_ref()
+            .is_some_and(|publication| publication.error.is_some())
+        {
+            return Err(Error::RequiresReconcile);
+        }
         Ok(())
     }
 
     pub(super) fn advance_source_tool_template_import(&mut self) {
         let state = &mut self.source_tools.template_import;
+        let mut native_returned = false;
         if let Some(pending) = state.pending.as_mut() {
             if let Some((result, returned)) = pending.poll() {
                 state.pending = None;
                 state.view.cleanup_failed = returned == TaskReturnState::CleanupFailed;
                 match result {
-                    Ok((outcome, evidence)) => {
-                        state.view.outcome = Some(outcome);
-                        state.evidence = evidence;
+                    Ok(completed) => {
+                        native_returned = completed.native.is_some();
+                        state.view.outcome = Some(completed.outcome);
+                        state.evidence = completed.evidence;
+                        state.native_publication = completed.native;
                     }
                     Err(error) => state.view.outcome = Some(Outcome::Failed(error)),
                 }
@@ -326,15 +432,32 @@ impl EditorProjectSession {
         if state.pending.is_none() && state.host.as_ref().is_some_and(RetainedHost::retire) {
             state.host = None;
         }
+        if native_returned && !self.closing {
+            self.request_project_source_index_refresh();
+        }
     }
 }
 
 type ImportResult = Result<(Outcome, Option<FilePublicationEvidence>), Error>;
 
+enum ImportRequest {
+    Text {
+        prepared: PreparedEditorSourceToolTemplateImport,
+        publisher: RetainedHost<FilePublicationHost>,
+    },
+    Prefab(PreparedEditorSourceToolPrefabTemplateImport),
+}
+
+struct CompletedImport {
+    outcome: Outcome,
+    evidence: Option<FilePublicationEvidence>,
+    native: Option<EditorSourceToolPrefabTemplatePublication>,
+}
+
 struct Work {
-    request: Option<PreparedEditorSourceToolTemplateImport>,
+    request: Option<ImportRequest>,
     started: bool,
-    result: Option<ImportResult>,
+    result: Option<Result<CompletedImport, Error>>,
 }
 
 struct Pending {
@@ -344,7 +467,7 @@ struct Pending {
 }
 
 impl Pending {
-    fn poll(&mut self) -> Option<(ImportResult, TaskReturnState)> {
+    fn poll(&mut self) -> Option<(Result<CompletedImport, Error>, TaskReturnState)> {
         let returned = self
             .task
             .as_ref()
@@ -363,7 +486,11 @@ impl Pending {
             } else if self.task.is_none() {
                 Err(Error::TaskRejected)
             } else {
-                Ok((Outcome::Cancelled, None))
+                Ok(CompletedImport {
+                    outcome: Outcome::Cancelled,
+                    evidence: None,
+                    native: None,
+                })
             }
         });
         Some((result, returned))

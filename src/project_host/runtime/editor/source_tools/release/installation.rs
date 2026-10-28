@@ -3,10 +3,10 @@
 use std::{collections::BTreeMap, fmt, io::Write};
 
 use nara_fs::{
-    CapabilityRights, ContentDigest, DirectoryCapability, DirectoryEnumerationLimits,
-    DirectoryPublicationBeginError, DirectoryPublicationOutcome, DirectoryPublicationReceipt,
-    ExpectedTarget, FileCapability, FileIdentity, FileKind, FileSyncReceipt, FsError,
-    RelativeComponent, RelativePath, ReplaceReceipt, TemporaryFileCleanup,
+    CapabilityRights, ContentDigest, DirectoryCapability, DirectoryPublicationBeginError,
+    DirectoryPublicationOutcome, DirectoryPublicationReceipt, ExpectedTarget, FileCapability,
+    FileIdentity, FileSyncReceipt, FsError, RelativeComponent, RelativePath, ReplaceReceipt,
+    TemporaryFileCleanup,
 };
 use nara_tooling::EditorSourceToolArtifactRole;
 
@@ -1121,80 +1121,35 @@ fn verify_members(
             });
         }
     }
-    verify_inventory(root, members.iter().map(|member| member.path.as_str()))
+    super::super::tree::verify_observed(
+        root,
+        members.iter().map(|member| member.path.as_str()),
+        |path, identity| {
+            members
+                .iter()
+                .find(|member| member.path == path)
+                .is_some_and(|member| Some(member.file.identity()) == identity)
+        },
+    )
+    .map_err(|error| match error {
+        super::super::tree::FileTreeError::Changed(member) => {
+            EditorSourceToolInstallationError::Changed { member }
+        }
+        super::super::tree::FileTreeError::Filesystem { path, source } => {
+            member_error(&path, source)
+        }
+    })
 }
 
 fn verify_inventory<'a>(
     root: &DirectoryCapability,
     paths: impl IntoIterator<Item = &'a str>,
 ) -> Result<(), EditorSourceToolInstallationError> {
-    let mut expected = BTreeMap::new();
-    for path in paths {
-        expected.insert(path.to_owned(), FileKind::Regular);
-        for (separator, _) in path.match_indices('/') {
-            expected.insert(path[..separator].to_owned(), FileKind::Directory);
-        }
-    }
-    let limit = expected.len();
-    let mut consumed = 0;
-    let mut pending = vec![(root.share(), String::new())];
-    while let Some((directory, prefix)) = pending.pop() {
-        let mut scan = directory
-            .begin_child_enumeration(DirectoryEnumerationLimits::new(
-                limit.saturating_sub(consumed),
-                512,
-                0,
-            ))
-            .map_err(|source| member_error("installation tree", source))?;
-        loop {
-            let batch = scan
-                .next_batch(64)
-                .map_err(|source| member_error("installation tree", source))?;
-            if !batch.rejected_entry_facts().is_empty() {
-                return Err(EditorSourceToolInstallationError::Changed {
-                    member: "installation tree".to_owned(),
-                });
-            }
-            for entry in batch.entries() {
-                consumed += 1;
-                let name = entry.name().to_str().ok_or_else(|| {
-                    EditorSourceToolInstallationError::Changed {
-                        member: "installation tree".to_owned(),
-                    }
-                })?;
-                let path = if prefix.is_empty() {
-                    name.to_owned()
-                } else {
-                    format!("{prefix}/{name}")
-                };
-                if expected.remove(&path) != Some(entry.kind()) {
-                    return Err(EditorSourceToolInstallationError::Changed { member: path });
-                }
-                if entry.kind() == FileKind::Directory {
-                    let child = root
-                        .open_directory_exact(
-                            &RelativePath::new(&path)
-                                .map_err(|source| member_error(&path, source.into()))?,
-                        )
-                        .map_err(|source| member_error(&path, source))?;
-                    if Some(child.identity()) != entry.identity() {
-                        return Err(EditorSourceToolInstallationError::Changed { member: path });
-                    }
-                    pending.push((child, path));
-                }
-            }
-            if batch.is_complete() {
-                break;
-            }
-        }
-    }
-    if expected.is_empty() {
-        Ok(())
-    } else {
-        Err(EditorSourceToolInstallationError::Changed {
-            member: "installation tree".to_owned(),
-        })
-    }
+    use super::super::tree::{self, FileTreeError};
+    tree::verify(root, paths).map_err(|error| match error {
+        FileTreeError::Changed(member) => EditorSourceToolInstallationError::Changed { member },
+        FileTreeError::Filesystem { path, source } => member_error(&path, source),
+    })
 }
 
 fn member_error(path: &str, source: FsError) -> EditorSourceToolInstallationError {

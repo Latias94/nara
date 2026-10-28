@@ -79,12 +79,14 @@ pub use editor::{
     EditorSourceToolInstallationOrphan, EditorSourceToolInstallationOutcome,
     EditorSourceToolInstallationPlan, EditorSourceToolInstallationReceipt,
     EditorSourceToolInstalledMember, EditorSourceToolManagedError, EditorSourceToolManagedHost,
-    EditorSourceToolManagedHostDigests, EditorSourceToolReleaseError,
-    EditorSourceToolReleaseMember, EditorSourceToolReleaseMemberKind,
+    EditorSourceToolManagedHostDigests, EditorSourceToolPrefabTemplateFile,
+    EditorSourceToolPrefabTemplateImportRequest, EditorSourceToolPrefabTemplatePublication,
+    EditorSourceToolReleaseError, EditorSourceToolReleaseMember, EditorSourceToolReleaseMemberKind,
     EditorSourceToolReleaseRequirement, PreparedEditorSourceToolArtifacts,
-    PreparedEditorSourceToolInstallations, PreparedEditorSourceToolReclamation,
-    PreparedEditorSourceToolRelease, PreparedEditorSourceToolSelection,
-    PreparedEditorSourceToolTemplateImport, PreparedEditorSourceToolWithdrawal,
+    PreparedEditorSourceToolInstallations, PreparedEditorSourceToolPrefabTemplateImport,
+    PreparedEditorSourceToolReclamation, PreparedEditorSourceToolRelease,
+    PreparedEditorSourceToolSelection, PreparedEditorSourceToolTemplateImport,
+    PreparedEditorSourceToolWithdrawal,
 };
 
 mod plugin_diagnostics;

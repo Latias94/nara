@@ -113,6 +113,17 @@ switch to V2, reject stale reviews and compare separately installed copies of id
 bytes. This separate test requires the runner's artifact environment; ordinary Editor tests
 do not silently substitute another child or count it as native UI qualification.
 
+The native-template consumers import a declared three-Prefab closure from the actual installed
+C# release into two independent project directories. They check fresh stable sidecars, complete
+source/overlay/reference remapping, unchanged document-local IDs and ordinary strings, preparation
+without writes, Browser Open, editing, Undo/Redo, Save/Reopen and fresh project Open. Actual graph
+withdrawal and reviewed per-member unlink remove the original managed artifact while both project
+copies and their source history remain usable. Invalid descriptors, external references,
+non-Content members and destination competition refuse without overwriting project data. These
+are window-free source-format workflows, not graphical import controls, arbitrary asset templates
+or the Nara-owned custom-drawn frontend. See the
+[native Prefab plan](../../../docs/plans/2026-10-29-native-prefab-template-import-plan.md).
+
 Pass `--native-editor` on Windows to append the explicit DX12 native Editor qualification after
 the default language and Application tests. It selects only
 `native_source_tool_inline_property_and_panel_share_review_history_and_persistence` with

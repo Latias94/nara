@@ -149,6 +149,9 @@ impl EditorProjectSession {
         project_path: &str,
         current: &FileCapability,
     ) -> Result<(), SourceAdmissionError> {
+        if self.source_tools.template_source_admission_pending() {
+            return Err(SourceAdmissionError::HostUnavailable);
+        }
         if super::source_tools::is_artifact_source_path(project_path) {
             return Err(SourceAdmissionError::PrivateArtifact);
         }

@@ -581,6 +581,24 @@ update, withdrawal and artifact disposal never follow origin to overwrite or del
 Scene/Prefab/asset templates separately require format-owned identity, sidecar and reference
 remapping before support is claimed. An opaque text-copy workflow is not that qualification.
 
+A supported native Prefab template uses an explicit finite descriptor for its entry, document
+members, original project coordinates, universe and identity policy. The original installation
+captures that descriptor and all declared document/sidecar bytes. Scene owns semantic copying;
+Reflect interprets declared reference leaves; the Host owns destination identities, metadata and
+publication. Whole-document copies may retain document-local entity IDs because their canonical
+source namespaces change. Schema-owner identities are independent and are never copied as new
+owners. Unknown semantic payloads may remain losslessly saveable while refusing a copy operation
+that requires complete reference interpretation.
+
+Prepare fixes destination mappings and bytes without writes. Confirmation revalidates the
+original project, selection, Schema and destination observations. Directory publication, current
+source admission and physical IO return are separate outcomes. If staged member handles must
+close before directory publication, later members require fresh admission; historical file IDs
+cannot establish continuity. Failure retains actual directory/orphan facts without recursive
+cleanup. A published directory whose members fail current admission is still published. The
+[native Prefab plan](../../plans/2026-10-29-native-prefab-template-import-plan.md) owns execution
+and actual qualification; this decision does not itself qualify that workflow.
+
 Artifact records are optional tool-management facts. Failure cannot block an unrelated document
 Save, Reopen or Close. Remove installation-content touch interception, sticky adoption flags,
 protection publication debt and the old record reader rather than retain compatibility. Whole

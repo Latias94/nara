@@ -21,6 +21,20 @@ pub(in crate::project_host::runtime::editor::source_tools) struct Release {
 }
 
 impl Release {
+    pub(in crate::project_host::runtime::editor::source_tools) fn add_content(
+        &mut self,
+        path: &str,
+        bytes: &[u8],
+    ) {
+        let target = self.directory.join(path);
+        fs::create_dir_all(target.parent().unwrap()).unwrap();
+        fs::write(target, bytes).unwrap();
+        let digest = ContentDigest::of_bytes(bytes);
+        self.manifest["files"].as_array_mut().unwrap().push(json!({
+            "path": path, "kind": "content", "length": digest.length(), "blake3": hex(digest),
+        }));
+    }
+
     pub(in crate::project_host::runtime::editor::source_tools) fn new() -> Self {
         let directory = std::env::temp_dir().join(format!(
             "nara_local_tool_release_{}_{}",

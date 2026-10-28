@@ -13,6 +13,8 @@ mod installed_graph;
 mod local_release;
 #[path = "support/managed_bootstrap.rs"]
 mod managed_bootstrap;
+#[path = "support/native_prefab_templates.rs"]
+mod native_prefab_templates;
 #[path = "support/scene_runtime.rs"]
 mod scene_runtime;
 

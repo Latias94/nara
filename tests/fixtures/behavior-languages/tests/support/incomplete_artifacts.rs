@@ -322,6 +322,12 @@ fn settle_artifacts(editor: &mut EditorProjectSession) -> EditorSourceToolArtifa
                 .operation
                 .as_ref()
                 .is_some_and(|operation| operation.outcome.is_some())
+            && !editor.current_frame().project_browser().has_pending_work()
+            && !editor.current_frame().image_import_work_pending()
+            && !editor.current_frame().source_asset_import_work_pending()
+            && !editor.current_frame().scene_preview_work_pending()
+            && !editor.current_frame().authoring_retirement_pending()
+            && !editor.source_tool_view().has_pending_work()
         {
             assert_eq!(view.phase, EditorSourceToolArtifactPhase::Idle, "{view:?}");
             assert!(view.error.is_none(), "{view:?}");

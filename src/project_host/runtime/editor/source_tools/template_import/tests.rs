@@ -50,7 +50,7 @@ impl Drop for IoGate {
     }
 }
 
-struct ReleaseGate(mpsc::Sender<()>);
+pub(super) struct ReleaseGate(mpsc::Sender<()>);
 
 impl Drop for ReleaseGate {
     fn drop(&mut self) {
@@ -58,7 +58,7 @@ impl Drop for ReleaseGate {
     }
 }
 
-fn root(project: &Project) -> DirectoryCapability {
+pub(super) fn root(project: &Project) -> DirectoryCapability {
     let file = fs::OpenOptions::new()
         .read(true)
         .share_mode(7)
@@ -85,9 +85,18 @@ fn registered(
         source.write_manifest(),
     )
     .unwrap();
+    register_release(editor, project, captured, "text-template")
+}
+
+pub(super) fn register_release(
+    editor: &mut EditorProjectSession,
+    project: &Project,
+    captured: PreparedEditorSourceToolRelease,
+    name: &str,
+) -> EditorSourceToolInstallation {
     let plan = EditorSourceToolInstallationPlan::new(
         root(project),
-        RelativeComponent::new("text-template").unwrap(),
+        RelativeComponent::new(name).unwrap(),
         captured,
     )
     .unwrap();
@@ -119,6 +128,17 @@ fn registered(
         Some(EditorSourceToolSelectionOutcome::Registered)
     );
     installation
+}
+
+pub(super) fn hold_import(editor: &mut EditorProjectSession) -> (mpsc::Receiver<()>, ReleaseGate) {
+    let (entered, entrance) = mpsc::channel();
+    let (release, released) = mpsc::channel();
+    editor.source_tools.template_import.next_gate = Some(Arc::new(IoGate {
+        entered,
+        release: Mutex::new(released),
+        fail_cleanup: false,
+    }));
+    (entrance, ReleaseGate(release))
 }
 
 fn verify_actual_return(fail_cleanup: bool) {

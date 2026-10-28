@@ -44,6 +44,7 @@ mod reclamation;
 mod release;
 mod selection;
 mod template_import;
+mod tree;
 pub(super) use artifacts::ARTIFACTS_PATH;
 pub use artifacts::{
     EditorSourceToolArtifactCommitError, EditorSourceToolIncompleteArtifactRegistrationError,
@@ -67,7 +68,11 @@ pub use selection::{
     PreparedEditorSourceToolInstallations, PreparedEditorSourceToolSelection,
     PreparedEditorSourceToolWithdrawal,
 };
-pub use template_import::PreparedEditorSourceToolTemplateImport;
+pub use template_import::{
+    EditorSourceToolPrefabTemplateFile, EditorSourceToolPrefabTemplateImportRequest,
+    EditorSourceToolPrefabTemplatePublication, PreparedEditorSourceToolPrefabTemplateImport,
+    PreparedEditorSourceToolTemplateImport,
+};
 #[cfg(all(test, any(windows, target_os = "linux")))]
 mod physical_tests;
 #[cfg(test)]
@@ -259,6 +264,10 @@ pub(super) struct EditorSourceTools {
 }
 
 impl EditorSourceTools {
+    pub(super) fn template_source_admission_pending(&self) -> bool {
+        self.template_import.native_pending()
+    }
+
     pub(super) fn reclamation_fenced(&self) -> bool {
         self.reclamation.fenced()
     }
