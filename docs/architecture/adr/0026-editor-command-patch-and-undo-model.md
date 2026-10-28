@@ -253,6 +253,13 @@ Undo/redo should be transaction-based:
 - Undo and Redo move one admitted record between stacks without allocating another history budget.
 - Clearing or evicting inverse records never changes the current content-state identity.
 
+Additive Schema reclassification under ADR 0090 preserves the retained Undo/Redo stacks and their
+content states. Its owner prepares both directions of each retained edge with actual history
+permissions and the originating scope, checks exact source/inverse restoration and the admitted
+two-way cost, and refuses the classification successor if any edge fails. Preparation is read-only
+and separately budgeted; it never uses Reopen or silently clears history. Publishing classification
+changes no source revision or history entry. Old prepared edits still reject the changed basis.
+
 ## Continuous Interaction Transactions
 
 Long-running slider, gizmo, curve, drag, and text-composition edits use one toolkit-neutral

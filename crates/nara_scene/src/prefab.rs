@@ -41,7 +41,9 @@ pub use declaration::{
 };
 #[cfg(feature = "serde")]
 pub(crate) use overlay::cost::{PrefabOverlayCostError, PrefabOverlayCostKind};
-pub(crate) use overlay::cost::{PrefabOverlayCostLimits, prefab_instance_cost};
+pub(crate) use overlay::cost::{
+    PrefabOverlayCostLimits, prefab_instance_cost, prefab_instance_cost_with_admission,
+};
 pub use overlay::{
     PrefabAddition, PrefabComponentIntent, PrefabComponentSetMode, PrefabEntityOrigin,
     PrefabEntityTarget, PrefabInstanceClaim, PrefabInstanceHop, PrefabOverlay, PrefabPlacement,

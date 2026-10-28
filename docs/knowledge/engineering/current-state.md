@@ -3,7 +3,7 @@ type: "Current State"
 title: "Current Engineering State"
 description: "Derived summary of immutable engineering-memory shards."
 tags: ["engineering-memory", "derived"]
-source_fingerprint: "c8de4122a859aa1b2293a18b4173feddad9b0d25cd6fda42b2914dc8f3e0e743"
+source_fingerprint: "af53d4a75f14f582473d856eec5a881802a688796331e82d8fd4efdae88ff006"
 ---
 
 # Current State
@@ -12,8 +12,8 @@ source_fingerprint: "c8de4122a859aa1b2293a18b4173feddad9b0d25cd6fda42b2914dc8f3e
 
 This file is derived from immutable shards. Record new facts in shards, then render during integration.
 
-- Source fingerprint: `c8de4122a859aa1b2293a18b4173feddad9b0d25cd6fda42b2914dc8f3e0e743`
-- Immutable records: 991
+- Source fingerprint: `af53d4a75f14f582473d856eec5a881802a688796331e82d8fd4efdae88ff006`
+- Immutable records: 993
 - Active lane heads: 1
 
 # Active Registrations
@@ -69,6 +69,8 @@ This file is derived from immutable shards. Record new facts in shards, then ren
 
 # Recent Evidence
 
+- **Verification Evidence**: [Source-owned schema reclassification with exact retained history and bounded interpretation](verification/2026-10/2026-10-28T032419Z-source-owned-schema-reclassification-with-exact-retained-history-and-bounded-interpretation-becb85b221e241aebeb4845c692a7379.md) - Qualifies the additive source/history owner and records the actual-demand historical composition boundary before whole-Session adoption.
+- **Work Progress**: [Source-owned additive schema reclassification and retained history integration in progress](progress/2026-10/2026-10-28T023202Z-source-owned-additive-schema-reclassification-and-retained-history-integration-in-progress-3f8038175810499ab6477d801c8903d2.md) - Records the in-progress source/history replacement and concrete budget, nominal identity and shared preparation interfaces before qualification.
 - **Verification Evidence**: [Recipe schema refresh preserves independently admitted owner lineage](verification/2026-10/2026-10-28T014807Z-recipe-schema-refresh-preserves-independently-admitted-owner-lineage-8afcd1ede3dc4451ac719a1a236e9c85.md) - Qualifies bounded owner-preserving refresh and records the reviewed source/history successor design without claiming Session adoption.
 - **Verification Evidence**: [Durable installed source-tool selection and independent paired attempt qualification](verification/2026-10/2026-10-28T012206Z-durable-installed-source-tool-selection-and-independent-paired-attempt-qualification-3a4a90d3cc3042e5b89e8fa20e314c22.md) - Qualifies code-free desired selection, approved installation enablement and physical lifetime through Session, Application and native Editor consumers.
 - **Work Progress**: [Durable installed tool selection and paired attempt integration in progress](progress/2026-10/2026-10-28T010718Z-durable-installed-tool-selection-and-paired-attempt-integration-in-progress-9621f4a6d44249569e458a0e4006fa4a.md) - Records the current single-slot selection replacement, independent review corrections and live qualification boundary.
@@ -79,8 +81,6 @@ This file is derived from immutable shards. Record new facts in shards, then ren
 - **Verification Evidence**: [Code-free local finite tool release capture and lifecycle owner design](verification/2026-10/2026-10-27T201403Z-code-free-local-finite-tool-release-capture-and-lifecycle-owner-design-1f12c7706bd44248adec1203402d167e.md) - Qualifies immutable declared artifact capture before installation, records pinned placement findings and the remaining local Package ownership and activation boundaries.
 - **Verification Evidence**: [Finite source tool property facets and shared native review qualification](verification/2026-10/2026-10-27T193225Z-finite-source-tool-property-facets-and-shared-native-review-qualification-c47581dc5dfa45038a38a6aea5b2d4be.md) - Records the UI-neutral Tooling replacement, exact activation and revocation corrections, shared panel and Inspector candidate, actual C# and DX12 workflow, independent review and bounded cleanup.
 - **Work Progress**: [Inline source tool facet contract and frontend integration in progress](progress/2026-10/2026-10-27T185417Z-inline-source-tool-facet-contract-and-frontend-integration-in-progress-cd9355db64e64f6b8ff437035268bdc0.md) - Records the shared Tooling replacement, explicit activation routing and active disjoint implementation lanes before complete production qualification.
-- **Verification Evidence**: [Production finite source tools and exact physical close observations](verification/2026-10/2026-10-27T180941Z-production-finite-source-tools-and-exact-physical-close-observations-fc2363973364434096d350ae4a8d762c.md) - Qualifies Session/Application-owned trusted child proposals, deletes the displaced tool bridge, and fixes concurrent result and physical-close observations.
-- **Verification Evidence**: [Complete observation bases at public authoring preparation ingress](verification/2026-10/2026-10-27T155752Z-complete-observation-bases-at-public-authoring-preparation-ingress-d45451eaca544ad2b50a55a66a0ce496.md) - Qualifies full source/Schema observation checks in Workspace, Session, Application and Panel preparation without a second transaction owner.
 
 # Integration Notes
 

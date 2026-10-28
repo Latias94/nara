@@ -5,6 +5,33 @@ use nara_identity::SceneEntityId;
 
 use crate::SourceDocumentKey;
 
+/// Internal refusal signal for borrowed cost walks. The outer owner retains its typed error.
+pub(crate) type CostScratchAdmission<'a> = dyn FnMut(Option<usize>) -> bool + 'a;
+
+/// Admits each complete Vec replacement request before asking the allocator for scratch.
+/// Ordinary cost walks retain their existing Vec growth when no admission is requested.
+pub(crate) fn reserve_cost_scratch<T>(
+    values: &mut Vec<T>,
+    additional: usize,
+    admission: &mut Option<&mut CostScratchAdmission<'_>>,
+) -> Option<()> {
+    let Some(admit) = admission.as_deref_mut() else {
+        return Some(());
+    };
+    if values.capacity().saturating_sub(values.len()) >= additional {
+        return Some(());
+    }
+    let capacity = values
+        .len()
+        .checked_add(additional)
+        .map(|needed| needed.max(values.capacity().saturating_mul(2)).max(4));
+    if !admit(capacity.and_then(|capacity| capacity.checked_mul(size_of::<T>()))) {
+        return None;
+    }
+    values.reserve_exact(capacity? - values.len());
+    Some(())
+}
+
 /// Stable provenance for every entity in one expanded scene document.
 pub type SceneEntityProvenanceMap = BTreeMap<SceneEntityId, SceneEntityProvenance>;
 

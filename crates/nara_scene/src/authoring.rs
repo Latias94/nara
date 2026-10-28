@@ -49,6 +49,14 @@ mod prepared;
 #[cfg(feature = "serde")]
 pub use prepared::{PreparedPrefabAuthoringEdit, PreparedSceneAuthoringEdit};
 #[cfg(feature = "serde")]
+mod schema_reclassification;
+#[cfg(feature = "serde")]
+pub use schema_reclassification::{
+    PrefabSchemaReclassificationCommit, PreparedPrefabSchemaReclassification,
+    PreparedSceneSchemaReclassification, SceneSchemaReclassificationCommit,
+    SchemaReclassificationLimits, SchemaReclassificationUsage, SchemaReclassificationWork,
+};
+#[cfg(feature = "serde")]
 mod property;
 #[cfg(feature = "serde")]
 pub use property::AuthoringPropertyEdit;
@@ -512,29 +520,19 @@ impl AuthoringHistory {
                 return report;
             }
         };
-        let Some(inverse) = report.inverse.clone() else {
-            self.restore(direction, entry);
-            return reject_history_publication(
-                report,
-                "scene.authoring-history-inverse-missing",
-                "accepted history patch did not produce an inverse",
-            );
-        };
-        let observed_cost = entry.scope.add_cost(
-            SceneAuthoringHistoryCost::for_patch(&entry.patch)
-                .max(SceneAuthoringHistoryCost::for_patch(&inverse)),
-        );
-        if observed_cost.operations > entry.cost.operations
-            || observed_cost.value_nodes > entry.cost.value_nodes
-            || observed_cost.logical_bytes > entry.cost.logical_bytes
-        {
-            self.restore(direction, entry);
-            return reject_history_publication(
-                report,
-                "scene.authoring-history-cost-changed",
-                "history inverse exceeded the cost admitted by the originating edit",
-            );
-        }
+        let report =
+            match admit_history_replay_report(&entry.patch, &entry.scope, entry.cost, report, None)
+            {
+                Ok(report) => report,
+                Err(report) => {
+                    self.restore(direction, entry);
+                    return report;
+                }
+            };
+        let inverse = report
+            .inverse
+            .clone()
+            .expect("admitted history owns its inverse");
 
         let reverse = SceneAuthoringHistoryEntry {
             patch: inverse,
@@ -611,6 +609,53 @@ impl AuthoringHistory {
     fn advance_revision(&mut self) {
         self.revision = self.revision.next();
     }
+}
+
+fn admit_history_replay_report(
+    patch: &ScenePatchDocument,
+    scope: &AuthoringHistoryScope,
+    maximum: SceneAuthoringHistoryCost,
+    report: ScenePatchReport,
+    mut admission: Option<&mut dyn FnMut(Option<usize>) -> Result<(), ScenePatchReport>>,
+) -> Result<ScenePatchReport, ScenePatchReport> {
+    let Some(inverse) = report.inverse.as_ref() else {
+        return Err(reject_history_publication(
+            report,
+            "scene.authoring-history-inverse-missing",
+            "accepted history patch did not produce an inverse",
+        ));
+    };
+    let mut cost = |patch: &ScenePatchDocument| match admission.as_deref_mut() {
+        None => Ok(SceneAuthoringHistoryCost::for_patch(patch)),
+        Some(admit) => crate::patch::bounded_scene_patch_cost_with_admission(
+            patch,
+            crate::ScenePatchApplyLimits::default(),
+            admit,
+        )?
+        .map(|cost| SceneAuthoringHistoryCost {
+            operations: cost.operation_count(),
+            value_nodes: cost.value_cost().nodes(),
+            logical_bytes: cost.logical_bytes(),
+        })
+        .ok_or_else(|| {
+            history_error_report(
+                "scene.authoring-history-cost-changed",
+                "History replay exceeds its owning cost boundary",
+            )
+        }),
+    };
+    let observed = scope.add_cost(cost(patch)?.max(cost(inverse)?));
+    if observed.operations > maximum.operations
+        || observed.value_nodes > maximum.value_nodes
+        || observed.logical_bytes > maximum.logical_bytes
+    {
+        return Err(reject_history_publication(
+            report,
+            "scene.authoring-history-cost-changed",
+            "history inverse exceeded the cost admitted by the originating edit",
+        ));
+    }
+    Ok(report)
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -1213,18 +1258,9 @@ impl PrefabAuthoringSession {
         let report =
             self.history
                 .apply_history(&mut self.document, direction, |patch, document, scope| {
-                    let prepared = match scope {
-                        AuthoringHistoryScope::Ordinary => {
-                            crate::authoring_decode::prepare_prefab_authoring_patch(
-                                document, state, patch, true,
-                            )
-                        }
-                        AuthoringHistoryScope::PrefabConversion(footprint) => {
-                            crate::authoring_decode::prepare_prefab_conversion_patch(
-                                document, state, patch, footprint,
-                            )
-                        }
-                    }?;
+                    let prepared = schema_reclassification::prepare_prefab_step(
+                        document, state, patch, scope, None,
+                    )?;
                     next_state = Some(prepared.state);
                     Ok((prepared.document, prepared.report))
                 });
@@ -1896,18 +1932,9 @@ impl SceneAuthoringSession {
         let report =
             self.history
                 .apply_history(&mut self.document, direction, |patch, document, scope| {
-                    let prepared = match scope {
-                        AuthoringHistoryScope::Ordinary => {
-                            crate::authoring_decode::prepare_scene_authoring_patch(
-                                document, state, patch, true,
-                            )
-                        }
-                        AuthoringHistoryScope::PrefabConversion(footprint) => {
-                            crate::authoring_decode::prepare_scene_prefab_conversion_patch(
-                                document, state, patch, footprint,
-                            )
-                        }
-                    }?;
+                    let prepared = schema_reclassification::prepare_scene_step(
+                        document, state, patch, scope, None,
+                    )?;
                     next_state = Some(prepared.state);
                     Ok((prepared.document, prepared.report))
                 });

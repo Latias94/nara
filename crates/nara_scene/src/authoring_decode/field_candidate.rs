@@ -18,7 +18,7 @@ pub(super) fn prepare<'a>(
     // overrides, component identity, owner or version. Do not expose an arbitrary-document
     // constructor: these unchanged facts are the proof for reusing the previous classification.
     let (mut document, inverse) = prepare_field_edits(document, state, edits)?;
-    field_edits_from_patch(&inverse)?;
+    validate_authoring_field_operations(inverse.operations.iter())?;
     document.canonicalize();
     Ok(PreparedFieldCandidate {
         state,
@@ -50,6 +50,22 @@ impl PreparedFieldCandidate<'_> {
         Ok(self)
     }
 
+    pub(super) fn validate_prefab_shape_with_admission(
+        mut self,
+        admit: &mut reclassification::AdmissionCallback<'_>,
+    ) -> Result<Self, ScenePatchReport> {
+        let prefab = PrefabDocument {
+            roots: self.document.roots,
+            entities: self.document.entities,
+        };
+        reclassification::validate_prefab_shape(&prefab, self.state.limits, Some(admit))?;
+        self.document = SceneDocument {
+            roots: prefab.roots,
+            entities: prefab.entities,
+        };
+        Ok(self)
+    }
+
     pub(super) fn into_parts(self) -> (SceneDocument, ScenePatchDocument) {
         (self.document, self.inverse)
     }
@@ -68,6 +84,20 @@ impl PreparedFieldCandidate<'_> {
                 state.limits,
             ),
         }
+    }
+
+    pub(super) fn classify_with_admission(
+        &self,
+        admit: &mut reclassification::AdmissionCallback<'_>,
+    ) -> Result<AuthoringDocumentState, ScenePatchReport> {
+        // The full classifier is also the scalar fast path's fallback. History proof must
+        // admit defaults/references and every retained copy, including unchanged records.
+        reclassification::classify_with_admission(
+            &self.document,
+            self.state,
+            &self.state.schema_basis(),
+            admit,
+        )
     }
 
     fn try_classify(
@@ -150,6 +180,7 @@ impl PreparedFieldCandidate<'_> {
             ),
             asset_reference_nodes: 0,
             asset_reference_bytes: 0,
+            admission: None,
         };
         for (_, fact, record) in &targets {
             classify_complete_record(

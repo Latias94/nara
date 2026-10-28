@@ -41,8 +41,10 @@ pub use authoring::{
     ConstructionPlacement, LocalConstructionEntity, LocalizedPrefabEntity, PrefabConversionError,
     PrefabConversionReceipt, PrefabConversionRequest, PrefabDeclarationError,
     PrefabDeclarationLimits, PrefabInstanceObservation, PreparedPrefabAuthoringConstruction,
-    PreparedPrefabAuthoringEdit, PreparedPrefabConversion, PreparedSceneAuthoringConstruction,
-    PreparedSceneAuthoringEdit, PreparedScenePrefabConversion, ScenePrefabConversionRequest,
+    PreparedPrefabAuthoringEdit, PreparedPrefabConversion, PreparedPrefabSchemaReclassification,
+    PreparedSceneAuthoringConstruction, PreparedSceneAuthoringEdit, PreparedScenePrefabConversion,
+    PreparedSceneSchemaReclassification, ScenePrefabConversionRequest,
+    SchemaReclassificationLimits, SchemaReclassificationUsage, SchemaReclassificationWork,
 };
 pub use authoring::{
     AuthoringSessionAuthorityError, CreatedSourceEntity, PrefabAuthoringSession,
@@ -142,6 +144,9 @@ pub use spawn::{
 #[doc(hidden)]
 #[cfg(feature = "serde")]
 pub mod __private {
+    pub use crate::authoring::{
+        PrefabSchemaReclassificationCommit, SceneSchemaReclassificationCommit,
+    };
     pub use crate::authoring_decode::{
         AuthoringAdapterReceipt, AuthoringAdapterReceiptError,
         fork_published_authoring_prefab_document, fork_published_authoring_scene_document,

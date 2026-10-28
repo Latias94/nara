@@ -12,7 +12,11 @@ use nara_core::ItemLimit;
 use super::LocalizedPrefabEntity;
 use crate::{
     SceneEntityId, SceneEntityRecord, SceneFileLimits, ScenePatchApplyLimits, ScenePatchDocument,
-    patch::{bounded_scene_entities_source_cost, bounded_scene_patch_cost},
+    patch::{
+        ScenePatchCost, bounded_scene_entities_source_cost,
+        bounded_scene_entities_source_cost_with_admission, bounded_scene_patch_cost,
+        bounded_scene_patch_cost_with_admission,
+    },
     provenance::{PrefabProjectionStep, provenance_string_bytes},
 };
 
@@ -21,6 +25,27 @@ pub(crate) fn document_dynamic_bytes(
     entities: &[SceneEntityRecord],
     limits: SceneFileLimits,
 ) -> Option<usize> {
+    let cost = bounded_scene_entities_source_cost(entities, source_cost_limits(limits)?)?;
+    document_bytes_from_cost(roots, cost)
+}
+
+/// Admits raw walk scratch independently of the returned ownership bound.
+pub(crate) fn document_dynamic_bytes_with_admission<E>(
+    roots: &[SceneEntityId],
+    entities: &[SceneEntityRecord],
+    limits: SceneFileLimits,
+    admit: impl FnMut(Option<usize>) -> Result<(), E>,
+) -> Result<Option<usize>, E> {
+    let Some(limits) = source_cost_limits(limits) else {
+        return Ok(None);
+    };
+    Ok(
+        bounded_scene_entities_source_cost_with_admission(entities, limits, admit)?
+            .and_then(|cost| document_bytes_from_cost(roots, cost)),
+    )
+}
+
+fn source_cost_limits(limits: SceneFileLimits) -> Option<ScenePatchApplyLimits> {
     // Classification owns these limits. Do not replace them with an unbounded raw-input walk.
     let work = limits
         .entities()
@@ -28,11 +53,15 @@ pub(crate) fn document_dynamic_bytes(
         .checked_add(limits.placements().get())?
         .checked_add(limits.components().get())?
         .checked_add(limits.shape().nodes().get())?;
-    let limits = ScenePatchApplyLimits::default()
-        .with_validation_work(ItemLimit::new(work)?)
-        .with_validation_value_nodes(limits.component_value_nodes())
-        .with_validation_value_bytes(limits.component_value_bytes());
-    let cost = bounded_scene_entities_source_cost(entities, limits)?;
+    Some(
+        ScenePatchApplyLimits::default()
+            .with_validation_work(ItemLimit::new(work)?)
+            .with_validation_value_nodes(limits.component_value_nodes())
+            .with_validation_value_bytes(limits.component_value_bytes()),
+    )
+}
+
+fn document_bytes_from_cost(roots: &[SceneEntityId], cost: ScenePatchCost) -> Option<usize> {
     let bytes = cost
         .operation_count()
         .checked_mul(512)?
@@ -46,6 +75,20 @@ pub(crate) fn document_dynamic_bytes(
 
 pub(crate) fn patch_dynamic_bytes(patch: &ScenePatchDocument) -> Option<usize> {
     let cost = bounded_scene_patch_cost(patch, ScenePatchApplyLimits::default())?;
+    patch_bytes_from_cost(cost)
+}
+
+pub(crate) fn patch_dynamic_bytes_with_admission<E>(
+    patch: &ScenePatchDocument,
+    admit: impl FnMut(Option<usize>) -> Result<(), E>,
+) -> Result<Option<usize>, E> {
+    Ok(
+        bounded_scene_patch_cost_with_admission(patch, ScenePatchApplyLimits::default(), admit)?
+            .and_then(patch_bytes_from_cost),
+    )
+}
+
+fn patch_bytes_from_cost(cost: ScenePatchCost) -> Option<usize> {
     cost.operation_count()
         .checked_mul(512)?
         .checked_add(cost.value_cost().nodes().checked_mul(96)?)?

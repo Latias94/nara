@@ -35,6 +35,50 @@ pub(super) fn prepare_scene_authoring_structure(
     )
 }
 
+pub(super) fn prepare_scene_authoring_structure_with_admission(
+    document: &SceneDocument,
+    state: &AuthoringDocumentState,
+    patch: &ScenePatchDocument,
+    history: bool,
+    admit: Option<&mut super::reclassification::AdmissionCallback<'_>>,
+) -> Result<PreparedSceneAuthoringPatch, ScenePatchReport> {
+    if admit.is_none() {
+        return prepare_scene_authoring_structure(document, state, patch, history);
+    }
+    prepare_structure_from_parts(
+        &document.roots,
+        &document.entities,
+        state,
+        patch,
+        if history {
+            StructureAdmission::History
+        } else {
+            StructureAdmission::Direct
+        },
+        None,
+        admit,
+    )
+}
+
+pub(super) fn prepare_conversion_structure_with_admission(
+    document: &SceneDocument,
+    state: &AuthoringDocumentState,
+    patch: &ScenePatchDocument,
+    footprint: &crate::authoring::prefab_conversion::PrefabConversionFootprint,
+    admit: &mut super::reclassification::AdmissionCallback<'_>,
+) -> Result<PreparedSceneAuthoringPatch, ScenePatchReport> {
+    footprint.admit_patch(patch)?;
+    prepare_structure_from_parts(
+        &document.roots,
+        &document.entities,
+        state,
+        patch,
+        StructureAdmission::PrefabConversion(footprint),
+        None,
+        Some(admit),
+    )
+}
+
 pub(super) fn prepare_conversion_structure(
     document: &SceneDocument,
     state: &AuthoringDocumentState,
@@ -83,6 +127,7 @@ pub(super) fn prepare_conversion_structure_with_work(
         patch,
         StructureAdmission::PrefabConversion(footprint),
         Some(work),
+        None,
     )
 }
 
@@ -99,6 +144,7 @@ fn prepare_structure(
         patch,
         admission,
         None,
+        None,
     )
 }
 
@@ -109,6 +155,7 @@ fn prepare_structure_from_parts(
     patch: &ScenePatchDocument,
     admission: StructureAdmission<'_>,
     mut work: Option<&mut ConversionWork>,
+    mut admit: Option<&mut super::reclassification::AdmissionCallback<'_>>,
 ) -> Result<PreparedSceneAuthoringPatch, ScenePatchReport> {
     let history = matches!(admission, StructureAdmission::History);
     if patch.format_version != ScenePatchDocument::CURRENT_FORMAT_VERSION
@@ -124,6 +171,19 @@ fn prepare_structure_from_parts(
             validate_operation_shape(operation, history)?;
         }
     }
+    if let Some(admit) = admit.as_deref_mut() {
+        super::reclassification::admit_document(roots, entities, state.limits, admit)?;
+        super::reclassification::admit_patch_copy(patch, "parsed-fields", admit)?;
+        super::reclassification::admit_patch_copy(patch, "candidate-insertions", admit)?;
+        super::reclassification::admit_patch_copy(patch, "forward-patch", admit)?;
+        admit(
+            "structure-transaction",
+            patch.operations.len().checked_mul(
+                std::mem::size_of::<Vec<ScenePatchOperation>>()
+                    + std::mem::size_of::<ScenePatchOperation>(),
+            ),
+        )?;
+    }
     let field_operations = patch
         .operations
         .iter()
@@ -133,7 +193,7 @@ fn prepare_structure_from_parts(
     } else {
         Vec::new()
     };
-    admit_replay_cost(patch)?;
+    admit_replay_cost(patch, admit.as_deref_mut())?;
     let mut fields = fields.iter();
     if let Some(work) = work.as_deref_mut() {
         work.reserve(
@@ -154,6 +214,17 @@ fn prepare_structure_from_parts(
     let mut created = BTreeSet::new();
     let mut inverses = Vec::with_capacity(patch.operations.len());
     for (operation_index, operation) in patch.operations.iter().enumerate() {
+        if let Some(admit) = admit.as_deref_mut() {
+            // Each operation can retain at most the current source in its exact inverse.
+            // This actual-state bound also covers RestoreEntity and destructive subtrees.
+            let inverse_bound = retention::document_dynamic_bytes_with_admission(
+                &candidate.roots,
+                &candidate.entities,
+                state.limits,
+                |bytes| admit("operation-inverse-scan", bytes),
+            )?;
+            admit("operation-inverse", inverse_bound)?;
+        }
         if is_authoring_field_operation(operation) {
             let edit = fields
                 .next()
@@ -238,6 +309,7 @@ fn prepare_structure_from_parts(
         inverses.push(inverse);
     }
     if work.is_none()
+        && admit.is_none()
         && crate::format::validate_scene_publication_shape(&candidate, state.limits).is_err()
     {
         return Err(authoring_structure_rejection(
@@ -253,7 +325,31 @@ fn prepare_structure_from_parts(
                 .checked_mul(std::mem::size_of::<crate::SceneEntityRecord>()),
         )?;
     }
+    if let Some(admit) = admit.as_deref_mut() {
+        admit(
+            "candidate-order",
+            candidate
+                .entities
+                .len()
+                .checked_mul(std::mem::size_of::<crate::SceneEntityRecord>()),
+        )?;
+    }
     candidate.canonicalize();
+    if let Some(admit) = admit.as_deref_mut() {
+        crate::format::validate_scene_publication_shape_with_admission(
+            &candidate,
+            state.limits,
+            |bytes| admit("publication-buffer", Some(bytes)),
+        )
+        .map_err(|error| match error {
+            crate::format::PublicationShapeAdmissionError::Admission(report) => report,
+            crate::format::PublicationShapeAdmissionError::Format(_) => {
+                authoring_structure_rejection(
+                    "Authoring structure exceeds the persistent format boundary",
+                )
+            }
+        })?;
+    }
     if let Some(work) = work.as_deref_mut()
         && state.kind == super::AuthoringDocumentKind::Scene
     {
@@ -273,6 +369,13 @@ fn prepare_structure_from_parts(
     }
     let candidate_state = if let Some(work) = work.as_deref_mut() {
         super::conversion::classify_conversion_document(&candidate, state, patch, work)?
+    } else if let Some(admit) = admit.as_deref_mut() {
+        super::reclassification::classify_with_admission(
+            &candidate,
+            state,
+            &state.schema_basis(),
+            admit,
+        )?
     } else {
         classify_scene_document(
             &candidate,
@@ -290,6 +393,16 @@ fn prepare_structure_from_parts(
     // The budgeted forward conversion reuses exact admitted facts for untouched records.
     // It rebases their placement while copying classification; no expected manifest is cloned.
     if work.is_none() {
+        if let Some(admit) = admit.as_deref_mut() {
+            let retained = state.checked_retained_bytes_with_admission(|bytes| {
+                admit("preservation-manifest-scan", bytes)
+            })?;
+            admit("preservation-manifest", retained)?;
+            admit(
+                "preservation-placement-index",
+                super::reclassification::placement_index_bytes(&candidate),
+            )?;
+        }
         let expected_manifest = if patch.operations.iter().any(|operation| {
             matches!(
                 operation,
@@ -314,9 +427,9 @@ fn prepare_structure_from_parts(
         }
     }
     let inverse = ScenePatchDocument::new(inverses.into_iter().rev().flatten());
-    admit_replay_cost(&inverse)?;
+    admit_replay_cost(&inverse, admit.as_deref_mut())?;
     if inverse.operations.iter().any(is_authoring_field_operation) {
-        super::field_edits_from_operations(
+        super::validate_authoring_field_operations(
             inverse
                 .operations
                 .iter()
@@ -365,14 +478,25 @@ fn validate_conversion_record(
     Ok(())
 }
 
-fn admit_replay_cost(patch: &ScenePatchDocument) -> Result<(), ScenePatchReport> {
-    crate::patch::bounded_scene_patch_cost(patch, crate::ScenePatchApplyLimits::default())
-        .map(|_| ())
-        .ok_or_else(|| {
-            authoring_structure_rejection(
-                "Authoring construction or its inverse exceeds the replay work budget",
-            )
-        })
+fn admit_replay_cost(
+    patch: &ScenePatchDocument,
+    admission: Option<&mut super::reclassification::AdmissionCallback<'_>>,
+) -> Result<(), ScenePatchReport> {
+    let cost = match admission {
+        Some(admit) => crate::patch::bounded_scene_patch_cost_with_admission(
+            patch,
+            crate::ScenePatchApplyLimits::default(),
+            |bytes| admit("replay-cost-scan", bytes),
+        )?,
+        None => {
+            crate::patch::bounded_scene_patch_cost(patch, crate::ScenePatchApplyLimits::default())
+        }
+    };
+    cost.map(|_| ()).ok_or_else(|| {
+        authoring_structure_rejection(
+            "Authoring construction or its inverse exceeds the replay work budget",
+        )
+    })
 }
 
 fn validate_operation_shape(

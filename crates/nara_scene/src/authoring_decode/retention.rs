@@ -19,6 +19,34 @@ const TREE_ENTRY_BYTES: usize = 6 * size_of::<usize>();
 
 impl AuthoringDocumentState {
     pub(crate) fn checked_retained_bytes(&self) -> Option<usize> {
+        self.checked_retained_bytes_impl(&mut None)
+    }
+
+    pub(crate) fn checked_retained_bytes_with_admission<E>(
+        &self,
+        mut admit: impl FnMut(Option<usize>) -> Result<(), E>,
+    ) -> Result<Option<usize>, E> {
+        let mut refusal = None;
+        let bytes = {
+            let mut callback = |bytes| match admit(bytes) {
+                Ok(()) => true,
+                Err(error) => {
+                    refusal = Some(error);
+                    false
+                }
+            };
+            self.checked_retained_bytes_impl(&mut Some(&mut callback))
+        };
+        match refusal {
+            Some(error) => Err(error),
+            None => Ok(bytes),
+        }
+    }
+
+    fn checked_retained_bytes_impl(
+        &self,
+        admission: &mut Option<&mut crate::provenance::CostScratchAdmission<'_>>,
+    ) -> Option<usize> {
         let mut bytes = size_of::<Self>()
             .checked_add(provenance_asset_ref_bytes(self.source.as_asset_ref())?)?
             .checked_add(self.diagnostics.retained_bytes())?;
@@ -70,7 +98,7 @@ impl AuthoringDocumentState {
             bytes = bytes.checked_add(size_of::<UnavailableRecordManifestEntry>())?;
             bytes = bytes.checked_add(match entry {
                 UnavailableRecordManifestEntry::Record(record) => {
-                    unavailable_record_dynamic_bytes(record, self.limits)?
+                    unavailable_record_dynamic_bytes(record, self.limits, admission)?
                 }
                 UnavailableRecordManifestEntry::OverlayTarget(target) => {
                     let mut retained = provenance_asset_ref_bytes(target.source.as_asset_ref())?
@@ -78,15 +106,26 @@ impl AuthoringDocumentState {
                         .checked_add(placement_dynamic_bytes(target.anchor_placement.as_ref())?)?
                         .checked_add(provenance_string_bytes(target.component.as_str())?)?;
                     if let Some(property) = &target.property {
-                        retained =
-                            retained.checked_add(property_dynamic_bytes(property, self.limits)?)?;
+                        retained = retained.checked_add(property_dynamic_bytes_impl(
+                            property,
+                            self.limits,
+                            admission,
+                        )?)?;
                     }
                     retained
                 }
             })?;
         }
         for (anchor, instance) in &self.unavailable_manifest.overlays {
-            let cost = prefab_instance_cost(instance, overlay_limits(self.limits)).ok()?;
+            let cost = match admission.as_deref_mut() {
+                Some(admit) => crate::prefab::prefab_instance_cost_with_admission(
+                    instance,
+                    overlay_limits(self.limits),
+                    admit,
+                )
+                .ok()??,
+                None => prefab_instance_cost(instance, overlay_limits(self.limits)).ok()?,
+            };
             bytes = bytes
                 .checked_add(TREE_ENTRY_BYTES)?
                 .checked_add(size_of::<SceneEntityId>())?
@@ -110,7 +149,7 @@ pub(crate) fn asset_references_bytes(references: &[DeclaredAssetReference]) -> O
     })
 }
 
-fn field_path_dynamic_bytes(path: &nara_reflect::ComponentFieldPath) -> Option<usize> {
+pub(super) fn field_path_dynamic_bytes(path: &nara_reflect::ComponentFieldPath) -> Option<usize> {
     path.segments().iter().try_fold(
         path.segments()
             .len()
@@ -124,14 +163,14 @@ fn field_path_dynamic_bytes(path: &nara_reflect::ComponentFieldPath) -> Option<u
     )
 }
 
-fn owner_bytes(owner: &AuthoringRecordOwnerClaim) -> Option<usize> {
+pub(super) fn owner_bytes(owner: &AuthoringRecordOwnerClaim) -> Option<usize> {
     match owner {
         AuthoringRecordOwnerClaim::Declared(owner) => provenance_string_bytes(owner.as_str()),
         AuthoringRecordOwnerClaim::Unclaimed => Some(0),
     }
 }
 
-fn location_dynamic_bytes(location: &AuthoringRecordLocation) -> Option<usize> {
+pub(super) fn location_dynamic_bytes(location: &AuthoringRecordLocation) -> Option<usize> {
     match location {
         AuthoringRecordLocation::EntityComponent { entity } => {
             provenance_string_bytes(entity.as_str())
@@ -141,41 +180,43 @@ fn location_dynamic_bytes(location: &AuthoringRecordLocation) -> Option<usize> {
             overlays,
             target,
             ..
-        } => {
-            let mut bytes = provenance_string_bytes(anchor.as_str())?
-                .checked_add(target_dynamic_bytes(target)?)?
-                .checked_add(
-                    overlays
-                        .len()
-                        .checked_mul(size_of::<AuthoringOverlayPathSegment>())?,
-                )?;
-            for segment in overlays {
-                let (source, base, target_bytes) = match segment {
-                    AuthoringOverlayPathSegment::Root { source, base } => (source, base, 0),
-                    AuthoringOverlayPathSegment::Addition {
-                        entity,
-                        source,
-                        base,
-                        ..
-                    } => (source, base, provenance_string_bytes(entity.as_str())?),
-                    AuthoringOverlayPathSegment::InstanceClaim {
-                        target,
-                        source,
-                        base,
-                        ..
-                    } => (source, base, target_dynamic_bytes(target)?),
-                };
-                bytes = bytes
-                    .checked_add(target_bytes)?
-                    .checked_add(provenance_asset_ref_bytes(source)?)?
-                    .checked_add(base.checked_retained_bytes()?)?;
-            }
-            Some(bytes)
-        }
+        } => provenance_string_bytes(anchor.as_str())?
+            .checked_add(target_dynamic_bytes(target)?)?
+            .checked_add(overlay_path_dynamic_bytes(overlays)?),
     }
 }
 
-fn target_dynamic_bytes(target: &PrefabEntityTarget) -> Option<usize> {
+pub(super) fn overlay_path_dynamic_bytes(
+    overlays: &[AuthoringOverlayPathSegment],
+) -> Option<usize> {
+    let mut bytes = overlays
+        .len()
+        .checked_mul(size_of::<AuthoringOverlayPathSegment>())?;
+    for segment in overlays {
+        let (source, base, target_bytes) = match segment {
+            AuthoringOverlayPathSegment::Root { source, base } => (source, base, 0),
+            AuthoringOverlayPathSegment::Addition {
+                entity,
+                source,
+                base,
+                ..
+            } => (source, base, provenance_string_bytes(entity.as_str())?),
+            AuthoringOverlayPathSegment::InstanceClaim {
+                target,
+                source,
+                base,
+                ..
+            } => (source, base, target_dynamic_bytes(target)?),
+        };
+        bytes = bytes
+            .checked_add(target_bytes)?
+            .checked_add(provenance_asset_ref_bytes(source)?)?
+            .checked_add(base.checked_retained_bytes()?)?;
+    }
+    Some(bytes)
+}
+
+pub(super) fn target_dynamic_bytes(target: &PrefabEntityTarget) -> Option<usize> {
     let bytes = provenance_string_bytes(target.entity.entity().as_str())?.checked_add(
         target
             .through
@@ -208,6 +249,7 @@ pub(super) fn placement_dynamic_bytes(placement: Option<&ScenePlacement>) -> Opt
 fn unavailable_record_dynamic_bytes(
     record: &UnavailableRecord,
     limits: SceneFileLimits,
+    admission: &mut Option<&mut crate::provenance::CostScratchAdmission<'_>>,
 ) -> Option<usize> {
     let mut bytes = provenance_asset_ref_bytes(record.source.as_asset_ref())?
         .checked_add(location_dynamic_bytes(&record.location)?)?
@@ -215,7 +257,7 @@ fn unavailable_record_dynamic_bytes(
         .checked_add(placement_dynamic_bytes(record.anchor_placement.as_ref())?)?
         .checked_add(owner_bytes(&record.owner)?)?
         .checked_add(provenance_string_bytes(record.component.as_str())?)?
-        .checked_add(value_bytes(&record.value, limits)?)?
+        .checked_add(value_bytes_impl(&record.value, limits, admission)?)?
         .checked_add(asset_references_bytes(
             &record.schema_declared_asset_references,
         )?)?;
@@ -243,9 +285,10 @@ fn unavailable_record_dynamic_bytes(
     Some(bytes)
 }
 
-fn property_dynamic_bytes(
+pub(super) fn property_dynamic_bytes_impl(
     property: &PrefabPropertyClaim,
     limits: SceneFileLimits,
+    admission: &mut Option<&mut crate::provenance::CostScratchAdmission<'_>>,
 ) -> Option<usize> {
     let mut bytes = provenance_string_bytes(property.path.root.as_str())?
         .checked_add(
@@ -279,22 +322,35 @@ fn property_dynamic_bytes(
             .checked_add(target_dynamic_bytes(&binding.target)?)?;
     }
     if let PrefabPropertyIntent::Set(value) = &property.intent {
-        bytes = bytes.checked_add(value_bytes(value, limits)?)?;
+        bytes = bytes.checked_add(value_bytes_impl(value, limits, admission)?)?;
     }
     Some(bytes)
 }
 
-fn value_bytes(value: &ComponentValue, limits: SceneFileLimits) -> Option<usize> {
-    let cost = value.cost_up_to(
-        limits.component_value_nodes().get(),
-        limits.component_value_bytes().get(),
-    )?;
+pub(super) fn value_bytes_impl(
+    value: &ComponentValue,
+    limits: SceneFileLimits,
+    admission: &mut Option<&mut crate::provenance::CostScratchAdmission<'_>>,
+) -> Option<usize> {
+    let cost = match admission.as_deref_mut() {
+        Some(admit) => value
+            .cost_up_to_with_admission(
+                limits.component_value_nodes().get(),
+                limits.component_value_bytes().get(),
+                |bytes| if admit(bytes) { Ok(()) } else { Err(()) },
+            )
+            .ok()??,
+        None => value.cost_up_to(
+            limits.component_value_nodes().get(),
+            limits.component_value_bytes().get(),
+        )?,
+    };
     cost.nodes()
         .checked_mul(96)?
         .checked_add(cost.logical_bytes())
 }
 
-fn overlay_limits(limits: SceneFileLimits) -> PrefabOverlayCostLimits {
+pub(super) fn overlay_limits(limits: SceneFileLimits) -> PrefabOverlayCostLimits {
     PrefabOverlayCostLimits {
         nodes: limits.shape().nodes().get(),
         depth: limits.shape().depth().get(),

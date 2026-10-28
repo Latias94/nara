@@ -103,6 +103,41 @@ all preparation allocation fits the much smaller final field-patch budget.
 
 ## Decision
 
+### Additive source reclassification
+
+An admitted authoring source may prepare a classification-only successor when every previously
+selected current declaration, persistent owner and Adapter evidence is unchanged. The project
+owner separately proves preservation of complete existing current/predecessor catalogs. This is
+new metadata adoption, not migration, owner reassignment, native binding or executable approval.
+Classify the unchanged source under one shared successor basis; recovery may shrink its unavailable
+manifest. Source-semantic equality, rather than equality with the predecessor manifest, proves
+preservation. Newly invalid known values/source-local references refuse. Dormant overlay and
+actual-demand composition retain their existing boundaries; asset availability stays Host-owned.
+
+Before accepting the source successor, its history owner proves every retained Undo and Redo edge
+in both directions through actual history preparation and its original scope. Freeze each generated
+inverse, require exact source restoration and regenerated patch equality, and preserve the original
+two-way cost bound. Failure leaves the original source/classification/history intact. Preparation
+has a distinct cumulative work allowance and peak logical-retention allowance, admitted before
+owning copies; patch retention alone does not bound repeated document scans. Retain no snapshot
+for every historical state and allocate no new history identities during the proof.
+This logical preparation model excludes allocator capacity, shared catalogs and bounded terminal
+refusal reporting. Diagnostic draft/report limits bound that refusal envelope even at exhaustion;
+retained classification diagnostics and dynamic interpretation scratch remain admitted work.
+This source proof preserves dormant overlay payloads and does not establish effective historical
+composition. Project adoption separately proves its actual selected source/dependency closure
+through the same compiler and history preparation kernel before publishing the bundle. A malformed
+surviving value refuses that Host successor; a lawfully discarded dormant payload does not.
+
+The move-only candidate retains the original revision and exact predecessor/successor bases.
+Commit changes classification only, preserving document/source identity, content state, source
+upgrade status and history, while invalidating old basis-bound queries and prepared edits. Source
+owners may lend exclusive validated commit guards so a Workspace can validate a complete set
+before infallible classification swaps. A source helper does not itself qualify whole-Session
+adoption, bundle publication, preview receipts or recovery after a published-but-unadopted bundle.
+The [owner-adoption plan](../../plans/2026-10-28-authoring-owner-adoption-plan.md) owns that ordered
+workflow and its implementation boundaries.
+
 [ADR 0118](0118-editor-workspaces-frontends-and-creation-templates.md) admits generic empty-entity
 insertion, current data-editable component addition/removal and an ordinary structural workflow.
 Stable-ID reparent/reorder proves an operation-relative placement change while preserving the

@@ -77,6 +77,9 @@ bytes does not recreate that nominal basis.
    Commit changes classification only, preserving source revision,
    content-state identity, upgrade flag, history contents/cost, saved state and selection. Mark
    an existing Scene projection dirty. Old prepared edits/queries reject their old basis.
+   This proves source replay, not eager activation of dormant overlay payloads. Preserve those
+   payloads even when malformed in isolation; actual-demand history qualification belongs to
+   the Host preparation below and must reuse this traversal/preparation kernel.
 2. **Bundle successor custody.** Prepare the composed bundle and ordinary engine-owned Adapters
    from code-free installation inspection. Reuse bounded bundle decoding/encoding and existing
    root/manifest observations. Add a narrow handoff from the actual admitted bundle leaf into
@@ -92,6 +95,12 @@ bytes does not recreate that nominal basis.
    leaf/digest. Capture uses the successor working copy of every already-open dirty Prefab.
    Closed raw Prefabs retain actual-demand composition: do not force independent strict publication
    of a source whose invalid payload is lawfully repaired/discarded by an outer declaration.
+   Extend the same history preparation traversal to validate actual selected composition for
+   every retained reachable state against the successor closure before publication. The Host
+   must distinguish invalid surviving intent from a dormant payload lawfully discarded by an
+   outer declaration; a source-only classification candidate does not establish this proof.
+   Keep that integration internal to the actual Host workflow, with no second history interpreter
+   or eager dependency scan and no retained snapshot per historical state.
 3. **Whole open-set preparation.** Through Workspace, prepare every open Scene and Prefab,
    including inactive dirty documents, against that shared successor. Preserve per-document
    persistence Hosts and saved checkpoints. Capture the exact open set/incarnations, revisions,
@@ -138,9 +147,12 @@ bytes does not recreate that nominal basis.
 - Two Scenes and two Prefabs include inactive dirty sources, both Undo/Redo branches, saved states,
   unrelated unavailable records and dormant overlays. Exact source/selection/history survives
   adoption; newly understood data becomes editable without a fabricated source edit.
-- An old explicit complete-instance repair hides a malformed unknown value. Current source may
-  classify under the new owner, but Undo would reveal an invalid value. Refuse adoption before
-  file publication rather than clear history or defer a predictable replay failure.
+- An old explicit complete-instance repair hides a malformed unknown overlay value. Source-only
+  classification must preserve this dormant history. With the real canonical base, prove current
+  composition succeeds and a retained Undo/Redo state actually selects the invalid surviving
+  value; the Host then refuses adoption before file publication. A paired outer replacement or
+  suppression that lawfully discards the payload must succeed. Do not clear history, eagerly
+  validate all embedded payloads or mistake source classification for this Host proof.
 - A valid history patch generates an inverse which fails reverse admission under the successor.
   Reject that edge before publication; test RestoreEntity and scoped conversion through actual
   history semantics, not ordinary-edit restrictions.

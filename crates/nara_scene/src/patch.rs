@@ -19,6 +19,7 @@ use crate::{
         error as diagnostic_error, with_capability, with_component_field_path,
         with_component_field_path_error, with_public_locator, with_public_u64,
     },
+    provenance::{CostScratchAdmission, reserve_cost_scratch},
     validation::{
         preflight_authoring_scene_with_context_at_operation,
         validate_patch_intermediate_scene_with_limits,
@@ -700,7 +701,7 @@ impl ScenePatchCost {
 pub(crate) fn scene_entities_source_value_cost(
     entities: &[SceneEntityRecord],
 ) -> ComponentValueCost {
-    tree_cost(vec![ValueCostNode::Entities(entities.iter(), 1)], None)
+    tree_cost(ValueCostNode::Entities(entities.iter(), 1), None, None)
         .expect("unbounded cost traversal always completes")
         .value_cost()
 }
@@ -711,13 +712,24 @@ pub(crate) fn bounded_scene_entities_source_cost(
     limits: ScenePatchApplyLimits,
 ) -> Option<ScenePatchCost> {
     tree_cost(
-        vec![ValueCostNode::Entities(entities.iter(), 1)],
+        ValueCostNode::Entities(entities.iter(), 1),
         Some(limits),
+        None,
     )
 }
 
+/// Reuses the raw source walker, admitting every scratch growth before allocation.
+#[cfg(feature = "serde")]
+pub(crate) fn bounded_scene_entities_source_cost_with_admission<E>(
+    entities: &[SceneEntityRecord],
+    limits: ScenePatchApplyLimits,
+    admit: impl FnMut(Option<usize>) -> Result<(), E>,
+) -> Result<Option<ScenePatchCost>, E> {
+    admitted_tree_cost(ValueCostNode::Entities(entities.iter(), 1), limits, admit)
+}
+
 pub(crate) fn scene_patch_cost(patch: &ScenePatchDocument) -> ScenePatchCost {
-    tree_cost(vec![ValueCostNode::Patch(patch, 1)], None)
+    tree_cost(ValueCostNode::Patch(patch, 1), None, None)
         .expect("unbounded cost traversal always completes")
 }
 
@@ -725,13 +737,52 @@ pub(crate) fn bounded_scene_patch_cost(
     patch: &ScenePatchDocument,
     limits: ScenePatchApplyLimits,
 ) -> Option<ScenePatchCost> {
-    tree_cost(vec![ValueCostNode::Patch(patch, 1)], Some(limits))
+    tree_cost(ValueCostNode::Patch(patch, 1), Some(limits), None)
+}
+
+pub(crate) fn bounded_scene_patch_cost_with_admission<E>(
+    patch: &ScenePatchDocument,
+    limits: ScenePatchApplyLimits,
+    admit: impl FnMut(Option<usize>) -> Result<(), E>,
+) -> Result<Option<ScenePatchCost>, E> {
+    admitted_tree_cost(ValueCostNode::Patch(patch, 1), limits, admit)
+}
+
+fn admitted_tree_cost<E>(
+    first: ValueCostNode<'_>,
+    limits: ScenePatchApplyLimits,
+    mut admit: impl FnMut(Option<usize>) -> Result<(), E>,
+) -> Result<Option<ScenePatchCost>, E> {
+    let mut refusal = None;
+    let result = {
+        let mut callback = |bytes| match admit(bytes) {
+            Ok(()) => true,
+            Err(error) => {
+                refusal = Some(error);
+                false
+            }
+        };
+        tree_cost(first, Some(limits), Some(&mut callback))
+    };
+    match refusal {
+        Some(error) => Err(error),
+        None => Ok(result),
+    }
 }
 
 fn tree_cost(
-    mut pending: Vec<ValueCostNode<'_>>,
+    first: ValueCostNode<'_>,
     limits: Option<ScenePatchApplyLimits>,
+    mut admission: Option<&mut CostScratchAdmission<'_>>,
 ) -> Option<ScenePatchCost> {
+    let mut pending = if admission.is_some() {
+        let mut pending = Vec::new();
+        reserve_cost_scratch(&mut pending, 1, &mut admission)?;
+        pending.push(first);
+        pending
+    } else {
+        vec![first]
+    };
     let mut cost = ScenePatchCost::default();
     while let Some(node) = pending.pop() {
         match node {
@@ -760,9 +811,16 @@ fn tree_cost(
                     cost.structural_logical_bytes = cost
                         .structural_logical_bytes
                         .saturating_add(component.owner().map_or(0, |owner| owner.as_str().len()));
-                    add_patch_value_cost(&mut cost, &component.value, depth + 1, limits)?;
+                    add_patch_value_cost(
+                        &mut cost,
+                        &component.value,
+                        depth + 1,
+                        limits,
+                        &mut admission,
+                    )?;
                 }
                 if let Some(prefab) = &entity.prefab {
+                    reserve_cost_scratch(&mut pending, 1, &mut admission)?;
                     pending.push(ValueCostNode::Instance(prefab, depth + 1));
                 }
             }
@@ -788,8 +846,12 @@ fn tree_cost(
                         .get()
                         .checked_sub(cost.value_cost.logical_bytes())?;
                 }
-                let instance_cost =
-                    crate::prefab::prefab_instance_cost(instance, allowance).ok()?;
+                let instance_cost = if let Some(admit) = admission.as_deref_mut() {
+                    crate::prefab::prefab_instance_cost_with_admission(instance, allowance, admit)
+                        .ok()??
+                } else {
+                    crate::prefab::prefab_instance_cost(instance, allowance).ok()?
+                };
                 cost.operation_count = cost.operation_count.saturating_add(instance_cost.nodes);
                 cost.value_cost = cost.value_cost.saturating_add(instance_cost.value_cost);
                 cost.structural_logical_bytes = cost
@@ -798,6 +860,7 @@ fn tree_cost(
             }
             ValueCostNode::Entities(mut entities, depth) => {
                 if let Some(entity) = entities.next() {
+                    reserve_cost_scratch(&mut pending, 2, &mut admission)?;
                     pending.push(ValueCostNode::Entities(entities, depth));
                     pending.push(ValueCostNode::Entity(entity, depth));
                 }
@@ -810,10 +873,14 @@ fn tree_cost(
                 {
                     return None;
                 }
+                reserve_cost_scratch(&mut pending, 1, &mut admission)?;
                 pending.push(ValueCostNode::Operations(patch.operations.iter(), depth));
             }
             ValueCostNode::Operations(mut operations, depth) => {
                 if let Some(operation) = operations.next() {
+                    // One continuation plus at most two owned payload frames (RestoreEntity
+                    // or the expected/value sides of SetPrefabInstance).
+                    reserve_cost_scratch(&mut pending, 3, &mut admission)?;
                     pending.push(ValueCostNode::Operations(operations, depth));
                     match operation {
                         ScenePatchOperation::AddEntity { entity, placement } => {
@@ -892,11 +959,27 @@ fn tree_cost(
                             add_scene_entity_id_cost(&mut cost, entity);
                             add_component_type_id_cost(&mut cost, component);
                             add_component_field_id_cost(&mut cost, field);
+                            // The existing wire convention is one Map and two String nodes.
+                            // Admit that temporary copy before asset_ref_value allocates it.
+                            // The bounded value walker separately admits its iterator scratch.
+                            if let Some(admit) = admission.as_deref_mut() {
+                                let logical_bytes = match asset_ref {
+                                    AssetRef::Path(path) => {
+                                        13usize.checked_add(path.as_str().len())
+                                    }
+                                    AssetRef::StableId(_) => Some(54),
+                                };
+                                if !admit(logical_bytes.and_then(|bytes| bytes.checked_add(3 * 96)))
+                                {
+                                    return None;
+                                }
+                            }
                             add_patch_value_cost(
                                 &mut cost,
                                 &asset_ref_value(asset_ref),
                                 depth + 1,
                                 limits,
+                                &mut admission,
                             )?;
                         }
                         ScenePatchOperation::SetPrefabInstance {
@@ -916,7 +999,7 @@ fn tree_cost(
                 }
             }
             ValueCostNode::Value(value, depth) => {
-                add_patch_value_cost(&mut cost, value, depth, limits)?;
+                add_patch_value_cost(&mut cost, value, depth, limits, &mut admission)?;
             }
         }
     }
@@ -928,8 +1011,28 @@ fn add_patch_value_cost(
     value: &ComponentValue,
     depth: usize,
     limits: Option<ScenePatchApplyLimits>,
+    admission: &mut Option<&mut CostScratchAdmission<'_>>,
 ) -> Option<()> {
     let value_cost = match limits {
+        Some(limits) if admission.is_some() => value
+            .cost_up_to_with_admission(
+                limits
+                    .validation_value_nodes()
+                    .get()
+                    .saturating_sub(cost.value_cost.nodes()),
+                limits
+                    .validation_value_bytes()
+                    .get()
+                    .saturating_sub(cost.value_cost.logical_bytes()),
+                |bytes| {
+                    if admission.as_deref_mut().is_some_and(|admit| admit(bytes)) {
+                        Ok(())
+                    } else {
+                        Err(())
+                    }
+                },
+            )
+            .ok()??,
         Some(limits) => value.cost_up_to(
             limits
                 .validation_value_nodes()
@@ -1159,7 +1262,7 @@ mod bounded_cost_tests {
             let mut entity = SceneEntityRecord::new(SceneEntityId::new("a").unwrap());
             entity.prefab = Some(deep_declaration(128, through_entities));
             let entities = std::slice::from_ref(&entity);
-            let unbounded = tree_cost(vec![ValueCostNode::Entities(entities.iter(), 1)], None)
+            let unbounded = tree_cost(ValueCostNode::Entities(entities.iter(), 1), None, None)
                 .expect("unbounded source accounting completes");
             assert!(unbounded.operation_count() < 1024);
             assert!(unbounded.logical_bytes() < 64 * 1024);
@@ -1204,6 +1307,102 @@ mod bounded_cost_tests {
         ] {
             assert!(bounded_scene_entities_source_cost(&entities, insufficient).is_none());
         }
+    }
+
+    #[test]
+    fn admitted_raw_walk_refuses_before_its_first_scratch_allocation() {
+        let entities = [SceneEntityRecord::new(SceneEntityId::new("a").unwrap())];
+        let mut calls = 0;
+        let result = bounded_scene_entities_source_cost_with_admission(
+            &entities,
+            ScenePatchApplyLimits::default(),
+            |bytes| {
+                calls += 1;
+                assert_eq!(bytes, Some(4 * std::mem::size_of::<ValueCostNode<'_>>()));
+                Err("scratch refused")
+            },
+        );
+        assert_eq!(result, Err("scratch refused"));
+        assert_eq!(calls, 1);
+    }
+
+    #[test]
+    fn admitted_raw_walk_accounts_repeated_value_scratch_without_file_limit_reservation() {
+        let record = SceneComponentRecord::new(
+            ComponentSchemaVersion::ONE,
+            ComponentValue::map([("v", ComponentValue::List(vec![ComponentValue::U64(7)]))]),
+        );
+        let entities = (0..1000)
+            .map(|index| {
+                SceneEntityRecord::new(SceneEntityId::new(format!("e{index}")).unwrap())
+                    .with_component(ComponentTypeId::new("c"), record.clone())
+            })
+            .collect::<Vec<_>>();
+        let cost_and_scratch = |entities: &[SceneEntityRecord]| {
+            let mut scratch = 0usize;
+            let cost = bounded_scene_entities_source_cost_with_admission(
+                entities,
+                ScenePatchApplyLimits::default(),
+                |bytes| {
+                    scratch = scratch.checked_add(bytes.unwrap()).unwrap();
+                    Ok::<_, ()>(())
+                },
+            )
+            .unwrap();
+            assert_eq!(
+                cost,
+                bounded_scene_entities_source_cost(entities, ScenePatchApplyLimits::default())
+            );
+            (cost, scratch)
+        };
+        let (_, empty) = cost_and_scratch(&[]);
+        let (_, one) = cost_and_scratch(&entities[..1]);
+        let (_, many) = cost_and_scratch(&entities);
+        assert!(one > empty);
+        assert_eq!(many - empty, 1000 * (one - empty));
+        assert!(one < 16 * 1024);
+        for through_entities in [false, true] {
+            let mut entity = SceneEntityRecord::new(SceneEntityId::new("a").unwrap());
+            entity.prefab = Some(deep_declaration(8, through_entities));
+            cost_and_scratch(&[entity]);
+        }
+    }
+
+    #[test]
+    fn admitted_asset_field_cost_refuses_its_wire_copy_before_materialization() {
+        let path = format!("textures/{}.png", "asset".repeat(200));
+        let wire_bytes = 3 * 96 + 13 + path.len();
+        let patch = ScenePatchDocument::new([ScenePatchOperation::SetAssetRefField {
+            entity: SceneEntityId::new("a").unwrap(),
+            component: ComponentTypeId::new("c"),
+            component_version: ComponentSchemaVersion::ONE,
+            field: ComponentFieldId::new("image"),
+            asset_ref: AssetRef::path(&path).unwrap(),
+        }]);
+        let mut wire_seen = false;
+        let refused = bounded_scene_patch_cost_with_admission(
+            &patch,
+            ScenePatchApplyLimits::default(),
+            |bytes| {
+                if bytes == Some(wire_bytes) {
+                    wire_seen = true;
+                    Err("wire copy refused")
+                } else {
+                    Ok(())
+                }
+            },
+        );
+        assert!(wire_seen);
+        assert_eq!(refused, Err("wire copy refused"));
+        assert_eq!(
+            bounded_scene_patch_cost_with_admission(
+                &patch,
+                ScenePatchApplyLimits::default(),
+                |_| Ok::<_, ()>(()),
+            )
+            .unwrap(),
+            bounded_scene_patch_cost(&patch, ScenePatchApplyLimits::default())
+        );
     }
 
     #[test]

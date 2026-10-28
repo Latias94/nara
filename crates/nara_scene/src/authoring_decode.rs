@@ -7,6 +7,7 @@ mod conversion;
 mod field_candidate;
 mod overlay;
 mod read;
+mod reclassification;
 mod retention;
 mod structure;
 
@@ -16,7 +17,7 @@ pub use read::{
     AuthoringReadError,
 };
 pub(crate) use retention::asset_references_bytes as retained_asset_references_bytes;
-use structure::{authoring_structure_rejection, prepare_scene_authoring_structure};
+use structure::authoring_structure_rejection;
 
 use std::{
     collections::{BTreeMap, BTreeSet},
@@ -1737,7 +1738,7 @@ struct ClassifiedRecord<'schema> {
     schema: Option<&'schema ComponentSchema>,
 }
 
-struct ClassificationContext<'a> {
+struct ClassificationContext<'a, 'callback, 'environment> {
     source: &'a AuthoringDocumentSource,
     kind: AuthoringDocumentKind,
     basis: &'a AuthoringClassificationBasis,
@@ -1751,9 +1752,10 @@ struct ClassificationContext<'a> {
     property_read_budget: nara_reflect::ComponentPropertyReadBudget,
     asset_reference_nodes: usize,
     asset_reference_bytes: usize,
+    admission: Option<&'callback mut reclassification::ClassificationCallback<'environment>>,
 }
 
-impl ClassificationContext<'_> {
+impl ClassificationContext<'_, '_, '_> {
     // Traversal and default materialization use the full per-record limits. Retained output
     // is reserved separately so an earlier record cannot shrink another record's Schema budget.
     fn asset_reference_limits(&self) -> nara_reflect::ComponentValueMaterializationLimits {
@@ -1804,6 +1806,20 @@ fn classify_scene_document(
     basis: Arc<AuthoringClassificationBasis>,
     limits: SceneFileLimits,
 ) -> Result<AuthoringDocumentState, AuthoringDocumentPublicationError> {
+    classify_scene_document_impl(document, source, kind, basis, limits, None)
+}
+
+fn classify_scene_document_impl(
+    document: &SceneDocument,
+    source: AuthoringDocumentSource,
+    kind: AuthoringDocumentKind,
+    basis: Arc<AuthoringClassificationBasis>,
+    limits: SceneFileLimits,
+    mut admission: Option<&mut reclassification::ClassificationCallback<'_>>,
+) -> Result<AuthoringDocumentState, AuthoringDocumentPublicationError> {
+    reclassification::charge(&mut admission, "classification-structure", || {
+        reclassification::structure_bytes(document)
+    })?;
     let structure = validate_scene_structure(document);
     if structure.has_errors() {
         return Err(AuthoringDocumentPublicationError::new(structure));
@@ -1829,6 +1845,7 @@ fn classify_scene_document(
             ),
             asset_reference_nodes: 0,
             asset_reference_bytes: 0,
+            admission: admission.as_deref_mut(),
         };
         for entity in &document.entities {
             classify_entity_components(entity, &mut context)?;
@@ -1839,6 +1856,9 @@ fn classify_scene_document(
             context.manifest,
         )
     };
+    reclassification::charge_measured(&mut admission, "classification-overlays", |scratch| {
+        reclassification::overlay_copies_bytes(document, limits, scratch)
+    })?;
     let unavailable_manifest = UnavailableRecordManifest::new(
         manifest,
         document
@@ -1852,6 +1872,9 @@ fn classify_scene_document(
             })
             .collect(),
     );
+    reclassification::charge(&mut admission, "classification-diagnostics", || {
+        reclassification::diagnostics_bytes(unavailable_manifest.entries())
+    })?;
     let diagnostics = unavailable_record_diagnostics(unavailable_manifest.entries());
     let readiness = if unavailable_manifest.total_count() == 0 {
         AuthoringDocumentReadiness::Complete
@@ -1859,6 +1882,9 @@ fn classify_scene_document(
         AuthoringDocumentReadiness::Degraded
     };
     let mut direct_record_facts = BTreeMap::<_, BTreeMap<_, _>>::new();
+    reclassification::charge(&mut admission, "classification-direct-index", || {
+        reclassification::direct_index_bytes(&record_facts)
+    })?;
     for (index, fact) in record_facts.iter().enumerate() {
         if let AuthoringRecordLocation::EntityComponent { entity } = &fact.location {
             direct_record_facts
@@ -1992,10 +2018,18 @@ fn with_authoring_record_location(
 
 fn classify_entity_components(
     entity: &SceneEntityRecord,
-    context: &mut ClassificationContext<'_>,
+    context: &mut ClassificationContext<'_, '_, '_>,
 ) -> Result<(), AuthoringDocumentPublicationError> {
+    reclassification::charge(&mut context.admission, "entity-placement-copy", || {
+        retention::placement_dynamic_bytes(context.placements.get(&entity.id))
+    })?;
     let placement = context.placements.get(&entity.id).cloned();
     for (component, record) in &entity.components {
+        reclassification::charge(&mut context.admission, "record-location", || {
+            crate::provenance::provenance_string_bytes(entity.id.as_str()).and_then(|bytes| {
+                bytes.checked_add(retention::placement_dynamic_bytes(placement.as_ref())?)
+            })
+        })?;
         let location = AuthoringRecordLocation::EntityComponent {
             entity: entity.id.clone(),
         };
@@ -2012,9 +2046,14 @@ fn classify_complete_record(
     placement: Option<crate::ScenePlacement>,
     component: &ComponentTypeId,
     record: &SceneComponentRecord,
-    context: &mut ClassificationContext<'_>,
+    context: &mut ClassificationContext<'_, '_, '_>,
 ) -> Result<(), AuthoringDocumentPublicationError> {
+    reclassification::charge(&mut context.admission, "record-classification", || {
+        reclassification::record_identity_bytes(context.basis, component, record)
+    })?;
     let classified = context.basis.classify_record(component, record)?;
+    let bounded = context.admission.is_some();
+    let mut admitted_effective = None;
     if classified.readiness.is_available() {
         let schema = classified
             .schema
@@ -2024,10 +2063,29 @@ fn classify_complete_record(
             .resolved_owner
             .as_ref()
             .expect("available authoring record retains its admitted schema owner");
-        let effective =
-            validate_complete_value(schema, owner, component, &record.value, context.limits)?;
+        let effective = if bounded {
+            reclassification::complete_value(
+                schema,
+                owner,
+                component,
+                &record.value,
+                context.limits,
+                &mut context.admission,
+            )?
+        } else {
+            validate_complete_value(schema, owner, component, &record.value, context.limits)?
+        };
         if matches!(&location, AuthoringRecordLocation::EntityComponent { .. }) {
-            validate_effective_local_references(
+            if bounded {
+                reclassification::validate_local_references(
+                    schema,
+                    &effective,
+                    &context.namespace,
+                    reference_traversal_limits(context.limits.component_materialization_limits()),
+                    &mut context.admission,
+                )?;
+            } else {
+                validate_effective_local_references(
                 schema,
                 &effective,
                 |entity| context.namespace.contains(entity),
@@ -2042,7 +2100,11 @@ fn classify_complete_record(
                     "component-id",
                     component.as_str(),
                 ))
-            })?;
+                })?;
+            }
+        }
+        if bounded {
+            admitted_effective = Some(effective);
         }
     }
     let schema_declared_asset_references = if classified
@@ -2066,7 +2128,33 @@ fn classify_complete_record(
         } else {
             context.limits.component_materialization_limits()
         };
-        collect_declared_asset_references_from_schema_with_limits(
+        if bounded {
+            let effective = match admitted_effective {
+                Some(value) => value,
+                None => reclassification::effective_value(
+                    schema,
+                    &record.value,
+                    context.limits,
+                    &mut context.admission,
+                )?,
+            };
+            reclassification::asset_references(
+                schema,
+                record.version,
+                &effective,
+                if has_assets {
+                    nara_reflect::EntityReferenceTraversalLimits::new(
+                        reference_limits.nodes(),
+                        reference_limits.bytes(),
+                        reference_limits.depth(),
+                    )
+                } else {
+                    reference_traversal_limits(reference_limits)
+                },
+                &mut context.admission,
+            )?
+        } else {
+            collect_declared_asset_references_from_schema_with_limits(
             schema,
             record.version,
             &record.value,
@@ -2090,7 +2178,8 @@ fn classify_complete_record(
                 "component-id",
                 component.as_str(),
             ))
-        })?
+            })?
+        }
     };
     context.reserve_asset_references(&schema_declared_asset_references)?;
     retain_complete_record(
@@ -2101,7 +2190,7 @@ fn classify_complete_record(
         classified,
         schema_declared_asset_references,
         context,
-    );
+    )?;
     Ok(())
 }
 
@@ -2112,8 +2201,22 @@ fn retain_complete_record(
     record: &SceneComponentRecord,
     classified: ClassifiedRecord<'_>,
     schema_declared_asset_references: Vec<DeclaredAssetReference>,
-    context: &mut ClassificationContext<'_>,
-) {
+    context: &mut ClassificationContext<'_, '_, '_>,
+) -> Result<(), AuthoringDocumentPublicationError> {
+    reclassification::charge(&mut context.admission, "record-fact", || {
+        reclassification::fact_copy_bytes(
+            &location,
+            component,
+            &classified,
+            &schema_declared_asset_references,
+        )
+    })?;
+    reclassification::reserve_vec(
+        &mut context.record_facts,
+        1,
+        &mut context.admission,
+        "record-fact-vector",
+    )?;
     context.record_facts.push(AuthoringRecordFact {
         location: location.clone(),
         owner: classified.owner.clone(),
@@ -2125,7 +2228,40 @@ fn retain_complete_record(
         schema_declared_asset_references: schema_declared_asset_references.clone(),
     });
     if !classified.readiness.is_available() {
-        let entity_references = collect_entity_references(&record.value);
+        reclassification::charge_measured(
+            &mut context.admission,
+            "unavailable-record-copy",
+            |scratch| {
+                reclassification::unavailable_copy_bytes(
+                    context.source,
+                    &location,
+                    placement.as_ref(),
+                    &context.placements,
+                    component,
+                    record,
+                    context.limits,
+                    scratch,
+                )
+            },
+        )?;
+        reclassification::reserve_vec(
+            &mut context.manifest,
+            1,
+            &mut context.admission,
+            "unavailable-manifest-vector",
+        )?;
+        let entity_references = if context.admission.is_some() {
+            let mut references = Vec::new();
+            collect_entity_references_at(
+                &record.value,
+                &mut Vec::new(),
+                &mut references,
+                &mut context.admission,
+            )?;
+            references
+        } else {
+            collect_entity_references(&record.value)
+        };
         context
             .manifest
             .push(UnavailableRecordManifestEntry::Record(UnavailableRecord {
@@ -2148,11 +2284,13 @@ fn retain_complete_record(
                 readiness: classified.readiness,
             }));
     }
+    Ok(())
 }
 
 fn collect_entity_references(value: &ComponentValue) -> Vec<UnavailableEntityReference> {
     let mut references = Vec::new();
-    collect_entity_references_at(value, &mut Vec::new(), &mut references);
+    collect_entity_references_at(value, &mut Vec::new(), &mut references, &mut None)
+        .expect("classification without admission cannot refuse reference copies");
     references
 }
 
@@ -2166,9 +2304,35 @@ fn collect_entity_references_at<'a>(
     value: &'a ComponentValue,
     path: &mut Vec<BorrowedUnavailableValuePathSegment<'a>>,
     references: &mut Vec<UnavailableEntityReference>,
-) {
+    admission: &mut Option<&mut reclassification::ClassificationCallback<'_>>,
+) -> Result<(), AuthoringDocumentPublicationError> {
     match value {
         ComponentValue::EntityReference(reference) => {
+            reclassification::charge(admission, "unavailable-reference", || {
+                let mut bytes = path
+                    .len()
+                    .checked_mul(std::mem::size_of::<UnavailableValuePathSegment>())?;
+                for segment in path.iter() {
+                    if let BorrowedUnavailableValuePathSegment::Field(field) = segment {
+                        bytes = bytes
+                            .checked_add(crate::provenance::provenance_string_bytes(field)?)?;
+                    }
+                }
+                bytes.checked_add(match reference {
+                    EntityReference::SceneLocal { entity } => {
+                        crate::provenance::provenance_string_bytes(entity.as_str())?
+                    }
+                    EntityReference::Persistent { entity } => {
+                        crate::provenance::provenance_string_bytes(entity.namespace.as_str())?
+                    }
+                })
+            })?;
+            reclassification::reserve_vec(
+                references,
+                1,
+                admission,
+                "unavailable-reference-vector",
+            )?;
             references.push(UnavailableEntityReference {
                 path: path
                     .iter()
@@ -2186,15 +2350,17 @@ fn collect_entity_references_at<'a>(
         }
         ComponentValue::List(values) => {
             for (index, value) in values.iter().enumerate() {
+                reclassification::reserve_vec(path, 1, admission, "unavailable-reference-path")?;
                 path.push(BorrowedUnavailableValuePathSegment::Index(index));
-                collect_entity_references_at(value, path, references);
+                collect_entity_references_at(value, path, references, admission)?;
                 let _ = path.pop();
             }
         }
         ComponentValue::Map(values) => {
             for (field, value) in values {
+                reclassification::reserve_vec(path, 1, admission, "unavailable-reference-path")?;
                 path.push(BorrowedUnavailableValuePathSegment::Field(field));
-                collect_entity_references_at(value, path, references);
+                collect_entity_references_at(value, path, references, admission)?;
                 let _ = path.pop();
             }
         }
@@ -2205,6 +2371,7 @@ fn collect_entity_references_at<'a>(
         | ComponentValue::F64(_)
         | ComponentValue::String(_) => {}
     }
+    Ok(())
 }
 
 fn rejection(diagnostic: nara_diagnostic::Diagnostic) -> AuthoringDocumentPublicationError {
@@ -2243,6 +2410,26 @@ pub(crate) fn prepare_scene_authoring_patch(
     patch: &ScenePatchDocument,
     history: bool,
 ) -> Result<PreparedSceneAuthoringPatch, ScenePatchReport> {
+    prepare_scene_authoring_patch_impl(document, state, patch, history, None)
+}
+
+pub(crate) fn prepare_scene_authoring_patch_with_admission(
+    document: &SceneDocument,
+    state: &AuthoringDocumentState,
+    patch: &ScenePatchDocument,
+    history: bool,
+    admit: &mut reclassification::AdmissionCallback<'_>,
+) -> Result<PreparedSceneAuthoringPatch, ScenePatchReport> {
+    prepare_scene_authoring_patch_impl(document, state, patch, history, Some(admit))
+}
+
+fn prepare_scene_authoring_patch_impl(
+    document: &SceneDocument,
+    state: &AuthoringDocumentState,
+    patch: &ScenePatchDocument,
+    history: bool,
+    mut admit: Option<&mut reclassification::AdmissionCallback<'_>>,
+) -> Result<PreparedSceneAuthoringPatch, ScenePatchReport> {
     if patch.operations.len() > MAX_AUTHORING_EDIT_OPERATIONS {
         return Err(authoring_structure_rejection(
             "Authoring transaction has too many operations",
@@ -2253,24 +2440,52 @@ pub(crate) fn prepare_scene_authoring_patch(
         .iter()
         .any(|operation| !is_authoring_field_operation(operation))
     {
-        return prepare_scene_authoring_structure(document, state, patch, history);
+        return structure::prepare_scene_authoring_structure_with_admission(
+            document, state, patch, history, admit,
+        );
+    }
+    if let Some(admit) = admit.as_deref_mut() {
+        reclassification::admit_document(&document.roots, &document.entities, state.limits, admit)?;
+        reclassification::admit_patch_copy(patch, "field-edits", admit)?;
+        reclassification::admit_patch_copy(patch, "forward-patch", admit)?;
+        reclassification::admit_patch_copy(patch, "field-candidate-writes", admit)?;
     }
     let edits = field_edits_from_patch(patch)?;
     let edit = &edits[0];
     let candidate = field_candidate::prepare(document.clone(), state, &edits)?;
-    if crate::format::validate_scene_publication_shape(candidate.document(), state.limits).is_err()
-    {
-        return Err(field_edit_rejection(
-            edit,
-            "scene.authoring-field-edit-format-invalid",
-            "Authoring field edit exceeds the persistent Scene format boundary",
-        ));
-    }
-    let candidate_state = candidate.classify().map_err(|error| ScenePatchReport {
-        applied: false,
-        inverse: None,
-        diagnostics: error.into_diagnostics(),
-    })?;
+    let shape = if let Some(admit) = admit.as_deref_mut() {
+        crate::format::validate_scene_publication_shape_with_admission(
+            candidate.document(),
+            state.limits,
+            |bytes| admit("publication-buffer", Some(bytes)),
+        )
+        .map_err(|error| match error {
+            crate::format::PublicationShapeAdmissionError::Admission(report) => report,
+            crate::format::PublicationShapeAdmissionError::Format(_) => field_edit_rejection(
+                edit,
+                "scene.authoring-field-edit-format-invalid",
+                "Authoring field edit exceeds the persistent Scene format boundary",
+            ),
+        })
+    } else {
+        crate::format::validate_scene_publication_shape(candidate.document(), state.limits).map_err(
+            |_| {
+                field_edit_rejection(
+                    edit,
+                    "scene.authoring-field-edit-format-invalid",
+                    "Authoring field edit exceeds the persistent Scene format boundary",
+                )
+            },
+        )
+    };
+    shape?;
+    let candidate_state = if let Some(admit) = admit.as_deref_mut() {
+        candidate.classify_with_admission(admit)?
+    } else {
+        candidate
+            .classify()
+            .map_err(reclassification::publication_report)?
+    };
     if candidate_state.unavailable_manifest != state.unavailable_manifest {
         return Err(field_edit_rejection(
             edit,
@@ -2298,6 +2513,41 @@ pub(crate) fn prepare_scene_prefab_conversion_patch(
     footprint: &crate::authoring::prefab_conversion::PrefabConversionFootprint,
 ) -> Result<PreparedSceneAuthoringPatch, ScenePatchReport> {
     structure::prepare_conversion_structure(document, state, patch, footprint)
+}
+
+pub(crate) fn prepare_scene_prefab_conversion_patch_with_admission(
+    document: &SceneDocument,
+    state: &AuthoringDocumentState,
+    patch: &ScenePatchDocument,
+    footprint: &crate::authoring::prefab_conversion::PrefabConversionFootprint,
+    admit: &mut reclassification::AdmissionCallback<'_>,
+) -> Result<PreparedSceneAuthoringPatch, ScenePatchReport> {
+    structure::prepare_conversion_structure_with_admission(document, state, patch, footprint, admit)
+}
+
+pub(crate) fn prepare_prefab_conversion_patch_with_admission(
+    document: &PrefabDocument,
+    state: &AuthoringDocumentState,
+    patch: &ScenePatchDocument,
+    footprint: &crate::authoring::prefab_conversion::PrefabConversionFootprint,
+    admit: &mut reclassification::AdmissionCallback<'_>,
+) -> Result<PreparedPrefabAuthoringPatch, ScenePatchReport> {
+    reclassification::admit_document(&document.roots, &document.entities, state.limits, admit)?;
+    let prepared = structure::prepare_conversion_structure_with_admission(
+        &document.instantiate(),
+        state,
+        patch,
+        footprint,
+        admit,
+    )?;
+    let document = PrefabDocument::new(prepared.document.roots, prepared.document.entities);
+    reclassification::validate_prefab_shape(&document, state.limits, Some(admit))?;
+    Ok(PreparedPrefabAuthoringPatch {
+        document,
+        state: prepared.state,
+        patch: prepared.patch,
+        report: prepared.report,
+    })
 }
 
 pub(crate) fn prepare_scene_prefab_conversion_patch_with_work(
@@ -2380,6 +2630,26 @@ pub(crate) fn prepare_prefab_authoring_patch(
     patch: &ScenePatchDocument,
     history: bool,
 ) -> Result<PreparedPrefabAuthoringPatch, ScenePatchReport> {
+    prepare_prefab_authoring_patch_impl(document, state, patch, history, None)
+}
+
+pub(crate) fn prepare_prefab_authoring_patch_with_admission(
+    document: &PrefabDocument,
+    state: &AuthoringDocumentState,
+    patch: &ScenePatchDocument,
+    history: bool,
+    admit: &mut reclassification::AdmissionCallback<'_>,
+) -> Result<PreparedPrefabAuthoringPatch, ScenePatchReport> {
+    prepare_prefab_authoring_patch_impl(document, state, patch, history, Some(admit))
+}
+
+fn prepare_prefab_authoring_patch_impl(
+    document: &PrefabDocument,
+    state: &AuthoringDocumentState,
+    patch: &ScenePatchDocument,
+    history: bool,
+    mut admit: Option<&mut reclassification::AdmissionCallback<'_>>,
+) -> Result<PreparedPrefabAuthoringPatch, ScenePatchReport> {
     if patch.operations.len() > MAX_AUTHORING_EDIT_OPERATIONS {
         return Err(authoring_structure_rejection(
             "Authoring transaction has too many operations",
@@ -2390,14 +2660,23 @@ pub(crate) fn prepare_prefab_authoring_patch(
         .iter()
         .any(|operation| !is_authoring_field_operation(operation))
     {
-        let prepared =
-            prepare_scene_authoring_structure(&document.instantiate(), state, patch, history)?;
-        let candidate = PrefabDocument::new(prepared.document.roots, prepared.document.entities);
-        if crate::format::validate_prefab_publication_shape(&candidate, state.limits).is_err() {
-            return Err(authoring_structure_rejection(
-                "Authoring structure exceeds the Prefab format boundary",
-            ));
+        if let Some(admit) = admit.as_deref_mut() {
+            reclassification::admit_document(
+                &document.roots,
+                &document.entities,
+                state.limits,
+                admit,
+            )?;
         }
+        let prepared = structure::prepare_scene_authoring_structure_with_admission(
+            &document.instantiate(),
+            state,
+            patch,
+            history,
+            admit.as_deref_mut(),
+        )?;
+        let candidate = PrefabDocument::new(prepared.document.roots, prepared.document.entities);
+        reclassification::validate_prefab_shape(&candidate, state.limits, admit.as_deref_mut())?;
         return Ok(PreparedPrefabAuthoringPatch {
             document: candidate,
             state: prepared.state,
@@ -2405,21 +2684,33 @@ pub(crate) fn prepare_prefab_authoring_patch(
             report: prepared.report,
         });
     }
+    if let Some(admit) = admit.as_deref_mut() {
+        reclassification::admit_document(&document.roots, &document.entities, state.limits, admit)?;
+        reclassification::admit_patch_copy(patch, "field-edits", admit)?;
+        reclassification::admit_patch_copy(patch, "forward-patch", admit)?;
+        reclassification::admit_patch_copy(patch, "field-candidate-writes", admit)?;
+    }
     let edits = field_edits_from_patch(patch)?;
     let edit = &edits[0];
     let candidate = field_candidate::prepare(document.instantiate(), state, &edits)?;
-    let candidate = candidate.validate_prefab_shape().map_err(|_| {
-        field_edit_rejection(
-            edit,
-            "scene.authoring-field-edit-format-invalid",
-            "Authoring field edit exceeds the persistent Prefab format boundary",
-        )
-    })?;
-    let candidate_state = candidate.classify().map_err(|error| ScenePatchReport {
-        applied: false,
-        inverse: None,
-        diagnostics: error.into_diagnostics(),
-    })?;
+    let candidate = if let Some(admit) = admit.as_deref_mut() {
+        candidate.validate_prefab_shape_with_admission(admit)?
+    } else {
+        candidate.validate_prefab_shape().map_err(|_| {
+            field_edit_rejection(
+                edit,
+                "scene.authoring-field-edit-format-invalid",
+                "Authoring field edit exceeds the persistent Prefab format boundary",
+            )
+        })?
+    };
+    let candidate_state = if let Some(admit) = admit.as_deref_mut() {
+        candidate.classify_with_admission(admit)?
+    } else {
+        candidate
+            .classify()
+            .map_err(reclassification::publication_report)?
+    };
     if candidate_state.unavailable_manifest != state.unavailable_manifest {
         return Err(field_edit_rejection(
             edit,
@@ -2481,6 +2772,33 @@ fn field_edits_from_patch(
 fn field_edits_from_operations<'a>(
     operations: impl Iterator<Item = &'a ScenePatchOperation> + Clone,
 ) -> Result<Vec<AuthoringFieldChange>, ScenePatchReport> {
+    parse_authoring_field_operations(operations, |entity, component, version, field, value| {
+        AuthoringFieldChange {
+            entity: entity.clone(),
+            component: component.clone(),
+            component_version: version,
+            field: field.clone(),
+            value: value.cloned(),
+        }
+    })
+}
+
+fn validate_authoring_field_operations<'a>(
+    operations: impl Iterator<Item = &'a ScenePatchOperation> + Clone,
+) -> Result<(), ScenePatchReport> {
+    parse_authoring_field_operations(operations, |_, _, _, _, _| ()).map(|_| ())
+}
+
+fn parse_authoring_field_operations<'a, T>(
+    operations: impl Iterator<Item = &'a ScenePatchOperation> + Clone,
+    mut field_change: impl FnMut(
+        &SceneEntityId,
+        &ComponentTypeId,
+        ComponentSchemaVersion,
+        &ComponentFieldId,
+        Option<&ComponentValue>,
+    ) -> T,
+) -> Result<Vec<T>, ScenePatchReport> {
     let count = operations.clone().count();
     if count == 0 || count > MAX_AUTHORING_FIELD_WRITES {
         return Err(authoring_field_patch_rejection());
@@ -2539,13 +2857,13 @@ fn field_edits_from_operations<'a>(
             {
                 return Err(authoring_field_patch_rejection());
             }
-            Ok(AuthoringFieldChange {
-                entity: entity.clone(),
-                component: component.clone(),
-                component_version: *component_version,
-                field: field.clone(),
-                value: value.cloned(),
-            })
+            Ok(field_change(
+                entity,
+                component,
+                *component_version,
+                field,
+                value,
+            ))
         })
         .collect()
 }

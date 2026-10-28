@@ -99,6 +99,7 @@ pub(super) fn classify_conversion_document(
         ),
         asset_reference_nodes: 0,
         asset_reference_bytes: 0,
+        admission: None,
     };
     // Aggregate inventory includes unavailable records and defaults retained in unchanged facts.
     for references in next
@@ -199,7 +200,7 @@ fn classify_materialized_record(
     entity: &SceneEntityId,
     component: &ComponentTypeId,
     record: &SceneComponentRecord,
-    context: &mut ClassificationContext<'_>,
+    context: &mut ClassificationContext<'_, '_, '_>,
     work: &mut ConversionWork,
 ) -> Result<(), ScenePatchReport> {
     let basis = context.basis;

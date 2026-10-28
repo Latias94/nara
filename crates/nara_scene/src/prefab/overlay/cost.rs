@@ -10,6 +10,7 @@ use super::{
     PrefabAddition, PrefabComponentIntent, PrefabEntityTarget, PrefabOverlay,
     PrefabPlacementParent, PrefabPlacementSlot, PrefabPropertyIntent, PrefabReferenceBinding,
 };
+use crate::provenance::{CostScratchAdmission, reserve_cost_scratch};
 use crate::{PrefabInstance, SceneComponentRecord, SourceDocumentKey, SourceDocumentOrigin};
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
@@ -92,14 +93,32 @@ pub(crate) fn prefab_instance_cost(
     instance: &PrefabInstance,
     limits: PrefabOverlayCostLimits,
 ) -> Result<PrefabOverlayCost, PrefabOverlayCostError> {
-    CostWalker::new(limits).walk(Frame::Instance(instance, 1))
+    CostWalker::new(limits, None).walk(Frame::Instance(instance, 1))
+}
+
+/// `Ok(None)` is scratch refusal; the outer cost owner retains the callback's typed error.
+pub(crate) fn prefab_instance_cost_with_admission(
+    instance: &PrefabInstance,
+    limits: PrefabOverlayCostLimits,
+    admit: &mut CostScratchAdmission<'_>,
+) -> Result<Option<PrefabOverlayCost>, PrefabOverlayCostError> {
+    let mut refused = false;
+    let result = {
+        let mut callback = |bytes| {
+            let accepted = admit(bytes);
+            refused |= !accepted;
+            accepted
+        };
+        CostWalker::new(limits, Some(&mut callback)).walk(Frame::Instance(instance, 1))
+    };
+    if refused { Ok(None) } else { result.map(Some) }
 }
 
 pub(crate) fn prefab_overlay_cost(
     overlay: &PrefabOverlay,
     limits: PrefabOverlayCostLimits,
 ) -> Result<PrefabOverlayCost, PrefabOverlayCostError> {
-    CostWalker::new(limits).walk(Frame::Overlay(overlay, 1))
+    CostWalker::new(limits, None).walk(Frame::Overlay(overlay, 1))
 }
 
 // Iterator frames keep auxiliary storage proportional to nesting, rather than fan-out.
@@ -110,21 +129,33 @@ enum Frame<'a> {
     Instances(std::slice::Iter<'a, super::PrefabInstanceClaim>, usize),
 }
 
-struct CostWalker {
+struct CostWalker<'a, 'environment> {
     cost: PrefabOverlayCost,
     limits: PrefabOverlayCostLimits,
+    admission: Option<&'a mut CostScratchAdmission<'environment>>,
 }
 
-impl CostWalker {
-    fn new(limits: PrefabOverlayCostLimits) -> Self {
+impl<'a, 'environment> CostWalker<'a, 'environment> {
+    fn new(
+        limits: PrefabOverlayCostLimits,
+        admission: Option<&'a mut CostScratchAdmission<'environment>>,
+    ) -> Self {
         Self {
             cost: PrefabOverlayCost::default(),
             limits,
+            admission,
         }
     }
 
     fn walk(mut self, first: Frame<'_>) -> Result<PrefabOverlayCost, PrefabOverlayCostError> {
-        let mut pending = vec![first];
+        let mut pending = if self.admission.is_some() {
+            let mut pending = Vec::new();
+            self.reserve_scratch(&mut pending, 1)?;
+            pending.push(first);
+            pending
+        } else {
+            vec![first]
+        };
         while let Some(frame) = pending.pop() {
             match frame {
                 Frame::Instance(instance, depth) => {
@@ -142,6 +173,7 @@ impl CostWalker {
                         AssetRef::StableId(_) => 54,
                     })?;
                     if let Some(overlay) = &instance.overrides {
+                        self.reserve_scratch(&mut pending, 1)?;
                         pending.push(Frame::Overlay(overlay, depth.saturating_add(1)));
                     }
                 }
@@ -186,11 +218,13 @@ impl CostWalker {
                     for target in &overlay.suppressions {
                         self.target(target, child_depth)?;
                     }
+                    self.reserve_scratch(&mut pending, 2)?;
                     pending.push(Frame::Instances(overlay.instances.iter(), child_depth));
                     pending.push(Frame::Additions(overlay.additions.iter(), child_depth));
                 }
                 Frame::Additions(mut additions, depth) => {
                     if let Some(addition) = additions.next() {
+                        self.reserve_scratch(&mut pending, 2)?;
                         pending.push(Frame::Additions(additions, depth));
                         self.node(depth)?;
                         self.bytes(addition.id.as_str().len())?;
@@ -212,6 +246,7 @@ impl CostWalker {
                 }
                 Frame::Instances(mut instances, depth) => {
                     if let Some(claim) = instances.next() {
+                        self.reserve_scratch(&mut pending, 2)?;
                         pending.push(Frame::Instances(instances, depth));
                         self.node(depth)?;
                         self.target(&claim.target, depth)?;
@@ -224,6 +259,25 @@ impl CostWalker {
             }
         }
         Ok(self.cost)
+    }
+
+    fn reserve_scratch<T>(
+        &mut self,
+        values: &mut Vec<T>,
+        additional: usize,
+    ) -> Result<(), PrefabOverlayCostError> {
+        reserve_cost_scratch(values, additional, &mut self.admission)
+            .ok_or_else(|| self.scratch_refusal())
+    }
+
+    fn scratch_refusal(&self) -> PrefabOverlayCostError {
+        // Internal unwind only. The admitted entry converts this to Ok(None), and its outer
+        // caller returns the exact admission error instead of exposing a semantic limit.
+        PrefabOverlayCostError {
+            kind: PrefabOverlayCostKind::Nodes,
+            observed: self.cost.nodes,
+            maximum: self.limits.nodes,
+        }
     }
 
     fn component(
@@ -394,9 +448,13 @@ impl CostWalker {
             )?;
             match value {
                 ComponentValue::List(values) => {
+                    self.reserve_scratch(&mut pending, 1)?;
                     pending.push((Children::List(values.iter()), depth))
                 }
-                ComponentValue::Map(values) => pending.push((Children::Map(values.iter()), depth)),
+                ComponentValue::Map(values) => {
+                    self.reserve_scratch(&mut pending, 1)?;
+                    pending.push((Children::Map(values.iter()), depth));
+                }
                 _ => {}
             }
             current = loop {
@@ -415,7 +473,17 @@ impl CostWalker {
         }
         // ComponentValueCost owns the scalar/key-byte convention. Reuse its canonical result
         // after the bounded walk rather than creating a second constructible cost type.
-        self.cost.value_cost = self.cost.value_cost.saturating_add(value.cost());
+        let value_cost = if let Some(admit) = self.admission.as_deref_mut() {
+            value
+                .cost_up_to_with_admission(usize::MAX, usize::MAX, |bytes| {
+                    if admit(bytes) { Ok(()) } else { Err(()) }
+                })
+                .map_err(|()| self.scratch_refusal())?
+                .ok_or_else(|| self.scratch_refusal())?
+        } else {
+            value.cost()
+        };
+        self.cost.value_cost = self.cost.value_cost.saturating_add(value_cost);
         Ok(())
     }
 
