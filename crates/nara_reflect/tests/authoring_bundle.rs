@@ -23,6 +23,40 @@ fn component_catalog(id: &str, alias: &str, version: u32) -> ComponentSchemaCata
 }
 
 #[test]
+fn bundle_encoding_enforces_reader_aggregate_shape_after_owner_composition() {
+    let owner = |name: &str| {
+        let mut catalog = component_catalog(&format!("{name}.Value"), "Value", 1);
+        catalog.components[0].aliases = (0..35_000)
+            .map(|index| format!("{index:08}{}", "a".repeat(120)))
+            .collect();
+        AuthoringSchemaBundleOwner::new(
+            PersistentComponentSchemaOwnerId::try_new(name).unwrap(),
+            catalog,
+            None,
+        )
+    };
+    let first = owner("studio.first");
+    let second = owner("studio.second");
+    for selected in [&first, &second] {
+        let bundle = AuthoringSchemaBundle::new([selected.clone()]).unwrap();
+        let encoded = bundle.to_json_string().unwrap();
+        assert_eq!(
+            AuthoringSchemaBundle::from_json_str(&encoded).unwrap(),
+            bundle
+        );
+    }
+    // Both inputs fit independently, and the composed envelope still fits encoded-byte and
+    // catalog-count limits. The reader's aggregate string allowance must also gate encoding.
+    let composed = AuthoringSchemaBundle::new([first, second]).unwrap();
+    let error = composed.to_json_string().unwrap_err();
+    assert!(matches!(error, AuthoringSchemaBundleError::Shape { source }
+    if matches!(source.downcast_ref::<nara_core::SerdeShapePreflightError<serde_json::Error>>(),
+        Some(nara_core::SerdeShapePreflightError::Shape(
+            nara_core::SerdeShapeError::TotalStringLimitExceeded { .. }
+        )))));
+}
+
+#[test]
 fn bundle_admission_rejects_deep_caller_shape_before_canonical_snapshot() {
     let mut catalog = component_catalog("nara.test.DeepBundle", "Deep bundle", 1);
     let mut shape = ComponentValueShape::scalar(ComponentValueKind::Bool);

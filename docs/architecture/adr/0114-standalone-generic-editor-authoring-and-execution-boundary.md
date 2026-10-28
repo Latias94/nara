@@ -139,6 +139,12 @@ Each project may publish a versioned, bounded Authoring Schema Bundle composed o
 - bounded authoring metadata already expressible by accepted first-party descriptors;
 - a canonical composition identity and source digest.
 
+Bundle encoding crosses the same format-neutral shape preflight as decoding, including aggregate
+string and container budgets, before returning publishable bytes. Two independently admitted
+owners can exceed a composed file's reader allowance; semantic catalog admission and encoded-byte
+size alone do not prove that the successor can be read. The Reflect format owner supplies this
+shared check without constructing a second decoded bundle or a Host-side schema validator.
+
 The bundle contains no Rust type identity, function pointer, trait object, native codec,
 `PluginDefinition`, executable path, dynamic library, script callback, toolkit object, GPU handle,
 or ambient filesystem path. Loading it grants no executable authority.

@@ -281,6 +281,12 @@ impl AuthoringSchemaBundle {
             }
         })?;
         validate_encoded_bytes(encoded.as_bytes(), limits)?;
+        let mut deserializer = serde_json::Deserializer::from_str(&encoded);
+        preflight_serde_shape(&mut deserializer, limits.shape()).map_err(|source| {
+            AuthoringSchemaBundleError::Shape {
+                source: Box::new(source),
+            }
+        })?;
         Ok(encoded)
     }
 
