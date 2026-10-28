@@ -1,4 +1,4 @@
-//! Durable installed C# selection through the public Application source-tool boundary.
+//! Installed C# metadata adoption and durable selection through the public Application boundary.
 
 use std::{
     collections::BTreeMap,
@@ -15,23 +15,28 @@ use nara::{
         RelativeComponent, TrustMode,
     },
     project_host::{
+        EditorSchemaOwnerAdoptionError, EditorSchemaOwnerAdoptionOutcome,
+        EditorSchemaOwnerAdoptionPhase, EditorSchemaOwnerAdoptionView,
         EditorSourceToolInstallationOutcome, EditorSourceToolInstallationPlan,
         EditorSourceToolManagedHost, EditorSourceToolManagedHostDigests,
         PreparedEditorSourceToolRelease, advanced::built_in_schema_providers,
         open_explicit_product_project_root,
     },
     reflect::{
-        AuthoringSchemaBundle, AuthoringSchemaBundleOwner, ComponentFieldId, ComponentPropertyPath,
-        ComponentSchemaCatalog, ComponentSchemaOwnerSnapshot, ComponentSchemaVersion,
-        ComponentTypeId, ComponentValue, PersistentComponentSchemaOwnerId,
+        AuthoringSchemaBundle, ComponentFieldId, ComponentPropertyPath, ComponentSchemaCatalog,
+        ComponentSchemaOwnerSnapshot, ComponentSchemaVersion, ComponentTypeId, ComponentValue,
+        PersistentComponentSchemaOwnerId,
     },
     scene::{
-        AuthoringReadError, SceneComponentRecord, SceneDocument, SceneEntityId, SceneEntityRecord,
-        ScenePatchOperation, ScenePlacement, ScenePlacementOwner,
+        AuthoringReadError, AuthoringRecordReadiness, SceneComponentRecord, SceneDocument,
+        SceneEntityId, SceneEntityRecord, ScenePatchDocument, ScenePatchOperation, ScenePlacement,
+        ScenePlacementOwner,
     },
     tooling::{
-        EditorAction, EditorActionBatch, EditorActionOutcome, EditorCloseDecision,
-        EditorDocumentId, EditorDocumentMutation, EditorDocumentQueryRejection,
+        EditorAction, EditorActionBatch, EditorActionOutcome, EditorAuthoringProjection,
+        EditorAuthoringQuery, EditorAuthoringQueryLimits, EditorAuthoringQueryPosition,
+        EditorAuthoringQueryTarget, EditorAuthoringRow, EditorCloseDecision, EditorDocumentId,
+        EditorDocumentMutation, EditorDocumentQueryBasis, EditorDocumentQueryRejection,
         EditorPersistenceAction, EditorPersistenceRequestResult, EditorPersistenceResult,
         EditorPropertyRead, EditorPropertyReadLimits, EditorPropertyTarget, EditorPropertyValue,
         EditorSourceToolAction, EditorSourceToolActionOutcome, EditorSourceToolAttemptId,
@@ -251,8 +256,19 @@ fn read_property(
     component: &str,
     field: &str,
 ) -> Result<EditorPropertyValue, EditorDocumentQueryRejection> {
+    let basis = application.document_query_basis(document).unwrap();
+    read_property_at(application, basis, entity, component, field)
+}
+
+fn read_property_at(
+    application: &mut EditorApplication,
+    basis: EditorDocumentQueryBasis,
+    entity: &SceneEntityId,
+    component: &str,
+    field: &str,
+) -> Result<EditorPropertyValue, EditorDocumentQueryRejection> {
     let target = EditorPropertyTarget {
-        basis: application.document_query_basis(document).unwrap(),
+        basis,
         entity: entity.clone(),
         component: ComponentTypeId::new(component),
         property: ComponentPropertyPath::new(ComponentFieldId::new(field)),
@@ -278,6 +294,75 @@ fn read_property(
         .as_ref()
         .map(|observation| observation.value.clone())
         .map_err(Clone::clone)
+}
+
+fn component_readiness(
+    application: &mut EditorApplication,
+    document: EditorDocumentId,
+    entity: &SceneEntityId,
+) -> AuthoringRecordReadiness {
+    let basis = application.document_query_basis(document).unwrap();
+    let frame = application.current_frame().unwrap();
+    let submitted = application.submit_and_drive(
+        EditorActionBatch::new(
+            frame.revision(),
+            [EditorAction::QueryDocumentAuthoring(EditorAuthoringQuery {
+                position: EditorAuthoringQueryPosition::Start(EditorAuthoringQueryTarget {
+                    basis,
+                    entity: entity.clone(),
+                    projection: EditorAuthoringProjection::Components,
+                }),
+                limits: EditorAuthoringQueryLimits::new(16, 16, 4096).unwrap(),
+            })],
+        ),
+        Duration::ZERO,
+    );
+    let [
+        EditorApplicationActionDispatch::Dispatched(EditorActionOutcome::DocumentAuthoring(Ok(
+            page,
+        ))),
+    ] = submitted.actions()
+    else {
+        panic!("Application lost the component metadata observation: {submitted:?}");
+    };
+    assert!(page.next.is_none());
+    page.rows
+        .iter()
+        .find_map(|row| match row {
+            EditorAuthoringRow::Component {
+                component,
+                readiness,
+                ..
+            } if component == &ComponentTypeId::new(STATS) => Some(*readiness),
+            _ => None,
+        })
+        .expect("The original EnemyStats source record must remain discoverable")
+}
+
+fn settle_schema_owner(
+    application: &mut EditorApplication,
+    phase: EditorSchemaOwnerAdoptionPhase,
+) -> EditorSchemaOwnerAdoptionView {
+    let deadline = Instant::now() + TIMEOUT;
+    loop {
+        application.advance(Duration::ZERO);
+        let view = application.schema_owner_adoption_view().unwrap();
+        if view.phase == phase
+            || matches!(
+                view.phase,
+                EditorSchemaOwnerAdoptionPhase::Terminal
+                    | EditorSchemaOwnerAdoptionPhase::RequiresReconcile
+            )
+        {
+            assert_eq!(view.phase, phase, "{view:?}");
+            return view.clone();
+        }
+        assert!(
+            Instant::now() < deadline,
+            "Application metadata adoption did not settle: {view:?}"
+        );
+        std::thread::sleep(Duration::from_millis(1));
+    }
 }
 
 fn replay(application: &mut EditorApplication, document: EditorDocumentId, redo: bool) {
@@ -332,15 +417,8 @@ fn csharp_source_tool_application_preserves_review_and_exact_commit_result() {
     let native =
         AuthoringSchemaBundle::from_trusted_provider_definitions(built_in_schema_providers())
             .unwrap();
-    let bundle = AuthoringSchemaBundle::new(
-        native
-            .owners()
-            .iter()
-            .map(AuthoringSchemaBundleOwner::from)
-            .chain([AuthoringSchemaBundleOwner::from(&owner)]),
-    )
-    .unwrap();
-    let name_owner = bundle
+    assert!(native.owner(owner.owner_id()).is_none());
+    let name_owner = native
         .owner_for_component(&ComponentTypeId::new(NAME))
         .unwrap();
     let enemy = SceneEntityId::new("enemy").unwrap();
@@ -367,30 +445,34 @@ fn csharp_source_tool_application_preserves_review_and_exact_commit_result() {
             .with_owner(owner.owner_id().clone()),
         )]);
     let fixture = PersistenceFixture::new();
-    fs::write(
-        fixture.root.join("catalogs/authoring.bundle.json"),
-        bundle.to_json_string().unwrap(),
-    )
-    .unwrap();
+    let bundle_path = fixture.root.join("catalogs/authoring.bundle.json");
+    fs::write(&bundle_path, native.to_json_string().unwrap()).unwrap();
+    let original_bundle = fs::read(&bundle_path).unwrap();
     let scene_path = fixture.root.join("worlds/entry.scene.json");
     fs::write(&scene_path, source.to_json_string().unwrap()).unwrap();
     let original_bytes = fs::read(&scene_path).unwrap();
     let installed = install_tool(&fixture.root, &directory, &executable);
-    let mut application = fixture.open_with_expected_state(EditorApplicationState::AuthoringReady);
+    assert_eq!(fs::read(&bundle_path).unwrap(), original_bundle);
+    let mut application =
+        fixture.open_with_expected_state(EditorApplicationState::AuthoringDegraded);
     let document = application
         .current_frame()
         .unwrap()
         .workspace()
         .active_document
         .unwrap();
-    let basis = application.document_query_basis(document).unwrap();
+    let old_basis = application.document_query_basis(document).unwrap();
     assert_eq!(
-        basis
+        old_basis
             .schema
             .as_ref()
             .unwrap()
             .component_schema_owner(&ComponentTypeId::new(STATS)),
-        Some(owner.owner_id()),
+        None,
+    );
+    assert_eq!(
+        component_readiness(&mut application, document, &enemy),
+        AuthoringRecordReadiness::UnknownSchema
     );
     let opened = settle_tool(&mut application);
     assert!(opened.active.is_none() && opened.attempt.is_none() && opened.review.is_none());
@@ -401,6 +483,125 @@ fn csharp_source_tool_application_preserves_review_and_exact_commit_result() {
         Some(EditorSourceToolSelectionOutcome::Observed),
     );
     assert!(!fixture.root.join(SELECTION).exists());
+
+    let old_edit = application
+        .prepare_authoring_edit(
+            &old_basis,
+            &ScenePatchDocument::new([ScenePatchOperation::AddEntity {
+                entity: SceneEntityRecord::new(
+                    SceneEntityId::new("stale-before-adoption").unwrap(),
+                ),
+                placement: ScenePlacement::last(ScenePlacementOwner::Root),
+            }]),
+        )
+        .unwrap();
+    let deadline = Instant::now() + TIMEOUT;
+    let adoption = loop {
+        match application.prepare_installed_schema_owner(INSTALLATION, installed.receipt) {
+            Ok(operation) => break operation,
+            Err(EditorSchemaOwnerAdoptionError::Busy) => {
+                assert!(
+                    Instant::now() < deadline,
+                    "Application metadata admission remained Busy"
+                );
+                application.advance(Duration::ZERO);
+                std::thread::sleep(Duration::from_millis(1));
+            }
+            Err(error) => panic!("Application metadata preparation failed: {error:?}"),
+        }
+    };
+    let review = settle_schema_owner(&mut application, EditorSchemaOwnerAdoptionPhase::Review);
+    assert_eq!(review.operation, Some(adoption));
+    assert_eq!(review.owner.as_deref(), Some("trial.enemy-stats"));
+    assert_eq!(review.documents, 1);
+    assert_eq!(review.outcome, None);
+    assert!(!review.reconciliation);
+    assert!(application.schema_owner_adoption_publication().is_none());
+    assert_eq!(
+        application.document_query_basis(document).unwrap(),
+        old_basis
+    );
+    assert_eq!(
+        component_readiness(&mut application, document, &enemy),
+        AuthoringRecordReadiness::UnknownSchema
+    );
+    assert_eq!(fs::read(&bundle_path).unwrap(), original_bundle);
+    assert_eq!(fs::read(&scene_path).unwrap(), original_bytes);
+    let before_enable = application.source_tool_view().unwrap();
+    assert!(
+        before_enable.active.is_none()
+            && before_enable.attempt.is_none()
+            && before_enable.request.is_none()
+            && before_enable.review.is_none()
+    );
+    assert!(!fixture.root.join(SELECTION).exists());
+
+    application.adopt_schema_owner(adoption).unwrap();
+    let adopted = settle_schema_owner(&mut application, EditorSchemaOwnerAdoptionPhase::Terminal);
+    assert_eq!(adopted.operation, Some(adoption));
+    assert_eq!(
+        adopted.outcome,
+        Some(EditorSchemaOwnerAdoptionOutcome::Adopted)
+    );
+    assert_eq!(application.state(), EditorApplicationState::AuthoringReady);
+    assert!(application.schema_owner_adoption_publication().is_some());
+    let basis = application.document_query_basis(document).unwrap();
+    assert_eq!(basis.revision, old_basis.revision);
+    assert_ne!(basis.schema, old_basis.schema);
+    assert_eq!(
+        basis
+            .schema
+            .as_ref()
+            .unwrap()
+            .component_schema_owner(&component),
+        Some(owner.owner_id())
+    );
+    assert_eq!(
+        read_property_at(&mut application, old_basis.clone(), &enemy, NAME, "value"),
+        Err(EditorDocumentQueryRejection::StaleSchema)
+    );
+    let rejected = application.commit_authoring_edit(old_edit, Duration::ZERO);
+    assert!(matches!(
+        rejected.actions(),
+        [EditorApplicationActionDispatch::Dispatched(EditorActionOutcome::Workspace(report))]
+            if !report.applied
+    ));
+    assert_eq!(application.document_query_basis(document).unwrap(), basis);
+    assert_eq!(
+        component_readiness(&mut application, document, &enemy),
+        AuthoringRecordReadiness::Available
+    );
+    assert_eq!(
+        read_property(&mut application, document, &enemy, STATS, "health").unwrap(),
+        EditorPropertyValue::Present(ComponentValue::I64(100))
+    );
+    assert_eq!(fs::read(&scene_path).unwrap(), original_bytes);
+    let expected_bundle = AuthoringSchemaBundle::from_owner_snapshots(
+        native.owners().iter().cloned().chain([owner.clone()]),
+    )
+    .unwrap();
+    assert_eq!(
+        AuthoringSchemaBundle::from_json_bytes(&fs::read(&bundle_path).unwrap()).unwrap(),
+        expected_bundle
+    );
+    let frame = application.current_frame().unwrap();
+    let tab = frame.workspace().document(document).unwrap();
+    assert!(!tab.dirty);
+    assert_eq!(tab.history.undo_depth, 0);
+    assert_eq!(tab.history.redo_depth, 0);
+    let metadata_only = application.source_tool_view().unwrap();
+    assert!(
+        metadata_only.active.is_none()
+            && metadata_only.attempt.is_none()
+            && metadata_only.request.is_none()
+            && metadata_only.review.is_none()
+    );
+    assert!(metadata_only.selection.as_ref().unwrap().desired.is_none());
+    assert!(!fixture.root.join(SELECTION).exists());
+    application
+        .acknowledge_schema_owner_adoption(adoption)
+        .unwrap();
+
     let attempt = enable_installed_tool(&mut application, &installed);
     let ready = settle_tool(&mut application);
     let enabled = ready.selection.as_ref().unwrap().desired.clone().unwrap();

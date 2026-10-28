@@ -22,6 +22,22 @@ pub(super) struct AuthoringSourceSelection {
 }
 
 impl EditorProjectSession {
+    pub(super) fn authoring_source_selection_retained_bytes(
+        &self,
+        document: EditorDocumentId,
+    ) -> Option<usize> {
+        let (path, key, source) = if let Some(lane) = self.scene_lanes.get(&document) {
+            (&lane.project_path, &lane.source_key, &lane.authoring_source)
+        } else {
+            let lane = self.prefab_lanes.get(&document)?;
+            (&lane.project_path, &lane.source_key, &lane.authoring_source)
+        };
+        std::mem::size_of::<AuthoringSourceSelection>()
+            .checked_add(path.len())?
+            .checked_add(key.retained_bytes())?
+            .checked_add(source.as_ref()?.checked_retained_bytes()?)
+    }
+
     pub(super) fn authoring_source_selection(
         &self,
         document: EditorDocumentId,

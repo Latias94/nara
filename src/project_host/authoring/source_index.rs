@@ -812,6 +812,13 @@ impl ProjectSourceIndexState {
         }
     }
 
+    /// Observes only an admitted scan. Reserved and queued refreshes cannot run through
+    /// `poll_preparation`, so they do not prevent replacing the bundle-bound index.
+    #[must_use]
+    pub(crate) const fn schema_adoption_pending(&self) -> bool {
+        self.attempt.is_some()
+    }
+
     #[must_use]
     pub(crate) const fn has_pending_work(&self) -> bool {
         self.attempt.is_some() || self.pending.is_some()

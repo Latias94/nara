@@ -1,8 +1,8 @@
-//! Additive data-only bundle preparation and accepted-leaf attachment.
+//! Additive data-only bundle preparation and actual-leaf attachment.
 //!
-//! A prepared basis does not manufacture a successor file receipt. The incumbent remains the
-//! physical observation during source preparation; only an accepted publication can join it to
-//! the prepared metadata. Whole-project and Workspace adoption are separate owner operations.
+//! A prepared basis does not manufacture a publication receipt. Source preparation uses either
+//! the incumbent leaf before publication or an explicitly observed successor leaf. Whole-project
+//! and Workspace adoption are separate owner operations.
 
 use std::{fmt, sync::Arc};
 
@@ -19,7 +19,7 @@ use super::super::{
     AuthoringProjectAdmissionError, AuthoringSchemaReceipt,
     adapter::{FirstPartyAuthoringAdapterError, project_authoring_adapters},
 };
-use super::AdmittedAuthoringSchemaBundle;
+use super::{AdmittedAuthoringSchemaBundle, admit_bundle};
 use crate::project_host::file_publication::{
     AcceptedFilePublication, FilePublicationEvidence, FilePublicationFailureStage,
     FilePublicationHost,
@@ -33,9 +33,16 @@ pub(crate) enum AuthoringSchemaOwnerPreparation {
     },
 }
 
-/// Immutable metadata held before any successor bundle leaf exists.
+/// Explicit recovery either prepares an ordinary publication or observes its exact successor.
+pub(crate) enum AuthoringSchemaOwnerReconciliation {
+    Publication(AuthoringSchemaOwnerPreparation),
+    Observed(PreparedAuthoringSchemaOwner),
+}
+
+/// Immutable metadata with separate live-incumbent and actual source-observation authority.
 pub(crate) struct PreparedAuthoringSchemaOwner {
     incumbent: Arc<AuthoringSchemaReceipt>,
+    observation: Arc<AuthoringSchemaReceipt>,
     bundle: Arc<AuthoringSchemaBundle>,
     bytes: Arc<[u8]>,
     digest: ContentDigest,
@@ -52,6 +59,14 @@ pub(crate) struct AdmittedAuthoringSchemaOwner {
     pub(crate) adapters: Box<[AuthoringAdapterReceipt]>,
     pub(crate) basis: AuthoringSchemaBasis,
     pub(crate) publication: FilePublicationEvidence,
+    pub(crate) usage: super::super::AuthoringProjectAdmissionUsage,
+}
+
+/// An actual read leaf joined to prepared metadata without asserting a publication attempt.
+pub(crate) struct ObservedAuthoringSchemaOwner {
+    pub(crate) schema: Arc<AuthoringSchemaReceipt>,
+    pub(crate) adapters: Box<[AuthoringAdapterReceipt]>,
+    pub(crate) basis: AuthoringSchemaBasis,
     pub(crate) usage: super::super::AuthoringProjectAdmissionUsage,
 }
 
@@ -92,11 +107,66 @@ impl AuthoringSchemaReceipt {
         owner: &ComponentSchemaOwnerSnapshot,
     ) -> Result<AuthoringSchemaOwnerPreparation, AuthoringSchemaOwnerError> {
         self.validate_owner_predecessor()?;
+        let mut budget = AuthoringProjectAdmissionBudget::new(self.limits());
+        budget.charge_manifest_bytes(self.manifest_bytes().len())?;
+        self.prepare_owner_with_budget(owner, budget)
+    }
+
+    /// Reads the selected bundle for a new review, preserving the original manifest and owners.
+    /// This does not refresh or reuse a previously reviewed nominal basis.
+    pub(crate) fn prepare_observed_owner(
+        self: &Arc<Self>,
+        owner: &ComponentSchemaOwnerSnapshot,
+    ) -> Result<AuthoringSchemaOwnerReconciliation, AuthoringSchemaOwnerError> {
+        self.validate_owner_manifest()?;
+        let mut budget = AuthoringProjectAdmissionBudget::new(self.limits());
+        budget.charge_manifest_bytes(self.manifest_bytes().len())?;
+        let observed = admit_bundle(&self.project_root, self.bundle_path().clone(), &mut budget)?;
+        if observed.capability().parent_identity() != self.bundle_parent_identity() {
+            return Err(AuthoringSchemaOwnerError::BundleChanged);
+        }
+        if observed.bundle() == self.bundle() {
+            // Ordinary publication still requires the exact incumbent leaf, not equal metadata
+            // independently rebound by name. Retain this read's work in the same allowance.
+            self.validate_owner_predecessor()?;
+            budget.charge_source_bytes(observed.bytes().len(), 0, 0, 0)?;
+            return self
+                .prepare_owner_with_budget(owner, budget)
+                .map(AuthoringSchemaOwnerReconciliation::Publication);
+        }
+        let expected = self
+            .owner_successor(owner)?
+            .ok_or(AuthoringSchemaOwnerError::BundleChanged)?;
+        if observed.bundle() != &expected {
+            return Err(AuthoringSchemaOwnerError::BundleChanged);
+        }
+        let mut prepared = PreparedAuthoringSchemaOwner::prepare_metadata(
+            self,
+            observed.shared_bundle(),
+            Arc::clone(&observed.bytes),
+            budget,
+        )?;
+        prepared.observation = Arc::new(AuthoringSchemaReceipt {
+            attempt: self.attempt,
+            project_root: self.project_root.share(),
+            manifest: Arc::clone(&self.manifest),
+            settings: self.settings.clone(),
+            bundle: observed,
+            budget: prepared.base_budget,
+        });
+        prepared.validate()?;
+        Ok(AuthoringSchemaOwnerReconciliation::Observed(prepared))
+    }
+
+    fn owner_successor(
+        &self,
+        owner: &ComponentSchemaOwnerSnapshot,
+    ) -> Result<Option<AuthoringSchemaBundle>, AuthoringSchemaOwnerError> {
         if let Some(previous) = self.bundle().owner(owner.owner_id()) {
             return if previous.current() == owner.current()
                 && previous.predecessor() == owner.predecessor()
             {
-                Ok(AuthoringSchemaOwnerPreparation::AlreadyAdmitted)
+                Ok(None)
             } else {
                 Err(AuthoringSchemaOwnerError::ExistingOwnerChanged)
             };
@@ -104,39 +174,39 @@ impl AuthoringSchemaReceipt {
         if owner.current().generation() != 1 || owner.predecessor().is_some() {
             return Err(AuthoringSchemaOwnerError::UnsupportedLineage);
         }
-        let bundle = AuthoringSchemaBundle::from_owner_snapshots(
+        AuthoringSchemaBundle::from_owner_snapshots(
             self.bundle()
                 .owners()
                 .iter()
                 .cloned()
                 .chain([owner.clone()]),
         )
-        .map_err(AuthoringSchemaOwnerError::Composition)?;
+        .map(Some)
+        .map_err(AuthoringSchemaOwnerError::Composition)
+    }
+
+    fn prepare_owner_with_budget(
+        self: &Arc<Self>,
+        owner: &ComponentSchemaOwnerSnapshot,
+        mut budget: AuthoringProjectAdmissionBudget,
+    ) -> Result<AuthoringSchemaOwnerPreparation, AuthoringSchemaOwnerError> {
+        let Some(bundle) = self.owner_successor(owner)? else {
+            return Ok(AuthoringSchemaOwnerPreparation::AlreadyAdmitted);
+        };
         let bytes = bundle
             .to_json_string()
             .map_err(AuthoringSchemaOwnerError::Encode)?
             .into_bytes();
-        let mut budget = AuthoringProjectAdmissionBudget::new(self.limits());
-        budget.charge_manifest_bytes(self.manifest_bytes().len())?;
         budget.charge_bundle_bytes(bytes.len())?;
         budget.charge_reference(self.bundle_path().as_str().len(), 0, false)?;
         budget.charge_open_file(2)?;
         budget.charge_open_file(2)?;
-        // Reuse the Authoring owner's existing encoded-to-metadata model before preparing
-        // adapters and the nominal declaration index. This is logical ownership, not RSS.
-        let metadata = bytes
-            .len()
-            .checked_mul(AUTHORING_BASIS_ENCODED_MULTIPLIER)
-            .ok_or(
-                AuthoringProjectAdmissionError::RetainedCandidateBytesExceeded {
-                    maximum: self.limits().retained_candidate_bytes().get(),
-                },
-            )?;
-        budget.charge_source_bytes(0, metadata, metadata, metadata)?;
-        let adapters =
-            project_authoring_adapters(&bundle).map_err(AuthoringSchemaOwnerError::Adapters)?;
-        let basis = AuthoringSchemaBasis::admit(&bundle, &adapters)
-            .map_err(AuthoringSchemaOwnerError::Basis)?;
+        let prepared = PreparedAuthoringSchemaOwner::prepare_metadata(
+            self,
+            Arc::new(bundle),
+            Arc::from(bytes),
+            budget,
+        )?;
         let publication = FilePublicationHost::bind_existing(
             &self.project_root,
             self.bundle_path().as_str(),
@@ -149,23 +219,12 @@ impl AuthoringSchemaReceipt {
             return Err(AuthoringSchemaOwnerError::BundleChanged);
         }
         Ok(AuthoringSchemaOwnerPreparation::Prepared {
-            owner: PreparedAuthoringSchemaOwner {
-                incumbent: Arc::clone(self),
-                bundle: Arc::new(bundle),
-                digest: ContentDigest::of_bytes(&bytes),
-                bytes: Arc::from(bytes),
-                settings: self.settings.clone(),
-                bundle_path: self.bundle_path().clone(),
-                adapters,
-                basis,
-                base_budget: budget,
-                budget,
-            },
+            owner: prepared,
             publication,
         })
     }
 
-    fn validate_owner_predecessor(&self) -> Result<(), AuthoringSchemaOwnerError> {
+    fn validate_owner_manifest(&self) -> Result<(), AuthoringSchemaOwnerError> {
         let manifest = self
             .project_root
             .open_file(
@@ -184,6 +243,11 @@ impl AuthoringSchemaReceipt {
         {
             return Err(AuthoringSchemaOwnerError::ManifestChanged);
         }
+        Ok(())
+    }
+
+    fn validate_owner_predecessor(&self) -> Result<(), AuthoringSchemaOwnerError> {
+        self.validate_owner_manifest()?;
         let publication = FilePublicationHost::bind_existing(
             &self.project_root,
             self.bundle_path().as_str(),
@@ -200,6 +264,42 @@ impl AuthoringSchemaReceipt {
 }
 
 impl PreparedAuthoringSchemaOwner {
+    fn prepare_metadata(
+        incumbent: &Arc<AuthoringSchemaReceipt>,
+        bundle: Arc<AuthoringSchemaBundle>,
+        bytes: Arc<[u8]>,
+        mut budget: AuthoringProjectAdmissionBudget,
+    ) -> Result<Self, AuthoringSchemaOwnerError> {
+        // Both publication and explicit observation use one metadata preparation kernel and
+        // one nominal admission. This accounts logical ownership rather than physical RSS.
+        let metadata = bytes
+            .len()
+            .checked_mul(AUTHORING_BASIS_ENCODED_MULTIPLIER)
+            .ok_or(
+                AuthoringProjectAdmissionError::RetainedCandidateBytesExceeded {
+                    maximum: incumbent.limits().retained_candidate_bytes().get(),
+                },
+            )?;
+        budget.charge_source_bytes(0, metadata, metadata, metadata)?;
+        let adapters =
+            project_authoring_adapters(&bundle).map_err(AuthoringSchemaOwnerError::Adapters)?;
+        let basis = AuthoringSchemaBasis::admit(&bundle, &adapters)
+            .map_err(AuthoringSchemaOwnerError::Basis)?;
+        Ok(Self {
+            incumbent: Arc::clone(incumbent),
+            observation: Arc::clone(incumbent),
+            bundle,
+            digest: ContentDigest::of_bytes(&bytes),
+            bytes,
+            settings: incumbent.settings.clone(),
+            bundle_path: incumbent.bundle_path().clone(),
+            adapters,
+            basis,
+            base_budget: budget,
+            budget,
+        })
+    }
+
     pub(in crate::project_host::authoring) fn budget(&self) -> AuthoringProjectAdmissionBudget {
         self.budget
     }
@@ -228,10 +328,41 @@ impl PreparedAuthoringSchemaOwner {
         &self.incumbent
     }
 
+    pub(crate) fn observation(&self) -> &Arc<AuthoringSchemaReceipt> {
+        &self.observation
+    }
+
+    /// Reserves retained operation inputs before their allocation, including refused attempts.
+    pub(crate) fn retain_operation_inputs(
+        &mut self,
+        bytes: usize,
+    ) -> Result<(), AuthoringProjectAdmissionError> {
+        let mut budget = self.budget();
+        let result = budget.charge_source_bytes(0, 0, 0, bytes);
+        self.retain_capture_budget(budget);
+        result
+    }
+
     /// Revalidates the original review input; it never refreshes metadata behind that review.
     pub(crate) fn validate(&self) -> Result<(), AuthoringSchemaOwnerError> {
         self.budget.ensure_within_limits()?;
-        self.incumbent.validate_owner_predecessor()
+        self.observation.validate_owner_predecessor()
+    }
+
+    /// Transfers the exact observed read leaf without IO or a synthetic publication receipt.
+    /// The caller separately retains any evidence from the original publication attempt.
+    pub(crate) fn attach_observed(self) -> Result<ObservedAuthoringSchemaOwner, Self> {
+        if Arc::ptr_eq(&self.incumbent, &self.observation)
+            || self.budget.ensure_within_limits().is_err()
+        {
+            return Err(self);
+        }
+        Ok(ObservedAuthoringSchemaOwner {
+            schema: self.observation,
+            adapters: self.adapters,
+            basis: self.basis,
+            usage: self.budget.usage(),
+        })
     }
 
     /// Joins prepared semantics to the actual accepted leaf without another Schema admission.
@@ -242,7 +373,8 @@ impl PreparedAuthoringSchemaOwner {
         let source = publication.source();
         let evidence = publication.evidence().receipt();
         let digest = self.digest;
-        if self.budget.ensure_within_limits().is_err()
+        if !Arc::ptr_eq(&self.incumbent, &self.observation)
+            || self.budget.ensure_within_limits().is_err()
             || evidence.previous_identity() != Some(self.incumbent.bundle_identity())
             || evidence.candidate_identity() != source.identity()
             || evidence.published_identity() != Some(source.identity())

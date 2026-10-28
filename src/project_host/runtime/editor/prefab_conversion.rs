@@ -109,6 +109,11 @@ pub(super) struct EditorPrefabConversionHost {
 }
 
 impl EditorPrefabConversionHost {
+    /// Pending ownership survives cancellation until `advance_prefab_conversion` observes return.
+    pub(super) fn schema_adoption_pending(&self) -> bool {
+        self.pending.is_some()
+    }
+
     pub(super) fn view(&self) -> EditorPrefabConversionView {
         self.view.clone()
     }
@@ -219,6 +224,9 @@ impl EditorProjectSession {
         basis: EditorDocumentQueryBasis,
         anchor: SceneEntityId,
     ) -> Outcome {
+        if self.schema_adoption_fenced() {
+            return rejected(None, Rejection::Busy);
+        }
         if !self.accepts_new_work() || self.pending_workspace_intent.is_some() {
             return rejected(None, Rejection::Closing);
         }
@@ -405,6 +413,9 @@ impl EditorProjectSession {
     }
 
     fn validate_prefab_conversion(&mut self, operation: EditorPrefabConversionId) -> Outcome {
+        if self.schema_adoption_fenced() {
+            return rejected(Some(operation), Rejection::Busy);
+        }
         if !self.accepts_new_work() || self.pending_workspace_intent.is_some() {
             return rejected(Some(operation), Rejection::Closing);
         }

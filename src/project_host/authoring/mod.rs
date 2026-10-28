@@ -18,8 +18,10 @@ pub(crate) use project::{
     AuthoringAssetSource, AuthoringDocumentCapture, AuthoringPrefabSessionSnapshot,
     AuthoringPrefabSourceCapture, AuthoringProjectCandidate, AuthoringProjectReadiness,
     AuthoringProjectReceipt, AuthoringProjectSessionSnapshot, AuthoringProjectSnapshot,
-    AuthoringProjectSourceAdmissionError, AuthoringSourceKind, AuthoringSourceValidation,
-    CapturedAuthoringPreview, PreparedAuthoringProject,
+    AuthoringProjectSourceAdmissionError, AuthoringSchemaOwnerProjectInput, AuthoringSourceKind,
+    AuthoringSourceValidation, CapturedAuthoringPreview, PreparedAuthoringProject,
+    PreparedSchemaOwnerProject, PreparedSchemaOwnerSceneCapture,
+    SchemaOwnerObservedProjectAttachmentFailure, SchemaOwnerProjectAttachmentFailure,
 };
 
 pub(crate) const MAX_AUTHORING_IMAGE_IDENTITIES: usize = 4_096;
@@ -56,10 +58,12 @@ use nara_reflect::{
 };
 
 use self::bundle::{AdmittedAuthoringSchemaBundle, admit_bundle};
-#[cfg(test)]
-pub(crate) use bundle::AuthoringSchemaOwnerPreparation;
 #[cfg(any(feature = "tooling", test))]
-pub(crate) use bundle::{AdmittedAuthoringSchemaOwner, PreparedAuthoringSchemaOwner};
+pub(crate) use bundle::{
+    AdmittedAuthoringSchemaOwner, AuthoringSchemaOwnerAttachmentFailure, AuthoringSchemaOwnerError,
+    AuthoringSchemaOwnerPreparation, AuthoringSchemaOwnerReconciliation,
+    ObservedAuthoringSchemaOwner, PreparedAuthoringSchemaOwner,
+};
 
 const PROJECT_MANIFEST_PATH: &str = "nara.toml";
 

@@ -157,6 +157,7 @@ impl From<EditorEditPreparationError> for EditorSourceToolError {
     fn from(error: EditorEditPreparationError) -> Self {
         match error {
             EditorEditPreparationError::Closing => Self::Closing,
+            EditorEditPreparationError::Busy => Self::Busy,
             EditorEditPreparationError::WorkspaceUnavailable => Self::WorkspaceUnavailable,
             EditorEditPreparationError::QueryBasis(error) => Self::QueryBasis(error),
             EditorEditPreparationError::StructureContractMismatch { document } => {
@@ -225,6 +226,11 @@ pub(super) struct EditorSourceTools {
 }
 
 impl EditorSourceTools {
+    /// Selection IO and deferred promotion are separate from process jobs.
+    pub(super) fn schema_adoption_pending(&self) -> bool {
+        self.jobs() != 0 || self.selection.schema_adoption_pending()
+    }
+
     pub(super) fn selection_read_source(
         &self,
     ) -> Result<Option<crate::project_host::file_publication::FilePublicationReadSource>, ()> {
@@ -586,6 +592,8 @@ impl EditorProjectSession {
     fn ensure_source_tool_admission(&self) -> Result<(), EditorSourceToolError> {
         if !self.accepts_new_work() || self.pending_workspace_intent.is_some() {
             Err(EditorSourceToolError::Closing)
+        } else if self.schema_adoption_fenced() {
+            Err(EditorSourceToolError::Busy)
         } else {
             Ok(())
         }
@@ -768,6 +776,9 @@ impl EditorProjectSession {
     }
 
     pub(super) fn advance_source_tools(&mut self) {
+        self.source_tools
+            .selection
+            .observe_schema_adoption_cleanup();
         self.advance_source_tool_selection();
         self.source_tools
             .retiring

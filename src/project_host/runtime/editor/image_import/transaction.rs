@@ -9,6 +9,7 @@ use nara_asset::{
 };
 use nara_fs::{ContentDigest, FileIdentity, RelativePath};
 use nara_image::ImageImportSettings;
+use nara_tasks::{TaskReturnObserver, TaskReturnState};
 use nara_tilemap::{TileSetSource, TileSetSourceFileLimits};
 
 #[cfg(test)]
@@ -232,6 +233,7 @@ pub(crate) struct EditorImageImportHost {
     runtime_revocation_failure: Option<EditorImageRuntimeFailure>,
     next_attempt_generation: u64,
     pending: Option<PendingImageImport>,
+    retiring_imports: Vec<TaskReturnObserver>,
     latest: Option<EditorImageImportLatestAttempt>,
     retained_details: BTreeMap<Arc<str>, EditorImageImportLatestDetail>,
     last_good: EditorImageLastGoodStore,
@@ -258,6 +260,7 @@ impl Default for EditorImageImportHost {
             runtime_revocation_failure: None,
             next_attempt_generation: 1,
             pending: None,
+            retiring_imports: Vec::new(),
             latest: None,
             retained_details: BTreeMap::new(),
             last_good: EditorImageLastGoodStore::default(),
@@ -379,8 +382,50 @@ impl EditorImageImportHost {
         self.catalog_attempt.is_some()
             || self.tile_source_refresh.is_some()
             || self.pending.is_some()
+            || !self.retiring_imports.is_empty()
             || self.refresh.is_some()
             || self.hydration.has_pending_work()
+    }
+
+    /// Observes admitted work and cleanup, including cancelled workers awaiting physical return.
+    /// Queued catalog, refresh and hydration inputs cannot run while the caller fences `advance`.
+    #[must_use]
+    pub(in crate::project_host::runtime::editor) fn schema_adoption_pending(&self) -> bool {
+        self.schema_adoption_import_pending() || self.hydration.schema_adoption_pending()
+    }
+
+    pub(in crate::project_host::runtime::editor) fn schema_adoption_import_pending(&self) -> bool {
+        self.pending.is_some()
+            || !self.retiring_imports.is_empty()
+            || self.publication_cleanup.is_some()
+    }
+
+    /// Cancels admitted image work and observes its return without admitting another worker.
+    pub(in crate::project_host::runtime::editor) fn advance_schema_adoption_drain(&mut self) {
+        if let Some(generation) = self.pending.as_ref().map(|pending| pending.generation) {
+            self.cancel_import_pending();
+            self.set_latest_state(EditorImageImportState::Failed {
+                generation,
+                failure: EditorImageImportFailure::Runtime(
+                    EditorImageRuntimeFailure::TaskCancelled,
+                ),
+            });
+        }
+        self.hydration.observe_schema_adoption_drain();
+        self.observe_retiring_imports();
+        self.retry_publication_cleanup();
+    }
+
+    fn observe_retiring_imports(&mut self) {
+        self.retiring_imports
+            .retain(|observer| observer.state() == TaskReturnState::Pending);
+    }
+
+    fn retain_import_return(&mut self, task: &EditorImageRuntimeTask) {
+        let observer = task.return_observer();
+        if observer.state() == TaskReturnState::Pending {
+            self.retiring_imports.push(observer);
+        }
     }
 
     #[must_use]
@@ -401,10 +446,15 @@ impl EditorImageImportHost {
     }
 
     pub(crate) fn cancel_pending(&mut self) {
+        self.cancel_import_pending();
+        self.hydration.cancel_pending();
+    }
+
+    fn cancel_import_pending(&mut self) {
         if let Some(pending) = self.pending.take() {
+            self.retain_import_return(&pending.task);
             self.retire_metadata(pending.metadata);
         }
-        self.hydration.cancel_pending();
     }
 
     pub(crate) fn retry_publication_cleanup(&mut self) -> bool {
@@ -449,6 +499,8 @@ impl EditorImageImportHost {
         project: &mut AuthoringProjectSessionSnapshot,
         runtime: &mut EditorAuthoringRuntime,
     ) -> Option<EditorImageRuntimeFailure> {
+        self.retry_publication_cleanup();
+        self.observe_retiring_imports();
         let previous_failure = self.runtime_revocation_failure;
         self.advance_refresh(project);
         self.advance_catalog(project, runtime);
@@ -816,7 +868,7 @@ impl EditorImageImportHost {
             self.catalog_basis = None;
             self.catalog_attempt = None;
             self.catalog = None;
-            self.catalog_failure = None;
+            // A refused successor refresh remains unavailable until a new index is observed.
             return;
         };
         if self
@@ -866,6 +918,7 @@ impl EditorImageImportHost {
                         generation: pending.generation,
                         failure: EditorImageImportFailure::MetadataInvalid,
                     });
+                    self.retain_import_return(&pending.task);
                     self.retire_metadata(pending.metadata);
                 }
                 let deferred = self
@@ -957,6 +1010,7 @@ impl EditorImageImportHost {
             .pending
             .take()
             .expect("a terminal image task belongs to one pending attempt");
+        self.retain_import_return(&pending.task);
         let generation = pending.generation;
         let result = match terminal {
             EditorImageRuntimeTerminal::Rejected(reason) => {
@@ -1149,6 +1203,7 @@ impl EditorImageImportHost {
         };
         if last_good.stable_id() != stable_id
             || last_good.version() != version
+            || last_good.source_proof() == EditorImageSourceProof::Unverified
             || source_index
                 .entry(&relative_path)
                 .and_then(crate::project_host::authoring::ProjectSourceIndexEntry::scoped_identity)
@@ -1167,6 +1222,21 @@ impl EditorImageImportHost {
         let target_generation = project.request_source_index_refresh()?;
         self.refresh = Some(RefreshObligation { target_generation });
         Some(target_generation)
+    }
+
+    /// Replaces obligations from the predecessor index after the Session installs its successor.
+    /// Import results, published metadata and last-good pixels retain their original facts;
+    /// predecessor index verification cannot authorize the successor's reused generations.
+    pub(in crate::project_host::runtime::editor) fn adopt_schema_project_index(
+        &mut self,
+        project: &mut AuthoringProjectSessionSnapshot,
+    ) {
+        self.last_good.revoke_source_index_verification();
+        self.refresh = None;
+        self.reconciliation = None;
+        if self.schedule_refresh(project).is_none() {
+            self.catalog_failure = Some(EditorImageCatalogBuildError::SourceIndexUnavailable);
+        }
     }
 
     fn require_reconciliation(

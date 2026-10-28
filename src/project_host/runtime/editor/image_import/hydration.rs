@@ -482,6 +482,40 @@ impl EditorImageHydrationHost {
             || !self.rechecks.is_empty()
     }
 
+    /// Cancelled hydration still owns its task until the executor has physically returned it.
+    #[must_use]
+    pub(super) fn schema_adoption_pending(&self) -> bool {
+        self.pending.is_some()
+    }
+
+    /// Cancels and observes admitted work without starting queued imports or validation.
+    /// Retain its input so ordinary driving can resume if adoption is refused.
+    pub(super) fn observe_schema_adoption_drain(&mut self) {
+        let Some(mut pending) = self.pending.take() else {
+            return;
+        };
+        if !pending.cancelled {
+            match &pending.work {
+                ImageHydrationWork::Recheck { image, .. } => {
+                    self.queue_recheck(pending.source.clone(), image.clone());
+                }
+                ImageHydrationWork::Import(_) | ImageHydrationWork::Validate { .. } => {
+                    if !self
+                        .queued
+                        .iter()
+                        .any(|source| source.asset_path() == pending.source.asset_path())
+                    {
+                        self.queued.push_front(pending.source.clone());
+                    }
+                }
+            }
+            pending.cancel();
+        }
+        if pending.return_state() == TaskReturnState::Pending {
+            self.pending = Some(pending);
+        }
+    }
+
     pub(super) fn cancel_pending(&mut self) {
         if let Some(pending) = &mut self.pending {
             pending.cancel();

@@ -10,9 +10,10 @@ use nara_image::ImageColorSpace;
 
 use crate::project_host::{
     authoring::{
-        AuthoringProjectAdmissionHost, PreparedAuthoringProject, project_authoring_adapters,
+        AuthoringProjectAdmissionHost, AuthoringProjectReceipt, PreparedAuthoringProject,
+        project_authoring_adapters,
     },
-    runtime::editor::{EditorProjectCloseProgress, EditorProjectSession},
+    runtime::editor::{EditorExecutionLane, EditorProjectCloseProgress, EditorProjectSession},
 };
 
 use super::*;
@@ -97,19 +98,26 @@ impl Fixture {
         .unwrap()
     }
 
-    fn editor(&self) -> EditorProjectSession {
+    fn receipt(&self) -> AuthoringProjectReceipt {
+        Self::receipt_from(self.capability())
+    }
+
+    fn receipt_from(root: DirectoryCapability) -> AuthoringProjectReceipt {
         let schema = AuthoringProjectAdmissionHost::default()
-            .prepare(self.capability(), None)
+            .prepare(root, None)
             .unwrap()
             .admit_bundle()
             .unwrap()
             .publish();
         let adapters = project_authoring_adapters(schema.bundle()).unwrap();
-        let receipt = PreparedAuthoringProject::new(schema, adapters)
+        PreparedAuthoringProject::new(schema, adapters)
             .admit_startup_closure()
             .unwrap()
-            .publish();
-        let mut editor = EditorProjectSession::open(receipt, None).unwrap();
+            .publish()
+    }
+
+    fn editor(&self) -> EditorProjectSession {
+        let mut editor = EditorProjectSession::open(self.receipt(), None).unwrap();
         drive_until(&mut editor, |editor| {
             !editor.project_source_index_work_pending()
                 && !editor.editor_image_import_work_pending()
@@ -410,4 +418,366 @@ fn cancellation_retires_pending_metadata_and_runtime_close_owns_abandoned_metada
             assert_eq!(publication.try_with(|_| ()), None);
         }
     }
+}
+
+// Windows can retry exact temporary-file removal after the injected obstruction releases.
+// Unix temporary-file failure retains an orphan under its separate filesystem contract.
+#[cfg(windows)]
+#[test]
+fn ordinary_advance_releases_failed_publication_cleanup_without_another_import_or_close() {
+    let fixture = Fixture::new(Some(ImageImportSettings::default()));
+    let mut editor = fixture.editor();
+    let original = fs::read(fixture.root.join(METADATA)).unwrap();
+    let cleanup = editor.test_fail_next_image_metadata_after_write();
+    let frame = editor.current_frame();
+    let outcome = editor.request_editor_image_import(
+        frame.revision(),
+        SOURCE,
+        ImageImportSettings::new(ImageColorSpace::Linear),
+    );
+    assert!(matches!(
+        outcome,
+        EditorImageImportRequestResult::Completed(EditorImageImportState::Failed {
+            failure: EditorImageImportFailure::CleanupPending,
+            ..
+        })
+    ));
+    let failed = editor.image_import.state();
+    let publication = editor
+        .image_import
+        .publication_cleanup
+        .as_ref()
+        .unwrap()
+        .clone();
+    for _ in 0..2 {
+        editor.drive_editor_frame(Duration::ZERO);
+        assert!(editor.image_import.schema_adoption_import_pending());
+        assert_eq!(
+            editor.image_import.request_blocker(),
+            Some(EditorImageImportFailure::CleanupPending)
+        );
+    }
+    cleanup.release();
+    editor.drive_editor_frame(Duration::ZERO);
+    assert!(!editor.image_import.schema_adoption_import_pending());
+    assert!(editor.image_import.publication_cleanup.is_none());
+    assert_eq!(editor.image_import.request_blocker(), None);
+    assert_eq!(editor.image_import.state(), failed);
+    assert_eq!(publication.try_with(|_| ()), None);
+    assert_eq!(fs::read(fixture.root.join(METADATA)).unwrap(), original);
+    close_editor(&mut editor);
+}
+
+#[test]
+fn adopting_a_fresh_project_index_replaces_old_refresh_and_reconciliation_targets() {
+    for reconcile in [false, true] {
+        let fixture = Fixture::new(Some(ImageImportSettings::default()));
+        let mut editor = fixture.editor();
+        let frame = editor.current_frame();
+        assert!(matches!(
+            editor.request_editor_image_import(
+                frame.revision(),
+                SOURCE,
+                ImageImportSettings::default(),
+            ),
+            EditorImageImportRequestResult::Started(_)
+        ));
+        let EditorImageImportState::Succeeded { generation, .. } = drive_to_terminal(&mut editor)
+        else {
+            panic!("the fixture must publish actual last-good pixels");
+        };
+        for _ in 0..3 {
+            assert!(editor.request_project_source_index_refresh());
+            drive_until(&mut editor, |editor| {
+                !editor.project_source_index_work_pending()
+                    && !editor.editor_image_import_work_pending()
+            });
+        }
+        let old_index = editor.project_source_index_snapshot().unwrap();
+        let old_catalog = editor.image_import.catalog.as_ref().unwrap().clone();
+        let old_target = {
+            let EditorProjectSession {
+                image_import,
+                execution,
+                ..
+            } = &mut editor;
+            let EditorExecutionLane::Authoring(project) = execution else {
+                unreachable!();
+            };
+            image_import.schedule_refresh(project).unwrap()
+        };
+        assert!(old_target > old_index.generation());
+        if reconcile {
+            editor.image_import.refresh = None;
+            editor
+                .image_import
+                .require_reconciliation(generation, old_target.get());
+        }
+        let previous_state = editor.image_import.state();
+        let path = AssetPath::new("textures/imported.png").unwrap();
+        let previous_image = editor.image_import.last_good(&path).unwrap().clone();
+        let previous_detail = editor
+            .image_import
+            .detail_for(SOURCE)
+            .unwrap()
+            .detail_revision();
+        let metadata_bytes = fs::read(fixture.root.join(METADATA)).unwrap();
+        let successor = Fixture::receipt_from(editor.source_project_root())
+            .into_session_snapshot()
+            .unwrap();
+        assert_eq!(
+            successor.project_root().identity(),
+            old_index.root_identity()
+        );
+        assert!(
+            successor
+                .project_root()
+                .same_object(&editor.source_project_root())
+                .unwrap()
+        );
+        assert!(successor.source_index_has_pending_work());
+        assert!(successor.source_index_snapshot().is_none());
+        editor.execution = EditorExecutionLane::Authoring(successor);
+        let target = {
+            let EditorProjectSession {
+                image_import,
+                execution,
+                ..
+            } = &mut editor;
+            let EditorExecutionLane::Authoring(project) = execution else {
+                unreachable!();
+            };
+            image_import.adopt_schema_project_index(project);
+            let target = image_import.refresh.unwrap().target_generation;
+            // Repeated requests coalesce into the successor index's queued refresh.
+            assert_eq!(project.request_source_index_refresh(), Some(target));
+            target
+        };
+        assert!(target < old_target);
+        assert!(editor.image_import.reconciliation.is_none());
+        assert!(editor.image_import.catalog.is_none());
+        assert!(editor.image_import.catalog_basis.is_none());
+        assert!(editor.image_import.catalog_attempt.is_none());
+        assert_eq!(editor.image_import.state(), previous_state);
+        let retained = editor.image_import.last_good(&path).unwrap();
+        assert_eq!(retained.source_proof(), EditorImageSourceProof::Unverified);
+        assert_eq!(retained.handle(), previous_image.handle());
+        assert_eq!(retained.stable_id(), previous_image.stable_id());
+        assert_eq!(retained.source_identity(), previous_image.source_identity());
+        assert_eq!(retained.source_digest(), previous_image.source_digest());
+        assert_eq!(retained.settings_hash(), previous_image.settings_hash());
+        assert_eq!(retained.version(), previous_image.version());
+        assert_eq!(
+            editor
+                .image_import
+                .detail_for(SOURCE)
+                .unwrap()
+                .detail_revision(),
+            previous_detail
+        );
+        drive_until(&mut editor, |editor| {
+            !editor.project_source_index_work_pending()
+                && !editor.editor_image_import_work_pending()
+        });
+        let current = editor.project_source_index_snapshot().unwrap();
+        assert_eq!(current.generation(), target);
+        assert!(!Arc::ptr_eq(&current, &old_index));
+        assert!(!Arc::ptr_eq(
+            editor.image_import.catalog.as_ref().unwrap(),
+            &old_catalog
+        ));
+        assert!(editor.image_import.metadata_snapshot(&current).is_some());
+        assert!(editor.image_import.refresh.is_none());
+        assert!(editor.image_import.reconciliation.is_none());
+        assert_eq!(editor.image_import.request_blocker(), None);
+        assert_eq!(editor.image_import.state(), previous_state);
+        assert_eq!(
+            editor.image_import.last_good(&path).unwrap().source_proof(),
+            EditorImageSourceProof::Unverified
+        );
+        assert_eq!(
+            editor.image_import.last_good(&path).unwrap().version(),
+            previous_image.version()
+        );
+        assert_eq!(
+            fs::read(fixture.root.join(METADATA)).unwrap(),
+            metadata_bytes
+        );
+        close_editor(&mut editor);
+    }
+}
+
+#[test]
+fn refused_successor_refresh_retains_unavailable_observation_without_inventing_success() {
+    let fixture = Fixture::new(Some(ImageImportSettings::default()));
+    let mut editor = fixture.editor();
+    let previous_state = editor.image_import.state();
+    let mut successor = Fixture::receipt_from(editor.source_project_root())
+        .into_session_snapshot()
+        .unwrap();
+    successor.cancel_source_index();
+    editor
+        .image_import
+        .adopt_schema_project_index(&mut successor);
+    assert!(editor.image_import.refresh.is_none());
+    assert!(editor.image_import.reconciliation.is_none());
+    assert_eq!(
+        editor.image_import.catalog_failure,
+        Some(EditorImageCatalogBuildError::SourceIndexUnavailable)
+    );
+    editor
+        .image_import
+        .advance(&mut successor, &mut editor.authoring_runtime);
+    assert_eq!(
+        editor.image_import.catalog_failure,
+        Some(EditorImageCatalogBuildError::SourceIndexUnavailable)
+    );
+    assert!(editor.image_import.catalog.is_none());
+    assert_eq!(editor.image_import.state(), previous_state);
+    assert!(!successor.source_index_has_pending_work());
+    close_editor(&mut editor);
+}
+
+#[test]
+fn successor_index_generation_collision_cannot_reverify_old_pixels_without_import() {
+    use nara_tooling::{EditorImageImportAvailabilityView, EditorImageImportFreshness};
+
+    let fixture = Fixture::new(Some(ImageImportSettings::default()));
+    let mut editor = fixture.editor();
+    let frame = editor.current_frame();
+    assert!(matches!(
+        editor.request_editor_image_import(
+            frame.revision(),
+            SOURCE,
+            ImageImportSettings::default(),
+        ),
+        EditorImageImportRequestResult::Started(_)
+    ));
+    assert!(matches!(
+        drive_to_terminal(&mut editor),
+        EditorImageImportState::Succeeded { .. }
+    ));
+    {
+        let EditorProjectSession {
+            image_import,
+            execution,
+            ..
+        } = &mut editor;
+        let EditorExecutionLane::Authoring(project) = execution else {
+            unreachable!();
+        };
+        image_import.schedule_refresh(project).unwrap();
+    }
+    drive_until(&mut editor, |editor| {
+        !editor.project_source_index_work_pending() && !editor.editor_image_import_work_pending()
+    });
+    let path = AssetPath::new("textures/imported.png").unwrap();
+    let previous = editor.image_import.last_good(&path).unwrap().clone();
+    let EditorImageSourceProof::SourceIndex {
+        generation: verified,
+    } = previous.source_proof()
+    else {
+        panic!("the actual import and refresh must verify the predecessor index");
+    };
+    let source_bytes = fs::read(fixture.root.join(SOURCE)).unwrap();
+    // An in-place rewrite retains the native identity but invalidates the decoded pixels' digest.
+    fs::write(
+        fixture.root.join(SOURCE),
+        b"changed image bytes under the same identity",
+    )
+    .unwrap();
+    let current_source = editor
+        .source_project_root()
+        .open_file_exact(&RelativePath::new(SOURCE).unwrap())
+        .unwrap();
+    assert_eq!(current_source.identity(), previous.source_identity());
+    assert!(
+        current_source
+            .verify_digest(previous.source_digest(), source_bytes.len() as u64)
+            .is_err()
+    );
+    drop(current_source);
+    let successor = Fixture::receipt_from(editor.source_project_root())
+        .into_session_snapshot()
+        .unwrap();
+    assert_eq!(
+        successor.project_root().identity(),
+        editor.source_project_root().identity()
+    );
+    assert!(
+        successor
+            .project_root()
+            .same_object(&editor.source_project_root())
+            .unwrap()
+    );
+    editor.execution = EditorExecutionLane::Authoring(successor);
+    {
+        let EditorProjectSession {
+            image_import,
+            execution,
+            ..
+        } = &mut editor;
+        let EditorExecutionLane::Authoring(project) = execution else {
+            unreachable!();
+        };
+        image_import.adopt_schema_project_index(project);
+        assert_eq!(image_import.refresh.unwrap().target_generation, verified);
+    }
+    drive_until(&mut editor, |editor| {
+        !editor.project_source_index_work_pending() && !editor.editor_image_import_work_pending()
+    });
+    let index = editor.project_source_index_snapshot().unwrap();
+    assert_eq!(index.generation(), verified);
+    let retained = editor.image_import.last_good(&path).unwrap();
+    assert_eq!(retained.source_proof(), EditorImageSourceProof::Unverified);
+    assert_eq!(retained.handle(), previous.handle());
+    assert_eq!(retained.version(), previous.version());
+    assert_eq!(retained.source_digest(), previous.source_digest());
+    let (_, view) = editor
+        .image_import
+        .projection_for(&index, SOURCE, &editor.authoring_runtime)
+        .unwrap()
+        .into_parts();
+    assert!(matches!(
+        view.availability(),
+        EditorImageImportAvailabilityView::LastGood {
+            freshness: EditorImageImportFreshness::SourceUnverified,
+            ..
+        }
+    ));
+
+    // Only another actual decode/validation may establish verification in the new index.
+    fs::write(fixture.root.join(SOURCE), &source_bytes).unwrap();
+    let frame = editor.current_frame();
+    assert!(matches!(
+        editor.request_editor_image_import(
+            frame.revision(),
+            SOURCE,
+            ImageImportSettings::default(),
+        ),
+        EditorImageImportRequestResult::Started(_)
+    ));
+    assert!(matches!(
+        drive_to_terminal(&mut editor),
+        EditorImageImportState::Succeeded { .. }
+    ));
+    assert_eq!(
+        editor.image_import.last_good(&path).unwrap().source_proof(),
+        EditorImageSourceProof::SourceIndex {
+            generation: verified
+        }
+    );
+    let (_, view) = editor
+        .image_import
+        .projection_for(&index, SOURCE, &editor.authoring_runtime)
+        .unwrap()
+        .into_parts();
+    assert!(matches!(
+        view.availability(),
+        EditorImageImportAvailabilityView::LastGood {
+            freshness: EditorImageImportFreshness::Fresh,
+            ..
+        }
+    ));
+    close_editor(&mut editor);
 }

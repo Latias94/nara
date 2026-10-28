@@ -22,6 +22,13 @@ pub(crate) use transaction::{
     EditorImageImportRequestResult,
 };
 
+impl super::EditorProjectSession {
+    /// Drains admitted image work while ordinary image admission is fenced by the Session.
+    pub(super) fn drain_schema_adoption_image_work(&mut self) {
+        self.image_import.advance_schema_adoption_drain();
+    }
+}
+
 fn metadata_byte_limit() -> u64 {
     u64::try_from(AssetMetaFileLimits::default().encoded_bytes().get()).unwrap_or(u64::MAX)
 }

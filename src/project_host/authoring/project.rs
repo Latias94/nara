@@ -44,6 +44,11 @@ pub(crate) use capture::{
     AuthoringDocumentCapture, AuthoringPrefabSessionSnapshot, AuthoringPrefabSourceCapture,
     AuthoringSourceValidation, CapturedAuthoringPreview,
 };
+#[cfg(any(feature = "tooling", test))]
+pub(crate) use schema_owner::{
+    AuthoringSchemaOwnerProjectInput, PreparedSchemaOwnerProject, PreparedSchemaOwnerSceneCapture,
+    SchemaOwnerObservedProjectAttachmentFailure, SchemaOwnerProjectAttachmentFailure,
+};
 #[cfg(test)]
 mod tests;
 use super::native_source::{AdmittedNativeDocumentSource, NativeDocumentSourcePolicy};
@@ -617,6 +622,10 @@ pub(crate) struct AuthoringProjectSessionSnapshot {
 }
 
 impl AuthoringProjectSessionSnapshot {
+    #[cfg(feature = "tooling")]
+    pub(crate) fn source_index_scan_pending(&self) -> bool {
+        self.source_index.schema_adoption_pending()
+    }
     pub(crate) fn admit_startup_document(
         &self,
     ) -> Result<super::AdmittedAuthoringDocument, super::AuthoringDocumentAdmissionError> {

@@ -2,9 +2,69 @@
 
 use super::*;
 use crate::project_host::{
-    authoring::{AdmittedAuthoringSchemaOwner, PreparedAuthoringSchemaOwner},
+    authoring::{
+        AdmittedAuthoringSchemaOwner, AuthoringSchemaOwnerError, AuthoringSchemaOwnerPreparation,
+        AuthoringSchemaOwnerReconciliation, ObservedAuthoringSchemaOwner,
+        PreparedAuthoringSchemaOwner,
+    },
     file_publication::FilePublicationEvidence,
 };
+
+/// Exact project authority needed by background preparation, without retaining the live Session.
+#[derive(Clone)]
+pub(crate) struct AuthoringSchemaOwnerProjectInput {
+    incumbent: Arc<AuthoringSchemaReceipt>,
+    basis: AuthoringSchemaBasis,
+    scene_limits: SceneFileLimits,
+}
+
+impl AuthoringProjectSessionSnapshot {
+    pub(crate) fn schema_owner_input(&self) -> AuthoringSchemaOwnerProjectInput {
+        AuthoringSchemaOwnerProjectInput {
+            incumbent: Arc::clone(&self.schema),
+            basis: self.startup_scene.schema_basis(),
+            scene_limits: self.scene_limits,
+        }
+    }
+}
+
+impl AuthoringSchemaOwnerProjectInput {
+    pub(crate) fn project_root(&self) -> DirectoryCapability {
+        self.incumbent.project_root()
+    }
+
+    pub(crate) fn schema_basis(&self) -> &AuthoringSchemaBasis {
+        &self.basis
+    }
+
+    pub(crate) fn prepare_owner(
+        &self,
+        owner: &nara_reflect::ComponentSchemaOwnerSnapshot,
+    ) -> Result<AuthoringSchemaOwnerPreparation, AuthoringSchemaOwnerError> {
+        self.incumbent.prepare_owner(owner)
+    }
+
+    pub(crate) fn prepare_observed_owner(
+        &self,
+        owner: &nara_reflect::ComponentSchemaOwnerSnapshot,
+    ) -> Result<AuthoringSchemaOwnerReconciliation, AuthoringSchemaOwnerError> {
+        self.incumbent.prepare_observed_owner(owner)
+    }
+
+    /// Revalidation compares actual authority and nominal basis, never just equal file bytes.
+    pub(crate) fn matches(&self, project: &AuthoringProjectSessionSnapshot) -> bool {
+        Arc::ptr_eq(&self.incumbent, &project.schema)
+            && self.basis == project.startup_scene.schema_basis()
+    }
+}
+
+impl Debug for AuthoringSchemaOwnerProjectInput {
+    fn fmt(&self, formatter: &mut Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("AuthoringSchemaOwnerProjectInput")
+            .finish_non_exhaustive()
+    }
+}
 
 /// A complete actual saved-root closure, still fenced by the incumbent metadata observation.
 ///
@@ -17,10 +77,26 @@ pub(crate) struct PreparedSchemaOwnerProject {
     startup: CapturedSavedStartup,
 }
 
+/// Actual selected capture under prepared metadata, still fenced by the incumbent bundle leaf.
+///
+/// The inner capture is unavailable as a published successor until the bundle's actual accepted
+/// leaf has been attached. Source-history proof and whole-project publication are separate.
+pub(crate) struct PreparedSchemaOwnerSceneCapture {
+    pub(super) capture: AuthoringDocumentCapture,
+    pub(super) basis: AuthoringSchemaBasis,
+    pub(super) incumbent: Arc<AuthoringSchemaReceipt>,
+}
+
 /// The bundle was already published; retain both preparation and actual leaf for reconciliation.
 pub(crate) struct SchemaOwnerProjectAttachmentFailure {
     pub(crate) prepared: PreparedSchemaOwnerProject,
     pub(crate) successor: AdmittedAuthoringSchemaOwner,
+}
+
+/// The observed leaf remains owned when it cannot join this nominal project preparation.
+pub(crate) struct SchemaOwnerObservedProjectAttachmentFailure {
+    pub(crate) prepared: PreparedSchemaOwnerProject,
+    pub(crate) successor: ObservedAuthoringSchemaOwner,
 }
 
 impl PreparedAuthoringSchemaOwner {
@@ -29,7 +105,15 @@ impl PreparedAuthoringSchemaOwner {
         incumbent: &AuthoringProjectSessionSnapshot,
         open_prefabs: &[AuthoringPrefabSessionSnapshot],
     ) -> Result<PreparedSchemaOwnerProject, AuthoringProjectSourceAdmissionError> {
-        if !Arc::ptr_eq(self.incumbent(), &incumbent.schema) {
+        self.prepare_project_input(&incumbent.schema_owner_input(), open_prefabs)
+    }
+
+    pub(crate) fn prepare_project_input(
+        &mut self,
+        input: &AuthoringSchemaOwnerProjectInput,
+        open_prefabs: &[AuthoringPrefabSessionSnapshot],
+    ) -> Result<PreparedSchemaOwnerProject, AuthoringProjectSourceAdmissionError> {
+        if !Arc::ptr_eq(self.incumbent(), &input.incumbent) {
             return Err(AuthoringProjectSourceAdmissionError::SchemaBasisMismatch);
         }
         let mut budget = self.budget();
@@ -46,10 +130,10 @@ impl PreparedAuthoringSchemaOwner {
                     adapter_receipts_retained_bytes(self.adapters())?,
                 ])?,
             )?;
-            let read = read_saved_startup(self.incumbent(), incumbent.scene_limits, &mut budget)?;
+            let read = read_saved_startup(self.observation(), input.scene_limits, &mut budget)?;
             let mut startup = capture_saved_startup(
-                self.incumbent(),
-                incumbent.scene_limits,
+                self.observation(),
+                input.scene_limits,
                 read,
                 &basis,
                 self.bytes().len(),
@@ -63,7 +147,7 @@ impl PreparedAuthoringSchemaOwner {
             Ok(PreparedSchemaOwnerProject {
                 incumbent: Arc::clone(self.incumbent()),
                 basis,
-                scene_limits: incumbent.scene_limits,
+                scene_limits: input.scene_limits,
                 startup,
             })
         })();
@@ -92,7 +176,10 @@ impl PreparedSchemaOwnerProject {
         &self,
         owner: &mut PreparedAuthoringSchemaOwner,
     ) -> Result<(), AuthoringProjectSourceAdmissionError> {
-        if &self.basis != owner.schema_basis() || !Arc::ptr_eq(&self.incumbent, owner.incumbent()) {
+        if &self.basis != owner.schema_basis()
+            || !Arc::ptr_eq(&self.incumbent, owner.incumbent())
+            || !Arc::ptr_eq(&self.startup.capture.authority, owner.observation())
+        {
             return Err(AuthoringProjectSourceAdmissionError::SchemaBasisMismatch);
         }
         let mut budget = owner.budget();
@@ -136,6 +223,29 @@ impl PreparedSchemaOwnerProject {
             .into_candidate(schema, adapters, self.scene_limits, usage);
         Ok((candidate.publish(), publication))
     }
+
+    /// Joins the exact observed leaf without writing or manufacturing publication evidence.
+    pub(crate) fn attach_observed(
+        self,
+        successor: ObservedAuthoringSchemaOwner,
+    ) -> Result<AuthoringProjectReceipt, SchemaOwnerObservedProjectAttachmentFailure> {
+        if self.basis != successor.basis {
+            return Err(SchemaOwnerObservedProjectAttachmentFailure {
+                prepared: self,
+                successor,
+            });
+        }
+        let ObservedAuthoringSchemaOwner {
+            schema,
+            adapters,
+            basis: _,
+            usage,
+        } = successor;
+        Ok(self
+            .startup
+            .into_candidate(schema, adapters, self.scene_limits, usage)
+            .publish())
+    }
 }
 
 impl Debug for PreparedSchemaOwnerProject {
@@ -159,5 +269,19 @@ impl Debug for SchemaOwnerProjectAttachmentFailure {
     }
 }
 
+impl Debug for SchemaOwnerObservedProjectAttachmentFailure {
+    fn fmt(&self, formatter: &mut Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("SchemaOwnerObservedProjectAttachmentFailure")
+            .field("prepared", &self.prepared)
+            .field("observed_bundle", &self.successor.schema.bundle_digest())
+            .finish_non_exhaustive()
+    }
+}
+
+#[cfg(all(test, any(windows, target_os = "linux")))]
+mod observed_owner_tests;
+#[cfg(all(test, any(windows, target_os = "linux")))]
+mod owned_input_tests;
 #[cfg(all(test, any(windows, target_os = "linux")))]
 mod tests;

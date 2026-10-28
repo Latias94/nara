@@ -171,6 +171,7 @@ impl EditorProjectSession {
         kind: AuthoringDocumentKind,
     ) -> EditorDocumentOpenRequestResult {
         if !self.accepts_new_work()
+            || self.schema_adoption_fenced()
             || self.pending_document_open.is_some()
             || self.pending_workspace_intent.is_some()
             || self.persistence.has_pending_work()
@@ -246,7 +247,7 @@ impl EditorProjectSession {
         admission: &OpenAdmission,
         prepared: &PreparedAuthoringDocumentOpen,
     ) -> Result<(), &'static str> {
-        if !self.accepts_new_work() {
+        if !self.accepts_new_work() || self.schema_adoption_fenced() {
             return Err("project.editor.document-open-busy");
         }
         let current = self

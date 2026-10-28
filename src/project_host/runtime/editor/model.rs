@@ -41,16 +41,27 @@ impl EditorProjectSession {
             };
             return self.publish_editor_frame(scan_work_observed);
         }
+        let schema_fenced = self.schema_adoption_fenced();
         let open_before = self.document_open_view();
         let mut scan_work_observed = match &mut self.execution {
+            super::EditorExecutionLane::Authoring(project) if schema_fenced => {
+                project.observe_source_index()
+            }
             super::EditorExecutionLane::Authoring(project) => {
                 project.advance_source_index(self.authoring_runtime.persistence_tasks())
             }
             super::EditorExecutionLane::TrustedCompiled(_) => false,
         };
         scan_work_observed |= self.advance_document_open();
-        self.advance_editor_image_import();
-        self.advance_source_asset_import();
+        if schema_fenced {
+            self.drain_schema_adoption_image_work();
+            self.drain_schema_adoption_source_asset_import();
+            #[cfg(feature = "presentation-2d")]
+            self.drain_schema_adoption_scene_capture();
+        } else {
+            self.advance_editor_image_import();
+            self.advance_source_asset_import();
+        }
         if self.trusted_compiled().is_some() {
             self.resume_content_refresh_after_runtime_retirement();
             self.advance_project_content_refresh();
@@ -60,13 +71,16 @@ impl EditorProjectSession {
         self.advance_workspace_retirement();
         self.advance_prefab_conversion();
         self.advance_source_tools();
+        self.advance_schema_owner_adoption();
         if drive_runtime && self.trusted_compiled().is_some() {
             self.drive_play_owner(real_delta);
         }
         self.advance_workspace_retirement();
         scan_work_observed |= open_before != self.document_open_view();
         #[cfg(feature = "presentation-2d")]
-        self.drive_editor_preview();
+        if !self.schema_adoption_fenced() {
+            self.drive_editor_preview();
+        }
         self.publish_editor_frame(scan_work_observed)
     }
 
@@ -134,7 +148,11 @@ impl EditorProjectSession {
         let preview_work = if self.authoring_runtime.preview_extent().is_some() {
             (
                 self.scene_capture.has_pending_work(),
-                self.scene_capture.recheck_after(),
+                if self.schema_adoption_fenced() {
+                    None
+                } else {
+                    self.scene_capture.recheck_after()
+                },
                 self.scene_capture.unsaved_dependencies(),
             )
         } else {
@@ -159,6 +177,7 @@ impl EditorProjectSession {
                 )
                 .with_document_open(self.document_open_view())
                 .with_authoring_retirement_pending(self.authoring_retirements.is_pending())
+                .with_schema_owner_adoption_work_pending(self.schema_owner_adoption.work_pending())
                 .with_scene_preview_work(preview_work.0, preview_work.1, preview_work.2)
                 .with_scene_preview_document(self.scene_preview_document)
                 .with_prefab_conversion(self.prefab_conversion_view()),

@@ -118,6 +118,31 @@ pub(super) struct EditorSceneCapture {
 }
 
 impl EditorSceneCapture {
+    /// Published preview packets do not block adoption; admitted capture work does.
+    pub(super) fn schema_adoption_pending(&self) -> bool {
+        self.pending.is_some()
+    }
+
+    /// Revokes pending capture publication and observes return without retrying composition.
+    /// The accepted preview remains available until the adoption turn invalidates it.
+    pub(super) fn observe_schema_adoption_drain(&mut self) {
+        let Some(work) = &self.pending else {
+            return;
+        };
+        work.cancel();
+        self.pending_stale = true;
+        let state = match work {
+            CaptureWork::Compose(task) => task.return_observer().state(),
+            CaptureWork::Candidate { task, .. } => task.return_observer().state(),
+            CaptureWork::Validate(task) => task.return_observer().state(),
+        };
+        if state != TaskReturnState::Pending {
+            self.pending = None;
+            self.pending_stale = false;
+            self.validate_at = Some(Instant::now());
+        }
+    }
+
     pub(super) fn cancel(&mut self) {
         if let Some(work) = &self.pending {
             work.cancel();
@@ -167,6 +192,11 @@ impl EditorSceneCapture {
 }
 
 impl EditorProjectSession {
+    /// Polls only admitted Scene capture while the ordinary preview driver is fenced.
+    pub(super) fn drain_schema_adoption_scene_capture(&mut self) {
+        self.scene_capture.observe_schema_adoption_drain();
+    }
+
     fn capture_selection(&self) -> Option<CaptureSelection> {
         let document = self.scene_preview_document?;
         self.workspace.scene(document)?;

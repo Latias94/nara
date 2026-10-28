@@ -120,7 +120,11 @@ That hidden-window trajectory prepares through the health property control and a
 the shared Source Tool panel, verifies a single Undo/Redo, the ordinary armor control, Attach,
 activation/parameter retirement, generic fallback, Save, physical Close and fresh Open. Rust
 materializes the saved component data through public Scene bindings. Both native scopes must
-present. The current fixture publishes and inspects a real project-local tool artifact and
+present. The current fixture begins with a native-only bundle and preserved unknown EnemyStats
+records. It prepares/reviews/adopts the installed owner through the public Application before
+enabling the tool, verifies source/history/checkpoint preservation and old-basis rejection, then
+runs existing Inspector/panel interactions. This qualifies native Application adoption, not a
+newly drawn installation/adoption control. It publishes and inspects a real project-local tool artifact and
 explicitly approves its managed Host. Application preparation and durable enablement publish the
 selection record before route promotion. The native panel exercises Disable for an active installed
 origin, then Save and physical Close. A fresh Open observes an enabled desired record without

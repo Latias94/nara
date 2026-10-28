@@ -223,6 +223,7 @@ impl EditorProjectSession {
         entity: &SceneEntityId,
     ) -> EditorWorkspaceCommandReport {
         if !self.accepts_new_work()
+            || self.schema_adoption_fenced()
             || self.persistence.has_pending_work()
             || self.pending_workspace_intent.is_some()
             || self.pending_document_open.is_some()
@@ -841,7 +842,10 @@ impl EditorProjectSession {
         if let EditorPersistenceCommand::AcknowledgeResult { attempt } = command {
             return self.acknowledge_persistence_attempt(attempt);
         }
-        if !self.accepts_new_work() || self.persistence.has_pending_work() {
+        if !self.accepts_new_work()
+            || self.schema_adoption_fenced()
+            || self.persistence.has_pending_work()
+        {
             return EditorPersistenceRequestResult::Refused(EditorPersistenceRejection::Busy);
         }
         let (request, requested_document) = match command {

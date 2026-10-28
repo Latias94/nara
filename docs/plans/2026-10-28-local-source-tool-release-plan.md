@@ -117,13 +117,14 @@ an archive reader, a resolver, a hard filesystem deadline nor an RSS sandbox.
 
 ## Schema And Content Boundaries To Preserve
 
-The existing EnemyStats fixture pre-admits its metadata in the project's authoring bundle. Initial
-activation integration must state that premise explicitly. Complete fresh-project installation
-also needs adoption through the actual authoring bundle/readmission owner; copying a catalog
-does not update admitted documents or history. Do not close that gap by inventing a package Schema
-executor. The [owner-adoption plan](2026-10-28-authoring-owner-adoption-plan.md) orders the
-source/history, bundle-custody and whole-Session replacement for one newly installed owner;
-its design is not implementation evidence. The first capture API additionally accepts only a generation-one catalog, without a
+Earlier EnemyStats activation fixtures pre-admitted metadata in the project's authoring bundle.
+That historical evidence retains its premise. The bounded
+[owner-adoption successor](2026-10-28-authoring-owner-adoption-plan.md#qualified-successor) now
+qualifies missing-owner Application and native consumers through actual source/history,
+bundle custody and complete Session adoption before tool enablement. Copying a catalog does not
+update admitted documents or history, and no package Schema executor owns that transition.
+Existing-owner evolution still needs a separate owning transaction. The first capture API
+additionally accepts only a generation-one catalog, without a
 predecessor input; even code-only updates over an evolved existing catalog need that input from
 the actual metadata owner before qualification. Updates requiring Schema migration reject until
 that owner has a qualified transaction.

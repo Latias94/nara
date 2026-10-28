@@ -14,6 +14,7 @@ pub(super) use crate::project_host::authoring::MAX_AUTHORING_IMAGE_IDENTITIES as
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum EditorImageSourceProof {
+    Unverified,
     SourceIndex {
         generation: ProjectSourceIndexGeneration,
     },
@@ -117,6 +118,18 @@ pub(super) struct EditorImageLastGoodStore {
 }
 
 impl EditorImageLastGoodStore {
+    /// A successor index starts its own generations; keep pixels without predecessor authority.
+    pub(super) fn revoke_source_index_verification(&mut self) {
+        for image in self.images.values_mut() {
+            if matches!(
+                image.source_proof,
+                EditorImageSourceProof::SourceIndex { .. }
+            ) {
+                image.source_proof = EditorImageSourceProof::Unverified;
+            }
+        }
+    }
+
     #[must_use]
     pub(super) fn get(&self, asset_path: &AssetPath) -> Option<&EditorImageLastGood> {
         self.images.get(asset_path)

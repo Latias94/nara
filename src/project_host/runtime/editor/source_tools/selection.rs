@@ -154,6 +154,24 @@ impl Default for SelectionState {
 }
 
 impl SelectionState {
+    /// Retained selection intent can still publish or promote after all process jobs return.
+    pub(super) fn schema_adoption_pending(&self) -> bool {
+        self.pending.is_some()
+            || self.ready.is_some()
+            || self.deferred_disable.is_some()
+            || self
+                .host
+                .as_ref()
+                .is_some_and(|host| host.try_with(|host| host.has_cleanup()).unwrap_or(true))
+    }
+
+    /// Keeps the accepted selection leaf; only retries temporary publication cleanup.
+    pub(super) fn observe_schema_adoption_cleanup(&mut self) {
+        if let Some(host) = &self.host {
+            host.try_with(|host| host.retry_cleanup());
+        }
+    }
+
     pub(super) fn view(
         &self,
         active_origin: Option<EditorSourceToolInstalledSelection>,
@@ -495,6 +513,9 @@ impl EditorProjectSession {
         if !self.accepts_new_work() {
             return Err(Error::Closing);
         }
+        if self.schema_adoption_fenced() {
+            return Err(Error::Busy);
+        }
         if !project
             .same_object(&self.source_project_root())
             .map_err(|_| Error::RootMismatch)?
@@ -553,6 +574,9 @@ impl EditorProjectSession {
         if !self.accepts_new_work() {
             return Err(Error::Closing);
         }
+        if self.schema_adoption_fenced() {
+            return Err(Error::Busy);
+        }
         self.advance_source_tools();
         self.source_tools.selection.check_basis(basis)?;
         self.source_tools.selection.writable()?;
@@ -606,6 +630,9 @@ impl EditorProjectSession {
         if !self.accepts_new_work() {
             return Err(Error::Closing);
         }
+        if self.schema_adoption_fenced() {
+            return Err(Error::Busy);
+        }
         self.source_tools.selection.check_basis(basis)?;
         if self
             .source_tools
@@ -640,6 +667,9 @@ impl EditorProjectSession {
     ) -> Result<EditorSourceToolAttemptId, Error> {
         if !self.accepts_new_work() {
             return Err(Error::Closing);
+        }
+        if self.schema_adoption_fenced() {
+            return Err(Error::Busy);
         }
         self.source_tools.selection.check_basis(basis)?;
         if self.source_tools.selection.pending.is_some() || self.source_tools.probe.is_some() {

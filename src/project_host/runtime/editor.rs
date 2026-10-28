@@ -28,6 +28,7 @@ mod preview;
 mod project_browser;
 #[cfg(feature = "presentation-2d")]
 mod scene_capture;
+mod schema_owner;
 mod source_admission;
 mod source_asset_import;
 mod source_tools;
@@ -77,6 +78,10 @@ pub use presentation::{
 };
 #[cfg(feature = "presentation-2d")]
 pub use preview::{EditorPreviewCandidate, EditorPreviewContentStamp, EditorPreviewHit};
+pub use schema_owner::{
+    EditorSchemaOwnerAdoptionError, EditorSchemaOwnerAdoptionId, EditorSchemaOwnerAdoptionOutcome,
+    EditorSchemaOwnerAdoptionPhase, EditorSchemaOwnerAdoptionView,
+};
 pub use source_asset_import::{EditorSourceAssetDomain, EditorSourceAssetImporters};
 pub use source_tools::{
     EditorSourceToolCommand, EditorSourceToolDefinition, EditorSourceToolInstallation,
@@ -873,6 +878,7 @@ pub struct EditorProjectSession {
     source_asset_import: source_asset_import::EditorSourceAssetImportHost,
     prefab_conversion: prefab_conversion::EditorPrefabConversionHost,
     source_tools: source_tools::EditorSourceTools,
+    schema_owner_adoption: schema_owner::EditorSchemaOwnerAdoptionHost,
     #[cfg(test)]
     next_close_poll_gate: Option<Box<dyn FnOnce(&mut Self) + Send>>,
     authoring_prefab_source_observations:
@@ -1005,6 +1011,7 @@ impl fmt::Debug for EditorProjectSession {
 
 impl Drop for EditorProjectSession {
     fn drop(&mut self) {
+        self.schema_owner_adoption.cancel();
         if let Some(project) = self.authoring_project_mut() {
             project.cancel_source_index();
         }
@@ -1026,6 +1033,8 @@ impl EditorProjectSession {
     #[doc(hidden)]
     pub fn advance_close(&mut self) -> EditorProjectCloseProgress {
         self.closing = true;
+        self.schema_owner_adoption.cancel();
+        self.advance_schema_owner_adoption();
         self.source_tools.cancel();
         self.advance_source_tools();
         self.prefab_conversion.cancel();
@@ -1053,6 +1062,7 @@ impl EditorProjectSession {
         }
         self.image_import.cancel_pending();
         self.source_asset_import.cancel();
+        self.drain_schema_adoption_source_asset_import();
         let mut files_closed = self.image_import.retry_publication_cleanup();
         files_closed &= self.authoring_runtime.host_custody().retry_cleanup();
         match self.authoring_runtime.shutdown_tasks() {
@@ -1064,8 +1074,13 @@ impl EditorProjectSession {
                 }
             }
             authoring_runtime::EditorAuthoringRuntimeCloseProgress::Complete(task_shutdown) => {
+                self.advance_schema_owner_adoption();
+                self.drain_schema_adoption_source_asset_import();
                 self.advance_prefab_conversion();
                 self.advance_source_tools();
+                files_closed &= !self.schema_owner_adoption.pending();
+                files_closed &= !self.source_asset_import.schema_adoption_pending();
+                files_closed &= self.authoring_runtime.host_custody().retry_cleanup();
                 let task_shutdown = self.session_task_shutdown(&task_shutdown);
                 if files_closed && !self.authoring_retirements.is_pending() && play_closed {
                     EditorProjectCloseProgress::Complete(EditorProjectCloseReceipt::new(
@@ -1597,6 +1612,7 @@ impl EditorProjectSession {
                 source_asset_import: source_asset_import::EditorSourceAssetImportHost::default(),
                 prefab_conversion: Default::default(),
                 source_tools: Default::default(),
+                schema_owner_adoption: Default::default(),
                 #[cfg(test)]
                 next_close_poll_gate: None,
                 authoring_prefab_source_observations: BTreeMap::new(),
@@ -1851,6 +1867,7 @@ impl EditorProjectSession {
                 source_asset_import: source_asset_import::EditorSourceAssetImportHost::default(),
                 prefab_conversion: Default::default(),
                 source_tools: Default::default(),
+                schema_owner_adoption: Default::default(),
                 #[cfg(test)]
                 next_close_poll_gate: None,
                 authoring_prefab_source_observations: BTreeMap::new(),
@@ -2457,7 +2474,10 @@ impl EditorProjectSession {
 
     #[cfg(feature = "presentation-2d")]
     fn drive_editor_preview(&mut self) {
-        if self.closing || self.authoring_runtime.preview_extent().is_none() {
+        if self.closing
+            || self.schema_adoption_fenced()
+            || self.authoring_runtime.preview_extent().is_none()
+        {
             return;
         }
         let source = if self.authoring_project().is_some() {
@@ -2679,6 +2699,19 @@ impl EditorProjectSession {
         &mut self,
         command: EditorWorkspaceCommand,
     ) -> EditorWorkspaceCommandReport {
+        if self.schema_adoption_fenced()
+            && !matches!(
+                command,
+                EditorWorkspaceCommand::SetActiveDocument { .. }
+                    | EditorWorkspaceCommand::SelectEntity { .. }
+                    | EditorWorkspaceCommand::MarkExternalChanged { .. }
+            )
+        {
+            return editor_workspace_command_rejected(
+                self.workspace.active_document(),
+                "project.editor.schema-adoption-busy",
+            );
+        }
         if matches!(command, EditorWorkspaceCommand::CloseDocument { .. }) {
             return editor_workspace_command_rejected(
                 self.workspace.active_document(),
@@ -2715,6 +2748,14 @@ impl EditorProjectSession {
         &mut self,
         intent: EditorWorkspaceIntent,
     ) -> EditorWorkspaceIntentRequestResult {
+        if self.schema_adoption_fenced() {
+            self.schema_owner_adoption.cancel();
+            if self.schema_owner_adoption.pending() {
+                return EditorWorkspaceIntentRequestResult::Rejected(
+                    EditorWorkspaceIntentRejection::Busy,
+                );
+            }
+        }
         if !self.accepts_new_work()
             || self.pending_workspace_intent.is_some()
             || self.persistence.has_pending_work()

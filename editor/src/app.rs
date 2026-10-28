@@ -38,6 +38,7 @@ const EDITOR_SESSION_CLOSE_RETRY_DELAY: Duration = Duration::from_millis(16);
 mod shell;
 
 mod extension_documents;
+mod schema_owner;
 mod source_tools;
 pub use source_tools::EditorApplicationSourceToolSubmission;
 
@@ -1313,6 +1314,7 @@ impl EditorApplication {
                     self.session_retirement = Some(EditorSessionRetirement::ExitProcess);
                     self.session_close_retry_at = None;
                 }
+                self.synchronize_authoring_readiness();
                 if self.session_retirement.is_some() {
                     self.finish_session_retirement(
                         actions_observed || external_observed || frame_observed,
@@ -1338,6 +1340,17 @@ impl EditorApplication {
                 exit_ready: false,
             },
         }
+    }
+
+    fn synchronize_authoring_readiness(&mut self) {
+        let state = self.take_state();
+        self.state = match state {
+            EditorProductState::AuthoringReady(project)
+            | EditorProductState::AuthoringDegraded(project) => {
+                EditorProductState::from_published(project)
+            }
+            other => other,
+        };
     }
 
     /// Advances retained supervised Play owners without consuming presentation-bound input.

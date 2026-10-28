@@ -198,7 +198,8 @@ impl EditorImageImportHost {
                             identity,
                             digest: last_good.source_digest(),
                         },
-                        EditorImageSourceProof::SourceIndex { .. }
+                        EditorImageSourceProof::Unverified
+                        | EditorImageSourceProof::SourceIndex { .. }
                         | EditorImageSourceProof::AuthoringClosure { .. } => {
                             EditorImageSourceObservation::Unverified
                         }

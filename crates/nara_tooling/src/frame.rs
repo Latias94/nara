@@ -123,6 +123,7 @@ impl EditorFrameClock {
             document_open: Default::default(),
             scene_preview_document: None,
             authoring_retirement_pending: false,
+            schema_owner_adoption_work_pending: false,
             scene_preview_work_pending: false,
             scene_preview_recheck_after: None,
             scene_preview_unsaved_dependencies: 0,
@@ -295,6 +296,7 @@ pub struct EditorFrameModel {
     document_open: crate::EditorDocumentOpenView,
     scene_preview_document: Option<EditorDocumentId>,
     authoring_retirement_pending: bool,
+    schema_owner_adoption_work_pending: bool,
     scene_preview_work_pending: bool,
     scene_preview_recheck_after: Option<Duration>,
     scene_preview_unsaved_dependencies: usize,
@@ -367,6 +369,18 @@ impl EditorFrameModel {
     #[must_use]
     pub fn with_authoring_retirement_pending(mut self, pending: bool) -> Self {
         self.authoring_retirement_pending = pending;
+        self
+    }
+
+    /// Finite Session metadata work or cleanup still needs observation, independently of rendering.
+    #[must_use]
+    pub const fn schema_owner_adoption_work_pending(&self) -> bool {
+        self.schema_owner_adoption_work_pending
+    }
+
+    #[must_use]
+    pub fn with_schema_owner_adoption_work_pending(mut self, pending: bool) -> Self {
+        self.schema_owner_adoption_work_pending = pending;
         self
     }
 

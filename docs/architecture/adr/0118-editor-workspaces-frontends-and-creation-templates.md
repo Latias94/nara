@@ -52,6 +52,19 @@ same source proof. Tasks remain Host-owned; Tooling creates no executor. A retur
 retains original document Arcs for capture and revalidates its complete original Workspace before
 exclusive publication, even if the live sources were edited, reopened or closed during preparation.
 
+The finite Session operation fences new conflicting source and publication admissions while
+observing the physical return of already admitted capture/index work. Rendering may continue
+from immutable predecessor packets. Logical cancellation does not discard an actual file
+publication result or certify worker return. Metadata preparation, explicit review, disk
+publication, whole-live-set adoption and cleanup remain separate observations.
+Known publication without adoption and uncertain publication retain their actual evidence and
+require explicit reconciliation. They do not permanently freeze ordinary source repair, Save
+or Close. Reconciliation reads the actual current bundle against the original manifest and the
+exact permitted owner extension, then prepares the complete current dirty set under a new review.
+An observed successor leaf is attached without inventing a publication receipt or writing it
+again. Changed predecessor declarations, unrelated owner additions and observation drift refuse;
+no automatic disk rollback or reuse of the stale original prepared candidate follows.
+
 Future custom UI reuses these semantic boundaries and render-view handoff, but may replace all widget, layout, focus and docking code.
 Sharing rendering does not require sharing the runtime game's complete UI toolkit.
 

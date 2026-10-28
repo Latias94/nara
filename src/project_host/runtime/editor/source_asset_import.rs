@@ -182,6 +182,11 @@ impl Default for EditorSourceAssetImportHost {
 }
 
 impl EditorSourceAssetImportHost {
+    /// Cancelled work remains in the same pending slot through physical return and file cleanup.
+    pub(super) fn schema_adoption_pending(&self) -> bool {
+        self.pending.is_some()
+    }
+
     pub(super) fn has_pending_work(&self) -> bool {
         self.pending.is_some()
     }
@@ -191,9 +196,18 @@ impl EditorSourceAssetImportHost {
     }
 
     pub(super) fn cancel(&mut self) {
-        if let Some(pending) = self.pending.take() {
+        if let Some(pending) = &self.pending {
             pending.cancel();
         }
+    }
+
+    fn poll(&mut self) -> Option<EditorSourceAssetImportAttempt> {
+        let outcome = self.pending.as_mut()?.poll()?;
+        self.pending = None;
+        if let Some((_, latest)) = &mut self.latest {
+            *latest = outcome.clone();
+        }
+        Some(outcome)
     }
 
     pub(super) fn projection(
@@ -289,6 +303,7 @@ impl EditorProjectSession {
         action: EditorSourceAssetImportAction,
     ) -> Result<(), Rejection> {
         if self.closing
+            || self.schema_adoption_fenced()
             || self.source_asset_import.has_pending_work()
             || matches!(
                 self.image_import.state(),
@@ -413,7 +428,7 @@ impl EditorProjectSession {
             .retain_publication(publication)
             .ok_or(Rejection::Busy)?;
         let pending = PendingSourceImport::start(
-            &self.authoring_runtime,
+            self.authoring_runtime.persistence_tasks(),
             publication,
             SourceImportWork {
                 provider,
@@ -422,6 +437,8 @@ impl EditorProjectSession {
                 encoded,
                 expected_source,
                 budget: self.source_asset_import.budget.clone(),
+                #[cfg(test)]
+                gate: None,
             },
         )?;
         self.source_asset_import.latest = Some((
@@ -433,25 +450,13 @@ impl EditorProjectSession {
     }
 
     pub(super) fn advance_source_asset_import(&mut self) {
-        let Some(pending) = self.source_asset_import.pending.as_mut() else {
+        let Some(outcome) = self.source_asset_import.poll() else {
             return;
         };
-        let Some(outcome) = pending.poll() else {
-            return;
-        };
-        self.source_asset_import.pending = None;
-        if let Some((_, latest)) = &mut self.source_asset_import.latest {
-            *latest = outcome;
-        }
         if matches!(
-            self.source_asset_import
-                .latest
-                .as_ref()
-                .map(|(_, attempt)| attempt),
-            Some(
-                EditorSourceAssetImportAttempt::MetadataPublished { .. }
-                    | EditorSourceAssetImportAttempt::ReconcileRequired
-            )
+            outcome,
+            EditorSourceAssetImportAttempt::MetadataPublished { .. }
+                | EditorSourceAssetImportAttempt::ReconcileRequired
         ) {
             let scheduled = match &mut self.execution {
                 super::EditorExecutionLane::Authoring(project) => {
@@ -463,6 +468,13 @@ impl EditorProjectSession {
                 *latest = EditorSourceAssetImportAttempt::ReconcileRequired;
             }
         }
+    }
+
+    /// Cancels and observes only admitted import work. A returned publication can reserve a
+    /// source-index refresh, but this method never starts a scan or another import worker.
+    pub(super) fn drain_schema_adoption_source_asset_import(&mut self) {
+        self.source_asset_import.cancel();
+        self.advance_source_asset_import();
     }
 }
 

@@ -10,9 +10,14 @@ Ordinary project Open never executes a tool. Code-free release capture, receipt-
 publication and explicitly approved captured-image execution have separate concrete APIs below.
 The project-local desired-selection workflow is being qualified under the
 [local lifecycle plan](../plans/2026-10-28-local-source-tool-release-plan.md); installed dependency
-resolution, metadata adoption, safe removal and a public language SDK remain separate work.
+resolution, safe removal and a public language SDK remain separate work.
 Raw development command paths are trusted local configuration, not immutable installed release
 identity.
+
+The additive metadata operation below has bounded
+[whole-Session and Windows consumer qualification](../knowledge/engineering/verification/2026-10/2026-10-28T080917Z-whole-session-installed-schema-owner-adoption-and-explicit-publication-recovery-5a02037cad1b4af49cbec2b24306524a.md)
+under the [owner-adoption plan](../plans/2026-10-28-authoring-owner-adoption-plan.md). This does
+not implement existing-owner migration or complete Package Manager controls.
 
 ## Prepare A Local Release
 
@@ -82,6 +87,41 @@ qualified; dropping it closes handles and preserves files for reconciliation.
 This is an artifact preparation/publication API, not the complete Package Manager. It does not
 select an installed graph, satisfy declared requirements, adopt project Schema, approve a launcher,
 enable a tool or complete update/removal. Those operations remain in the local lifecycle plan.
+
+## Review And Adopt A Missing Schema Owner
+
+An installed catalog does not change the metadata already admitted by an open Session. Use
+`prepare_installed_schema_owner(project_relative_directory, expected_receipt_digest)` on the
+Project Session or Application to begin code-free preparation. This first operation accepts one
+previously absent generation-one owner, preserving every existing owner's complete declarations
+and lineage. It neither approves nor enables the executable tool. An existing equal owner returns
+`AlreadyAdmitted` only when the live project and actual disk bundle agree.
+
+Drive ordinary frames and observe `schema_owner_adoption_view()`. Preparation first fences new
+conflicting work and observes existing physical capture/index return. It then prepares the saved
+startup and every current open Scene against all prepared working Prefabs, preserving their exact
+source/history and saved checkpoints. Read-only queries and navigation remain available.
+The returned Review exposes per-root diagnostics and typed composition failure through
+`schema_owner_adoption_diagnostics(document)` and
+`schema_owner_adoption_composition_failure(document)`; `None` names the actual saved startup.
+A Degraded capture does not authorize Play or execution.
+
+Confirm the exact operation with `adopt_schema_owner(operation)`. This starts finite validation
+and publication; an `Ok` return means the request was admitted. Observe the eventual outcome
+separately. `Adopted` means the complete Workspace classification and matching project were
+installed together. Source revisions, source bytes, Undo/Redo, selection and saved states retain
+their owners. Old Schema-bound queries and prepared edits reject. Cancel before publication
+leaves the incumbent; cancel or Close after publication cannot erase the actual disk result.
+
+`PublishedWithoutAdoption` and `Uncertain` require explicit reconciliation. The actual available
+file evidence remains readable through `schema_owner_adoption_publication()`. Ordinary source
+repair, Save and Close remain available. Call `reconcile_schema_owner_adoption(operation)` to
+begin a new operation over the current dirty set, then review and confirm it again. Recovery
+requires the original manifest and the exact permitted complete owner extension. An already
+published successor attaches its observed leaf without another write or a synthetic publication
+receipt. External declaration/owner changes refuse instead of merging behind an old review.
+No automatic rollback or source/history discard follows. Terminal acknowledgement is available
+only after the operation's task return and temporary-file cleanup have completed.
 
 ## Approve Captured Managed Images
 

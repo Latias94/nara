@@ -112,6 +112,14 @@ impl EditorProjectSession {
             EditorAction::SourceTool(action) => self.dispatch_source_tool_action(action),
             EditorAction::Mutate(action) => self.dispatch_document_mutation(action),
             EditorAction::Extension(action) => {
+                if self.schema_adoption_fenced() {
+                    return EditorActionOutcome::Workspace(
+                        super::editor_workspace_command_rejected(
+                            self.workspace.active_document(),
+                            "project.editor.schema-adoption-busy",
+                        ),
+                    );
+                }
                 if let Err(rejection) =
                     self.verify_document_revision(action.document(), action.base_revision())
                 {
@@ -188,7 +196,7 @@ impl EditorProjectSession {
         image_frame: Option<&super::image_import::EditorImageImportFrame>,
         action: EditorImageImportAction,
     ) -> EditorActionOutcome {
-        if self.source_asset_import.has_pending_work() {
+        if self.schema_adoption_fenced() || self.source_asset_import.has_pending_work() {
             return EditorActionOutcome::ImageImport(EditorImageImportActionOutcome::Rejected(
                 EditorImageImportActionRejection::Busy,
             ));
@@ -431,6 +439,12 @@ impl EditorProjectSession {
         &mut self,
         action: EditorDocumentMutation,
     ) -> EditorActionOutcome {
+        if self.schema_adoption_fenced() {
+            return EditorActionOutcome::Workspace(super::editor_workspace_command_rejected(
+                self.workspace.active_document(),
+                "project.editor.schema-adoption-busy",
+            ));
+        }
         let document = action.document();
         let base_revision = action.base_revision();
         if let Err(rejection) = self.verify_document_revision(document, base_revision) {
@@ -573,6 +587,12 @@ impl EditorProjectSession {
         frame: &EditorFrameModel,
         action: EditorGestureAction,
     ) -> EditorActionOutcome {
+        if self.schema_adoption_fenced() && !matches!(&action, EditorGestureAction::Cancel { .. }) {
+            return EditorActionOutcome::Workspace(super::editor_workspace_command_rejected(
+                self.workspace.active_document(),
+                "project.editor.schema-adoption-busy",
+            ));
+        }
         if !self.accepts_new_work() && !matches!(&action, EditorGestureAction::Cancel { .. }) {
             return EditorActionOutcome::Workspace(super::editor_workspace_command_rejected(
                 self.workspace.active_document(),

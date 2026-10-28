@@ -1,4 +1,4 @@
-//! Durable installed C# selection and proposals through native Editor widgets.
+//! Application metadata adoption followed by installed C# proposals through native widgets.
 
 use std::os::windows::fs::OpenOptionsExt;
 
@@ -8,15 +8,17 @@ use nara::{
         RelativeComponent, TrustMode,
     },
     project_host::{
+        EditorSchemaOwnerAdoptionError, EditorSchemaOwnerAdoptionOutcome,
+        EditorSchemaOwnerAdoptionPhase, EditorSchemaOwnerAdoptionView,
         EditorSourceToolInstallationOutcome, EditorSourceToolInstallationPlan,
         EditorSourceToolManagedHost, EditorSourceToolManagedHostDigests,
         PreparedEditorSourceToolRelease, advanced::built_in_schema_providers,
         open_explicit_product_project_root,
     },
     reflect::{
-        AuthoringSchemaBundle, AuthoringSchemaBundleOwner, ComponentRegistry,
-        ComponentSchemaCatalog, ComponentSchemaOwnerSnapshot, ComponentSchemaVersion,
-        ComponentTypeId, PersistentComponentSchemaOwnerId,
+        AuthoringSchemaBundle, ComponentRegistry, ComponentSchemaCatalog,
+        ComponentSchemaOwnerSnapshot, ComponentSchemaVersion, ComponentTypeId,
+        PersistentComponentSchemaOwnerId,
     },
     scene::{
         InMemoryPrefabSourceResolver, SCENE_COMPONENTS_SCHEMA_PROVIDER, SceneComponentBindings,
@@ -27,6 +29,7 @@ use nara::{
     tooling::{
         EditorSourceToolDesiredSelection, EditorSourceToolIntent, EditorSourceToolRequestId,
         EditorSourceToolSelectionOutcome, EditorSourceToolSelectionPhase, EditorSourceToolView,
+        SceneInspectorReadOnlyReason,
     },
 };
 
@@ -85,17 +88,12 @@ impl SourceToolFixture {
             None,
         )
         .map_err(|error| error.to_string())?;
-        let builtins =
+        let bundle =
             AuthoringSchemaBundle::from_trusted_provider_definitions(built_in_schema_providers())
                 .map_err(|error| error.to_string())?;
-        let bundle = AuthoringSchemaBundle::new(
-            builtins
-                .owners()
-                .iter()
-                .map(AuthoringSchemaBundleOwner::from)
-                .chain([AuthoringSchemaBundleOwner::from(&owner)]),
-        )
-        .map_err(|error| error.to_string())?;
+        if bundle.owner(owner.owner_id()).is_some() {
+            return Err("the initial native bundle already declares the installed owner".into());
+        }
         let name_owner = bundle
             .owner_for_component(&ComponentTypeId::new(NAME))
             .ok_or("the trusted builtins do not declare Name")?;
@@ -136,7 +134,15 @@ impl SourceToolFixture {
                 .map_err(|error| error.to_string())?,
         )
         .map_err(|error| error.to_string())?;
+        let original_bundle = fs::read(project.root.join("catalogs/authoring.bundle.json"))
+            .map_err(|error| error.to_string())?;
         let installed = installed_tool(&project, &directory, &executable)?;
+        if fs::read(project.root.join("catalogs/authoring.bundle.json"))
+            .map_err(|error| error.to_string())?
+            != original_bundle
+        {
+            return Err("release installation changed the native-only bundle".into());
+        }
         Ok(Self {
             project,
             owner,
@@ -333,6 +339,221 @@ impl ApplicationHandler for SourceToolApplication<'_> {
 }
 
 impl AuthoringWorkflow<'_> {
+    fn settle_native_schema_owner(
+        &mut self,
+        phase: EditorSchemaOwnerAdoptionPhase,
+    ) -> Result<EditorSchemaOwnerAdoptionView, String> {
+        let deadline = Instant::now() + TOOL_TIMEOUT;
+        loop {
+            self.paint(|_| {})?;
+            let view = self
+                .application
+                .schema_owner_adoption_view()
+                .map_err(|error| error.to_string())?;
+            if view.phase == phase {
+                return Ok(view.clone());
+            }
+            if matches!(
+                view.phase,
+                EditorSchemaOwnerAdoptionPhase::Terminal
+                    | EditorSchemaOwnerAdoptionPhase::RequiresReconcile
+            ) || Instant::now() >= deadline
+            {
+                return Err(format!(
+                    "native Application metadata adoption did not reach {phase:?}: {view:?}"
+                ));
+            }
+            std::thread::sleep(Duration::from_millis(1));
+        }
+    }
+
+    fn adopt_installed_source_tool_owner(
+        &mut self,
+        fixture: &SourceToolFixture,
+    ) -> Result<(), String> {
+        let frame = self.frame()?;
+        let document = frame
+            .workspace()
+            .active_document
+            .ok_or("Open has no active document")?;
+        let before = frame
+            .workspace()
+            .document(document)
+            .ok_or("the initial source tab is missing")?
+            .clone();
+        let selection = frame
+            .workspace()
+            .active_scene
+            .as_ref()
+            .ok_or("the initial Scene selection is missing")?
+            .selection
+            .clone();
+        let old_basis = self
+            .application
+            .document_query_basis(document)
+            .map_err(|error| format!("{error:?}"))?;
+        let unknown_stats = |frame: &EditorFrameModel| {
+            frame
+                .workspace()
+                .active_scene
+                .as_ref()
+                .and_then(|scene| scene.editor.inspector.selected_entity_view.as_ref())
+                .and_then(|entity| {
+                    entity
+                        .components
+                        .iter()
+                        .find(|component| component.component.as_str() == STATS)
+                })
+                .is_some_and(|component| {
+                    component.access.read_only_reason()
+                        == Some(SceneInspectorReadOnlyReason::UnknownSchema)
+                })
+        };
+        if old_basis.schema.as_ref().is_none_or(|basis| {
+            basis
+                .component_schema_owner(&ComponentTypeId::new(STATS))
+                .is_some()
+        }) || !unknown_stats(&frame)
+            || before.history.undo_depth != 0
+            || before.history.redo_depth != 0
+            || before.dirty
+            || control_rect(&format!("field:{STATS}:health")).is_some()
+        {
+            return Err("ordinary native Open must retain clean unknown EnemyStats under the native-only bundle".into());
+        }
+        let source_path = fixture.project.root.join(SCENE);
+        let bundle_path = fixture.project.root.join("catalogs/authoring.bundle.json");
+        let original_source = fs::read(&source_path).map_err(|error| error.to_string())?;
+        let original_bundle = fs::read(&bundle_path).map_err(|error| error.to_string())?;
+        let native = AuthoringSchemaBundle::from_json_bytes(&original_bundle)
+            .map_err(|error| error.to_string())?;
+        if native.owner(fixture.owner.owner_id()).is_some()
+            || read_scene(&source_path)? != fixture.original
+        {
+            return Err(
+                "the missing-owner native fixture changed before metadata preparation".into(),
+            );
+        }
+        let before_tool = self.frame()?.source_tool().clone();
+        let deadline = Instant::now() + TOOL_TIMEOUT;
+        let operation = loop {
+            match self
+                .application
+                .prepare_installed_schema_owner(INSTALLATION, fixture.installed.receipt)
+            {
+                Ok(operation) => break operation,
+                Err(EditorSchemaOwnerAdoptionError::Busy) if Instant::now() < deadline => {
+                    self.paint(|_| {})?;
+                    std::thread::sleep(Duration::from_millis(1));
+                }
+                Err(error) => {
+                    return Err(format!(
+                        "native Application metadata preparation failed: {error:?}"
+                    ));
+                }
+            }
+        };
+        let review = self.settle_native_schema_owner(EditorSchemaOwnerAdoptionPhase::Review)?;
+        let reviewed = self.frame()?;
+        if review.operation != Some(operation)
+            || review.owner.as_deref() != Some(fixture.owner.owner_id().as_str())
+            || review.documents != 1
+            || review.outcome.is_some()
+            || review.reconciliation
+            || self
+                .application
+                .schema_owner_adoption_publication()
+                .is_some()
+            || self
+                .application
+                .document_query_basis(document)
+                .map_err(|error| format!("{error:?}"))?
+                != old_basis
+            || reviewed.workspace().document(document) != Some(&before)
+            || !unknown_stats(&reviewed)
+            || reviewed.source_tool() != &before_tool
+            || fs::read(&source_path).map_err(|error| error.to_string())? != original_source
+            || fs::read(&bundle_path).map_err(|error| error.to_string())? != original_bundle
+        {
+            return Err(format!(
+                "native Application metadata Review changed incumbent source, history or files: {review:?}"
+            ));
+        }
+
+        // This calls the public Application boundary; no metadata-adoption widget is qualified.
+        self.application
+            .adopt_schema_owner(operation)
+            .map_err(|error| error.to_string())?;
+        let adopted = self.settle_native_schema_owner(EditorSchemaOwnerAdoptionPhase::Terminal)?;
+        let basis = self
+            .application
+            .document_query_basis(document)
+            .map_err(|error| format!("{error:?}"))?;
+        let frame = self.frame()?;
+        let after = frame
+            .workspace()
+            .document(document)
+            .ok_or("adoption lost the original tab")?;
+        if adopted.operation != Some(operation)
+            || adopted.outcome != Some(EditorSchemaOwnerAdoptionOutcome::Adopted)
+            || basis.revision != old_basis.revision
+            || basis.schema == old_basis.schema
+            || basis
+                .schema
+                .as_ref()
+                .and_then(|schema| schema.component_schema_owner(&ComponentTypeId::new(STATS)))
+                != Some(fixture.owner.owner_id())
+            || after.saved_revision != before.saved_revision
+            || after.history != before.history
+            || after.dirty != before.dirty
+            || after.source_binding != before.source_binding
+            || frame
+                .workspace()
+                .active_scene
+                .as_ref()
+                .is_none_or(|scene| scene.selection != selection)
+            || self.selected_stats()? != (100, 10)
+            || frame.source_tool() != &before_tool
+            || fixture.project.root.join(SELECTION).exists()
+            || fs::read(&source_path).map_err(|error| error.to_string())? != original_source
+        {
+            return Err(format!(
+                "native Application metadata adoption did not preserve the original source state: {adopted:?}"
+            ));
+        }
+        let published_bundle = fs::read(&bundle_path).map_err(|error| error.to_string())?;
+        let expected = AuthoringSchemaBundle::from_owner_snapshots(
+            native
+                .owners()
+                .iter()
+                .cloned()
+                .chain([fixture.owner.clone()]),
+        )
+        .map_err(|error| error.to_string())?;
+        if AuthoringSchemaBundle::from_json_bytes(&published_bundle)
+            .map_err(|error| error.to_string())?
+            != expected
+            || self
+                .application
+                .schema_owner_adoption_publication()
+                .is_none_or(|receipt| {
+                    receipt.verified_content_digest()
+                        != Some(ContentDigest::of_bytes(&published_bundle))
+                })
+        {
+            return Err(
+                "native metadata adoption did not publish the exact additive bundle".into(),
+            );
+        }
+        self.application
+            .acknowledge_schema_owner_adoption(operation)
+            .map_err(|error| error.to_string())?;
+        for _ in 0..3 {
+            self.paint(|_| {})?;
+        }
+        Ok(())
+    }
+
     fn open_source_tool_document(&mut self) -> Result<(), String> {
         let backend = self
             .native
@@ -604,6 +825,7 @@ impl AuthoringWorkflow<'_> {
         fixture: &SourceToolFixture,
     ) -> Result<SourceToolObservation, String> {
         self.open_source_tool_document()?;
+        self.adopt_installed_source_tool_owner(fixture)?;
         let source = fixture.project.root.join(SCENE);
         let original_bytes = fs::read(&source).map_err(|error| error.to_string())?;
         let project_code =

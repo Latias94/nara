@@ -148,6 +148,18 @@ Task consumers cover immutable snapshots, stale live edits, source Drop, calibra
 both real conversion-history branches. This does not implement the Session operation, its physical
 IO/Close coordination or native installed adoption. Caller-side capture scans/copy have no measured
 responsiveness claim; source and project budget models remain logical rather than RSS deadlines.
+The [whole-Session adoption successor](../../knowledge/engineering/verification/2026-10/2026-10-28T080917Z-whole-session-installed-schema-owner-adoption-and-explicit-publication-recovery-5a02037cad1b4af49cbec2b24306524a.md)
+implements the bounded missing generation-one owner operation through code-free installed
+inspection, physical quiescing, complete dirty-source/history preparation, review, actual bundle
+publication and matching project/Workspace adoption. Known published-but-unadopted and uncertain
+results retain their facts; explicit reconciliation rechecks current dirty sources and attaches
+an actual observed successor without another write or synthetic receipt. Same-turn preview
+invalidation, index-generation handoff and strict read-only capability derivation have owning
+corrections. Root737, filesystem/Tooling190 and Editor245 pass, with existing explicit skips;
+real C# Application and Windows/DX12 missing-owner-to-Inspector/panel/history/Save/fresh-Open
+consumers pass. This is native Application adoption plus existing widgets, not a new installer
+UI, existing-owner migration, installed dependency/removal closure, language SDK or full R1b.
+The full foundation Goal remains active; the linked evidence retains platform/performance limits.
 The [documentation verification](../../knowledge/engineering/verification/2026-10/2026-10-23T115037Z-foundation-architecture-rebaseline-documentation-checks-and-adversarial-closure-33c8c794baf142ee964468a01248af17.md)
 records inventory/link/status checks and the scoped adversarial correction/recheck. No Cargo,
 performance or native trajectory was re-executed for this design-only unit.

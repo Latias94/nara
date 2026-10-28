@@ -2262,6 +2262,7 @@ fn imgui_frame_maintenance_deadline(
     let deadline = (frame.project_browser().has_pending_work()
         || frame.document_open().has_pending_work()
         || frame.authoring_retirement_pending()
+        || frame.schema_owner_adoption_work_pending()
         || frame.source_tool().has_pending_work()
         || frame.prefab_conversion().phase.work_pending()
         || matches!(
@@ -2590,6 +2591,14 @@ mod opening_tests {
             Some(now + Duration::from_millis(16)),
         );
         assert_eq!(imgui_frame_presentation_deadline(&tool_frame, now), None);
+        let schema_frame = retired_frame
+            .clone()
+            .with_schema_owner_adoption_work_pending(true);
+        assert_eq!(
+            imgui_frame_maintenance_deadline(&schema_frame, now),
+            Some(now + Duration::from_millis(16)),
+        );
+        assert_eq!(imgui_frame_presentation_deadline(&schema_frame, now), None);
         let rechecking_frame = retired_frame.clone().with_scene_preview_work(
             false,
             Some(Duration::from_millis(500)),

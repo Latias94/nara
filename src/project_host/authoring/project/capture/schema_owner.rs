@@ -1,16 +1,9 @@
 //! Current-source capture before bundle publication, with nominal successor attachment.
 
 use super::*;
-use crate::project_host::authoring::{AdmittedAuthoringSchemaOwner, PreparedAuthoringSchemaOwner};
-
-/// Actual selected capture under prepared metadata, still fenced by the incumbent bundle leaf.
-///
-/// The inner capture is unavailable as a published successor until the bundle's actual accepted
-/// leaf has been attached. Source-history proof and whole-project publication are separate.
-pub(crate) struct PreparedSchemaOwnerSceneCapture {
-    capture: AuthoringDocumentCapture,
-    basis: AuthoringSchemaBasis,
-}
+use crate::project_host::authoring::{
+    AdmittedAuthoringSchemaOwner, ObservedAuthoringSchemaOwner, PreparedAuthoringSchemaOwner,
+};
 
 impl PreparedAuthoringSchemaOwner {
     pub(crate) fn capture_scene(
@@ -30,6 +23,7 @@ impl PreparedAuthoringSchemaOwner {
         }
         let mut budget = self.budget();
         let result = (|| {
+            budget.charge_source_bytes(0, 0, 0, size_of::<Arc<AuthoringSchemaReceipt>>())?;
             prefabs::charge_capture_inputs(
                 source,
                 view.document().retained_bytes()?,
@@ -39,7 +33,7 @@ impl PreparedAuthoringSchemaOwner {
             )
             .and_then(|(_, containing)| {
                 capture_scene(
-                    self.incumbent(),
+                    self.observation(),
                     view.file_limits(),
                     view.document(),
                     &basis,
@@ -57,7 +51,11 @@ impl PreparedAuthoringSchemaOwner {
         self.retain_capture_budget(budget);
         let mut capture = result?;
         capture.root_revision = Some(view.base_revision());
-        Ok(PreparedSchemaOwnerSceneCapture { capture, basis })
+        Ok(PreparedSchemaOwnerSceneCapture {
+            capture,
+            basis,
+            incumbent: Arc::clone(self.incumbent()),
+        })
     }
 }
 
@@ -72,16 +70,55 @@ impl PreparedSchemaOwnerSceneCapture {
         self.capture.composition_failure()
     }
 
+    /// Revalidates the original capture under the same cumulative project preparation allowance.
+    pub(crate) fn validate(
+        &self,
+        owner: &mut PreparedAuthoringSchemaOwner,
+    ) -> Result<(), AuthoringProjectSourceAdmissionError> {
+        if &self.basis != owner.schema_basis()
+            || !Arc::ptr_eq(&self.incumbent, owner.incumbent())
+            || !Arc::ptr_eq(&self.capture.authority, owner.observation())
+        {
+            return Err(AuthoringProjectSourceAdmissionError::SchemaBasisMismatch);
+        }
+        let mut budget = owner.budget();
+        let result = budget
+            .ensure_within_limits()
+            .map_err(AuthoringProjectSourceAdmissionError::from)
+            .and_then(|()| {
+                self.capture
+                    .source_validation()
+                    .validate_with_budget(&mut budget)
+            });
+        owner.retain_capture_budget(budget);
+        result
+    }
+
     /// Transfers already prepared capture into the same nominal successor after leaf attachment.
     /// No IO, compilation or Schema admission occurs here.
     pub(crate) fn attach(
-        mut self,
+        self,
         successor: &AdmittedAuthoringSchemaOwner,
     ) -> Result<AuthoringDocumentCapture, Self> {
-        if self.basis != successor.basis {
+        self.attach_schema(&successor.basis, &successor.schema)
+    }
+
+    pub(crate) fn attach_observed(
+        self,
+        successor: &ObservedAuthoringSchemaOwner,
+    ) -> Result<AuthoringDocumentCapture, Self> {
+        self.attach_schema(&successor.basis, &successor.schema)
+    }
+
+    fn attach_schema(
+        mut self,
+        basis: &AuthoringSchemaBasis,
+        schema: &Arc<AuthoringSchemaReceipt>,
+    ) -> Result<AuthoringDocumentCapture, Self> {
+        if &self.basis != basis {
             return Err(self);
         }
-        self.capture.authority = Arc::clone(&successor.schema);
+        self.capture.authority = Arc::clone(schema);
         Ok(self.capture)
     }
 }

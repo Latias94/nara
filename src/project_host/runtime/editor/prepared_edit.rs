@@ -19,6 +19,8 @@ pub enum EditorEditPreparationError {
     WorkspaceUnavailable,
     #[error("the Editor is closing or resolving a workspace intent")]
     Closing,
+    #[error("a whole-Session Schema adoption is pending")]
+    Busy,
     #[error("the edit requires its specialized document-domain contract")]
     StructureContractMismatch { document: EditorDocumentId },
     #[error("the captured document-query basis is no longer admitted: {0}")]
@@ -100,6 +102,9 @@ impl EditorProjectSession {
         if !self.accepts_new_work() || self.pending_workspace_intent.is_some() {
             return Err(EditorEditPreparationError::Closing);
         }
+        if self.schema_adoption_fenced() {
+            return Err(EditorEditPreparationError::Busy);
+        }
         self.workspace
             .validate_document_query_basis(basis)
             .map_err(EditorEditPreparationError::QueryBasis)
@@ -138,6 +143,14 @@ impl EditorProjectSession {
         &mut self,
         prepared: PreparedEditorDocumentConstruction,
     ) -> Result<CommittedEditorDocumentConstruction, EditorActionOutcome> {
+        if self.schema_adoption_fenced() {
+            return Err(EditorActionOutcome::Workspace(
+                editor_workspace_command_rejected(
+                    self.workspace.active_document(),
+                    "project.editor.schema-adoption-busy",
+                ),
+            ));
+        }
         if !self.accepts_new_work() || self.pending_workspace_intent.is_some() {
             return Err(EditorActionOutcome::Workspace(
                 editor_workspace_command_rejected(
@@ -199,6 +212,12 @@ impl EditorProjectSession {
         &mut self,
         prepared: PreparedEditorDocumentEdit,
     ) -> EditorActionOutcome {
+        if self.schema_adoption_fenced() {
+            return EditorActionOutcome::Workspace(editor_workspace_command_rejected(
+                self.workspace.active_document(),
+                "project.editor.schema-adoption-busy",
+            ));
+        }
         if !self.accepts_new_work() || self.pending_workspace_intent.is_some() {
             return EditorActionOutcome::Workspace(editor_workspace_command_rejected(
                 self.workspace.active_document(),
