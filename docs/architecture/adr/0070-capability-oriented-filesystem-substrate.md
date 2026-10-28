@@ -58,6 +58,11 @@ flowchart LR
   root without elevating either capability's authority. Equality does not equate session-scoped
   `FileIdentity` values or merge trust, rights, or generations. This is ordinary live-object proof,
   not immutable-content evidence or a persistent ID.
+- `DirectoryCapability::strict_read_only` derives a narrower capability over the same held
+  directory, rechecking proven identity and strict resolution before permitting descendant
+  traversal. It preserves Session/generation, the live root identity and volume boundary,
+  without changing the predecessor. Strict read-only derivation is distinct from the restrictive
+  handle lease required for executable launch and does not freeze file content or namespace.
 - `Unsupported` means the adapter, platform, or filesystem explicitly lacks the required primitive.
   `Unproven` means the primitive may exist, but sufficient evidence was unavailable for this object
   or runtime environment. Both fail closed for strict operations.

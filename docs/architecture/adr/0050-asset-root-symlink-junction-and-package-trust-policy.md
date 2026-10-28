@@ -2,7 +2,7 @@
 
 **Status**: Accepted
 **Date**: 2026-07-09
-**Last Revised**: 2026-07-18
+**Last Revised**: 2026-10-28
 **Refines**: ADR 0007, ADR 0037, ADR 0049
 **Refined By**: [ADR 0070: Capability-Oriented Filesystem Substrate](0070-capability-oriented-filesystem-substrate.md)
 
@@ -55,6 +55,12 @@ Rules:
 - Trusted local mode may deliberately select a weaker, explicitly reported proof tier for developer
   workflows. It never silently upgrades that tier to strict and never grants out-of-root access from
   project content alone.
+- An explicit strict read-only derivation may attenuate an already held directory capability.
+  It rechecks live object identity and required platform resolution, preserves the original
+  capability Session/generation and volume boundary, and tightens descendant traversal and rights.
+  The original capability is unchanged. This does not prove how the Host originally selected that
+  root, immutable content, or restrictive executable-launch custody. A consumer requiring strict
+  access derives it before traversing package-controlled descendants and refuses missing proof.
 - Watcher paths are observations only. Existing targets are resolved again through the source
   capability before publication. A removed or rename-from leaf uses the previously indexed
   live-object identity, a verified parent capability, and an expected generation because the leaf

@@ -165,6 +165,52 @@ impl DirectoryCapability {
         }
     }
 
+    /// Derives strict read-only traversal from this continuously held directory object.
+    ///
+    /// Rechecks live identity and strict platform resolution before duplicating authority.
+    /// The original capability is unchanged. Session, generation and object identities remain
+    /// the same; descendant reads enforce strict single-link and beneath-root rules. This is
+    /// capability attenuation, not immutable content or restrictive executable-launch custody.
+    pub fn strict_read_only(&self) -> Result<Self, FsError> {
+        let file = self
+            .inner
+            .file
+            .try_clone()
+            .map_err(|source| FsError::io(FsOperation::CloneHandle, source))?;
+        let facts = platform::facts(&file)?;
+        validate_directory_facts(&self.inner, facts)?;
+        if !facts.identity_proven {
+            return Err(FsError::Unproven {
+                operation: FsOperation::InspectHandle,
+                proof: "strict read-only traversal requires proven live directory identity",
+            });
+        }
+        if facts.identity != self.inner.identity.native() {
+            return Err(FsError::CapabilityIdentityDrift {
+                operation: FsOperation::CloneHandle,
+            });
+        }
+        let resolution = platform::resolution_tier(&file);
+        require_strict_resolution(resolution, FsOperation::OpenDirectory)?;
+        Ok(Self {
+            inner: Arc::new(DirectoryInner {
+                file,
+                identity: self.inner.identity,
+                root_native: self.inner.root_native,
+                options: HostCapabilityOptions {
+                    rights: CapabilityRights::ReadOnly,
+                    trust: if self.inner.options.trust == TrustMode::Recovery {
+                        TrustMode::Recovery
+                    } else {
+                        TrustMode::Untrusted
+                    },
+                    generation: self.inner.options.generation,
+                },
+                resolution,
+            }),
+        })
+    }
+
     /// Reopens this exact directory through the platform's restrictive launch lease contract.
     ///
     /// Unlike a plain duplicate, the returned lease is produced by the capability owner and is
@@ -880,6 +926,57 @@ mod tests {
             Err(FsError::CapabilitySessionExhausted)
         ));
         assert_eq!(counter.load(Ordering::Relaxed), u64::MAX);
+    }
+
+    #[cfg(any(windows, target_os = "linux"))]
+    #[test]
+    fn strict_read_only_preserves_session_identity_and_tightens_descendant_authority() {
+        static SEQUENCE: AtomicU64 = AtomicU64::new(0);
+        let root = std::env::temp_dir().join(format!(
+            "nara_fs_strict_read_{}_{}",
+            std::process::id(),
+            SEQUENCE.fetch_add(1, Ordering::Relaxed)
+        ));
+        std::fs::create_dir(&root).unwrap();
+        std::fs::write(root.join("value.txt"), b"value").unwrap();
+        let capability = DirectoryCapability::from_host_handle(
+            test_host_directory(&root),
+            HostCapabilityOptions::new(CapabilityRights::ReadWrite, TrustMode::TrustedLocal)
+                .with_generation(7),
+        )
+        .unwrap();
+        let strict = capability.strict_read_only().unwrap();
+        assert_eq!(strict.identity(), capability.identity());
+        assert!(strict.same_object(&capability).unwrap());
+        assert_eq!(strict.options().rights(), CapabilityRights::ReadOnly);
+        assert_eq!(strict.options().trust(), TrustMode::Untrusted);
+        assert_eq!(
+            strict.options().generation(),
+            capability.options().generation()
+        );
+        let path = RelativePath::new("value.txt").unwrap();
+        assert_eq!(
+            strict.open_file_exact(&path).unwrap().identity(),
+            capability.open_file_exact(&path).unwrap().identity()
+        );
+        assert!(matches!(
+            strict.create_child_file(&RelativeComponent::new("forbidden").unwrap()),
+            Err(FsError::ReadOnlyCapability { .. })
+        ));
+        std::fs::hard_link(root.join("value.txt"), root.join("alias.txt")).unwrap();
+        assert!(matches!(
+            strict.open_file_exact(&path),
+            Err(FsError::MultipleLinks { .. })
+        ));
+        assert!(capability.open_file_exact(&path).is_ok());
+        assert_eq!(capability.options().rights(), CapabilityRights::ReadWrite);
+        assert_eq!(capability.options().trust(), TrustMode::TrustedLocal);
+        let nested = strict.strict_read_only().unwrap();
+        assert_eq!(nested.identity(), capability.identity());
+        drop(nested);
+        drop(strict);
+        drop(capability);
+        std::fs::remove_dir_all(root).unwrap();
     }
 
     #[cfg(any(unix, windows))]
