@@ -9,6 +9,8 @@ mod overlay;
 mod read;
 mod reclassification;
 mod retention;
+#[cfg(test)]
+mod shared_publication_tests;
 mod structure;
 
 use complete_value::validate_complete_value;
@@ -176,7 +178,7 @@ impl AuthoringDocumentReadmission {
         )?;
         Ok(
             crate::SceneAuthoringSession::from_published_authoring_document_with_history_limits(
-                PublishedAuthoringSceneDocument { document, state },
+                SceneAuthoringDocumentCandidate { document, state }.publish(),
                 self.history_limits,
             ),
         )
@@ -202,7 +204,7 @@ impl AuthoringDocumentReadmission {
         )?;
         Ok(
             crate::PrefabAuthoringSession::from_published_authoring_document_with_history_limits(
-                PublishedAuthoringPrefabDocument { document, state },
+                PrefabAuthoringDocumentCandidate { document, state }.publish(),
                 self.history_limits,
             ),
         )
@@ -1179,8 +1181,8 @@ impl SceneAuthoringDocumentCandidate {
     #[must_use]
     pub fn publish(self) -> PublishedAuthoringSceneDocument {
         PublishedAuthoringSceneDocument {
-            document: self.document,
-            state: self.state,
+            document: Arc::new(self.document),
+            state: Arc::new(self.state),
         }
     }
 }
@@ -1206,26 +1208,27 @@ impl PrefabAuthoringDocumentCandidate {
     #[must_use]
     pub fn publish(self) -> PublishedAuthoringPrefabDocument {
         PublishedAuthoringPrefabDocument {
-            document: self.document,
-            state: self.state,
+            document: Arc::new(self.document),
+            state: Arc::new(self.state),
         }
     }
 }
 
+/// Move-only publication retaining one immutable source and its exact classification.
 #[derive(Debug)]
 pub struct PublishedAuthoringSceneDocument {
-    document: SceneDocument,
-    state: AuthoringDocumentState,
+    document: Arc<SceneDocument>,
+    state: Arc<AuthoringDocumentState>,
 }
 
 impl PublishedAuthoringSceneDocument {
     #[must_use]
-    pub const fn document(&self) -> &SceneDocument {
+    pub fn document(&self) -> &SceneDocument {
         &self.document
     }
 
     #[must_use]
-    pub const fn readiness(&self) -> AuthoringDocumentReadiness {
+    pub fn readiness(&self) -> AuthoringDocumentReadiness {
         self.state.readiness
     }
 
@@ -1249,35 +1252,39 @@ impl PublishedAuthoringSceneDocument {
     }
 
     #[must_use]
-    pub const fn unavailable_manifest(&self) -> &UnavailableRecordManifest {
+    pub fn unavailable_manifest(&self) -> &UnavailableRecordManifest {
         &self.state.unavailable_manifest
     }
 
     #[must_use]
-    pub const fn diagnostics(&self) -> &DiagnosticReport {
+    pub fn diagnostics(&self) -> &DiagnosticReport {
         &self.state.diagnostics
     }
 
-    pub(crate) fn into_parts(self) -> (SceneDocument, AuthoringDocumentState) {
+    pub(crate) fn into_parts(self) -> (Arc<SceneDocument>, Arc<AuthoringDocumentState>) {
         (self.document, self.state)
     }
 }
 
 /// Forks one published Scene source into an independent Editor working owner.
+///
+/// Shares immutable source and classification handles. Session construction creates independent
+/// source identity and history; subsequent edits replace only that Session's handles.
 #[must_use]
 pub fn fork_published_authoring_scene_document(
     published: &PublishedAuthoringSceneDocument,
 ) -> PublishedAuthoringSceneDocument {
     PublishedAuthoringSceneDocument {
-        document: published.document.clone(),
-        state: published.state.clone(),
+        document: Arc::clone(&published.document),
+        state: Arc::clone(&published.state),
     }
 }
 
+/// Move-only publication retaining one immutable nominal Prefab and its exact classification.
 #[derive(Debug)]
 pub struct PublishedAuthoringPrefabDocument {
-    document: PrefabDocument,
-    state: AuthoringDocumentState,
+    document: Arc<PrefabDocument>,
+    state: Arc<AuthoringDocumentState>,
 }
 
 impl PublishedAuthoringPrefabDocument {
@@ -1286,12 +1293,12 @@ impl PublishedAuthoringPrefabDocument {
     }
 
     #[must_use]
-    pub const fn document(&self) -> &PrefabDocument {
+    pub fn document(&self) -> &PrefabDocument {
         &self.document
     }
 
     #[must_use]
-    pub const fn readiness(&self) -> AuthoringDocumentReadiness {
+    pub fn readiness(&self) -> AuthoringDocumentReadiness {
         self.state.readiness
     }
 
@@ -1315,28 +1322,31 @@ impl PublishedAuthoringPrefabDocument {
     }
 
     #[must_use]
-    pub const fn unavailable_manifest(&self) -> &UnavailableRecordManifest {
+    pub fn unavailable_manifest(&self) -> &UnavailableRecordManifest {
         &self.state.unavailable_manifest
     }
 
     #[must_use]
-    pub const fn diagnostics(&self) -> &DiagnosticReport {
+    pub fn diagnostics(&self) -> &DiagnosticReport {
         &self.state.diagnostics
     }
 
-    pub(crate) fn into_parts(self) -> (PrefabDocument, AuthoringDocumentState) {
+    pub(crate) fn into_parts(self) -> (Arc<PrefabDocument>, Arc<AuthoringDocumentState>) {
         (self.document, self.state)
     }
 }
 
 /// Forks one published source into an independent Editor working owner.
+///
+/// Shares immutable source and classification handles. Session construction creates independent
+/// source identity and history; subsequent edits replace only that Session's handles.
 #[must_use]
 pub fn fork_published_authoring_prefab_document(
     published: &PublishedAuthoringPrefabDocument,
 ) -> PublishedAuthoringPrefabDocument {
     PublishedAuthoringPrefabDocument {
-        document: published.document.clone(),
-        state: published.state.clone(),
+        document: Arc::clone(&published.document),
+        state: Arc::clone(&published.state),
     }
 }
 

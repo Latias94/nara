@@ -538,8 +538,8 @@ fn source_readmission_round_trips_unresolved_intent_without_compiling_its_target
     let state = classify(&document, asset_basis(true), SceneFileLimits::default()).unwrap();
     let session =
         SceneAuthoringSession::from_published_authoring_document(PublishedAuthoringSceneDocument {
-            document: document.clone(),
-            state,
+            document: Arc::new(document.clone()),
+            state: Arc::new(state),
         });
     let admission = session.authoring_readmission().unwrap();
     for candidate in [
@@ -610,8 +610,8 @@ fn source_transactions_preserve_both_snapshot_sides_through_scene_and_prefab_his
     let state = classify(&document, empty_basis(), SceneFileLimits::default()).unwrap();
     let mut scene =
         SceneAuthoringSession::from_published_authoring_document(PublishedAuthoringSceneDocument {
-            document: document.clone(),
-            state: state.clone(),
+            document: Arc::new(document.clone()),
+            state: Arc::new(state.clone()),
         });
     let prefab_state = classify_scene_document(
         &document,
@@ -623,11 +623,11 @@ fn source_transactions_preserve_both_snapshot_sides_through_scene_and_prefab_his
     .unwrap();
     let mut prefab = PrefabAuthoringSession::from_published_authoring_document(
         PublishedAuthoringPrefabDocument {
-            document: PrefabDocument {
+            document: Arc::new(PrefabDocument {
                 roots: document.roots.clone(),
                 entities: document.entities.clone(),
-            },
-            state: prefab_state,
+            }),
+            state: Arc::new(prefab_state),
         },
     );
     let patch = ScenePatchDocument::new([ScenePatchOperation::SetPrefabInstance {

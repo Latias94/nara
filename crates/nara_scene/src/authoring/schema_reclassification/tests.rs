@@ -1276,3 +1276,68 @@ fn native_sessions_have_no_reclassification_authority() {
     );
     assert_eq!(work.usage(), SchemaReclassificationUsage::default());
 }
+
+#[test]
+fn retained_incumbent_cannot_skip_another_allowances_source_charge() {
+    let previous = empty_basis();
+    let next = successor();
+    each_source!(&document(), &previous, |session| {
+        let mut original = SchemaReclassificationWork::default();
+        let retained = session
+            .retain_schema_reclassification_source(&mut original)
+            .unwrap();
+        assert!(original.usage().work_bytes > 0);
+        let mut foreign = SchemaReclassificationWork::default();
+        assert!(
+            session
+                .prepare_schema_reclassification_with_retained_source(&next, &mut foreign, retained)
+                .is_err()
+        );
+        assert_eq!(foreign.usage(), SchemaReclassificationUsage::default());
+        assert_eq!(session.authoring_schema_basis(), Some(previous.clone()));
+    });
+}
+
+#[test]
+fn retained_incumbent_requires_its_original_source_revision_and_kind() {
+    let previous = empty_basis();
+    let next = successor();
+    let mut work = SchemaReclassificationWork::default();
+    let mut first = scene(&document(), &previous);
+    let second = scene(&document(), &previous);
+    let retained = first
+        .retain_schema_reclassification_source(&mut work)
+        .unwrap();
+    let before = work.usage();
+    assert!(
+        second
+            .prepare_schema_reclassification_with_retained_source(&next, &mut work, retained)
+            .is_err()
+    );
+    assert_eq!(work.usage(), before);
+
+    let retained = first
+        .retain_schema_reclassification_source(&mut work)
+        .unwrap();
+    let prefab = prefab(&document(), &previous);
+    let before = work.usage();
+    assert!(
+        prefab
+            .prepare_schema_reclassification_with_retained_source(&next, &mut work, retained)
+            .is_err()
+    );
+    assert_eq!(work.usage(), before);
+
+    let retained = first
+        .retain_schema_reclassification_source(&mut work)
+        .unwrap();
+    assert!(first.apply_authoring_patch(&add("later")).applied);
+    let before = work.usage();
+    assert!(
+        first
+            .prepare_schema_reclassification_with_retained_source(&next, &mut work, retained)
+            .is_err()
+    );
+    assert_eq!(work.usage(), before);
+    assert_eq!(first.authoring_schema_basis(), Some(previous));
+}

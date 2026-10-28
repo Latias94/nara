@@ -146,8 +146,9 @@ pub use spawn::{
 pub mod __private {
     pub use crate::authoring::{
         PrefabSchemaReclassificationCommit, PreparedPrefabSchemaSource, PreparedSceneSchemaSource,
-        SceneSchemaReclassificationCommit, borrow_prepared_prefab_schema_source,
-        borrow_prepared_scene_schema_source,
+        RetainedSchemaReclassificationSource, SceneSchemaReclassificationCommit,
+        borrow_prepared_prefab_schema_source, borrow_prepared_scene_schema_source,
+        require_schema_reclassification_successor,
     };
     pub use crate::authoring_decode::{
         AuthoringAdapterReceipt, AuthoringAdapterReceiptError,

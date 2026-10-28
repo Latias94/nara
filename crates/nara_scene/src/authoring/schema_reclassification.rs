@@ -78,16 +78,34 @@ pub struct SchemaReclassificationUsage {
 /// does not establish that Workspace-wide bound.
 #[derive(Debug, Default)]
 pub struct SchemaReclassificationWork {
+    identity: Arc<ReclassificationWorkIdentity>,
     limits: SchemaReclassificationLimits,
     usage: SchemaReclassificationUsage,
     retained: usize,
     scratch: usize,
 }
 
+#[derive(Debug, Default)]
+struct ReclassificationWorkIdentity;
+
+/// A source incumbent already charged to one exact preparation allowance.
+///
+/// Whole-workspace preparation retains all incumbents before allocating its first successor.
+/// This linear token prevents a different source or allowance from skipping that charge.
+#[doc(hidden)]
+#[derive(Debug)]
+pub struct RetainedSchemaReclassificationSource {
+    work: Arc<ReclassificationWorkIdentity>,
+    revision: SceneAuthoringRevision,
+    previous: AuthoringSchemaBasis,
+    kind: crate::SourceDocumentKind,
+}
+
 impl SchemaReclassificationWork {
     #[must_use]
-    pub const fn new(limits: SchemaReclassificationLimits) -> Self {
+    pub fn new(limits: SchemaReclassificationLimits) -> Self {
         Self {
+            identity: Arc::new(ReclassificationWorkIdentity),
             limits,
             usage: SchemaReclassificationUsage {
                 work_bytes: 0,
@@ -101,6 +119,14 @@ impl SchemaReclassificationWork {
     #[must_use]
     pub const fn usage(&self) -> SchemaReclassificationUsage {
         self.usage
+    }
+
+    /// Charges the finite owner's candidate and binding storage before allocation.
+    #[doc(hidden)]
+    pub fn retain_preparation_storage(&mut self, bytes: usize) -> Result<(), ScenePatchReport> {
+        self.begin_step(Some(0))?;
+        self.reserve("preparation-storage", Some(bytes))?;
+        self.retain_classification(Some(bytes))
     }
 
     fn retain(&mut self, bytes: Option<usize>) -> Result<(), ScenePatchReport> {
@@ -187,6 +213,15 @@ fn limit_error(kind: &'static str, stage: &'static str) -> ScenePatchReport {
 
 fn refused(summary: &'static str) -> ScenePatchReport {
     history_error_report("scene.authoring-schema-reclassification-rejected", summary)
+}
+
+/// Uses the source owner's declaration check before allocating a whole-workspace candidate.
+#[doc(hidden)]
+pub fn require_schema_reclassification_successor(
+    previous: &AuthoringSchemaBasis,
+    successor: &AuthoringSchemaBasis,
+) -> Result<(), ScenePatchReport> {
+    successor.require_declaration_extension_of(previous)
 }
 
 /// An unpublished classification successor; source and history remain in their original owner.
@@ -453,11 +488,24 @@ impl SceneAuthoringSession {
         successor: &AuthoringSchemaBasis,
         work: &mut SchemaReclassificationWork,
     ) -> Result<PreparedSceneSchemaReclassification, ScenePatchReport> {
+        let previous = self
+            .authoring_schema_basis()
+            .ok_or_else(|| refused("Native sources have no admitted authoring basis"))?;
+        successor.require_declaration_extension_of(&previous)?;
+        let incumbent = self.retain_schema_reclassification_source(work)?;
+        self.prepare_schema_reclassification_with_retained_source(successor, work, incumbent)
+    }
+
+    /// Retains this exact incumbent before a whole-set owner prepares any successor.
+    #[doc(hidden)]
+    pub fn retain_schema_reclassification_source(
+        &self,
+        work: &mut SchemaReclassificationWork,
+    ) -> Result<RetainedSchemaReclassificationSource, ScenePatchReport> {
         let state = self
             .authority
             .published()
             .ok_or_else(|| refused("Native sources have no admitted authoring basis"))?;
-        successor.require_declaration_extension_of(&state.schema_basis())?;
         work.begin_step(Some(0))?;
         let incumbent = incumbent_bytes(
             self.document.as_ref(),
@@ -467,6 +515,34 @@ impl SceneAuthoringSession {
             &mut |stage, bytes| work.reserve(stage, bytes),
         )?;
         work.retain(incumbent)?;
+        work.end_step();
+        Ok(RetainedSchemaReclassificationSource {
+            work: Arc::clone(&work.identity),
+            revision: self.revision(),
+            previous: state.schema_basis(),
+            kind: crate::SourceDocumentKind::Scene,
+        })
+    }
+
+    /// Prepares under the allowance that already retains this exact source incumbent.
+    #[doc(hidden)]
+    pub fn prepare_schema_reclassification_with_retained_source(
+        &self,
+        successor: &AuthoringSchemaBasis,
+        work: &mut SchemaReclassificationWork,
+        incumbent: RetainedSchemaReclassificationSource,
+    ) -> Result<PreparedSceneSchemaReclassification, ScenePatchReport> {
+        incumbent.require_source(
+            work,
+            self.revision(),
+            self.authoring_schema_basis(),
+            crate::SourceDocumentKind::Scene,
+        )?;
+        let state = self
+            .authority
+            .published()
+            .expect("retained authoring source");
+        successor.require_declaration_extension_of(&state.schema_basis())?;
         work.begin_step(Some(0))?;
         let next = state.reclassify(&self.document, successor, &mut |stage, bytes| {
             work.reserve(stage, bytes)
@@ -534,11 +610,23 @@ impl PrefabAuthoringSession {
         successor: &AuthoringSchemaBasis,
         work: &mut SchemaReclassificationWork,
     ) -> Result<PreparedPrefabSchemaReclassification, ScenePatchReport> {
+        let previous = self
+            .authoring_schema_basis()
+            .ok_or_else(|| refused("Native sources have no admitted authoring basis"))?;
+        successor.require_declaration_extension_of(&previous)?;
+        let incumbent = self.retain_schema_reclassification_source(work)?;
+        self.prepare_schema_reclassification_with_retained_source(successor, work, incumbent)
+    }
+
+    #[doc(hidden)]
+    pub fn retain_schema_reclassification_source(
+        &self,
+        work: &mut SchemaReclassificationWork,
+    ) -> Result<RetainedSchemaReclassificationSource, ScenePatchReport> {
         let state = self
             .authority
             .published()
             .ok_or_else(|| refused("Native sources have no admitted authoring basis"))?;
-        successor.require_declaration_extension_of(&state.schema_basis())?;
         work.begin_step(Some(0))?;
         let incumbent = incumbent_bytes(
             self.document.as_ref(),
@@ -548,6 +636,33 @@ impl PrefabAuthoringSession {
             &mut |stage, bytes| work.reserve(stage, bytes),
         )?;
         work.retain(incumbent)?;
+        work.end_step();
+        Ok(RetainedSchemaReclassificationSource {
+            work: Arc::clone(&work.identity),
+            revision: self.revision(),
+            previous: state.schema_basis(),
+            kind: crate::SourceDocumentKind::Prefab,
+        })
+    }
+
+    #[doc(hidden)]
+    pub fn prepare_schema_reclassification_with_retained_source(
+        &self,
+        successor: &AuthoringSchemaBasis,
+        work: &mut SchemaReclassificationWork,
+        incumbent: RetainedSchemaReclassificationSource,
+    ) -> Result<PreparedPrefabSchemaReclassification, ScenePatchReport> {
+        incumbent.require_source(
+            work,
+            self.revision(),
+            self.authoring_schema_basis(),
+            crate::SourceDocumentKind::Prefab,
+        )?;
+        let state = self
+            .authority
+            .published()
+            .expect("retained authoring source");
+        successor.require_declaration_extension_of(&state.schema_basis())?;
         work.begin_step(Some(0))?;
         let next = state.reclassify_prefab(&self.document, successor, &mut |stage, bytes| {
             work.reserve(stage, bytes)
@@ -604,6 +719,23 @@ impl PrefabAuthoringSession {
             session: self,
             state: prepared.state,
         })
+    }
+}
+
+impl RetainedSchemaReclassificationSource {
+    fn require_source(
+        &self,
+        work: &SchemaReclassificationWork,
+        revision: SceneAuthoringRevision,
+        previous: Option<AuthoringSchemaBasis>,
+        kind: crate::SourceDocumentKind,
+    ) -> Result<(), ScenePatchReport> {
+        if !Arc::ptr_eq(&self.work, &work.identity) || self.kind != kind {
+            return Err(refused(
+                "Retained source belongs to another preparation allowance or kind",
+            ));
+        }
+        require_prepared_source(revision, previous, self.revision, &self.previous)
     }
 }
 

@@ -53,13 +53,14 @@ mod schema_reclassification;
 #[cfg(feature = "serde")]
 pub use schema_reclassification::{
     PrefabSchemaReclassificationCommit, PreparedPrefabSchemaReclassification,
-    PreparedSceneSchemaReclassification, SceneSchemaReclassificationCommit,
-    SchemaReclassificationLimits, SchemaReclassificationUsage, SchemaReclassificationWork,
+    PreparedSceneSchemaReclassification, RetainedSchemaReclassificationSource,
+    SceneSchemaReclassificationCommit, SchemaReclassificationLimits, SchemaReclassificationUsage,
+    SchemaReclassificationWork,
 };
 #[cfg(feature = "serde")]
 pub use schema_reclassification::{
     PreparedPrefabSchemaSource, PreparedSceneSchemaSource, borrow_prepared_prefab_schema_source,
-    borrow_prepared_scene_schema_source,
+    borrow_prepared_scene_schema_source, require_schema_reclassification_successor,
 };
 #[cfg(feature = "serde")]
 mod property;
@@ -903,10 +904,10 @@ impl PrefabAuthoringSession {
     ) -> Self {
         let (document, state) = published.into_parts();
         Self {
-            document: Arc::new(document),
+            document,
             history: AuthoringHistory::new(history_limits),
             source_upgrade_required: false,
-            authority: AuthoringSessionAuthority::Published(Arc::new(state)),
+            authority: AuthoringSessionAuthority::Published(state),
         }
     }
 
@@ -1363,12 +1364,12 @@ impl SceneAuthoringSession {
     ) -> Self {
         let (document, state) = published.into_parts();
         Self {
-            document: Arc::new(document),
+            document,
             history: AuthoringHistory::new(history_limits),
             live_instance: None,
             live_dirty: true,
             source_upgrade_required: false,
-            authority: AuthoringSessionAuthority::Published(Arc::new(state)),
+            authority: AuthoringSessionAuthority::Published(state),
         }
     }
 

@@ -287,8 +287,8 @@ fn source_local_entity_reference_field_edit_is_atomic_and_round_trips_history_an
     let (document, state) = fixture(AuthoringDocumentKind::Scene, false);
     let mut scene =
         SceneAuthoringSession::from_published_authoring_document(PublishedAuthoringSceneDocument {
-            document,
-            state,
+            document: Arc::new(document),
+            state: Arc::new(state),
         });
     let original = scene.document().clone();
     let baseline_revision = scene.revision();
@@ -405,8 +405,8 @@ fn source_local_reference_edit_does_not_publish_a_persistent_inverse() {
     let state = full(&document, &state).unwrap();
     let mut scene =
         SceneAuthoringSession::from_published_authoring_document(PublishedAuthoringSceneDocument {
-            document: document.clone(),
-            state,
+            document: Arc::new(document.clone()),
+            state: Arc::new(state),
         });
     let revision = scene.revision();
     let report = scene.apply_authoring_field_edit(
@@ -491,8 +491,8 @@ fn scene_and_prefab_field_publication_keep_history_and_quota_failure_atomic() {
         let (document, state) = fixture(AuthoringDocumentKind::Scene, degraded);
         let mut scene = SceneAuthoringSession::from_published_authoring_document(
             PublishedAuthoringSceneDocument {
-                document: document.clone(),
-                state,
+                document: Arc::new(document.clone()),
+                state: Arc::new(state),
             },
         );
         let (prefab_document, state) = fixture(AuthoringDocumentKind::Prefab, degraded);
@@ -502,8 +502,8 @@ fn scene_and_prefab_field_publication_keep_history_and_quota_failure_atomic() {
         };
         let mut prefab = PrefabAuthoringSession::from_published_authoring_document(
             PublishedAuthoringPrefabDocument {
-                document: prefab_document.clone(),
-                state,
+                document: Arc::new(prefab_document.clone()),
+                state: Arc::new(state),
             },
         );
         let patch = ScenePatchDocument::new([
@@ -599,8 +599,8 @@ fn scene_and_prefab_field_publication_keep_history_and_quota_failure_atomic() {
     let (document, state) = fixture(AuthoringDocumentKind::Scene, true);
     let mut scene = SceneAuthoringSession::from_published_authoring_document_with_history_limits(
         PublishedAuthoringSceneDocument {
-            document: document.clone(),
-            state,
+            document: Arc::new(document.clone()),
+            state: Arc::new(state),
         },
         limits,
     );
@@ -611,8 +611,8 @@ fn scene_and_prefab_field_publication_keep_history_and_quota_failure_atomic() {
     };
     let mut prefab = PrefabAuthoringSession::from_published_authoring_document_with_history_limits(
         PublishedAuthoringPrefabDocument {
-            document: document_prefab.clone(),
-            state,
+            document: Arc::new(document_prefab.clone()),
+            state: Arc::new(state),
         },
         limits,
     );
@@ -772,8 +772,8 @@ fn ordinary_field_edits_reject_selected_wire_limits_without_publishing_either_ki
                 AuthoringDocumentKind::Scene => {
                     let mut session = SceneAuthoringSession::from_published_authoring_document(
                         PublishedAuthoringSceneDocument {
-                            document: document.clone(),
-                            state,
+                            document: Arc::new(document.clone()),
+                            state: Arc::new(state),
                         },
                     );
                     assert_refused!(session, &document);
@@ -781,8 +781,8 @@ fn ordinary_field_edits_reject_selected_wire_limits_without_publishing_either_ki
                 AuthoringDocumentKind::Prefab => {
                     let mut session = PrefabAuthoringSession::from_published_authoring_document(
                         PublishedAuthoringPrefabDocument {
-                            document: prefab_document.clone(),
-                            state,
+                            document: Arc::new(prefab_document.clone()),
+                            state: Arc::new(state),
                         },
                     );
                     assert_refused!(session, &prefab_document);
