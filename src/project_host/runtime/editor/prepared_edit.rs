@@ -161,8 +161,10 @@ impl EditorProjectSession {
         }
         self.verify_prepared_patch_contract(prepared.document(), prepared.patch())
             .map_err(EditorActionOutcome::Rejected)?;
+        let edit = self.capture_source_tool_content_edit(prepared.document());
         match self.workspace.commit_authoring_construction(prepared) {
             Ok(committed) => {
+                self.record_source_tool_content_edit(edit);
                 let _ = self
                     .diagnostics
                     .extend(committed.report().diagnostics.clone());
@@ -230,7 +232,11 @@ impl EditorProjectSession {
         {
             return EditorActionOutcome::Rejected(rejection);
         }
+        let edit = self.capture_source_tool_content_edit(prepared.document());
         let report = self.workspace.commit_authoring_edit(prepared);
+        if report.applied {
+            self.record_source_tool_content_edit(edit);
+        }
         let _ = self.diagnostics.extend(report.diagnostics.clone());
         EditorActionOutcome::Workspace(report)
     }

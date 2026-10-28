@@ -97,36 +97,79 @@ and wait for its initial read and actual pending work to return. Then call
 `prepare_source_tool_content_management(&basis, project_relative_directory, Arc::clone(&installation))`.
 The returned candidate describes the finite member baselines and protection facts. Preparation
 and dropping the candidate write nothing. `commit_source_tool_content(candidate)` confirms that
-original successor; observe its eventual operation outcome separately from the returned attempt.
-A changed Session basis or different actual project directory refuses the candidate.
+original successor and admits its known facts before IO; failed publication retains them.
+Observe its eventual operation outcome separately from the returned attempt. A changed Session
+basis or different actual project directory refuses the candidate.
 
 `prepare_source_tool_content_adoption(&basis, &installation_id, &["samples/readme.txt"])` prepares
 explicit project ownership of declared Content members. Confirm through the same commit API.
 Adoption changes no source, history, graph or executable approval. It remains set even while
-bytes equal the release baseline. Unknown members and tool/metadata members cannot be adopted
-as samples. An imported project copy is outside this member set; management never follows its
-origin to delete that copy.
+bytes equal the release baseline or its publication fails. Unknown members and tool/metadata
+members cannot be adopted as samples. An imported project copy is outside this member set;
+management never follows its origin to delete that copy.
 
 `prepare_source_tool_content_observation(&basis, &installation_id)` observes declared member
 presence and bounded default-stream digests without requiring the whole installation to remain
 a valid executable release. Confirming that candidate retains observed modification. Restoring
 baseline bytes or registering the same installation again cannot clear admitted modification
-or adoption. Unknown siblings remain untouched. This records observations; it cannot discover
-an external change that was reverted entirely between observations. Complete protection at
-every accepted document-edit boundary remains subsequent work.
+or adoption, including after a failed publication. Unknown siblings remain untouched. This cannot
+discover an external change that was reverted entirely between observations.
+
+For document edits, the Session captures the exact bound project-relative source and owner content
+identity before five actual acceptance seams: Workspace commands (including Undo/Redo), prepared
+edit commit, prepared construction commit, final Prefab-conversion publication and extension
+actions. Accepted content changes immediately mark matching managed members `modified`, even
+before Save. No-op, refusal, query, navigation, preview and reclassification do not mark.
+Modification remains sticky through Undo, baseline restoration, Save file replacement, Reopen and
+Discard. Existing persistence lanes privately retain accepted-touch facts through initial
+asynchronous content reads and later management; there is no additional document store/history.
+Path matching conservatively protects ASCII-case variants. It grants no exact-object deletion
+proof and never follows an imported copy's origin to claim ownership.
+If the management record is unavailable, an accepted touch cannot yet be classified. That
+document's Save/Reopen/Close returns `RequiresReconcile`, and whole Close retains the Session.
+Restore a valid record and explicitly reconcile before retrying; Undo to clean does not remove
+the obligation. Opening an unchanged document does not create it.
 
 The separate bounded `.nara/source-tools/content.json` preserves up to 32 installations,
 66 members each and 2 MiB of data, including installations already withdrawn from the graph.
-Capacity refusal never evicts protection records. `physical_work_pending` includes actual task
-return and publication cleanup. Publication drift or uncertainty retains the existing facts;
-`reconcile_source_tool_content(&basis)` explicitly reads the current record without writing.
-Within the current Session reconciliation cannot discard known entries, change their immutable
-baselines or clear known protection.
-If disk protection is weaker, the result is `NeedsProtectionPublication`, with
-`protection_publication_pending` and `RequiresReconcile`, rather than a successful durable
-reconciliation. Prepare an explicit adoption or observation successor against that returned basis
-and confirm it to republish the retained protection. A failed or uncertain publication requires
-another fresh read before repair. Read-only reconciliation itself never rewrites disk.
+Capacity refusal never evicts protection records. `protection_publication_pending` reports known
+facts still awaiting accepted disk publication; `physical_work_pending` separately includes actual
+task return and publication cleanup. Additional protection invalidates an older content basis. Already
+pending bytes stay exact; later facts form an automatic coalesced successor. Success settles only
+facts covered by the accepted publication, so an older receipt cannot clear later debt. Automatic
+metadata work updates protection/phase/error observations without overwriting the explicit
+`content.operation` attempt or outcome.
+
+Publication drift or uncertainty retains known facts. `reconcile_source_tool_content(&basis)`
+explicitly reads the current record without writing; it cannot discard known entries, replace
+immutable baselines or clear protection. Each read remembers the protection basis from its start.
+Disk weaker than that basis yields `NeedsProtectionPublication`, with
+`protection_publication_pending` and `RequiresReconcile`, requiring explicit reconcile/republication.
+An older in-flight read missing only newer document facts can instead queue their automatic
+successor when its start-basis protection is intact.
+
+After the reconciliation read succeeds, including a `NeedsProtectionPublication` result, call
+`prepare_source_tool_content_protection(&basis)` on Session or Application with the returned
+basis, then `commit_source_tool_content(candidate)`. The repair API prepares the exact
+already-known protection without IO or additional ownership;
+accepted explicit repair publication reports `Protected`. Preparing or dropping the candidate
+writes nothing. A failed or uncertain publication retains the facts and requires another fresh
+read before repair. Read-only reconciliation itself never republishes them.
+
+Save, Reopen and new document Close guard the owning source before writes, replacement or release.
+Wait on `Busy`; use explicit reconciliation and repair for `RequiresReconcile`. Discard does not
+bypass protection. Unknown pending classification may first admit the original owned Save/Reopen
+request; persistence polling itself advances classification/protection before starting its IO.
+Whole physical Close advances protection before irreversible closing or
+Host/task admission shutdown; failure leaves the retained Session repairable. During Close or
+project replacement waiting, Application still exposes content inspection, original-basis repair
+preparation/commit and reconciliation on that retained Session, including while a replacement
+opens. Other authoring remains gated. Already-entered Save IO keeps its actual publication/receipt
+result; source and protection writes are not a cross-file transaction.
+
+Accepted source changes protect memory only. Only an accepted file-publication receipt supplies
+disk evidence for its covered facts; a crash between acceptance and publication may lose them.
+Windows parent-directory synchronization remains unsupported, with no power-failure guarantee.
 
 Fresh Open reads the ledger without recovering historical creation custody, approving code or
 deleting any file. An unavailable/corrupt record preserves installed files. A pending recovery
@@ -134,7 +177,10 @@ fact is not permission to resume deletion. Whole-file reclamation remains unqual
 Windows probes show that restrictive default-stream custody still allows named alternate-stream
 creation/modification. Default-stream digest equality therefore cannot authorize destroying the
 complete file. See the [protected-content plan](../plans/2026-10-28-protected-source-tool-content-plan.md)
-for the complete workflow and remaining native proof.
+for the source-edit successor's pending qualification and the separate all-stream safe reclaimer.
+Generic exact-object unlink already exists; it supplies no unchanged-content policy. This
+source-edit contract is being implemented, with no new executed qualification claimed here.
+It does not add UI controls or complete reclamation or the full foundation Goal.
 
 ## Review And Adopt A Missing Schema Owner
 

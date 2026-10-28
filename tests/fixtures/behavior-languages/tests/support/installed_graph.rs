@@ -2,6 +2,9 @@
 
 #![cfg(all(target_os = "windows", target_arch = "x86_64", target_env = "msvc"))]
 
+#[path = "installed_graph/content_edits.rs"]
+mod content_edits;
+
 use std::{
     collections::BTreeMap,
     fs,

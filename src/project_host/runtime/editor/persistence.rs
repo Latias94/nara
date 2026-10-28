@@ -101,6 +101,7 @@ impl EditorProjectSession {
     }
 
     pub(super) fn advance_persistence(&mut self) {
+        self.advance_source_tool_content();
         let state = std::mem::take(&mut self.persistence);
         let PersistenceState::Pending {
             attempt,
@@ -117,6 +118,21 @@ impl EditorProjectSession {
                 candidate,
                 authoring,
             } => {
+                if self
+                    .source_tool_content_persistence_rejection(lane.document())
+                    .is_some()
+                {
+                    self.persistence = PersistenceState::Pending {
+                        attempt,
+                        operation,
+                        work: PendingPersistence::Save {
+                            lane,
+                            candidate,
+                            authoring,
+                        },
+                    };
+                    return;
+                }
                 self.persistence = PersistenceState::Pending {
                     attempt,
                     operation,
@@ -150,6 +166,17 @@ impl EditorProjectSession {
                 self.acknowledge_save(lane, refresh, outcome)
             }
             PendingPersistence::Reopen(pending) => {
+                if self
+                    .source_tool_content_persistence_rejection(pending.document())
+                    .is_some()
+                {
+                    self.persistence = PersistenceState::Pending {
+                        attempt,
+                        operation,
+                        work: PendingPersistence::Reopen(pending),
+                    };
+                    return;
+                }
                 self.persistence = PersistenceState::Pending {
                     attempt,
                     operation,
@@ -411,6 +438,7 @@ impl EditorProjectSession {
                 project_path,
                 source_key,
                 authoring_source: None,
+                content_edited: false,
                 document,
                 host,
             },
@@ -662,6 +690,7 @@ impl EditorProjectSession {
                 project_path,
                 source_key,
                 authoring_source: Some(authoring_source),
+                content_edited: false,
                 document,
                 host,
             },
@@ -839,6 +868,7 @@ impl EditorProjectSession {
         &mut self,
         command: EditorPersistenceCommand,
     ) -> EditorPersistenceRequestResult {
+        self.advance_source_tool_content();
         if let EditorPersistenceCommand::AcknowledgeResult { attempt } = command {
             return self.acknowledge_persistence_attempt(attempt);
         }
@@ -882,6 +912,19 @@ impl EditorProjectSession {
                 EditorPersistenceRejection::NoActiveDocument,
             );
         };
+        if let Some(reason) = self.source_tool_content_persistence_rejection(requested_document)
+            && (reason != EditorPersistenceRejection::Busy
+                || self.source_tool_content_manages_document(requested_document))
+        {
+            return self.reject_persistence_attempt(
+                attempt,
+                request,
+                Some(requested_document),
+                reason,
+            );
+        }
+        // Initial classification can finish after admission. The owned checkpoint/request waits
+        // in PendingPersistence; its publication cannot start before the protection guard clears.
 
         let runtime_blocks_reopen = self.scene_runtime_blocks_reopen();
         if matches!(command, EditorPersistenceCommand::Reopen { .. })

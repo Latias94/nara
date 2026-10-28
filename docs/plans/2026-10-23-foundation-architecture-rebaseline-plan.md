@@ -194,6 +194,10 @@ The [protected-content successor](2026-10-28-protected-source-tool-content-plan.
 the qualified exact graph through durable modification/adoption facts and reviewed reclamation.
 Actual Windows named-stream creation during restrictive default-stream custody exposes a
 whole-file deletion-proof gap; management/adoption can proceed without qualifying reclamation.
+The [accepted-document protection qualification](../knowledge/engineering/verification/2026-10/2026-10-28T132217Z-accepted-document-protection-and-repairable-installed-content-close-qualification-8a03235372c74fcbb4a02f7ee23eaca2.md)
+adds sticky accepted-change facts, original-checkpoint persistence and repairable physical Close
+through existing owners and actual public/native consumers. Reviewed reclamation, interrupted
+deletion recovery and the all-stream proof remain open; this does not close R1b or the full Goal.
 
 Acceptance: panel/session parity, exact result, one Undo, Save/Reopen, rejected/stale proposal,
 delayed completion after newer requests, multiple observers and bounded structured diagnostic

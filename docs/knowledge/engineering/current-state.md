@@ -3,7 +3,7 @@ type: "Current State"
 title: "Current Engineering State"
 description: "Derived summary of immutable engineering-memory shards."
 tags: ["engineering-memory", "derived"]
-source_fingerprint: "7c28e14cdac8879a9a7c1c489abb02cbaf92e245296ba340a491ef91a424b9a6"
+source_fingerprint: "77056951509a79b86920918acf9152bd447cf01045b7f5c633a6586b4c4b5786"
 ---
 
 # Current State
@@ -12,8 +12,8 @@ source_fingerprint: "7c28e14cdac8879a9a7c1c489abb02cbaf92e245296ba340a491ef91a42
 
 This file is derived from immutable shards. Record new facts in shards, then render during integration.
 
-- Source fingerprint: `7c28e14cdac8879a9a7c1c489abb02cbaf92e245296ba340a491ef91a424b9a6`
-- Immutable records: 1004
+- Source fingerprint: `77056951509a79b86920918acf9152bd447cf01045b7f5c633a6586b4c4b5786`
+- Immutable records: 1006
 - Active lane heads: 1
 
 # Active Registrations
@@ -69,6 +69,8 @@ This file is derived from immutable shards. Record new facts in shards, then ren
 
 # Recent Evidence
 
+- **Verification Evidence**: [Accepted document protection and repairable installed-content close qualification](verification/2026-10/2026-10-28T132217Z-accepted-document-protection-and-repairable-installed-content-close-qualification-8a03235372c74fcbb4a02f7ee23eaca2.md) - Qualifies sticky accepted-edit protection, original snapshot persistence, failure repair and physical Close through actual Session, Application and managed/native consumers.
+- **Work Progress**: [Accepted document content protection integration and close recovery](progress/2026-10/2026-10-28T130259Z-accepted-document-content-protection-integration-and-close-recovery-c332720c1d2b451d91cd31e85c7a0711.md) - Records the known-versus-published protection correction, independent close/recovery findings and intermediate verification before final qualification.
 - **Verification Evidence**: [Exact-object file unlink and durable installed-content protection](verification/2026-10/2026-10-28T114302Z-exact-object-file-unlink-and-durable-installed-content-protection-995675b08109422ab0f90b15d6004546.md) - Qualifies generic Windows unlink separately from bounded Session management/adoption, explicit protection repair and real managed/public/native consumers; complete reclamation remains open.
 - **Work Progress**: [Protected installed content integration and explicit unlink authority correction](progress/2026-10/2026-10-28T112021Z-protected-installed-content-integration-and-explicit-unlink-authority-correction-10774d33b8b844fcb33ed785e034d011.md) - Records native ADS counterexamples, concrete exact-object unlink, ongoing content protection integration and review corrections without claiming complete reclamation.
 - **Verification Evidence**: [Exact installed source-tool graph and dependency-safe withdrawal](verification/2026-10/2026-10-28T095430Z-exact-installed-source-tool-graph-and-dependency-safe-withdrawal-0c433a90f253423da28da2b3e275bff8.md) - Replaces the single-member selection record with bounded exact installed relationships, shared capture admission and Session-owned withdrawal with independent managed/Application/native consumers.
@@ -79,8 +81,6 @@ This file is derived from immutable shards. Record new facts in shards, then ren
 - **Verification Evidence**: [Whole-workspace schema preparation and shared immutable published sources](verification/2026-10/2026-10-28T050925Z-whole-workspace-schema-preparation-and-shared-immutable-published-sources-dc568b9954884122a24a9f8a25491451.md) - Qualifies exact whole-set source classification and immutable source sharing without claiming project or Session adoption.
 - **Verification Evidence**: [Snapshot-preserving bundle successors and prepared current-source capture](verification/2026-10/2026-10-28T041431Z-snapshot-preserving-bundle-successors-and-prepared-current-source-capture-74dd681a584541178fb81b346b53e878.md) - Qualifies live bundle-leaf handoff and same-basis current capture without claiming whole project, historical or Session adoption.
 - **Work Progress**: [Bundle owner successor and current source capture integration in progress](progress/2026-10/2026-10-28T041003Z-bundle-owner-successor-and-current-source-capture-integration-in-progress-92c27e57b33f494f8505ae9d834233c9.md) - Records snapshot-preserving composition, live accepted leaf handoff, nominal current-source capture and remaining historical and Session adoption work.
-- **Subagent Finding**: [Host schema adoption seams after source history qualification](subagents/2026-10/2026-10-28T033218Z-host-schema-adoption-seams-after-source-history-qualification-656e522708f64f469f6623e660467e9a.md) - Maps actual bundle, capture, Workspace and Session ownership and records proposed streaming historical proof without a second interpreter.
-- **Verification Evidence**: [Source-owned schema reclassification with exact retained history and bounded interpretation](verification/2026-10/2026-10-28T032419Z-source-owned-schema-reclassification-with-exact-retained-history-and-bounded-interpretation-becb85b221e241aebeb4845c692a7379.md) - Qualifies the additive source/history owner and records the actual-demand historical composition boundary before whole-Session adoption.
 
 # Integration Notes
 

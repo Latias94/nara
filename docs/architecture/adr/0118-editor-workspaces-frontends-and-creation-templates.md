@@ -2,7 +2,7 @@
 
 **Status**: Accepted
 **Date**: 2026-10-16
-**Last Revised**: 2026-10-28 (finite tool facets, code-free local release capture and complete-observation preparation)
+**Last Revised**: 2026-10-28 (finite tool facets, local release capture, complete-observation preparation and accepted source-edit protection)
 **Owner**: Private Editor product, tooling, reflection and document-domain owners
 **Refines**: [0015](0015-editor-tooling-and-dogfooding-boundary.md), [0081](0081-schema-source-stable-identity-catalog-and-runtime-binding.md), [0090](0090-unavailable-schema-and-lossless-authoring.md), [0107](0107-shared-ui-foundation-and-independent-product-layers.md), [0113](0113-editor-ui-prefab-authoring-and-canvas-authority.md), [0114](0114-standalone-generic-editor-authoring-and-execution-boundary.md)
 **Related**: [0117](0117-2d-foundation-ownership-and-authoring-contracts.md)
@@ -545,28 +545,73 @@ modification/adoption. Explicit adoption of declared Content members makes them 
 without editing a source, rewriting history or following imported-copy origins.
 
 Preparation and dropped candidates write nothing. Confirmation consumes the original nominal
-content basis and exact protection successor; stale candidates reject. An admitted observation
-can set sticky modification and current presence/failure facts, but an equal default-stream digest
-is no immutable whole-object or deletion proof. Unknown siblings are untouched. Record publication,
-admission, cleanup and actual task return remain separate; uncertain publication requires explicit
-reconciliation. A Session re-observation cannot clear its already known protection or discard
-known installations. Corrupt/unavailable records preserve files, rather than becoming an empty
-ledger eligible for blind overwrite.
-If the current disk record has weaker protection, retain the stronger facts and actual read Host,
-report NeedsProtectionPublication/RequiresReconcile, and require explicit original-basis candidate
-publication. An in-memory OR is not durable reconciliation. The prepared preview retains the
-complete creation-custody projection and exact encoded candidate bytes; confirmation does not
-refresh either behind the review. Content pending/terminal observations enter the existing
-immutable frame and its ordinary change/polling path, including actual publication-cleanup debt.
+content basis and exact protection successor; stale candidates reject. Explicit management,
+adoption and observation confirmation admit their known facts before starting IO. Failed or
+uncertain publication retains those facts. An observation can set sticky modification and current
+presence/failure facts, but an equal default-stream digest is no immutable whole-object or deletion
+proof. Unknown siblings are untouched. Re-observation cannot clear known protection, discard
+installations or replace immutable baselines. Corrupt/unavailable records preserve files rather
+than becoming empty overwrite candidates.
+The Session separately retains which confirmed local registrations have not yet appeared in
+accepted disk evidence. If their first publication fails, reconciliation may retain those
+missing entries as unpublished protection for explicit repair. It cannot apply that exception
+to an installation already admitted by a disk read or successful publication. Conflicting
+immutable facts, overlapping directories and record capacity still refuse; failure never
+evicts known protection.
+
+ADR 0047 owns the five source acceptance seams and their exact bound path/content-identity
+capture. Accepted changes immediately protect matching managed members, independently of dirty
+state, Undo, restored baseline bytes, Save replacement, Reopen or Discard. Existing persistence
+lanes retain a private accepted-touch fact across initial asynchronous reads and later management;
+no second document store or history is introduced. Conservative ASCII-case path matching grants
+protection only, not exact-object deletion proof or imported-origin ownership.
+If the initial management read is unavailable, a document's sticky accepted-touch fact remains
+unclassified. Save, Reopen and Close require successful reconciliation before releasing that
+fact, including when Undo made the document clean. Whole Close retains the repairable Session;
+an unchanged document alone creates no such obligation.
+
+The prepared preview retains the complete creation-custody projection and exact encoded candidate
+bytes; confirmation does not refresh either behind the review. Additional known protection invalidates
+the original content basis immediately. An already pending publication retains its immutable
+bytes; later document facts form an automatic coalesced successor. Accepted publication settles
+only known facts covered by those bytes, so an older successful publication cannot erase later
+protection debt.
+
+A disk read retains the known protection basis from its start. If disk is weaker than that basis,
+retain the stronger facts and actual read Host, report
+`NeedsProtectionPublication`/`RequiresReconcile`, and require explicit reconciliation and
+original-basis republication. Only an older in-flight read missing newer document facts may queue
+their automatic successor when its start-basis protection is intact. An in-memory merge is not
+durable reconciliation. After a successful read, public Session/Application
+`prepare_source_tool_content_protection(&basis)` prepares the exact already-known repair candidate
+without IO or new ownership. Explicit `commit_source_tool_content(candidate)` publishes it with
+the `Protected` outcome on accepted publication; failed or uncertain publication requires another
+fresh reconciliation. Session/Application inspection, original-basis preparation, commit and
+reconciliation remain available while Close or project replacement waits on protection, including
+the retained Session while a replacement opens. Ordinary authoring remains gated.
+
+`protection_publication_pending` describes known protection debt, independently of
+`physical_work_pending` for actual task return and publication cleanup. Both enter the existing
+immutable frame/change/polling path. Automatic metadata work updates these protection/phase/error
+facts without replacing the explicit `content.operation` attempt or outcome. Save, Reopen and
+new document Close use ADR 0047's owning-source `Busy`/`RequiresReconcile` guard. Whole physical
+Close advances protection before irreversible closing or Host/task admission shutdown, leaving
+publication failures repairable. Already-entered Save IO retains its actual receipt; no cross-file
+transaction follows.
+
+Source acceptance is in-memory protection, not disk evidence. Only an accepted file-publication
+receipt supplies that evidence for its covered facts. A crash in the acceptance-to-publication
+window may lose protection. Existing Windows parent-directory synchronization is unsupported;
+neither this sequence nor its receipts promise power-failure durability.
 
 Fresh Open reads management/recovery data without recovering historical creation custody,
 execution approval or permission to delete. This record and its filesystem aliases are reserved
 from ordinary source-document admission. No reclaim operation follows automatically from Open,
-graph withdrawal, an equal digest or an adopted Schema. Complete edited-document protection and
-reviewed reclamation remain subject to the
-[protected-content plan](../../plans/2026-10-28-protected-source-tool-content-plan.md), including
-the currently unresolved all-stream deletion proof. The bounded management/adoption contract does
-not close the complete local release lifecycle.
+graph withdrawal, an equal digest or an adopted Schema. Source-edit protection and
+reviewed reclamation have separate qualification obligations in the
+[protected-content plan](../../plans/2026-10-28-protected-source-tool-content-plan.md).
+Generic exact-object unlink already exists; an all-stream safe reclaimer remains unresolved.
+This contract claims no new UI controls, completed reclamation or complete local release lifecycle.
 
 The initial framework-dependent installed-tool design admits a Host-approved machine runtime as
 an explicit trusted platform prerequisite. Approval names its configured launcher/root, requested

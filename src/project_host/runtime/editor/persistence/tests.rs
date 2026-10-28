@@ -190,6 +190,7 @@ impl Fixture {
                             document,
                             EditorScenePersistenceLane {
                                 authoring_source: None,
+                                content_edited: false,
                                 project_path: Arc::from(format!("scenes/{name}")),
                                 source_key: nara_scene::SourceDocumentKey::project_location(
                                     "6d57f8c5-867c-5463-b74a-057a8cabe2bc".parse().unwrap(),
@@ -240,6 +241,7 @@ impl Fixture {
                             document,
                             EditorPrefabPersistenceLane {
                                 authoring_source: None,
+                                content_edited: false,
                                 project_path: Arc::from(format!("prefabs/{name}")),
                                 source_key: nara_scene::SourceDocumentKey::project_location(
                                     "6d57f8c5-867c-5463-b74a-057a8cabe2bc".parse().unwrap(),
@@ -356,6 +358,28 @@ fn settle(editor: &mut EditorProjectSession) -> EditorPersistenceResult {
         assert!(
             Instant::now() < deadline,
             "persistence did not physically return"
+        );
+        std::thread::sleep(Duration::from_millis(1));
+    }
+}
+
+fn start_persistence_worker(editor: &mut EditorProjectSession) {
+    let deadline = Instant::now() + Duration::from_secs(5);
+    loop {
+        editor.advance_persistence();
+        if matches!(
+            editor.persistence,
+            PersistenceState::Pending {
+                work: PendingPersistence::Saving(_) | PendingPersistence::Reopening(_),
+                ..
+            }
+        ) {
+            return;
+        }
+        assert!(
+            Instant::now() < deadline,
+            "persistence prerequisites did not admit the worker: {:?}",
+            editor.persistence_view()
         );
         std::thread::sleep(Duration::from_millis(1));
     }
@@ -531,7 +555,7 @@ fn stable_editor_open_and_reopen_reject_missing_mismatched_duplicate_and_changed
         }),
         EditorPersistenceRequestResult::Accepted { .. }
     ));
-    editor.advance_persistence();
+    start_persistence_worker(&mut editor);
     assert!(gate.wait_until_started());
     metadata(
         "second.scene.json",
@@ -865,7 +889,7 @@ fn reopen_rejects_same_key_metadata_byte_and_file_replacements_after_preparation
                 }),
                 EditorPersistenceRequestResult::Accepted { .. }
             ));
-            editor.advance_persistence();
+            start_persistence_worker(&mut editor);
             assert!(gate.wait_until_started());
             if replace_object {
                 fs::rename(&metadata_path, metadata_path.with_extension("previous")).unwrap();
@@ -924,7 +948,7 @@ fn non_active_scene_and_prefab_persistence_keeps_each_captured_owner() {
             editor.request_persistence(EditorPersistenceCommand::Save { document: Some(b) }),
             EditorPersistenceRequestResult::Accepted { .. }
         ));
-        editor.advance_persistence();
+        start_persistence_worker(&mut editor);
         assert!(gate.wait_until_started());
         edit(&mut editor, a, "later-a");
         edit(&mut editor, b, "later-b");
@@ -954,7 +978,7 @@ fn non_active_scene_and_prefab_persistence_keeps_each_captured_owner() {
             editor.request_persistence(EditorPersistenceCommand::Reopen { document: Some(b) }),
             EditorPersistenceRequestResult::Accepted { .. }
         ));
-        editor.advance_persistence();
+        start_persistence_worker(&mut editor);
         assert!(gate.wait_until_started());
         edit(&mut editor, a, "reopen-unrelated-a");
         let later_a_revision = editor.workspace.document_revision(a);
@@ -997,7 +1021,7 @@ fn prepared_reopen_rejects_rebound_or_retired_exact_host() {
                 }),
                 EditorPersistenceRequestResult::Accepted { .. }
             ));
-            editor.advance_persistence();
+            start_persistence_worker(&mut editor);
             assert!(gate.wait_until_started());
             if retired {
                 match editor.capture_persistence_lane(document).unwrap() {
@@ -1104,7 +1128,7 @@ fn rejected_acknowledgement_marks_only_the_original_published_host_uncertain() {
             }),
             EditorPersistenceRequestResult::Accepted { .. }
         ));
-        editor.advance_persistence();
+        start_persistence_worker(&mut editor);
         assert!(gate.wait_until_started());
         fixture.rebind(&mut editor, document);
         let replacement = editor.capture_persistence_lane(document).unwrap();

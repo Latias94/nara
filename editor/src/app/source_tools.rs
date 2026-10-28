@@ -23,6 +23,8 @@ use nara::{
 use super::{EditorApplication, EditorApplicationActionNotDispatched, EditorApplicationUpdate};
 
 #[cfg(all(test, windows))]
+mod content_tests;
+#[cfg(all(test, windows))]
 mod csharp_tests;
 
 /// Exact tool acceptance result and subsequent application drive.
@@ -54,7 +56,12 @@ impl EditorApplication {
     pub fn source_tool_content_view(
         &self,
     ) -> Result<EditorSourceToolContentView, EditorSourceToolError> {
-        Ok(self.authoring_edit_session()?.source_tool_content_view())
+        Ok(self
+            .state
+            .published()
+            .ok_or(EditorSourceToolError::Closing)?
+            .session
+            .source_tool_content_view())
     }
 
     pub fn prepare_source_tool_content_management(
@@ -89,13 +96,24 @@ impl EditorApplication {
             .prepare_source_tool_content_observation(basis, installation)
     }
 
+    pub fn prepare_source_tool_content_protection(
+        &self,
+        basis: &EditorSourceToolContentBasis,
+    ) -> Result<PreparedEditorSourceToolContent, EditorSourceToolContentError> {
+        self.state
+            .published()
+            .ok_or(EditorSourceToolContentError::Closing)?
+            .session
+            .prepare_source_tool_content_protection(basis)
+    }
+
     pub fn commit_source_tool_content(
         &mut self,
         prepared: PreparedEditorSourceToolContent,
     ) -> Result<EditorSourceToolAttemptId, EditorSourceToolContentError> {
         let result = self
             .state
-            .workspace_mut()
+            .published_mut()
             .ok_or(EditorSourceToolContentError::Closing)?
             .session
             .commit_source_tool_content(prepared);
@@ -109,7 +127,7 @@ impl EditorApplication {
     ) -> Result<EditorSourceToolAttemptId, EditorSourceToolContentError> {
         let result = self
             .state
-            .workspace_mut()
+            .published_mut()
             .ok_or(EditorSourceToolContentError::Closing)?
             .session
             .reconcile_source_tool_content(basis);

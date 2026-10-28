@@ -295,6 +295,7 @@ impl EditorSourceToolView {
                     || matches!(
                         content.phase,
                         EditorSourceToolContentPhase::Loading
+                            | EditorSourceToolContentPhase::ProtectionPending
                             | EditorSourceToolContentPhase::Publishing
                             | EditorSourceToolContentPhase::Reconciling
                     )

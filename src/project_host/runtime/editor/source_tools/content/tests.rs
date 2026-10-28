@@ -61,6 +61,9 @@ impl Drop for IoControl {
 
 #[cfg(all(target_arch = "x86_64", target_env = "msvc"))]
 mod native {
+    mod close_recovery;
+    mod document_edits;
+
     use std::{
         collections::BTreeMap,
         fs,
@@ -189,10 +192,13 @@ mod native {
         outcome: Outcome,
     ) -> EditorSourceToolContentView {
         let basis = editor.source_tool_content_view().basis;
+        let confirmed = prepared.installations();
         let attempt = editor.commit_source_tool_content(prepared).unwrap();
         let publishing = editor.source_tool_content_view();
         assert_eq!(publishing.phase, Phase::Publishing);
         assert!(publishing.physical_work_pending);
+        assert!(publishing.protection_publication_pending);
+        assert_eq!(publishing.installations, confirmed);
         assert_ne!(publishing.basis, basis);
         assert_eq!(
             publishing.operation,
@@ -635,6 +641,7 @@ mod native {
                 let candidate = editor
                     .prepare_source_tool_content_adoption(&managed.basis, &id, &[SAMPLE])
                     .unwrap();
+                let confirmed = candidate.installations();
                 let path = project.root.join(RECORD);
                 let original = fs::read(&path).unwrap();
                 let external = if replace_leaf {
@@ -653,21 +660,29 @@ mod native {
                 editor.drive_editor_frame(Duration::ZERO);
                 assert_eq!(editor.source_tool_content_view(), managed);
                 let refused = commit(editor, candidate, Outcome::Failed(Error::Changed));
-                assert_eq!(refused.installations, managed.installations);
+                assert_eq!(refused.installations, confirmed);
+                assert!(sample(&refused).adopted);
+                assert!(refused.protection_publication_pending);
+                assert_eq!(refused.phase, Phase::RequiresReconcile);
                 assert_eq!(fs::read(&path).unwrap(), external);
                 editor.drive_editor_frame(Duration::ZERO);
                 assert_eq!(editor.source_tool_content_view(), refused);
                 let attempt = editor
                     .reconcile_source_tool_content(&refused.basis)
                     .unwrap();
-                let reconciled = completed(editor, &attempt, Outcome::Reconciled);
-                assert_eq!(sample(&reconciled).adopted, !replace_leaf);
+                let outcome = if replace_leaf {
+                    Outcome::NeedsProtectionPublication
+                } else {
+                    Outcome::Reconciled
+                };
+                let reconciled = completed(editor, &attempt, outcome);
+                assert!(sample(&reconciled).adopted);
                 assert!(reconciled.installations[0].creation_custody);
                 assert_eq!(fs::read(&path).unwrap(), external);
-                let adoption = editor
-                    .prepare_source_tool_content_adoption(&reconciled.basis, &id, &[SAMPLE])
+                let repair = editor
+                    .prepare_source_tool_content_protection(&reconciled.basis)
                     .unwrap();
-                let adopted = commit(editor, adoption, Outcome::Adopted);
+                let adopted = commit(editor, repair, Outcome::Protected);
                 assert!(sample(&adopted).adopted);
                 assert_record(&project, &adopted);
                 if replace_leaf {
@@ -733,9 +748,9 @@ mod native {
                 serde_json::to_vec(&rollback).unwrap()
             );
             let repair = editor
-                .prepare_source_tool_content_observation(&pending.basis, &id)
+                .prepare_source_tool_content_protection(&pending.basis)
                 .unwrap();
-            let reconciled = commit(editor, repair, Outcome::Observed);
+            let reconciled = commit(editor, repair, Outcome::Protected);
             assert!(sample(&reconciled).modified);
             assert!(sample(&reconciled).adopted);
             assert_record(&project, &reconciled);
@@ -1106,6 +1121,7 @@ mod native {
             let adoption = editor
                 .prepare_source_tool_content_adoption(&managed.basis, &id, &[SAMPLE])
                 .unwrap();
+            let confirmed = adoption.installations();
             let closing_candidate = editor
                 .prepare_source_tool_content_observation(&managed.basis, &id)
                 .unwrap();
@@ -1138,7 +1154,9 @@ mod native {
                 editor.source_tool_view().content.as_ref(),
                 Some(&publishing)
             );
-            assert_eq!(publishing.installations, managed.installations);
+            assert_eq!(publishing.installations, confirmed);
+            assert!(sample(&publishing).adopted);
+            assert!(publishing.protection_publication_pending);
             assert_eq!(
                 publishing.operation,
                 Some(EditorSourceToolContentAttempt {
@@ -1176,6 +1194,8 @@ mod native {
                     EditorProjectCloseProgress::Incomplete { .. }
                 ));
                 assert!(!close.task_shutdown().is_complete(), "{close:?}");
+                assert!(!editor.closing);
+                assert!(editor.authoring_runtime.host_custody().is_accepting());
                 assert_eq!(observer.state(), TaskReturnState::Pending);
                 assert_eq!(editor.source_tool_content_view(), publishing);
                 assert_eq!(source_snapshot(editor), source);
@@ -1184,11 +1204,11 @@ mod native {
             }
             assert_eq!(
                 editor.commit_source_tool_content(closing_candidate),
-                Err(Error::Closing),
+                Err(Error::StaleBasis),
             );
             assert_eq!(
                 editor.reconcile_source_tool_content(&publishing.basis),
-                Err(Error::Closing),
+                Err(Error::Busy),
             );
             control.release();
             returned = Some(observer);

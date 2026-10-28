@@ -589,6 +589,21 @@ impl EditorWorkspace {
             .map(EditorDocumentSlot::revision)
     }
 
+    /// Reads the owner's content identity without encoding or advancing its revision.
+    ///
+    /// Undo may restore this identity while the accepted revision continues to advance.
+    #[must_use]
+    pub fn document_content_state(
+        &self,
+        document: EditorDocumentId,
+    ) -> Option<SceneAuthoringContentState> {
+        self.documents.get(&document).map(|slot| match slot {
+            EditorDocumentSlot::Scene(slot) => slot.session.content_state(),
+            EditorDocumentSlot::Prefab(slot) => slot.session.content_state(),
+            EditorDocumentSlot::Extension(slot) => slot.owner.content_state(),
+        })
+    }
+
     /// Captures the exact current query facts for an open Scene or Prefab document.
     pub fn document_query_basis(
         &self,

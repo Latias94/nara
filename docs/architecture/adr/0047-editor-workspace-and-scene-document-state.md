@@ -15,6 +15,8 @@ with independent file evidence and complete content authorization
 **Refines**: ADR 0015, ADR 0026, ADR 0034, ADR 0038, ADR 0043
 **Amended**: 2026-10-28 to retain installed-content protection independently of graph withdrawal;
 management facts do not recover creation or deletion authority on Open
+**Amended**: 2026-10-28 to protect accepted source changes before persistence or source release,
+with separate in-memory facts and receipt-backed publication evidence
 **Refined By**: [ADR 0104](0104-host-owned-editor-workspace-installation.md): Host-Owned Editor
 Workspace Installation
 
@@ -181,12 +183,30 @@ Rules:
   Installed-content protection uses a separate bounded Session ledger through that same owned
   file publication/task custody. Actual installation handles may transfer creation provenance;
   serialized management data never does. Explicit sample adoption and observed modification
-  survive installed-graph withdrawal and ordinary Close/Open as data facts. A prepared protection
-  successor writes nothing until its original-basis confirmation. Publication uncertainty and
-  cleanup remain observable; a re-observation cannot clear protection already admitted by the
-  current Session. No source edit, automatic execution or deletion follows from this record.
+  survive installed-graph withdrawal; published facts remain readable after Close/Open. Preparation
+  writes nothing. Original-basis confirmation admits known protection before IO; failed publication
+  cannot remove it. Publication uncertainty and cleanup remain observable; re-observation cannot
+  clear protection already admitted by the current Session. The record grants no source edit,
+  automatic execution or deletion.
   ADR 0118 and the [content plan](../../plans/2026-10-28-protected-source-tool-content-plan.md)
   own the finite management/adoption and remaining complete reclamation scope.
+- The Session captures the exact bound project-relative source and the document owner's content
+  identity before each of five actual acceptance seams: Workspace command publication, prepared
+  edit commit, prepared construction commit, final Prefab-conversion publication and extension
+  action publication. An accepted content-identity change immediately marks every matching
+  managed member `modified` in its installation. Undo/Redo that changes content participates;
+  no-op, refusal, query, navigation, preview and classification-only adoption do not.
+  Modification is sticky independently of dirty state: Undo, baseline restoration, Save file
+  replacement, Reopen and Discard cannot clear it. Existing Scene/Prefab/extension persistence
+  lanes retain a private accepted-touch fact while initial asynchronous content reads or new
+  management have not yet associated the source with a member. This adds no document store or
+  history. Managed path matching conservatively protects ASCII-case variants; it supplies neither
+  exact-object deletion proof nor ownership of an imported copy through its release origin.
+  A changed protection basis invalidates an older prepared candidate. Already pending publication
+  keeps its exact bytes; later facts form an automatic coalesced successor under ADR 0118.
+  Source acceptance protects memory only. Only an accepted file-publication receipt supplies
+  disk evidence for the covered facts; a crash between acceptance and publication may lose them.
+  Windows parent-directory synchronization remains unsupported, with no power-failure guarantee.
 - Retained construction uses that same source owner. Workspace routes the original complete
   query basis plus the draft's exact source/Schema basis, and carries a nominal prepared
   construction with its fixed local mapping. A new query cannot authorize an obsolete draft.
@@ -196,8 +216,20 @@ Rules:
 - Automatic entity creation uses the source owner's complete creation operation and returned ID.
   Workspace slots own no generated-ID ordinal, reservation or Reopen reset. Selection changes
   only after successful source publication; failed creation preserves the exact prior selection.
-- Once physical Session close begins, ordinary mutations, Undo/Redo, gesture publication and
-  prepared commits all reject new work at their owning ingress. Retained document observations
+- Save, Reopen and new document Close check protection at the owning source boundary before
+  writes, document replacement or source release. Known managed work returns `Busy`; unknown
+  pending classification may first admit the existing owned checkpoint/request, whose IO waits
+  for classification and protection. Persistence polling progresses that prerequisite itself.
+  Protection failure or uncertainty requires `RequiresReconcile`. Discard is not a bypass. Whole physical
+  Session Close advances protection before setting irreversible closing state or shutting Host
+  and task admission. Failure leaves a retained, repairable Session for explicit reconciliation
+  and publication. While Close or project replacement waits on protection, Application keeps
+  inspection and original-basis repair preparation/commit/reconciliation available on the retained
+  Session, including while a replacement opens; ordinary authoring remains gated.
+  Already-entered Save IO retains its honest publication/receipt outcome; protection and source
+  files do not form a cross-file transaction.
+- After protection permits physical Session close, ordinary mutations, Undo/Redo, gesture
+  publication and prepared commits all reject new work at their owning ingress. Retained document observations
   do not reopen mutation admission while file Hosts and pending cleanup retire. Gesture rejection
   precedes draft consumption; explicit cancellation and existing retirement controls remain
   available. Application filtering does not replace the common Session workspace fence.
@@ -394,6 +426,8 @@ Rules:
 | `SelectionSet` | Ordered selected authoring targets plus top-selected target |
 | `DocumentRevision` | Monotonic authoring revision for mutation preconditions and conflict checks |
 | `ContentState` | Opaque branch-safe identity used to compare current content with a verified saved checkpoint |
+| Accepted source touch | Sticky knowledge that a bound source accepted changed content, independent of current dirty state or disk bytes |
+| Protection publication debt | Known protection not yet covered by accepted disk publication, separate from physical task return and cleanup |
 | `ExternalReloadState` | Clean, changed-on-disk, deleted-on-disk, conflict, or reload-failed |
 | `WorkspaceCommand` | UI/AI command that resolves to document patches, selection changes, mode changes, or save/reload actions |
 

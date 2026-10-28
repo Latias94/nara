@@ -49,6 +49,8 @@ pub struct EditorSourceToolContentInstallation {
 pub enum EditorSourceToolContentPhase {
     Loading,
     Idle,
+    /// Accepted document edits have queued a protection publication.
+    ProtectionPending,
     Publishing,
     Reconciling,
     Unavailable,
@@ -94,6 +96,7 @@ pub enum EditorSourceToolContentOutcome {
     Observed,
     Managed,
     Adopted,
+    Protected,
     Reconciled,
     /// Disk protection was weaker; an explicit candidate publication must make it durable.
     NeedsProtectionPublication,
@@ -114,7 +117,8 @@ pub struct EditorSourceToolContentView {
     pub phase: EditorSourceToolContentPhase,
     pub operation: Option<EditorSourceToolContentAttempt>,
     pub error: Option<EditorSourceToolContentError>,
-    /// Known protection exceeds the last admitted disk record and still needs publication.
+    /// Known protection still needs confirmation in the admitted disk record.
+    /// An accepted source edit alone does not promise crash-durable protection.
     pub protection_publication_pending: bool,
     /// Actual task return and publication cleanup can outlive a terminal operation.
     pub physical_work_pending: bool,

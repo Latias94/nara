@@ -83,7 +83,7 @@ impl<H> RetainedHost<H> {
             .map(apply)
     }
 
-    fn is_retired(&self) -> bool {
+    pub(in crate::project_host::runtime::editor) fn is_retired(&self) -> bool {
         match self.host.try_lock() {
             Ok(host) => host.is_none(),
             Err(TryLockError::WouldBlock) => false,

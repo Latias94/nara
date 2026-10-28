@@ -133,7 +133,11 @@ impl EditorProjectSession {
                         ),
                     );
                 }
+                let edit = self.capture_source_tool_content_edit(action.document());
                 let report = self.workspace.apply_extension_action(action);
+                if report.applied {
+                    self.record_source_tool_content_edit(edit);
+                }
                 let _ = self.diagnostics.extend(report.diagnostics.clone());
                 EditorActionOutcome::Workspace(report)
             }

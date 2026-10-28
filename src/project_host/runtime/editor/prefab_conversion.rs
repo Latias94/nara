@@ -541,12 +541,14 @@ impl EditorProjectSession {
             .view
             .operation
             .expect("a pending operation has identity");
+        let edit = self.capture_source_tool_content_edit(prepared.source.document());
         match self
             .workspace
             .commit_complete_prefab_conversion_with_loader(prepared.source, |reference| {
                 Ok::<_, std::convert::Infallible>(prepared.capture.resolve(reference))
             }) {
             Ok(receipt) => {
+                self.record_source_tool_content_edit(edit);
                 let _ = self
                     .diagnostics
                     .extend(receipt.report().diagnostics.clone());

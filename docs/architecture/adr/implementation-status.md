@@ -182,9 +182,17 @@ content task/terminal facts enter ordinary frame polling. Fs supplies concrete e
 authorized same-object unlink on the qualified Windows/NTFS baseline, without claiming unchanged
 bytes or installation ownership. Native98, root/Tooling887, Editor246 and independent29 pass,
 with their explicit skips; actual managed/Application and selected Windows/DX12 paths pass.
-Default-stream custody still permits ADS changes, so complete protected whole-file reclamation,
-edited-document protection and the full local lifecycle remain open. No custom-drawn UI,
-performance improvement or native cross-platform unlink qualification follows.
+Default-stream custody still permits ADS changes, so complete protected whole-file reclamation
+and the full local lifecycle remain open. No custom-drawn UI, performance improvement or native
+cross-platform unlink qualification follows.
+The [accepted-document protection successor](../../knowledge/engineering/verification/2026-10/2026-10-28T132217Z-accepted-document-protection-and-repairable-installed-content-close-qualification-8a03235372c74fcbb4a02f7ee23eaca2.md)
+adds immediate sticky member protection at existing source acceptance seams, confirmed known facts
+independent of publication success, exact automatic successors and explicit repair. Persistence
+polling progresses unknown classification before its original checkpoint can publish. Failed
+first registration, unavailable initial records and retired file Hosts retain honest repair/Close
+semantics. Final root/Tooling/Editor libraries pass 1,144 with 38 explicit skips; independent30,
+actual managed cancellation/Application and selected Windows/DX12 pass. Reclamation, all-stream
+proof, replacement-opening failure injection and interactive locality retain the linked limits.
 The [documentation verification](../../knowledge/engineering/verification/2026-10/2026-10-23T115037Z-foundation-architecture-rebaseline-documentation-checks-and-adversarial-closure-33c8c794baf142ee964468a01248af17.md)
 records inventory/link/status checks and the scoped adversarial correction/recheck. No Cargo,
 performance or native trajectory was re-executed for this design-only unit.

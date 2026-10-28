@@ -44,8 +44,8 @@ operations exist; it does not own processes, filesystem capabilities or file del
 
 The artifact receipt records a nonzero installation identifier and the selected manifest digest.
 Live installation custody separately retains created members, content observations and publication
-receipts. A future installed ownership/adoption ledger must not infer its authority from that
-persisted artifact receipt. Desired enablement is a durable request, not an executable trust grant.
+receipts. The bounded installed-content protection ledger must not infer deletion authority from
+that persisted artifact receipt. Desired enablement is a durable request, not an executable trust grant.
 Runtime activation IDs remain nominal Session identities. Package, Schema owner, component,
 release, installed file and active invocation are distinct identities with explicit relationships.
 Cargo and NuGet/MSBuild retain source resolution and build authority. Only already selected exact
@@ -101,7 +101,8 @@ local relationships are checked; unsupported sources, roles, migration and targe
    deletion authority even if bytes still match. Retain cleanup/recovery facts across Close/Open.
    The [protected-content successor](2026-10-28-protected-source-tool-content-plan.md) separates
    continuous creation custody from durable protection facts and fresh explicit removal review;
-   its first prerequisite qualifies a same-object stable-content filesystem primitive.
+   generic exact-object unlink already landed at `2f032e7`. It proves no stable-content policy;
+   the separate all-stream safe reclaimer remains unresolved.
 5. **Public and native consumer.** Complete the actual tool workflow without fixture-owned
    execution, installation or proposal interpretation. Exercise invalid/missing/oversized/aliased
    artifacts, wrong digest/target, failed V2, stale review, changed content, adoption, disabled
@@ -137,6 +138,25 @@ Managed installation copies and explicit project import/adoption are different. 
 adopted sample is project-owned and survives removal; release origins or matching digests do not
 restore installer deletion authority. The first release candidate's Content classification has
 no project destination and by itself grants no overwrite or deletion permission.
+
+ADRs 0047/0118 adopt immediate sticky protection at five source acceptance seams, using exact
+bound project-relative source and owner content identity. Undo, baseline restoration, Save
+replacement, Reopen and Discard cannot clear it. Conservative ASCII-case protection grants neither
+exact-object deletion proof nor imported-origin ownership. The
+[protected-content plan](2026-10-28-protected-source-tool-content-plan.md) owns qualification of
+private accepted-touch retention, pre-IO fact admission, exact pending bytes/coalesced successors,
+read-start-basis reconciliation, explicit `Protected` repair and independent protection/physical
+pending observations without overwriting `content.operation`.
+
+Save/Reopen/new document Close guard the owning source before effects with `Busy`/`RequiresReconcile`.
+Whole physical Close advances protection before irreversible closing or Host/task shutdown.
+Application retains inspection and original-basis repair on the retained Session during
+Close/replacement waiting, including while a replacement opens; ordinary authoring remains gated.
+Already-entered Save IO keeps its actual receipt, without a cross-file transaction. Acceptance
+protects memory only; an accepted file-publication receipt supplies disk evidence. A crash before
+publication may lose facts, and unsupported Windows directory sync prevents a power-failure
+guarantee. This successor is being implemented; no executed successor qualification, new UI
+controls, complete reclamation or completed Goal is claimed here.
 
 ## Contract And Verification Scope
 

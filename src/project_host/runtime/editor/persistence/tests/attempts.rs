@@ -136,7 +136,7 @@ fn held_save_and_reopen_keep_the_admitted_attempt_until_physical_return() {
         panic!("dirty Save must be admitted")
     };
     let saving = editor.persistence_view();
-    editor.advance_persistence();
+    start_persistence_worker(&mut editor);
     assert!(gate.wait_until_started());
     let busy = editor.request_persistence(EditorPersistenceCommand::Save {
         document: Some(document),
@@ -155,7 +155,7 @@ fn held_save_and_reopen_keep_the_admitted_attempt_until_physical_return() {
         panic!("Reopen must be admitted")
     };
     let opening = editor.persistence_view();
-    editor.advance_persistence();
+    start_persistence_worker(&mut editor);
     assert!(gate.wait_until_started());
     let pending_ack =
         editor.request_persistence(EditorPersistenceCommand::AcknowledgeResult { attempt: save });
@@ -346,7 +346,7 @@ fn workspace_close_retains_but_exit_consumes_only_its_own_saved_attempt() {
             .as_ref()
             .unwrap()
             .save_attempt();
-        editor.advance_persistence();
+        start_persistence_worker(&mut editor);
         assert!(gate.wait_until_started());
         gate.release();
         let deadline = Instant::now() + Duration::from_secs(5);
@@ -399,7 +399,7 @@ fn two_document_exit_consumes_each_attempt_without_aliasing_the_next_terminal() 
         EditorWorkspaceIntentRequestResult::Accepted
     );
     let first_attempt = editor.persistence_view().attempt().unwrap();
-    editor.advance_persistence();
+    start_persistence_worker(&mut editor);
     assert!(gate.wait_until_started());
     gate.release();
     let deadline = Instant::now() + Duration::from_secs(5);
@@ -426,7 +426,7 @@ fn two_document_exit_consumes_each_attempt_without_aliasing_the_next_terminal() 
         .as_ref()
         .unwrap()
         .save_attempt();
-    editor.advance_persistence();
+    start_persistence_worker(&mut editor);
     assert!(gate.wait_until_started());
     gate.release();
     // Pause between the concrete owner's publication and its ordinary drive's intent progression.

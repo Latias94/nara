@@ -81,6 +81,7 @@ impl ReopenFixture {
                         .unwrap(),
                         document: self.document,
                         authoring_source: None,
+                        content_edited: false,
                         host: self.host.clone(),
                     }),
                     document: self.document,

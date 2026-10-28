@@ -127,6 +127,39 @@ impl Ledger {
         Ok(())
     }
 
+    /// Protects the declared project path across source saves and file-object replacement.
+    ///
+    /// A conservative case match grants no deletion or filesystem alias authority.
+    pub(super) fn protect_document_source(&mut self, project_path: &str) -> bool {
+        let mut changed = false;
+        for entry in &mut self.installations {
+            let Some(relative) = installed_member_path(&entry.installed.directory, project_path)
+            else {
+                continue;
+            };
+            for member in &mut entry.members {
+                if !member.modified && relative.eq_ignore_ascii_case(&member.path) {
+                    member.modified = true;
+                    changed = true;
+                }
+            }
+        }
+        changed
+    }
+
+    pub(super) fn contains_document_source(&self, project_path: &str) -> bool {
+        self.installations.iter().any(|entry| {
+            installed_member_path(&entry.installed.directory, project_path).is_some_and(
+                |relative| {
+                    entry
+                        .members
+                        .iter()
+                        .any(|member| relative.eq_ignore_ascii_case(&member.path))
+                },
+            )
+        })
+    }
+
     fn canonicalize(&mut self) {
         self.installations
             .sort_unstable_by_key(|entry| entry.installed.installation);
@@ -136,6 +169,14 @@ impl Ledger {
                 .sort_unstable_by(|left, right| left.path.cmp(&right.path));
         }
     }
+}
+
+fn installed_member_path<'a>(directory: &str, project_path: &'a str) -> Option<&'a str> {
+    project_path
+        .get(..directory.len())?
+        .eq_ignore_ascii_case(directory)
+        .then_some(())?;
+    project_path[directory.len()..].strip_prefix('/')
 }
 
 impl Installation {
