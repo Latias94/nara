@@ -140,6 +140,13 @@ owns the exposed preparation ergonomics correction: complete original query base
 Workspace, Session, Application and Panel while source-local Scene candidates keep their own
 revision/Schema contract.
 
+The [source-tool ownership design](source-tool-artifact-ownership-design.md) challenges mixed
+installed/project content and selects a managed artifact subtree with explicit project-owned
+template import. Its [replacement plan](../plans/2026-10-28-managed-source-tool-artifacts-plan.md)
+retains actual exact-object unlink and complete reviewed reclamation. The current qualified
+protection implementation is a predecessor; store/import/reclaimer implementation and owning
+ADR amendments remain in progress.
+
 The [per-document persistence-custody design](editor-document-persistence-custody-design.md)
 specifies R5c's concrete replacement for the integrated Host's per-kind file lanes. It separates
 source aliases, document sessions, preview selection and executable startup without an erased

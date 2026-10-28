@@ -7,6 +7,15 @@ related_plan: 2026-10-28-local-source-tool-release-plan.md
 
 # Protected Installed Content And Explicit Reclamation
 
+The qualified mixed-content implementation below remains the current production predecessor.
+Its future reclamation design is superseded by the
+[managed artifact and explicit import plan](2026-10-28-managed-source-tool-artifacts-plan.md)
+and [ownership design](../architecture/source-tool-artifact-ownership-design.md).
+That replacement keeps real exact-object unlink, separates disposable artifacts from project
+sources, and removes the optional protection-record dependency from ordinary persistence after
+complete replacement qualification. Do not implement an older mixed-content deletion path or
+add a compatibility reader. The historical results below do not qualify the new design.
+
 ## Complete Consumer
 
 Continue the same independently built EnemyStats tool from exact installed graph withdrawal to

@@ -198,6 +198,11 @@ The [accepted-document protection qualification](../knowledge/engineering/verifi
 adds sticky accepted-change facts, original-checkpoint persistence and repairable physical Close
 through existing owners and actual public/native consumers. Reviewed reclamation, interrupted
 deletion recovery and the all-stream proof remain open; this does not close R1b or the full Goal.
+The [artifact ownership successor](2026-10-28-managed-source-tool-artifacts-plan.md) now replaces
+that future mixed-content reclamation premise with managed artifacts and explicit project-owned
+template import. It retains real generic unlink and orders retained-source/physical-pending
+corrections before store admission, import, reviewed removal intent and actual partial recovery.
+The selected design is not implementation or a complete R1b claim.
 
 Acceptance: panel/session parity, exact result, one Undo, Save/Reopen, rejected/stale proposal,
 delayed completion after newer requests, multiple observers and bounded structured diagnostic

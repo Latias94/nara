@@ -7,6 +7,12 @@ related_plan: 2026-10-23-foundation-architecture-rebaseline-plan.md
 
 # Local Finite Source-Tool Releases
 
+The [managed artifact and project-owned import successor](2026-10-28-managed-source-tool-artifacts-plan.md)
+owns the next ownership replacement. Mixed installed-content protection below describes the
+qualified predecessor; its remaining deletion premise is superseded. Actual exact-object unlink
+remains required. The successor must complete installation, dependencies, import, withdrawal and
+reviewed partial reclamation rather than reduce this lifecycle to graph mutation alone.
+
 ## Complete Consumer And Placement
 
 Take the actual independently built EnemyStats command and health parameter facet from the
