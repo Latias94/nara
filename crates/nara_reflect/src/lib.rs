@@ -28,12 +28,13 @@ mod value;
 
 pub(crate) use asset_reference::decode_asset_reference_value;
 pub use asset_reference::{
-    DeclaredAssetReference, DeclaredAssetReferenceError, collect_declared_asset_references,
-    collect_declared_asset_references_from_schema,
+    AssetReferenceRewriteError, DeclaredAssetReference, DeclaredAssetReferenceError,
+    collect_declared_asset_references, collect_declared_asset_references_from_schema,
     collect_declared_asset_references_from_schema_with_limits,
     collect_declared_asset_references_with_limits, collect_declared_field_asset_references,
     collect_declared_field_asset_references_with_limits,
-    collect_declared_value_asset_references_with_limits,
+    collect_declared_value_asset_references_with_limits, rewrite_declared_asset_references,
+    rewrite_declared_asset_references_with_admission,
 };
 pub use authoring::PersistentComponentProvider;
 #[cfg(feature = "serde")]

@@ -19,6 +19,13 @@ use crate::{
     },
 };
 
+mod rewrite;
+
+pub use rewrite::{
+    AssetReferenceRewriteError, rewrite_declared_asset_references,
+    rewrite_declared_asset_references_with_admission,
+};
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct DeclaredAssetReference {
     field_id: ComponentFieldId,
