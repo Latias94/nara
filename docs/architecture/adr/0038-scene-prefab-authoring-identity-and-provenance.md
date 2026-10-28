@@ -72,6 +72,15 @@ Scene/prefab authoring identity is document-relative and provenance-aware.
   retains the source owner's complete provenance as one value, rather than separately mutable
   local-ID/path fields. Materialized entity locators remain separate and non-durable.
 - Runtime `Entity` values never become authoring identity.
+- Copying whole source documents creates independent canonical source namespaces and may retain
+  their document-local IDs and local references. The source owner remaps every copied instance
+  reference, overlay base and occurrence-hop constraint, including nested additions, claims,
+  bindings and structural targets. Reflect interprets declared payload references; the Host
+  admits source aliases, allocates destination identities and owns file/sidecar publication.
+  Schema-owner identities remain unchanged. Reference-bearing defaults need explicit copied
+  intent or refusal; a hidden old default must not reconnect the copy to its original source.
+  Lossless Save of unavailable records does not grant the interpretation authority needed for
+  copying a reference closure. Unbound external dependencies require explicit bindings or refusal.
 - Prefab-expanded write-back must explicitly edit the true owning source, change the chosen
   containing instance's override, or convert the selected projection into local data. Each path
   needs its own qualified source transaction. Writing a whole expanded entity back as if it were

@@ -20,6 +20,8 @@ mod migration;
 mod occurrence;
 mod patch;
 mod prefab;
+#[cfg(feature = "serde")]
+mod prefab_copy;
 mod product_transaction;
 mod provenance;
 mod runtime_hierarchy;
@@ -107,6 +109,11 @@ pub use prefab::{
     PrefabInstantiationReport, PrefabOverlay, PrefabOverlaySlot, PrefabPlacement,
     PrefabPlacementParent, PrefabPlacementSlot, PrefabPropertyClaim, PrefabPropertyIntent,
     PrefabReferenceBinding, PrefabRevert, PrefabSourceResolver, ResolvedPrefabSource,
+};
+#[cfg(feature = "serde")]
+pub use prefab_copy::{
+    PrefabCopyError, PrefabCopyLimits, PrefabCopyRequest, PrefabCopySchemaError, PrefabCopySource,
+    PreparedPrefabCopy, PreparedPrefabCopySource,
 };
 pub use provenance::{
     PrefabProjectionPath, PrefabProjectionStep, SceneEntityProvenance, SceneEntityProvenanceMap,
