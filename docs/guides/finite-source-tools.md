@@ -69,8 +69,9 @@ Handle the complete `EditorSourceToolInstallationOutcome`:
 
 - `Published` retains the admitted artifact and live created-member provenance. Its `verify()`
   rechecks the selected destination, identities, digests and complete directory inventory.
-- `Incomplete` retains a published but unready directory, original plan and acquired custody.
-  Keep these recovery facts; the attempt has not committed its ready receipt.
+- `Incomplete` retains a publisher-created `EditorSourceToolIncompletePublication`, original
+  plan and failure. It names the actual published directory and created subset, without a ready
+  receipt. Each member retains its original reader or cleanup-only handle and separate sync fact.
 - `PublishedUnverified` retains both completed publication receipts plus the actual admission
   refusal. It cannot be presented as an unpublished failure or silently selected for execution.
 - `Failed` retains its original plan and actual pre-ready filesystem error/orphan facts.
@@ -85,9 +86,10 @@ After closing an artifact owner, reopen its directory through a strict capabilit
 `EditorSourceToolInstallationInspection::read(&directory, expected_receipt_digest)`. Inspection
 verifies the selected receipt and recaptures the full declared release; unknown, missing or changed
 files reject. This returns data observations, not recovered creation provenance or deletion rights.
-Unready custody has no automatic/public reclamation operation; dropping it closes handles and
-preserves files for reconciliation. The review operation below currently requires a registered
-artifact inventory entry and does not admit an incomplete installation.
+Unready custody has no automatic reclamation. Explicitly register its actual partial facts through
+the operation below, then prepare a fresh disposal review. Dropping it closes handles and preserves
+files. Directory-publication failure before a published destination retains a separate orphan;
+that staging outcome is not an incomplete published artifact.
 
 This is an artifact preparation/publication API, not the complete Package Manager. It does not
 select an installed graph, satisfy declared requirements, adopt project Schema, approve a launcher,
@@ -105,10 +107,19 @@ Keep a successful `EditorSourceToolInstallation` in an `Arc` to transfer its liv
 custody into a Project Session or Application. Observe `source_tool_artifact_view()` and wait for
 the initial read and actual pending work to return. Then call
 `prepare_source_tool_artifact_registration(&basis, Arc::clone(&installation))`. The candidate's
-`installations()` exposes exact installation facts, member roles, release baselines and current
+`artifacts()` exposes exact publication facts, member roles, release baselines and current
 observations. Preparation and dropping the candidate write nothing. Registration uses the
 installation's retained project association and `project_path()`; a different actual project
 directory or an ordinary document already owning a member refuses it.
+
+For `Incomplete`, consume its actual publication with
+`prepare_source_tool_incomplete_artifact_registration(&basis, publication)`. The candidate retains
+an Incomplete publication and only actually created paths. An empty subset is valid. A failed
+ready-receipt commit retains the actual receipt-temporary path; the competing ready receipt is
+unowned and excluded. Preparation hands cleanup-only files over to exact readers while both live
+objects are compared, then closes duplicate writers and creation-time directory handles. This
+does not discard or unlink a file. A refusal returns `EditorSourceToolIncompleteArtifactRegistrationError`;
+inspect `error()` and use `into_parts()` to recover the publication for explicit repair/retry.
 
 `commit_source_tool_artifacts(candidate)` confirms that original basis and exact successor bytes
 through the existing Tasks and file publisher. Drive ordinary frames and correlate `operation`
@@ -116,19 +127,28 @@ with the returned attempt. Its eventual outcome is `Registered`, `Observed`, `Re
 `PublishedWithCleanupFailure` or `Failed(error)`; an admitted attempt alone is not publication.
 Accepted publication followed by executor cleanup failure retains the published inventory,
 reports `TaskCleanupFailed` separately and requires reconciliation. A changed basis returns
-`StaleBasis`, and actual pending work returns `Busy`. Pending bytes remain fixed. Observe
+`EditorSourceToolArtifactCommitError` with `StaleBasis`, and actual pending work returns `Busy`.
+Both preserve the original candidate through `into_parts()`. Recover unique incomplete custody
+with `candidate.into_incomplete_publication()` before preparing a new review. Pending bytes remain fixed. Observe
 `physical_work_pending` separately from the logical result and retain actual publication and
 cleanup facts after cancellation.
 
-`prepare_source_tool_artifact_observation(&basis, &installation_id)` prepares current observations
+If an admitted registration's publication fails, the Session still retains its original custody.
+After explicit artifact reconciliation, `prepare_retained_source_tool_artifact_registration(&basis,
+&artifact_id)` prepares the same retained objects for another explicit confirmation. Fresh Open
+cannot reconstruct those handles from an ID and refuses this entry point without actual custody.
+
+`prepare_source_tool_artifact_observation(&basis, &artifact_id)` prepares current observations
 of declared members without requiring a valid executable release. Confirm it with the same commit
 API. Member observations are `Present`, `Changed`, `Missing` or `Failed`; they cover bounded
 default-stream digests and available live object comparisons. Matching bytes do not establish
 whole-file stability or historical creation provenance. Unknown siblings remain untouched.
 
-The separate format-1 `.nara/source-tools/artifacts.json` inventory retains up to 32 installations,
-66 members each and 2 MiB, including installations withdrawn from the graph. Registration cannot
-replace immutable installation facts or evict another entry. Corrupt, unavailable or unsupported
+The separate format-1 `.nara/source-tools/artifacts.json` inventory requires `artifacts` and
+`reclamations`. It retains up to 32 artifact publications, 66 members each and 2 MiB, including
+ready installations withdrawn from the graph and incomplete subsets. Ready facts include the
+complete ready receipt; Incomplete has none. Registration cannot replace immutable publication
+facts or evict another entry. Corrupt, unavailable or unsupported
 records refuse blind overwrite. Publication drift or uncertainty reports `RequiresReconcile`;
 call `reconcile_source_tool_artifacts(&basis)` to read current disk facts before preparing another
 mutation. Reconciliation writes nothing and does not recover live creation custody, approve code
@@ -170,20 +190,22 @@ This finite text-copy workflow does not qualify native Scene/Prefab/asset templa
 Those formats require their owners to allocate destination identities and sidecars and remap
 references before support can be claimed. Generic `DirectoryCapability::unlink_file` remains
 available as the exact-object primitive. The operation below reclaims registered artifacts and
-preserves mixed results. Incomplete-installation recovery and Package Manager controls remain under
+preserves mixed results for both ready and incomplete publications. Native template remapping and
+Package Manager controls remain under
 the [managed artifact plan](../plans/2026-10-28-managed-source-tool-artifacts-plan.md). Inventory
 observations and graph withdrawal alone grant no deletion authority; default-stream digest
 equality does not cover alternate streams or authorize whole-file disposal.
 
 ## Review And Reclaim Withdrawn Artifacts
 
-Withdraw the exact installation through the installed graph first, including disabled required
-dependents. Wait for actual process, pipe, selection/import/capture work and Host cleanup to
+For Ready artifacts, withdraw the exact installation through the graph first, including disabled
+required dependents. Incomplete artifacts have no ready graph registration, but their directory must
+still be absent from every graph entry. Wait for actual process, pipe, selection/import/capture work and Host cleanup to
 return. `Withdrawn`, task cancellation and phase Idle alone do not authorize deletion.
 
 Observe both `source_tool_artifact_view().basis` and `source_tool_selection_view().basis`, then
 call `prepare_source_tool_reclamation(&artifact_basis, &selection_basis, project_root,
-&installation_id)`. Preparation performs finite reads and retains the exact candidate objects;
+&artifact_id)`. Preparation performs finite reads and retains the exact candidate objects;
 it neither writes an intent nor schedules deletion. Inspect `record()` for the exact selected
 members and `creation_custody()` for continuously held creation facts. After fresh Open that
 historical custody is absent; explicit confirmation still requires the new reviewed live objects.
@@ -322,7 +344,7 @@ ambient process authority; this adapter is not a sandbox.
 Approval and successful Session activation are independent of durable desired selection. Fresh
 Open does not start a tool because its receipt exists. Schema metadata must already be admitted
 in the project; missing-owner adoption uses the operation above. Existing-owner evolution and
-incomplete-installation recovery remain in the lifecycle plan.
+complete Package Manager controls remain in the lifecycle plan.
 
 ## Select A Project-Local Installed Tool
 

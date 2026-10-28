@@ -2,7 +2,8 @@
 
 **Date:** 2026-10-28. **Status:** Owning ADRs amended; managed artifact publication/inventory,
 project-owned text import and reviewed registered-artifact reclamation implemented.
-Incomplete-publication recovery and native template import remain in progress.
+Incomplete-publication recovery has separate public/native qualification; native template import
+remains open.
 **Research baseline:** `874bfc0`.
 
 The [implementation plan](../plans/2026-10-28-managed-source-tool-artifacts-plan.md) continues
@@ -136,12 +137,13 @@ store/import replacement. The registered-artifact owner now publishes reviewed i
 real per-member unlink and retains partial recovery facts through Session/Application Close.
 Its qualification is recorded separately; the predecessor evidence does not establish it.
 
-An incomplete installation still retains its original plan, published-directory facts, created
-readers and cleanup-only handles outside the ready inventory. It cannot be fabricated as a ready
-installation or silently disposed of. The next owning replacement must admit actual partial
-publication facts, distinguish real receipt temporary paths from the ready receipt, hand over
-cleanup-only live objects before unlink review, and preserve source alias protection on refusal.
-It should reuse the existing publisher/review/reclaimer and retain one canonical format-1 reader.
+An incomplete publication retains its original plan, published-directory facts, created readers
+and cleanup-only handles in a concrete publisher-created owner. The common inventory distinguishes
+Ready and Incomplete without a fictitious ready receipt. Actual receipt temporary paths remain
+distinct from the ready receipt. Exact cleanup-to-reader handover and source-owner checks precede
+registration; refusal returns original custody, and failed confirmation returns the prepared owner.
+Failed asynchronous registration retains actual custody for explicit reconcile/registration retry.
+Both kinds reuse the same publisher/review/reclaimer and one canonical format-1 reader.
 The [implementation continuity](../knowledge/engineering/progress/2026-10/2026-10-28T182559Z-reviewed-real-artifact-unlink-integration-and-incomplete-publication-follow-up-1de5c56631a146318b4b1098eb0fdfd8.md)
 records concrete source gaps and the proposed next unit; it is not qualification of that successor.
 

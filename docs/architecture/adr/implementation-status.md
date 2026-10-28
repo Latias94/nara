@@ -217,6 +217,17 @@ cannot become deletion permission. Close retains unpublished mixed results, and 
 every failed Session receipt. Final affected libraries pass 1,316 with 38 explicit skips. The
 linked evidence owns actual independent/native results and limits. Incomplete installation
 publication recovery, native templates, existing-owner evolution and the full lifecycle remain open.
+The [incomplete-publication successor](../../knowledge/engineering/verification/2026-10/2026-10-28T194040Z-incomplete-artifact-publication-custody-and-unified-reviewed-recovery-e4c2d017cc7f4000ac1b38588809102a.md)
+replaces the ready-only artifact inventory with actual Ready/Incomplete publication facts. The
+publisher retains the actual created subset, receipt temporaries and cleanup-only objects;
+exact reader handover and refusal-preserving registration keep that custody through stale
+confirmation and failed publication. Retained-object retry reuses the same Session owner, while
+fresh Open cannot recover authority from serialized IDs. Both artifact kinds use the existing
+review, intent, real unlink and partial-result recovery. Final affected libraries pass 1,239
+with 38 explicit skips; all 31 independent language consumers and the separately selected real
+managed cancellation, Application and Windows/DX12 workflows pass. The linked evidence owns
+static checks and platform limits. Native-format template identity/remapping, existing-owner
+Schema evolution, complete management controls and the full foundation Goal remain open.
 The [documentation verification](../../knowledge/engineering/verification/2026-10/2026-10-23T115037Z-foundation-architecture-rebaseline-documentation-checks-and-adversarial-closure-33c8c794baf142ee964468a01248af17.md)
 records inventory/link/status checks and the scoped adversarial correction/recheck. No Cargo,
 performance or native trajectory was re-executed for this design-only unit.

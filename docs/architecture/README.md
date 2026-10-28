@@ -148,8 +148,11 @@ replacement; managed publication/inventory and explicit project-owned text impor
 mixed-content protection mechanism. The
 [registered-artifact reclamation successor](../knowledge/engineering/verification/2026-10/2026-10-28T185322Z-reviewed-registered-artifact-unlink-and-truthful-partial-recovery-qualification-4c85687a35ef4b54b24b3fc98b6e5083.md)
 adds reviewed intent, real per-member unlink, partial/result-publication recovery and exact
-Session/Application Close evidence. Incomplete publication recovery and native-format template
-remapping remain open. Each evidence record owns its actual results and platform scope.
+Session/Application Close evidence. The
+[incomplete-publication successor](../knowledge/engineering/verification/2026-10/2026-10-28T194040Z-incomplete-artifact-publication-custody-and-unified-reviewed-recovery-e4c2d017cc7f4000ac1b38588809102a.md)
+uses actual partial publication facts and retained cleanup/reader handover through that same
+reclaimer. Native-format template remapping remains open. Each evidence record owns its actual
+results and platform scope.
 
 The [per-document persistence-custody design](editor-document-persistence-custody-design.md)
 specifies R5c's concrete replacement for the integrated Host's per-kind file lanes. It separates

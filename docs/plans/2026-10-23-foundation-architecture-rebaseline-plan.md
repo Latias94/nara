@@ -207,8 +207,11 @@ removes mixed-content protection and optional-ledger persistence gates while qua
 copies through ordinary source history and persistence. The
 [registered-artifact reclamation successor](../knowledge/engineering/verification/2026-10/2026-10-28T185322Z-reviewed-registered-artifact-unlink-and-truthful-partial-recovery-qualification-4c85687a35ef4b54b24b3fc98b6e5083.md)
 adds reviewed intent, actual unlink, partial recovery and retained result-publication debt through
-physical Close. Incomplete publication recovery and native template identity/remapping remain
-open; this is not a complete R1b claim.
+physical Close. The
+[incomplete-publication replacement](../knowledge/engineering/verification/2026-10/2026-10-28T194040Z-incomplete-artifact-publication-custody-and-unified-reviewed-recovery-e4c2d017cc7f4000ac1b38588809102a.md)
+adds actual partial artifact facts, retained cleanup handover and registration recovery using the
+same reclaimer. Native template identity/remapping and full management controls remain open;
+this is not a complete R1b claim.
 
 Acceptance: panel/session parity, exact result, one Undo, Save/Reopen, rejected/stale proposal,
 delayed completion after newer requests, multiple observers and bounded structured diagnostic

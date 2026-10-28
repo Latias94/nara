@@ -595,11 +595,25 @@ actual member result and any later record-publication debt; failure is not rollb
 `DirectoryCapability::unlink_file` remains the exact-object primitive. It does not own this
 domain policy or grant disposal rights over imported project copies and unknown members.
 
-The finite inventory also retains one bounded reclamation record per installation: a fresh
-random correlation ID, installation ID, Intent/Results phase and at most 66 exact member paths
+The finite inventory describes actual artifact publications separately from the ready installed
+graph. Each artifact has a correlation ID, package, exact store directory, captured manifest and
+Ready receipt or Incomplete publication facts. Ready requires the complete existing receipt and
+payload shape. Incomplete records only the actual created subset, including zero members and an
+actual receipt-temporary path when present; it never invents a ready receipt or uncreated payload.
+Canonical format 1 requires `artifacts` and `reclamations`, with one reader and no predecessor alias.
+
+An incomplete publication comes directly from the publisher with actual project/destination,
+directory publication receipt, created readers and cleanup-only live objects. Registration consumes
+that owner. It may hand cleanup over to strictly reopened readers only while the original objects
+remain held and compare equal. Closing duplicate writer/creation handles is separate from unlink.
+Any failure returns the owner and its remaining custody to the caller for explicit repair/retry;
+it performs no discard and claims no removal. Source-owner exclusion precedes inventory acceptance.
+
+The finite inventory also retains one bounded reclamation record per artifact: a fresh
+random correlation ID, artifact ID, Intent/Results phase and at most 66 exact member paths
 with Pending/Removed/Missing/Failed states. These serialized fields never retain native identity
 or removal permission. A new explicit review can replace the previous record for that same
-installation; ordinary registration/observation preserves it. Format 1 requires this record
+artifact; ordinary registration/observation preserves it. Format 1 requires this record
 array, with no older reader for the unreleased predecessor shape.
 
 An admitted review retains the actual project/directory/member objects and parent namespace
