@@ -1,7 +1,7 @@
 ---
 title: Installed owner creation-metadata evolution
 date: 2026-10-29
-status: planned; not implemented or qualified
+status: qualified for creation-only data-owner evolution
 related_plan: 2026-10-23-foundation-architecture-rebaseline-plan.md
 ---
 
@@ -88,7 +88,50 @@ claims; it does not establish new graphical upgrade controls. Nara's own custom-
 will consume the same semantic operation. Parallel V1-serving/V2-probing, field/value migration
 and general package authority over an owner remain separate design questions.
 
+## Qualified Result
+
+Reflect's strict relation and paired catalog reader are `9a4ee37`; whole-source/history, release,
+Session/Application and actual C# consumers are `34f8371`. The
+[verification record](../knowledge/engineering/verification/2026-10/2026-10-28T223626Z-installed-creation-only-owner-successor-preserves-sources-history-and-separate-execution-approval-57dec00a6525410f9abb79ec24a99e69.md)
+records 1,887 final library passes with 39 explicit skips, all 37 independent consumers, actual
+managed cancellation, both selected C# Application cases and the selected Windows/DX12 facet/panel
+trajectory. Correctness Clippy, independent Scene integration, minimal features and root/fixture
+format checks pass. The new upgrade workflow uses window-free public Session/Application;
+existing native interaction evidence does not qualify new graphical upgrade controls.
+
+Direct and owned Scene/Prefab preparation retain old concrete creation history even when the
+successor removes its template. Ordinary new creation then refuses. Actual dirty Prefab capture,
+unsupported predecessor/definition refusal, active/pending V1 refusal, published-result Cancel/
+reconciliation and V2 probe failure retain their separate owners and tested facts.
+
+This bounded unit is complete; general stored-field/value migration, executable gameplay
+publications, complete management UI and the full foundation Goal remain open. The independent
+[delivery-boundary audit](../knowledge/engineering/subagents/2026-10/2026-10-28T225432Z-source-carrying-export-still-lacks-an-independent-verified-runtime-content-entry-b9156a4b7e2043f09f3ab41b78cf3bf8.md)
+records the next resource-facet/Runtime-content investigation without adopting its design or
+claiming processed/source-free delivery.
+
 ## References
+
+Pinned source comparison informs the semantics rather than supplying Nara qualification:
+
+- Godot `81ab961f91066a63bcbf3ec340962bb1a1ada558`,
+  `modules/gdscript/gdscript_compiler.cpp::_compile_class` and
+  `modules/gdscript/gdscript.cpp::GDScriptInstance::reload_members`, copies compatible existing
+  members by name in its keep-state path. Its Editor placeholder path is different:
+  `GDScript::_update_exports` and `core/object/script_language.cpp::PlaceHolderScriptInstance`
+  keep explicit overrides while unoverridden properties read the new defaults. Nara's complete
+  stored payload is explicit data even when its value equals an old creation initial. Do not
+  infer an absent override or reset `100` to `250` from equality with the old initial value.
+- Bevy `85503941e488152711a4695bbe248e9ed9f453fc`,
+  `crates/bevy_ecs/src/reflect/component.rs::apply_or_insert_mapped` and
+  `reflect/mod.rs::from_reflect_with_fallback`, distinguishes applying to an existing component
+  from constructing then applying. Derive `#[reflect(default)]` fills an omitted field. Those
+  operations do not establish persistent authoring evolution, Undo continuity or a catalog
+  successor protocol. Keep Nara's creation initial separate from missing-field `default_value`.
+
+The read-only comparison did not run either engine or qualify their runtime reload, persistence
+or history. Nara's fresh Adapter evidence and separate executable approval retain their own
+owner contracts and actual consumer gates.
 
 - [Additive adoption](2026-10-28-authoring-owner-adoption-plan.md)
 - [Local lifecycle](2026-10-28-local-source-tool-release-plan.md)

@@ -157,9 +157,10 @@ remapping. Scene/image closures, explicit external bindings, complete management
 full R1b remain open. Each evidence record owns its actual results and platform scope.
 
 The [installed creation-metadata evolution plan](../plans/2026-10-29-installed-owner-creation-metadata-evolution-plan.md)
-continues the separate existing-owner question after additive adoption. It proposes one real
-catalog successor with unchanged stored values/history and explicit tool retirement/approval;
-the design is not implementation or general Schema migration evidence.
+continues the separate existing-owner question after additive adoption. Its implementation and
+[qualification](../knowledge/engineering/verification/2026-10/2026-10-28T223626Z-installed-creation-only-owner-successor-preserves-sources-history-and-separate-execution-approval-57dec00a6525410f9abb79ec24a99e69.md)
+cover one catalog successor with unchanged stored values/history and explicit tool retirement/
+approval. General stored-value migration and new graphical upgrade controls remain separate.
 
 The [per-document persistence-custody design](editor-document-persistence-custody-design.md)
 specifies R5c's concrete replacement for the integrated Host's per-kind file lanes. It separates

@@ -34,9 +34,12 @@ Format 1 requires explicit `package`, opaque `release` label, `host_target`,
 `requires` and `files`. An exact requirement has `package` and `manifest: {length, blake3}`; each
 member has `path`, `length`, lowercase 64-digit BLAKE3 `blake3`, and `kind` (`tool` or `content`).
 `catalog` and `entry` exactly name distinct nonempty tool members. The catalog uses Reflect's
-existing JSON catalog envelope. This first capture form requires catalog generation one and has
-no predecessor-lineage input; an already evolved catalog is not yet admitted even if only tool
-code changes. Package identity and Schema owner identity are separate fields.
+existing JSON catalog envelope. An optional `catalog_predecessor` names another distinct exact,
+nonempty Tool member. It contains the complete immediate predecessor for an evolved catalog;
+absence or `null` selects generation one without a predecessor. Reflect validates the current
+and predecessor pair together, including later-generation predecessor boundaries without a
+recursive catalog history. The pair shares Reflect's encoded and declaration allowances as well
+as the release payload allowance. Package identity and Schema owner identity are separate fields.
 The first Host targets are `x86_64-pc-windows-msvc` and `x86_64-unknown-linux-gnu`; capture rejects
 a different current Host. The executable runtime/launcher remains an external Host prerequisite.
 
@@ -314,8 +317,8 @@ successful unlink. Prepare and explicitly confirm a new review to continue dispo
 ## Review And Adopt A Missing Schema Owner
 
 An installed catalog does not change the metadata already admitted by an open Session. Use
-`prepare_installed_schema_owner(project_relative_directory, expected_receipt_digest)` on the
-Project Session or Application to begin code-free preparation. This first operation accepts one
+`prepare_installed_schema_owner(project_relative_directory, expected_receipt_digest,
+ComponentSchemaOwnerChange::Add)` on the Project Session or Application to begin code-free preparation. This operation accepts one
 previously absent generation-one owner, preserving every existing owner's complete declarations
 and lineage. It neither approves nor enables the executable tool. An existing equal owner returns
 `AlreadyAdmitted` only when the live project and actual disk bundle agree.
@@ -355,6 +358,43 @@ its worker. The Application exposes the same observation while it still holds th
 including pending physical Close. Acknowledging the terminal operation, starting a new one or
 beginning explicit reconciliation clears this failure. Diagnostic limits and truncation remain
 those of the owning reports; arbitrary native error strings are not presented.
+
+## Evolve An Existing Owner's Creation Metadata
+
+Use the same preparation operation with `ComponentSchemaOwnerChange::CreationMetadata` for an
+existing engine-owned data owner. The installed candidate must carry a complete immediate
+predecessor exactly equal to the project's admitted current catalog. Only complete component
+`authoring_initial_value` values may change. Component/field identities, aliases, wire versions,
+shapes, required flags, defaults, capabilities and tombstones stay equal. Other owners keep their
+complete snapshots. An unsupported stored-definition change refuses instead of silently migrating
+values or assigning new owners.
+
+Explicitly disable the affected V1 tool first and wait for its actual process/pipe/selection work
+to return. Creation evolution refuses an active affected route, failed process cleanup or pending
+work. Code-free inspection determines the owner, so an active-route refusal can be the operation's
+asynchronous `Failed(ActiveTool)` outcome. Preparation never disables a tool on the caller's behalf.
+
+The review and confirmation retain the selected `change`. New exact data Adapter evidence and
+one nominal successor basis cover the complete open source set and current captures. Existing
+stored payloads, source revisions, saved checkpoints, selection and both history branches remain
+unchanged. A stored value equal to the old creation initial remains stored data; it does not
+become an implicit default. New creation consumes the new initial value through the ordinary
+construction owner. Required fields and missing-field `default_value` semantics do not change.
+
+Confirm, observe, cancel and reconcile through the same owner-adoption operation above. Ordinary
+editing resumes after terminal/cancelled preparation; a live review fences conflicting writes.
+An accepted bundle followed by cancelled or failed live adoption remains an explicit
+`PublishedWithoutAdoption` result. Reconciliation retains the original change intent and reviews
+the permitted successor against the current dirty source set without an automatic rollback.
+
+After successful Schema adoption, explicitly approve and enable V2 through ordinary installed
+selection. Schema adoption grants no execution approval. Failed V2 probe or selection publication
+leaves the new Schema with an inactive, retryable tool and the actual durable selection record.
+Bundle and selection are separate durable owners; Close/Open can observe the intermediate new
+Schema with disabled V1 selection and never executes either tool automatically. The
+[creation-metadata plan](../plans/2026-10-29-installed-owner-creation-metadata-evolution-plan.md)
+owns current verification. General stored-field/value migration and graphical upgrade controls
+remain separate work.
 
 ## Approve Captured Managed Images
 
@@ -414,8 +454,9 @@ ambient process authority; this adapter is not a sandbox.
 
 Approval and successful Session activation are independent of durable desired selection. Fresh
 Open does not start a tool because its receipt exists. Schema metadata must already be admitted
-in the project; missing-owner adoption uses the operation above. Existing-owner evolution and
-complete Package Manager controls remain in the lifecycle plan.
+in the project; missing-owner adoption and bounded creation-metadata evolution use the operations
+above. General stored-value evolution and complete Package Manager controls remain in the
+lifecycle plan.
 
 ## Select A Project-Local Installed Tool
 

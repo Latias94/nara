@@ -192,8 +192,10 @@ bundle publication and whole-Session adoption. New-owner adoption, existing-owne
 installed graph/removal retain distinct acceptance; the full R1b workflow must join them. The
 [creation-metadata evolution plan](2026-10-29-installed-owner-creation-metadata-evolution-plan.md)
 selects the next bounded existing-owner transaction: unchanged stored values/history, one actual
-catalog successor and separately retired/approved tool execution. It is planned, not implemented
-or value-migration qualification.
+catalog successor and separately retired/approved tool execution. Its
+[qualification](../knowledge/engineering/verification/2026-10/2026-10-28T223626Z-installed-creation-only-owner-successor-preserves-sources-history-and-separate-execution-approval-57dec00a6525410f9abb79ec24a99e69.md)
+covers the implemented creation-only operation, retained dirty source/history and intermediate
+Close/Open states. General stored-value migration remains separate.
 The [protected-content successor](2026-10-28-protected-source-tool-content-plan.md) continues
 the qualified exact graph through durable modification/adoption facts and reviewed reclamation.
 Actual Windows named-stream creation during restrictive default-stream custody exposes a
@@ -477,6 +479,12 @@ publication with tracked inputs; identity does not come from generated cache or 
 
 R6a is the facet/continuity/verified Runtime-product contract. R6b adds the durable recipe index
 and local CAS; it does not block an independently qualified R7 immutable base catalog.
+
+The [delivery-boundary audit](../knowledge/engineering/subagents/2026-10/2026-10-28T225432Z-source-carrying-export-still-lacks-an-independent-verified-runtime-content-entry-b9156a4b7e2043f09f3ab41b78cf3bf8.md)
+locates the actual source-carrying loader and starter build-policy dependencies and recommends
+one two-Scene external text-bundle consumer. Build-machine Cargo and detached-development-root
+source delivery remain valid existing behavior. The audit is next-work evidence, not an adopted
+Runtime format, processed catalog implementation or execution qualification.
 
 Acceptance: clear-cache stable references, rename/reorder/ambiguity, dependency/settings/target
 drift, member corruption, cache explanations and every group publication fault point. Preserve

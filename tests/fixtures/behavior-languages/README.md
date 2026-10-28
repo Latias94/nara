@@ -21,6 +21,60 @@ are supplied through `NARA_SOURCE_TOOL_V1_DIR`, `NARA_SOURCE_TOOL_V2_DIR` and
 the command. All build products use the root `target`. The runner does not use the system Lua
 executable or download nethost binaries.
 
+Existing-owner creation-metadata tests use a separate actual C# variant,
+`NARA_SOURCE_TOOL_CREATION_V2_DIR`, at
+`target/behavior-language-trial/tools/creation_v2/bin/EnemyStatsTool/debug`. The existing V2
+remains an algorithm-only, generation-one baseline. Before compiling the new variant, the runner
+invokes the fixture's `creation_catalogs` Rust example with the actual captured V1 catalog path
+and `target/behavior-language-trial/creation-catalogs` as the output directory. Reflect admits
+and serializes the complete successor; the fixture does not calculate fingerprints or rewrite
+serialized references. The `ToolCatalog` MSBuild property selects the generated
+`enemy-stats.catalog.json`, embedded under that same logical resource name and copied to the
+output directory. Its generation is 2, its component wire version remains 1, and its fields and
+shapes are unchanged. Its complete `authoring_initial_value` is health `250`, armor `25`.
+The executable retains the real V2 algorithm, which doubles the bonus.
+
+The companion `enemy-stats.predecessor.catalog.json` contains the complete, captured V1 bytes.
+The release manifest names it with optional `catalog_predecessor`; both catalogs are exact,
+nonempty `tool` members in the ordinary `files` list and share its existing limits. V1 releases
+omit `catalog_predecessor`. Three further output environments use the same directory convention:
+
+| Environment | Actual artifact |
+|---|---|
+| `NARA_SOURCE_TOOL_CREATION_WRONG_PREDECESSOR_DIR` | A valid generation-two catalog pair whose predecessor is another generation-one catalog, with initial values `90`/`9` |
+| `NARA_SOURCE_TOOL_CREATION_UNSUPPORTED_DIR` | A valid lineage with component version 2 and a string health field; the creation-only project transaction must refuse it |
+| `NARA_SOURCE_TOOL_CREATION_INVALID_DIR` | The valid creation V2 catalog pair with an executable that deliberately describes component version 2, so explicit activation fails |
+
+The independent Windows Session selectors share the prefix
+`installed_graph::creation_metadata::csharp_installed_creation_metadata_`:
+
+- `preserves_dirty_scene_prefab_history_and_separate_enablement` installs/adopts V1 from an
+  absent project owner, edits through the real child, retains an inactive dirty Scene and
+  Prefab with Undo and Redo branches, explicitly disables/drains V1, reviews/adopts the
+  creation-only successor, rejects old observations and prepared proposals, creates with the
+  new initial value, and saves/closes/opens before separately approving/enabling V2. Actual
+  V2 edits, Undo/Redo and a second Save/physical Close/fresh Open complete the workflow.
+- `rejects_wrong_predecessor_and_stored_schema_changes_without_publication` retains the
+  original working values, basis, saved source files, bundle and selection when the actual
+  predecessor differs, stored declarations change, or an additive intent names an existing
+  changed owner. The main workflow also checks active-V1 and pending-request refusals.
+- `captures_selected_dirty_prefab_instead_of_broken_saved_dependency` saves a Prefab with a
+  missing dependency, repairs only its dirty working copy, then requires error-free startup
+  and open-Scene composition under the new Schema. This distinguishes actual working-Prefab
+  capture from a disk-only classification. Both retained history directions remain usable.
+- `failed_v2_probe_keeps_new_schema_and_disabled_v1_on_fresh_open` observes the actual failed
+  Describe after Schema adoption and verifies that the new Schema and disabled V1 selection
+  remain separately durable, without restoring old execution.
+
+For a focused serial nextest run after artifact generation, retain the runner's artifact
+environment, use `--test languages` and `--test-threads=1`, and select
+`test(installed_graph::creation_metadata::)`. The consumers observe complete public field
+queries, source entity/component identities, document revisions, saved revisions, dirty flags,
+navigation and history status. They exercise saved checkpoint behavior by replaying to the
+saved source and back. Internal Adapter evidence and retained-history byte costs are not public
+Session queries; their exact identity/cost proof belongs to the owning engine tests. The fixture
+adds no migration executor, history owner, executable approval cache or Editor dependency.
+
 The exact Rust dependency pins are in `Cargo.toml` and `Cargo.lock`. Lua uses the vendored
 Lua 5.4 backend of mlua 0.12.2. In-process C# gameplay uses netcorehost 0.22.0 and the installed
 .NET 10 framework-dependent runtime; the standalone tool uses that runtime through dotnet.
@@ -104,13 +158,13 @@ custody through the production Tasks owner. No drawing toolkit or collectible to
 involved. See the [finite source-tool guide](../../../docs/guides/finite-source-tools.md) and
 [owner plan](../../../docs/plans/2026-10-28-finite-source-tool-owner-plan.md).
 
-On Windows the runner also selects the ignored window-free Application test against the same
+On Windows the runner also selects the ignored window-free Application tests against the same
 actual C# executable. It exercises Application review, exact successful receipts and source/history
 delegation through an explicitly approved project-local installation. Desired enablement, Disable,
 Save, physical Close and fresh Open use the public durable-selection owner; Open observes enabled
 data without executing it. Independent consumers also retain V1 on a rejected installed update,
 switch to V2, reject stale reviews and compare separately installed copies of identical release
-bytes. This separate test requires the runner's artifact environment; ordinary Editor tests
+bytes. These separate tests require the runner's artifact environment; ordinary Editor tests
 do not silently substitute another child or count it as native UI qualification.
 
 The native-template consumers import a declared three-Prefab closure from the actual installed

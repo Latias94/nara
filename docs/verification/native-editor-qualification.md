@@ -144,6 +144,15 @@ gates. The native trajectory above retains its tool/facet/selection scope. Those
 source-format results do not qualify newly drawn import/reclamation controls, arbitrary Scene or
 asset template collections, or the future custom-drawn frontend.
 
+The runner's separate window-free Application selection also includes
+`csharp_source_tool_creation_metadata_evolution_preserves_existing_data_and_history`. It uses
+an actual generation-two embedded tool catalog and captured predecessor to review/adopt a
+creation-only owner successor, preserve existing data/history, Close/Open before separately
+approving V2, then execute and persist a real proposal. Independent Session consumers add
+inactive dirty Scene/Prefab captures, unsupported successor refusal and failed-probe recovery.
+These source/metadata workflows do not establish graphical upgrade controls or general stored
+field/value migration. The native selection above retains its existing actual interaction scope.
+
 For trusted Play source association and source-local document Close, also execute:
 
 ```powershell

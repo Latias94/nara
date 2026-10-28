@@ -96,8 +96,9 @@ window-free source-format consumer. No newly drawn import control is qualified.
 The closed Prefab unit is complete within those limits. The parent lifecycle and complete
 foundation Goal remain active. Scene/image closures, external bindings, general asset templates
 and complete management/custom-drawn UI remain separate. The
-[creation-metadata evolution plan](2026-10-29-installed-owner-creation-metadata-evolution-plan.md)
-is the next planned existing-owner workflow, not an implemented Schema migration capability.
+[creation-metadata evolution successor](2026-10-29-installed-owner-creation-metadata-evolution-plan.md)
+separately qualifies bounded existing-owner creation changes. General stored-value migration
+remains outside both workflows.
 
 ## References
 
