@@ -280,7 +280,7 @@ pub(super) fn prepare_ordinary_scene(
         world,
         registry,
         definition,
-        candidate,
+        SceneMaterializationInput::Expanded(candidate),
         occurrence,
         database,
         target,
@@ -323,7 +323,7 @@ impl SceneComponentBindings {
     ) -> Result<PreparedScene, SceneSpawnReport> {
         self.prepare_selected_scene(
             world,
-            candidate,
+            SceneMaterializationInput::Expanded(candidate),
             occurrence,
             database,
             SceneIdentityCommit::Register,
@@ -362,7 +362,7 @@ impl SceneComponentBindings {
             .clone();
         self.prepare_selected_scene(
             world,
-            candidate,
+            SceneMaterializationInput::Expanded(candidate),
             &occurrence,
             database,
             SceneIdentityCommit::Replace(current),
@@ -370,10 +370,55 @@ impl SceneComponentBindings {
         )
     }
 
+    /// Prepares a processed Scene with its exact admitted native/data definitions.
+    ///
+    /// Uses the candidate's aggregate value allowance and the receiving World's asset bindings.
+    /// A managed World must have installed the same definitions during App composition.
+    #[cfg(feature = "serde")]
+    pub fn prepare_runtime_scene(
+        &self,
+        world: &mut World,
+        candidate: &crate::runtime_scene::RuntimeSceneCandidate,
+        occurrence: &SceneOccurrenceKey,
+    ) -> Result<PreparedScene, SceneSpawnReport> {
+        self.prepare_selected_scene(
+            world,
+            SceneMaterializationInput::Runtime(candidate),
+            occurrence,
+            None,
+            SceneIdentityCommit::Register,
+            candidate.limits().value_limits(),
+        )
+    }
+
+    /// Prepares a processed replacement for one exact activation and its logical occurrence.
+    ///
+    /// Rejection preserves the current activation. Commit uses the ordinary Scene publication
+    /// guards without repeating codecs or admitting source migrations.
+    #[cfg(feature = "serde")]
+    pub fn prepare_runtime_scene_replacement(
+        &self,
+        world: &mut World,
+        candidate: &crate::runtime_scene::RuntimeSceneCandidate,
+        current: &SpawnedSceneInstance,
+    ) -> Result<PreparedScene, SceneSpawnReport> {
+        let occurrence = occurrence_for_instance(world, current)
+            .map_err(|error| occurrence_rejection(DiagnosticReport::default(), error))?
+            .clone();
+        self.prepare_selected_scene(
+            world,
+            SceneMaterializationInput::Runtime(candidate),
+            &occurrence,
+            None,
+            SceneIdentityCommit::Replace(current),
+            candidate.limits().value_limits(),
+        )
+    }
+
     fn prepare_selected_scene(
         &self,
         world: &mut World,
-        candidate: &ExpandedSceneCandidate,
+        candidate: SceneMaterializationInput<'_>,
         occurrence: &SceneOccurrenceKey,
         database: Option<&ProjectAssetDatabase>,
         target: SceneIdentityCommit<'_>,

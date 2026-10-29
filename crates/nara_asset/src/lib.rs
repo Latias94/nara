@@ -63,6 +63,10 @@ pub use storage::{
     Asset, AssetMutationBaseline, AssetSlotRevision, Assets, Handle, allocate_anonymous_handle,
 };
 
+/// Selects the export form for source-bound primary products.
+///
+/// Auxiliary products and primary products without source paths always preserve their complete
+/// [`AssetRef::Product`] identity.
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
 pub enum AssetRefExportPolicy {
     #[default]
@@ -135,25 +139,28 @@ impl From<AssetDatabaseError> for AssetRefError {
 }
 
 impl AssetRef {
-    /// Resolves a primary product handle, rejecting auxiliary selections before mutation.
+    /// Resolves an existing complete product binding or reserves a source-path handle.
+    ///
+    /// Product lookup supports primary and auxiliary selections without a source database. Unknown
+    /// products reject without allocating an identity. Stable source IDs require a real project
+    /// database. A successful resolution proves no actual content existence or residency.
     pub fn resolve<T: 'static>(
         &self,
         asset_server: &mut AssetServer,
     ) -> Result<Handle<T>, AssetRefError> {
-        self.validate_primary_selection()?;
         match self {
             Self::Path(path) => asset_server.reserve::<T>(path.as_str()).map_err(Into::into),
             Self::StableId(id) => Err(AssetRefError::MissingProjectDatabase(*id)),
             Self::Product(reference) => {
-                Err(AssetRefError::MissingProjectDatabase(reference.source()))
+                asset_server.resolve_product(*reference).map_err(Into::into)
             }
         }
     }
 
     /// Resolves a primary product handle through its registered source.
     ///
-    /// Auxiliary selections require their concrete product owner and are rejected before any
-    /// handle allocation or source/type binding.
+    /// A source record proves only its primary product. Auxiliary selections reject before any
+    /// allocation or binding, even when the server already has their complete product identity.
     pub fn resolve_with_database<T: 'static>(
         &self,
         asset_server: &mut AssetServer,
@@ -212,6 +219,9 @@ impl AssetRef {
         Self::from_handle_with_policy(asset_server, handle, AssetRefExportPolicy::Path)
     }
 
+    /// Exports a handle while preserving complete auxiliary and pathless primary product identity.
+    ///
+    /// The policy selects a path or stable source ID only for a source-bound primary product.
     pub fn from_handle_with_policy<T: 'static>(
         asset_server: &AssetServer,
         handle: Handle<T>,
@@ -223,15 +233,17 @@ impl AssetRef {
                 error => Err(AssetRefError::Asset(error)),
             };
         }
-        if policy == AssetRefExportPolicy::StableIdWhenKnown
-            && let Some(stable_id) = asset_server.stable_id(handle.id())
-        {
-            return Ok(Self::StableId(stable_id));
+        let path = asset_server.path(handle.id());
+        if let Some(product) = asset_server.product(handle.id()) {
+            if product.product() != ImportedProductId::PRIMARY || path.is_none() {
+                return Ok(Self::Product(product));
+            }
+            if policy == AssetRefExportPolicy::StableIdWhenKnown {
+                return Ok(Self::StableId(product.source()));
+            }
         }
 
-        let path = asset_server
-            .path(handle.id())
-            .ok_or_else(|| AssetRefError::UnknownHandle(handle.id()))?;
+        let path = path.ok_or_else(|| AssetRefError::UnknownHandle(handle.id()))?;
         Self::path(path).map_err(Into::into)
     }
 }
@@ -491,7 +503,7 @@ mod tests {
     }
 
     #[test]
-    fn auxiliary_product_handle_attempts_reject_before_reservation_or_binding() {
+    fn source_database_routes_reject_auxiliary_products_even_when_bound() {
         let record = asset_record("textures/player.png");
         let mut database = ProjectAssetDatabase::default();
         database.insert(record.clone()).unwrap();
@@ -506,14 +518,17 @@ mod tests {
         for existing_primary in [false, true] {
             let mut server = AssetServer::new();
             if existing_primary {
-                server.reserve::<u32>(record.path().as_str()).unwrap();
+                server.reserve_record::<u32>(&record).unwrap();
             }
             let baseline = server.clone();
             assert_eq!(
                 reference.resolve::<String>(&mut server),
-                Err(expected.clone())
+                Err(AssetRefError::Asset(AssetError::UnknownProduct(product)))
             );
             assert_eq!(server, baseline);
+            let auxiliary = server.reserve_product::<String>(product).unwrap();
+            assert_eq!(reference.resolve::<String>(&mut server), Ok(auxiliary));
+            let baseline = server.clone();
             assert_eq!(
                 reference.resolve_with_database::<String>(&mut server, &database),
                 Err(expected.clone())
@@ -546,14 +561,14 @@ mod tests {
     }
 
     #[test]
-    fn primary_product_handles_require_database_kind_identity_and_type_proofs() {
+    fn source_primary_resolution_requires_database_kind_identity_and_type_proofs() {
         let product = AssetProductRef::new(stable_id(), ImportedProductId::PRIMARY).unwrap();
         let reference = AssetRef::product(product);
         let mut server = AssetServer::new();
         let baseline = server.clone();
         assert_eq!(
             reference.resolve::<String>(&mut server),
-            Err(AssetRefError::MissingProjectDatabase(stable_id()))
+            Err(AssetRefError::Asset(AssetError::UnknownProduct(product)))
         );
         let mut database = ProjectAssetDatabase::default();
         assert_eq!(
@@ -591,6 +606,8 @@ mod tests {
             .resolve_with_database::<String>(&mut server, &database)
             .unwrap();
         let baseline = server.clone();
+        assert_eq!(reference.resolve::<String>(&mut server), Ok(handle));
+        assert_eq!(server, baseline);
         assert!(matches!(
             reference.resolve_with_database_as::<u32>(
                 &mut server,
@@ -643,12 +660,14 @@ mod tests {
         );
 
         let handle = server.reserve_record::<String>(&first).unwrap();
+        let baseline = server.clone();
         let error = server.reserve_record::<String>(&second).unwrap_err();
 
         assert!(matches!(
             error,
             AssetError::AssetIdAlreadyBoundToStableId { .. }
         ));
+        assert_eq!(server, baseline);
         assert_eq!(server.stable_id(handle.id()), Some(stable_id()));
     }
 
@@ -663,12 +682,14 @@ mod tests {
         );
 
         let handle = server.reserve_record::<String>(&first).unwrap();
+        let baseline = server.clone();
         let error = server.reserve_record::<String>(&second).unwrap_err();
 
         assert!(matches!(
             error,
             AssetError::AssetIdAlreadyBoundToPath { .. }
         ));
+        assert_eq!(server, baseline);
         assert_eq!(server.path(handle.id()), Some("textures/player.png"));
     }
 

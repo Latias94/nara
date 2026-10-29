@@ -182,6 +182,41 @@ impl ExpandedSceneCandidate {
     }
 }
 
+/// Closed borrowed inputs to the existing Scene materialization owner.
+/// Runtime candidates retain their exact admitted definitions and processed-value contract.
+#[derive(Clone, Copy)]
+pub(crate) enum SceneMaterializationInput<'a> {
+    Expanded(&'a ExpandedSceneCandidate),
+    #[cfg(feature = "serde")]
+    Runtime(&'a crate::runtime_scene::RuntimeSceneCandidate),
+}
+
+impl<'a> SceneMaterializationInput<'a> {
+    pub(crate) fn source_key(self) -> &'a SourceDocumentKey {
+        match self {
+            Self::Expanded(candidate) => candidate.source_key(),
+            #[cfg(feature = "serde")]
+            Self::Runtime(candidate) => candidate.source_key(),
+        }
+    }
+
+    pub(crate) fn document(self) -> &'a SceneDocument {
+        match self {
+            Self::Expanded(candidate) => candidate.document(),
+            #[cfg(feature = "serde")]
+            Self::Runtime(candidate) => candidate.document(),
+        }
+    }
+
+    pub(crate) fn provenance(self) -> &'a SceneEntityProvenanceMap {
+        match self {
+            Self::Expanded(candidate) => candidate.provenance(),
+            #[cfg(feature = "serde")]
+            Self::Runtime(candidate) => candidate.provenance(),
+        }
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) struct InvalidSceneProvenance;
 

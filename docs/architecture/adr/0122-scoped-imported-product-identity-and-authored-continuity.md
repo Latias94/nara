@@ -2,6 +2,7 @@
 
 **Status:** Accepted
 **Date:** 2026-10-29
+**Amended:** 2026-10-29 by complete Runtime product-to-handle binding
 **Owner:** `nara_asset`, concrete resource formats and authoring metadata owners
 **Extracted from:** [Proposed ADR 0083](0083-durable-project-asset-and-document-entity-identity.md)
 and [Proposed ADR 0087](0087-asset-dependency-import-product-and-artifact-publication-graph.md)
@@ -34,9 +35,34 @@ or Runtime store is migrated. The declared-reference integration uses `AssetRef:
 existing Schema asset-reference leaf, traversal and rewrite. Ordinary path/stable source references
 remain primary selectors. Traversal preserves the complete product reference; resolving its source
 record is not proof that its product exists. The project Host asks the prepared domain to validate
-the selected product before publishing content. Primary-only handles and Prefab-source loading
-refuse auxiliary selection instead of discarding it. These integrations retain their existing
-authority and require their own qualification.
+the selected product before publishing content. Source-oriented primary-only handle resolution
+and Prefab-source loading refuse auxiliary selection instead of discarding it. These integrations
+retain their existing authority and require their own qualification.
+
+`AssetServer` owns complete Product-to-runtime-ID bindings, with real source paths retained only
+as authoring aliases of the source's primary product. Equal auxiliary IDs in different sources,
+and primary versus auxiliary within one source, remain separate runtime identities. One complete
+Product has one Rust type claim per catalogue. `stable_id`/stable-source lookup denote the primary
+product only and cannot erase an auxiliary selection.
+
+A concrete content owner may `reserve_product` after its own product admission. Runtime
+`AssetRef::Product` resolution uses only an existing complete binding and rejects unknown or
+wrong-typed products without allocating another identity. It does not require a fabricated source
+database. Reverse conversion preserves auxiliary Product identity and pathless primary Product
+identity. Source-record reservation joins its actual path and primary Product transactionally;
+database-based source resolution still refuses auxiliary selection because a source record alone
+does not prove membership. Nil source identities reject before binding.
+
+These are weak runtime identities, not resource leases or catalogue integrity. The content owner
+still validates actual product existence, selected codec/family and receiving resource values.
+Scene preparation consumes that receiving World's bindings through the ordinary scratch batch,
+then validates the same catalogue baseline at publication. Missing, mistyped or changed bindings
+do not publish a replacement or change last-good products. No global subresource loader follows.
+
+For later acquisition, the owner can reserve new complete bindings in the existing unpublished
+component/Scene asset batch and prepare actual values through the existing product transaction.
+This retains one originating-World/catalogue baseline and one Scene publication path; cancelled or
+rejected candidates may consume process IDs but publish neither bindings nor resource values.
 
 `AssetDomain::contains_product(product, id)` is a trusted, pure query over existing product data
 with no allocation or I/O and the primary product as its default. The source Host invokes it

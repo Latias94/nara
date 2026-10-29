@@ -91,6 +91,36 @@ pub(crate) fn validate_expanded_values<E>(
     document: &SceneDocument,
     authority: SchemaAuthority<'_>,
     context: &mut ComponentDecodeContext<'_>,
+    admit_asset_work: impl FnMut(usize, usize, usize) -> Result<(), E>,
+) -> Result<EffectiveSceneValidation, E> {
+    validate_effective_values(document, authority, context, false, admit_asset_work)
+}
+
+/// Checks current, explicit processed values without codecs or source migrations, retaining
+/// the processed owner's aggregate admission for declared-asset work and inventory.
+#[cfg(feature = "serde")]
+pub(crate) fn validate_runtime_values_with_admission<E>(
+    document: &SceneDocument,
+    bindings: &SceneComponentBindings,
+    limits: ComponentValueMaterializationLimits,
+    admit_asset_work: impl FnMut(usize, usize, usize) -> Result<(), E>,
+) -> Result<DiagnosticReport, E> {
+    let mut context = ComponentDecodeContext::new().with_materialization_limits(limits);
+    validate_effective_values(
+        document,
+        SchemaAuthority::Mixed(bindings),
+        &mut context,
+        true,
+        admit_asset_work,
+    )
+    .map(|validation| validation.diagnostics)
+}
+
+fn validate_effective_values<E>(
+    document: &SceneDocument,
+    authority: SchemaAuthority<'_>,
+    context: &mut ComponentDecodeContext<'_>,
+    require_runtime_values: bool,
     mut admit_asset_work: impl FnMut(usize, usize, usize) -> Result<(), E>,
 ) -> Result<EffectiveSceneValidation, E> {
     let (placement, mut diagnostics) = validate_scene_structure_with_operation(document, None);
@@ -127,6 +157,7 @@ pub(crate) fn validate_expanded_values<E>(
         .collect::<BTreeSet<_>>();
     let limits = context.materialization_limits();
     let traversal = reference_traversal_limits(limits);
+    let mut runtime_value_budget = SceneValueBudget::new(limits);
     for entity in sorted_entities(document) {
         if let Some(instance) = &entity.prefab {
             diagnostics.push(with_asset_ref(
@@ -200,6 +231,22 @@ pub(crate) fn validate_expanded_values<E>(
                 diagnostics.push(invalid(&ComponentCodecError::Message(error.to_string())));
                 continue;
             }
+            if require_runtime_values {
+                match runtime_value_budget.materialize(schema, &record.value) {
+                    Ok(effective) if effective.as_ref() == &record.value => {}
+                    Ok(_) => {
+                        diagnostics.push(locate(diagnostic_error(
+                            "scene.runtime-incomplete-value",
+                            "Runtime component defaults must be explicit in the processed value",
+                        )));
+                        continue;
+                    }
+                    Err(error) => {
+                        diagnostics.push(invalid(&error));
+                        continue;
+                    }
+                }
+            }
             if let Err(error) =
                 nara_reflect::validate_component_value_with_limits(schema, &record.value, limits)
             {
@@ -217,6 +264,21 @@ pub(crate) fn validate_expanded_values<E>(
                     continue;
                 }
             };
+            if require_runtime_values
+                && let Some(reference) = references.iter().find(|reference| {
+                    !matches!(reference.asset_ref(), nara_asset::AssetRef::Product(_))
+                })
+            {
+                diagnostics.push(with_public_locator(
+                    locate(diagnostic_error(
+                        "scene.runtime-unprocessed-asset-reference",
+                        "Runtime asset references require complete product identities",
+                    )),
+                    "field-id",
+                    reference.field_id().as_str(),
+                ));
+                continue;
+            }
             // Scene checks the enclosing source record only. The selected product's actual
             // existence and typed domain admission belong to the root content owner.
             if let Some(database) = context.project_asset_database()

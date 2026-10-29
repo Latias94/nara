@@ -5,7 +5,9 @@ use std::{
     fmt::{self, Display, Formatter},
 };
 
-use nara_asset::{AssetRef, AssetRefError, AssetServer, Handle, ProjectAssetDatabase};
+use nara_asset::{
+    AssetError, AssetProductRef, AssetRef, AssetRefError, AssetServer, Handle, ProjectAssetDatabase,
+};
 use nara_ecs::{
     __private::{
         PersistentComponentMetadataError, PersistentLifecycleEvent as EcsPersistentLifecycleEvent,
@@ -534,6 +536,20 @@ impl ComponentApplyBatch {
     #[must_use]
     pub fn staged_asset_server(&self) -> &AssetServer {
         &self.context.asset_server
+    }
+
+    /// Reserves an explicitly admitted Product in this unpublished catalogue.
+    ///
+    /// The concrete content owner still prepares actual values and verifies their membership,
+    /// format and type. This operation reserves weak identity only; commit retains the ordinary
+    /// originating-World/catalogue guard and publishes no resource value on its own.
+    pub fn reserve_product<T: 'static>(
+        &mut self,
+        reference: AssetProductRef,
+    ) -> Result<Handle<T>, AssetError> {
+        let handle = self.context.asset_server.reserve_product(reference)?;
+        self.context.asset_server_touched = true;
+        Ok(handle)
     }
 
     /// Checks the captured World and asset catalogue even when decoding has not touched assets.

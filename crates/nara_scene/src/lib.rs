@@ -25,6 +25,8 @@ mod prefab_copy;
 mod product_transaction;
 mod provenance;
 mod runtime_hierarchy;
+#[cfg(feature = "serde")]
+mod runtime_scene;
 mod scene_components;
 mod schema_authority;
 mod source;
@@ -117,6 +119,10 @@ pub use prefab_copy::{
 };
 pub use provenance::{
     PrefabProjectionPath, PrefabProjectionStep, SceneEntityProvenance, SceneEntityProvenanceMap,
+};
+#[cfg(feature = "serde")]
+pub use runtime_scene::{
+    RuntimeSceneCandidate, RuntimeSceneDocumentCandidate, RuntimeSceneError, RuntimeSceneLimits,
 };
 /// Provisional APIs for advanced product integrations.
 ///

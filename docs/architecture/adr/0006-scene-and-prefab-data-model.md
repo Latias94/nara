@@ -2,7 +2,7 @@
 
 **Status**: Accepted
 **Date**: 2026-07-08
-**Last Revised**: 2026-07-18
+**Last Revised**: 2026-10-29
 **Implemented Slices**: Scene/Prefab/Patch document foundation; RGF-U29 explicit persistent
 composition and guarded target-World apply on 2026-07-18
 **Refined By**: ADR 0038: Scene/Prefab Authoring Identity and Provenance; ADR 0043:
@@ -123,6 +123,52 @@ Pure data retires through ordinary strict entity retirement with no carrier hook
 Materialization does not establish language/module execution readiness. Executable publications,
 owner migrations, dependency cohorts and physical code retirement remain separate proposed work
 under ADR 0120. Implementation status and actual verification belong in the implementation ledger.
+
+### Derived Runtime Scene Representation
+
+Scene owns a distinct processed representation for source-free delivery. Cook consumes a complete
+source-bound effective expansion under the selected native/data definitions. It preserves actual
+containing-source identity and every entity's typed source/addition provenance, while removing
+executable dependence on Prefab declarations, overlays, source migrations and authoring metadata.
+The processed record has its own `runtime_scene` envelope and flat hierarchy/component payload;
+it does not accept dormant source fields or disguise an expansion as a plain local document.
+
+Containing-source local IDs remain unchanged. Projected IDs derive injectively from the complete
+canonical logical address, including typed placement ancestry. Private expansion locators and
+lookup aliases do not determine those IDs. Cook checks collisions with authored local IDs and
+rewrites hierarchy and Schema-declared SceneLocal references through the complete mapping.
+Lookup evidence remains inert provenance. Declared asset leaves become complete source/product
+identities through admitted project metadata; existing complete product selections remain intact.
+Ordinary strings are never treated as references.
+
+Encoded/structural, aggregate value and modeled working/provenance limits apply before usable
+candidate publication. The working ledger admits the processed owner's allocations and declared
+reference work; existing validation and syntax scratch retain their own limits. It is not a
+resident-memory bound. Runtime admission requires the expected containing source and selected current
+Schema/owner definitions. Values contain their effective defaults explicitly. Declared references
+close over the processed namespace. Runtime decoding neither migrates source values nor interprets
+missing native bindings as data storage. The decoded document candidate alone grants no execution
+authority.
+
+A separate move-only Runtime candidate captures the exact definition witness. It enters the same
+prepared native/data values, occurrence, hierarchy, product transaction and publication owners as
+source-backed Scenes through a private closed input selection. It does not create another Scene
+transaction or public generic provider interface. Runtime prepare and commit retain the existing
+receiving-World/definition/native-claim checks and last-good replacement behavior.
+
+Immutability and the exact witness carry the processed-value invariant into ordinary preflight;
+preparation does not repeat the complete pure admission pass or reopen source migration.
+Concrete content owners may stage newly admitted Product bindings through `SceneAssetBindings`
+alongside their actual resource values in the existing product transaction. Native codecs resolve
+only the supplied complete Product bindings. Unknown selections never become implicit reservations;
+failure or cancellation does not publish the private catalogue or resource overlay. ADR 0122 owns
+the identity/type contract, which alone proves neither membership nor residency.
+
+This adopts only the Scene representation boundary needed by the ordered delivery workflow.
+Catalog integrity, target/executable compatibility, expected digests, resource residency and actual
+source-free startup/later acquisition belong to their Host and asset owners. Implementation and
+qualification remain recorded separately; this section alone establishes neither a catalog nor
+a completed source-free product.
 
 ## Data Shape
 

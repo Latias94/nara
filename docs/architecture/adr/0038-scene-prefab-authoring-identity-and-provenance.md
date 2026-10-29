@@ -10,6 +10,7 @@ and complete Runtime/Canvas logical-key lowering
 and exact containing-source instance-declaration transactions, plus source-owned identity encoding
 **Amended**: 2026-10-26 by declarative instance intent and selection before recursive activation
 **Amended**: 2026-10-27 by source-owned declaration observation and exact selected-intent Revert
+**Amended**: 2026-10-29 by complete typed provenance in derived Runtime Scenes
 **Refines**: ADR 0006: Scene and Prefab Data Model
 **Refined By**: ADR 0043: Scene, Prefab, and Patch Document Migration Policy; ADR 0047:
 Editor Workspace and Scene Document State; ADR 0058: Stable Runtime Identity and Entity References;
@@ -72,6 +73,12 @@ Scene/prefab authoring identity is document-relative and provenance-aware.
   retains the source owner's complete provenance as one value, rather than separately mutable
   local-ID/path fields. Materialized entity locators remain separate and non-durable.
 - Runtime `Entity` values never become authoring identity.
+- A derived Runtime Scene retains the original canonical containing source and complete typed
+  provenance even after Prefab execution is cooked away. Its deterministic projected record IDs
+  belong to the processed namespace, not to source authoring. Runtime decoding validates that
+  association without opening lookup evidence. It must not flatten provenance into containing-local
+  ownership or persist the compiler's private locators as durable identity. ADR 0006 owns the
+  representation and shared materialization boundary.
 - Copying whole source documents creates independent canonical source namespaces and may retain
   their document-local IDs and local references. The source owner remaps every copied instance
   reference, overlay base and occurrence-hop constraint, including nested additions, claims,

@@ -7,12 +7,16 @@ use std::{
 
 use nara_ecs::Resource;
 
-use crate::{AssetId, AssetPath, AssetPathError, AssetRecord, Handle, StableAssetId};
+use crate::{
+    AssetId, AssetPath, AssetPathError, AssetProductIdentityError, AssetProductRef, AssetRecord,
+    Handle, ImportedProductId, StableAssetId,
+};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum AssetError {
     IdSpaceExhausted,
     InvalidPath(AssetPathError),
+    InvalidProductIdentity(AssetProductIdentityError),
     ConflictingAssetIdentity {
         path: AssetPath,
         stable_id: StableAssetId,
@@ -38,6 +42,7 @@ pub enum AssetError {
         requested_stable_id: StableAssetId,
     },
     UnknownAssetId(AssetId),
+    UnknownProduct(AssetProductRef),
     AssetTypeMismatch {
         id: AssetId,
         existing: &'static str,
@@ -50,6 +55,9 @@ impl Display for AssetError {
         match self {
             Self::IdSpaceExhausted => formatter.write_str("asset id space exhausted"),
             Self::InvalidPath(error) => write!(formatter, "invalid asset path: {error}"),
+            Self::InvalidProductIdentity(error) => {
+                write!(formatter, "invalid asset product identity: {error}")
+            }
             Self::ConflictingAssetIdentity { path, stable_id } => write!(
                 formatter,
                 "asset path '{path}' and stable id '{stable_id}' are bound to different runtime handles"
@@ -91,6 +99,12 @@ impl Display for AssetError {
                 id
             ),
             Self::UnknownAssetId(id) => write!(formatter, "runtime asset id {:?} is unknown", id),
+            Self::UnknownProduct(reference) => {
+                write!(
+                    formatter,
+                    "asset product '{reference}' has no runtime identity"
+                )
+            }
             Self::AssetTypeMismatch {
                 id,
                 existing,
@@ -106,16 +120,17 @@ impl Display for AssetError {
 
 impl Error for AssetError {}
 
-/// Runtime identities and type claims for primary source products and anonymous assets.
+/// Weak runtime identities and type claims for complete products, source paths and anonymous assets.
 ///
-/// Auxiliary product selection belongs to the concrete product owner. Resolve complete authored
-/// references through `AssetRef`; a source record alone carries no auxiliary selection.
+/// Source paths alias only their source's primary product. Concrete content owners may reserve
+/// primary or auxiliary products without authoring paths. A binding proves neither actual content
+/// existence, codec compatibility nor residency; those remain the content owner's responsibility.
 #[derive(Debug, Clone, PartialEq, Eq, Resource)]
 pub struct AssetServer {
     paths: HashMap<AssetPath, AssetId>,
     reverse_paths: HashMap<AssetId, AssetPath>,
-    stable_ids: HashMap<StableAssetId, AssetId>,
-    reverse_stable_ids: HashMap<AssetId, StableAssetId>,
+    products: HashMap<AssetProductRef, AssetId>,
+    reverse_products: HashMap<AssetId, AssetProductRef>,
     type_claims: HashMap<AssetId, (TypeId, &'static str)>,
 }
 
@@ -131,8 +146,8 @@ impl AssetServer {
         Self {
             paths: HashMap::new(),
             reverse_paths: HashMap::new(),
-            stable_ids: HashMap::new(),
-            reverse_stable_ids: HashMap::new(),
+            products: HashMap::new(),
+            reverse_products: HashMap::new(),
             type_claims: HashMap::new(),
         }
     }
@@ -156,16 +171,55 @@ impl AssetServer {
         Ok(id)
     }
 
+    /// Reserves a complete product identity and claims its Rust type.
+    ///
+    /// The concrete content owner must separately validate product membership, codec compatibility
+    /// and actual resources. Repeating a reservation with another Rust type rejects without
+    /// changing the catalogue. This does not create a source-path alias or retain an asset value.
+    pub fn reserve_product<T: 'static>(
+        &mut self,
+        reference: AssetProductRef,
+    ) -> Result<Handle<T>, AssetError> {
+        if let Some(id) = self.products.get(&reference).copied() {
+            return self.claim(id);
+        }
+
+        let id = AssetId::allocate()?;
+        self.products.insert(reference, id);
+        self.reverse_products.insert(id, reference);
+        self.claim(id)
+    }
+
+    /// Resolves only an existing complete product identity and checks or establishes its Rust type.
+    ///
+    /// Unknown products and incompatible type claims reject without changing the catalogue or
+    /// allocating an identity. Success proves no content existence, compatibility or residency.
+    pub fn resolve_product<T: 'static>(
+        &mut self,
+        reference: AssetProductRef,
+    ) -> Result<Handle<T>, AssetError> {
+        let id = self
+            .products
+            .get(&reference)
+            .copied()
+            .ok_or(AssetError::UnknownProduct(reference))?;
+        self.claim(id)
+    }
+
     /// Reserves the source's primary product; the record proves no auxiliary product membership.
+    ///
+    /// Nil source identities reject before any path, product or type binding.
     pub fn reserve_record<T: 'static>(
         &mut self,
         record: &AssetRecord,
     ) -> Result<Handle<T>, AssetError> {
+        let primary = AssetProductRef::new(record.stable_id(), ImportedProductId::PRIMARY)
+            .map_err(AssetError::InvalidProductIdentity)?;
         if let Some(id) = self
             .paths
             .get(record.path())
             .copied()
-            .or_else(|| self.stable_ids.get(&record.stable_id()).copied())
+            .or_else(|| self.products.get(&primary).copied())
         {
             self.validate_type_claim::<T>(id)?;
         }
@@ -173,13 +227,15 @@ impl AssetServer {
         self.claim(id)
     }
 
-    /// Binds only the source's primary runtime identity.
+    /// Binds the actual source path and primary product transactionally, rejecting nil sources.
     pub fn reserve_record_id(&mut self, record: &AssetRecord) -> Result<AssetId, AssetError> {
+        let primary = AssetProductRef::new(record.stable_id(), ImportedProductId::PRIMARY)
+            .map_err(AssetError::InvalidProductIdentity)?;
         let path_id = self.paths.get(record.path()).copied();
-        let stable_id = self.stable_ids.get(&record.stable_id()).copied();
+        let product_id = self.products.get(&primary).copied();
 
-        let id = match (path_id, stable_id) {
-            (Some(path_id), Some(stable_id)) if path_id != stable_id => {
+        let id = match (path_id, product_id) {
+            (Some(path_id), Some(product_id)) if path_id != product_id => {
                 return Err(AssetError::ConflictingAssetIdentity {
                     path: record.path().clone(),
                     stable_id: record.stable_id(),
@@ -190,9 +246,10 @@ impl AssetServer {
         };
 
         self.validate_path_binding(id, record.path())?;
-        self.validate_stable_id_binding(id, record.stable_id())?;
+        self.validate_primary_binding(id, primary)?;
         self.bind_path(id, record.path().clone())?;
-        self.bind_stable_id(id, record.stable_id())?;
+        self.products.insert(primary, id);
+        self.reverse_products.insert(id, primary);
         Ok(id)
     }
 
@@ -226,7 +283,8 @@ impl AssetServer {
 
     #[must_use]
     pub(crate) fn id_for_stable_id(&self, stable_id: StableAssetId) -> Option<AssetId> {
-        self.stable_ids.get(&stable_id).copied()
+        let primary = AssetProductRef::new(stable_id, ImportedProductId::PRIMARY).ok()?;
+        self.products.get(&primary).copied()
     }
 
     #[must_use]
@@ -234,14 +292,25 @@ impl AssetServer {
         self.reverse_paths.get(&id).map(AssetPath::as_str)
     }
 
+    /// Returns the complete product identity, including any auxiliary selection.
+    #[must_use]
+    pub fn product(&self, id: AssetId) -> Option<AssetProductRef> {
+        self.reverse_products.get(&id).copied()
+    }
+
+    /// Returns a stable source identity only for its primary product.
+    ///
+    /// Use [`Self::product`] to preserve an auxiliary selection.
     #[must_use]
     pub fn stable_id(&self, id: AssetId) -> Option<StableAssetId> {
-        self.reverse_stable_ids.get(&id).copied()
+        self.product(id)
+            .filter(|reference| reference.product() == ImportedProductId::PRIMARY)
+            .map(AssetProductRef::source)
     }
 
     pub(crate) fn validate_type_claim<T: 'static>(&self, id: AssetId) -> Result<(), AssetError> {
         let known = self.reverse_paths.contains_key(&id)
-            || self.reverse_stable_ids.contains_key(&id)
+            || self.reverse_products.contains_key(&id)
             || self.type_claims.contains_key(&id);
         if !known {
             return Err(AssetError::UnknownAssetId(id));
@@ -289,37 +358,34 @@ impl AssetServer {
         Ok(())
     }
 
-    fn bind_stable_id(&mut self, id: AssetId, stable_id: StableAssetId) -> Result<(), AssetError> {
-        self.validate_stable_id_binding(id, stable_id)?;
-        self.stable_ids.insert(stable_id, id);
-        self.reverse_stable_ids.insert(id, stable_id);
-        Ok(())
-    }
-
-    fn validate_stable_id_binding(
+    fn validate_primary_binding(
         &self,
         id: AssetId,
-        stable_id: StableAssetId,
+        primary: AssetProductRef,
     ) -> Result<(), AssetError> {
-        if let Some(existing_id) = self.stable_ids.get(&stable_id).copied()
+        if let Some(existing_id) = self.products.get(&primary).copied()
             && existing_id != id
         {
             return Err(AssetError::StableIdAlreadyBound {
-                stable_id,
+                stable_id: primary.source(),
                 existing_id,
                 requested_id: id,
             });
         }
-        if let Some(existing_stable_id) = self.reverse_stable_ids.get(&id).copied()
-            && existing_stable_id != stable_id
+        // Source reservation selects only a path alias or a primary product, never an auxiliary.
+        if let Some(existing_product) = self.product(id)
+            && existing_product != primary
         {
             return Err(AssetError::AssetIdAlreadyBoundToStableId {
                 id,
-                existing_stable_id,
-                requested_stable_id: stable_id,
+                existing_stable_id: existing_product.source(),
+                requested_stable_id: primary.source(),
             });
         }
 
         Ok(())
     }
 }
+
+#[cfg(test)]
+mod tests;

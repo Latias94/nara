@@ -169,6 +169,74 @@ Plain data materialization does not install a language module, prove gameplay ca
 or replace the product recipe's required-contribution checks. Those execution-owner integrations
 remain separate from this storage family.
 
+## Processed Runtime Scenes
+
+With the `nara_scene/serde` feature, the Scene owner can cook a complete source-bound expansion
+into a separate `runtime_scene` version 1 JSON artifact. This is the processed Scene format;
+it does not load a Runtime catalog, select products or prove asset residency.
+
+```rust,ignore
+let cooked = RuntimeSceneCandidate::cook(
+    &expanded,
+    &bindings,
+    &project_assets,
+    RuntimeSceneLimits::default(),
+)?;
+let bytes = cooked.to_json_bytes()?;
+
+// The caller supplies the expected canonical Scene identity from its admitted content base.
+let candidate = RuntimeSceneDocumentCandidate::from_json_bytes(&bytes, limits)?
+    .admit(&expected_source, &bindings)?;
+let prepared = bindings.prepare_runtime_scene(world, &candidate, &occurrence)?;
+let report = prepared.commit(world);
+```
+
+Cook materializes defaults, remaps hierarchy and declared Scene-local references, and converts
+declared `Path`/`StableId` asset leaves to complete primary Product references through the real
+project database. Existing Product references preserve their subproduct selection and require
+their enclosing source in that database. Ordinary strings do not become references. Product
+existence and receiving-World resources still belong to the content owner.
+That owner can bind complete primary/auxiliary products with `AssetServer::reserve_product::<T>`
+and publish the actual typed values through its own resource transaction. Native Runtime codecs
+then resolve those existing bindings through the ordinary component context without a source
+database. Unknown or wrong-typed selections refuse; a reservation alone proves no residency.
+The [native asset consumer](../../tests/fixtures/module-consumer/tests/runtime_scene_assets.rs)
+exercises actual values, full reverse identities and replacement refusal through this path.
+For a later Scene that introduces new products, `SceneAssetBindings::reserve_product` stages their
+identities privately. Supply those bindings and the owner-prepared resource values to the existing
+advanced replacement transaction. Native decoding sees the private catalogue; cancellation or
+failure publishes neither its new bindings nor the resource overlay. Successful commit publishes
+the captured catalogue, resources and Scene through the same guarded path.
+
+Containing-local entity IDs are preserved. Projected IDs encode complete canonical logical
+provenance deterministically; lookup aliases and the compiler's temporary expanded locators do
+not select identity. Typed Prefab-source and instance-addition ancestry remains available through
+`SceneEntitySource` after source files are removed. Runtime decoding never opens that evidence.
+
+Raw decoding and consuming admission run no native codecs or source migrations. Admission checks
+the expected source, current owner/version/shape, explicit defaults, complete provenance, surviving
+references and Product-only asset leaves. Source composition fields are rejected even when empty
+or null. Both candidate types are move-only and expose no serde bypass.
+
+The admitted candidate retains a witness of its exact native/data definitions. Preparing it with
+separately admitted equivalent definitions refuses before native decoding. Explicit readmission of
+the bytes may select new compatible definitions; a managed World additionally requires its own
+installed selection. Use `prepare_runtime_scene_replacement` for an existing activation. Both
+methods return ordinary `PreparedScene` tokens and use the existing guarded publication, cancellation
+and last-good replacement behavior. Advanced native retirement/product writes retain the existing
+`PreparedSceneReplacement` retry/discard protocol.
+
+`RuntimeSceneLimits` combines ordinary `SceneFileLimits` with provenance and cumulative modeled
+working-byte bounds. The working ledger covers the processed owner's allocations and admitted
+Reflect reference work; existing hierarchy/default-validation/local-reference scratch and syntax
+preflight retain their own limits. It is not an allocator or resident-memory bound. The candidate's
+aggregate value limits also govern native/data preparation.
+
+The [independent processed consumer](../../tests/fixtures/module-consumer/tests/runtime_scene_delivery.rs)
+exercises file-backed cooking, source removal, native/data publication, typed ancestry, reference
+remaps and failed replacement. The complete verified-base startup/later-Scene delivery remains
+separate work in the [ordered delivery plan](../plans/2026-10-29-asset-import-and-runtime-delivery-plan.md).
+
 ## Prepare And Materialize A Scene
 
 `spawn_scene(world, registry, candidate, occurrence, database)` is the immediate convenience. Use

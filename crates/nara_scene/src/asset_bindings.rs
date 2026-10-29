@@ -1,7 +1,8 @@
 use std::fmt;
 
 use nara_asset::{
-    AssetRef, AssetRefError, AssetServer, AssetSourceKind, Handle, ProjectAssetDatabase,
+    AssetError, AssetProductRef, AssetRef, AssetRefError, AssetServer, AssetSourceKind, Handle,
+    ProjectAssetDatabase,
 };
 use nara_ecs::World;
 use nara_reflect::{ComponentApplyBatch, ComponentCodecError};
@@ -50,6 +51,18 @@ impl SceneAssetBindings {
                 .resolve_asset_ref_with_kind(reference, expected_kind)
                 .expect("Scene asset bindings always install a scratch AssetServer")
         })
+    }
+
+    /// Reserves an admitted Runtime Product without source metadata or live World mutation.
+    ///
+    /// The content owner must prepare actual values through its resource transaction. Native
+    /// codecs consume this binding through their ordinary decode context; unknown references
+    /// remain errors rather than implicit reservations. Dropping these bindings cancels them.
+    pub fn reserve_product<T: 'static>(
+        &mut self,
+        reference: AssetProductRef,
+    ) -> Result<Handle<T>, AssetError> {
+        self.batch.reserve_product(reference)
     }
 
     /// Observes the catalogue that component decoding will extend and commit on success.

@@ -96,6 +96,12 @@ After the declared-product prerequisite, establish these owners in dependency or
   and validate decoded domain products against their catalog identity. Reuse the existing Scene
   transaction and physical cleanup owners. No authoring source, metadata or cache fallback is
   permitted after selecting the processed base.
+- Bind complete native resource products in the receiving `AssetServer` after concrete product
+  admission, without constructing a source database. Its Product index owns runtime identity;
+  source paths are primary aliases. Runtime native reference resolution looks up an existing
+  Product/type binding and never allocates an unknown selection. Actual membership, codec and
+  resource values remain the content owner's proof. Qualify primary/auxiliary native codecs,
+  reverse export and missing/type/stale binding refusal with the source database dropped.
 
 This ordering records current design constraints. The catalog format, processed Scene format and
 complete runtime-input resource representation still need concrete owner implementation and
@@ -112,6 +118,14 @@ resolved identity; preset invariants follow the complete profile overlay. Its
 records exact round trips, source-input refusal, actual startup values, Reference Game consumers
 and all three selected Windows/DX12 critical trajectories. No catalog or source-free startup is
 implied by configuration alone. Continue Scene cook/admission before catalog wiring.
+
+The next Scene unit introduces a distinct bounded `runtime_scene` format, deterministic logical
+projection IDs, explicit effective values, canonical product leaves and exact definition witness.
+Reuse the production source compiler for selection and Reflect for declared-reference rewrites.
+Both source and processed candidates enter the same private materialization path. Qualify actual
+native/data Prepare/Commit, replacement refusal/last-good behavior and independent encoded loading
+after source removal before recording this unit complete. This does not substitute for the later
+same-base catalog/startup/Scene-request workflow or promote Proposed ADR 0088 wholesale.
 
 ## Owning Decisions
 

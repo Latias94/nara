@@ -131,12 +131,14 @@ pub(super) fn asset_error_identifier(error: &AssetError) -> &'static str {
     match error {
         AssetError::IdSpaceExhausted => "id-space-exhausted",
         AssetError::InvalidPath(_) => "invalid-path",
+        AssetError::InvalidProductIdentity(_) => "invalid-product-identity",
         AssetError::ConflictingAssetIdentity { .. } => "conflicting-asset-identity",
         AssetError::PathAlreadyBound { .. } => "path-already-bound",
         AssetError::StableIdAlreadyBound { .. } => "stable-id-already-bound",
         AssetError::AssetIdAlreadyBoundToPath { .. } => "asset-id-already-bound-to-path",
         AssetError::AssetIdAlreadyBoundToStableId { .. } => "asset-id-already-bound-to-stable-id",
         AssetError::UnknownAssetId(_) => "unknown-asset-id",
+        AssetError::UnknownProduct(_) => "unknown-product",
         AssetError::AssetTypeMismatch { .. } => "asset-type-mismatch",
     }
 }

@@ -141,10 +141,26 @@ collector and rewrite, including nested/default references. The project Host col
 targets during source discovery and calls `AssetDomain::contains_product` on the actual prepared
 value before publishing content. Its default accepts only `PRIMARY`; compound domains provide
 their bounded, pure membership query. Database source resolution alone does not prove product
-existence. Primary-only handles, Image/TileSet consumers and Prefab sources refuse auxiliary
+existence. Primary-only Image/TileSet codecs and Prefab sources refuse auxiliary
 selection instead of silently loading the primary. This does not install global subresource loading.
 The [scoped identity decision](../architecture/adr/0122-scoped-imported-product-identity-and-authored-continuity.md)
 defines those limits. An encoded round trip alone is not source-free project delivery.
+
+For processed Runtime resources, a concrete content owner can reserve a complete identity with
+`AssetServer::reserve_product::<T>(reference)` and prepare the actual `Assets<T>` value through
+its own transaction. The server's Product index is authoritative for runtime handles; a primary
+source path is an optional authoring alias, not required Runtime data. `AssetRef::resolve` for a
+Product uses an existing binding and rejects unknown/wrong-typed selections. It never opens a
+source or creates a missing product. Reverse conversion preserves auxiliary and pathless primary Product
+references. These APIs prove weak identity/type agreement only; the owner must still admit the
+actual format, membership and residency. Source database operations retain their primary-only
+contract. The [native processed consumer](../../tests/fixtures/module-consumer/tests/runtime_scene_assets.rs)
+uses actual primary/auxiliary values with native Scene codecs and no decode-time source database.
+
+The same consumer stages a new later-Scene Product through `SceneAssetBindings::reserve_product`
+and supplies its values through the existing product resource overlay. A final native failure or
+explicit discard leaves both the old catalogue and actual values intact. Successful replacement
+publishes all three together without changing the live server during preparation.
 
 ## Editor Metadata Import
 

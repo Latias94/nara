@@ -47,7 +47,7 @@ use crate::{
     ExpandedSceneCandidate, SceneComponentBindings, SceneEntityId, SceneEntityProvenance,
     SceneEntityProvenanceMap, SceneOccurrenceKey, SourceDocumentKey,
     asset_bindings::SceneAssetBindings,
-    candidate::validate_scene_provenance,
+    candidate::{SceneMaterializationInput, validate_scene_provenance},
     diagnostics::{error as diagnostic_error, with_codec_error, with_public_locator},
     occurrence::{
         OccurrenceError, PreparedSceneOccurrence, SceneSourceContext, occurrence_for_instance,
@@ -362,7 +362,7 @@ impl SceneSpawner {
             world,
             registry,
             definition,
-            candidate,
+            SceneMaterializationInput::Expanded(candidate),
             occurrence,
             database,
             commit,
@@ -379,7 +379,7 @@ impl SceneSpawner {
         world: &mut World,
         registry: &ComponentRegistry,
         definition: preparation::ScenePreparationDefinition,
-        candidate: &ExpandedSceneCandidate,
+        candidate: SceneMaterializationInput<'_>,
         occurrence: &SceneOccurrenceKey,
         database: Option<&ProjectAssetDatabase>,
         commit: SceneIdentityCommit<'_>,
@@ -391,6 +391,22 @@ impl SceneSpawner {
         if !definition.matches_registry(registry) {
             return Err(preparation::definition_rejection());
         }
+        let (database, value_limits) = match candidate {
+            SceneMaterializationInput::Expanded(_) => (database, value_limits),
+            #[cfg(feature = "serde")]
+            SceneMaterializationInput::Runtime(candidate) => {
+                definition
+                    .bindings()
+                    .filter(|bindings| candidate.definitions().matches(bindings))
+                    .ok_or_else(preparation::definition_rejection)?;
+                definition.validate(world)?;
+                let limits = candidate.limits().value_limits();
+                // Cook/admit validated this immutable input against these exact definitions.
+                // Every version remains current, so shared preflight cannot enter migration.
+                // Runtime product identities resolve only through the receiving asset bindings.
+                (None, limits)
+            }
+        };
         if registry
             .schema_for_type::<crate::SceneDataComponents>()
             .is_some()
@@ -786,6 +802,67 @@ impl SceneComponentBindings {
     where
         F: FnOnce(&mut SceneProductOverlayWriter<'_>),
     {
+        self.prepare_selected_scene_replacement_with_claims(
+            world,
+            SceneMaterializationInput::Expanded(candidate),
+            database,
+            current,
+            assets,
+            claims,
+            SceneProductTransactionInput {
+                limits,
+                additional_retirements,
+                configure: Box::new(configure),
+            },
+        )
+    }
+
+    /// Prepares a processed native/data replacement before native-domain retirement starts.
+    ///
+    /// Product identities use the content owner's exact receiving asset bindings. The callback
+    /// runs once during preparation; commit and retry retain the existing native retirement
+    /// custody without rerunning codecs or consulting authoring sources.
+    #[cfg(feature = "serde")]
+    #[doc(hidden)]
+    pub fn prepare_runtime_scene_replacement_with_claims<F>(
+        &self,
+        world: &mut World,
+        candidate: &crate::runtime_scene::RuntimeSceneCandidate,
+        current: &SpawnedSceneInstance,
+        assets: SceneAssetBindings,
+        claims: &SceneNativeRetirementClaims,
+        limits: SceneProductTransactionLimits,
+        additional_retirements: &[WorldEntityToken],
+        configure: F,
+    ) -> Result<PreparedSceneReplacement, SceneSpawnReport>
+    where
+        F: FnOnce(&mut SceneProductOverlayWriter<'_>),
+    {
+        self.prepare_selected_scene_replacement_with_claims(
+            world,
+            SceneMaterializationInput::Runtime(candidate),
+            None,
+            current,
+            assets,
+            claims,
+            SceneProductTransactionInput {
+                limits,
+                additional_retirements,
+                configure: Box::new(configure),
+            },
+        )
+    }
+
+    fn prepare_selected_scene_replacement_with_claims(
+        &self,
+        world: &mut World,
+        candidate: SceneMaterializationInput<'_>,
+        database: Option<&ProjectAssetDatabase>,
+        current: &SpawnedSceneInstance,
+        assets: SceneAssetBindings,
+        claims: &SceneNativeRetirementClaims,
+        product: SceneProductTransactionInput<'_>,
+    ) -> Result<PreparedSceneReplacement, SceneSpawnReport> {
         let occurrence = occurrence_for_instance(world, current)
             .map_err(|error| occurrence_rejection(DiagnosticReport::default(), error))?
             .clone();
@@ -803,11 +880,7 @@ impl SceneComponentBindings {
                 &occurrence,
                 database,
                 SceneIdentityCommit::Replace(current),
-                Some(SceneProductTransactionInput {
-                    limits,
-                    additional_retirements,
-                    configure: Box::new(configure),
-                }),
+                Some(product),
                 assets,
                 claims,
                 ComponentValueMaterializationLimits::default(),
