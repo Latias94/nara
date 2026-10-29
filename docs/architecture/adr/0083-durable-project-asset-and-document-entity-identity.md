@@ -1,6 +1,9 @@
 # ADR 0083: Durable Project Asset and Document Entity Identity
 
 **Status**: Proposed
+**Accepted Extracted Slice**: [ADR 0122](0122-scoped-imported-product-identity-and-authored-continuity.md)
+adopts source-scoped primary/auxiliary product references and explicit authored continuity.
+Project-wide identity migration, cross-document integration and publication remain Proposed here.
 **Date**: 2026-07-13
 **Last Revised**: 2026-10-23
 **Owner**: `nara_asset`, `nara_identity`, `nara_scene`, persistent document owners, and authoring

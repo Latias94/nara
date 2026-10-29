@@ -17,6 +17,9 @@ use nara_tasks::TaskPoolConfig;
 use super::*;
 use crate::project_host::runtime::editor::persistence::HostCustody;
 
+#[path = "settings_tests.rs"]
+mod settings_tests;
+
 const WAIT: Duration = Duration::from_secs(5);
 const SOURCE: &str = "source.txt";
 const METADATA: &str = "source.txt.meta";
@@ -24,9 +27,12 @@ static NEXT_FIXTURE: AtomicU64 = AtomicU64::new(1);
 
 struct Domain;
 
+impl nara_asset::AssetDomain for Domain {
+    type Product = ();
+}
+
 impl SourceAssetImporter for Domain {
     type Settings = ();
-    type Product = ();
     const SOURCE_KIND: &'static str = "test.source-return";
 
     fn limits() -> AssetImportLimits {
@@ -100,6 +106,7 @@ impl Fixture {
                 provider: Arc::new(TypedImporter::<Domain>(PhantomData)),
                 assets,
                 metadata,
+                previous: None,
                 encoded,
                 expected_source,
                 budget: ProjectContentBudgetHost::new(Default::default()),

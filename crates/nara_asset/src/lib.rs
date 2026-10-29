@@ -7,8 +7,10 @@ mod format;
 mod identity;
 #[cfg(feature = "serde")]
 mod import;
+mod product_identity;
 mod reload;
 mod revision;
+mod runtime_codec;
 mod server;
 mod state;
 mod storage;
@@ -39,6 +41,7 @@ pub use identity::{
 };
 #[cfg(feature = "serde")]
 pub use import::{AssetImportError, AssetImportLimits, AssetImportSource, SourceAssetImporter};
+pub use product_identity::{AssetProductIdentityError, AssetProductRef, ImportedProductId};
 pub use reload::{
     ASSET_PLUGIN_DECLARATION, ASSET_PLUGIN_ID, AssetLoadGeneration, AssetLoadGenerations,
     AssetPlugin, AssetReloadDiagnostics, AssetReloadRequest, AssetReloadRequestAdmissionError,
@@ -49,6 +52,7 @@ pub use reload::{
     ImageReloadConsumer, ImageReloadDrainError, ImageReloadRegistrationError,
     register_image_reload_consumer,
 };
+pub use runtime_codec::{AssetDomain, AssetRuntimeError, AssetRuntimeLimits, RuntimeAssetCodec};
 pub use server::{AssetError, AssetServer};
 pub use state::{
     AssetDependencyGraph, AssetEvent, AssetEventKind, AssetEventLimits, AssetEventPushOutcome,

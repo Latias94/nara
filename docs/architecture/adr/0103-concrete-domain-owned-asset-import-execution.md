@@ -214,6 +214,14 @@ cook facets return operation-unavailable; import registration or Check success d
 processed Runtime support. Tracked cross-product inputs, stable subproduct reconciliation and
 artifact-group publication remain separate Proposed obligations under ADR 0083/0087.
 
+`AssetDomain` names the typed product independently of executable operations. The source facet
+inherits that marker; `RuntimeAssetCodec` separately owns bounded deterministic encode/decode for
+one Runtime kind. A source-only or Runtime-only contribution need not implement the other facet.
+Neither trait supplies a public erased executor, task scheduling or publication authority. Typed
+project collection reads depend on the family marker, not on source-import capability. A concrete
+compound bundle may retain its own complete subproduct map under the scoped identities in
+[ADR 0122](0122-scoped-imported-product-identity-and-authored-continuity.md).
+
 Reusable source/import and Runtime-decode contracts belong below root project orchestration and
 must not require Editor, Scene or 2D merely to express a pure importer. The root Host retains exact
 source receipts, aggregate budgets and Scene commit; Image/TileSet retain their own prepared-state
@@ -226,8 +234,10 @@ settings, a manifest, an installed crate or supplied package bytes cannot grant 
 activation or native execution authority. A selected facet cannot bypass data-only Open or obtain
 filesystem writes, directory publication or mutable Editor/World authority through its data.
 
-This amendment permits and bounds the study; it does not claim Runtime or cook facets are
-implemented. The executing `SourceAssetImporter` Check/Play/source-carrying Export and selected
+The independent text-bundle consumer implements its concrete Runtime format through that lower
+codec contract. Codec qualification does not establish target cooking, an admitted project Runtime
+catalog or source-free startup/later Scene loading. The executing `SourceAssetImporter`
+Check/Play/source-carrying Export and selected
 Editor metadata facet own the source slice described above; the dependency extraction has its own
 qualification. The prospective compound consumer must test
 absent facets, old-generation retention, importer failure, tracked cross-product inputs and a

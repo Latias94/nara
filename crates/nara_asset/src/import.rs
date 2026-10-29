@@ -9,7 +9,7 @@ use std::{
 use nara_core::ByteLimit;
 use nara_diagnostic::Diagnostic;
 
-use crate::{AssetMetaIdentityCandidate, AssetPath};
+use crate::{AssetDomain, AssetMetaIdentityCandidate, AssetPath};
 
 type SourceReader<'a, E> = dyn FnMut(&AssetPath, ByteLimit) -> Result<Arc<[u8]>, E> + 'a;
 
@@ -94,9 +94,8 @@ impl<E: Error + 'static> Error for AssetImportError<E> {
 /// auxiliary input must pass through the supplied reader. Products and destructors must not
 /// panic or perform external effects. Runtime decode, cook and Editor settings are separate
 /// capabilities; implementing this trait grants none of them.
-pub trait SourceAssetImporter: Send + Sync + 'static {
+pub trait SourceAssetImporter: AssetDomain {
     type Settings: serde::de::DeserializeOwned;
-    type Product: Send + Sync + 'static;
 
     const SOURCE_KIND: &'static str;
 

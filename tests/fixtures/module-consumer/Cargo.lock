@@ -1938,6 +1938,7 @@ dependencies = [
  "nara_core",
  "nara_diagnostic",
  "serde",
+ "serde_json",
 ]
 
 [[package]]
@@ -1967,6 +1968,7 @@ dependencies = [
  "nara-asset-domain-consumer",
  "nara-editor",
  "nara_asset",
+ "nara_diagnostic",
  "nara_tooling",
  "serde_json",
 ]

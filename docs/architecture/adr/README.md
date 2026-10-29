@@ -174,3 +174,4 @@ See [the July 2026 migration guide](../../migrations/2026-07-engine-foundation.m
 - [ADR 0119](0119-schema-first-semantic-metadata-authority.md): Schema-First Semantic Metadata Authority (Accepted; replaces ADR 0004)
 - [ADR 0120](0120-schema-publications-and-execution-representations.md): Schema Publications and Execution Representations (Proposed)
 - [ADR 0121](0121-composable-render-programs-and-host-execution.md): Composable Render Programs and Host Execution (Proposed)
+- [ADR 0122](0122-scoped-imported-product-identity-and-authored-continuity.md): Scoped Imported Product Identity and Authored Continuity

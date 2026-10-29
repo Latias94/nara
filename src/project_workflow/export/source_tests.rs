@@ -65,9 +65,12 @@ impl nara_app::Plugin for SourceTextPlugin {
 
 struct SourceTextDomain;
 
+impl nara_asset::AssetDomain for SourceTextDomain {
+    type Product = Vec<u8>;
+}
+
 impl nara_asset::SourceAssetImporter for SourceTextDomain {
     type Settings = ();
-    type Product = Vec<u8>;
     const SOURCE_KIND: &'static str = "test.export.text";
     fn limits() -> nara_asset::AssetImportLimits {
         let bytes = nara_core::ByteLimit::new(1024).unwrap();

@@ -8,9 +8,10 @@ publish = false
 
 [dependencies]
 nara_asset = { path = "../../../../crates/nara_asset", default-features = false, features = ["serde"] }
-nara_core = { path = "../../../../crates/nara_core" }
+nara_core = { path = "../../../../crates/nara_core", features = ["serde"] }
 nara_diagnostic = { path = "../../../../crates/nara_diagnostic" }
 serde = { version = "1", features = ["derive"] }
+serde_json = "1"
 
 [dev-dependencies]
 nara = { path = "../../../..", default-features = false, features = ["project-workflow"] }

@@ -19,6 +19,7 @@ bench = false
 dear-imgui-rs = "=0.21.0"
 nara = { path = "../../../..", default-features = false, features = ["tooling"] }
 nara_asset = { path = "../../../../crates/nara_asset", default-features = false, features = ["serde"] }
+nara_diagnostic = { path = "../../../../crates/nara_diagnostic" }
 nara-asset-domain-consumer = { path = "../asset-domain-consumer" }
 nara-editor = { path = "../../../../editor" }
 nara_tooling = { path = "../../../../crates/nara_tooling" }

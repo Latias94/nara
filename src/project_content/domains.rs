@@ -7,7 +7,8 @@ use std::{
 };
 
 use nara_asset::{
-    AssetImportError, AssetImportSource, AssetMetaIdentityCandidate, SourceAssetImporter,
+    AssetDomain, AssetImportError, AssetImportSource, AssetMetaIdentityCandidate,
+    SourceAssetImporter,
 };
 use nara_core::ByteLimit;
 use nara_ecs::Resource;
@@ -55,9 +56,9 @@ pub(super) trait ErasedCollection: Any + Send + Sync {
     fn records(&self) -> &[AssetRecord];
 }
 
-struct DomainCollection<D: SourceAssetImporter>(ProjectAssetCollection<D::Product>);
+struct DomainCollection<D: AssetDomain>(ProjectAssetCollection<D::Product>);
 
-impl<D: SourceAssetImporter> ErasedCollection for DomainCollection<D> {
+impl<D: AssetDomain> ErasedCollection for DomainCollection<D> {
     fn domain_type(&self) -> std::any::TypeId {
         std::any::TypeId::of::<D>()
     }
@@ -101,9 +102,7 @@ impl ProjectDomainAssets {
     }
 
     #[must_use]
-    pub fn collection<D: SourceAssetImporter>(
-        &self,
-    ) -> Option<&ProjectAssetCollection<D::Product>> {
+    pub fn collection<D: AssetDomain>(&self) -> Option<&ProjectAssetCollection<D::Product>> {
         self.inner
             .collections
             .iter()

@@ -9,9 +9,12 @@ use nara_tooling::{
 
 struct SettingsDomain;
 
+impl nara_asset::AssetDomain for SettingsDomain {
+    type Product = u32;
+}
+
 impl SourceAssetImporter for SettingsDomain {
     type Settings = u32;
-    type Product = u32;
     const SOURCE_KIND: &'static str = "test.source-refresh";
 
     fn limits() -> AssetImportLimits {

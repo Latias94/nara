@@ -12,6 +12,24 @@ auxiliary-read errors; the parser does not depend on a project Host, Scene or 2D
 The pure input tests in `tests/import.rs` exercise that error distinction, typed settings
 and caller-enforced dependency bounds.
 
+`bundle::TextBundleDomain` is the compound consumer. Its raw JSON has a suffix path and named
+text rows without intrinsic IDs. `TextBundleSettings::initial` requires explicit product IDs;
+`rebind` requires complete `Continue`/`New` decisions against exact new source bytes. Authored
+metadata retains the row mapping and known-retired IDs. Neither cache contents nor name/index
+matching allocates continuity. Equal-byte row exchanges remain indistinguishable unless an
+author explicitly supplies another mapping.
+
+`AssetProductRef` checks the enclosing source as well as the stable product ID. The whole typed
+bundle owns its entry map. Its separately implemented `RuntimeAssetCodec<TextBundle>` encodes
+only bounded cooked text and identity in deterministic product-ID order. Decoder inputs need no
+raw source, sidecar or suffix reader. This is a concrete codec; source-free project startup,
+Runtime catalogs and independently resident subresources remain separate integration work.
+
+The original single-text format remains a distinct consumer for existing source workflows and
+Editor settings behavior, not a compatibility reader for the compound format. Both use the same
+lower operation contracts. The compound tests and `tests/compound_workflow.rs` exercise explicit
+continuity, processed bytes and actual two-Scene Check/Play/travel without a second loader.
+
 The public integration tests qualify Check receipts, headless Play, actionable domain failures,
 missing contributions, shared dependency reads, parser reservations, panic diagnostics, retained
 generation budgets and explicit Scene transitions. Preparation and commit failures preserve the

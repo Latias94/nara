@@ -263,9 +263,12 @@ fn retained_domain_owner_keeps_its_generation_and_budget_alive() {
 }
 
 struct OversizedDomain;
+impl nara_asset::AssetDomain for OversizedDomain {
+    type Product = ();
+}
+
 impl SourceAssetImporter for OversizedDomain {
     type Settings = TextSettings;
-    type Product = ();
     const SOURCE_KIND: &'static str = "consumer.text";
     fn limits() -> AssetImportLimits {
         AssetImportLimits::new(
@@ -280,9 +283,12 @@ impl SourceAssetImporter for OversizedDomain {
 }
 
 struct PanickingDomain;
+impl nara_asset::AssetDomain for PanickingDomain {
+    type Product = ();
+}
+
 impl SourceAssetImporter for PanickingDomain {
     type Settings = TextSettings;
-    type Product = ();
     const SOURCE_KIND: &'static str = "consumer.text";
     fn limits() -> AssetImportLimits {
         TextDomain::limits()

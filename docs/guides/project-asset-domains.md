@@ -21,7 +21,8 @@ are complete examples outside root workspace inheritance.
 ## Domain Contract
 
 Implement `nara_asset::SourceAssetImporter` with a stable `SOURCE_KIND`, associated `Settings`
-and `Product`, conservative `AssetImportLimits`, and generic `prepare<E>`. Persist
+and generic `prepare<E>`. Implement `AssetDomain` for the typed `Product` shared by operation
+facets and supply conservative `AssetImportLimits`. Persist
 `AssetSourceKind::Other(SOURCE_KIND)` in the source's
 canonical `.meta` identity. The Host routes declared persistent `AssetRef` fields by that identity.
 It does not infer a handler from file extensions or crate presence. Two selected owners of the
@@ -54,9 +55,12 @@ IO, authority and budget errors retain their original classification. Host-repor
 panics omit the panic payload from the diagnostic report.
 
 ```rust,ignore
+impl nara_asset::AssetDomain for TextImporter {
+    type Product = TextResource;
+}
+
 impl nara_asset::SourceAssetImporter for TextImporter {
     type Settings = TextSettings;
-    type Product = TextResource;
     const SOURCE_KIND: &'static str = "studio.text";
 
     fn limits() -> nara_asset::AssetImportLimits {
@@ -95,7 +99,7 @@ fn show_text(assets: nara::ecs::Res<nara::project_host::ProjectDomainAssets>) {
 }
 ```
 
-`collection::<D>()` distinguishes domain types even when they use the same Rust product type.
+`collection::<D: AssetDomain>()` distinguishes families even when they use the same Rust product type.
 `get(&AssetRef)` accepts either admitted path or stable identity. No mutable collection is exposed.
 Clone `ProjectDomainAssets` when retaining data beyond a borrow; this keeps its generation and
 budget alive. A domain whose products share allocations must retain this owner alongside them.
@@ -114,6 +118,24 @@ Image and TileSet retain their concrete typed stores and GPU/native publication 
 native/GPU import adapters, cross-domain products, cooking, source-free export, watchers and dynamic plugin
 loading need their own concrete consumers. The metadata-only Editor facet below is a narrower
 source-backed workflow. See [ADR 0103](../architecture/adr/0103-concrete-domain-owned-asset-import-execution.md).
+
+## Processed Runtime Facet
+
+`RuntimeAssetCodec<P>` defines a concrete format independently of `SourceAssetImporter`. A compiled
+Host binds a selected family and codec with `C: RuntimeAssetCodec<D::Product>`. Different codecs
+can encode the same family without creating another logical product family. `RUNTIME_KIND` and
+`RUNTIME_VERSION` name the exact format; `AssetRuntimeLimits` promises encoded, work and retained
+budgets. The caller reserves these before the operation and separately accounts for identity,
+collection and overlapping generations. The codec validates its own bounded format and semantic
+invariants and returns `AssetRuntimeError` with an actionable diagnostic.
+
+Neither format conversion method reads authoring source, sidecars or generated cache. Target
+cooking, member integrity, Runtime catalog admission, IO and publication remain separate owners.
+The compound text package uses this facet with `AssetProductRef` and `ImportedProductId` to keep
+two text entries stable across explicitly authored rebinds. The whole bundle owns the immutable
+entry map; this does not install global subresource loading or extend Scene's reference traversal.
+The [scoped identity decision](../architecture/adr/0122-scoped-imported-product-identity-and-authored-continuity.md)
+defines those limits. An encoded round trip alone is not source-free project delivery.
 
 ## Editor Metadata Import
 
@@ -146,6 +168,19 @@ composition with selected Host facets before changing its workspace.
 The compiled selection persists across project replacement; operation
 state belongs to each fresh session. Ordinary Open remains data-only and never loads game Rust.
 The game independently selects its source domain through `ProductRecipe` for Check and Play.
+
+An authoring facet with continuity or other predecessor-sensitive settings overrides
+`validate_settings_successor(previous, candidate)`. The Host supplies settings decoded from the
+freshly admitted existing metadata leaf and its candidate, before source preparation and inside
+the worker's budget/panic boundary. Default behavior permits ordinary stateless settings changes.
+The compound bundle facet uses its domain-owned `candidate.validate_successor(previous)` to reject
+lost retirements or reuse of known-retired product IDs. A standalone valid candidate is not proof
+of an admissible transition.
+
+The original file publisher still fences the previous object and digest before writes. Candidate,
+predecessor and encoded transport remain charged while queued/running/disposed; cancellation
+does not free their reservation before actual worker return. This proves the transition against
+the current admitted leaf, not unlimited history after manual sidecar edits or branch rollback.
 
 Panels read `EditorFrameModel::source_asset_import`, retain their typed draft and submit
 `EditorAction::SourceAssetImport`. Use the facet's `import_action(path, &settings)` to derive the

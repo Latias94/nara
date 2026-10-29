@@ -23,6 +23,7 @@ pub(super) struct PendingSourceImport {
     task: TaskHandle<()>,
     result: Arc<Mutex<SourceImportResult>>,
     publication: RetainedHost<FilePublicationHost>,
+    _metadata_retention: crate::project_content::ProjectContentLease,
     outcome: Option<EditorSourceAssetImportAttempt>,
 }
 
@@ -30,11 +31,18 @@ pub(super) struct SourceImportWork {
     pub(super) provider: Arc<dyn SourceImporter>,
     pub(super) assets: DirectoryCapability,
     pub(super) metadata: AssetMetaIdentityCandidate,
+    pub(super) previous: Option<AssetMetaIdentityCandidate>,
     pub(super) encoded: String,
     pub(super) expected_source: FileIdentity,
     pub(super) budget: ProjectContentBudgetHost,
     #[cfg(test)]
     pub(super) gate: Option<SourceImportTestGate>,
+}
+
+struct RetainedSourceImportWork {
+    work: SourceImportWork,
+    // Fields drop in declaration order, including when a queued closure is discarded.
+    _metadata_retention: crate::project_content::ProjectContentLease,
 }
 
 impl PendingSourceImport {
@@ -43,17 +51,24 @@ impl PendingSourceImport {
         publication: RetainedHost<FilePublicationHost>,
         work: SourceImportWork,
     ) -> Result<Self, Rejection> {
-        let SourceImportWork {
-            provider,
-            assets,
-            metadata,
-            encoded,
-            expected_source,
-            budget,
-            #[cfg(test)]
-            mut gate,
-        } = work;
-        let stable_id = metadata.identity().stable_id();
+        let metadata_retention = match work.budget.retain_editor_source_import_metadata(
+            &work.metadata,
+            work.previous.as_ref(),
+            work.encoded.capacity(),
+        ) {
+            Ok(retention) => retention,
+            Err(_) => {
+                publication.retire();
+                return Err(Rejection::Busy);
+            }
+        };
+        // The pending owner and queued closure share one charge. Dropping either owner
+        // cannot release retained inputs before actual executor disposal.
+        let stable_id = work.metadata.identity().stable_id();
+        let retained_work = RetainedSourceImportWork {
+            work,
+            _metadata_retention: metadata_retention.clone(),
+        };
         let writer = publication.clone();
         let result = Arc::new(Mutex::new(SourceImportResult::default()));
         let worker_result = Arc::clone(&result);
@@ -61,25 +76,42 @@ impl PendingSourceImport {
             TaskPoolKind::Io,
             TaskSpawnRequest::new(0, TaskDomainKey::new(0x736f_7572_696d_7074)),
             move |context| {
+                let mut retained_work = retained_work;
+                let SourceImportWork {
+                    provider,
+                    assets,
+                    metadata,
+                    previous,
+                    encoded,
+                    expected_source,
+                    budget,
+                    #[cfg(test)]
+                    gate,
+                } = &mut retained_work.work;
                 #[cfg(test)]
-                wait_at(&mut gate, SourceImportTestPhase::BeforeWork);
+                wait_at(gate, SourceImportTestPhase::BeforeWork);
                 let outcome = (|| {
                     if context.is_cancelled() {
                         return cancelled();
                     }
-                    let validation =
-                        match provider.validate(&assets, &metadata, expected_source, &budget) {
-                            Ok(validation) => validation,
-                            Err(error) => {
-                                return EditorSourceAssetImportAttempt::Failed {
-                                    diagnostics: error.diagnostics().clone(),
-                                };
-                            }
-                        };
+                    let validation = match provider.validate(
+                        assets,
+                        metadata,
+                        *expected_source,
+                        budget,
+                        previous.as_ref(),
+                    ) {
+                        Ok(validation) => validation,
+                        Err(error) => {
+                            return EditorSourceAssetImportAttempt::Failed {
+                                diagnostics: error.diagnostics().clone(),
+                            };
+                        }
+                    };
                     if context.is_cancelled() {
                         return cancelled();
                     }
-                    if let Err(error) = validation.revalidate(&assets) {
+                    if let Err(error) = validation.revalidate(assets) {
                         return EditorSourceAssetImportAttempt::Failed {
                             diagnostics: error.diagnostics().clone(),
                         };
@@ -116,7 +148,7 @@ impl PendingSourceImport {
                     .unwrap_or_else(|error| error.into_inner())
                     .outcome = Some(outcome);
                 #[cfg(test)]
-                wait_at(&mut gate, SourceImportTestPhase::AfterWork);
+                wait_at(gate, SourceImportTestPhase::AfterWork);
             },
         );
         match task.into_handle() {
@@ -124,6 +156,7 @@ impl PendingSourceImport {
                 task,
                 result,
                 publication,
+                _metadata_retention: metadata_retention,
                 outcome: None,
             }),
             Err(_) => {

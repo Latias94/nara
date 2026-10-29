@@ -1,7 +1,16 @@
 //! Independent text-resource domain: typed settings, parsing and an auxiliary source dependency.
 
+pub mod bundle;
+
+pub use bundle::{
+    TextBundle, TextBundleContinuity, TextBundleDomain, TextBundleEntry, TextBundleError,
+    TextBundleIdentityDecision, TextBundleRebindAssignment, TextBundleRowAssignment,
+    TextBundleSettings,
+};
+
 use nara_asset::{
-    AssetImportError, AssetImportLimits, AssetImportSource, AssetPath, SourceAssetImporter,
+    AssetDomain, AssetImportError, AssetImportLimits, AssetImportSource, AssetPath,
+    SourceAssetImporter,
 };
 use nara_core::ByteLimit;
 use nara_diagnostic::{Diagnostic, DiagnosticCode, SafeSummary};
@@ -20,9 +29,12 @@ pub struct TextResource {
     pub text: String,
 }
 
+impl AssetDomain for TextDomain {
+    type Product = TextResource;
+}
+
 impl SourceAssetImporter for TextDomain {
     type Settings = TextSettings;
-    type Product = TextResource;
     const SOURCE_KIND: &'static str = "consumer.text";
 
     fn limits() -> AssetImportLimits {

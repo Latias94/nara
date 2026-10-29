@@ -42,6 +42,23 @@ pub trait EditorSourceAssetDomain: Send + Sync + 'static {
 
     fn default_settings() -> <Self::Domain as SourceAssetImporter>::Settings;
 
+    /// Validates an authored transition from the current metadata to its replacement.
+    ///
+    /// The Host admits the previous settings from the exact metadata leaf fenced by publication.
+    /// This runs before source preparation for Reimport only, under the same work budget and panic
+    /// containment. Domains with authored continuity must reject lost or reused lineage here;
+    /// standalone candidate semantics remain the source importer's responsibility. Validation
+    /// must be deterministic and effect-free, and cannot establish history beyond that leaf.
+    /// Each typed metadata admission must fit the domain's declared work allowance; the Host
+    /// reserves two allowances while both settings are live.
+    fn validate_settings_successor(
+        previous: &<Self::Domain as SourceAssetImporter>::Settings,
+        candidate: &<Self::Domain as SourceAssetImporter>::Settings,
+    ) -> Result<(), nara_diagnostic::Diagnostic> {
+        let _ = (previous, candidate);
+        Ok(())
+    }
+
     /// Encodes a typed request for this facet's domain. The Host still admits the displayed action.
     fn import_action(
         relative_path: impl Into<Arc<str>>,
@@ -117,6 +134,7 @@ trait SourceImporter: Send + Sync {
         metadata: &AssetMetaIdentityCandidate,
         expected_source: FileIdentity,
         budget: &ProjectContentBudgetHost,
+        previous: Option<&AssetMetaIdentityCandidate>,
     ) -> Result<crate::project_content::EditorSourceValidation, ProjectContentError>;
 }
 
@@ -152,8 +170,34 @@ impl<D: EditorSourceAssetDomain> SourceImporter for TypedImporter<D> {
         metadata: &AssetMetaIdentityCandidate,
         expected_source: FileIdentity,
         budget: &ProjectContentBudgetHost,
+        previous: Option<&AssetMetaIdentityCandidate>,
     ) -> Result<crate::project_content::EditorSourceValidation, ProjectContentError> {
-        validate_editor_source::<D::Domain>(assets, metadata, expected_source, budget)
+        validate_editor_source::<D::Domain>(
+            assets,
+            metadata,
+            expected_source,
+            budget,
+            previous,
+            || {
+                let Some(previous) = previous else {
+                    return Ok(());
+                };
+                let settings_error = |_| {
+                    source_import_error(
+                        "project.editor.source-import-settings-invalid",
+                        "The asset metadata settings could not be admitted",
+                    )
+                };
+                let previous = previous
+                    .admit::<<D::Domain as SourceAssetImporter>::Settings>()
+                    .map_err(settings_error)?;
+                let candidate = metadata
+                    .admit::<<D::Domain as SourceAssetImporter>::Settings>()
+                    .map_err(settings_error)?;
+                D::validate_settings_successor(previous.settings(), candidate.settings())
+                    .map_err(ProjectContentError::asset_domain)
+            },
+        )
     }
 }
 
@@ -341,7 +385,7 @@ impl EditorProjectSession {
         if action.settings.len() > byte_limit {
             return Err(Rejection::InvalidSettings);
         }
-        let (stable_id, publication) = match catalog.candidate(&path) {
+        let (stable_id, publication, previous) = match catalog.candidate(&path) {
             Some(candidate) => {
                 if candidate.identity().source_kind()
                     != &AssetSourceKind::Other(provider.kind().to_owned())
@@ -372,7 +416,6 @@ impl EditorProjectSession {
                 if current.identity().path() != &path
                     || current.identity().source_kind() != candidate.identity().source_kind()
                     || current.identity().stable_id() != candidate.identity().stable_id()
-                    || provider.settings(&current).is_none()
                 {
                     return Err(Rejection::InvalidMetadata);
                 }
@@ -384,7 +427,7 @@ impl EditorProjectSession {
                     byte_limit as u64,
                 )
                 .map_err(|_| Rejection::PublicationUnavailable)?;
-                (current.identity().stable_id(), publication)
+                (current.identity().stable_id(), publication, Some(current))
             }
             None => {
                 if index.entry(&metadata_path).is_some() {
@@ -396,7 +439,7 @@ impl EditorProjectSession {
                 let publication =
                     FilePublicationHost::bind_missing(&root, &metadata_path, byte_limit as u64)
                         .map_err(|_| Rejection::PublicationUnavailable)?;
-                (stable_id, publication)
+                (stable_id, publication, None)
             }
         };
         let encoded = provider.metadata(
@@ -435,6 +478,7 @@ impl EditorProjectSession {
                 provider,
                 assets,
                 metadata,
+                previous,
                 encoded,
                 expected_source,
                 budget: self.source_asset_import.budget.clone(),
@@ -480,12 +524,16 @@ impl EditorProjectSession {
 }
 
 fn failed(code: &'static str, summary: &'static str) -> EditorSourceAssetImportAttempt {
-    let error = ProjectContentError::asset_domain(nara_diagnostic::Diagnostic::error(
-        nara_diagnostic::DiagnosticCode::new(code).expect("static source import diagnostic code"),
-        nara_diagnostic::SafeSummary::new(summary)
-            .expect("static source import diagnostic summary"),
-    ));
+    let error = source_import_error(code, summary);
     EditorSourceAssetImportAttempt::Failed {
         diagnostics: error.diagnostics().clone(),
     }
+}
+
+fn source_import_error(code: &'static str, summary: &'static str) -> ProjectContentError {
+    ProjectContentError::asset_domain(nara_diagnostic::Diagnostic::error(
+        nara_diagnostic::DiagnosticCode::new(code).expect("static source import diagnostic code"),
+        nara_diagnostic::SafeSummary::new(summary)
+            .expect("static source import diagnostic summary"),
+    ))
 }

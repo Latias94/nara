@@ -15,6 +15,9 @@ ADR 0070, ADR 0080, ADR 0083
 accepts concrete domain-owned single-product import execution and retires the unused generic
 registry. This ADR remains Proposed for tracked dependency discovery, multi-product identity,
 reconciliation, invalidation graphs, and atomic artifact-group publication.
+The separate [ADR 0122](0122-scoped-imported-product-identity-and-authored-continuity.md) adopts
+the logical product identity and authored-continuity semantics only; it does not qualify this
+artifact-group graph or its publication contract.
 
 ## Context
 

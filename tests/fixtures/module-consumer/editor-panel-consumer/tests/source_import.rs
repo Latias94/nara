@@ -369,9 +369,12 @@ static PREPARATION_GATE: std::sync::Mutex<
 > = std::sync::Mutex::new(None);
 
 struct DelayedTextDomain;
+impl nara_asset::AssetDomain for DelayedTextDomain {
+    type Product = nara_asset_domain_consumer::TextResource;
+}
+
 impl SourceAssetImporter for DelayedTextDomain {
     type Settings = nara_asset_domain_consumer::TextSettings;
-    type Product = nara_asset_domain_consumer::TextResource;
     const SOURCE_KIND: &'static str = "consumer.delayed-text";
     fn limits() -> AssetImportLimits {
         nara_asset_domain_consumer::TextDomain::limits()
