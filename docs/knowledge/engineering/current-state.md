@@ -3,7 +3,7 @@ type: "Current State"
 title: "Current Engineering State"
 description: "Derived summary of immutable engineering-memory shards."
 tags: ["engineering-memory", "derived"]
-source_fingerprint: "dd5e5f50c006e47ff04c9d5d1f05c945b2604d11f5a2ea160efac738049634fc"
+source_fingerprint: "0c09213cc34fa3cac2ef08022cefb3c46f472a974174de30d2b76ad12219466f"
 ---
 
 # Current State
@@ -12,8 +12,8 @@ source_fingerprint: "dd5e5f50c006e47ff04c9d5d1f05c945b2604d11f5a2ea160efac738049
 
 This file is derived from immutable shards. Record new facts in shards, then render during integration.
 
-- Source fingerprint: `dd5e5f50c006e47ff04c9d5d1f05c945b2604d11f5a2ea160efac738049634fc`
-- Immutable records: 1022
+- Source fingerprint: `0c09213cc34fa3cac2ef08022cefb3c46f472a974174de30d2b76ad12219466f`
+- Immutable records: 1024
 - Active lane heads: 1
 
 # Active Registrations
@@ -69,6 +69,8 @@ This file is derived from immutable shards. Record new facts in shards, then ren
 
 # Recent Evidence
 
+- **Verification Evidence**: [Processed Runtime Scene and complete product binding qualification](verification/2026-10/2026-10-29T060803Z-processed-runtime-scene-and-complete-product-binding-qualification-cd202f5ff4514802a3c5f57a32b43b7a.md) - Qualifies source-independent Scene wire and native/data transactions, Product-index ownership and staged new-resource publication without a source database.
+- **Work Progress**: [Processed Runtime Scene and long-horizon render design integration](progress/2026-10/2026-10-29T051305Z-processed-runtime-scene-and-long-horizon-render-design-integration-5d66c9ed79cf47238e2c6253c51652c8.md) - Records source-independent Scene integration, initial public verification, active root qualification and the graph-first render design refinement.
 - **Verification Evidence**: [Admitted exact Runtime configuration and owner initialization qualification](verification/2026-10/2026-10-29T041356Z-admitted-exact-runtime-configuration-and-owner-initialization-qualification-106a7693310949e980e8cda1e52c5548.md) - Qualifies source-independent admitted Runtime values, exact duration records, final profile invariants and actual clock diagnostics ownership through public and native consumers.
 - **Verification Evidence**: [Declared product references and prepared content target admission qualification](verification/2026-10/2026-10-29T023522Z-declared-product-references-and-prepared-content-target-admission-qualification-37c1b3f6eeca448f928a6961f1c7ab6b.md) - Qualifies complete product references through shared Schema traversal, strict prepared-product checks, source copying and cached compiled Editor Play refusal and recovery.
 - **Work Progress**: [Declared product reference integration and cached Editor Play admission in progress](progress/2026-10/2026-10-29T013709Z-declared-product-reference-integration-and-cached-editor-play-admission-in-progress-0d7fa57efb5843c3a54807a0256bed32.md) - Records complete Product reference integration, two independent contract gaps and pending JSON/RON, cached Play and Prefab copy qualification.
@@ -79,8 +81,6 @@ This file is derived from immutable shards. Record new facts in shards, then ren
 - **Work Progress**: [Installed creation metadata successor production integration and paired catalog boundary](progress/2026-10/2026-10-28T221627Z-installed-creation-metadata-successor-production-integration-and-paired-catalog-boundary-ad2d225ed6fe4aaea906239dac114022.md) - Records explicit owner-change admission, fresh Adapter evidence, repeatable paired catalog capture and pending complete consumer qualification.
 - **Subagent Finding**: [Installed existing-owner evolution is a separate transaction after additive adoption](subagents/2026-10/2026-10-28T214506Z-installed-existing-owner-evolution-is-a-separate-transaction-after-additive-adoption-6b701a39429c41ddbc273c80bab9474c.md) - Records four current refusal boundaries and a creation-metadata-only installed tool successor workflow without claiming value migration or implementation.
 - **Verification Evidence**: [Native Prefab template identity remapping and retained publication qualification](verification/2026-10/2026-10-28T211402Z-native-prefab-template-identity-remapping-and-retained-publication-qualification-288aa15af1244e52b81c3c364689d633.md) - Qualifies source-owned closed Prefab copying and explicit project publication with exact native identities, reference remaps and retained failure custody.
-- **Work Progress**: [Native Prefab template copy and publication integration](progress/2026-10/2026-10-28T210026Z-native-prefab-template-copy-and-publication-integration-261a364ec6af4ce5bae5c11cd70b1dc8.md) - Records source-owned copying, actual publication integration and independently reviewed custody corrections before final qualification.
-- **Verification Evidence**: [Incomplete artifact publication custody and unified reviewed recovery](verification/2026-10/2026-10-28T194040Z-incomplete-artifact-publication-custody-and-unified-reviewed-recovery-e4c2d017cc7f4000ac1b38588809102a.md) - Records actual partial publication, preserved cleanup handover, common artifact format and real access-denied public recovery without fabricating a ready installation.
 
 # Integration Notes
 

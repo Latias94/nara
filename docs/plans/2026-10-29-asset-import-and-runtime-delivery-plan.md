@@ -103,9 +103,9 @@ After the declared-product prerequisite, establish these owners in dependency or
   resource values remain the content owner's proof. Qualify primary/auxiliary native codecs,
   reverse export and missing/type/stale binding refusal with the source database dropped.
 
-This ordering records current design constraints. The catalog format, processed Scene format and
-complete runtime-input resource representation still need concrete owner implementation and
-qualification; these bullets do not establish an implemented delivery path.
+This ordering records current design constraints. The Scene representation and weak Product-binding
+unit is qualified below. The catalog and complete runtime-input/resource delivery still need owner
+implementation and qualification; these bullets do not establish a complete delivery path.
 
 The configuration unit `a5563ca` replaces `RuntimePlan`'s complete source-project settings with
 the admitted Runtime projection under [ADR 0035](../architecture/adr/0035-project-manifest-and-runtime-settings-authority.md).
@@ -119,13 +119,19 @@ records exact round trips, source-input refusal, actual startup values, Referenc
 and all three selected Windows/DX12 critical trajectories. No catalog or source-free startup is
 implied by configuration alone. Continue Scene cook/admission before catalog wiring.
 
-The next Scene unit introduces a distinct bounded `runtime_scene` format, deterministic logical
-projection IDs, explicit effective values, canonical product leaves and exact definition witness.
-Reuse the production source compiler for selection and Reflect for declared-reference rewrites.
-Both source and processed candidates enter the same private materialization path. Qualify actual
-native/data Prepare/Commit, replacement refusal/last-good behavior and independent encoded loading
-after source removal before recording this unit complete. This does not substitute for the later
-same-base catalog/startup/Scene-request workflow or promote Proposed ADR 0088 wholesale.
+The Scene unit `89d9bc8` implements a distinct bounded `runtime_scene` format, deterministic logical
+projection IDs, explicit effective values, canonical Product leaves and exact definition witness.
+It reuses production source compilation and Reflect reference interpretation, then the same private
+native/data preparation and publication path. Complete Product indices replace primary-only Runtime
+indices; concrete owners can stage new bindings and actual values through the existing transaction
+without source metadata or live World mutation. The
+[qualification](../knowledge/engineering/verification/2026-10/2026-10-29T060803Z-processed-runtime-scene-and-complete-product-binding-qualification-cd202f5ff4514802a3c5f57a32b43b7a.md)
+records actual source removal, native/data values, managed/exact definitions, reference/provenance
+round trips, last-good and native-claim retry, and new-resource failure/discard/publication. Final
+Asset134, domain1334, independent21, root70, Reference Game57 and all three selected native DX12
+cases pass, with explicit skips/platform limits. This closes the Scene/binding prerequisite;
+same-base catalog/startup/later acquisition, actual Runtime codecs for other resources and build
+selection remain open. Proposed ADR 0088 is not accepted wholesale by this result.
 
 ## Owning Decisions
 
