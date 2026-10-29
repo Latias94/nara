@@ -3,7 +3,7 @@ type: "Current State"
 title: "Current Engineering State"
 description: "Derived summary of immutable engineering-memory shards."
 tags: ["engineering-memory", "derived"]
-source_fingerprint: "127e2a28433c5ab0f4db133107c01e277b10d6f4e1aaa82fa598d28d4d23aeda"
+source_fingerprint: "45cca2d120fff97bb44eaf66603dee83028f44c1f542f3d0f52a4bf695651804"
 ---
 
 # Current State
@@ -12,8 +12,8 @@ source_fingerprint: "127e2a28433c5ab0f4db133107c01e277b10d6f4e1aaa82fa598d28d4d2
 
 This file is derived from immutable shards. Record new facts in shards, then render during integration.
 
-- Source fingerprint: `127e2a28433c5ab0f4db133107c01e277b10d6f4e1aaa82fa598d28d4d23aeda`
-- Immutable records: 1019
+- Source fingerprint: `45cca2d120fff97bb44eaf66603dee83028f44c1f542f3d0f52a4bf695651804`
+- Immutable records: 1021
 - Active lane heads: 1
 
 # Active Registrations
@@ -69,6 +69,8 @@ This file is derived from immutable shards. Record new facts in shards, then ren
 
 # Recent Evidence
 
+- **Verification Evidence**: [Declared product references and prepared content target admission qualification](verification/2026-10/2026-10-29T023522Z-declared-product-references-and-prepared-content-target-admission-qualification-37c1b3f6eeca448f928a6961f1c7ab6b.md) - Qualifies complete product references through shared Schema traversal, strict prepared-product checks, source copying and cached compiled Editor Play refusal and recovery.
+- **Work Progress**: [Declared product reference integration and cached Editor Play admission in progress](progress/2026-10/2026-10-29T013709Z-declared-product-reference-integration-and-cached-editor-play-admission-in-progress-0d7fa57efb5843c3a54807a0256bed32.md) - Records complete Product reference integration, two independent contract gaps and pending JSON/RON, cached Play and Prefab copy qualification.
 - **Verification Evidence**: [Compound product continuity and independent Runtime format qualification](verification/2026-10/2026-10-29T004054Z-compound-product-continuity-and-independent-runtime-format-qualification-a2d6d4837fd44218b7cb87f67cb38063.md) - Records scoped product identities, explicit authored rebind, bounded processed text format, actual two-Scene source consumption and predecessor-aware Editor publication.
 - **Verification Evidence**: [Source import contracts below project Hosts with typed read errors](verification/2026-10/2026-10-28T233934Z-source-import-contracts-below-project-hosts-with-typed-read-errors-e617bfdd9a104fb69bdf3a20936f7d57.md) - Qualifies the pure executing source/import facet, concrete reader errors and migrated project and Editor consumers; processed Runtime delivery remains open.
 - **Subagent Finding**: [Source-carrying export still lacks an independent verified Runtime content entry](subagents/2026-10/2026-10-28T225432Z-source-carrying-export-still-lacks-an-independent-verified-runtime-content-entry-b9156a4b7e2043f09f3ab41b78cf3bf8.md) - Distinguishes build-machine Cargo and qualified source-carrying delivery from the remaining processed Runtime catalog and subsequent Scene loading boundary.
@@ -79,8 +81,6 @@ This file is derived from immutable shards. Record new facts in shards, then ren
 - **Work Progress**: [Native Prefab template copy and publication integration](progress/2026-10/2026-10-28T210026Z-native-prefab-template-copy-and-publication-integration-261a364ec6af4ce5bae5c11cd70b1dc8.md) - Records source-owned copying, actual publication integration and independently reviewed custody corrections before final qualification.
 - **Verification Evidence**: [Incomplete artifact publication custody and unified reviewed recovery](verification/2026-10/2026-10-28T194040Z-incomplete-artifact-publication-custody-and-unified-reviewed-recovery-e4c2d017cc7f4000ac1b38588809102a.md) - Records actual partial publication, preserved cleanup handover, common artifact format and real access-denied public recovery without fabricating a ready installation.
 - **Verification Evidence**: [Reviewed registered artifact unlink and truthful partial recovery qualification](verification/2026-10/2026-10-28T185322Z-reviewed-registered-artifact-unlink-and-truthful-partial-recovery-qualification-4c85687a35ef4b54b24b3fc98b6e5083.md) - Qualifies actual ready-artifact intent, per-member unlink, cancellation, result publication debt and exact Session/Application retention; incomplete publications remain open.
-- **Work Progress**: [Reviewed real artifact unlink integration and incomplete publication follow-up](progress/2026-10/2026-10-28T182559Z-reviewed-real-artifact-unlink-integration-and-incomplete-publication-follow-up-1de5c56631a146318b4b1098eb0fdfd8.md) - Records real ready-artifact disposal, namespace and cleanup corrections, focused verification and the concrete incomplete-publication owner successor.
-- **Verification Evidence**: [Managed source-tool artifact store and project-owned text template replacement](verification/2026-10/2026-10-28T163225Z-managed-source-tool-artifact-store-and-project-owned-text-template-replacement-7c31339a78064eb8bc385a9bd82b372a.md) - Qualifies fixed managed artifact publication/inventory and explicit project-owned text import while removing mixed-content source protection and retaining future real reclamation.
 
 # Integration Notes
 

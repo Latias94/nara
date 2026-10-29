@@ -1,6 +1,6 @@
 # Asset Import Ownership And Processed Runtime Delivery
 
-**Date:** 2026-10-29. **Status:** Source/import and compound continuity/format qualified; Runtime catalog delivery open.
+**Date:** 2026-10-29. **Status:** Source/import, compound continuity/format and declared-product admission qualified; Runtime catalog delivery open.
 **Baseline:** `13a2744`.
 **Parent:** [Foundation rebaseline](2026-10-23-foundation-architecture-rebaseline-plan.md), R6/R7.
 
@@ -58,11 +58,8 @@ codec can serve that family's product. The compound consumer binds an explicit r
 exact primary source bytes; its Editor facet also validates previous-to-candidate settings through
 the actual metadata publication worker. A pure helper alone cannot establish that transition.
 Startup/later Scene source-free catalog admission remains step 3.
-The current Scene consumer uses an ordinary declared bundle `AssetRef` plus a concrete text
-selector, then constructs `AssetProductRef` for bundle lookup. This does not qualify generic
-Schema traversal or required-target validation for product references. Integrate that reference
-boundary where the actual Runtime catalog consumer requires it; do not advertise current source
-Check as proving arbitrary subproduct selectors exist.
+That predecessor consumer used an ordinary declared bundle `AssetRef` plus a concrete text
+selector. Its codec round trip alone did not qualify Schema traversal or required-target validation.
 
 The Runtime catalog step first replaces that opaque selector with a complete declared product
 reference in the existing asset-reference grammar. Reflect uses its existing asset leaf traversal
@@ -71,6 +68,11 @@ domain value. Native primary-only stores and Prefab-source loading refuse auxili
 instead of silently loading their enclosing primary. Copying a source remaps its enclosing source
 identity and preserves its internal product-ID pattern. This reference integration is a
 prerequisite of the named catalog consumer, not completion of source-free delivery.
+This prerequisite is implemented as `c3c6d33`, with complete nested/default traversal and rewrite,
+strict JSON/RON records, primary-only refusal, actual prepared-domain target checks, source-copy
+scope and cached compiled Editor Play refusal/recovery. The
+[qualification](../knowledge/engineering/verification/2026-10/2026-10-29T023522Z-declared-product-references-and-prepared-content-target-admission-qualification-37c1b3f6eeca448f928a6961f1c7ab6b.md)
+records independent consumers, review corrections, actual verification and limits.
 
 ### Runtime Base Implementation Order
 
