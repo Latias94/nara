@@ -3,7 +3,7 @@ type: "Current State"
 title: "Current Engineering State"
 description: "Derived summary of immutable engineering-memory shards."
 tags: ["engineering-memory", "derived"]
-source_fingerprint: "5d099ef09dd192e13c68626f8c14c49fcf88afbcc8f594c7eff81dbcd135a15c"
+source_fingerprint: "4d7381f2cbc900dbe1008938f56ce1c3b01998dc666844e765a604fa8491bd71"
 ---
 
 # Current State
@@ -12,8 +12,8 @@ source_fingerprint: "5d099ef09dd192e13c68626f8c14c49fcf88afbcc8f594c7eff81dbcd13
 
 This file is derived from immutable shards. Record new facts in shards, then render during integration.
 
-- Source fingerprint: `5d099ef09dd192e13c68626f8c14c49fcf88afbcc8f594c7eff81dbcd135a15c`
-- Immutable records: 1026
+- Source fingerprint: `4d7381f2cbc900dbe1008938f56ce1c3b01998dc666844e765a604fa8491bd71`
+- Immutable records: 1028
 - Active lane heads: 1
 
 # Active Registrations
@@ -69,6 +69,8 @@ This file is derived from immutable shards. Record new facts in shards, then ren
 
 # Recent Evidence
 
+- **Verification Evidence**: [Anonymous and processed Image content with retained native publication qualification](verification/2026-10/2026-10-29T090832Z-anonymous-and-processed-image-content-with-retained-native-publication-qualification-3e529af056d34a5caa2c12924c0c1014.md) - Qualifies source-free Runtime Image decode, explicit managed Product admission, anonymous procedural render content and original output custody through CPU, public Scene, GPU and native Editor workflows.
+- **Work Progress**: [Source-independent Runtime Image ownership and final qualification in progress](progress/2026-10/2026-10-29T081235Z-source-independent-runtime-image-ownership-and-final-qualification-in-progress-421a0d14cb7a41c7877c249ec9184b8a.md) - Integrates actual pixel identity, bounded Runtime Image decode and source-owned rejection with independent native Scene consumers; final Host/native qualification and next-owner review remain active.
 - **Verification Evidence**: [Immutable local Runtime base and shared processed Scene lifecycle qualification](verification/2026-10/2026-10-29T072753Z-immutable-local-runtime-base-and-shared-processed-scene-lifecycle-qualification-140b1b89e14c4130a72ac1c6d8f3de89.md) - Qualifies independently expected local content capture, complete Product decode, same-plan managed startup and replacement, bounded concurrent retention and source-free composition.
 - **Work Progress**: [Immutable Runtime base capture and shared source-free composition integration](progress/2026-10/2026-10-29T065031Z-immutable-runtime-base-capture-and-shared-source-free-composition-integration-134487d3e8f04aee93dfa3262536ada9.md) - Records the local catalog implementation, direct retained Runtime Scene ownership, independent review corrections and in-progress final qualification.
 - **Verification Evidence**: [Processed Runtime Scene and complete product binding qualification](verification/2026-10/2026-10-29T060803Z-processed-runtime-scene-and-complete-product-binding-qualification-cd202f5ff4514802a3c5f57a32b43b7a.md) - Qualifies source-independent Scene wire and native/data transactions, Product-index ownership and staged new-resource publication without a source database.
@@ -79,8 +81,6 @@ This file is derived from immutable shards. Record new facts in shards, then ren
 - **Verification Evidence**: [Compound product continuity and independent Runtime format qualification](verification/2026-10/2026-10-29T004054Z-compound-product-continuity-and-independent-runtime-format-qualification-a2d6d4837fd44218b7cb87f67cb38063.md) - Records scoped product identities, explicit authored rebind, bounded processed text format, actual two-Scene source consumption and predecessor-aware Editor publication.
 - **Verification Evidence**: [Source import contracts below project Hosts with typed read errors](verification/2026-10/2026-10-28T233934Z-source-import-contracts-below-project-hosts-with-typed-read-errors-e617bfdd9a104fb69bdf3a20936f7d57.md) - Qualifies the pure executing source/import facet, concrete reader errors and migrated project and Editor consumers; processed Runtime delivery remains open.
 - **Subagent Finding**: [Source-carrying export still lacks an independent verified Runtime content entry](subagents/2026-10/2026-10-28T225432Z-source-carrying-export-still-lacks-an-independent-verified-runtime-content-entry-b9156a4b7e2043f09f3ab41b78cf3bf8.md) - Distinguishes build-machine Cargo and qualified source-carrying delivery from the remaining processed Runtime catalog and subsequent Scene loading boundary.
-- **Verification Evidence**: [Installed creation-only owner successor preserves sources history and separate execution approval](verification/2026-10/2026-10-28T223626Z-installed-creation-only-owner-successor-preserves-sources-history-and-separate-execution-approval-57dec00a6525410f9abb79ec24a99e69.md) - Qualifies an actual catalog generation upgrade with source-owned history preparation and retained publication recovery, within creation-only data semantics.
-- **Work Progress**: [Installed creation metadata successor production integration and paired catalog boundary](progress/2026-10/2026-10-28T221627Z-installed-creation-metadata-successor-production-integration-and-paired-catalog-boundary-ad2d225ed6fe4aaea906239dac114022.md) - Records explicit owner-change admission, fresh Adapter evidence, repeatable paired catalog capture and pending complete consumer qualification.
 
 # Integration Notes
 
