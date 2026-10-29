@@ -1883,7 +1883,7 @@ impl EditorProjectSession {
                 ));
             }
 
-            let mut diagnostics = runtime_plan_selected_report(&plan);
+            let mut diagnostics = runtime_plan_selected_report(plan.configuration_plan());
             let _ = diagnostics.extend(report.diagnostics);
             let mut session = Self {
                 closing: false,

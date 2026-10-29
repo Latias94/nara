@@ -27,6 +27,8 @@ use crate::project_host::{
 };
 use crate::startup_scene::{CurrentScene, StartupSceneActivationPlugin, materialize_startup_scene};
 
+mod processed;
+
 #[test]
 fn direct_world_without_project_owner_needs_no_tasks_or_current_scene() {
     let mut world = World::new();
@@ -42,6 +44,38 @@ fn direct_world_without_project_owner_needs_no_tasks_or_current_scene() {
     assert!(CurrentScene::get(&world).is_none());
     assert!(!world.contains_resource::<RequestOwner>());
     assert!(!world.contains_resource::<TaskPools>());
+}
+
+#[test]
+fn source_requests_reject_products_and_undeclared_paths_without_queuing_work() {
+    Fixture::new().with_world(|world| {
+        world.insert_resource(pools());
+        let expected = CurrentScene::get(world).unwrap().receipt().clone();
+        let product = AssetProductRef::new(
+            nara_asset::StableAssetId::parse_str("00000000-0000-4000-8000-000000000001").unwrap(),
+            nara_asset::ImportedProductId::PRIMARY,
+        )
+        .unwrap();
+        ProjectScenes::scope(world, |scenes| {
+            assert_eq!(
+                scenes.request(product),
+                Err(ProjectSceneRequestError::UndeclaredScene)
+            );
+            assert_eq!(
+                scenes.request(ProjectPath::new("undeclared.scene.json").unwrap()),
+                Err(ProjectSceneRequestError::UndeclaredScene),
+            );
+        });
+        assert_eq!(
+            world
+                .resource::<TaskPools>()
+                .stats()
+                .for_kind(nara_tasks::TaskPoolKind::Io)
+                .admitted,
+            0,
+        );
+        assert_eq!(CurrentScene::get(world).unwrap().receipt(), &expected);
+    });
 }
 
 #[test]
@@ -117,9 +151,19 @@ fn scoped_prepared_inspection_preserves_source_receipt_pair_and_scheduled_stale_
         let source_view = CurrentScene::get(world).unwrap().source_view();
         let request = ProjectScenes::scope(world, |scenes| scenes.request(selected())).unwrap();
         wait_for_request(world, request, ProjectSceneRequestState::Ready);
+        let owner = world.resource::<RequestOwner>();
+        let Some(Slot::Ready { admission, content }) = owner.slot.as_ref() else {
+            panic!("the source preparation returned ready content")
+        };
+        assert!(api::content_matches_admission(content, admission));
         let roots = ProjectScenes::scope(world, |scenes| {
             let prepared = scenes.prepared(request).unwrap();
-            assert_eq!(prepared.selected_scene_path(), &selected());
+            assert_eq!(prepared.selected_scene_path(), Some(&selected()));
+            assert_eq!(
+                prepared.selected_scene(),
+                &ProjectSceneSelection::Source(selected())
+            );
+            assert_eq!(prepared.selected_scene_product(), None);
             assert_eq!(prepared.expected_instance(), &expected);
             prepared.scene().roots.clone()
         });
@@ -165,27 +209,34 @@ fn scoped_prepared_inspection_preserves_source_receipt_pair_and_scheduled_stale_
 fn worker_prepares_selected_scene_and_refunds_rejected_content() {
     let fixture = Fixture::new();
     let context = fixture.context();
+    let Context::Source {
+        candidate,
+        plan,
+        loader,
+    } = context.as_ref()
+    else {
+        unreachable!()
+    };
     let pools = pools();
-    let current = context
-        .loader
-        .load(&context.candidate, &context.plan)
-        .unwrap();
-    let baseline = context.loader.budget_snapshot();
+    let current = loader.load(candidate, plan).unwrap();
+    let baseline = loader.budget_snapshot();
     let mut preparation =
         Preparation::start(Arc::clone(&context), selected(), &pools, None).unwrap();
-    let target = finish(&mut preparation).unwrap();
+    let PreparedSceneContent::Source(target) = finish(&mut preparation).unwrap() else {
+        panic!("source requests retain their real source snapshot")
+    };
     assert_eq!(target.selected_scene_path(), &selected());
     assert_eq!(
         target.expanded_scene().roots,
         [SceneEntityId::new("second").unwrap()]
     );
-    assert!(target.shares_component_bindings(context.plan.schema_validation().bindings()));
+    assert!(target.shares_component_bindings(plan.schema_validation().bindings()));
     assert_eq!(
         current.expanded_scene().roots,
         [SceneEntityId::new("startup").unwrap()]
     );
     assert_eq!(
-        context.loader.budget_snapshot().active_generations(),
+        loader.budget_snapshot().active_generations(),
         baseline.active_generations() + 1
     );
     drop(target);
@@ -196,12 +247,9 @@ fn worker_prepares_selected_scene_and_refunds_rejected_content() {
         b"{ malformed",
     )
     .unwrap();
-    let expected = context
-        .loader
-        .load_scene(&context.candidate, &context.plan, &selected())
-        .unwrap_err();
+    let expected = loader.load_scene(candidate, plan, &selected()).unwrap_err();
     let mut rejected = Preparation::start(Arc::clone(&context), selected(), &pools, None).unwrap();
-    let failure = finish(&mut rejected).unwrap_err();
+    let failure = finish(&mut rejected).err().unwrap();
     assert_eq!(
         failure.error,
         ProjectSceneRequestError::Content(ProjectContentErrorKind::SceneFormat)
@@ -225,12 +273,17 @@ fn worker_prepares_selected_scene_and_refunds_rejected_content() {
 fn cancellation_keeps_worker_and_prepared_generation_until_physical_return() {
     let fixture = Fixture::new();
     let context = fixture.context();
+    let Context::Source {
+        candidate,
+        plan,
+        loader,
+    } = context.as_ref()
+    else {
+        unreachable!()
+    };
     let pools = pools();
-    let _current = context
-        .loader
-        .load(&context.candidate, &context.plan)
-        .unwrap();
-    let baseline = context.loader.budget_snapshot();
+    let _current = loader.load(candidate, plan).unwrap();
+    let baseline = loader.budget_snapshot();
     for phase in [TestPhase::BeforeRead, TestPhase::AfterPreparation] {
         let (gate, control) = TestGate::new(phase);
         let mut preparation =
@@ -245,7 +298,7 @@ fn cancellation_keeps_worker_and_prepared_generation_until_physical_return() {
         }
         if phase == TestPhase::AfterPreparation {
             assert_eq!(
-                context.loader.budget_snapshot().active_generations(),
+                loader.budget_snapshot().active_generations(),
                 baseline.active_generations() + 1
             );
         }
@@ -262,12 +315,17 @@ fn cancellation_keeps_worker_and_prepared_generation_until_physical_return() {
 fn failed_worker_discards_its_prepared_snapshot_and_closed_pool_never_reads_inline() {
     let fixture = Fixture::new();
     let context = fixture.context();
+    let Context::Source {
+        candidate,
+        plan,
+        loader,
+    } = context.as_ref()
+    else {
+        unreachable!()
+    };
     let pools = pools();
-    let _current = context
-        .loader
-        .load(&context.candidate, &context.plan)
-        .unwrap();
-    let baseline = context.loader.budget_snapshot();
+    let _current = loader.load(candidate, plan).unwrap();
+    let baseline = loader.budget_snapshot();
     let (gate, control) = TestGate::panicking(TestPhase::AfterPreparation);
     let mut preparation =
         Preparation::start(Arc::clone(&context), selected(), &pools, Some(gate)).unwrap();
@@ -290,11 +348,14 @@ fn failed_worker_discards_its_prepared_snapshot_and_closed_pool_never_reads_inli
 fn inline_pool_rejects_scene_io_without_queuing_or_loading() {
     let fixture = Fixture::new();
     let context = fixture.context();
+    let Context::Source { loader, .. } = context.as_ref() else {
+        unreachable!()
+    };
     let pools = TaskPools::inline_for_tests(
         TaskPoolConfig::threaded(ItemLimit::ONE, ItemLimit::ONE, ItemLimit::ONE).unwrap(),
     )
     .unwrap();
-    let baseline = context.loader.budget_snapshot();
+    let baseline = loader.budget_snapshot();
     assert!(matches!(
         Preparation::start(Arc::clone(&context), selected(), &pools, None),
         Err(ProjectSceneRequestError::TaskUnavailable)
@@ -324,7 +385,7 @@ fn pools() -> TaskPools {
 
 fn finish(
     preparation: &mut Preparation,
-) -> Result<ProjectContentSnapshot, preparation::PreparationFailure> {
+) -> Result<PreparedSceneContent, preparation::PreparationFailure> {
     let deadline = Instant::now() + Duration::from_secs(5);
     loop {
         if let Some(result) = preparation.poll() {
@@ -358,7 +419,10 @@ fn wait_for_request(
 }
 
 fn assert_active_budget(context: &Context, expected: ProjectContentBudgetSnapshot) {
-    let actual = context.loader.budget_snapshot();
+    let Context::Source { loader, .. } = context else {
+        unreachable!()
+    };
+    let actual = loader.budget_snapshot();
     assert_eq!(actual.active_generations(), expected.active_generations());
     assert_eq!(actual.active_reservations(), expected.active_reservations());
     for &kind in ProjectContentBudgetKind::ALL {
@@ -373,80 +437,18 @@ struct Fixture {
 impl Fixture {
     fn with_world(&self, inspect: impl FnOnce(&mut World) + Send + Sync + 'static) {
         let context = self.context();
-        let snapshot = context
-            .loader
-            .load(&context.candidate, &context.plan)
-            .unwrap();
-        let inspect = Arc::new(Mutex::new(Some(inspect)));
-        let inspection = Arc::clone(&inspect);
-        let native = Arc::new(OnceLock::new());
-        assert!(
-            native
-                .set(context.plan.schema_validation().snapshot().clone())
-                .is_ok()
-        );
-        let mut app = App::new();
-        app.add_plugins(nara_reflect::preloaded_component_registry_plugin(native))
-            .unwrap()
-            .add_plugins((
-                nara_scene::SceneComponentsPlugin,
-                nara_hierarchy::HierarchyPlugin,
-                nara_transform::TransformPlugin,
-                nara_render::RenderComponentsPlugin,
-                nara_sprite::SpritePlugin,
-                nara_tilemap::TilemapPlugin,
-                nara_scene::SceneComponentBindingsPlugin::new(
-                    context
-                        .plan
-                        .schema_validation()
-                        .bindings()
-                        .data_owners()
-                        .iter()
-                        .cloned(),
-                ),
-                StartupSceneActivationPlugin,
-            ))
-            .unwrap()
-            .add_systems(nara_app::CoreStage::Update, move |world: &mut World| {
-                if let Some(inspect) = inspection.lock().unwrap().take() {
-                    inspect(world);
-                    if let Some(pools) = world.get_resource::<TaskPools>() {
-                        pools.shutdown_blocking().unwrap();
-                    }
-                }
-            })
-            .unwrap();
-        let mut candidate = nara_app::RuntimeAdmissionReservation::try_acquire()
-            .unwrap()
-            .admit(
-                app.seal().unwrap(),
-                nara_app::RuntimeObligationLedger::new(),
-                nara_app::RuntimeClosePolicy::default(),
-            )
-            .unwrap();
-        candidate
-            .with_admission_scope(move |scope| {
-                scope.apply_command(move |world: &mut World| {
-                    materialize_startup_scene(world, snapshot.scene_source()).unwrap();
-                    let closing = Arc::clone(&world.resource::<Closing>().0);
-                    world.insert_resource(RequestOwner {
-                        context,
-                        closing,
-                        slot: None,
-                        gate: None,
-                    });
-                });
-            })
-            .map(|outcome| assert!(outcome.post_operation_fault.is_none()))
-            .unwrap();
-        let mut runtime = candidate.complete_startup().unwrap().promote();
-        runtime.drive(Duration::ZERO).unwrap();
-        assert!(inspect.lock().unwrap().is_none());
-        let mut retirement = runtime.begin_retirement();
-        assert_eq!(
-            retirement.drive_retirement(),
-            nara_app::RuntimeCandidateRetirementState::Retired
-        );
+        let Context::Source {
+            candidate,
+            plan,
+            loader,
+        } = context.as_ref()
+        else {
+            unreachable!()
+        };
+        let snapshot = loader.load(candidate, plan).unwrap();
+        let source = snapshot.scene_source();
+        drop(snapshot);
+        with_context_world(context, source, inspect);
     }
 
     fn new() -> Self {
@@ -523,12 +525,98 @@ requested = ["runtime-2d"]
         )
         .unwrap();
         let plan = resolve_product_recipe(&candidate, crate::ProductRecipe::new()).unwrap();
-        Arc::new(Context {
+        Arc::new(Context::Source {
             candidate,
             plan,
             loader: Arc::new(ProjectContentLoader::new(root).unwrap()),
         })
     }
+}
+
+fn with_context_world(
+    context: Arc<Context>,
+    source: crate::startup_scene::SceneSource,
+    inspect: impl FnOnce(&mut World) + Send + Sync + 'static,
+) {
+    let schema = match context.as_ref() {
+        Context::Source { plan, .. } => plan.schema_validation(),
+        Context::Processed { base } => base.plan().schema_validation(),
+    };
+    let inspect = Arc::new(Mutex::new(Some(inspect)));
+    let inspection = Arc::clone(&inspect);
+    let native = Arc::new(OnceLock::new());
+    assert!(native.set(schema.snapshot().clone()).is_ok());
+    let mut app = App::new();
+    app.add_plugins(nara_reflect::preloaded_component_registry_plugin(native))
+        .unwrap()
+        .add_plugins((
+            nara_scene::SceneComponentsPlugin,
+            nara_hierarchy::HierarchyPlugin,
+            nara_transform::TransformPlugin,
+            nara_render::RenderComponentsPlugin,
+            nara_sprite::SpritePlugin,
+            nara_tilemap::TilemapPlugin,
+            nara_scene::SceneComponentBindingsPlugin::new(
+                schema.bindings().data_owners().iter().cloned(),
+            ),
+            StartupSceneActivationPlugin,
+        ))
+        .unwrap()
+        .add_systems(nara_app::CoreStage::Update, move |world: &mut World| {
+            if let Some(inspect) = inspection.lock().unwrap().take() {
+                inspect(world);
+                if let Some(pools) = world.get_resource::<TaskPools>() {
+                    pools.shutdown_blocking().unwrap();
+                }
+            }
+        })
+        .unwrap();
+    let mut candidate = nara_app::RuntimeAdmissionReservation::try_acquire()
+        .unwrap()
+        .admit(
+            app.seal().unwrap(),
+            nara_app::RuntimeObligationLedger::new(),
+            nara_app::RuntimeClosePolicy::default(),
+        )
+        .unwrap();
+    candidate
+        .with_admission_scope(move |scope| {
+            scope.apply_command(move |world: &mut World| {
+                if let Context::Processed { base } = context.as_ref()
+                    && source.is_content_managed()
+                {
+                    let content = base
+                        .prepare_scene_content(base.catalog().startup_scene())
+                        .unwrap();
+                    super::super::content_residency::publish_processed_startup(world, &content)
+                        .unwrap();
+                }
+                materialize_startup_scene(world, source).unwrap();
+                match context.as_ref() {
+                    Context::Source {
+                        candidate,
+                        plan,
+                        loader,
+                    } => {
+                        install_context(world, candidate.clone(), plan.clone(), Arc::clone(loader))
+                            .unwrap();
+                    }
+                    Context::Processed { base } => {
+                        install_runtime_context(world, base.clone()).unwrap();
+                    }
+                }
+            });
+        })
+        .map(|outcome| assert!(outcome.post_operation_fault.is_none()))
+        .unwrap();
+    let mut runtime = candidate.complete_startup().unwrap().promote();
+    runtime.drive(Duration::ZERO).unwrap();
+    assert!(inspect.lock().unwrap().is_none());
+    let mut retirement = runtime.begin_retirement();
+    assert_eq!(
+        retirement.drive_retirement(),
+        nara_app::RuntimeCandidateRetirementState::Retired
+    );
 }
 
 impl Drop for Fixture {

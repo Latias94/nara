@@ -1958,6 +1958,10 @@ requested = ["runtime-2d"]
             .iter()
             .all(|entry| entry.plugin_id() != nara::render::RENDER_PLUGIN_ID)
     );
+    assert!(entries.iter().all(|entry| {
+        entry.plugin_id() != nara::asset::ASSET_SOURCE_PLUGIN_ID
+            && entry.plugin_id() != nara::image::IMAGE_SOURCE_PLUGIN_ID
+    }));
     assert!(
         plan.schema_validation()
             .provider_ids()
@@ -2932,14 +2936,15 @@ name = "Host-Owned Editor Profile"
 #[test]
 fn overlapping_product_groups_accept_atomic_type_directed_edits() {
     use nara::{
-        image::{IMAGE_PLUGIN_ID, ImageImportLimits},
-        render::{RENDER_PLUGIN_ID, RenderPlugin},
+        image::IMAGE_PLUGIN_ID,
+        render::{RENDER_PLUGIN_ID, RenderPlugin, WorldCanvas},
     };
 
     let manifest = TestManifest::new(FULL_PRODUCT_MANIFEST);
     let candidate = ingest_project_manifest(&manifest.capability(), None).unwrap();
+    let render_definition = nara::render::plugin(Some(WorldCanvas::new(320, 180).unwrap()));
     let request = project_runtime_plugins(&candidate)
-        .configure(nara::image::plugin(ImageImportLimits::default()))
+        .configure(render_definition.clone())
         .insert_before::<RenderPlugin>(PluginDefinition::for_default::<OrderingPlugin>())
         .insert_after::<RenderPlugin>(PluginDefinition::for_default::<AfterOrderingPlugin>());
     let plan = resolve_runtime_plan(&candidate, request, built_in_schema_providers()).unwrap();
@@ -2952,6 +2957,15 @@ fn overlapping_product_groups_accept_atomic_type_directed_edits() {
 
     assert_eq!(ids.iter().filter(|id| **id == RENDER_PLUGIN_ID).count(), 1);
     assert_eq!(ids.iter().filter(|id| **id == IMAGE_PLUGIN_ID).count(), 1);
+    assert_eq!(
+        plan.plugin_plan()
+            .entries()
+            .iter()
+            .find(|entry| entry.plugin_id() == RENDER_PLUGIN_ID)
+            .unwrap()
+            .definition_key(),
+        render_definition.key(),
+    );
     let before = ids
         .iter()
         .position(|id| *id == TEST_ORDERING_PLUGIN_ID)

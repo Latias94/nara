@@ -1,13 +1,13 @@
 use std::sync::{Arc, Mutex, TryLockError};
 
-use nara_project::ProjectPath;
 use nara_tasks::{
     TaskDomainKey, TaskHandle, TaskPoolKind, TaskPools, TaskReturnState, TaskSpawnRequest,
     TaskTerminal,
 };
 
 use super::{
-    Context, DiagnosticReport, ProjectContentSnapshot, ProjectSceneRequestError, error_diagnostics,
+    Context, Diagnostic, DiagnosticCode, DiagnosticReport, PreparedSceneContent,
+    ProjectSceneRequestError, ProjectSceneSelection, SafeSummary, error_diagnostics,
 };
 
 #[derive(Debug)]
@@ -24,6 +24,19 @@ impl PreparationFailure {
             diagnostics: error_diagnostics(error),
         }
     }
+
+    fn runtime_content(error: crate::runtime_content::RuntimeContentError) -> Self {
+        let kind = ProjectSceneRequestError::RuntimeContent;
+        let mut diagnostics = DiagnosticReport::default();
+        diagnostics.push(Diagnostic::error(
+            DiagnosticCode::new(kind.code()).expect("engine-owned diagnostic code is valid"),
+            SafeSummary::new(error.summary()).expect("Runtime content errors have safe summaries"),
+        ));
+        Self {
+            error: kind,
+            diagnostics,
+        }
+    }
 }
 
 pub(super) struct Preparation {
@@ -34,7 +47,7 @@ pub(super) struct Preparation {
 impl Preparation {
     pub(super) fn start(
         context: Arc<Context>,
-        path: ProjectPath,
+        selection: impl Into<ProjectSceneSelection>,
         pools: &TaskPools,
         #[cfg(test)] gate: Option<TestGate>,
     ) -> Result<Self, ProjectSceneRequestError> {
@@ -43,7 +56,7 @@ impl Preparation {
         }
         let work = Arc::new(Mutex::new(Some(Work {
             context,
-            path,
+            selection: selection.into(),
             result: None,
             #[cfg(test)]
             gate,
@@ -66,15 +79,33 @@ impl Preparation {
                     }
                     // Startup already established executable schema agreement. Ordinary targets use the
                     // same frozen native plan; they are not new startup attestations or schema owners.
-                    work.result = Some(
-                        work.context
-                            .loader
-                            .load_scene(&work.context.candidate, &work.context.plan, &work.path)
+                    work.result = Some(match (work.context.as_ref(), &work.selection) {
+                        (
+                            Context::Source {
+                                candidate,
+                                plan,
+                                loader,
+                            },
+                            ProjectSceneSelection::Source(path),
+                        ) => loader
+                            .load_scene(candidate, plan, path)
+                            .map(PreparedSceneContent::Source)
                             .map_err(|error| PreparationFailure {
                                 error: ProjectSceneRequestError::Content(error.kind()),
                                 diagnostics: error.diagnostics().clone(),
                             }),
-                    );
+                        (Context::Processed { base }, ProjectSceneSelection::Product(product)) => {
+                            base.prepare_scene_content(*product)
+                                .map(PreparedSceneContent::Processed)
+                                .map_err(PreparationFailure::runtime_content)
+                        }
+                        _ => Err(PreparationFailure {
+                            error: ProjectSceneRequestError::UndeclaredScene,
+                            diagnostics: error_diagnostics(
+                                ProjectSceneRequestError::UndeclaredScene,
+                            ),
+                        }),
+                    });
                     #[cfg(test)]
                     wait_at(&mut work.gate, TestPhase::AfterPreparation);
                 },
@@ -88,7 +119,7 @@ impl Preparation {
         self.task.cancel();
     }
 
-    pub(super) fn poll(&mut self) -> Option<Result<ProjectContentSnapshot, PreparationFailure>> {
+    pub(super) fn poll(&mut self) -> Option<Result<PreparedSceneContent, PreparationFailure>> {
         let returned = self.task.return_observer().state();
         if returned == TaskReturnState::Pending {
             return None;
@@ -125,8 +156,8 @@ impl Drop for Preparation {
 
 struct Work {
     context: Arc<Context>,
-    path: ProjectPath,
-    result: Option<Result<ProjectContentSnapshot, PreparationFailure>>,
+    selection: ProjectSceneSelection,
+    result: Option<Result<PreparedSceneContent, PreparationFailure>>,
     #[cfg(test)]
     gate: Option<TestGate>,
 }

@@ -130,7 +130,7 @@ impl std::error::Error for AssetReloadRequestAdmissionError {}
 
 /// Non-cloneable authority for the concrete first-party image reload integration.
 ///
-/// The token is returned directly to `ImagePlugin` and never stored as a public ECS resource.
+/// The token is returned directly to `ImageSourcePlugin` and never stored as a public ECS resource.
 /// Requests admitted for another App generation cannot be drained with this token.
 #[derive(Debug)]
 pub struct ImageReloadConsumer {
@@ -174,7 +174,7 @@ impl std::error::Error for ImageReloadDrainError {}
 
 #[derive(Debug)]
 pub enum ImageReloadRegistrationError {
-    AssetPluginMissing,
+    AssetSourcePluginMissing,
     AlreadyRegistered,
     AppMutation(PluginError),
 }
@@ -182,8 +182,8 @@ pub enum ImageReloadRegistrationError {
 impl fmt::Display for ImageReloadRegistrationError {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Self::AssetPluginMissing => {
-                formatter.write_str("image reload consumer requires AssetPlugin")
+            Self::AssetSourcePluginMissing => {
+                formatter.write_str("image reload consumer requires AssetSourcePlugin")
             }
             Self::AlreadyRegistered => {
                 formatter.write_str("image reload requests already have a registered consumer")
@@ -197,7 +197,7 @@ impl std::error::Error for ImageReloadRegistrationError {
     fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
         match self {
             Self::AppMutation(error) => Some(error),
-            Self::AssetPluginMissing | Self::AlreadyRegistered => None,
+            Self::AssetSourcePluginMissing | Self::AlreadyRegistered => None,
         }
     }
 }
@@ -207,7 +207,7 @@ pub fn register_image_reload_consumer<T: 'static>(
     app: &mut App,
 ) -> Result<ImageReloadConsumer, ImageReloadRegistrationError> {
     if !app.world().contains_resource::<AssetReloadRequests>() {
-        return Err(ImageReloadRegistrationError::AssetPluginMissing);
+        return Err(ImageReloadRegistrationError::AssetSourcePluginMissing);
     }
     if app.world().contains_resource::<ImageReloadRegistration>() {
         return Err(ImageReloadRegistrationError::AlreadyRegistered);

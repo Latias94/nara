@@ -111,8 +111,8 @@ pub use runtime::EditorUiPreviewCandidate;
     feature = "render-wgpu"
 ))]
 pub use runtime::{
-    DesktopPresentationVerificationReceipt, DesktopRun, DesktopRunIntent, DesktopRunOutcome,
-    DesktopRunReport,
+    DesktopPresentationVerificationReceipt, DesktopRun, DesktopRunIntent, DesktopRunOptions,
+    DesktopRunOutcome, DesktopRunReport,
 };
 #[cfg(all(
     feature = "runtime-2d",
@@ -180,7 +180,9 @@ pub use runtime::{EditorPreviewCandidate, EditorPreviewContentStamp, EditorPrevi
 #[doc(hidden)]
 pub use runtime::{EditorUiAuthoringEditError, EditorUiAuthoringFrame};
 #[cfg(all(feature = "runtime-2d", feature = "serde"))]
-pub use runtime::{HeadlessRun, HeadlessRunIntent, HeadlessRunOutcome, HeadlessRunReport};
+pub use runtime::{
+    HeadlessRun, HeadlessRunIntent, HeadlessRunOptions, HeadlessRunOutcome, HeadlessRunReport,
+};
 #[cfg(all(feature = "runtime-2d", feature = "serde"))]
 pub(crate) use runtime::{
     PROJECT_SCENE_REQUEST_CLOSE_OBLIGATION, poll_project_scene_requests,
@@ -189,5 +191,5 @@ pub(crate) use runtime::{
 #[cfg(all(feature = "runtime-2d", feature = "serde"))]
 pub use runtime::{
     PreparedProjectSceneView, ProjectSceneRequestError, ProjectSceneRequestId,
-    ProjectSceneRequestState, ProjectScenes,
+    ProjectSceneRequestState, ProjectSceneSelection, ProjectScenes,
 };

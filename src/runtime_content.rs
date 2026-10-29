@@ -8,6 +8,12 @@
 
 mod budget;
 mod catalog;
+mod codecs;
+mod prepared;
+
+pub use codecs::{RuntimeCodecDefinitionId, RuntimeCodecSelectionError, RuntimeCodecsFingerprint};
+pub(crate) use codecs::{RuntimeCodecRole, RuntimeCodecs};
+pub(crate) use prepared::ProcessedSceneContent;
 
 use std::{
     error::Error,
@@ -185,15 +191,20 @@ pub enum RuntimeContentError {
     TargetMismatch,
     RecipeMismatch,
     SchemaMismatch,
+    CodecsMismatch,
     MemberDigestMismatch,
     UndeclaredProduct,
     UndeclaredScene,
     UndeclaredDependency,
     NotScene,
     NotAsset,
+    CodecNotSelected,
     CodecMismatch,
     CodecPanicked,
     ProductIdentityMismatch,
+    NativeResourceUnavailable,
+    TileSet(nara_tilemap::TileSetDescriptorError),
+    Tilemap(nara_tilemap::TilemapMembershipError),
     Scene(RuntimeSceneError),
     SceneReference(DeclaredAssetReferenceError),
     Asset(AssetRuntimeError),
@@ -209,7 +220,13 @@ pub enum RuntimeContentError {
 
 impl fmt::Display for RuntimeContentError {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-        formatter.write_str(match self {
+        formatter.write_str(self.summary())
+    }
+}
+
+impl RuntimeContentError {
+    pub(crate) const fn summary(&self) -> &'static str {
+        match self {
             Self::Host(_) => "Runtime content capability read failed",
             Self::Catalog(_) => "Runtime content catalog was rejected",
             Self::Configuration(_) => "Runtime configuration was rejected",
@@ -218,6 +235,7 @@ impl fmt::Display for RuntimeContentError {
             Self::TargetMismatch => "Runtime catalog target differs from the Host expectation",
             Self::RecipeMismatch => "Runtime catalog differs from the executable recipe",
             Self::SchemaMismatch => "Runtime catalog differs from the executable Schema",
+            Self::CodecsMismatch => "Runtime catalog differs from the executable codec selection",
             Self::MemberDigestMismatch => "Runtime member differs from its admitted catalog digest",
             Self::UndeclaredProduct => "Runtime product is absent from the admitted catalog",
             Self::UndeclaredScene => "Runtime Scene is not a declared acquisition root",
@@ -226,15 +244,23 @@ impl fmt::Display for RuntimeContentError {
             }
             Self::NotScene => "Runtime product is not a Scene",
             Self::NotAsset => "Runtime product is not an asset member",
+            Self::CodecNotSelected => {
+                "Runtime codec is absent from the original executable selection"
+            }
             Self::CodecMismatch => "Runtime member requires another compiled codec",
             Self::CodecPanicked => "Runtime codec panicked",
             Self::ProductIdentityMismatch => "Runtime product identity differs from its catalog",
+            Self::NativeResourceUnavailable => {
+                "Runtime resource requires an unavailable native product family"
+            }
+            Self::TileSet(_) => "Runtime TileSet descriptor does not match its actual Image",
+            Self::Tilemap(_) => "Runtime Tilemap cells do not match their admitted TileSet",
             Self::Scene(_) => "Runtime Scene admission failed",
             Self::SceneReference(_) => "Runtime Scene asset-reference inventory failed",
             Self::Asset(_) => "Runtime asset decode failed",
             Self::Budget { .. } => "Runtime content budget exceeded",
             Self::BudgetOverflow { .. } => "Runtime content budget calculation overflowed",
-        })
+        }
     }
 }
 
@@ -248,6 +274,8 @@ impl Error for RuntimeContentError {
             Self::Scene(error) => Some(error),
             Self::SceneReference(error) => Some(error),
             Self::Asset(error) => Some(error),
+            Self::TileSet(error) => Some(error),
+            Self::Tilemap(error) => Some(error),
             _ => None,
         }
     }
@@ -269,6 +297,12 @@ struct RuntimeContentBaseInner {
     members: Box<[Vec<u8>]>,
     budget: Arc<DecodeBudget>,
     limits: RuntimeContentLimits,
+}
+
+/// Retention charged to the original base for first-party collection and residency metadata.
+/// Values retain their own decode leases; this owner covers only the enclosing Host storage.
+pub(crate) struct RuntimeContentLease {
+    _lease: DecodeLease,
 }
 
 impl fmt::Debug for RuntimeContentBase {
@@ -377,6 +411,12 @@ impl RuntimeContentBase {
         {
             return Err(RuntimeContentError::SchemaMismatch);
         }
+        if plan.runtime_codecs_fingerprint().as_bytes() != catalog.runtime_codecs_fingerprint() {
+            return Err(RuntimeContentError::CodecsMismatch);
+        }
+        for member in catalog.members() {
+            plan.runtime_codecs().validate_member(member)?;
+        }
 
         let mut encoded = catalog_bytes.len();
         for member in catalog.members() {
@@ -473,6 +513,20 @@ impl RuntimeContentBase {
         &self.inner.plan
     }
 
+    pub(crate) fn same_base(&self, other: &Self) -> bool {
+        Arc::ptr_eq(&self.inner, &other.inner)
+    }
+
+    /// Admit Host-owned indices before allocating them, against this base's shared limit.
+    pub(crate) fn reserve_retained(
+        &self,
+        bytes: usize,
+    ) -> Result<RuntimeContentLease, RuntimeContentError> {
+        Ok(RuntimeContentLease {
+            _lease: self.inner.budget.reserve(bytes, 0)?,
+        })
+    }
+
     /// Inspects admitted membership and dependency metadata without decoding or making it resident.
     #[must_use]
     pub fn member(&self, product: AssetProductRef) -> Option<&RuntimeContentMember> {
@@ -491,6 +545,14 @@ impl RuntimeContentBase {
         if !self.inner.catalog.scenes().contains(&product) {
             return Err(RuntimeContentError::UndeclaredScene);
         }
+        self.acquire_scene_member(product)
+    }
+
+    /// Data membership does not grant the separate public Scene-root acquisition authority.
+    fn acquire_scene_member(
+        &self,
+        product: AssetProductRef,
+    ) -> Result<RuntimeContentScene, RuntimeContentError> {
         let index = self.member_index(product)?;
         let member = &self.inner.catalog.members()[index];
         let RuntimeContentMemberKind::Scene { source } = member.kind() else {
@@ -556,8 +618,12 @@ impl RuntimeContentBase {
         if format.as_str() != C::RUNTIME_KIND || version.get() != C::RUNTIME_VERSION {
             return Err(RuntimeContentError::CodecMismatch);
         }
+        let limits = self
+            .inner
+            .plan
+            .runtime_codecs()
+            .selected_limits::<D, C>(member)?;
         catch_unwind(AssertUnwindSafe(|| {
-            let limits = C::runtime_limits();
             check(
                 RuntimeContentBudgetKind::MemberEncodedBytes,
                 self.inner.members[index].len(),

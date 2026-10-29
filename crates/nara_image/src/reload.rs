@@ -512,15 +512,11 @@ pub(crate) enum ImageReloadInternalSet {
     ApplyResults,
 }
 
-#[derive(Debug, Clone, Default)]
-pub struct ImagePlugin {
-    importer: ImageImporter,
-    source_directory: Option<Arc<ImageSourceDirectory>>,
-}
+/// Installs native Image storage without importing, watching, or reading source files.
+#[derive(Debug, Clone, Copy, Default)]
+pub struct ImagePlugin;
 
 pub const IMAGE_PLUGIN_ID: nara_app::PluginId = nara_app::PluginId::new("nara.image");
-const IMAGE_PLUGIN_DEFINITION_ID: nara_app::PluginDefinitionId =
-    nara_app::PluginDefinitionId::new("nara.image.configured", 1);
 const IMAGE_PLUGIN_REQUIREMENTS: &[nara_app::PluginId] = &[nara_asset::ASSET_PLUGIN_ID];
 const IMAGE_PLUGIN_PRODUCT_ALTERNATIVES: &[nara_app::PluginProductCapability] = &[
     nara_app::PluginProductCapability::new("runtime-2d"),
@@ -531,15 +527,50 @@ pub const IMAGE_PLUGIN_DECLARATION: nara_app::PluginDeclaration =
         .requires_plugins(IMAGE_PLUGIN_REQUIREMENTS)
         .requires_any_product_capabilities(IMAGE_PLUGIN_PRODUCT_ALTERNATIVES);
 
-/// Creates a repeatable image plugin definition from pure import limits.
+impl Plugin for ImagePlugin {
+    fn declaration() -> &'static nara_app::PluginDeclaration {
+        &IMAGE_PLUGIN_DECLARATION
+    }
+
+    fn build(&self, app: &mut App) -> Result<(), PluginError> {
+        app.init_resource::<Assets<ImageAsset>>()?;
+        Ok(())
+    }
+}
+
+/// Installs explicit source Image reloads using Tasks-owned import execution.
+///
+/// File access requires a Host-supplied [`ImageSourceDirectory`]. A queued import without that
+/// authority fails with [`ImageReloadError::MissingSourceDirectory`]; it is never silently skipped.
+#[derive(Debug, Clone, Default)]
+pub struct ImageSourcePlugin {
+    importer: ImageImporter,
+    source_directory: Option<Arc<ImageSourceDirectory>>,
+}
+
+pub const IMAGE_SOURCE_PLUGIN_ID: nara_app::PluginId = nara_app::PluginId::new("nara.image.source");
+const IMAGE_SOURCE_PLUGIN_DEFINITION_ID: nara_app::PluginDefinitionId =
+    nara_app::PluginDefinitionId::new("nara.image.source.configured", 1);
+pub const IMAGE_SOURCE_PLUGIN_DECLARATION: nara_app::PluginDeclaration =
+    nara_app::PluginDeclaration::new(IMAGE_SOURCE_PLUGIN_ID, nara_app::PluginCategory::Asset)
+        .requires_plugins(&[
+            IMAGE_PLUGIN_ID,
+            nara_asset::ASSET_SOURCE_PLUGIN_ID,
+            nara_tasks::TASK_PLUGIN_ID,
+        ]);
+
+/// Creates a repeatable source Image plugin definition from pure import limits.
+///
+/// Select [`ImagePlugin`], [`nara_asset::AssetSourcePlugin`], and [`nara_tasks::TaskPlugin`]
+/// separately. This definition grants no source-directory authority.
 #[must_use]
-pub fn plugin(limits: ImageImportLimits) -> nara_app::PluginDefinition {
-    let canonical_configuration = image_plugin_configuration(limits);
-    nara_app::PluginDefinition::fallible::<ImagePlugin, _>(
-        IMAGE_PLUGIN_DEFINITION_ID,
+pub fn source_plugin(limits: ImageImportLimits) -> nara_app::PluginDefinition {
+    let canonical_configuration = image_source_plugin_configuration(limits);
+    nara_app::PluginDefinition::fallible::<ImageSourcePlugin, _>(
+        IMAGE_SOURCE_PLUGIN_DEFINITION_ID,
         canonical_configuration,
         move || {
-            ImagePlugin::with_limits(limits).map_err(|_| {
+            ImageSourcePlugin::with_limits(limits).map_err(|_| {
                 nara_app::PluginDomainError::new(
                     "nara.image.invalid-import-limits",
                     "Image import limits are invalid",
@@ -550,9 +581,9 @@ pub fn plugin(limits: ImageImportLimits) -> nara_app::PluginDefinition {
     )
 }
 
-fn image_plugin_configuration(limits: ImageImportLimits) -> Vec<u8> {
+fn image_source_plugin_configuration(limits: ImageImportLimits) -> Vec<u8> {
     let mut bytes = Vec::with_capacity(96);
-    bytes.extend_from_slice(b"nara.image.plugin-config.v1\0");
+    bytes.extend_from_slice(b"nara.image.source.plugin-config.v1\0");
     bytes.extend_from_slice(&(limits.max_encoded_bytes().get() as u64).to_le_bytes());
     bytes.extend_from_slice(&limits.max_width().get().to_le_bytes());
     bytes.extend_from_slice(&limits.max_height().get().to_le_bytes());
@@ -563,7 +594,7 @@ fn image_plugin_configuration(limits: ImageImportLimits) -> Vec<u8> {
     bytes
 }
 
-impl ImagePlugin {
+impl ImageSourcePlugin {
     pub fn with_limits(limits: ImageImportLimits) -> Result<Self, ImageImporterCreateError> {
         Ok(Self {
             importer: ImageImporter::with_limits(limits)?,
@@ -588,13 +619,12 @@ impl ImagePlugin {
     }
 }
 
-impl Plugin for ImagePlugin {
+impl Plugin for ImageSourcePlugin {
     fn declaration() -> &'static nara_app::PluginDeclaration {
-        &IMAGE_PLUGIN_DECLARATION
+        &IMAGE_SOURCE_PLUGIN_DECLARATION
     }
 
     fn build(&self, app: &mut App) -> Result<(), PluginError> {
-        app.init_resource::<Assets<ImageAsset>>()?;
         app.init_resource::<ImageReloadStats>()?;
         app.init_resource::<PendingImageJobs>()?;
         app.init_resource::<ReadyImageJobs>()?;
@@ -662,7 +692,7 @@ fn image_reload_registration_plugin_error(error: ImageReloadRegistrationError) -
     match error {
         ImageReloadRegistrationError::AppMutation(error) => error,
         error => PluginError::SetupFailed {
-            plugin: IMAGE_PLUGIN_ID,
+            plugin: IMAGE_SOURCE_PLUGIN_ID,
             message: error.to_string(),
         },
     }

@@ -10,6 +10,14 @@ fn recipe() -> Result<nara::ProductRecipe, nara::ProductRecipeError> {
 }
 ```
 
+Processed delivery selects its concrete decoder separately with
+`add_runtime_asset_codec::<D, C>(RuntimeCodecDefinitionId::new("studio.package.runtime", 1))`.
+Selecting source import never enables Runtime decode. The original Runtime configuration plan
+freezes that typed binding and its limits, and the catalog must match its dedicated codec
+fingerprint. The [Runtime base guide](runtime-content-base.md) describes processed startup and
+later Scene requests. Collection reads are shared: `get` checks full Product membership, `iter`
+visits stored values once and `source_records` exposes only actual source metadata.
+
 Implement the pure source/import facet with `nara_asset` and its `serde` feature. Its settings,
 input, limits and error types require no root facade, Scene, 2D or Editor dependency. Product
 selection, typed collections and project workflows remain in the root Host and require
@@ -92,18 +100,21 @@ Borrow the installed resource from an ordinary system:
 ```rust,ignore
 fn show_text(assets: nara::ecs::Res<nara::project_host::ProjectDomainAssets>) {
     if let Some(texts) = assets.collection::<text_package::TextDomain>() {
-        for (identity, text) in texts.iter() {
-            // Consume the typed CPU value together with its admitted identity.
+        for text in texts.iter() {
+            // Consume each stored typed CPU value once.
         }
     }
 }
 ```
 
 `collection::<D: AssetDomain>()` distinguishes families even when they use the same Rust product type.
-`get(&AssetRef)` accepts an admitted path, stable identity or `Product` selecting `PRIMARY`.
-It refuses auxiliary selection. For a compound reference, explicitly look up its enclosing source
-with `AssetRef::StableId(reference.source())`, then use the concrete product's lookup API with the
-complete `AssetProductRef`. No mutable collection is exposed.
+`get(&AssetRef)` accepts a complete admitted Product, including auxiliary selections. Source
+collections first locate the real source record and use the domain's pure membership query.
+Processed collections use exact Product mappings retained from their decoded members. A source
+path aliases only a real primary source record; processed collections have no paths. Stable IDs
+always select the exact primary Product. Use the concrete product's own lookup API to select a
+value inside a returned compound bundle. `source_records()` visits actual source records only;
+`iter()` visits stored values independently of aliases. No mutable collection is exposed.
 Clone `ProjectDomainAssets` when retaining data beyond a borrow; this keeps its generation and
 budget alive. A domain whose products share allocations must retain this owner alongside them.
 

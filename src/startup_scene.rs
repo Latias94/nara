@@ -94,11 +94,20 @@ enum SceneRetention {
         schema_authority: Arc<nara_scene::SceneComponentBindingsWitness>,
     },
     #[cfg(all(feature = "runtime-2d", feature = "serde"))]
-    RuntimeContent(crate::runtime_content::RuntimeContentScene),
+    RuntimeContent {
+        content: crate::runtime_content::RuntimeContentScene,
+        custody: RuntimeContentCustody,
+    },
     Direct {
         retained_bytes: usize,
         _limit: usize,
     },
+}
+
+#[cfg(all(feature = "runtime-2d", feature = "serde"))]
+enum RuntimeContentCustody {
+    Independent,
+    HostManaged,
 }
 
 enum RetainedSceneCandidate {
@@ -216,7 +225,24 @@ impl SceneSource {
     ) -> Self {
         Self {
             candidate: RetainedSceneCandidate::Runtime(content.candidate_arc()),
-            retention: SceneRetention::RuntimeContent(content),
+            retention: SceneRetention::RuntimeContent {
+                content,
+                custody: RuntimeContentCustody::Independent,
+            },
+        }
+    }
+
+    /// Marks first-party processed content whose resource collections require Host residency.
+    #[cfg(all(feature = "runtime-2d", feature = "serde"))]
+    pub(crate) fn from_hosted_runtime_content(
+        content: crate::runtime_content::RuntimeContentScene,
+    ) -> Self {
+        Self {
+            candidate: RetainedSceneCandidate::Runtime(content.candidate_arc()),
+            retention: SceneRetention::RuntimeContent {
+                content,
+                custody: RuntimeContentCustody::HostManaged,
+            },
         }
     }
 
@@ -242,7 +268,7 @@ impl SceneSource {
             #[cfg(all(feature = "runtime-2d", feature = "serde"))]
             SceneRetention::Project { assets, .. } => Some(assets.database()),
             #[cfg(all(feature = "runtime-2d", feature = "serde"))]
-            SceneRetention::RuntimeContent(_) => None,
+            SceneRetention::RuntimeContent { .. } => None,
             SceneRetention::Direct { .. } => None,
         }
     }
@@ -252,7 +278,24 @@ impl SceneSource {
             #[cfg(all(feature = "runtime-2d", feature = "serde"))]
             SceneRetention::Project { .. } => true,
             #[cfg(all(feature = "runtime-2d", feature = "serde"))]
-            SceneRetention::RuntimeContent(_) => false,
+            SceneRetention::RuntimeContent { .. } => false,
+            SceneRetention::Direct { .. } => false,
+        }
+    }
+
+    pub(crate) fn is_content_managed(&self) -> bool {
+        match self.retention {
+            #[cfg(all(feature = "runtime-2d", feature = "serde"))]
+            SceneRetention::Project { .. }
+            | SceneRetention::RuntimeContent {
+                custody: RuntimeContentCustody::HostManaged,
+                ..
+            } => true,
+            #[cfg(all(feature = "runtime-2d", feature = "serde"))]
+            SceneRetention::RuntimeContent {
+                custody: RuntimeContentCustody::Independent,
+                ..
+            } => false,
             SceneRetention::Direct { .. } => false,
         }
     }
@@ -268,7 +311,7 @@ impl SceneSource {
                 schema_authority, ..
             } => schema_authority.matches(bindings),
             #[cfg(all(feature = "runtime-2d", feature = "serde"))]
-            SceneRetention::RuntimeContent(_) => unreachable!(
+            SceneRetention::RuntimeContent { .. } => unreachable!(
                 "Runtime content always retains a processed Scene with its own definitions"
             ),
             SceneRetention::Direct { .. } => {
@@ -284,7 +327,7 @@ impl SceneSource {
             #[cfg(all(feature = "runtime-2d", feature = "serde"))]
             SceneRetention::Project { retained_bytes, .. } => *retained_bytes,
             #[cfg(all(feature = "runtime-2d", feature = "serde"))]
-            SceneRetention::RuntimeContent(content) => content.retained_bytes(),
+            SceneRetention::RuntimeContent { content, .. } => content.retained_bytes(),
             SceneRetention::Direct { retained_bytes, .. } => *retained_bytes,
         }
     }
@@ -295,7 +338,7 @@ impl SceneSource {
             #[cfg(all(feature = "runtime-2d", feature = "serde"))]
             SceneRetention::Project { .. } => None,
             #[cfg(all(feature = "runtime-2d", feature = "serde"))]
-            SceneRetention::RuntimeContent(_) => None,
+            SceneRetention::RuntimeContent { .. } => None,
             SceneRetention::Direct { _limit, .. } => Some(_limit),
         }
     }
@@ -313,7 +356,7 @@ impl fmt::Debug for SceneSource {
                     #[cfg(all(feature = "runtime-2d", feature = "serde"))]
                     SceneRetention::Project { .. } => "project-content",
                     #[cfg(all(feature = "runtime-2d", feature = "serde"))]
-                    SceneRetention::RuntimeContent(_) => "runtime-content",
+                    SceneRetention::RuntimeContent { .. } => "runtime-content",
                     SceneRetention::Direct { .. } => "direct-limit",
                 },
             )
@@ -480,6 +523,25 @@ impl CurrentSceneOwner {
     #[cfg(all(feature = "runtime-2d", feature = "serde"))]
     pub(crate) fn is_project_backed(&self) -> bool {
         self.source.is_project_backed()
+    }
+
+    #[cfg(all(feature = "runtime-2d", feature = "serde"))]
+    pub(crate) fn is_content_managed(&self) -> bool {
+        self.source.is_content_managed()
+    }
+
+    /// Identifies only first-party hosted processed content, retaining the original base identity.
+    #[cfg(all(feature = "runtime-2d", feature = "serde"))]
+    pub(crate) fn hosted_runtime_base(
+        &self,
+    ) -> Option<&crate::runtime_content::RuntimeContentBase> {
+        match &self.source.retention {
+            SceneRetention::RuntimeContent {
+                content,
+                custody: RuntimeContentCustody::HostManaged,
+            } => Some(content.base()),
+            _ => None,
+        }
     }
 
     #[cfg(all(feature = "runtime-2d", feature = "serde"))]

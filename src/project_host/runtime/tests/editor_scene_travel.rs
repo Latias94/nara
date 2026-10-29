@@ -86,7 +86,7 @@ fn travel_between_declared_scenes(world: &mut World) {
                 Some(ProjectSceneRequestState::Preparing) => return,
                 Some(ProjectSceneRequestState::Ready) => {
                     let prepared = scenes.prepared(request).unwrap();
-                    assert_eq!(prepared.selected_scene_path().as_str(), path);
+                    assert_eq!(prepared.selected_scene_path().unwrap().as_str(), path);
                     (
                         prepared.scene().clone(),
                         prepared.expected_instance().clone(),

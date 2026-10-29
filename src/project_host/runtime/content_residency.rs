@@ -2,6 +2,7 @@
 
 mod catalog;
 mod images;
+mod metadata;
 mod replacement;
 pub(super) use replacement::PreparedProjectSceneReplacement;
 
@@ -11,8 +12,8 @@ use std::{
 };
 
 use nara_asset::{
-    AssetEvents, AssetRecord, AssetRef, AssetServer, AssetSourceKind, AssetStates, Assets,
-    ProjectAssetDatabase, SourceHash,
+    AssetEvents, AssetMutationBaseline, AssetRecord, AssetRef, AssetServer, AssetSourceKind,
+    AssetStates, Assets, ProjectAssetDatabase, SourceHash,
 };
 use nara_diagnostic::{Diagnostic, DiagnosticCode, SafeSummary};
 use nara_ecs::{Mut, Res, ResMut, Resource, World, bevy_ecs::system::SystemState};
@@ -30,141 +31,220 @@ use nara_tilemap::{
     TileSetPublicationInput,
 };
 
-use super::{
-    HostFault, ProjectContentSnapshot, ProjectSettingsLineage,
-    publish_snapshot_assets_with_database, single_error,
-};
+use super::content::PreparedSceneContent;
+use super::{HostFault, ProjectContentSnapshot, ProjectSettingsLineage, single_error};
 use crate::{
     project_content::{ProjectContentLease, asset_record_retained_bytes},
+    runtime_content::{ProcessedSceneContent, RuntimeContentBase, RuntimeContentLease},
     startup_scene::{CurrentSceneOwner, current_scene_bindings},
 };
 use catalog::CatalogChange;
 use images::{ImagePublications, OwnedImage};
+use metadata::{PreparedCatalog, ResidencyAuthority};
 
 #[derive(Resource)]
 struct ProjectSceneResidency {
-    lineage: ProjectSettingsLineage,
     images: Vec<OwnedImage>,
     tilesets: Vec<TileSetContentReceipt>,
-    catalog: Vec<AssetRecord>,
-    _lease: ProjectContentLease,
+    // Resource values and their receipts retire before their metadata reservation and base.
+    authority: ResidencyAuthority,
 }
 
-/// Startup is unpublished, so its existing incremental publisher remains legal. Capture actual
-/// publications only after it succeeds, and preserve registrations supplied by other plugins.
+#[derive(Clone, Copy)]
+enum ResidencyInput<'a> {
+    Source(&'a ProjectContentSnapshot),
+    Processed(&'a ProcessedSceneContent),
+}
+
+impl<'a> From<&'a PreparedSceneContent> for ResidencyInput<'a> {
+    fn from(content: &'a PreparedSceneContent) -> Self {
+        match content {
+            PreparedSceneContent::Source(snapshot) => Self::Source(snapshot),
+            PreparedSceneContent::Processed(content) => Self::Processed(content),
+        }
+    }
+}
+
+impl ResidencyInput<'_> {
+    fn image_count(self) -> usize {
+        match self {
+            Self::Source(snapshot) => snapshot.images().len(),
+            Self::Processed(content) => content.images.len(),
+        }
+    }
+
+    fn tileset_count(self) -> usize {
+        match self {
+            Self::Source(snapshot) => snapshot.tilesets().len(),
+            Self::Processed(content) => content.tilesets.len(),
+        }
+    }
+}
+
+/// Source startup uses the same concrete resource preparation and publication as later travel.
 pub(super) fn publish_startup(
     world: &mut World,
     snapshot: &ProjectContentSnapshot,
 ) -> Result<(), HostFault> {
-    let catalog = CatalogChange::prepare(
-        &world
-            .get_resource::<ProjectAssetDatabase>()
-            .cloned()
-            .unwrap_or_default(),
-        &[],
-        snapshot.asset_database().records().cloned(),
-    )?;
-    let lease = reserve_metadata(snapshot, &catalog)?;
-    if !snapshot.images().is_empty() {
-        images::validate_startup_images(
-            snapshot,
-            world
-                .get_resource::<AssetServer>()
-                .ok_or_else(resources_missing)?,
-            world
-                .get_resource::<Assets<ImageAsset>>()
-                .ok_or_else(resources_missing)?,
-            world
-                .get_resource::<AssetStates>()
-                .ok_or_else(resources_missing)?,
+    publish_startup_content(
+        world,
+        ResidencyInput::Source(snapshot),
+        snapshot.domain_assets(),
+    )
+}
+
+/// Publishes into the unpublished startup World before its processed Scene is materialized.
+pub(super) fn publish_processed_startup(
+    world: &mut World,
+    content: &ProcessedSceneContent,
+) -> Result<(), HostFault> {
+    publish_startup_content(world, ResidencyInput::Processed(content), &content.domains)
+}
+
+fn publish_startup_content(
+    world: &mut World,
+    content: ResidencyInput<'_>,
+    domains: &crate::project_content::ProjectDomainAssets,
+) -> Result<(), HostFault> {
+    prepare_startup_resources(world, content)?;
+    if world.contains_resource::<ProjectSceneResidency>() {
+        return Err(resources_missing());
+    }
+    let prepared = PreparedResidency::prepare(world, content, None)?;
+    prepared
+        .bindings
+        .validate(world)
+        .map_err(|_| binding_changed())?;
+    prepared.catalog.validate(world)?;
+    if prepared.inputs.is_empty() && prepared.retirements.is_empty() {
+        prepared.commit_startup(world, domains, None);
+    } else {
+        // This owner borrow fences capacity and claims through the same synchronous tail used
+        // by Scene replacement. Startup has no CurrentSceneOwner or live Scene to retire yet.
+        world.resource_scope(
+            |world, mut owner: Mut<TileSetAssets>| -> Result<(), HostFault> {
+                prepared.publish_startup(world, domains, &mut owner)
+            },
         )?;
     }
-    publish_snapshot_assets_with_database(world, snapshot, &catalog.database)?;
-    let mut bindings = SceneAssetBindings::from_world(world);
-    let mut images = Vec::with_capacity(snapshot.images().len());
-    for content in snapshot.images() {
-        let source = content.source();
-        let record = AssetRecord::new(
-            source.stable_id(),
-            source.path().clone(),
-            AssetSourceKind::Image,
-        );
-        let handle = bindings
-            .reserve::<ImageAsset>(
-                &AssetRef::StableId(record.stable_id()),
-                snapshot.asset_database(),
-                &AssetSourceKind::Image,
-            )
-            .expect("startup published every admitted Image identity");
-        let values = world.resource::<Assets<ImageAsset>>();
-        let states = world.resource::<AssetStates>();
-        assert!(values.get(handle).is_some());
-        images.push(OwnedImage::capture(handle, record, values, states));
+    Ok(())
+}
+
+fn prepare_startup_resources(
+    world: &mut World,
+    content: ResidencyInput<'_>,
+) -> Result<(), HostFault> {
+    world.register_component::<AssetServer>();
+    world.register_component::<ProjectSceneResidency>();
+    world.register_component::<crate::project_content::ProjectDomainAssets>();
+    if matches!(content, ResidencyInput::Source(_)) {
+        world.register_component::<ProjectAssetDatabase>();
     }
-    let mut tilesets = Vec::with_capacity(snapshot.tilesets().len());
-    for content in snapshot.tilesets() {
-        let handle = bindings
-            .reserve::<TileSet>(
-                &AssetRef::StableId(content.stable_id()),
-                snapshot.asset_database(),
-                &tileset_kind(),
-            )
-            .expect("startup published every admitted TileSet identity");
-        let receipt = world
-            .resource::<TileSetAssets>()
-            .content_receipt(
-                handle,
-                world.resource::<Assets<TileSet>>(),
-                world.resource::<AssetStates>(),
-            )
-            .expect("startup retains each successfully installed TileSet source");
-        tilesets.push(receipt);
+    world.flush();
+    let unsupported = nara_ecs::__private::validate_resource_insertion::<AssetServer>(world)
+        .is_err()
+        || nara_ecs::__private::validate_resource_insertion::<ProjectSceneResidency>(world)
+            .is_err()
+        || nara_ecs::__private::validate_resource_insertion::<
+            crate::project_content::ProjectDomainAssets,
+        >(world)
+        .is_err()
+        || matches!(content, ResidencyInput::Source(_))
+            && nara_ecs::__private::validate_resource_insertion::<ProjectAssetDatabase>(world)
+                .is_err()
+        || content.tileset_count() != 0
+            && nara_ecs::__private::validate_resource_scope::<TileSetAssets>(world).is_err();
+    if unsupported {
+        return Err(failure(
+            "project.scene.residency-lifecycle-unsupported",
+            "Scene residency owners cannot run lifecycle effects during commit",
+        ));
     }
-    world.insert_resource(catalog.database);
-    world.insert_resource(snapshot.domain_assets().clone());
-    world.insert_resource(ProjectSceneResidency {
-        lineage: snapshot.lineage(),
-        images,
-        tilesets,
-        catalog: catalog.owned,
-        _lease: lease,
-    });
     Ok(())
 }
 
 struct PreparedResidency {
     bindings: SceneAssetBindings,
+    staged_server: AssetServer,
     images: ImagePublications,
     inputs: Vec<TileSetPublicationInput>,
     retirements: Vec<TileSetContentReceipt>,
-    catalog: CatalogChange,
-    lease: ProjectContentLease,
+    tileset_slots: Vec<AssetMutationBaseline<TileSet>>,
+    catalog: PreparedCatalog,
 }
 
 impl PreparedResidency {
+    fn publish_startup(
+        mut self,
+        world: &mut World,
+        domains: &crate::project_content::ProjectDomainAssets,
+        owner: &mut TileSetAssets,
+    ) -> Result<(), HostFault> {
+        // Keep every catalogue copy and its reservation in this aggregate through refusal.
+        // The closure must capture this complete owner, rather than moving individual fields.
+        let inputs = std::mem::take(&mut self.inputs);
+        let tilesets = owner
+            .prepare_publications(
+                inputs,
+                &self.retirements,
+                &self.staged_server,
+                self.catalog.database(),
+                world.resource::<Assets<TileSet>>(),
+                world.resource::<AssetStates>(),
+            )
+            .map_err(tileset_failure)?;
+        self.commit_startup(world, domains, Some(tilesets));
+        Ok(())
+    }
+
+    fn commit_startup(
+        self,
+        world: &mut World,
+        domains: &crate::project_content::ProjectDomainAssets,
+        tilesets: Option<PreparedTileSetPublications<'_>>,
+    ) {
+        let Self {
+            catalog,
+            bindings,
+            staged_server,
+            images,
+            inputs,
+            retirements,
+            tileset_slots,
+        } = self;
+        drop((bindings, inputs, retirements, tileset_slots));
+        world.insert_resource(staged_server);
+        let (images, tilesets) = replacement::commit_publications(world, images, tilesets);
+        let authority = catalog.commit(world);
+        world.insert_resource(domains.clone());
+        world.insert_resource(ProjectSceneResidency {
+            images,
+            tilesets,
+            authority,
+        });
+    }
+
     fn prepare(
         world: &World,
-        snapshot: &ProjectContentSnapshot,
-        current: &ProjectSceneResidency,
+        content: ResidencyInput<'_>,
+        current: Option<&ProjectSceneResidency>,
     ) -> Result<Self, HostFault> {
-        if snapshot.lineage() != current.lineage {
-            return Err(failure(
-                "project.scene.lineage-mismatch",
-                "Prepared Scene belongs to another project",
-            ));
+        if let Some(current) = current {
+            current.authority.validate(content)?;
         }
+        replacement::validate_native_resources(world, content, current)?;
+        // Admission precedes all vectors, indices, catalogue copies and retained Image wrappers.
+        let catalog = PreparedCatalog::prepare(world, content, current)?;
         let mut bindings = SceneAssetBindings::from_world(world);
-        let no_content = current.images.is_empty() && snapshot.images().is_empty();
-        if !no_content && !world.contains_resource::<AssetEvents>() {
-            return Err(resources_missing());
-        }
+        let owned_images = current.map_or(&[][..], |current| current.images.as_slice());
+        let no_content = owned_images.is_empty() && content.image_count() == 0;
         let images = if no_content {
             // A data-only replacement has no Image resource dependency.
             ImagePublications::empty()
         } else {
             ImagePublications::prepare(
-                snapshot,
-                &current.images,
+                content,
+                owned_images,
                 &mut bindings,
                 world
                     .get_resource::<AssetServer>()
@@ -175,79 +255,124 @@ impl PreparedResidency {
                 world
                     .get_resource::<AssetStates>()
                     .ok_or_else(resources_missing)?,
+                catalog.runtime_lease(),
             )?
         };
-        let old_tilesets = current
-            .tilesets
+        let owned_tilesets = current.map_or(&[][..], |current| current.tilesets.as_slice());
+        let old_tilesets = owned_tilesets
             .iter()
             .map(|receipt| (receipt.handle().id(), receipt))
             .collect::<BTreeMap<_, _>>();
-        let mut inputs = Vec::with_capacity(snapshot.tilesets().len());
+        let mut inputs = Vec::with_capacity(content.tileset_count());
+        let mut tileset_slots = Vec::with_capacity(content.tileset_count() + owned_tilesets.len());
         let mut next_ids = BTreeSet::new();
-        for content in snapshot.tilesets() {
-            let handle = bindings
-                .reserve::<TileSet>(
-                    &AssetRef::StableId(content.stable_id()),
-                    snapshot.asset_database(),
-                    &tileset_kind(),
-                )
-                .map_err(|_| {
-                    failure(
-                        "project.scene.asset-identity-conflict",
-                        "Prepared Scene asset identity conflicts with the runtime",
-                    )
-                })?;
-            let (image_handle, image) = images
-                .image_for_path(content.image_path())
-                .ok_or_else(resources_missing)?;
-            let record =
-                AssetRecord::new(content.stable_id(), content.path().clone(), tileset_kind());
-            let mut input = TileSetPublicationInput::from_source(
-                handle,
-                record,
-                content.source().clone(),
-                SourceHash::from_digest(*content.source_hash().as_bytes()),
-                image_handle,
-                image,
-            );
+        let mut insert = |handle: nara_asset::Handle<TileSet>,
+                          mut input: TileSetPublicationInput| {
             if let Some(receipt) = old_tilesets.get(&handle.id()) {
                 input = input.with_receipt((*receipt).clone());
             }
-            next_ids.insert(handle.id());
+            if !next_ids.insert(handle.id()) {
+                return Err(binding_changed());
+            }
+            tileset_slots.push(
+                world
+                    .resource::<Assets<TileSet>>()
+                    .prepare_mutation(handle, world.resource::<AssetStates>())
+                    .map_err(|_| tileset_failure(TileSetAssetError::Superseded))?,
+            );
             inputs.push(input);
+            Ok(())
+        };
+        match content {
+            ResidencyInput::Source(snapshot) => {
+                for content in snapshot.tilesets() {
+                    let handle = bindings
+                        .reserve::<TileSet>(
+                            &AssetRef::StableId(content.stable_id()),
+                            snapshot.asset_database(),
+                            &tileset_kind(),
+                        )
+                        .map_err(|_| binding_changed())?;
+                    let (image_handle, image) = images
+                        .image_for_path(content.image_path())
+                        .ok_or_else(resources_missing)?;
+                    let record = AssetRecord::new(
+                        content.stable_id(),
+                        content.path().clone(),
+                        tileset_kind(),
+                    );
+                    insert(
+                        handle,
+                        TileSetPublicationInput::from_source(
+                            handle,
+                            record,
+                            content.source().clone(),
+                            SourceHash::from_digest(*content.source_hash().as_bytes()),
+                            image_handle,
+                            image,
+                        ),
+                    )?;
+                }
+            }
+            ResidencyInput::Processed(content) => {
+                for acquired in &content.tilesets {
+                    if !content.base().same_base(acquired.base()) {
+                        return Err(binding_changed());
+                    }
+                    let descriptor = *acquired.product();
+                    if descriptor.product() != acquired.reference() {
+                        return Err(binding_changed());
+                    }
+                    let handle = bindings
+                        .reserve_product::<TileSet>(descriptor.product())
+                        .map_err(|_| binding_changed())?;
+                    let (image_handle, image) = images
+                        .image_for_product(descriptor.image_product())
+                        .ok_or_else(resources_missing)?;
+                    insert(
+                        handle,
+                        TileSetPublicationInput::from_product(
+                            handle,
+                            descriptor,
+                            image_handle,
+                            image,
+                        ),
+                    )?;
+                }
+            }
         }
-        let retirements = current
-            .tilesets
+        let retirements: Vec<_> = owned_tilesets
             .iter()
             .filter(|receipt| !next_ids.contains(&receipt.handle().id()))
             .cloned()
             .collect();
-        let catalog = CatalogChange::prepare(
-            &world
-                .get_resource::<ProjectAssetDatabase>()
-                .cloned()
-                .unwrap_or_default(),
-            &current.catalog,
-            snapshot.asset_database().records().cloned(),
-        )?;
-        let lease = reserve_metadata(snapshot, &catalog)?;
+        for receipt in &retirements {
+            tileset_slots.push(
+                world
+                    .resource::<Assets<TileSet>>()
+                    .prepare_mutation(receipt.handle(), world.resource::<AssetStates>())
+                    .map_err(|_| tileset_failure(TileSetAssetError::Superseded))?,
+            );
+        }
+        let staged_server = bindings.staged_server().clone();
         Ok(Self {
             bindings,
+            staged_server,
             images,
             inputs,
             retirements,
+            tileset_slots,
             catalog,
-            lease,
         })
     }
 }
 
 /// The admitted Host owns this synchronous convenience wrapper. Managed travel retains the same
 /// preparation token while independent native domains retire and reconcile their state.
-pub(super) fn replace_project_scene<F>(
+pub(super) fn replace_scene<F>(
     world: &mut World,
     expected: &SpawnedSceneInstance,
-    snapshot: &ProjectContentSnapshot,
+    content: &PreparedSceneContent,
     limits: SceneProductTransactionLimits,
     additional_retirements: &[WorldEntityToken],
     configure: F,
@@ -258,7 +383,7 @@ where
     match PreparedProjectSceneReplacement::prepare(
         world,
         expected,
-        snapshot,
+        content,
         &SceneNativeRetirementClaims::default(),
         limits,
         additional_retirements,
@@ -283,58 +408,12 @@ where
         Err(report) => report,
     }
 }
-fn reserve_metadata(
-    snapshot: &ProjectContentSnapshot,
-    catalog: &CatalogChange,
-) -> Result<ProjectContentLease, HostFault> {
-    // Logical owned metadata, including the merged catalogue copy; decoded pixels keep their own
-    // original content lease. Checked arithmetic preserves the existing aggregate content ceiling.
-    let mut bytes = size_of::<ProjectSceneResidency>()
-        .checked_add(
-            snapshot
-                .images()
-                .len()
-                .checked_mul(size_of::<OwnedImage>())
-                .ok_or_else(resources_missing)?,
-        )
-        .and_then(|bytes| {
-            bytes.checked_add(
-                snapshot
-                    .tilesets()
-                    .len()
-                    .checked_mul(size_of::<TileSetContentReceipt>())?,
-            )
-        })
-        .ok_or_else(resources_missing)?;
-    // Reuse the catalogue's conservative path/case-fold/index estimate. Applying it to plain
-    // owned records overcounts storage but preserves one checked, qualified policy.
-    let image_records = snapshot
-        .images()
-        .iter()
-        .map(|content| {
-            let source = content.source();
-            AssetRecord::new(
-                source.stable_id(),
-                source.path().clone(),
-                AssetSourceKind::Image,
-            )
-        })
-        .collect::<Vec<_>>();
-    for record in catalog
-        .database
-        .records()
-        .chain(catalog.owned.iter())
-        .chain(image_records.iter())
-    {
-        let record_bytes = asset_record_retained_bytes(record)
-            .map_err(|error| HostFault::new(error.diagnostics().clone()))?;
-        bytes = bytes
-            .checked_add(record_bytes)
-            .ok_or_else(resources_missing)?;
-    }
-    snapshot
-        .reserve_consumer_retained(bytes)
-        .map_err(|error| HostFault::new(error.diagnostics().clone()))
+
+fn binding_changed() -> HostFault {
+    failure(
+        "project.scene.asset-identity-conflict",
+        "Prepared Scene asset identity conflicts with the runtime",
+    )
 }
 
 fn tileset_kind() -> AssetSourceKind {

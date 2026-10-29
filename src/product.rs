@@ -329,6 +329,8 @@ pub struct ProductRecipe {
     defaults: default_settings::ProductDefaultSettings,
     #[cfg(all(feature = "runtime-2d", feature = "serde"))]
     pub(crate) asset_domains: crate::project_content::ProjectAssetDomains,
+    #[cfg(all(feature = "runtime-2d", feature = "serde"))]
+    pub(crate) runtime_codecs: crate::runtime_content::RuntimeCodecs,
 }
 
 impl fmt::Debug for ProductRecipe {
@@ -339,6 +341,8 @@ impl fmt::Debug for ProductRecipe {
             .field("defaults", &self.defaults);
         #[cfg(all(feature = "runtime-2d", feature = "serde"))]
         debug.field("asset_domains", &self.asset_domains);
+        #[cfg(all(feature = "runtime-2d", feature = "serde"))]
+        debug.field("runtime_codecs", &self.runtime_codecs);
         debug.finish()
     }
 }
@@ -351,11 +355,13 @@ impl ProductRecipe {
             defaults: default_settings::ProductDefaultSettings::new(),
             #[cfg(all(feature = "runtime-2d", feature = "serde"))]
             asset_domains: crate::project_content::ProjectAssetDomains::new(),
+            #[cfg(all(feature = "runtime-2d", feature = "serde"))]
+            runtime_codecs: crate::runtime_content::RuntimeCodecs::new(),
         }
     }
 
     #[must_use]
-    /// Returns the number of explicit plugin entries, excluding default selections.
+    /// Returns the number of explicit plugin entries, excluding defaults and asset operation facets.
     pub fn len(&self) -> usize {
         self.entries.len()
     }
@@ -364,7 +370,7 @@ impl ProductRecipe {
     pub fn is_empty(&self) -> bool {
         let empty = self.entries.is_empty() && self.defaults.is_empty();
         #[cfg(all(feature = "runtime-2d", feature = "serde"))]
-        let empty = empty && self.asset_domains.is_empty();
+        let empty = empty && self.asset_domains.is_empty() && self.runtime_codecs.is_empty();
         empty
     }
 
@@ -374,6 +380,56 @@ impl ProductRecipe {
         mut self,
     ) -> Result<Self, ProductRecipeError> {
         self.asset_domains.add::<D>()?;
+        Ok(self)
+    }
+
+    /// Selects a concrete Runtime codec for typed CPU reads, independently of source import.
+    ///
+    /// The versioned definition names this compiled family/codec binding. It is distinct from
+    /// the encoded format version and participates in the executable/content agreement.
+    #[cfg(all(feature = "runtime-2d", feature = "serde"))]
+    pub fn add_runtime_asset_codec<D, C>(
+        mut self,
+        definition: crate::runtime_content::RuntimeCodecDefinitionId,
+    ) -> Result<Self, ProductRecipeError>
+    where
+        D: nara_asset::AssetDomain,
+        C: nara_asset::RuntimeAssetCodec<D::Product>,
+    {
+        self.runtime_codecs
+            .add::<D, C>(definition, crate::runtime_content::RuntimeCodecRole::Cpu)?;
+        Ok(self)
+    }
+
+    /// Selects Runtime Image decode and its concrete first-party native publication facet.
+    #[cfg(all(feature = "runtime-2d", feature = "serde"))]
+    pub fn add_runtime_image_codec<C>(
+        mut self,
+        definition: crate::runtime_content::RuntimeCodecDefinitionId,
+    ) -> Result<Self, ProductRecipeError>
+    where
+        C: nara_asset::RuntimeAssetCodec<nara_image::ImageAsset>,
+    {
+        self.runtime_codecs.add::<nara_image::ImageDomain, C>(
+            definition,
+            crate::runtime_content::RuntimeCodecRole::Image,
+        )?;
+        Ok(self)
+    }
+
+    /// Selects Runtime TileSet decode and its concrete first-party native publication facet.
+    #[cfg(all(feature = "runtime-2d", feature = "serde"))]
+    pub fn add_runtime_tileset_codec<C>(
+        mut self,
+        definition: crate::runtime_content::RuntimeCodecDefinitionId,
+    ) -> Result<Self, ProductRecipeError>
+    where
+        C: nara_asset::RuntimeAssetCodec<nara_tilemap::TileSetDescriptor>,
+    {
+        self.runtime_codecs.add::<nara_tilemap::TileSetDomain, C>(
+            definition,
+            crate::runtime_content::RuntimeCodecRole::TileSet,
+        )?;
         Ok(self)
     }
 
@@ -641,6 +697,9 @@ impl PluginGroup for ProductRecipe {
 
 #[derive(Debug, Error, Clone, PartialEq, Eq)]
 pub enum ProductRecipeError {
+    #[cfg(all(feature = "runtime-2d", feature = "serde"))]
+    #[error(transparent)]
+    RuntimeCodec(#[from] crate::runtime_content::RuntimeCodecSelectionError),
     #[error("asset domain identity {kind} is empty or reserved by the product")]
     ReservedAssetDomain { kind: &'static str },
     #[error("asset domain {kind} appears more than once in the product recipe")]

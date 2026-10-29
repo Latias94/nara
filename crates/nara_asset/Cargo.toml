@@ -13,7 +13,6 @@ nara_app.workspace = true
 nara_core.workspace = true
 nara_diagnostic.workspace = true
 nara_ecs.workspace = true
-nara_tasks.workspace = true
 serde = { workspace = true, optional = true }
 serde_json = { workspace = true, optional = true }
 uuid.workspace = true
@@ -22,6 +21,7 @@ uuid.workspace = true
 getrandom = { workspace = true, features = ["wasm_js"] }
 
 [dev-dependencies]
+nara_tasks.workspace = true
 ron.workspace = true
 serde_json.workspace = true
 

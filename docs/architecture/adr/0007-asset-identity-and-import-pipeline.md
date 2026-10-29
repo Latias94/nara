@@ -66,6 +66,26 @@ Core rules:
 - Hot reload changes asset versions behind stable handles; it should not require all scenes to rewrite references.
 - Source assets and imported artifacts are distinct concepts.
 
+### Explicit Source Execution Facets
+
+`AssetPlugin` owns native identities, value-independent states/events and public asset phase
+ordering. It does not install a source database, source-change queues or source execution.
+`AssetSourcePlugin` explicitly installs the actual source database, source dependency graph,
+change resolution, reload requests/generations and unclaimed-request finalization. Resolution
+requires its real resources; an absent database never means that queued changes may be discarded.
+
+`ImagePlugin` owns native Image storage. `ImageSourcePlugin` explicitly adds the importer,
+directory capability and reload tasks, requiring Asset source execution and Tasks. Image prepare
+remains independently selected. Watchers require Asset source execution and retain their own
+physical-close obligation. Source reload tasks continue to return through the existing Tasks
+owner; dropping a request or job handle does not establish physical completion.
+
+Default Runtime and presentation composition can therefore execute processed or procedural
+content without source resources or I/O authority. A source Host may own a real database and use
+its own typed import driver without selecting queued reload execution. Processed Host admission
+refuses an explicitly selected source-execution plugin before constructing the candidate App;
+it neither strips a resolved contribution nor fabricates an empty database.
+
 ## Alternatives Considered
 
 ### Option A: Path-only identity forever
@@ -115,7 +135,35 @@ target/profile independently of package bytes. Catalog data cannot select Rust c
 itself. Its admitted Runtime configuration is composed with the executable's selected recipe
 through the same capability, plugin and native/data Schema closure as source-backed composition,
 without manufacturing a source manifest, project lineage or authoring Schema-bundle receipt.
-The catalog's recipe and Schema fingerprints must agree with that executable composition.
+The catalog's plugin-plan, Schema and Runtime-codec fingerprints must agree with that executable
+composition. The plugin-plan fingerprint describes plugins, not the complete product recipe.
+
+The admitted Runtime configuration plan owns the frozen compiled codec selection independently
+of source importers and ECS plugins. Each contribution binds a typed family and concrete codec to
+a package-owned stable definition ID/revision, accepted format kind/version, concrete operation
+role and actual frozen codec limits. The current codec contract has no instance settings; arbitrary
+unused configuration bytes cannot stand in for configuration actually consumed by the decoder.
+Definition revisions declare executable meaning; they are not Rust binary hashes. Canonical
+selection fingerprints exclude Rust type names, TypeIds and function addresses. Process-local
+binding checks retain the exact typed implementation in the original plan.
+
+One family may select several formats or versions. A member's kind/version must match exactly one
+selected definition across the whole plan. Duplicate definitions and ambiguous selectors refuse
+composition; missing selectors refuse base admission. Package bytes only index and verify code
+already selected by the trusted recipe. They cannot discover code, choose between competing
+decoders or cause source fallback. Generic typed acquisition also requires that exact family/codec
+binding in the original selection before invoking any decoder callback. Its predecode reservation
+uses the frozen limits included in the agreement.
+
+CPU, Image and TileSet contributions have explicit roles. Image and TileSet facets bind their
+concrete native family and reuse existing resource publication owners; returning the same Rust
+product type from an unrelated CPU family grants no native publication authority. Native and CPU
+views can share the same admitted acquisition. In one prepared generation, decode each selected
+member once per exact family/definition and map all its complete Products to that retained owner.
+Several codecs serving one family aggregate into one typed collection. Independent public
+acquisitions remain independently charged; this does not introduce a global cache.
+Family preparation follows canonical definition order and members follow canonical catalog order,
+so equivalent recipe selections do not change shared-budget admission through insertion order.
 
 Each complete `AssetProductRef` maps to exactly one bounded member and its declared Runtime
 format. Several products may share one compound member. Member paths, encoded digests, logical
@@ -130,6 +178,18 @@ it does not reopen changed files, create a source database, import metadata or f
 Content mutation after capture cannot redirect an existing base. This eager local capture is an
 implementation policy, not a requirement that future container or streaming providers merge
 membership, readiness and residency.
+Startup and later first-party Scene preparation retain the original base and plan. Equal catalog
+bytes or fingerprints from a separately opened base do not establish that same owner or exact
+executable selection.
+
+Required closure distinguishes data readiness from Scene instantiation. A persistent Door or
+similar reference can require another Scene member; that member is admitted against the original
+definitions and retained as data in the same finite closure. Only the requested root Scene is
+materialized into ECS. Visit each member once, including Scene cycles, and retain dependency
+Scenes in a flat collection without mutually owning Scene objects. Required membership does not
+grant public travel authority: a Scene present only as a dependency remains unavailable to an
+explicit Scene request unless it is also declared as an acquisition root. Sequential Scene/asset
+decoders reuse released work allowance; graph indices and admitted data retain their own charges.
 
 Scene acquisition admits the actual processed Scene against the catalog's containing identity
 and the original exact definitions. It traverses declared effective asset leaves through Reflect
@@ -190,10 +250,11 @@ under the ordered delivery plan. Proposed ADR 0088 is not accepted wholesale.
   inputs and typed results. The Image domain accepts immutable bytes or a Host-authorized file
   capability, applies its own budgets, and produces backend-neutral CPU image data without
   allocating GPU resources.
-- `AssetPlugin` installs the asset resources, configures the chained `AssetTaskUpdateSet` ordering,
-  and runs source-change resolution in `AssetTaskUpdateSet::ResolveSourceChanges`. Domain plugins
-  claim their concrete reload-consumer authority and join the asset-owned spawn/apply phases. As
-  refined by ADR 0103, `nara_asset` exposes no generic importer registry or erased decoder executor.
+- `AssetPlugin` installs native identity/state resources and the chained `AssetTaskUpdateSet`
+  ordering. The separately selected `AssetSourcePlugin` runs source-change resolution in
+  `AssetTaskUpdateSet::ResolveSourceChanges`. Source-domain plugins claim their concrete reload
+  consumer and join the asset-owned spawn/apply phases. As refined by ADR 0103, `nara_asset`
+  exposes no generic importer registry or erased decoder executor.
 
 ## Success Metrics
 

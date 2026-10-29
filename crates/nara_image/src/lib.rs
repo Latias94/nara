@@ -35,8 +35,9 @@ pub use prepare::{
     image_content_hash, image_resource_key, prepare_images,
 };
 pub use reload::{
-    IMAGE_PLUGIN_DECLARATION, IMAGE_PLUGIN_ID, ImagePlugin, ImageReloadError, ImageReloadStats,
-    plugin,
+    IMAGE_PLUGIN_DECLARATION, IMAGE_PLUGIN_ID, IMAGE_SOURCE_PLUGIN_DECLARATION,
+    IMAGE_SOURCE_PLUGIN_ID, ImagePlugin, ImageReloadError, ImageReloadStats, ImageSourcePlugin,
+    source_plugin,
 };
 pub use runtime::ImageDomain;
 #[cfg(feature = "serde")]

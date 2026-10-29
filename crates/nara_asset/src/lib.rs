@@ -43,13 +43,14 @@ pub use identity::{
 pub use import::{AssetImportError, AssetImportLimits, AssetImportSource, SourceAssetImporter};
 pub use product_identity::{AssetProductIdentityError, AssetProductRef, ImportedProductId};
 pub use reload::{
-    ASSET_PLUGIN_DECLARATION, ASSET_PLUGIN_ID, AssetLoadGeneration, AssetLoadGenerations,
-    AssetPlugin, AssetReloadDiagnostics, AssetReloadRequest, AssetReloadRequestAdmissionError,
+    ASSET_PLUGIN_DECLARATION, ASSET_PLUGIN_ID, ASSET_SOURCE_PLUGIN_DECLARATION,
+    ASSET_SOURCE_PLUGIN_ID, AssetLoadGeneration, AssetLoadGenerations, AssetPlugin,
+    AssetReloadDiagnostics, AssetReloadRequest, AssetReloadRequestAdmissionError,
     AssetReloadRequestId, AssetReloadRequestKind, AssetReloadRequestLimitKind,
     AssetReloadRequestLimits, AssetReloadRequests, AssetSourceChange,
     AssetSourceChangeAdmissionError, AssetSourceChangeKind, AssetSourceChangeLimitKind,
-    AssetSourceChangeLimits, AssetSourceChanges, AssetSourceRoot, AssetTaskUpdateSet,
-    ImageReloadConsumer, ImageReloadDrainError, ImageReloadRegistrationError,
+    AssetSourceChangeLimits, AssetSourceChanges, AssetSourcePlugin, AssetSourceRoot,
+    AssetTaskUpdateSet, ImageReloadConsumer, ImageReloadDrainError, ImageReloadRegistrationError,
     register_image_reload_consumer,
 };
 pub use runtime_codec::{AssetDomain, AssetRuntimeError, AssetRuntimeLimits, RuntimeAssetCodec};

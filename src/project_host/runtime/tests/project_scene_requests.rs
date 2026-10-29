@@ -231,7 +231,10 @@ fn original_host_prepares_inspectable_scene_then_commits_and_acknowledges_b_to_a
             let mut access = SystemState::<ProjectScenes>::new(world);
             let scenes = access.get_mut(world).unwrap();
             let prepared = scenes.prepared(b).unwrap();
-            assert_eq!(prepared.selected_scene_path().as_str(), "b.scene.json");
+            assert_eq!(
+                prepared.selected_scene_path().unwrap().as_str(),
+                "b.scene.json"
+            );
             assert_eq!(prepared.expected_instance(), &original_receipt);
             assert_eq!(
                 prepared.scene().roots,
@@ -280,7 +283,7 @@ fn original_host_prepares_inspectable_scene_then_commits_and_acknowledges_b_to_a
             assert!(!scenes.acknowledge(b));
             let prepared = scenes.prepared(a).unwrap();
             assert_eq!(
-                prepared.selected_scene_path().as_str(),
+                prepared.selected_scene_path().unwrap().as_str(),
                 "startup.scene.json"
             );
             assert_eq!(prepared.expected_instance(), &committed_b);

@@ -115,7 +115,7 @@ impl<T: Asset> SlotGuard<T> {
         Ok(Self {
             handle,
             baseline: assets
-                .mutation_baseline(handle, states)
+                .prepare_mutation(handle, states)
                 .map_err(TileSetAssetError::State)?,
             next_version: states
                 .next_version(handle.id())

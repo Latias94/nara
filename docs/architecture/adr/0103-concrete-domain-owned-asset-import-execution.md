@@ -222,6 +222,15 @@ project collection reads depend on the family marker, not on source-import capab
 compound bundle may retain its own complete subproduct map under the scoped identities in
 [ADR 0122](0122-scoped-imported-product-identity-and-authored-continuity.md).
 
+The root product recipe selects Runtime codecs independently of its source-domain contributions.
+Its admitted Runtime configuration plan owns the frozen versioned definition bindings and a
+dedicated canonical fingerprint, as specified by ADR 0007. These pure definitions are not installed
+as an otherwise unused ECS registry plugin. A direct `App::add_plugins(recipe)` installs the
+recipe's plugin contributions; it does not grant Runtime content acquisition. The first-party
+content Host consumes the selected codec definitions through the original admitted plan, keeps
+typed heterogeneous adapters private and publishes through the existing concrete Scene/resource
+owners.
+
 Reusable source/import and Runtime-decode contracts belong below root project orchestration and
 must not require Editor, Scene or 2D merely to express a pure importer. The root Host retains exact
 source receipts, aggregate budgets and Scene commit; Image/TileSet retain their own prepared-state

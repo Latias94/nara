@@ -286,6 +286,7 @@ pub struct RuntimeContentCatalogDefinition {
     pub configuration: RuntimeConfiguration,
     pub plugin_plan_fingerprint: [u8; 32],
     pub schema_fingerprint: [u8; 32],
+    pub runtime_codecs_fingerprint: [u8; 32],
     pub startup_scene: AssetProductRef,
     pub scenes: Vec<AssetProductRef>,
     pub addressable_roots: Vec<AssetProductRef>,
@@ -294,8 +295,8 @@ pub struct RuntimeContentCatalogDefinition {
 
 /// Fully validated immutable version-one catalog, without a public serde admission bypass.
 ///
-/// The catalog cannot authorize its own target, digest, plugin plan or Schema. The receiving
-/// Host compares these claims with trusted executable expectations before admitting the base.
+/// The catalog cannot authorize its own target, digest, plugin plan, Schema or Runtime codecs.
+/// The receiving Host compares these claims with trusted executable expectations before admission.
 /// The Runtime configuration remains a record; its owner admits it with `resolve` before planning.
 #[derive(Debug)]
 pub struct RuntimeContentCatalog {
@@ -303,6 +304,7 @@ pub struct RuntimeContentCatalog {
     configuration: RuntimeConfiguration,
     plugin_plan_fingerprint: [u8; 32],
     schema_fingerprint: [u8; 32],
+    runtime_codecs_fingerprint: [u8; 32],
     startup_scene: AssetProductRef,
     scenes: Vec<AssetProductRef>,
     addressable_roots: Vec<AssetProductRef>,
@@ -378,6 +380,7 @@ impl RuntimeContentCatalog {
                 configuration: raw.configuration,
                 plugin_plan_fingerprint: raw.plugin_plan_fingerprint,
                 schema_fingerprint: raw.schema_fingerprint,
+                runtime_codecs_fingerprint: raw.runtime_codecs_fingerprint,
                 startup_scene: raw.startup_scene,
                 scenes: raw.scenes,
                 addressable_roots: raw.addressable_roots,
@@ -405,6 +408,7 @@ impl RuntimeContentCatalog {
             mut configuration,
             plugin_plan_fingerprint,
             schema_fingerprint,
+            runtime_codecs_fingerprint,
             startup_scene,
             mut scenes,
             mut addressable_roots,
@@ -552,6 +556,7 @@ impl RuntimeContentCatalog {
             configuration,
             plugin_plan_fingerprint,
             schema_fingerprint,
+            runtime_codecs_fingerprint,
             startup_scene,
             scenes,
             addressable_roots,
@@ -658,6 +663,7 @@ impl RuntimeContentCatalog {
                 configuration: &self.configuration,
                 plugin_plan_fingerprint: &self.plugin_plan_fingerprint,
                 schema_fingerprint: &self.schema_fingerprint,
+                runtime_codecs_fingerprint: &self.runtime_codecs_fingerprint,
                 startup_scene: &self.startup_scene,
                 scenes: &self.scenes,
                 addressable_roots: &self.addressable_roots,
@@ -694,6 +700,10 @@ impl RuntimeContentCatalog {
     #[must_use]
     pub const fn schema_fingerprint(&self) -> [u8; 32] {
         self.schema_fingerprint
+    }
+    #[must_use]
+    pub const fn runtime_codecs_fingerprint(&self) -> [u8; 32] {
+        self.runtime_codecs_fingerprint
     }
     #[must_use]
     pub const fn startup_scene(&self) -> AssetProductRef {
@@ -1111,6 +1121,7 @@ struct PayloadWire {
     configuration: RuntimeConfiguration,
     plugin_plan_fingerprint: [u8; 32],
     schema_fingerprint: [u8; 32],
+    runtime_codecs_fingerprint: [u8; 32],
     startup_scene: AssetProductRef,
     scenes: Vec<AssetProductRef>,
     addressable_roots: Vec<AssetProductRef>,
@@ -1123,6 +1134,7 @@ struct PayloadRef<'a> {
     configuration: &'a RuntimeConfiguration,
     plugin_plan_fingerprint: &'a [u8; 32],
     schema_fingerprint: &'a [u8; 32],
+    runtime_codecs_fingerprint: &'a [u8; 32],
     startup_scene: &'a AssetProductRef,
     scenes: &'a [AssetProductRef],
     addressable_roots: &'a [AssetProductRef],

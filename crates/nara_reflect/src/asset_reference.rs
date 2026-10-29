@@ -693,6 +693,17 @@ pub fn decode_asset_reference_value(
     })
 }
 
+/// Returns the logical allocation bound for decoding one asset-reference leaf.
+///
+/// This borrows the closed wire record without allocating. It covers owned path text and
+/// parser scratch, including failed identity parsing, but excludes the input and error
+/// diagnostics. `None` means the wire shape refuses before payload decoding. A returned bound
+/// does not validate reference syntax, resolve a source or prove product existence.
+#[must_use]
+pub fn asset_reference_decode_work_bytes(value: &ComponentValue) -> Option<usize> {
+    asset_reference_value_work(value).map(|work| work.decode_allocation_bytes)
+}
+
 /// Encodes one complete persistent asset-reference leaf without resolving its target.
 ///
 /// Path and stable source selectors name the primary product. Product selectors retain their

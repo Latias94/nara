@@ -522,6 +522,35 @@ fn product_reference(subproduct: bool) -> AssetRef {
 }
 
 #[test]
+fn decode_work_query_borrows_payloads_without_parsing_or_allocating() {
+    let long_path = "a".repeat(64 * 1024);
+    for (value, expected) in [
+        (asset(&long_path), Some(long_path.len())),
+        (
+            encode_asset_reference_value(&product_reference(false)),
+            Some(36),
+        ),
+        (
+            encode_asset_reference_value(&product_reference(true)),
+            Some(72),
+        ),
+        (
+            ComponentValue::map([
+                ("kind", ComponentValue::String("stable_id".into())),
+                ("value", ComponentValue::String(long_path.clone())),
+            ]),
+            Some(long_path.len()),
+        ),
+        (ComponentValue::String(long_path.clone()), None),
+    ] {
+        let before = allocation_calls();
+        let work = asset_reference_decode_work_bytes(&value);
+        assert_eq!(allocation_calls(), before);
+        assert_eq!(work, expected);
+    }
+}
+
+#[test]
 fn product_leaf_collectors_charge_complete_input_and_output_at_exact_limits() {
     let component = ComponentTypeId::new("test.SelectedProducts");
     let field = field(ComponentValueShape::AssetRef);

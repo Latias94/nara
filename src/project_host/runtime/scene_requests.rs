@@ -1,4 +1,4 @@
-//! One project-owned, worker-prepared Scene request with an explicit owner-thread commit.
+//! One hosted, worker-prepared Scene request with an explicit owner-thread commit.
 
 mod api;
 pub(crate) mod domains;
@@ -6,8 +6,8 @@ mod preparation;
 
 pub use api::{
     PreparedProjectSceneView, ProjectSceneRequestError, ProjectSceneRequestId,
-    ProjectSceneRequestState, ProjectScenes, begin_prepared_project_scene_travel,
-    commit_prepared_project_scene,
+    ProjectSceneRequestState, ProjectSceneSelection, ProjectScenes,
+    begin_prepared_project_scene_travel, commit_prepared_project_scene,
 };
 #[cfg(all(test, any(windows, target_os = "linux")))]
 mod tests;
@@ -22,6 +22,7 @@ use nara_app::{
     RuntimeCloseParticipantError, RuntimeCloseParticipantId, RuntimeCloseProgress,
     RuntimeGeneration,
 };
+use nara_asset::AssetProductRef;
 use nara_diagnostic::{Diagnostic, DiagnosticCode, DiagnosticReport, SafeSummary};
 use nara_ecs::{Res, ResMut, Resource, World, system::SystemParam};
 use nara_identity::{SpawnedSceneInstance, WorldEntityToken};
@@ -32,11 +33,12 @@ use nara_scene::{
 };
 use nara_tasks::TaskPools;
 
+use super::content::PreparedSceneContent;
 use crate::{
     project_host::{
-        ProjectContentErrorKind, ProjectContentLoader, ProjectContentSnapshot,
-        ProjectSettingsCandidate, RuntimePlan,
+        ProjectContentErrorKind, ProjectContentLoader, ProjectSettingsCandidate, RuntimePlan,
     },
+    runtime_content::{RuntimeContentBase, RuntimeContentMemberKind},
     startup_scene::CurrentSceneOwner,
 };
 use domains::ManagedSceneTravelAttempt;
@@ -44,17 +46,50 @@ use preparation::Preparation;
 
 static NEXT_REQUEST: AtomicU64 = AtomicU64::new(1);
 
-struct Context {
-    candidate: ProjectSettingsCandidate,
-    plan: RuntimePlan,
-    loader: Arc<ProjectContentLoader>,
+enum Context {
+    Source {
+        candidate: ProjectSettingsCandidate,
+        plan: RuntimePlan,
+        loader: Arc<ProjectContentLoader>,
+    },
+    Processed {
+        base: RuntimeContentBase,
+    },
+}
+
+impl Context {
+    fn matches_current(&self, current: &CurrentSceneOwner) -> bool {
+        match self {
+            Self::Source { .. } => current.is_project_backed(),
+            Self::Processed { base } => current
+                .hosted_runtime_base()
+                .is_some_and(|current| base.same_base(current)),
+        }
+    }
+
+    fn declares(&self, selection: &ProjectSceneSelection) -> bool {
+        match (self, selection) {
+            (Self::Source { candidate, .. }, ProjectSceneSelection::Source(path)) => {
+                let settings = candidate.settings();
+                settings.startup.default_scene.as_ref() == Some(path)
+                    || settings.content.scenes.contains(path)
+            }
+            (Self::Processed { base }, ProjectSceneSelection::Product(product)) => {
+                base.catalog().scenes().contains(product)
+                    && base.member(*product).is_some_and(|member| {
+                        matches!(member.kind(), RuntimeContentMemberKind::Scene { .. })
+                    })
+            }
+            _ => false,
+        }
+    }
 }
 
 struct Admission {
     context: Arc<Context>,
     id: ProjectSceneRequestId,
     expected: SpawnedSceneInstance,
-    path: ProjectPath,
+    selection: ProjectSceneSelection,
 }
 
 #[derive(Resource)]
@@ -74,7 +109,7 @@ enum Slot {
     },
     Ready {
         admission: Admission,
-        snapshot: ProjectContentSnapshot,
+        content: PreparedSceneContent,
     },
     /// Queued or active managed travel. Once native retirement starts, this slot retains the exact
     /// candidate and attempt even if ordinary pre-commit admission facts change.
@@ -163,7 +198,7 @@ impl Slot {
 impl RequestOwner {
     fn request(
         &mut self,
-        path: ProjectPath,
+        selection: ProjectSceneSelection,
         generation: RuntimeGeneration,
         expected: &SpawnedSceneInstance,
         pools: &TaskPools,
@@ -174,10 +209,7 @@ impl RequestOwner {
         if self.slot.is_some() {
             return Err(ProjectSceneRequestError::Busy);
         }
-        let settings = self.context.candidate.settings();
-        if settings.startup.default_scene.as_ref() != Some(&path)
-            && !settings.content.scenes.contains(&path)
-        {
+        if !self.context.declares(&selection) {
             return Err(ProjectSceneRequestError::UndeclaredScene);
         }
         let sequence = NEXT_REQUEST
@@ -191,7 +223,7 @@ impl RequestOwner {
         };
         let preparation = Preparation::start(
             Arc::clone(&self.context),
-            path.clone(),
+            selection.clone(),
             pools,
             #[cfg(test)]
             self.gate.take(),
@@ -201,7 +233,7 @@ impl RequestOwner {
                 context: Arc::clone(&self.context),
                 id,
                 expected: expected.clone(),
-                path,
+                selection,
             },
             preparation,
             discard: None,
@@ -218,7 +250,9 @@ impl RequestOwner {
         !self.closing.load(Ordering::Acquire)
             && generation == Some(admission.id.generation)
             && Arc::ptr_eq(&self.context, &admission.context)
-            && current.is_some_and(|current| current.receipt() == &admission.expected)
+            && current.is_some_and(|current| {
+                current.receipt() == &admission.expected && self.context.matches_current(current)
+            })
     }
 
     fn cancel(&mut self, request: ProjectSceneRequestId) -> bool {
@@ -287,7 +321,32 @@ pub(super) fn install_context(
     plan: RuntimePlan,
     loader: Arc<ProjectContentLoader>,
 ) -> Result<(), ProjectSceneRequestError> {
-    if world.contains_resource::<RequestOwner>() || candidate.lineage() != plan.lineage() {
+    if candidate.lineage() != plan.lineage() {
+        return Err(ProjectSceneRequestError::Stale);
+    }
+    install_request_owner(
+        world,
+        Context::Source {
+            candidate,
+            plan,
+            loader,
+        },
+    )
+}
+
+/// Captures the original admitted processed base, without reconstructing its executable plan.
+pub(super) fn install_runtime_context(
+    world: &mut World,
+    base: RuntimeContentBase,
+) -> Result<(), ProjectSceneRequestError> {
+    install_request_owner(world, Context::Processed { base })
+}
+
+fn install_request_owner(
+    world: &mut World,
+    context: Context,
+) -> Result<(), ProjectSceneRequestError> {
+    if world.contains_resource::<RequestOwner>() {
         return Err(ProjectSceneRequestError::Stale);
     }
     let closing = world
@@ -299,11 +358,7 @@ pub(super) fn install_context(
         return Err(ProjectSceneRequestError::Unavailable);
     }
     world.insert_resource(RequestOwner {
-        context: Arc::new(Context {
-            candidate,
-            plan,
-            loader,
-        }),
+        context: Arc::new(context),
         closing,
         slot: None,
         #[cfg(test)]
@@ -371,14 +426,11 @@ pub(crate) fn poll_project_scene_requests(world: &mut World) {
             let id = admission.id;
             slot = match (state, result) {
                 (Some(state), _) => Slot::terminal(id, state),
-                (None, Ok(snapshot)) => {
+                (None, Ok(content)) => {
                     let Slot::Preparing { admission, .. } = slot else {
                         unreachable!()
                     };
-                    Slot::Ready {
-                        admission,
-                        snapshot,
-                    }
+                    Slot::Ready { admission, content }
                 }
                 (None, Err(failure)) => Slot::Terminal {
                     id,

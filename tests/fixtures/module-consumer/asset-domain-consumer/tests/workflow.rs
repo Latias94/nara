@@ -86,7 +86,7 @@ impl Plugin for CaptionPlugin {
                 outcome.0 = assets
                     .collection::<TextDomain>()
                     .map_or_else(Vec::new, |texts| {
-                        texts.iter().map(|(_, value)| value.text.clone()).collect()
+                        texts.iter().map(|value| value.text.clone()).collect()
                     });
             },
         )?;
@@ -375,7 +375,7 @@ fn text(world: &World) -> Option<&str> {
         .collection::<TextDomain>()?
         .iter()
         .next()
-        .map(|(_, product)| product.text.as_str())
+        .map(|product| product.text.as_str())
 }
 
 fn travel(world: &mut World) {
@@ -421,7 +421,6 @@ fn travel(world: &mut World) {
                             .iter()
                             .next()
                             .unwrap()
-                            .1
                             .text,
                         "Goodbye world"
                     );

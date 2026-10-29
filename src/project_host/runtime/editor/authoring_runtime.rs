@@ -771,7 +771,10 @@ fn configure_authoring_app(app: &mut App) -> Result<(), DiagnosticReport> {
     .and_then(|app| app.add_plugins(TileSetAssetPlugin))
     .map_err(|_| runtime_error("project.editor.preview-plugin-install-failed"))?;
     tilesets::install(app)?;
-    app.insert_resource(EditorImageAdmissionPort)
+    // This Host owns its source imports through the admission driver, not the reload queue.
+    app.init_resource::<nara_asset::ProjectAssetDatabase>()
+        .and_then(|app| app.init_resource::<ImageImporter>())
+        .and_then(|app| app.insert_resource(EditorImageAdmissionPort))
         .and_then(|app| app.insert_resource(EditorImagePublicationPort))
         .and_then(|app| app.insert_resource(EditorImageRevocationPort))
         .and_then(|app| {

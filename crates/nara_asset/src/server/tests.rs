@@ -26,6 +26,58 @@ fn source_record() -> AssetRecord {
 }
 
 #[test]
+fn retained_cost_counts_anonymous_claims_and_is_a_pure_clone_observation() {
+    let mut server = AssetServer::new();
+    let empty = server.checked_retained_bytes().unwrap();
+    for _ in 0..32 {
+        server.reserve_anonymous::<String>().unwrap();
+    }
+    let before = server.clone();
+    let populated = server.checked_retained_bytes().unwrap();
+    assert!(populated > empty);
+    assert_eq!(server, before);
+    assert_eq!(before.checked_retained_bytes(), Some(populated));
+    server.reserve_anonymous::<u32>().unwrap();
+    assert!(server.checked_retained_bytes().unwrap() > populated);
+}
+
+#[test]
+fn retained_cost_counts_product_indices_type_claims_and_both_owned_path_strings() {
+    let reference = product(1, auxiliary());
+    let mut server = AssetServer::new();
+    let empty = server.checked_retained_bytes().unwrap();
+    server.reserve_product::<String>(reference).unwrap();
+    assert_eq!(
+        server.checked_retained_bytes().unwrap() - empty,
+        AssetServer::checked_product_binding_retained_bytes(None).unwrap(),
+    );
+    let record = source_record();
+    let mut short = AssetServer::new();
+    short.reserve_record::<String>(&record).unwrap();
+    assert_eq!(
+        short.checked_retained_bytes().unwrap() - empty,
+        AssetServer::checked_product_binding_retained_bytes(Some(record.path())).unwrap(),
+    );
+    let long_record = AssetRecord::new(
+        record.stable_id(),
+        AssetPath::new("textures/a-much-longer-player-name.png").unwrap(),
+        AssetSourceKind::Image,
+    );
+    let mut long = AssetServer::new();
+    long.reserve_record::<String>(&long_record).unwrap();
+    assert_eq!(
+        long.checked_retained_bytes().unwrap() - short.checked_retained_bytes().unwrap(),
+        2 * (long_record.path().as_str().len() - record.path().as_str().len()),
+    );
+}
+
+#[test]
+fn retained_cost_rejects_overflow_before_multiplying_entry_counts() {
+    assert!(checked_map_bytes::<AssetProductRef, AssetId>(usize::MAX).is_none());
+    assert!(checked_map_bytes::<AssetId, (TypeId, &'static str)>(usize::MAX).is_none());
+}
+
+#[test]
 fn primary_product_and_source_record_share_handles_in_both_orders() {
     let reference = product(1, ImportedProductId::PRIMARY);
     let record = source_record();

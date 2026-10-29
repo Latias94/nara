@@ -41,11 +41,12 @@ use nara::{
         PersistentComponent, PersistentComponentProvider,
     },
     runtime_content::{
-        RUNTIME_CONTENT_CATALOG_FILE, RuntimeContentAsset, RuntimeContentBase,
-        RuntimeContentBudgetKind, RuntimeContentCatalog, RuntimeContentCatalogDefinition,
-        RuntimeContentCatalogLimits, RuntimeContentDependency, RuntimeContentDependencyRole,
-        RuntimeContentError, RuntimeContentExpectation, RuntimeContentLimits, RuntimeContentMember,
-        RuntimeContentMemberKind, RuntimeContentScene, RuntimeContentTarget,
+        RUNTIME_CONTENT_CATALOG_FILE, RuntimeCodecDefinitionId, RuntimeCodecSelectionError,
+        RuntimeContentAsset, RuntimeContentBase, RuntimeContentBudgetKind, RuntimeContentCatalog,
+        RuntimeContentCatalogDefinition, RuntimeContentCatalogLimits, RuntimeContentDependency,
+        RuntimeContentDependencyRole, RuntimeContentError, RuntimeContentExpectation,
+        RuntimeContentLimits, RuntimeContentMember, RuntimeContentMemberKind, RuntimeContentScene,
+        RuntimeContentTarget,
     },
     scene::{
         ExpandedSceneCandidate, RuntimeSceneCandidate, RuntimeSceneLimits, SceneComponentBindings,
@@ -127,9 +128,23 @@ impl Plugin for ConsumerPlugin {
 }
 
 fn recipe() -> ProductRecipe {
-    // Runtime codec selection below does not select the source importer in the executable recipe.
+    recipe_with_codec::<TextBundleDomain, TextBundleDomain>("consumer.runtime-base.text-bundle")
+}
+
+fn schema_recipe() -> ProductRecipe {
     ProductRecipe::new()
         .add_contribution(SchemaContribution::<ConsumerPlugin>::for_default([PROVIDER]).unwrap())
+        .unwrap()
+}
+
+fn recipe_with_codec<D, C>(definition: &'static str) -> ProductRecipe
+where
+    D: AssetDomain<Product = TextBundle>,
+    C: RuntimeAssetCodec<TextBundle>,
+{
+    // Selecting the exact compiled family/codec does not select its source importer.
+    schema_recipe()
+        .add_runtime_asset_codec::<D, C>(RuntimeCodecDefinitionId::new(definition, 1))
         .unwrap()
 }
 
@@ -247,10 +262,23 @@ struct Fixture {
     root: PathBuf,
     catalog: RuntimeContentCatalog,
     expected: RuntimeContentExpectation,
+    recipe: ProductRecipe,
 }
 
 impl Fixture {
     fn new() -> Self {
+        Self::with_recipe(recipe())
+    }
+
+    fn with_codec<D, C>(definition: &'static str) -> Self
+    where
+        D: AssetDomain<Product = TextBundle>,
+        C: RuntimeAssetCodec<TextBundle>,
+    {
+        Self::with_recipe(recipe_with_codec::<D, C>(definition))
+    }
+
+    fn with_recipe(recipe: ProductRecipe) -> Self {
         static NEXT: AtomicU64 = AtomicU64::new(1);
         let root = std::env::temp_dir().join(format!(
             "nara-runtime-base-consumer-{}-{}",
@@ -264,8 +292,8 @@ impl Fixture {
         configuration.tasks.io.workers = 1;
         configuration.tasks.compute.workers = 1;
         configuration.tasks.async_compute.workers = 1;
-        let plan =
-            resolve_runtime_configuration(&configuration.resolve().unwrap(), recipe()).unwrap();
+        let plan = resolve_runtime_configuration(&configuration.resolve().unwrap(), recipe.clone())
+            .unwrap();
         let startup = scene_bytes(
             plan.schema_validation().bindings(),
             STARTUP_SOURCE,
@@ -340,6 +368,7 @@ impl Fixture {
                 .schema_validation()
                 .composition_fingerprint()
                 .as_bytes(),
+            runtime_codecs_fingerprint: plan.runtime_codecs_fingerprint().as_bytes(),
             startup_scene: startup_product(),
             scenes: vec![startup_product(), later_product()],
             addressable_roots: vec![selected(FIRST), selected(SECOND)],
@@ -354,15 +383,49 @@ impl Fixture {
             catalog,
             // These expectations are producer outputs supplied independently to the reader.
             expected: RuntimeContentExpectation::new(ContentDigest::of_bytes(&encoded), target()),
+            recipe,
         }
     }
 
+    #[allow(
+        clippy::result_large_err,
+        reason = "The public RuntimeContentError is intentionally preserved for typed assertions."
+    )]
     fn open(
         &self,
         limits: RuntimeContentLimits,
     ) -> Result<RuntimeContentBase, RuntimeContentError> {
         let directory = open_explicit_product_project_root(&self.root).unwrap();
-        RuntimeContentBase::open(&directory, &self.expected, recipe(), limits)
+        RuntimeContentBase::open(&directory, &self.expected, self.recipe.clone(), limits)
+    }
+
+    fn reopen_with_codec<D, C>(&mut self, definition: &'static str) -> RuntimeContentBase
+    where
+        D: AssetDomain<Product = TextBundle>,
+        C: RuntimeAssetCodec<TextBundle>,
+    {
+        self.recipe = recipe_with_codec::<D, C>(definition);
+        let plan = resolve_runtime_configuration(
+            &self.catalog.configuration().resolve().unwrap(),
+            self.recipe.clone(),
+        )
+        .unwrap();
+        assert_eq!(
+            plan.plugin_plan().fingerprint().as_bytes(),
+            self.catalog.plugin_plan_fingerprint(),
+        );
+        assert_eq!(
+            plan.schema_validation()
+                .composition_fingerprint()
+                .as_bytes(),
+            self.catalog.schema_fingerprint(),
+        );
+        // Only executable selection changes. Keep the exact members, including malformed payloads
+        // or dependency edits supplied by a test, and publish a matching trusted catalog digest.
+        self.rewrite_catalog(|definition| {
+            definition.runtime_codecs_fingerprint = plan.runtime_codecs_fingerprint().as_bytes();
+        });
+        self.open_for_one_asset::<D, C>()
     }
 
     fn rewrite_catalog(&mut self, edit: impl FnOnce(&mut RuntimeContentCatalogDefinition)) {
@@ -371,6 +434,7 @@ impl Fixture {
             configuration: self.catalog.configuration().clone(),
             plugin_plan_fingerprint: self.catalog.plugin_plan_fingerprint(),
             schema_fingerprint: self.catalog.schema_fingerprint(),
+            runtime_codecs_fingerprint: self.catalog.runtime_codecs_fingerprint(),
             startup_scene: self.catalog.startup_scene(),
             scenes: self.catalog.scenes().to_vec(),
             addressable_roots: self.catalog.addressable_roots().to_vec(),
@@ -403,21 +467,26 @@ impl Fixture {
         });
     }
 
-    fn open_for_one_asset(&self) -> RuntimeContentBase {
+    fn open_for_one_asset<D, C>(&self) -> RuntimeContentBase
+    where
+        D: AssetDomain<Product = TextBundle>,
+        C: RuntimeAssetCodec<TextBundle>,
+    {
         let limits = RuntimeContentLimits::default()
-            .with_retained_bytes(TextBundleDomain::runtime_limits().retained_bytes());
+            .with_retained_bytes(C::runtime_limits().retained_bytes());
+        // Probe a separate base with the same exact selected D/C. The tight cap must reject the
+        // complete predecode promise before invoking any decoder or product callback.
         let probe = self.open(limits).unwrap();
-        let required =
-            match probe.acquire_asset::<TextBundleDomain, PanickingDecode>(selected(FIRST)) {
-                Err(RuntimeContentError::Budget {
-                    kind: RuntimeContentBudgetKind::RetainedBytes,
-                    required,
-                    ..
-                }) => required,
-                result => {
-                    panic!("expected a predecode retained-output reservation refusal: {result:?}")
-                }
-            };
+        let required = match probe.acquire_asset::<D, C>(selected(FIRST)) {
+            Err(RuntimeContentError::Budget {
+                kind: RuntimeContentBudgetKind::RetainedBytes,
+                required,
+                ..
+            }) => required,
+            result => {
+                panic!("expected a predecode retained-output reservation refusal: {result:?}")
+            }
+        };
         self.open(limits.with_retained_bytes(bytes(required)))
             .unwrap()
     }
@@ -525,9 +594,12 @@ fn travel(world: &mut World) {
             })
             .unwrap(),
     );
-    // The default AssetPlugin installs an empty table for its source-change systems. This
-    // consumer never supplies source metadata or uses that table to resolve Runtime products.
-    assert!(world.resource::<ProjectAssetDatabase>().is_empty());
+    assert!(!world.contains_resource::<ProjectAssetDatabase>());
+    assert!(!world.contains_resource::<nara::asset::AssetSourceChanges>());
+    assert!(!world.contains_resource::<nara::asset::AssetReloadRequests>());
+    assert!(!world.contains_resource::<nara::asset::AssetReloadDiagnostics>());
+    assert!(!world.contains_resource::<nara::asset::AssetLoadGenerations>());
+    assert!(!world.contains_resource::<nara::asset::AssetDependencyGraph>());
     world.resource_mut::<Travel>().completed = true;
 }
 
@@ -622,7 +694,12 @@ fn captured_base_runs_two_managed_scenes_and_compound_products_after_all_files_c
                 let diagnostics = materialize_startup_scene(world, startup.scene_source()).unwrap();
                 assert!(!diagnostics.has_errors());
                 assert!(CurrentScene::get(world).is_none());
-                assert!(world.resource::<ProjectAssetDatabase>().is_empty());
+                assert!(!world.contains_resource::<ProjectAssetDatabase>());
+                assert!(!world.contains_resource::<nara::asset::AssetSourceChanges>());
+                assert!(!world.contains_resource::<nara::asset::AssetReloadRequests>());
+                assert!(!world.contains_resource::<nara::asset::AssetReloadDiagnostics>());
+                assert!(!world.contains_resource::<nara::asset::AssetLoadGenerations>());
+                assert!(!world.contains_resource::<nara::asset::AssetDependencyGraph>());
             });
         })
         .unwrap();
@@ -696,6 +773,22 @@ fn host_digest_target_recipe_and_schema_are_independent_admission_requirements()
         Err(RuntimeContentError::SchemaMismatch),
     ));
     fixture.rewrite_catalog(|definition| definition.schema_fingerprint = original_schema);
+    let original_codecs = fixture.catalog.runtime_codecs_fingerprint();
+    fixture.rewrite_catalog(|definition| definition.runtime_codecs_fingerprint[0] ^= 1);
+    assert!(matches!(
+        fixture.open(RuntimeContentLimits::default()),
+        Err(RuntimeContentError::CodecsMismatch),
+    ));
+    fixture.rewrite_catalog(|definition| definition.runtime_codecs_fingerprint = original_codecs);
+    assert!(matches!(
+        RuntimeContentBase::open(
+            &directory,
+            &fixture.expected,
+            schema_recipe(),
+            RuntimeContentLimits::default(),
+        ),
+        Err(RuntimeContentError::CodecsMismatch),
+    ));
     assert!(fixture.open(RuntimeContentLimits::default()).is_ok());
 }
 
@@ -737,6 +830,13 @@ fn a_valid_codec_payload_cannot_borrow_another_source_or_omit_a_declared_auxilia
         // and the enclosing source, rather than blessing only the requested auxiliary.
         assert!(matches!(
             rejected.acquire_asset::<TextBundleDomain, TextBundleDomain>(selected(FIRST)),
+            Err(RuntimeContentError::ProductIdentityMismatch),
+        ));
+        let reopened = fixture.reopen_with_codec::<TextBundleDomain, TextBundleDomain>(
+            "consumer.runtime-base.reopened-text-bundle",
+        );
+        assert!(matches!(
+            reopened.acquire_asset::<TextBundleDomain, TextBundleDomain>(selected(FIRST)),
             Err(RuntimeContentError::ProductIdentityMismatch),
         ));
         let original = last_good
@@ -983,6 +1083,47 @@ impl RuntimeAssetCodec<TextBundle> for WrongCodec {
     }
 }
 
+static UNSELECTED_CODEC_CALLBACKS: AtomicU64 = AtomicU64::new(0);
+
+struct UnselectedCodec;
+
+fn unselected_codec_callback() -> ! {
+    UNSELECTED_CODEC_CALLBACKS.fetch_add(1, Ordering::Relaxed);
+    panic!("an unselected codec must not invoke a callback");
+}
+
+impl RuntimeAssetCodec<TextBundle> for UnselectedCodec {
+    const RUNTIME_KIND: &'static str = TextBundleDomain::RUNTIME_KIND;
+    const RUNTIME_VERSION: u32 = TextBundleDomain::RUNTIME_VERSION;
+
+    fn runtime_limits() -> AssetRuntimeLimits {
+        unselected_codec_callback()
+    }
+
+    fn encode_runtime(_: &TextBundle) -> Result<Box<[u8]>, AssetRuntimeError> {
+        unselected_codec_callback()
+    }
+
+    fn decode_runtime(_: &[u8]) -> Result<TextBundle, AssetRuntimeError> {
+        unselected_codec_callback()
+    }
+
+    fn runtime_retained_bytes(_: &TextBundle) -> Result<usize, AssetRuntimeError> {
+        unselected_codec_callback()
+    }
+
+    fn visit_required_runtime_products<E>(
+        _: &TextBundle,
+        _: impl FnMut(AssetProductRef) -> Result<(), E>,
+    ) -> Result<(), E> {
+        unselected_codec_callback()
+    }
+
+    fn contains_runtime_product(_: &TextBundle, _: AssetProductRef) -> bool {
+        unselected_codec_callback()
+    }
+}
+
 struct InvalidRetainedCost<const MODE: u8>;
 
 impl<const MODE: u8> RuntimeAssetCodec<TextBundle> for InvalidRetainedCost<MODE> {
@@ -1037,22 +1178,18 @@ impl<const MODE: u8> RuntimeAssetCodec<TextBundle> for InvalidRetainedCost<MODE>
     }
 }
 
-#[test]
-fn invalid_retained_costs_preserve_typed_errors_and_the_next_full_decode_reservation() {
-    let fixture = Fixture::new();
-    let base = fixture.open_for_one_asset();
+fn assert_invalid_retained_cost<const MODE: u8>(definition: &'static str) {
+    let mut fixture =
+        Fixture::with_codec::<TextBundleDomain, InvalidRetainedCost<MODE>>(definition);
+    let base = fixture.open_for_one_asset::<TextBundleDomain, InvalidRetainedCost<MODE>>();
     let inline = size_of::<TextBundle>();
     let promised = TextBundleDomain::runtime_limits().retained_bytes().get();
-    for mode in 0..=4 {
-        let result = match mode {
-            0 => base.acquire_asset::<TextBundleDomain, InvalidRetainedCost<0>>(selected(FIRST)),
-            1 => base.acquire_asset::<TextBundleDomain, InvalidRetainedCost<1>>(selected(FIRST)),
-            2 => base.acquire_asset::<TextBundleDomain, InvalidRetainedCost<2>>(selected(FIRST)),
-            3 => base.acquire_asset::<TextBundleDomain, InvalidRetainedCost<3>>(selected(FIRST)),
-            4 => base.acquire_asset::<TextBundleDomain, InvalidRetainedCost<4>>(selected(FIRST)),
-            _ => unreachable!(),
-        };
-        match (mode, result) {
+    // Both failures must reach the selected codec under a one-acquisition cap. A leaked promise
+    // from the first call would turn the second result into an admission failure instead.
+    for _ in 0..2 {
+        let result =
+            base.acquire_asset::<TextBundleDomain, InvalidRetainedCost<MODE>>(selected(FIRST));
+        match (MODE, result) {
             (0, Err(RuntimeContentError::CodecPanicked)) => {}
             (1, Err(RuntimeContentError::Asset(error))) => assert_eq!(
                 error.diagnostic().code().as_str(),
@@ -1070,7 +1207,7 @@ fn invalid_retained_costs_preserve_typed_errors_and_the_next_full_decode_reserva
                 assert_eq!(limit, promised);
             }
             (
-                3 | 4,
+                3,
                 Err(RuntimeContentError::Budget {
                     kind: RuntimeContentBudgetKind::RetainedBytes,
                     required,
@@ -1082,39 +1219,80 @@ fn invalid_retained_costs_preserve_typed_errors_and_the_next_full_decode_reserva
             }
             (mode, result) => panic!("unexpected retained-cost mode {mode} result: {result:?}"),
         }
-        let recovered = base
-            .acquire_asset::<TextBundleDomain, TextBundleDomain>(selected(FIRST))
-            .unwrap();
-        assert_eq!(
-            recovered.product().get(&selected(FIRST)).unwrap().text,
-            "Hello world",
-        );
     }
+    drop(base);
+    let recovered_base = fixture.reopen_with_codec::<TextBundleDomain, TextBundleDomain>(
+        "consumer.runtime-base.text-bundle",
+    );
+    let recovered = recovered_base
+        .acquire_asset::<TextBundleDomain, TextBundleDomain>(selected(FIRST))
+        .unwrap();
+    assert_eq!(
+        recovered.product().get(&selected(FIRST)).unwrap().text,
+        "Hello world",
+    );
 }
 
 #[test]
-fn wrong_codec_and_panicking_queries_preserve_the_next_decode_reservation() {
+fn invalid_retained_costs_preserve_typed_errors_and_the_next_full_decode_reservation() {
+    assert_invalid_retained_cost::<0>("consumer.runtime-base.panicking-retention");
+    assert_invalid_retained_cost::<1>("consumer.runtime-base.refused-retention");
+    assert_invalid_retained_cost::<2>("consumer.runtime-base.oversized-retention");
+    assert_invalid_retained_cost::<3>("consumer.runtime-base.under-inline-retention");
+    // An impossible predecode promise is now rejected while selecting the recipe, before any
+    // base can be captured or decode callback invoked. Actual-cost underreporting stays above.
+    let definition = RuntimeCodecDefinitionId::new("consumer.runtime-base.under-inline-promise", 1);
+    assert!(matches!(
+        schema_recipe().add_runtime_asset_codec::<TextBundleDomain, InvalidRetainedCost<4>>(definition),
+        Err(nara::ProductRecipeError::RuntimeCodec(
+            RuntimeCodecSelectionError::InvalidCodec { definition: rejected }
+        )) if rejected == definition,
+    ));
+}
+
+fn assert_panicking_acquisition<D, C>(definition: &'static str)
+where
+    D: AssetDomain<Product = TextBundle>,
+    C: RuntimeAssetCodec<TextBundle>,
+{
+    let mut fixture = Fixture::with_codec::<D, C>(definition);
+    let base = fixture.open_for_one_asset::<D, C>();
+    for _ in 0..2 {
+        assert!(matches!(
+            base.acquire_asset::<D, C>(selected(FIRST)),
+            Err(RuntimeContentError::CodecPanicked),
+        ));
+    }
+    drop(base);
+    let recovered_base = fixture.reopen_with_codec::<TextBundleDomain, TextBundleDomain>(
+        "consumer.runtime-base.text-bundle",
+    );
+    let recovered = recovered_base
+        .acquire_asset::<TextBundleDomain, TextBundleDomain>(selected(FIRST))
+        .unwrap();
+    assert_eq!(
+        recovered.product().get(&selected(FIRST)).unwrap().text,
+        "Hello world"
+    );
+}
+
+#[test]
+fn wrong_unselected_codec_and_family_refuse_before_callbacks_and_preserve_admission() {
     let fixture = Fixture::new();
-    let base = fixture.open_for_one_asset();
+    let base = fixture.open_for_one_asset::<TextBundleDomain, TextBundleDomain>();
     assert!(matches!(
         base.acquire_asset::<TextBundleDomain, WrongCodec>(selected(FIRST)),
         Err(RuntimeContentError::CodecMismatch),
     ));
+    assert_eq!(UNSELECTED_CODEC_CALLBACKS.load(Ordering::Relaxed), 0);
     assert!(matches!(
-        base.acquire_asset::<TextBundleDomain, PanickingDecode>(selected(FIRST)),
-        Err(RuntimeContentError::CodecPanicked),
+        base.acquire_asset::<TextBundleDomain, UnselectedCodec>(selected(FIRST)),
+        Err(RuntimeContentError::CodecNotSelected),
     ));
+    assert_eq!(UNSELECTED_CODEC_CALLBACKS.load(Ordering::Relaxed), 0);
     assert!(matches!(
         base.acquire_asset::<PanickingMembership, TextBundleDomain>(selected(FIRST)),
-        Err(RuntimeContentError::CodecPanicked),
-    ));
-    assert!(matches!(
-        base.acquire_asset::<TextBundleDomain, PanickingIdentity>(selected(FIRST)),
-        Err(RuntimeContentError::CodecPanicked),
-    ));
-    assert!(matches!(
-        base.acquire_asset::<TextBundleDomain, PanickingDependencyInventory>(selected(FIRST)),
-        Err(RuntimeContentError::CodecPanicked),
+        Err(RuntimeContentError::CodecNotSelected),
     ));
     let recovered = base
         .acquire_asset::<TextBundleDomain, TextBundleDomain>(selected(FIRST))
@@ -1126,10 +1304,28 @@ fn wrong_codec_and_panicking_queries_preserve_the_next_decode_reservation() {
 }
 
 #[test]
+fn selected_panicking_queries_preserve_the_next_full_decode_reservation() {
+    assert_panicking_acquisition::<TextBundleDomain, PanickingDecode>(
+        "consumer.runtime-base.panicking-decode",
+    );
+    assert_panicking_acquisition::<PanickingMembership, TextBundleDomain>(
+        "consumer.runtime-base.panicking-membership",
+    );
+    assert_panicking_acquisition::<TextBundleDomain, PanickingIdentity>(
+        "consumer.runtime-base.panicking-identity",
+    );
+    assert_panicking_acquisition::<TextBundleDomain, PanickingDependencyInventory>(
+        "consumer.runtime-base.panicking-dependencies",
+    );
+}
+
+#[test]
 fn codec_work_promises_and_shared_retained_output_are_admitted_before_decode() {
-    let fixture = Fixture::new();
+    let probe_fixture = Fixture::with_codec::<TextBundleDomain, PanickingDecode>(
+        "consumer.runtime-base.predecode-work-probe",
+    );
     let work = TextBundleDomain::runtime_limits().work_bytes().get();
-    let too_little_work = fixture
+    let too_little_work = probe_fixture
         .open(RuntimeContentLimits::default().with_work_bytes(bytes(work - 1)))
         .unwrap();
     assert!(matches!(
@@ -1140,7 +1336,8 @@ fn codec_work_promises_and_shared_retained_output_are_admitted_before_decode() {
             limit,
         }) if required == work && limit == work - 1,
     ));
-    let base = fixture.open_for_one_asset();
+    let fixture = Fixture::new();
+    let base = fixture.open_for_one_asset::<TextBundleDomain, TextBundleDomain>();
     let first = base
         .acquire_asset::<TextBundleDomain, TextBundleDomain>(selected(FIRST))
         .unwrap();
@@ -1278,9 +1475,11 @@ impl RuntimeAssetCodec<TextBundle> for HeldDecode {
         TextBundleDomain::encode_runtime(product)
     }
     fn decode_runtime(encoded: &[u8]) -> Result<TextBundle, AssetRuntimeError> {
-        let (started, release) = DECODE_GATE.lock().unwrap().take().unwrap();
-        started.send(()).unwrap();
-        release.recv_timeout(Duration::from_secs(5)).unwrap();
+        let gate = DECODE_GATE.lock().unwrap().take();
+        if let Some((started, release)) = gate {
+            started.send(()).unwrap();
+            release.recv_timeout(Duration::from_secs(5)).unwrap();
+        }
         TextBundleDomain::decode_runtime(encoded)
     }
     fn runtime_retained_bytes(product: &TextBundle) -> Result<usize, AssetRuntimeError> {
@@ -1298,9 +1497,14 @@ impl RuntimeAssetCodec<TextBundle> for HeldDecode {
 }
 
 #[test]
+#[allow(
+    clippy::result_large_err,
+    reason = "The public RuntimeContentError is intentionally preserved across the worker boundary."
+)]
 fn overlapping_decodes_share_admission_and_release_after_the_last_output_owner() {
-    let fixture = Fixture::new();
-    let base = fixture.open_for_one_asset();
+    let fixture =
+        Fixture::with_codec::<TextBundleDomain, HeldDecode>("consumer.runtime-base.held-decode");
+    let base = fixture.open_for_one_asset::<TextBundleDomain, HeldDecode>();
     let (started, observe) = mpsc::channel();
     let (release, blocked) = mpsc::channel();
     *DECODE_GATE.lock().unwrap() = Some((started, blocked));
@@ -1308,7 +1512,7 @@ fn overlapping_decodes_share_admission_and_release_after_the_last_output_owner()
         let held =
             scope.spawn(|| base.acquire_asset::<TextBundleDomain, HeldDecode>(selected(FIRST)));
         observe.recv_timeout(Duration::from_secs(5)).unwrap();
-        let refused = base.acquire_asset::<TextBundleDomain, TextBundleDomain>(selected(SECOND));
+        let refused = base.acquire_asset::<TextBundleDomain, HeldDecode>(selected(SECOND));
         release.send(()).unwrap();
         let first = held.join().unwrap().unwrap();
         assert!(matches!(
@@ -1321,7 +1525,7 @@ fn overlapping_decodes_share_admission_and_release_after_the_last_output_owner()
         first
     });
     assert!(matches!(
-        base.acquire_asset::<TextBundleDomain, TextBundleDomain>(selected(SECOND)),
+        base.acquire_asset::<TextBundleDomain, HeldDecode>(selected(SECOND)),
         Err(RuntimeContentError::Budget {
             kind: RuntimeContentBudgetKind::RetainedBytes,
             ..
@@ -1329,7 +1533,7 @@ fn overlapping_decodes_share_admission_and_release_after_the_last_output_owner()
     ));
     drop(output);
     assert!(
-        base.acquire_asset::<TextBundleDomain, TextBundleDomain>(selected(SECOND))
+        base.acquire_asset::<TextBundleDomain, HeldDecode>(selected(SECOND))
             .is_ok()
     );
 }

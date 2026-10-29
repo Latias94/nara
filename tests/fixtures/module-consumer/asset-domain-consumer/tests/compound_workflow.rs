@@ -358,17 +358,18 @@ fn rebuild_and_source_move_preserve_products_while_stale_continuity_refuses() {
         )
         .unwrap();
         for reference in [
-            AssetRef::Path(collection.iter().next().unwrap().0.path().clone()),
+            AssetRef::Path(collection.source_records().next().unwrap().path().clone()),
             AssetRef::stable_id(SOURCE).unwrap(),
             AssetRef::Product(primary),
         ] {
             assert!(std::ptr::eq(collection.get(&reference).unwrap(), bundle));
         }
-        assert!(
+        assert!(std::ptr::eq(
             collection
                 .get(&AssetRef::Product(product_ref(FIRST)))
-                .is_none()
-        );
+                .unwrap(),
+            bundle,
+        ));
         TextBundleDomain::encode_runtime(bundle).unwrap()
     };
     let original_metadata = fs::read(fixture.root.join("assets/bundle.json.meta")).unwrap();
@@ -523,7 +524,12 @@ fn copied_source_needs_a_new_enclosing_identity_before_catalogue_admission() {
         .unwrap();
     assert_eq!(copied_bundle.source(), selected.source());
     assert_eq!(
-        copied_collection.iter().next().unwrap().0.path().as_str(),
+        copied_collection
+            .source_records()
+            .next()
+            .unwrap()
+            .path()
+            .as_str(),
         "copy.json"
     );
     assert_eq!(copied_bundle.get(&selected).unwrap().text, "Hello world");

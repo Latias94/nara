@@ -678,7 +678,8 @@ fn prepare_texture_handle(
     field: &str,
     asset_ref: AssetRef,
 ) -> Result<PreparedTexture, ComponentCodecError> {
-    if let Some(reference) = asset_ref.as_product()
+    if context.project_asset_database().is_some()
+        && let Some(reference) = asset_ref.as_product()
         && !asset_ref.is_primary()
     {
         return Err(invalid_asset_ref(
@@ -1228,7 +1229,7 @@ mod tests {
     }
 
     #[test]
-    fn sprite_codec_rejects_auxiliary_texture_before_source_resolution() {
+    fn sprite_source_codec_rejects_auxiliary_texture_before_source_resolution() {
         let source = stable_id("2f0d71c7-14fc-4ed4-b48b-1c61bba8b97f");
         let product =
             ImportedProductId::parse_subproduct("011a8cc0-343a-4b95-8adb-3aa6d81977ed").unwrap();
@@ -1239,31 +1240,76 @@ mod tests {
         let snapshot = registry.snapshot().unwrap();
 
         for with_server in [false, true] {
-            for with_database in [false, true] {
-                let mut asset_server = AssetServer::new();
-                let mut context = if with_server {
-                    ComponentDecodeContext::with_asset_server(&mut asset_server)
-                } else {
-                    ComponentDecodeContext::new()
-                };
-                if with_database {
-                    context = context.with_project_asset_database(&database);
-                }
-                let result = snapshot.preflight_component_with_context(
-                    &sprite_type_id(),
-                    &sprite_value(image.clone()),
-                    &mut context,
-                );
+            let mut asset_server = AssetServer::new();
+            let mut context = if with_server {
+                ComponentDecodeContext::with_asset_server(&mut asset_server)
+            } else {
+                ComponentDecodeContext::new()
+            };
+            context = context.with_project_asset_database(&database);
+            let result = snapshot.preflight_component_with_context(
+                &sprite_type_id(),
+                &sprite_value(image.clone()),
+                &mut context,
+            );
 
+            assert!(matches!(
+                result,
+                Err(ComponentCodecError::InvalidAssetRef { field, asset_ref, message })
+                    if field == "material.image.value"
+                        && asset_ref == image.to_string()
+                        && message == AssetRefError::UnsupportedProductSelection(reference).to_string()
+            ));
+            assert!(!context.asset_server_touched());
+            assert_eq!(asset_server, AssetServer::new());
+        }
+    }
+
+    #[test]
+    fn sprite_codec_looks_up_complete_runtime_image_products_without_source_metadata() {
+        let source = stable_id("2f0d71c7-14fc-4ed4-b48b-1c61bba8b97f");
+        let auxiliary =
+            ImportedProductId::parse_subproduct("011a8cc0-343a-4b95-8adb-3aa6d81977ed").unwrap();
+        let registry = frozen_sprite_registry();
+        let snapshot = registry.snapshot().unwrap();
+        for selection in [ImportedProductId::PRIMARY, auxiliary] {
+            let reference = AssetProductRef::new(source, selection).unwrap();
+            let mut server = AssetServer::new();
+            let handle = server.reserve_product::<ImageAsset>(reference).unwrap();
+            let before = server.clone();
+            let mut context = ComponentDecodeContext::with_asset_server(&mut server);
+            let prepared = snapshot
+                .preflight_component_with_context(
+                    &sprite_type_id(),
+                    &sprite_value(AssetRef::Product(reference)),
+                    &mut context,
+                )
+                .unwrap();
+            assert!(context.asset_server_touched());
+            let mut world = World::new();
+            let entity = world.spawn_empty().id();
+            prepared.apply(&mut world, entity).unwrap();
+            assert_eq!(
+                world.get::<Sprite>(entity).unwrap().material.image,
+                Some(handle)
+            );
+            assert_eq!(server, before);
+            for wrong_type in [false, true] {
+                let mut server = AssetServer::new();
+                if wrong_type {
+                    server.reserve_product::<String>(reference).unwrap();
+                }
+                let before = server.clone();
+                let mut context = ComponentDecodeContext::with_asset_server(&mut server);
                 assert!(matches!(
-                    result,
-                    Err(ComponentCodecError::InvalidAssetRef { field, asset_ref, message })
-                        if field == "material.image.value"
-                            && asset_ref == image.to_string()
-                            && message == AssetRefError::UnsupportedProductSelection(reference).to_string()
+                    snapshot.preflight_component_with_context(
+                        &sprite_type_id(),
+                        &sprite_value(AssetRef::Product(reference)),
+                        &mut context,
+                    ),
+                    Err(ComponentCodecError::InvalidAssetRef { .. })
                 ));
-                assert!(!context.asset_server_touched());
-                assert_eq!(asset_server, AssetServer::new());
+                assert_eq!(server, before);
             }
         }
     }

@@ -4499,7 +4499,7 @@ fn budget_rejected_reload_preserves_last_good_value_and_asset_version() {
         &temp_root,
         [record.clone()],
         TaskPools::inline_for_tests(TaskPoolConfig::default()).unwrap(),
-        ImagePlugin::with_limits(limits).unwrap(),
+        ImageSourcePlugin::with_limits(limits).unwrap(),
     );
     let importer = app.world().resource::<ImageImporter>().clone();
     let (server, handle, images, states, events) =
@@ -6386,12 +6386,133 @@ fn app_with_image_plugin(asset_root: &Path, record: AssetRecord) -> App {
 }
 
 #[test]
-fn image_plugin_definition_binds_canonical_limits_and_prepares_that_configuration() {
+fn native_image_storage_prepares_procedural_pixels_without_source_resources_or_tasks() {
+    let mut app = App::new();
+    app.add_plugins((nara_asset::AssetPlugin, ImagePlugin, ImagePreparePlugin))
+        .unwrap();
+    let handle = nara_asset::allocate_anonymous_handle::<ImageAsset>().unwrap();
+    let image = ImageAsset::new(
+        ImageExtent::new(1, 1),
+        ImageFormat::Rgba8,
+        ImageColorSpace::Srgb,
+        vec![24, 120, 220, 255],
+    )
+    .unwrap();
+    let mut images = Assets::default();
+    let mut states = AssetStates::default();
+    let mut events = AssetEvents::default();
+    images
+        .commit_loaded(handle, image, &mut states, &mut events, None, None)
+        .unwrap();
+    app.insert_resource(images)
+        .unwrap()
+        .insert_resource(states)
+        .unwrap()
+        .insert_resource(events)
+        .unwrap();
+    let mut runtime = nara_app::RuntimeInstance::start(app).unwrap();
+    runtime.drive(Duration::ZERO).unwrap();
+
+    let world = runtime.world();
+    let prepared = world
+        .resource::<PreparedImages>()
+        .get(image_resource_key(handle))
+        .unwrap();
+    assert_eq!(prepared.resource().pixels(), &[24, 120, 220, 255]);
+    assert!(!world.contains_resource::<nara_asset::ProjectAssetDatabase>());
+    assert!(!world.contains_resource::<AssetSourceChanges>());
+    assert!(!world.contains_resource::<nara_asset::AssetReloadRequests>());
+    assert!(!world.contains_resource::<AssetReloadDiagnostics>());
+    assert!(!world.contains_resource::<AssetLoadGenerations>());
+    assert!(!world.contains_resource::<nara_asset::AssetDependencyGraph>());
+    assert!(!world.contains_resource::<ImageImporter>());
+    assert!(!world.contains_resource::<ImageReloadStats>());
+    assert!(!world.contains_resource::<PendingImageJobs>());
+    assert!(!world.contains_resource::<TaskPools>());
+    runtime.finish().unwrap();
+}
+
+#[test]
+fn image_source_requires_explicit_source_and_task_plugins_before_build() {
+    let without_source = nara_app::PluginPlan::resolve((
+        nara_app::PluginDefinition::for_default::<nara_asset::AssetPlugin>(),
+        nara_app::PluginDefinition::for_default::<nara_tasks::TaskPlugin>(),
+        nara_app::PluginDefinition::for_default::<ImagePlugin>(),
+        source_plugin(ImageImportLimits::default()),
+    ));
+    assert!(matches!(
+        without_source,
+        Err(nara_app::PluginPlanError::MissingPlugin { plugin, required })
+            if plugin == IMAGE_SOURCE_PLUGIN_ID && required == nara_asset::ASSET_SOURCE_PLUGIN_ID
+    ));
+    let without_tasks = nara_app::PluginPlan::resolve((
+        nara_app::PluginDefinition::for_default::<nara_asset::AssetPlugin>(),
+        nara_app::PluginDefinition::for_default::<nara_asset::AssetSourcePlugin>(),
+        nara_app::PluginDefinition::for_default::<ImagePlugin>(),
+        source_plugin(ImageImportLimits::default()),
+    ));
+    assert!(matches!(
+        without_tasks,
+        Err(nara_app::PluginPlanError::MissingPlugin { plugin, required })
+            if plugin == IMAGE_SOURCE_PLUGIN_ID && required == nara_tasks::TASK_PLUGIN_ID
+    ));
+}
+
+#[test]
+fn source_image_reload_without_directory_authority_fails_instead_of_dropping_intent() {
+    let record = image_record("textures/player.png");
+    let mut app = App::new();
+    app.insert_resource(TaskPools::inline_for_tests(TaskPoolConfig::default()).unwrap())
+        .unwrap();
+    app.add_plugins((
+        nara_tasks::TaskPlugin::default(),
+        nara_asset::AssetPlugin,
+        nara_asset::AssetSourcePlugin,
+        ImagePlugin,
+        ImageSourcePlugin::default(),
+    ))
+    .unwrap();
+    app.world_mut()
+        .unwrap()
+        .resource_mut::<nara_asset::ProjectAssetDatabase>()
+        .insert(record.clone())
+        .unwrap();
+    app.world_mut()
+        .unwrap()
+        .resource_mut::<AssetSourceChanges>()
+        .meta_modified(record.path().clone())
+        .unwrap();
+    let mut runtime = nara_app::RuntimeInstance::start(app).unwrap();
+    runtime.drive(Duration::ZERO).unwrap();
+
+    let world = runtime.world();
+    assert!(world.resource::<AssetSourceChanges>().is_empty());
+    assert!(
+        world
+            .resource::<nara_asset::AssetReloadRequests>()
+            .is_empty()
+    );
+    assert_eq!(world.resource::<ImageReloadStats>().failed, 1);
+    assert!(world.resource::<Assets<ImageAsset>>().is_empty());
+    assert!(
+        world
+            .resource::<AssetReloadDiagnostics>()
+            .iter()
+            .any(|diagnostic| {
+                diagnostic.code().as_str() == "image.reload-source-authority-missing"
+            })
+    );
+    assert_eq!(world.resource::<ImageReloadStats>().spawned, 0);
+    runtime.finish().unwrap();
+}
+
+#[test]
+fn image_source_plugin_definition_binds_canonical_limits_and_prepares_that_configuration() {
     let limits =
         ImageImportLimits::default().with_max_width(std::num::NonZeroU32::new(2_048).unwrap());
-    let first = crate::plugin(limits);
-    let repeated = crate::plugin(limits);
-    let changed = crate::plugin(ImageImportLimits::default());
+    let first = crate::source_plugin(limits);
+    let repeated = crate::source_plugin(limits);
+    let changed = crate::source_plugin(ImageImportLimits::default());
 
     assert_eq!(first.key(), repeated.key());
     assert_ne!(first.key(), changed.key());
@@ -6399,7 +6520,8 @@ fn image_plugin_definition_binds_canonical_limits_and_prepares_that_configuratio
     let plan = nara_app::PluginPlan::resolve((
         nara_app::PluginDefinition::for_default::<nara_tasks::TaskPlugin>(),
         nara_app::PluginDefinition::for_default::<nara_asset::AssetPlugin>(),
-        nara_app::PluginDefinition::for_default::<ImagePreparePlugin>(),
+        nara_app::PluginDefinition::for_default::<nara_asset::AssetSourcePlugin>(),
+        nara_app::PluginDefinition::for_default::<ImagePlugin>(),
         first,
     ))
     .unwrap();
@@ -6409,13 +6531,14 @@ fn image_plugin_definition_binds_canonical_limits_and_prepares_that_configuratio
 }
 
 #[test]
-fn invalid_image_plugin_limits_fail_during_preparation() {
+fn invalid_image_source_plugin_limits_fail_during_preparation() {
     let limits = ImageImportLimits::default().with_max_in_flight_bytes(ByteLimit::new(1).unwrap());
     let plan = nara_app::PluginPlan::resolve((
         nara_app::PluginDefinition::for_default::<nara_tasks::TaskPlugin>(),
         nara_app::PluginDefinition::for_default::<nara_asset::AssetPlugin>(),
-        nara_app::PluginDefinition::for_default::<ImagePreparePlugin>(),
-        crate::plugin(limits),
+        nara_app::PluginDefinition::for_default::<nara_asset::AssetSourcePlugin>(),
+        nara_app::PluginDefinition::for_default::<ImagePlugin>(),
+        crate::source_plugin(limits),
     ))
     .unwrap();
 
@@ -6423,7 +6546,7 @@ fn invalid_image_plugin_limits_fail_during_preparation() {
         plan.instantiate(),
         Err(nara_app::PluginInstantiationError::Prepare(
             nara_app::PluginPrepareError::Failed {
-                plugin: IMAGE_PLUGIN_ID,
+                plugin: IMAGE_SOURCE_PLUGIN_ID,
                 source,
             }
         )) if source.code() == "nara.image.invalid-import-limits"
@@ -6447,14 +6570,19 @@ fn app_with_image_plugin_pools(
     records: impl IntoIterator<Item = AssetRecord>,
     task_pools: TaskPools,
 ) -> App {
-    app_with_image_plugin_configuration(asset_root, records, task_pools, ImagePlugin::default())
+    app_with_image_plugin_configuration(
+        asset_root,
+        records,
+        task_pools,
+        ImageSourcePlugin::default(),
+    )
 }
 
 fn app_with_image_plugin_configuration(
     asset_root: &Path,
     records: impl IntoIterator<Item = AssetRecord>,
     task_pools: TaskPools,
-    plugin: ImagePlugin,
+    plugin: ImageSourcePlugin,
 ) -> App {
     let mut app = App::new();
     app.insert_resource(task_pools).unwrap();
@@ -6464,12 +6592,12 @@ fn app_with_image_plugin_configuration(
     app.add_plugins((
         nara_reflect::ComponentRegistryPlugin,
         nara_tasks::TaskPlugin::default(),
-        nara_asset::AssetPlugin,
+        (nara_asset::AssetPlugin, nara_asset::AssetSourcePlugin),
         nara_hierarchy::HierarchyPlugin,
         nara_transform::TransformPlugin,
         nara_render::RenderComponentsPlugin,
         nara_render::RenderPlugin::default(),
-        ImagePreparePlugin,
+        (ImagePlugin, ImagePreparePlugin),
     ))
     .unwrap();
     app.add_plugins(plugin.with_source_directory(image_source_directory(asset_root)))

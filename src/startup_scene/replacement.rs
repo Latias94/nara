@@ -48,10 +48,11 @@ where
 
 /// Replaces the committed data-only Scene and its retained source in one exclusive operation.
 ///
-/// Both Scenes may be expanded or processed Runtime inputs. Project-backed replacement needs a
-/// separate residency preflight, publication and retirement contract; passing a
-/// project source here is rejected before the callback or any Scene mutation. Use
-/// [`restart_current_scene_with_product`] to restart already resident project content.
+/// Both Scenes may be expanded or processed Runtime inputs. First-party hosted content needs a
+/// separate residency preflight, publication and retirement contract; replacing either side with
+/// hosted content here is rejected before the callback or any Scene mutation. Independent
+/// Runtime-content integrations retain their own resource custody. Use
+/// [`restart_current_scene_with_product`] to restart already resident content.
 ///
 /// The exact expected receipt, bindings authority, source coverage and bounded product writes are
 /// validated before retiring the prior instance. This does not promise rollback of arbitrary native
@@ -96,11 +97,11 @@ where
     let owner = world.resource::<CurrentSceneOwner>();
     if source
         .as_ref()
-        .is_some_and(|source| source.is_project_backed() || owner.source.is_project_backed())
+        .is_some_and(|source| source.is_content_managed() || owner.source.is_content_managed())
     {
         return rejected(
             "scene.current.project-residency-required",
-            "Project Scene replacement requires content residency preparation",
+            "Hosted Scene replacement requires content residency preparation",
         );
     }
     if nara_ecs::__private::validate_resource_scope::<CurrentSceneOwner>(world).is_err() {

@@ -266,13 +266,16 @@ pub(super) fn start_request(
     source_revision: SceneAuthoringRevision,
     prepared: &super::super::PreparedRuntimeStart,
 ) -> EditorGameStartRequest {
+    let (snapshot, plan) = prepared
+        .source()
+        .expect("Editor game activation retains the admitted source project");
     EditorGameStartRequest {
         document,
         source_revision,
-        project_lineage: prepared.plan.lineage(),
-        content_revision: prepared.snapshot.revision(),
-        schema_fingerprint: prepared.snapshot.schema_fingerprint(),
-        plugin_plan_fingerprint: prepared.plan.plugin_plan().fingerprint(),
+        project_lineage: plan.lineage(),
+        content_revision: snapshot.revision(),
+        schema_fingerprint: snapshot.schema_fingerprint(),
+        plugin_plan_fingerprint: plan.plugin_plan().fingerprint(),
         runtime_generation: prepared.generation(),
         capture: config,
         geometry_generation: 1,

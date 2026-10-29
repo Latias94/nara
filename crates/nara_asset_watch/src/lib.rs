@@ -394,7 +394,7 @@ const ASSET_WATCH_PRODUCT_REQUIREMENTS: &[nara_app::PluginProductCapability] =
 pub const ASSET_WATCH_PLUGIN_DECLARATION: nara_app::PluginDeclaration =
     nara_app::PluginDeclaration::new(ASSET_WATCH_PLUGIN_ID, nara_app::PluginCategory::Asset)
         .requires_plugins(&[
-            nara_asset::ASSET_PLUGIN_ID,
+            nara_asset::ASSET_SOURCE_PLUGIN_ID,
             nara_diagnostic::DIAGNOSTICS_PLUGIN_ID,
         ])
         .requires_product_capabilities(ASSET_WATCH_PRODUCT_REQUIREMENTS)

@@ -9,8 +9,8 @@ use std::{
 
 use nara_app::{App, CoreStage, RuntimeInstance};
 use nara_asset::{
-    AssetPath, AssetPlugin, AssetRecord, AssetServer, AssetSourceChanges, AssetSourceKind, Assets,
-    Handle, ProjectAssetDatabase, StableAssetId,
+    AssetPath, AssetPlugin, AssetRecord, AssetServer, AssetSourceChanges, AssetSourceKind,
+    AssetSourcePlugin, Assets, Handle, ProjectAssetDatabase, StableAssetId,
 };
 use nara_core::{ItemLimit, TimeLimit};
 use nara_ecs::{Res, ResMut, Resource};
@@ -18,7 +18,7 @@ use nara_fs::{CapabilityRights, DirectoryCapability, HostCapabilityOptions, Trus
 use nara_hierarchy::HierarchyPlugin;
 use nara_image::{
     ImageAsset, ImageImportBudgetHost, ImageImportLimits, ImageImporter, ImagePlugin,
-    ImagePreparePlugin, ImageReloadStats, ImageSourceDirectory,
+    ImagePreparePlugin, ImageReloadStats, ImageSourceDirectory, ImageSourcePlugin,
 };
 use nara_reflect::ComponentRegistryPlugin;
 use nara_render::{RenderComponentsPlugin, RenderPlugin};
@@ -92,16 +92,16 @@ impl ImageFixture {
         app.add_plugins((
             ComponentRegistryPlugin,
             TaskPlugin::new(task_config()),
-            AssetPlugin,
+            (AssetPlugin, AssetSourcePlugin),
             HierarchyPlugin,
             TransformPlugin,
             RenderComponentsPlugin,
             RenderPlugin::default(),
-            ImagePreparePlugin,
+            (ImagePlugin, ImagePreparePlugin),
         ))
         .unwrap();
         app.add_plugin(
-            ImagePlugin::with_budget_host(limits, budget.clone())
+            ImageSourcePlugin::with_budget_host(limits, budget.clone())
                 .unwrap()
                 .with_source_directory(image_source_directory(&root.path)),
         )

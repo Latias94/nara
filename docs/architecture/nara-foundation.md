@@ -169,7 +169,7 @@ or private. ADR 0089 remains Proposed; the implementation ledger is the authorit
 | `nara_asset_watch` | Optional `AssetWatchPlugin`, bounded semantic watch event queue, runtime status/diagnostics, source-change translator, and downstream admission observation | All `notify` integration and desktop filesystem watcher details behind the root `asset-watch` feature |
 | `nara_scene` | Bounded `SceneDocument`/`PrefabDocument` candidates, one canonical ordered roots-and-children placement closure, `ScenePatchDocument`, `SceneAuthoringSession`, `PrefabSourceResolver`, `SceneEntityId`, `Name`/`Visibility` schemas, scene materialization/export, and documented direct use with caller-owned `nara_reflect::ComponentRegistry` and `bevy_ecs::World` | Asset-aware placement/component validation, exact anchor-based patch transactions, undo/redo, order-preserving Prefab expansion, one-way ordered lowering into `nara_hierarchy`, failure-atomic exact-membership replacement/unload, and rejection of runtime topology export |
 | `nara_render` | `Camera2d`, `ViewMapping2d`, `RenderTarget`, `ViewportRect`, Presented-cut `ExtractedView`, owned topology-only `RenderFramePacket`, `RenderFrame`, and `RenderBackendStatus` | Backend-neutral camera mapping and bounded ordered views for one exclusive physical target; invertible global affine drawing/picking, explicit image extent and clear/load policy; private content-before-UI assembly and backend lifetime/status; no public pass, phase, dependency, or graph construction |
-| `nara_image` | Non-`Clone` `ImageAsset` with shared immutable pixel storage, `ImageImporter`, owned byte/file import requests, `ImageImportLimits`, `ImageImportBudgetHost`, reservation-bearing imported candidates, `ImagePlugin`, prepared image resources, image reload stats | Audited static non-interlaced PNG preflight/decode, shared RAII peak accounting, separate desired recipe/in-flight attempt/last-good publication, baseline-checked candidate publication and backend-neutral preparation; no arbitrary-codec, sampler, or material policy |
+| `nara_image` | Non-`Clone` `ImageAsset` with shared immutable pixel storage, `ImageImporter`, owned byte/file import requests, `ImageImportLimits`, `ImageImportBudgetHost`, reservation-bearing imported candidates, native `ImagePlugin`, explicit `ImageSourcePlugin`, independent `ImagePreparePlugin`, prepared image resources, image reload stats | Audited static non-interlaced PNG preflight/decode, shared RAII peak accounting, separate desired recipe/in-flight attempt/last-good publication, baseline-checked candidate publication and backend-neutral preparation; no arbitrary-codec, sampler, or material policy |
 | `nara_material` | `FilterMode`, `AddressMode`, `SamplerDescriptor`, `AlphaMode2d`, `Material2dDefinition`, `Material2dDefinitions`, `Material2dInstance` | Trusted Rust startup material definitions with one fragment-input contract, finite parameters and a second image binding; data selects admitted definitions without GPU authority; shader changes require restart |
 | `nara_sprite` | `Sprite`, `SpriteMaterial`, `TextureRegion`, `SpriteAnchor`, `Handle<ImageAsset>` material image binding | Sprite authoring component data with material-first image/sampler/alpha/tint; no backend handles |
 | `nara_tilemap` | `Tilemap`, `TileCoord`, `TileCell`, `TileSet`, `TileSetMaterial`, `TileAtlasLayout`, `TileLayer`, dirty chunk tracking | Tilemap authoring data with material-first tilesets that lower into textured quads now; later culling/cache mechanisms remain measurement-gated under ADR 0096 |
@@ -239,7 +239,8 @@ sequenceDiagram
     participant ECS as nara_ecs::World
     participant Asset as nara_asset::AssetServer
     participant FS as nara_fs::FileCapability
-    participant Image as nara_image::ImagePlugin
+    participant Image as nara_image::ImageSourcePlugin
+    participant ImagePrepare as nara_image::ImagePreparePlugin
     participant Render as nara_render
     participant SpriteRender as nara_sprite_render
     participant Ui as nara_ui
@@ -248,17 +249,19 @@ sequenceDiagram
 
     Note over Game,App: Composition and startup completed before this published-frame view
     loop frame
-        App->>Asset: TaskUpdate / AssetTaskUpdateSet::Poll
-        Tasks-->>Image: expose terminal IDs in the poller's entry snapshot
-        Asset->>Asset: ResolveSourceChanges into reload requests
-        Image->>FS: capture target and reserve conservative file admission
-        FS-->>Image: bounded read into Vec, then fixed Box bytes
-        Image->>Image: preflight PNG and resize to modeled decode/publication peak
-        Image->>Tasks: SpawnJobs transfers the admitted reservation owner
-        Image->>Asset: ApplyResults calls candidate.commit before releasing overlap
-        Note over Tasks,Image: readiness after the poller snapshot waits for next frame
+        opt explicit source reload facets selected
+            App->>Asset: TaskUpdate / AssetTaskUpdateSet::Poll
+            Tasks-->>Image: expose terminal IDs in the poller's entry snapshot
+            Asset->>Asset: ResolveSourceChanges into reload requests
+            Image->>FS: capture target and reserve conservative file admission
+            FS-->>Image: bounded read into Vec, then fixed Box bytes
+            Image->>Image: preflight PNG and resize to modeled decode/publication peak
+            Image->>Tasks: SpawnJobs transfers the admitted reservation owner
+            Image->>Asset: ApplyResults calls candidate.commit before releasing overlap
+            Note over Tasks,Image: readiness after the poller snapshot waits for next frame
+        end
         App->>ECS: PreUpdate / zero or more fixed ticks / Update / PostUpdate
-        Image->>Render: prepare backend-neutral image resource snapshots
+        ImagePrepare->>Render: prepare backend-neutral image resource snapshots
         App->>ECS: Extract completes one Presented spatial cut
         Render->>ECS: extract Camera2d views from that cut
         SpriteRender->>ECS: extract Sprite / Tilemap with same-cut affines and order
@@ -612,7 +615,11 @@ second real adapter or stronger isolation pressure.
   unsupported kinds and missing consumers cannot remain queued or indefinitely `Loading`.
 - Asset source-change, request-admission, and terminal-resolution failures are structured diagnostics rather than discarded errors. `AssetEvents` is an observational bounded queue: overflow suppresses later deltas behind a sticky rescan marker until a consumer rebuilds from all `AssetStates` and explicitly completes the rescan. Asset reload policy preserves last-good typed values on failed reload, records failed first loads without inventing values, rejects stale removals after a same-frame replacement, and keeps GPU objects in backend caches rather than imported artifacts.
 - Scene/prefab authoring identity is provenance-aware. Scene-local entities patch the scene, prefab source entities patch the prefab source, prefab anchors patch the scene instance, and prefab-expanded projections must write back only through explicit override or convert-to-local flows.
-- `nara_image::ImagePlugin` registers `ImageImporter`, admits bounded reload tasks, polls typed
+- `nara_asset::AssetPlugin` installs native identities, states/events and ordering; `ImagePlugin`
+  installs Image storage. Source execution requires the explicit `AssetSourcePlugin` and
+  `ImageSourcePlugin` selections. Processed Host startup uses the original plan's typed Runtime
+  codecs and concrete residency instead of a source database or import fallback.
+- `nara_image::ImageSourcePlugin` registers `ImageImporter`, admits bounded reload tasks, polls typed
   terminals, orders each asset stream across frames, and sorts ready streams by task key. Desired
   settings, in-flight attempts and last-good usable pixels have separate lifetimes. Metadata
   observations survive request/task rejection, supersession and decode failure until the current

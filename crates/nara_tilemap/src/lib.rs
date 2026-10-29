@@ -26,7 +26,9 @@ mod runtime;
 #[cfg(feature = "serde")]
 mod source;
 
-pub use admission::{TilemapMembershipError, validate_persisted_tilemap_membership};
+pub use admission::{
+    TilemapMembershipError, tilemap_membership_work_bytes, validate_persisted_tilemap_membership,
+};
 #[cfg(feature = "serde")]
 pub use runtime::TileSetRuntimeCodec;
 pub use runtime::{TileSetDescriptor, TileSetDescriptorError, TileSetDomain};
@@ -938,12 +940,12 @@ fn vec2_value(value: Vec2) -> Result<ComponentValue, ComponentCodecError> {
     ]))
 }
 
-fn read_color(value: &ComponentValue, field: &str) -> Result<Color, ComponentCodecError> {
+fn read_color(value: &ComponentValue) -> Result<Color, ComponentCodecError> {
     Ok(Color::rgba(
-        read_f32(value.field("r")?, &format!("{field}.r"))?,
-        read_f32(value.field("g")?, &format!("{field}.g"))?,
-        read_f32(value.field("b")?, &format!("{field}.b"))?,
-        read_f32(value.field("a")?, &format!("{field}.a"))?,
+        read_f32(value.field("r")?, "cell.color.r")?,
+        read_f32(value.field("g")?, "cell.color.g")?,
+        read_f32(value.field("b")?, "cell.color.b")?,
+        read_f32(value.field("a")?, "cell.color.a")?,
     ))
 }
 
@@ -970,25 +972,29 @@ fn read_cells(
         .iter()
         .enumerate()
         .map(|(index, entry)| {
-            let coord = entry.field("coord")?;
-            let cell = entry.field("cell")?;
-            let coord = TileCoord::new(
-                read_i32(coord, "x", "cells[].coord.x")?,
-                read_i32(coord, "y", "cells[].coord.y")?,
-            );
+            let (coord, cell) = read_cell(entry)?;
             if !coordinates.insert(coord) {
                 return Err(ComponentCodecError::invalid_field(
                     format!("cells[{index}].coord"),
                     "unique tile coordinate",
                 ));
             }
-            Ok((
-                coord,
-                TileCell::new(TileIndex::new(read_u32(cell, "tile", "cells[].cell.tile")?))
-                    .with_color(read_color(cell.field("color")?, "cell.color")?),
-            ))
+            Ok((coord, cell))
         })
         .collect()
+}
+
+fn read_cell(entry: &ComponentValue) -> Result<(TileCoord, TileCell), ComponentCodecError> {
+    let coord = entry.field("coord")?;
+    let cell = entry.field("cell")?;
+    Ok((
+        TileCoord::new(
+            read_i32(coord, "x", "cells[].coord.x")?,
+            read_i32(coord, "y", "cells[].coord.y")?,
+        ),
+        TileCell::new(TileIndex::new(read_u32(cell, "tile", "cells[].cell.tile")?))
+            .with_color(read_color(cell.field("color")?)?),
+    ))
 }
 
 fn read_i32(
@@ -1407,6 +1413,93 @@ mod tests {
                 ));
                 assert_eq!(server, before);
             }
+        }
+    }
+
+    #[test]
+    fn membership_checks_unique_coordinates_with_one_bounded_selection_vector() {
+        let source = stable_id("2f0d71c7-14fc-4ed4-b48b-1c61bba8b97f");
+        let reference =
+            AssetRef::Product(AssetProductRef::new(source, ImportedProductId::PRIMARY).unwrap());
+        let mut value = ComponentValue::map([
+            (
+                "tileset",
+                nara_reflect::encode_asset_reference_value(&reference),
+            ),
+            (
+                "cells",
+                ComponentValue::List(vec![tile_cell_value(9, -1, 0), tile_cell_value(-2, 5, 0)]),
+            ),
+        ]);
+        let atlas = TileAtlasLayout::grid(Vec2::ONE, 1, 1);
+        validate_persisted_tilemap_membership(&value, |_| Some(atlas)).unwrap();
+        assert_eq!(
+            tilemap_membership_work_bytes(&value),
+            Some(
+                std::mem::size_of::<Vec<(TileCoord, TileIndex, usize)>>()
+                    + 2 * std::mem::size_of::<(TileCoord, TileIndex, usize)>()
+                    + 36,
+            )
+        );
+        value = ComponentValue::map([
+            (
+                "tileset",
+                nara_reflect::encode_asset_reference_value(&reference),
+            ),
+            (
+                "cells",
+                ComponentValue::List(vec![
+                    tile_cell_value(9, -1, 0),
+                    tile_cell_value(-2, 5, 0),
+                    tile_cell_value(9, -1, 0),
+                ]),
+            ),
+        ]);
+        assert!(matches!(
+            validate_persisted_tilemap_membership(&value, |_| {
+                panic!("invalid duplicate coordinates must refuse before resolving an atlas")
+            }),
+            Err(TilemapMembershipError::InvalidValue(_))
+        ));
+    }
+
+    #[test]
+    fn empty_membership_still_bounds_reference_decoding() {
+        let source = stable_id("2f0d71c7-14fc-4ed4-b48b-1c61bba8b97f");
+        let auxiliary =
+            ImportedProductId::parse_subproduct("011a8cc0-343a-4b95-8adb-3aa6d81977ed").unwrap();
+        let path = format!("tilesets/{}.ron", "a".repeat(64 * 1024));
+        for (reference, bytes) in [
+            (AssetRef::path(&path).unwrap(), path.len()),
+            (
+                AssetRef::Product(
+                    AssetProductRef::new(source, ImportedProductId::PRIMARY).unwrap(),
+                ),
+                36,
+            ),
+            (
+                AssetRef::Product(AssetProductRef::new(source, auxiliary).unwrap()),
+                72,
+            ),
+        ] {
+            let value = ComponentValue::map([
+                (
+                    "tileset",
+                    nara_reflect::encode_asset_reference_value(&reference),
+                ),
+                ("cells", ComponentValue::List(Vec::new())),
+            ]);
+            assert_eq!(tilemap_membership_work_bytes(&value), Some(bytes));
+            validate_persisted_tilemap_membership(&value, |_| {
+                panic!("an empty map requires no atlas cell lookup")
+            })
+            .unwrap();
+        }
+        for value in [
+            ComponentValue::map([] as [(&str, ComponentValue); 0]),
+            ComponentValue::map([("tileset", ComponentValue::Null)]),
+        ] {
+            assert_eq!(tilemap_membership_work_bytes(&value), Some(0));
         }
     }
 

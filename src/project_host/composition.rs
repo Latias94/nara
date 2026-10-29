@@ -447,6 +447,11 @@ impl fmt::Debug for RuntimePlan {
 
 impl RuntimePlan {
     #[must_use]
+    pub const fn configuration_plan(&self) -> &RuntimeConfigurationPlan {
+        &self.configuration
+    }
+
+    #[must_use]
     pub const fn lineage(&self) -> ProjectSettingsLineage {
         self.lineage
     }
@@ -867,6 +872,8 @@ fn resolve_runtime_composition(
     let data_contributors = request.recipe.data_contributors();
     #[cfg(all(feature = "runtime-2d", feature = "serde"))]
     let asset_domains = request.recipe.asset_domains.clone();
+    #[cfg(all(feature = "runtime-2d", feature = "serde"))]
+    let runtime_codecs = request.recipe.runtime_codecs.clone();
     let snapshot_cell = Arc::new(OnceLock::new());
     request.plugins = request
         .plugins
@@ -909,6 +916,8 @@ fn resolve_runtime_composition(
             required,
             plugin_plan,
             schema_validation,
+            #[cfg(all(feature = "runtime-2d", feature = "serde"))]
+            runtime_codecs,
         },
         #[cfg(all(feature = "runtime-2d", feature = "serde"))]
         asset_domains,

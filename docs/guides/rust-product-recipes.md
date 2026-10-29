@@ -264,11 +264,15 @@ replacement or Restart. Its optional `source_view()` remains weak and cannot ext
 
 Hosted products request startup or a declared delivery root through the `ProjectScenes` system
 parameter. Keep the returned `ProjectSceneRequestId` and observe its state. `Ready` exposes a
-borrowed `prepared(id)` view of the expanded target document, selected path and expected current
+borrowed `prepared(id)` view of the target document, Source/Product selection and expected current
 instance. Validate game-owned checkpoint references and prepare owned runtime values before calling
 `commit_prepared_project_scene` at an exclusive simulation boundary. The Host reuses its original
 project/schema authority, loader budget and CPU residency transaction; gameplay does not resolve a
-second RuntimePlan or construct direct sources to bypass resource ownership.
+second RuntimePlan or construct direct sources to bypass resource ownership. Processed runs
+request a complete `AssetProductRef` through the same interface and retain their original base and
+configuration plan. `selected_scene_path()` and `selected_scene_product()` return only the matching
+kind. Their typed collections and concrete Image/TileSet residency use that same publication tail.
+See the [processed Runtime entry](runtime-content-base.md#materialization-and-retention).
 
 Exclusive callers use `ProjectScenes::scope(world, |scenes| ...)` for that same request interface.
 For example, the scope can turn `scenes.prepared(id)` into owned checkpoint validation data; call

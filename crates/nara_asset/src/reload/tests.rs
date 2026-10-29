@@ -41,8 +41,43 @@ fn install_asset_plugin(app: &mut App) {
         nara_tasks::TaskPools::inline_for_tests(nara_tasks::TaskPoolConfig::default()).unwrap(),
     )
     .unwrap();
-    app.add_plugins((nara_tasks::TaskPlugin::default(), AssetPlugin))
-        .unwrap();
+    app.add_plugins((
+        nara_tasks::TaskPlugin::default(),
+        AssetPlugin,
+        AssetSourcePlugin,
+    ))
+    .unwrap();
+}
+
+#[test]
+fn native_assets_run_without_source_resources_or_task_pools() {
+    let mut app = App::new();
+    app.add_plugins(AssetPlugin).unwrap();
+    let mut runtime = nara_app::RuntimeInstance::start(app).unwrap();
+    runtime.drive(std::time::Duration::ZERO).unwrap();
+
+    let world = runtime.world();
+    assert!(world.contains_resource::<AssetServer>());
+    assert!(world.contains_resource::<AssetStates>());
+    assert!(world.contains_resource::<AssetEvents>());
+    assert!(!world.contains_resource::<ProjectAssetDatabase>());
+    assert!(!world.contains_resource::<AssetDependencyGraph>());
+    assert!(!world.contains_resource::<AssetSourceChanges>());
+    assert!(!world.contains_resource::<AssetReloadRequests>());
+    assert!(!world.contains_resource::<AssetReloadDiagnostics>());
+    assert!(!world.contains_resource::<AssetLoadGenerations>());
+    assert!(!world.contains_resource::<AssetSourceRoot>());
+    assert!(!world.contains_resource::<nara_tasks::TaskPools>());
+    runtime.finish().unwrap();
+}
+
+#[test]
+fn asset_source_requires_native_assets_before_build() {
+    assert!(matches!(
+        nara_app::PluginPlan::resolve(nara_app::PluginDefinition::for_default::<AssetSourcePlugin>()),
+        Err(nara_app::PluginPlanError::MissingPlugin { plugin, required })
+            if plugin == ASSET_SOURCE_PLUGIN_ID && required == ASSET_PLUGIN_ID
+    ));
 }
 
 #[derive(Debug, Default, Resource)]

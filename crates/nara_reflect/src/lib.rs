@@ -28,7 +28,8 @@ mod value;
 
 pub use asset_reference::{
     AssetReferenceRewriteError, DeclaredAssetReference, DeclaredAssetReferenceError,
-    collect_declared_asset_references, collect_declared_asset_references_from_schema,
+    asset_reference_decode_work_bytes, collect_declared_asset_references,
+    collect_declared_asset_references_from_schema,
     collect_declared_asset_references_from_schema_with_limits,
     collect_declared_asset_references_with_limits, collect_declared_field_asset_references,
     collect_declared_field_asset_references_with_limits,

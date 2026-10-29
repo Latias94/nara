@@ -66,6 +66,7 @@ fn definition() -> RuntimeContentCatalogDefinition {
         configuration: RuntimeConfiguration::default(),
         plugin_plan_fingerprint: [31; 32],
         schema_fingerprint: [47; 32],
+        runtime_codecs_fingerprint: [59; 32],
         startup_scene: startup,
         scenes: vec![later, startup],
         addressable_roots: vec![text_b, later],
@@ -126,6 +127,7 @@ fn complete_catalog_round_trip_retains_configuration_identity_and_compound_produ
     assert_eq!(decoded.configuration(), catalog.configuration());
     assert_eq!(decoded.plugin_plan_fingerprint(), [31; 32]);
     assert_eq!(decoded.schema_fingerprint(), [47; 32]);
+    assert_eq!(decoded.runtime_codecs_fingerprint(), [59; 32]);
     assert_eq!(decoded.startup_scene(), product(1, None));
     assert_eq!(decoded.scenes(), [product(1, None), product(2, None)]);
     assert_eq!(
@@ -160,6 +162,50 @@ fn complete_catalog_round_trip_retains_configuration_identity_and_compound_produ
             .binary_search_by_key(&product(2, None), RuntimeContentDependency::product)
             .is_ok()
     );
+}
+
+#[test]
+fn runtime_codec_fingerprint_is_required_without_a_wire_default() {
+    let mut wire = value();
+    wire["payload"]
+        .as_object_mut()
+        .unwrap()
+        .remove("runtime_codecs_fingerprint")
+        .unwrap();
+    let error = decode(&wire).unwrap_err();
+    assert!(
+        matches!(&error, RuntimeContentCatalogError::Json(error) if error.to_string().contains("missing field `runtime_codecs_fingerprint`")),
+        "{error}"
+    );
+}
+
+#[test]
+fn changed_runtime_codec_fingerprint_changes_canonical_content_and_round_trips() {
+    let original = catalog();
+    let mut input = definition();
+    input.runtime_codecs_fingerprint[0] ^= 1;
+    let expected = input.runtime_codecs_fingerprint;
+    let changed =
+        RuntimeContentCatalog::new(input, RuntimeContentCatalogLimits::default()).unwrap();
+    let original_bytes = original.to_json_bytes().unwrap();
+    let changed_bytes = changed.to_json_bytes().unwrap();
+    assert_ne!(changed_bytes, original_bytes);
+    assert_ne!(
+        ContentDigest::of_bytes(&changed_bytes),
+        ContentDigest::of_bytes(&original_bytes)
+    );
+    let decoded = RuntimeContentCatalog::from_json_bytes(
+        &changed_bytes,
+        RuntimeContentCatalogLimits::default(),
+    )
+    .unwrap();
+    assert_eq!(decoded.runtime_codecs_fingerprint(), expected);
+    assert_eq!(
+        decoded.plugin_plan_fingerprint(),
+        original.plugin_plan_fingerprint()
+    );
+    assert_eq!(decoded.schema_fingerprint(), original.schema_fingerprint());
+    assert_eq!(decoded.to_json_bytes().unwrap(), changed_bytes);
 }
 
 #[test]

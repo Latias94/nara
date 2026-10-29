@@ -70,16 +70,66 @@ impl HeadlessDrive {
     }
 }
 
+/// Execution policy shared by source-backed and processed headless runs.
+pub struct HeadlessRunOptions<O> {
+    drive: HeadlessDrive,
+    cleanup_policy: RuntimeClosePolicy,
+    terminal_predicate: Option<TerminalPredicate<O>>,
+}
+
+impl<O> fmt::Debug for HeadlessRunOptions<O> {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("HeadlessRunOptions")
+            .field("drive", &self.drive)
+            .field("cleanup_policy", &self.cleanup_policy)
+            .field(
+                "stops_on_terminal_outcome",
+                &self.terminal_predicate.is_some(),
+            )
+            .finish_non_exhaustive()
+    }
+}
+
+impl<O> HeadlessRunOptions<O> {
+    #[must_use]
+    pub fn new(fixed_ticks: NonZeroU32) -> Self {
+        Self {
+            drive: HeadlessDrive::ExactTicks(fixed_ticks),
+            cleanup_policy: RuntimeClosePolicy::default(),
+            terminal_predicate: None,
+        }
+    }
+
+    #[must_use]
+    pub fn frames(count: NonZeroU32, real_delta: Duration) -> Self {
+        Self {
+            drive: HeadlessDrive::Frames { count, real_delta },
+            ..Self::new(count)
+        }
+    }
+
+    #[must_use]
+    pub fn with_cleanup_timeout(mut self, timeout: Duration) -> Self {
+        self.cleanup_policy = RuntimeClosePolicy::new(timeout);
+        self
+    }
+
+    #[must_use]
+    pub fn stop_when(mut self, predicate: impl Fn(&O) -> bool + Send + 'static) -> Self {
+        self.terminal_predicate = Some(Box::new(predicate));
+        self
+    }
+}
+
 /// File-backed headless run intent for one concrete product action.
 ///
 /// The recipe is the complete Rust product-composition input. Candidate, publication, and cleanup
 /// choreography remain private to the root Host.
 pub struct HeadlessRunIntent<O> {
     profile: Option<String>,
-    drive: HeadlessDrive,
-    cleanup_policy: RuntimeClosePolicy,
     recipe: ProductRecipe,
-    terminal_predicate: Option<TerminalPredicate<O>>,
+    execution: HeadlessRunOptions<O>,
 }
 
 impl<O> fmt::Debug for HeadlessRunIntent<O> {
@@ -87,13 +137,8 @@ impl<O> fmt::Debug for HeadlessRunIntent<O> {
         formatter
             .debug_struct("HeadlessRunIntent")
             .field("profile_present", &self.profile.is_some())
-            .field("drive", &self.drive)
-            .field("cleanup_policy", &self.cleanup_policy)
+            .field("execution", &self.execution)
             .field("recipe", &self.recipe)
-            .field(
-                "stops_on_terminal_outcome",
-                &self.terminal_predicate.is_some(),
-            )
             .finish_non_exhaustive()
     }
 }
@@ -108,10 +153,8 @@ impl<O> HeadlessRunIntent<O> {
     pub fn new(fixed_ticks: NonZeroU32) -> Self {
         Self {
             profile: None,
-            drive: HeadlessDrive::ExactTicks(fixed_ticks),
-            cleanup_policy: RuntimeClosePolicy::default(),
             recipe: ProductRecipe::new(),
-            terminal_predicate: None,
+            execution: HeadlessRunOptions::new(fixed_ticks),
         }
     }
 
@@ -123,7 +166,7 @@ impl<O> HeadlessRunIntent<O> {
     #[must_use]
     pub fn frames(count: NonZeroU32, real_delta: Duration) -> Self {
         Self {
-            drive: HeadlessDrive::Frames { count, real_delta },
+            execution: HeadlessRunOptions::frames(count, real_delta),
             ..Self::new(count)
         }
     }
@@ -136,7 +179,7 @@ impl<O> HeadlessRunIntent<O> {
 
     #[must_use]
     pub fn with_cleanup_timeout(mut self, timeout: Duration) -> Self {
-        self.cleanup_policy = RuntimeClosePolicy::new(timeout);
+        self.execution = self.execution.with_cleanup_timeout(timeout);
         self
     }
 
@@ -154,7 +197,13 @@ impl<O> HeadlessRunIntent<O> {
     /// with `project.run.tick-limit` or `project.run.frame-limit` and drives ordinary shutdown.
     #[must_use]
     pub fn stop_when(mut self, predicate: impl Fn(&O) -> bool + Send + 'static) -> Self {
-        self.terminal_predicate = Some(Box::new(predicate));
+        self.execution = self.execution.stop_when(predicate);
+        self
+    }
+
+    #[must_use]
+    pub fn with_execution(mut self, execution: HeadlessRunOptions<O>) -> Self {
+        self.execution = execution;
         self
     }
 }
@@ -189,7 +238,8 @@ impl<O> HeadlessRunReport<O> {
     /// Returns the exact startup source closure once project checking succeeded.
     ///
     /// Runtime startup, execution, shutdown, or cleanup may still have failed. `None` means the
-    /// manifest, product composition, or startup content check itself did not publish a closure.
+    /// manifest, product composition, or startup content check itself did not publish a closure,
+    /// or that this run selected an already admitted processed Runtime base.
     #[must_use]
     pub const fn startup_content_closure(&self) -> Option<&StartupContentClosureReceipt> {
         self.startup_content_closure.as_ref()
@@ -202,12 +252,39 @@ impl<O> HeadlessRunReport<O> {
 }
 
 #[cfg(all(feature = "desktop-winit", feature = "render-wgpu"))]
+/// Event-loop and cleanup policy, independently of the selected content input.
+#[derive(Debug, Default)]
+pub struct DesktopRunOptions {
+    cleanup_policy: RuntimeClosePolicy,
+    runner: WinitRunner,
+}
+
+#[cfg(all(feature = "desktop-winit", feature = "render-wgpu"))]
+impl DesktopRunOptions {
+    #[must_use]
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    #[must_use]
+    pub fn with_cleanup_timeout(mut self, timeout: Duration) -> Self {
+        self.cleanup_policy = RuntimeClosePolicy::new(timeout);
+        self
+    }
+
+    #[must_use]
+    pub fn with_control_flow(mut self, control_flow: WinitControlFlow) -> Self {
+        self.runner = WinitRunner::new(control_flow);
+        self
+    }
+}
+
+#[cfg(all(feature = "desktop-winit", feature = "render-wgpu"))]
 /// File-backed desktop run intent for the concrete first-party Winit product path.
 pub struct DesktopRunIntent {
     profile: Option<String>,
-    cleanup_policy: RuntimeClosePolicy,
     recipe: ProductRecipe,
-    runner: WinitRunner,
+    execution: DesktopRunOptions,
     first_present: Option<DesktopFirstPresentRequest>,
 }
 
@@ -217,9 +294,8 @@ impl fmt::Debug for DesktopRunIntent {
         formatter
             .debug_struct("DesktopRunIntent")
             .field("profile_present", &self.profile.is_some())
-            .field("cleanup_policy", &self.cleanup_policy)
+            .field("execution", &self.execution)
             .field("recipe", &self.recipe)
-            .field("runner", &self.runner)
             .field(
                 "first_present_mode",
                 &self
@@ -244,9 +320,8 @@ impl DesktopRunIntent {
     pub fn new() -> Self {
         Self {
             profile: None,
-            cleanup_policy: RuntimeClosePolicy::default(),
             recipe: ProductRecipe::new(),
-            runner: WinitRunner::default(),
+            execution: DesktopRunOptions::new(),
             first_present: None,
         }
     }
@@ -259,7 +334,7 @@ impl DesktopRunIntent {
 
     #[must_use]
     pub fn with_cleanup_timeout(mut self, timeout: Duration) -> Self {
-        self.cleanup_policy = RuntimeClosePolicy::new(timeout);
+        self.execution = self.execution.with_cleanup_timeout(timeout);
         self
     }
 
@@ -272,7 +347,13 @@ impl DesktopRunIntent {
 
     #[must_use]
     pub fn with_control_flow(mut self, control_flow: WinitControlFlow) -> Self {
-        self.runner = WinitRunner::new(control_flow);
+        self.execution = self.execution.with_control_flow(control_flow);
+        self
+    }
+
+    #[must_use]
+    pub fn with_execution(mut self, execution: DesktopRunOptions) -> Self {
+        self.execution = execution;
         self
     }
 
@@ -392,13 +473,29 @@ impl DesktopRun {
         Self::new_inner(project_root, intent, None)
     }
 
+    /// Runs an admitted processed base through the same desktop Runtime and close owner.
+    ///
+    /// Source-supervised activation and its source-closure attestation remain source operations.
+    #[must_use]
+    pub fn from_runtime_content(
+        base: crate::runtime_content::RuntimeContentBase,
+        execution: DesktopRunOptions,
+    ) -> Self {
+        Self {
+            state: DesktopRunState::Fresh(DesktopRunInputs::Processed { base, execution }),
+            diagnostics: DiagnosticReport::default(),
+            startup_content_closure: None,
+            presentation_verification: None,
+        }
+    }
+
     fn new_inner(
         project_root: DirectoryCapability,
         intent: DesktopRunIntent,
         overlay: Option<RuntimePluginOverlay>,
     ) -> Self {
         Self {
-            state: DesktopRunState::Fresh(DesktopRunInputs {
+            state: DesktopRunState::Fresh(DesktopRunInputs::Source {
                 project_root,
                 intent,
                 overlay,
@@ -471,46 +568,55 @@ impl DesktopRun {
     }
 
     fn execute_fresh(&mut self, inputs: DesktopRunInputs) -> DesktopRunState {
-        let DesktopRunInputs {
-            project_root,
-            intent,
-            overlay,
-        } = inputs;
-        let DesktopRunIntent {
-            profile,
-            cleanup_policy,
-            recipe,
-            runner,
-            first_present,
-        } = intent;
-        if first_present
-            .as_ref()
-            .is_some_and(|request| !request.is_bound_to_project_root(&project_root))
-        {
-            self.diagnostics.extend(single_error(
-                "project.desktop.supervised-project-root-mismatch",
-                "Desktop supervised activation was verified against another project capability",
-            ));
-            return DesktopRunState::Failed;
-        }
-        let verification = first_present.map(DesktopFirstPresentVerification::new);
-        let host_policy = verification
-            .as_ref()
-            .map(DesktopFirstPresentVerification::host_policy);
+        let (prepared, runner, verification) = match inputs {
+            DesktopRunInputs::Source {
+                project_root,
+                intent,
+                overlay,
+            } => {
+                let DesktopRunIntent {
+                    profile,
+                    recipe,
+                    execution,
+                    first_present,
+                } = intent;
+                if first_present
+                    .as_ref()
+                    .is_some_and(|request| !request.is_bound_to_project_root(&project_root))
+                {
+                    self.diagnostics.extend(single_error(
+                        "project.desktop.supervised-project-root-mismatch",
+                        "Desktop supervised activation was verified against another project capability",
+                    ));
+                    return DesktopRunState::Failed;
+                }
+                let verification = first_present.map(DesktopFirstPresentVerification::new);
+                let host_policy = verification
+                    .as_ref()
+                    .map(DesktopFirstPresentVerification::host_policy);
+                let prepared = prepare_project_start(
+                    project_root,
+                    profile,
+                    execution.cleanup_policy,
+                    recipe,
+                    overlay,
+                    host_policy,
+                    Vec::new(),
+                );
+                (prepared, execution.runner, verification)
+            }
+            DesktopRunInputs::Processed { base, execution } => (
+                prepare_runtime_content_start(base, execution.cleanup_policy, Vec::new()),
+                execution.runner,
+                None,
+            ),
+        };
         let PreparedProjectStart {
             mut host,
             mut attempt,
             plan_diagnostics,
             startup_content_closure,
-        } = match prepare_project_start(
-            project_root,
-            profile,
-            cleanup_policy,
-            recipe,
-            overlay,
-            host_policy,
-            Vec::new(),
-        ) {
+        } = match prepared {
             Ok(prepared) => prepared,
             Err(error) => {
                 self.startup_content_closure = error.startup_content_closure;
@@ -518,7 +624,7 @@ impl DesktopRun {
                 return DesktopRunState::Failed;
             }
         };
-        self.startup_content_closure = Some(startup_content_closure);
+        self.startup_content_closure = startup_content_closure;
         self.diagnostics.extend(plan_diagnostics);
         match host.complete_start(&mut attempt) {
             Ok(diagnostics) => {
@@ -690,10 +796,16 @@ impl DesktopRun {
 }
 
 #[cfg(all(feature = "desktop-winit", feature = "render-wgpu"))]
-struct DesktopRunInputs {
-    project_root: DirectoryCapability,
-    intent: DesktopRunIntent,
-    overlay: Option<RuntimePluginOverlay>,
+enum DesktopRunInputs {
+    Source {
+        project_root: DirectoryCapability,
+        intent: DesktopRunIntent,
+        overlay: Option<RuntimePluginOverlay>,
+    },
+    Processed {
+        base: crate::runtime_content::RuntimeContentBase,
+        execution: DesktopRunOptions,
+    },
 }
 
 #[cfg(all(feature = "desktop-winit", feature = "render-wgpu"))]
@@ -1347,6 +1459,27 @@ where
         Self::new_inner(project_root, intent, None, commands)
     }
 
+    /// Runs the startup and later Scenes of an already admitted immutable Runtime base.
+    ///
+    /// The base retains its original executable plan. Execution policy cannot choose another
+    /// recipe, source profile or directory, and no source Check receipt is manufactured.
+    #[must_use]
+    pub fn from_runtime_content(
+        base: crate::runtime_content::RuntimeContentBase,
+        execution: HeadlessRunOptions<O>,
+        commands: Vec<GameplayCommandSubmission>,
+    ) -> Self {
+        Self {
+            state: HeadlessRunState::Fresh(HeadlessRunInputs::Processed {
+                base,
+                execution,
+                commands,
+            }),
+            diagnostics: DiagnosticReport::default(),
+            startup_content_closure: None,
+        }
+    }
+
     fn new_inner(
         project_root: DirectoryCapability,
         intent: HeadlessRunIntent<O>,
@@ -1354,7 +1487,7 @@ where
         commands: Vec<GameplayCommandSubmission>,
     ) -> Self {
         Self {
-            state: HeadlessRunState::Fresh(HeadlessRunInputs {
+            state: HeadlessRunState::Fresh(HeadlessRunInputs::Source {
                 project_root,
                 intent,
                 overlay,
@@ -1424,7 +1557,7 @@ where
                 return HeadlessRunState::Failed;
             }
         };
-        self.startup_content_closure = Some(startup_content_closure);
+        self.startup_content_closure = startup_content_closure;
         self.diagnostics.extend(plan_diagnostics);
 
         match host.complete_start(&mut attempt) {
@@ -1548,11 +1681,18 @@ where
     }
 }
 
-struct HeadlessRunInputs<O> {
-    project_root: DirectoryCapability,
-    intent: HeadlessRunIntent<O>,
-    overlay: Option<RuntimePluginOverlay>,
-    commands: Vec<GameplayCommandSubmission>,
+enum HeadlessRunInputs<O> {
+    Source {
+        project_root: DirectoryCapability,
+        intent: HeadlessRunIntent<O>,
+        overlay: Option<RuntimePluginOverlay>,
+        commands: Vec<GameplayCommandSubmission>,
+    },
+    Processed {
+        base: crate::runtime_content::RuntimeContentBase,
+        execution: HeadlessRunOptions<O>,
+        commands: Vec<GameplayCommandSubmission>,
+    },
 }
 
 struct PreparedStart<O> {
@@ -1561,14 +1701,14 @@ struct PreparedStart<O> {
     drive: HeadlessDrive,
     terminal_predicate: Option<TerminalPredicate<O>>,
     plan_diagnostics: DiagnosticReport,
-    startup_content_closure: StartupContentClosureReceipt,
+    startup_content_closure: Option<StartupContentClosureReceipt>,
 }
 
 struct PreparedProjectStart {
     host: ProjectHost,
     attempt: RuntimeStartAttempt,
     plan_diagnostics: DiagnosticReport,
-    startup_content_closure: StartupContentClosureReceipt,
+    startup_content_closure: Option<StartupContentClosureReceipt>,
 }
 
 struct PreparedProjectStartError {
@@ -1627,36 +1767,62 @@ fn state_after_failure<O>(host: ProjectHost) -> HeadlessRunState<O> {
 fn prepare_start<O>(
     inputs: HeadlessRunInputs<O>,
 ) -> Result<PreparedStart<O>, PreparedProjectStartError> {
-    let HeadlessRunInputs {
-        project_root,
-        intent,
-        overlay,
-        commands,
-    } = inputs;
-    let HeadlessRunIntent {
-        profile,
-        drive,
-        cleanup_policy,
-        recipe,
-        terminal_predicate,
-    } = intent;
-    let prepared = prepare_project_start(
-        project_root,
-        profile,
-        cleanup_policy,
-        recipe,
-        overlay,
-        None,
-        commands,
-    )?;
-    Ok(PreparedStart {
-        host: prepared.host,
-        attempt: prepared.attempt,
-        drive,
-        terminal_predicate,
-        plan_diagnostics: prepared.plan_diagnostics,
-        startup_content_closure: prepared.startup_content_closure,
-    })
+    match inputs {
+        HeadlessRunInputs::Source {
+            project_root,
+            intent,
+            overlay,
+            commands,
+        } => {
+            let HeadlessRunIntent {
+                profile,
+                recipe,
+                execution,
+            } = intent;
+            let HeadlessRunOptions {
+                drive,
+                cleanup_policy,
+                terminal_predicate,
+            } = execution;
+            let prepared = prepare_project_start(
+                project_root,
+                profile,
+                cleanup_policy,
+                recipe,
+                overlay,
+                None,
+                commands,
+            )?;
+            Ok(PreparedStart {
+                host: prepared.host,
+                attempt: prepared.attempt,
+                drive,
+                terminal_predicate,
+                plan_diagnostics: prepared.plan_diagnostics,
+                startup_content_closure: prepared.startup_content_closure,
+            })
+        }
+        HeadlessRunInputs::Processed {
+            base,
+            execution,
+            commands,
+        } => {
+            let HeadlessRunOptions {
+                drive,
+                cleanup_policy,
+                terminal_predicate,
+            } = execution;
+            let prepared = prepare_runtime_content_start(base, cleanup_policy, commands)?;
+            Ok(PreparedStart {
+                host: prepared.host,
+                attempt: prepared.attempt,
+                drive,
+                terminal_predicate,
+                plan_diagnostics: prepared.plan_diagnostics,
+                startup_content_closure: None,
+            })
+        }
+    }
 }
 
 fn prepare_project_start(
@@ -1685,7 +1851,7 @@ fn prepare_project_start(
         startup_content_closure: None,
     })?;
     let (candidate, plan, snapshot, loader) = checked.into_delivery_parts();
-    let plan_diagnostics = runtime_plan_selected_report(&plan);
+    let plan_diagnostics = runtime_plan_selected_report(plan.configuration_plan());
     let startup_content_closure = snapshot
         .startup_content_closure()
         .expect("the runtime startup check selects the manifest's default Scene");
@@ -1707,7 +1873,28 @@ fn prepare_project_start(
         host,
         attempt,
         plan_diagnostics,
-        startup_content_closure,
+        startup_content_closure: Some(startup_content_closure),
+    })
+}
+
+fn prepare_runtime_content_start(
+    base: crate::runtime_content::RuntimeContentBase,
+    cleanup_policy: RuntimeClosePolicy,
+    commands: Vec<GameplayCommandSubmission>,
+) -> Result<PreparedProjectStart, PreparedProjectStartError> {
+    let plan_diagnostics = runtime_plan_selected_report(base.plan());
+    let mut host = ProjectHost::new(cleanup_policy);
+    let attempt = host
+        .begin_processed_start(base, commands)
+        .map_err(|fault| PreparedProjectStartError {
+            fault,
+            startup_content_closure: None,
+        })?;
+    Ok(PreparedProjectStart {
+        host,
+        attempt,
+        plan_diagnostics,
+        startup_content_closure: None,
     })
 }
 

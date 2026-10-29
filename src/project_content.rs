@@ -44,7 +44,7 @@ use nara_scene::{
     SourceDocumentKey, SourceDocumentKind,
 };
 use nara_tilemap::{
-    TileSetSource, TileSetSourceFileLimits, TilemapMembershipError,
+    TileSetSource, TileSetSourceFileLimits, TilemapMembershipError, tilemap_membership_work_bytes,
     validate_persisted_tilemap_membership,
 };
 
@@ -78,6 +78,7 @@ pub(crate) use domains::ProjectAssetDomains;
 pub(crate) use domains::validate_asset_domain_kind;
 #[cfg(feature = "tooling")]
 pub(crate) use domains::{EditorSourceValidation, validate_editor_source};
+pub(crate) use domains::{ErasedCollection, runtime_collection};
 pub use domains::{ProjectAssetCollection, ProjectDomainAssets};
 
 /// Computes the canonical Runtime startup-content digest from already admitted logical members.
@@ -2127,6 +2128,9 @@ impl<'a> LoadContext<'a> {
             else {
                 continue;
             };
+            let work = tilemap_membership_work_bytes(&record.value)
+                .ok_or_else(|| overflow_budget(ProjectContentBudgetKind::WorkBytes))?;
+            self.add_budget(ProjectContentBudgetKind::WorkBytes, work)?;
             let result = validate_persisted_tilemap_membership(&record.value, |reference| {
                 tilesets
                     .iter()
@@ -2139,6 +2143,7 @@ impl<'a> LoadContext<'a> {
                     })
                     .map(|tileset| tileset.source.atlas)
             });
+            self.subtract_budget(ProjectContentBudgetKind::WorkBytes, work);
             if let Err(error) = result {
                 return Err(tilemap_membership_error(entity, provenance, error));
             }

@@ -196,6 +196,7 @@ fn sprite_and_tilesets_publish_exact_generations_and_revoke_without_releasing_he
         ImagePreparePlugin,
     ))
     .unwrap();
+    app.init_resource::<ProjectAssetDatabase>().unwrap();
     app.add_plugins((TileSetAssetPlugin, SpriteRenderPlugin))
         .unwrap();
     app.insert_resource(TileSetAssets::with_limits(TileSetAssetLimits::new(

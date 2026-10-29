@@ -79,6 +79,12 @@ Rules:
   owned baseline. Success, failure, and removal revalidate that same baseline; unchanged but
   mismatched resources do not establish publication authority. Raw code-first writes revoke prior
   managed derivation authority while remaining eligible for their explicit rendering path.
+- Unpublished content bindings use passive preparation of the exact value/state cut. Existing
+  associations must match, but an abandoned fresh Product must leave no per-ID association in
+  live stores. The first actual mutation establishes its association; competing preparations
+  revalidate the original store/revision cut before any outcome. Immediate mutation admission
+  retains its explicit pairing semantics. Both paths share the same baseline and publication
+  checks, without rollback callbacks or a second identity ledger.
 - Phase 1 can keep file IO and importing synchronous internally, but public load states and exact
   prepare snapshot identity must leave room for async task-pool integration.
 
@@ -233,15 +239,16 @@ use; preserves backend isolation; gives hot reload and editor tooling a durable 
   Changing sampler policy is a material change, not an image import or prepare change.
 - Sprite and tilemap authoring components store typed handles to `ImageAsset`/`TileSet` inside
   narrow material wrappers; backend texture objects remain private to `nara_render_wgpu`.
-- `nara_image::ImagePlugin` is the first domain implementation of the async import seam. It installs
+- `nara_image::ImagePlugin` installs native Image storage independently of source execution.
+  `ImageSourcePlugin` is the first domain implementation of the async import seam. It installs
   `ImageImporter` as the concrete execution resource, spawns image reload jobs from
   `AssetReloadRequest` values in
   `AssetTaskUpdateSet::SpawnJobs`, applies typed `ImageAsset` results in
-  `AssetTaskUpdateSet::ApplyResults`, and then updates backend-neutral `PreparedImages` in
-  `CoreStage::Prepare`.
-- `ImagePlugin` composes `ImagePreparePlugin` rather than registering a parallel prepare path. This
-  keeps prepare stats and render-resource snapshot replacement single-pass even when sprite
-  rendering also depends on image preparation.
+  `AssetTaskUpdateSet::ApplyResults`. It explicitly requires Asset source execution and Tasks.
+- `ImagePreparePlugin` independently updates backend-neutral `PreparedImages` in
+  `CoreStage::Prepare`. Runtime/presentation composition selects it without selecting an importer,
+  reload queue or directory capability. There is one prepare path and one set of prepare stats
+  regardless of whether Image values are procedural, imported or processed.
 - `ImageBytesImportRequest` owns a fixed-length `Box<[u8]>`; file requests own an admitted
   host-issued `FileCapability`. `ImageImporter::{import_image, admit_file}` privately capture the
   target stable binding, expected version, O(1) `AssetStateRevision`, and persistent

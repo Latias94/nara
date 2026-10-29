@@ -787,12 +787,13 @@ fn image_reload_consumer_rejects_duplicate_owners() {
 }
 
 #[test]
-fn image_reload_consumer_requires_asset_plugin_resources() {
+fn image_reload_consumer_requires_asset_source_plugin_resources() {
     let mut app = App::new();
+    app.add_plugins(AssetPlugin).unwrap();
 
     assert!(matches!(
         register_image_reload_consumer::<String>(&mut app),
-        Err(ImageReloadRegistrationError::AssetPluginMissing)
+        Err(ImageReloadRegistrationError::AssetSourcePluginMissing)
     ));
 }
 

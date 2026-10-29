@@ -43,6 +43,8 @@ capacity for its upfront maximum while previous outputs remain charged.
 Use the existing [verified Runtime base](runtime-content-base.md) and the concrete family/codec:
 
 ```rust,ignore
+// The original recipe selected this concrete native facet before catalog/base admission:
+// .add_runtime_image_codec::<ImageRuntimeCodec>(RuntimeCodecDefinitionId::new("nara.image.runtime", 1))?
 let admitted = base.acquire_asset::<ImageDomain, ImageRuntimeCodec>(image_product)?;
 assert!(admitted.product().source().is_none());
 ```
@@ -76,8 +78,11 @@ refuse source-free values where that contract needs provenance.
 
 The [independent consumer](../../tests/fixtures/module-consumer/tests/runtime_image_delivery.rs)
 uses actual primary/auxiliary images, native Scene handles, exact definitions, failure/discard/
-successful product transactions and escaped CPU/prepared lifetime checks. The first-party Runtime
-Host and automatic stock resource residency remain work in the
+successful product transactions and escaped CPU/prepared lifetime checks. First-party processed
+runs use the original selected native facet and shared residency transaction to install actual
+top-level Image values for stock preparation and extraction. See the
+[Runtime base entry](runtime-content-base.md#materialization-and-retention). Packaged executable
+and target-build qualification remain in the
 [ordered delivery plan](../plans/2026-10-29-asset-import-and-runtime-delivery-plan.md).
 The [Runtime TileSet guide](runtime-tilesets.md) describes source-independent descriptors and
 their shared concrete publication owner, including actual Image dependencies and cell admission.

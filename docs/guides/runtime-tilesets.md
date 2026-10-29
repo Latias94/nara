@@ -16,6 +16,7 @@ descriptor has no owned heap storage; its retained promise and actual modeled co
 Acquire from one [verified Runtime base](runtime-content-base.md):
 
 ```rust,ignore
+// The original recipe selected the native TileSet and Image codec facets before base admission.
 let descriptor = base.acquire_asset::<TileSetDomain, TileSetRuntimeCodec>(tileset_product)?;
 let image = base.acquire_asset::<ImageDomain, ImageRuntimeCodec>(
     descriptor.product().image_product(),
@@ -72,7 +73,11 @@ base and decoded-output charge after native-store retirement. Authorization for 
 can be revoked while the old captured pixels remain readable. Source APIs enumerate Source
 declarations and cannot take over a Product declaration by inventing an authoring record.
 
-The first-party processed Runtime Host, stock renderer residency routing, packaged executable
-entry and target build selection remain separate work in the
-[ordered delivery plan](../plans/2026-10-29-asset-import-and-runtime-delivery-plan.md). An independent
-resource aggregate does not automatically become the top-level stores read by stock extraction.
+First-party processed runs prepare the actual Required closure, check the declared Image's selected
+native family/extent and admit persisted Tilemap cells before constructing a live candidate. Their
+shared residency owner publishes to the top-level stores read by stock extraction; later Scene
+travel uses the same transaction and native retry/discard custody. An independent resource
+aggregate retains its own publication responsibility. See the
+[Runtime base entry](runtime-content-base.md#materialization-and-retention). Packaged executable
+entry and target build selection remain in the
+[ordered delivery plan](../plans/2026-10-29-asset-import-and-runtime-delivery-plan.md).

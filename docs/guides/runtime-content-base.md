@@ -5,10 +5,11 @@ typed acquisition. It is available with `runtime-2d,serde`. A base contains proc
 resource members plus `catalog.json`; opening it does not read `nara.toml`, source sidecars,
 an authoring Schema bundle or an import cache.
 
-This API is the content boundary used to build source-independent delivery. The first-party
-`HeadlessRun`, desktop launch and Editor source workflows still have their own source-backed
-entry paths. The base API alone does not install every asset family, cook a target, select Cargo
-artifacts or qualify a complete packaged Player.
+The first-party `HeadlessRun` and `DesktopRun` accept an admitted base independently of their
+source-backed entries. The Editor retains its source authoring workflow. Base capture does not
+cook a target, select Cargo artifacts or qualify a complete packaged Player. First-party native
+residency supports the explicitly selected Image and TileSet facets; other families expose typed
+CPU collections and keep concrete native publication with their consuming owner.
 
 ## Authority And Identity
 
@@ -18,7 +19,8 @@ artifacts or qualify a complete packaged Player.
 | Member path | Portable location inside the local base, never a source lookup fallback |
 | Member digest | Expected encoded length and content hash |
 | Catalog digest | Exact catalog bytes selected independently by the Host |
-| `RuntimeConfigurationPlan` | Actual compiled plugin and native/data Schema selection |
+| `RuntimeConfigurationPlan` | Original compiled plugin, native/data Schema and Runtime codec selection |
+| `RuntimeCodecDefinitionId` | Package author's versioned declaration of one compiled family/codec binding |
 | `RuntimeContentBase` | Shared immutable encoded snapshot plus its original configuration plan |
 | `RuntimeContentAsset<P>` / `RuntimeContentScene` | Admitted decoded output retaining its base and reservation |
 | Native handle and residency | Separately admitted and published state in a receiving Runtime |
@@ -27,11 +29,17 @@ The Host supplies `RuntimeContentExpectation` with the expected catalog digest a
 Obtain those facts from the selected trusted build result. Reading a catalog's digest or target
 and treating those same values as the expectation would remove the independent check.
 
-The catalog declares Runtime configuration, recipe/Schema fingerprints, startup and later Scene
+The catalog declares Runtime configuration, plugin/Schema/codec fingerprints, startup and later Scene
 roots, explicitly addressable roots, member formats and dependencies. Multiple compound products
 can map to one member. Duplicate product mappings, file aliases, invalid roots and missing required
 dependencies refuse admission. Soft dependencies may be absent; declaring one does not start a
 load or satisfy an actual required Scene reference.
+
+A Required reference may name another Scene, including a finite back-edge. First-party preparation
+admits and retains those Scene documents as data; it instantiates only the selected root. A dependent
+Scene is not automatically a public travel root. This processed capability does not establish
+source-side Scene/sidecar discovery; the authored Door path has its own pending correction in the
+ordered delivery plan.
 
 ## Capture And Acquisition
 
@@ -42,6 +50,16 @@ The Runtime receives a Host-issued read capability for the base directory and th
 selected expectation:
 
 ```rust,ignore
+let executable_recipe = game_recipe()?
+    .add_runtime_asset_codec::<TextBundleDomain, TextBundleDomain>(
+        RuntimeCodecDefinitionId::new("studio.text-bundle.runtime", 1),
+    )?
+    .add_runtime_image_codec::<ImageRuntimeCodec>(
+        RuntimeCodecDefinitionId::new("nara.image.runtime", 1),
+    )?
+    .add_runtime_tileset_codec::<TileSetRuntimeCodec>(
+        RuntimeCodecDefinitionId::new("nara.tileset.runtime", 1),
+    )?;
 let base = RuntimeContentBase::open(
     &base_directory,
     &expected_base,
@@ -54,7 +72,8 @@ let text = base.acquire_asset::<TextBundleDomain, TextBundleDomain>(caption_prod
 ```
 
 `open` verifies the catalog bytes, admits its configuration through `nara_project`, resolves the
-actual executable recipe and compares plugin/Schema fingerprints. It then bounds and captures
+actual executable recipe and compares plugin/Schema/codec fingerprints. Each Asset member must
+have a uniquely selected format/version before capture. It then bounds and captures
 every declared member, checking each exact encoded digest. Only a complete base is returned.
 The returned base retains no filesystem capability. Replacing or deleting files afterwards cannot
 change its acquisitions. Reopening another base creates another snapshot; it does not redirect
@@ -66,8 +85,12 @@ complete Product to be present and declared as a required dependency of that Sce
 does not treat arbitrary strings as references or trust the dependency table in place of payload
 inspection.
 
-Resource acquisition selects a concrete Rust family and codec. Kind/version must match before
-decode. The codec's complete-identity query and the family's membership query validate every
+Resource acquisition requires the concrete Rust family and codec already selected by that base's
+original plan. Kind/version alone cannot authorize a same-format replacement implementation.
+The stable definition revision declares executable meaning independently of the persistent format;
+frozen work/output limits and concrete CPU/Image/TileSet role also participate in agreement.
+Different formats or versions may serve one family; ambiguous selectors refuse composition.
+The codec's complete-identity query and the family's membership query validate every
 Product mapped to the member. The compound text consumer checks the enclosing source as well as
 each auxiliary ID; valid bytes for a different source are rejected. The required
 `visit_required_runtime_products` query enumerates references from the decoded payload. The Host
@@ -83,6 +106,44 @@ The concrete [Runtime Image guide](runtime-images.md) describes `ImageDomain` an
 escaped CPU/native/prepared captures. Image membership is one complete Product per member.
 
 ## Materialization And Retention
+
+First-party runs prepare the complete Required resource closure through the original immutable
+base, then use the existing candidate startup, Scene request and residency lifecycle:
+
+```rust,ignore
+let mut run = HeadlessRun::<GameOutcome>::from_runtime_content(
+    base,
+    HeadlessRunOptions::frames(frame_limit, Duration::from_millis(16))
+        .stop_when(|outcome| outcome.finished()),
+    Vec::new(),
+);
+let report = run.execute_bounded();
+assert!(report.startup_content_closure().is_none()); // This receipt describes source Check only.
+```
+
+Desktop uses `DesktopRun::from_runtime_content(base, DesktopRunOptions::new())`. Execution options
+select frame/loop and cleanup policy; they cannot substitute a new recipe or source profile for
+the base's original plan. The source-supervised desktop attestation remains a source operation.
+
+Game code requests a declared processed Scene with `ProjectScenes::request(scene_product)`.
+`PreparedProjectSceneView::selected_scene()` distinguishes a source path from a complete Product;
+the convenience path/product accessors return only the matching selection. Ready typed data is
+available through `domain_assets()`. Inspect it, then explicitly commit or begin managed travel.
+Live CPU collections, actual Image/TileSet stores and current-Scene ownership change only through
+the successful shared publication tail. Failed preparation or native retirement retains the same
+last-good and retry/discard owners as the source path. Cancellation waits for physical worker return.
+
+`ProjectAssetCollection::get` requires an exact complete Product for processed auxiliary values;
+it never substitutes a primary product. `iter()` visits each stored decoded value once, even when
+several complete Products map to it. `source_records()` is empty for processed collections.
+One preparation decodes each member once for its selected family/codec, with several codecs of
+one family aggregated into one collection. Original acquisition/base reservations remain attached
+to typed collections and escaped native pixels; collection metadata is admitted before allocation.
+
+Default native/presentation plugins install no source database, queues, importer or directory
+capability. Queued source reload is explicitly selected through `AssetSourcePlugin` and
+`ImageSourcePlugin`; processed Host startup rejects those source-execution selections and watchers
+before constructing the Runtime. No empty database substitutes for a processed content proof.
 
 `startup.scene_source()` shares its complete retained owner with the existing startup/current
 Scene lifecycle. The private input selection accepts source expansion or processed Runtime data
@@ -134,8 +195,8 @@ separate decodes of one Product remain independently charged.
 
 These are modeled content-owner costs, not allocator capacity or RSS. Compiled plugin/Schema
 construction and allocations inside trusted native code retain their existing owner contracts.
-Native GPU/device objects, automatic family residency, input-map representation, the first-party
-packaged Player entry, target stripping/build selection, CAS, patch/DLC and remote authenticity
+Native GPU/device objects, additional concrete family residency, input-map representation, the
+complete packaged Player/build entry, target stripping/build selection, CAS, patch/DLC and remote authenticity
 remain separate work in the [ordered delivery plan](../plans/2026-10-29-asset-import-and-runtime-delivery-plan.md).
 The current local base neither adds a universal decoder registry nor implements a second asset
 transaction, package resolver or Rust dependency resolver.

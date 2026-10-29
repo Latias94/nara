@@ -73,13 +73,13 @@ enum AssetReloadInternalSet {
     FinalizeRequests,
 }
 
+/// Installs native asset identity, state, events, and asset task ordering without source loading.
 #[derive(Debug, Default, Clone, Copy)]
 pub struct AssetPlugin;
 
 pub const ASSET_PLUGIN_ID: nara_app::PluginId = nara_app::PluginId::new("nara.asset");
 pub const ASSET_PLUGIN_DECLARATION: nara_app::PluginDeclaration =
-    nara_app::PluginDeclaration::new(ASSET_PLUGIN_ID, nara_app::PluginCategory::Asset)
-        .requires_plugins(&[nara_tasks::TASK_PLUGIN_ID]);
+    nara_app::PluginDeclaration::new(ASSET_PLUGIN_ID, nara_app::PluginCategory::Asset);
 
 impl Plugin for AssetPlugin {
     fn declaration() -> &'static nara_app::PluginDeclaration {
@@ -90,12 +90,6 @@ impl Plugin for AssetPlugin {
         app.init_resource::<AssetServer>()?;
         app.init_resource::<AssetStates>()?;
         app.init_resource::<AssetEvents>()?;
-        app.init_resource::<AssetDependencyGraph>()?;
-        app.init_resource::<ProjectAssetDatabase>()?;
-        app.init_resource::<AssetSourceChanges>()?;
-        app.init_resource::<AssetReloadRequests>()?;
-        app.init_resource::<AssetReloadDiagnostics>()?;
-        app.init_resource::<AssetLoadGenerations>()?;
         app.configure_sets(
             CoreStage::TaskUpdate,
             (
@@ -106,6 +100,34 @@ impl Plugin for AssetPlugin {
             )
                 .chain(),
         )?;
+        Ok(())
+    }
+}
+
+/// Resolves explicit source changes against a real project database.
+///
+/// This plugin installs bounded source and reload queues but acquires no filesystem authority.
+/// Concrete source consumers and optional watchers must be selected separately.
+#[derive(Debug, Default, Clone, Copy)]
+pub struct AssetSourcePlugin;
+
+pub const ASSET_SOURCE_PLUGIN_ID: nara_app::PluginId = nara_app::PluginId::new("nara.asset.source");
+pub const ASSET_SOURCE_PLUGIN_DECLARATION: nara_app::PluginDeclaration =
+    nara_app::PluginDeclaration::new(ASSET_SOURCE_PLUGIN_ID, nara_app::PluginCategory::Asset)
+        .requires_plugins(&[ASSET_PLUGIN_ID]);
+
+impl Plugin for AssetSourcePlugin {
+    fn declaration() -> &'static nara_app::PluginDeclaration {
+        &ASSET_SOURCE_PLUGIN_DECLARATION
+    }
+
+    fn build(&self, app: &mut App) -> Result<(), PluginError> {
+        app.init_resource::<AssetDependencyGraph>()?;
+        app.init_resource::<ProjectAssetDatabase>()?;
+        app.init_resource::<AssetSourceChanges>()?;
+        app.init_resource::<AssetReloadRequests>()?;
+        app.init_resource::<AssetReloadDiagnostics>()?;
+        app.init_resource::<AssetLoadGenerations>()?;
         app.configure_sets(
             CoreStage::TaskUpdate,
             AssetReloadInternalSet::FinalizeRequests.after(AssetTaskUpdateSet::ApplyResults),

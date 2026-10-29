@@ -434,6 +434,22 @@ impl AssetStates {
         valid
     }
 
+    pub(crate) fn validates_managed_slot(
+        &self,
+        id: AssetId,
+        slot: &AssetSlotRevision,
+        fresh: bool,
+    ) -> bool {
+        let slots = self
+            .managed_slots
+            .lock()
+            .unwrap_or_else(|error| error.into_inner());
+        match slots.get(&id) {
+            Some(expected) => expected == slot,
+            None => fresh,
+        }
+    }
+
     pub(crate) fn bind_managed_slot(&mut self, id: AssetId, slot: AssetSlotRevision) {
         self.managed_slots
             .get_mut()

@@ -29,11 +29,11 @@ use nara_engine::{
     project::{ProductCapability, RuntimeConfiguration, RuntimePreset},
     project_host::{open_explicit_product_project_root, resolve_runtime_configuration},
     runtime_content::{
-        RUNTIME_CONTENT_CATALOG_FILE, RuntimeContentAsset, RuntimeContentBase,
-        RuntimeContentBudgetKind, RuntimeContentCatalog, RuntimeContentCatalogDefinition,
-        RuntimeContentCatalogLimits, RuntimeContentDependency, RuntimeContentDependencyRole,
-        RuntimeContentError, RuntimeContentExpectation, RuntimeContentLimits, RuntimeContentMember,
-        RuntimeContentMemberKind, RuntimeContentTarget,
+        RUNTIME_CONTENT_CATALOG_FILE, RuntimeCodecDefinitionId, RuntimeContentAsset,
+        RuntimeContentBase, RuntimeContentBudgetKind, RuntimeContentCatalog,
+        RuntimeContentCatalogDefinition, RuntimeContentCatalogLimits, RuntimeContentDependency,
+        RuntimeContentDependencyRole, RuntimeContentError, RuntimeContentExpectation,
+        RuntimeContentLimits, RuntimeContentMember, RuntimeContentMemberKind, RuntimeContentTarget,
     },
 };
 use nara_identity::{EntityLookup, SpawnedSceneInstance, WorldIdentityDomain};
@@ -212,11 +212,29 @@ impl Plugin for ImageConsumerPlugin {
     }
 }
 
-fn recipe() -> ProductRecipe {
+fn schema_recipe() -> ProductRecipe {
     ProductRecipe::new()
         .add_contribution(
             SchemaContribution::<ImageConsumerPlugin>::for_default([PROVIDER]).unwrap(),
         )
+        .unwrap()
+}
+
+fn recipe() -> ProductRecipe {
+    schema_recipe()
+        .add_runtime_image_codec::<ImageRuntimeCodec>(RuntimeCodecDefinitionId::new(
+            "consumer.runtime-image.image",
+            1,
+        ))
+        .unwrap()
+}
+
+fn observed_recipe() -> ProductRecipe {
+    schema_recipe()
+        .add_runtime_image_codec::<ObservedImageCodec>(RuntimeCodecDefinitionId::new(
+            "consumer.runtime-image.observed",
+            1,
+        ))
         .unwrap()
 }
 
@@ -322,6 +340,7 @@ struct Fixture {
     directory: tempfile::TempDir,
     catalog: RuntimeContentCatalog,
     expected: RuntimeContentExpectation,
+    recipe: ProductRecipe,
     primary_pixels: Vec<u8>,
     primary_extent: ImageExtent,
     primary_hash: ImageContentHash,
@@ -329,6 +348,10 @@ struct Fixture {
 
 impl Fixture {
     fn new() -> Self {
+        Self::with_recipe(recipe())
+    }
+
+    fn with_recipe(recipe: ProductRecipe) -> Self {
         let directory = tempfile::tempdir().unwrap();
         fs::write(directory.path().join(SOURCE_FILE), SOURCE_PNG).unwrap();
         let imported = ImageImporter::new()
@@ -381,8 +404,8 @@ impl Fixture {
         configuration.tasks.io.workers = 1;
         configuration.tasks.compute.workers = 1;
         configuration.tasks.async_compute.workers = 1;
-        let plan =
-            resolve_runtime_configuration(&configuration.resolve().unwrap(), recipe()).unwrap();
+        let plan = resolve_runtime_configuration(&configuration.resolve().unwrap(), recipe.clone())
+            .unwrap();
         let mut members = Vec::new();
         for (path, source, scene_product, reference) in [
             (STARTUP_FILE, STARTUP_SOURCE, startup(), primary()),
@@ -436,6 +459,7 @@ impl Fixture {
                     .schema_validation()
                     .composition_fingerprint()
                     .as_bytes(),
+                runtime_codecs_fingerprint: plan.runtime_codecs_fingerprint().as_bytes(),
                 startup_scene: startup(),
                 scenes: vec![startup(), later()],
                 addressable_roots: vec![primary(), auxiliary()],
@@ -454,13 +478,14 @@ impl Fixture {
             directory,
             catalog,
             expected: RuntimeContentExpectation::new(ContentDigest::of_bytes(&encoded), target()),
+            recipe,
             primary_pixels,
             primary_extent,
             primary_hash,
         }
     }
 
-    fn small_images() -> Self {
+    fn small_images(recipe: ProductRecipe) -> Self {
         Self::with_primary_image(
             ImageAsset::from_product(
                 primary(),
@@ -470,11 +495,12 @@ impl Fixture {
                 vec![3, 5, 7, 255, 11, 13, 17, 127],
             )
             .unwrap(),
+            recipe,
         )
     }
 
-    fn with_primary_image(image: ImageAsset) -> Self {
-        let mut fixture = Self::new();
+    fn with_primary_image(image: ImageAsset, recipe: ProductRecipe) -> Self {
+        let mut fixture = Self::with_recipe(recipe);
         let encoded = ImageRuntimeCodec::encode_runtime(&image).unwrap();
         fixture.replace_primary(&encoded, ImageRuntimeCodec::RUNTIME_KIND);
         fixture.primary_pixels = image.pixels().to_vec();
@@ -483,6 +509,10 @@ impl Fixture {
         fixture
     }
 
+    #[allow(
+        clippy::result_large_err,
+        reason = "The public RuntimeContentError is intentionally preserved for typed assertions."
+    )]
     fn open(
         &self,
         limits: RuntimeContentLimits,
@@ -490,7 +520,7 @@ impl Fixture {
         RuntimeContentBase::open(
             &open_explicit_product_project_root(self.directory.path()).unwrap(),
             &self.expected,
-            recipe(),
+            self.recipe.clone(),
             limits,
         )
     }
@@ -511,17 +541,17 @@ impl Fixture {
     fn open_for_one_image(&self) -> RuntimeContentBase {
         self.open(
             RuntimeContentLimits::default()
-                .with_retained_bytes(bytes(self.one_image_retained_limit())),
+                .with_retained_bytes(bytes(self.one_image_retained_limit::<ImageRuntimeCodec>())),
         )
         .unwrap()
     }
 
     /// Includes the captured base and one complete maximum codec/Host output reservation.
-    fn one_image_retained_limit(&self) -> usize {
+    fn one_image_retained_limit<C: RuntimeAssetCodec<ImageAsset>>(&self) -> usize {
         let limits = RuntimeContentLimits::default()
-            .with_retained_bytes(ImageRuntimeCodec::runtime_limits().retained_bytes());
+            .with_retained_bytes(C::runtime_limits().retained_bytes());
         let probe = self.open(limits).unwrap();
-        let required = match probe.acquire_asset::<ImageDomain, ImageRuntimeCodec>(primary()) {
+        let required = match probe.acquire_asset::<ImageDomain, C>(primary()) {
             Err(RuntimeContentError::Budget {
                 kind: RuntimeContentBudgetKind::RetainedBytes,
                 required,
@@ -536,7 +566,7 @@ impl Fixture {
             .open(limits.with_retained_bytes(bytes(required - 1)))
             .unwrap();
         assert!(matches!(
-            short.acquire_asset::<ImageDomain, ImageRuntimeCodec>(primary()),
+            short.acquire_asset::<ImageDomain, C>(primary()),
             Err(RuntimeContentError::Budget {
                 kind: RuntimeContentBudgetKind::RetainedBytes,
                 ..
@@ -574,6 +604,7 @@ impl Fixture {
                 configuration: self.catalog.configuration().clone(),
                 plugin_plan_fingerprint: self.catalog.plugin_plan_fingerprint(),
                 schema_fingerprint: self.catalog.schema_fingerprint(),
+                runtime_codecs_fingerprint: self.catalog.runtime_codecs_fingerprint(),
                 startup_scene: self.catalog.startup_scene(),
                 scenes: self.catalog.scenes().to_vec(),
                 addressable_roots: self.catalog.addressable_roots().to_vec(),
@@ -1038,6 +1069,11 @@ fn runtime_base_rejects_foreign_product_wrong_codec_corruption_and_missing_image
                 candidate.open(RuntimeContentLimits::default()),
                 Err(RuntimeContentError::Host(_))
             ));
+        } else if case == "wrong-codec" {
+            assert!(matches!(
+                candidate.open(RuntimeContentLimits::default()),
+                Err(RuntimeContentError::CodecNotSelected)
+            ));
         } else {
             let base = candidate.open(RuntimeContentLimits::default()).unwrap();
             let result = base.acquire_asset::<ImageDomain, ImageRuntimeCodec>(primary());
@@ -1046,7 +1082,6 @@ fn runtime_base_rejects_foreign_product_wrong_codec_corruption_and_missing_image
                     result,
                     Err(RuntimeContentError::ProductIdentityMismatch)
                 )),
-                "wrong-codec" => assert!(matches!(result, Err(RuntimeContentError::CodecMismatch))),
                 "truncated" => assert!(matches!(result, Err(RuntimeContentError::Asset(_)))),
                 _ => unreachable!(),
             }
@@ -1073,23 +1108,23 @@ fn runtime_base_rejects_foreign_product_wrong_codec_corruption_and_missing_image
 fn many_independent_small_images_refund_maximum_output_until_the_last_shared_owner() {
     const COUNT: usize = 32;
 
-    let fixture = Fixture::small_images();
-    let one_image = fixture.one_image_retained_limit();
+    let fixture = Fixture::small_images(observed_recipe());
+    let one_image = fixture.one_image_retained_limit::<ObservedImageCodec>();
     let probe = fixture
         .open(RuntimeContentLimits::default().with_retained_bytes(bytes(one_image)))
         .unwrap();
     let first = probe
-        .acquire_asset::<ImageDomain, ImageRuntimeCodec>(primary())
+        .acquire_asset::<ImageDomain, ObservedImageCodec>(primary())
         .unwrap();
     let actual = first.retained_bytes();
-    let product_bytes = ImageRuntimeCodec::runtime_retained_bytes(first.product()).unwrap();
+    let product_bytes = ObservedImageCodec::runtime_retained_bytes(first.product()).unwrap();
     assert!(product_bytes >= size_of::<ImageAsset>() + fixture.primary_pixels.len());
     assert!(
         actual > product_bytes,
         "the Host wrapper must also be charged"
     );
     let maximum =
-        ImageRuntimeCodec::runtime_limits().retained_bytes().get() + (actual - product_bytes);
+        ObservedImageCodec::runtime_limits().retained_bytes().get() + (actual - product_bytes);
     assert!(COUNT * actual < maximum);
     drop((first, probe));
 
@@ -1197,6 +1232,10 @@ fn many_independent_small_images_refund_maximum_output_until_the_last_shared_own
 }
 
 #[test]
+#[allow(
+    clippy::result_large_err,
+    reason = "The public RuntimeContentError is intentionally preserved across the worker boundary."
+)]
 fn held_image_decode_keeps_full_retained_and_work_promises_until_success() {
     let fixture = Fixture::with_primary_image(
         ImageAsset::from_product(
@@ -1207,18 +1246,19 @@ fn held_image_decode_keeps_full_retained_and_work_promises_until_success() {
             vec![37; 4 * 1024 * 1024],
         )
         .unwrap(),
+        observed_recipe(),
     );
     assert_eq!(fixture.primary_pixels.len(), 4 * 1024 * 1024);
-    let one_image = fixture.one_image_retained_limit();
+    let one_image = fixture.one_image_retained_limit::<ObservedImageCodec>();
     let probe = fixture
         .open(RuntimeContentLimits::default().with_retained_bytes(bytes(one_image)))
         .unwrap();
     let value = probe
-        .acquire_asset::<ImageDomain, ImageRuntimeCodec>(primary())
+        .acquire_asset::<ImageDomain, ObservedImageCodec>(primary())
         .unwrap();
     let actual = value.retained_bytes();
-    let product_bytes = ImageRuntimeCodec::runtime_retained_bytes(value.product()).unwrap();
-    let codec = ImageRuntimeCodec::runtime_limits();
+    let product_bytes = ObservedImageCodec::runtime_retained_bytes(value.product()).unwrap();
+    let codec = ObservedImageCodec::runtime_limits();
     let maximum = codec.retained_bytes().get() + (actual - product_bytes);
     assert!(actual < maximum);
     drop((value, probe));

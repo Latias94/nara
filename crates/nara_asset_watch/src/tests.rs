@@ -2,8 +2,8 @@ use super::*;
 use crate::backend::admit_notify_event;
 use nara_asset::{
     AssetPlugin, AssetRecord, AssetReloadRequest, AssetReloadRequestKind, AssetReloadRequests,
-    AssetSourceChangeLimits, AssetSourceChanges, AssetSourceKind, ProjectAssetDatabase,
-    StableAssetId, register_image_reload_consumer,
+    AssetSourceChangeLimits, AssetSourceChanges, AssetSourceKind, AssetSourcePlugin,
+    ProjectAssetDatabase, StableAssetId, register_image_reload_consumer,
 };
 use nara_core::{ByteLimit, ItemLimit};
 use nara_diagnostic::{
@@ -33,9 +33,29 @@ fn install_asset_prerequisites(app: &mut App) {
     app.add_plugins((
         nara_tasks::TaskPlugin::default(),
         AssetPlugin,
+        AssetSourcePlugin,
         DiagnosticsPlugin::default(),
     ))
     .unwrap();
+}
+
+#[test]
+fn watcher_requires_explicit_asset_source_before_acquiring_filesystem_authority() {
+    let mut app = App::new();
+    app.add_plugins((AssetPlugin, DiagnosticsPlugin::default()))
+        .unwrap();
+    let Err(error) = app.add_plugin(AssetWatchPlugin::new("unadmitted-source-root")) else {
+        panic!("watcher must require AssetSourcePlugin before build");
+    };
+    assert!(matches!(
+        error,
+        nara_app::AddPluginsError::Plan(nara_app::PluginPlanError::MissingPlugin {
+            plugin,
+            required,
+        }) if plugin == ASSET_WATCH_PLUGIN_ID && required == nara_asset::ASSET_SOURCE_PLUGIN_ID
+    ));
+    assert!(!app.world().contains_resource::<AssetSourceRoot>());
+    assert!(!app.world().contains_resource::<AssetWatcher>());
 }
 
 fn install_watch_runtime(app: &mut App, queue: AssetWatchEventQueue) {

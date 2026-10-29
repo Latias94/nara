@@ -154,7 +154,7 @@ impl<T: Asset> AssetMutationBaseline<T> {
                 id: self.handle.id(),
             });
         }
-        assets.validate_association(self.handle, states)
+        assets.validate_prepared_association(self.handle, states)
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -225,7 +225,26 @@ impl<T: Asset> Default for Assets<T> {
 }
 
 impl<T: Asset> Assets<T> {
+    /// Prepares an exact value/state cut without establishing a fresh store association.
+    ///
+    /// Use this for unpublished Product bindings: abandoning preparation leaves no per-ID
+    /// association behind. Existing managed associations must already match. The first actual
+    /// mutation establishes a fresh association, and every outcome revalidates this same cut.
+    pub fn prepare_mutation(
+        &self,
+        handle: Handle<T>,
+        states: &AssetStates,
+    ) -> Result<AssetMutationBaseline<T>, AssetStateError> {
+        self.validate_prepared_association(handle, states)?;
+        Ok(AssetMutationBaseline {
+            handle,
+            slot: self.slot_revision(handle),
+            state: states.state_revision(handle.id()),
+        })
+    }
+
     /// Captures only an actually associated managed publication or a fresh, empty initial slot.
+    /// A fresh admission immediately binds the two stores, even before its first outcome.
     pub fn mutation_baseline(
         &self,
         handle: Handle<T>,
@@ -245,6 +264,34 @@ impl<T: Asset> Assets<T> {
         states: &AssetStates,
     ) -> Result<(), AssetStateError> {
         self.admit_association(handle, states, false)
+    }
+
+    fn validate_prepared_association(
+        &self,
+        handle: Handle<T>,
+        states: &AssetStates,
+    ) -> Result<(), AssetStateError> {
+        let stores = self
+            .managed_state_stores
+            .lock()
+            .unwrap_or_else(|error| error.into_inner());
+        let state_store = states.store_identity();
+        if stores
+            .get(&handle.id())
+            .is_some_and(|expected| !Arc::ptr_eq(expected, &state_store))
+        {
+            return Err(AssetStateError::StorageMismatch { id: handle.id() });
+        }
+        let fresh = self.get(handle).is_none()
+            && states.version(handle.id()).unwrap_or(AssetVersion::ZERO) == AssetVersion::ZERO
+            && states
+                .state(handle.id())
+                .is_none_or(|state| state.usable_version().is_none());
+        if states.validates_managed_slot(handle.id(), &self.slot_revision(handle), fresh) {
+            Ok(())
+        } else {
+            Err(AssetStateError::StorageMismatch { id: handle.id() })
+        }
     }
 
     fn admit_association(
@@ -453,6 +500,60 @@ impl<T: Asset> Assets<T> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn abandoned_unpublished_mutations_leave_no_per_identity_associations() {
+        let assets = Assets::<String>::default();
+        let states = AssetStates::default();
+        for id in 1000..1100 {
+            let handle = Handle::new(AssetId::from_raw(id));
+            let prepared = assets.prepare_mutation(handle, &states).unwrap();
+            prepared.validate(&assets, &states).unwrap();
+            drop(prepared);
+        }
+        assert!(assets.managed_state_stores.lock().unwrap().is_empty());
+        assert!(assets.slot_revisions.is_empty());
+        assert!(states.managed_slots_empty_for_tests());
+        assert!(states.is_empty());
+    }
+
+    #[test]
+    fn competing_unpublished_store_cuts_are_fenced_by_the_first_actual_publication() {
+        let handle = Handle::<String>::new(AssetId::from_raw(1101));
+        let mut first = Assets::default();
+        let mut second = Assets::default();
+        let mut states = AssetStates::default();
+        let mut events = AssetEvents::default();
+        let first_cut = first.prepare_mutation(handle, &states).unwrap();
+        let second_cut = second.prepare_mutation(handle, &states).unwrap();
+        assert!(states.managed_slots_empty_for_tests());
+        second_cut
+            .commit_loaded(
+                "published".into(),
+                &mut second,
+                &mut states,
+                &mut events,
+                None,
+                None,
+            )
+            .unwrap();
+        assert!(matches!(
+            first_cut.commit_loaded(
+                "stale".into(),
+                &mut first,
+                &mut states,
+                &mut events,
+                None,
+                None
+            ),
+            Err(AssetStateError::MutationSuperseded { .. })
+        ));
+        assert!(first.is_empty());
+        assert_eq!(second.get(handle).unwrap(), "published");
+        assert!(first.prepare_mutation(handle, &states).is_err());
+        assert!(second.prepare_mutation(handle, &states).is_ok());
+        assert_eq!(events.drain().len(), 1);
+    }
 
     #[test]
     fn baseline_capture_rejects_mismatched_stores_before_observing_unchanged_slots() {

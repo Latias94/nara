@@ -18,6 +18,28 @@ impl ProjectSceneRequestId {
     }
 }
 
+/// A declared source Scene path or complete processed Scene Product.
+///
+/// The selection must match the original Host's content mode. Products never resolve through
+/// source paths or fall back to their enclosing primary Product.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ProjectSceneSelection {
+    Source(ProjectPath),
+    Product(AssetProductRef),
+}
+
+impl From<ProjectPath> for ProjectSceneSelection {
+    fn from(path: ProjectPath) -> Self {
+        Self::Source(path)
+    }
+}
+
+impl From<AssetProductRef> for ProjectSceneSelection {
+    fn from(product: AssetProductRef) -> Self {
+        Self::Product(product)
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
 pub enum ProjectSceneRequestError {
     #[error("project Scene request authority is unavailable")]
@@ -34,6 +56,9 @@ pub enum ProjectSceneRequestError {
     Stale,
     #[error("project Scene content was rejected: {0:?}")]
     Content(ProjectContentErrorKind),
+    /// Processed acquisition failed. The request diagnostics retain its safe Runtime category.
+    #[error("Runtime Scene content was rejected")]
+    RuntimeContent,
     #[error("project Scene commit was rejected")]
     CommitRejected,
 }
@@ -49,6 +74,7 @@ impl ProjectSceneRequestError {
             Self::IdExhausted => "project.scene.request-id-exhausted",
             Self::Stale => "project.scene.request-stale",
             Self::Content(_) => "project.scene.content-rejected",
+            Self::RuntimeContent => "project.scene.runtime-content-rejected",
             Self::CommitRejected => "project.scene.commit-rejected",
         }
     }
@@ -84,25 +110,44 @@ impl ProjectSceneRequestState {
 /// owned game data from it, return that data, then explicitly commit after the scope returns.
 pub struct PreparedProjectSceneView<'a> {
     admission: &'a Admission,
-    snapshot: &'a ProjectContentSnapshot,
+    content: &'a PreparedSceneContent,
 }
 
 impl PreparedProjectSceneView<'_> {
     /// Typed CPU data prepared for the target Scene, before its explicit commit.
     #[must_use]
     pub fn domain_assets(&self) -> &crate::project_host::ProjectDomainAssets {
-        self.snapshot.domain_assets()
+        self.content.domain_assets()
     }
 
-    /// Expanded target document, matching the document that becomes `CurrentScene::source`.
+    /// Admitted target document, matching the document that becomes `CurrentScene::source`.
     #[must_use]
     pub fn scene(&self) -> &SceneDocument {
-        self.snapshot.expanded_scene()
+        self.content.document()
     }
 
+    /// Borrows the exact selection captured by this request.
     #[must_use]
-    pub fn selected_scene_path(&self) -> &ProjectPath {
-        &self.admission.path
+    pub fn selected_scene(&self) -> &ProjectSceneSelection {
+        &self.admission.selection
+    }
+
+    /// Returns a real source path only for source-backed requests.
+    #[must_use]
+    pub fn selected_scene_path(&self) -> Option<&ProjectPath> {
+        match self.selected_scene() {
+            ProjectSceneSelection::Source(path) => Some(path),
+            ProjectSceneSelection::Product(_) => None,
+        }
+    }
+
+    /// Returns the complete Product only for processed requests.
+    #[must_use]
+    pub fn selected_scene_product(&self) -> Option<AssetProductRef> {
+        match self.selected_scene() {
+            ProjectSceneSelection::Source(_) => None,
+            ProjectSceneSelection::Product(product) => Some(*product),
+        }
     }
 
     #[must_use]
@@ -238,19 +283,20 @@ impl ProjectScenes<'_> {
 
     /// Requests asynchronous preparation of a declared Scene through the original Host authority.
     ///
-    /// The current source must be project-backed. Missing authority or generation returns
+    /// The current source must belong to first-party hosted content. The selection must match
+    /// that Host's source or processed mode. Missing authority or generation returns
     /// [`ProjectSceneRequestError::Unavailable`]; a missing I/O pool returns
     /// [`ProjectSceneRequestError::TaskUnavailable`]. An occupied slot remains
     /// [`ProjectSceneRequestError::Busy`] until its terminal result is explicitly acknowledged.
     pub fn request(
         &mut self,
-        path: ProjectPath,
+        selection: impl Into<ProjectSceneSelection>,
     ) -> Result<ProjectSceneRequestId, ProjectSceneRequestError> {
         let current = self
             .current
             .as_deref()
             .ok_or(ProjectSceneRequestError::Unavailable)?;
-        if !current.is_project_backed() {
+        if !current.is_content_managed() {
             return Err(ProjectSceneRequestError::Unavailable);
         }
         let generation = **self
@@ -261,10 +307,14 @@ impl ProjectScenes<'_> {
             .pools
             .as_deref()
             .ok_or(ProjectSceneRequestError::TaskUnavailable)?;
-        self.owner
+        let owner = self
+            .owner
             .as_deref_mut()
-            .ok_or(ProjectSceneRequestError::Unavailable)?
-            .request(path, generation, current.receipt(), pools)
+            .ok_or(ProjectSceneRequestError::Unavailable)?;
+        if !owner.context.matches_current(current) {
+            return Err(ProjectSceneRequestError::Stale);
+        }
+        owner.request(selection.into(), generation, current.receipt(), pools)
     }
 
     /// Observes exactly this request using the current generation and expected-receipt predicates.
@@ -298,11 +348,7 @@ impl ProjectScenes<'_> {
     #[must_use]
     pub fn prepared(&self, request: ProjectSceneRequestId) -> Option<PreparedProjectSceneView<'_>> {
         let owner = self.owner.as_deref()?;
-        let Slot::Ready {
-            admission,
-            snapshot,
-        } = owner.slot.as_ref()?
-        else {
+        let Slot::Ready { admission, content } = owner.slot.as_ref()? else {
             return None;
         };
         (admission.id == request
@@ -311,10 +357,7 @@ impl ProjectScenes<'_> {
                 self.generation.as_deref().copied(),
                 self.current.as_deref(),
             ))
-        .then_some(PreparedProjectSceneView {
-            admission,
-            snapshot,
-        })
+        .then_some(PreparedProjectSceneView { admission, content })
     }
 
     /// Safe owner-produced details for exactly this managed or terminal request.
@@ -423,23 +466,19 @@ where
                 "Project Scene preparation has not returned ready content",
             );
         }
-        let Some(Slot::Ready {
-            admission,
-            snapshot,
-        }) = owner.slot.take()
-        else {
+        let Some(Slot::Ready { admission, content }) = owner.slot.take() else {
             unreachable!()
         };
-        let report = if !snapshot_matches_admission(&snapshot, &admission) {
+        let report = if !content_matches_admission(&content, &admission) {
             rejected(
                 "project.scene.prepared-input-mismatch",
                 "Prepared Scene does not match its captured Host authority",
             )
         } else {
-            super::super::content_residency::replace_project_scene(
+            super::super::content_residency::replace_scene(
                 world,
                 &admission.expected,
-                &snapshot,
+                &content,
                 limits,
                 additional_retirements,
                 configure,
@@ -513,15 +552,11 @@ where
                 "Project Scene request inputs changed before preparation",
             ));
         }
-        let Some(Slot::Ready {
-            admission,
-            snapshot,
-        }) = owner.slot.take()
-        else {
+        let Some(Slot::Ready { admission, content }) = owner.slot.take() else {
             unreachable!()
         };
         let prepared = (|| {
-            if !snapshot_matches_admission(&snapshot, &admission) {
+            if !content_matches_admission(&content, &admission) {
                 return Err(rejected(
                     "project.scene.prepared-input-mismatch",
                     "Prepared Scene does not match its captured Host authority",
@@ -537,7 +572,7 @@ where
                 })?;
             let view = PreparedProjectSceneView {
                 admission: &admission,
-                snapshot: &snapshot,
+                content: &content,
             };
             let attempt =
                 ManagedSceneTravelAttempt::prepare(registry, world, &view).map_err(|error| {
@@ -547,7 +582,7 @@ where
                 super::super::content_residency::PreparedProjectSceneReplacement::prepare(
                     world,
                     &admission.expected,
-                    &snapshot,
+                    &content,
                     &attempt.combined_claims(),
                     limits,
                     additional_retirements,
@@ -589,11 +624,38 @@ where
     })
 }
 
-fn snapshot_matches_admission(snapshot: &ProjectContentSnapshot, admission: &Admission) -> bool {
-    snapshot.lineage() == admission.context.candidate.lineage()
-        && snapshot.content_closure().manifest_digest()
-            == admission.context.candidate.manifest_digest()
-        && snapshot.selected_scene_path() == &admission.path
-        && snapshot.shares_component_bindings(admission.context.plan.schema_validation().bindings())
-        && snapshot.matches_asset_domains(&admission.context.plan)
+pub(super) fn content_matches_admission(
+    content: &PreparedSceneContent,
+    admission: &Admission,
+) -> bool {
+    match (content, admission.context.as_ref(), &admission.selection) {
+        (
+            PreparedSceneContent::Source(snapshot),
+            Context::Source {
+                candidate, plan, ..
+            },
+            ProjectSceneSelection::Source(path),
+        ) => {
+            snapshot.lineage() == candidate.lineage()
+                && snapshot.content_closure().manifest_digest() == candidate.manifest_digest()
+                && snapshot.selected_scene_path() == path
+                && snapshot.shares_component_bindings(plan.schema_validation().bindings())
+                && snapshot.matches_asset_domains(plan)
+        }
+        (
+            PreparedSceneContent::Processed(content),
+            Context::Processed { base },
+            ProjectSceneSelection::Product(product),
+        ) => {
+            base.same_base(content.base())
+                && content.product() == *product
+                && admission.context.declares(&admission.selection)
+                && content
+                    .scene
+                    .candidate()
+                    .definitions()
+                    .matches(base.plan().schema_validation().bindings())
+        }
+        _ => false,
+    }
 }

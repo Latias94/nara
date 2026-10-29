@@ -3,6 +3,7 @@ use std::{
     collections::HashMap,
     error::Error,
     fmt::{self, Display, Formatter},
+    mem::size_of,
 };
 
 use nara_ecs::Resource;
@@ -150,6 +151,50 @@ impl AssetServer {
             reverse_products: HashMap::new(),
             type_claims: HashMap::new(),
         }
+    }
+
+    /// Returns checked logical storage for this catalogue or an independent clone.
+    ///
+    /// The model includes the owner, every map entry, two machine words of indexing metadata
+    /// per entry, and both owned copies of each source path. Anonymous type claims count too;
+    /// borrowed static Rust type names allocate no cloned string storage. This pure borrowed
+    /// query uses logical lengths, not hash-table capacity, allocator overhead or process RSS.
+    /// `None` means the logical byte calculation overflowed.
+    #[must_use]
+    pub fn checked_retained_bytes(&self) -> Option<usize> {
+        let mut bytes = size_of::<Self>();
+        for entries in [
+            checked_map_bytes::<AssetPath, AssetId>(self.paths.len())?,
+            checked_map_bytes::<AssetId, AssetPath>(self.reverse_paths.len())?,
+            checked_map_bytes::<AssetProductRef, AssetId>(self.products.len())?,
+            checked_map_bytes::<AssetId, AssetProductRef>(self.reverse_products.len())?,
+            checked_map_bytes::<AssetId, (TypeId, &'static str)>(self.type_claims.len())?,
+        ] {
+            bytes = bytes.checked_add(entries)?;
+        }
+        for path in self.paths.keys().chain(self.reverse_paths.values()) {
+            bytes = bytes.checked_add(path.as_str().len())?;
+        }
+        Some(bytes)
+    }
+
+    /// Returns the logical growth bound for one new typed Product and optional source alias.
+    ///
+    /// This uses the same model as [`Self::checked_retained_bytes`], excluding the catalogue
+    /// owner itself. It is a conservative admission bound when some of the binding already
+    /// exists; it neither allocates a runtime identity nor changes this or another catalogue.
+    #[must_use]
+    pub fn checked_product_binding_retained_bytes(path: Option<&AssetPath>) -> Option<usize> {
+        let mut bytes = checked_map_bytes::<AssetProductRef, AssetId>(1)?
+            .checked_add(checked_map_bytes::<AssetId, AssetProductRef>(1)?)?
+            .checked_add(checked_map_bytes::<AssetId, (TypeId, &'static str)>(1)?)?;
+        if let Some(path) = path {
+            bytes = bytes
+                .checked_add(checked_map_bytes::<AssetPath, AssetId>(1)?)?
+                .checked_add(checked_map_bytes::<AssetId, AssetPath>(1)?)?
+                .checked_add(path.as_str().len().checked_mul(2)?)?;
+        }
+        Some(bytes)
     }
 
     pub fn reserve<T: 'static>(
@@ -385,6 +430,10 @@ impl AssetServer {
 
         Ok(())
     }
+}
+
+fn checked_map_bytes<K, V>(entries: usize) -> Option<usize> {
+    entries.checked_mul(size_of::<(K, V)>().checked_add(2 * size_of::<usize>())?)
 }
 
 #[cfg(test)]

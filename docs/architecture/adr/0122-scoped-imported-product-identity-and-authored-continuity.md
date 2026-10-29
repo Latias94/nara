@@ -70,14 +70,23 @@ under the domain's existing preparation budget and panic boundary, after prepari
 value. Cached compiled Editor Play rechecks edited selections against that same prepared value
 under its existing content budget and a contained query. Required targets are collected and deduplicated
 with source discovery; they are not inferred from metadata or collected through a second walker.
-`ProjectAssetCollection::get` selects only the primary product. Compound consumers explicitly
-select the enclosing source, then pass the complete reference to their domain's own lookup API.
+`ProjectAssetCollection::get` locates the stored typed value containing the exact Product.
+Source collections check real enclosing records plus the selected family's pure membership query;
+processed collections retain complete admitted Product-to-acquisition mappings. An auxiliary
+selection never falls back to its primary. Stable-source and actual source-path aliases mean
+primary only; processed collections have no source paths or records. The returned compound value
+keeps its domain-specific lookup API. Iteration visits stored values once independently of aliases.
 
 Processed acquisition additionally invokes the selected `RuntimeAssetCodec`'s
 `contains_runtime_product(product, reference)` for every mapping of the verified member. This
 pure query validates the complete enclosing-source and product identity carried by the actual
 decoded payload. The file-local family query alone cannot establish enclosing-source agreement.
 Catalog membership, format admission and native residency remain separate proofs under ADR 0007.
+The original Runtime configuration plan separately freezes typed codec definitions, roles and
+actual limits; its dedicated selection fingerprint participates in catalog agreement. Generic
+acquisition cannot substitute another same-format implementation. Within a prepared generation,
+several Products mapped to one selected member share one admitted decode and original reservation;
+several selected formats of one family still expose one typed collection.
 
 Source-copy remapping preserves the internal product ID while changing an explicitly mapped
 enclosing stable source identity. A path-only destination cannot express that identity and

@@ -7,7 +7,7 @@ use std::{
 };
 
 use nara::advanced_prelude::*;
-use nara::image::ImageSourceDirectory;
+use nara::image::{ImageSourceDirectory, ImageSourcePlugin};
 
 const TEXTURE_ID: &str = "2f0d71c7-14fc-4ed4-b48b-1c61bba8b97f";
 const VALID_PNG: &[u8] = include_bytes!("fixtures/images/valid-rgba-1x1.png");
@@ -101,9 +101,11 @@ fn root_facade_plugin_reload_preserves_last_good_after_budget_rejection() {
         nara::reflect::ComponentRegistryPlugin,
         nara::tasks::TaskPlugin::default(),
         nara::asset::AssetPlugin,
+        nara::asset::AssetSourcePlugin,
         nara::hierarchy::HierarchyPlugin,
         nara::transform::TransformPlugin,
-        ImagePlugin::with_limits(limits)
+        ImagePlugin,
+        ImageSourcePlugin::with_limits(limits)
             .unwrap()
             .with_source_directory(source_directory(root.path())),
     ))

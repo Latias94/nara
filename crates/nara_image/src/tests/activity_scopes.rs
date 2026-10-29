@@ -28,16 +28,18 @@ fn shared_image_app(
         .unwrap();
     app.add_plugins((
         nara_reflect::ComponentRegistryPlugin,
-        nara_asset::AssetPlugin,
+        (nara_asset::AssetPlugin, nara_asset::AssetSourcePlugin),
         nara_hierarchy::HierarchyPlugin,
         nara_transform::TransformPlugin,
         nara_render::RenderComponentsPlugin,
         nara_render::RenderPlugin::default(),
-        ImagePreparePlugin,
+        (ImagePlugin, ImagePreparePlugin),
     ))
     .unwrap();
-    app.add_plugin(ImagePlugin::default().with_source_directory(image_source_directory(root)))
-        .unwrap();
+    app.add_plugin(
+        ImageSourcePlugin::default().with_source_directory(image_source_directory(root)),
+    )
+    .unwrap();
 
     let handle = server.reserve_record::<ImageAsset>(record).unwrap();
     let mut images = Assets::default();

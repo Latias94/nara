@@ -20,7 +20,7 @@ use nara_tilemap::{
     TileSetRetentionSnapshot, TileSetSource,
 };
 
-use super::super::content_residency::replace_project_scene;
+use super::super::{content::PreparedSceneContent, content_residency::replace_scene};
 
 const SHARED_ID: &str = "53000000-0000-4000-8000-000000000001";
 const UNIQUE_ID: &str = "53000000-0000-4000-8000-000000000002";
@@ -270,7 +270,14 @@ fn limits() -> SceneProductTransactionLimits {
 
 fn replace(world: &mut World, snapshot: &ProjectContentSnapshot) -> SpawnedSceneInstance {
     let before = world.resource::<CurrentSceneOwner>().receipt().clone();
-    let report = replace_project_scene(world, &before, snapshot, limits(), &[], |_| {});
+    let report = replace_scene(
+        world,
+        &before,
+        &PreparedSceneContent::Source(snapshot.clone()),
+        limits(),
+        &[],
+        |_| {},
+    );
     assert!(!report.diagnostics.has_errors(), "{:?}", report.diagnostics);
     let receipt = report.instance.unwrap();
     assert_ne!(receipt.instance_id(), before.instance_id());
@@ -713,9 +720,16 @@ fn assert_rejected(
     code: &str,
 ) {
     let before = PublicationBaseline::capture(world);
-    let report = replace_project_scene(world, expected, snapshot, limits(), &[], |_| {
-        panic!("residency rejection must precede product configuration");
-    });
+    let report = replace_scene(
+        world,
+        expected,
+        &PreparedSceneContent::Source(snapshot.clone()),
+        limits(),
+        &[],
+        |_| {
+            panic!("residency rejection must precede product configuration");
+        },
+    );
     assert!(report.instance.is_none());
     assert!(
         report_has_code(&report.diagnostics, code),
@@ -751,13 +765,23 @@ fn hosted_residency_rejects_atlas_retention_stale_and_foreign_image_authority_be
             );
         }
         let b = fixture.load("b.scene.json");
+        let budget = fixture.loader.budget_host();
         fixture.step(move |world| {
             let current = world.resource::<CurrentSceneOwner>().receipt().clone();
+            let retained = budget
+                .snapshot()
+                .active(ProjectContentBudgetKind::RetainedBytes);
             assert_rejected(
                 world,
                 &current,
                 &b,
                 "project.scene.tileset-preparation-failed",
+            );
+            assert_eq!(
+                budget
+                    .snapshot()
+                    .active(ProjectContentBudgetKind::RetainedBytes),
+                retained
             );
         });
         let b = fixture.load("b.scene.json");
@@ -862,6 +886,102 @@ fn hosted_residency_rejects_tileset_owner_remove_observer_before_callback_or_pub
         );
     });
     assert_eq!(calls.load(Ordering::SeqCst), 0);
+    fixture.close();
+}
+
+#[test]
+fn hosted_startup_tileset_refusal_releases_complete_prepared_residency() {
+    let project = TestProject::new("project-startup-residency-refusal");
+    write_image(&project, "shared.png", SHARED_ID, [255, 0, 0, 255]);
+    write_image(&project, "unique.png", UNIQUE_ID, [0, 255, 0, 255]);
+    write_tileset(&project, TileAtlasLayout::grid(Vec2::ONE, 1, 1));
+    write_scene(&project, "startup.scene.json", "level-a", true, true);
+    let root = project.capability();
+    let manifest = root
+        .open_file(&RelativePath::new(PROJECT_MANIFEST).unwrap())
+        .unwrap();
+    let candidate = ingest_project_manifest(&manifest, None).unwrap();
+    drop(manifest);
+    let definition = PluginDefinition::infallible::<ResidencyProbePlugin, _>(
+        PluginDefinitionId::new("nara.test.startup-residency-refusal", 1),
+        [],
+        || ResidencyProbePlugin {
+            probe: Arc::new(ResidencyProbe::default()),
+            foreign: false,
+            limits: Some(TileSetAssetLimits::new(
+                ItemLimit::ONE,
+                ItemLimit::ONE,
+                ByteLimit::ONE,
+            )),
+        },
+    );
+    let request = project_runtime_plugins(&candidate)
+        .insert_after::<nara_tilemap::TileSetAssetPlugin>(definition);
+    let plan = resolve_runtime_plan(&candidate, request, built_in_schema_providers()).unwrap();
+    let loader = ProjectContentLoader::new(root).unwrap();
+    let snapshot = load_runtime_snapshot(&loader, &candidate, &plan);
+    let mut host = ProjectHost::new(RuntimeClosePolicy::default());
+    let mut attempt = host.begin_start(snapshot, plan, Vec::new()).unwrap();
+    let error = host.complete_start(&mut attempt).unwrap_err();
+    assert!(report_has_code(
+        &error.diagnostics,
+        "project.scene.tileset-preparation-failed"
+    ));
+    drop(attempt);
+    close_host(&mut host);
+    assert_eq!(loader.budget_snapshot().active_reservations(), 0);
+    assert_eq!(loader.budget_snapshot().active_generations(), 0);
+    assert_eq!(
+        loader
+            .budget_snapshot()
+            .active(ProjectContentBudgetKind::RetainedBytes),
+        0
+    );
+}
+
+#[test]
+fn hosted_residency_rejects_a_replaced_empty_image_store_before_retired_product_reactivation() {
+    let mut fixture = ResidencyFixture::new(false, None);
+    let empty = fixture.load("empty.scene.json");
+    let target = fixture.load("startup.scene.json");
+    fixture.step(move |world| {
+        let handle = image_handle(world, SHARED_ID);
+        replace(world, &empty);
+        let expected = world.resource::<CurrentSceneOwner>().receipt().clone();
+        assert_eq!(
+            world
+                .resource::<AssetStates>()
+                .state(handle.id())
+                .unwrap()
+                .load_state(),
+            &nara_asset::LoadState::Removed
+        );
+        let original = world.remove_resource::<Assets<ImageAsset>>().unwrap();
+        assert!(original.is_empty());
+        world.insert_resource(Assets::<ImageAsset>::default());
+        assert!(
+            world
+                .resource::<Assets<ImageAsset>>()
+                .mutation_baseline(handle, world.resource::<AssetStates>())
+                .is_err()
+        );
+        assert_rejected(
+            world,
+            &expected,
+            &target,
+            "project.scene.image-ownership-changed",
+        );
+        // Returning the exact original store restores its association without inventing a new
+        // product identity, revision or state generation.
+        world.insert_resource(original);
+        assert!(
+            world
+                .resource::<Assets<ImageAsset>>()
+                .mutation_baseline(handle, world.resource::<AssetStates>())
+                .is_ok()
+        );
+        replace(world, &target);
+    });
     fixture.close();
 }
 

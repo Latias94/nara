@@ -23,6 +23,8 @@ pub struct RuntimeConfigurationPlan {
     pub(super) required: ProductCapabilitySet,
     pub(super) plugin_plan: PluginPlan,
     pub(super) schema_validation: SchemaValidationInput,
+    #[cfg(all(feature = "runtime-2d", feature = "serde"))]
+    pub(crate) runtime_codecs: crate::runtime_content::RuntimeCodecs,
 }
 
 impl fmt::Debug for RuntimeConfigurationPlan {
@@ -40,6 +42,18 @@ impl fmt::Debug for RuntimeConfigurationPlan {
 }
 
 impl RuntimeConfigurationPlan {
+    /// Frozen Runtime codec agreement, separate from plugin and component Schema composition.
+    #[cfg(all(feature = "runtime-2d", feature = "serde"))]
+    #[must_use]
+    pub fn runtime_codecs_fingerprint(&self) -> crate::runtime_content::RuntimeCodecsFingerprint {
+        self.runtime_codecs.fingerprint()
+    }
+
+    #[cfg(all(feature = "runtime-2d", feature = "serde"))]
+    pub(crate) fn runtime_codecs(&self) -> &crate::runtime_content::RuntimeCodecs {
+        &self.runtime_codecs
+    }
+
     /// Returns only the admitted values consumed by the Runtime composition.
     #[must_use]
     pub const fn settings(&self) -> &EffectiveRuntimeConfiguration {

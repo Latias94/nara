@@ -1,6 +1,6 @@
 use std::{
     sync::{
-        Arc, OnceLock,
+        Arc, OnceLock, Weak,
         atomic::{AtomicU64, Ordering},
     },
     time::Duration,
@@ -11,7 +11,6 @@ use super::{
     CompositionError, ProjectContentRevision, ProjectContentSnapshot, ProjectSettingsLineage,
     RuntimePlan, RuntimePlanError,
 };
-use crate::startup_scene::{SceneSource, materialize_startup_scene};
 use nara_app::{
     AppExit, PluginFailureReport, PluginHook, PluginHookMutation, PluginPlanError,
     RuntimeAdmissionError, RuntimeAdmissionReservation, RuntimeCandidateFailure,
@@ -42,9 +41,14 @@ use nara_tasks::TaskShutdownReport;
 use nara_tilemap::TileSet;
 use plugin_diagnostics::{append_plugin_shutdown_diagnostics, runtime_construction_failure_report};
 
+use super::composition::RuntimeConfigurationPlan;
+use crate::runtime_content::{ProcessedSceneContent, RuntimeContentBase, RuntimeContentError};
+use crate::startup_scene::{SceneSource, materialize_startup_scene};
+
 const PROJECT_MANIFEST: &str = "nara.toml";
 
 mod action;
+mod content;
 mod content_residency;
 mod scene_requests;
 pub use scene_requests::domains::{
@@ -57,8 +61,8 @@ pub(crate) use scene_requests::{
 };
 pub use scene_requests::{
     PreparedProjectSceneView, ProjectSceneRequestError, ProjectSceneRequestId,
-    ProjectSceneRequestState, ProjectScenes, begin_prepared_project_scene_travel,
-    commit_prepared_project_scene,
+    ProjectSceneRequestState, ProjectSceneSelection, ProjectScenes,
+    begin_prepared_project_scene_travel, commit_prepared_project_scene,
 };
 
 #[cfg(all(feature = "desktop-winit", feature = "render-wgpu"))]
@@ -92,8 +96,12 @@ pub use editor::{
 mod plugin_diagnostics;
 
 #[cfg(all(feature = "desktop-winit", feature = "render-wgpu"))]
-pub use action::{DesktopRun, DesktopRunIntent, DesktopRunOutcome, DesktopRunReport};
-pub use action::{HeadlessRun, HeadlessRunIntent, HeadlessRunOutcome, HeadlessRunReport};
+pub use action::{
+    DesktopRun, DesktopRunIntent, DesktopRunOptions, DesktopRunOutcome, DesktopRunReport,
+};
+pub use action::{
+    HeadlessRun, HeadlessRunIntent, HeadlessRunOptions, HeadlessRunOutcome, HeadlessRunReport,
+};
 #[cfg(all(feature = "desktop-winit", feature = "render-wgpu"))]
 pub use desktop_verification::DesktopPresentationVerificationReceipt;
 #[cfg(all(feature = "tooling", feature = "presentation-ui"))]
@@ -137,13 +145,20 @@ struct RuntimeStartAttempt {
 
 struct PreparedRuntimeStart {
     claim: ActiveStartClaim,
-    snapshot: ProjectContentSnapshot,
-    plan: RuntimePlan,
+    content: RuntimeStartContent,
+    plan: RuntimeConfigurationPlan,
     runtime: RuntimePublicationSlot,
     diagnostics: DiagnosticReport,
 }
 
 impl PreparedRuntimeStart {
+    fn source(&self) -> Option<(&ProjectContentSnapshot, &RuntimePlan)> {
+        match &self.content {
+            RuntimeStartContent::Source { snapshot, plan } => Some((snapshot, plan)),
+            RuntimeStartContent::Processed { .. } => None,
+        }
+    }
+
     fn generation(&self) -> RuntimeGeneration {
         self.runtime
             .runtime()
@@ -153,8 +168,7 @@ impl PreparedRuntimeStart {
 }
 
 struct RuntimeStartInputs {
-    snapshot: ProjectContentSnapshot,
-    plan: RuntimePlan,
+    content: RuntimeStartContent,
     startup_scene: SceneSource,
     commands: Vec<GameplayCommandSubmission>,
     obligations: RuntimeObligationLedger,
@@ -164,34 +178,103 @@ struct RuntimeStartInputs {
     )>,
 }
 
-struct RuntimeStartStamp {
-    lineage: ProjectSettingsLineage,
-    content_revision: ProjectContentRevision,
-    schema_fingerprint: SchemaCompositionFingerprint,
-    bindings: SceneComponentBindings,
+#[derive(Clone)]
+enum RuntimeStartContent {
+    Source {
+        snapshot: ProjectContentSnapshot,
+        plan: RuntimePlan,
+    },
+    Processed {
+        base: RuntimeContentBase,
+        content: Arc<ProcessedSceneContent>,
+    },
+}
+
+impl RuntimeStartContent {
+    fn plan(&self) -> &RuntimeConfigurationPlan {
+        match self {
+            Self::Source { plan, .. } => plan.configuration_plan(),
+            Self::Processed { base, .. } => base.plan(),
+        }
+    }
+}
+
+enum RuntimeStartStamp {
+    Source {
+        lineage: ProjectSettingsLineage,
+        content_revision: ProjectContentRevision,
+        schema_fingerprint: SchemaCompositionFingerprint,
+        bindings: SceneComponentBindings,
+    },
+    Processed {
+        base: RuntimeContentBase,
+        content: Weak<ProcessedSceneContent>,
+        bindings: SceneComponentBindings,
+    },
 }
 
 impl RuntimeStartStamp {
-    fn capture(snapshot: &ProjectContentSnapshot, plan: &RuntimePlan) -> Self {
-        Self {
-            lineage: snapshot.lineage(),
-            content_revision: snapshot.revision(),
-            schema_fingerprint: snapshot.schema_fingerprint(),
-            bindings: plan.schema_validation().bindings().clone(),
+    fn capture(content: &RuntimeStartContent) -> Self {
+        match content {
+            RuntimeStartContent::Source { snapshot, plan } => Self::Source {
+                lineage: snapshot.lineage(),
+                content_revision: snapshot.revision(),
+                schema_fingerprint: snapshot.schema_fingerprint(),
+                bindings: plan.schema_validation().bindings().clone(),
+            },
+            RuntimeStartContent::Processed { base, content } => Self::Processed {
+                base: base.clone(),
+                content: Arc::downgrade(content),
+                bindings: base.plan().schema_validation().bindings().clone(),
+            },
         }
     }
 
-    fn matches(&self, snapshot: &ProjectContentSnapshot, plan: &RuntimePlan) -> bool {
-        self.lineage == snapshot.lineage()
-            && self.lineage == plan.lineage()
-            && self.content_revision == snapshot.revision()
-            && self.schema_fingerprint == snapshot.schema_fingerprint()
-            && self.schema_fingerprint == plan.schema_validation().composition_fingerprint()
-            && self
-                .bindings
-                .same_definitions(plan.schema_validation().bindings())
-            && snapshot.shares_component_bindings(&self.bindings)
-            && snapshot.matches_asset_domains(plan)
+    fn matches(&self, content: &RuntimeStartContent, startup_scene: &SceneSource) -> bool {
+        match (self, content) {
+            (
+                Self::Source {
+                    lineage,
+                    content_revision,
+                    schema_fingerprint,
+                    bindings,
+                },
+                RuntimeStartContent::Source { snapshot, plan },
+            ) => {
+                *lineage == snapshot.lineage()
+                    && *lineage == plan.lineage()
+                    && *content_revision == snapshot.revision()
+                    && *schema_fingerprint == snapshot.schema_fingerprint()
+                    && *schema_fingerprint == plan.schema_validation().composition_fingerprint()
+                    && bindings.same_definitions(plan.schema_validation().bindings())
+                    && snapshot.shares_component_bindings(bindings)
+                    && snapshot.matches_asset_domains(plan)
+            }
+            (
+                Self::Processed {
+                    base,
+                    content: original,
+                    bindings,
+                },
+                RuntimeStartContent::Processed {
+                    base: selected,
+                    content,
+                },
+            ) => {
+                base.same_base(selected)
+                    && base.same_base(content.base())
+                    && Weak::ptr_eq(original, &Arc::downgrade(content))
+                    && content.product() == base.catalog().startup_scene()
+                    && bindings.same_definitions(selected.plan().schema_validation().bindings())
+                    && content.scene.candidate().definitions().matches(bindings)
+                    && std::ptr::eq(
+                        startup_scene.document(),
+                        content.scene.candidate().document(),
+                    )
+                    && startup_scene.is_content_managed()
+            }
+            _ => false,
+        }
     }
 }
 
@@ -272,7 +355,7 @@ impl RuntimeStartAttempt {
         let valid_stamp = self
             .inputs
             .as_ref()
-            .is_some_and(|inputs| self.stamp.matches(&inputs.snapshot, &inputs.plan));
+            .is_some_and(|inputs| self.stamp.matches(&inputs.content, &inputs.startup_scene));
         if !valid_owner || !valid_epoch || !valid_slot || !valid_stamp {
             return Err(HostFault::new(single_error(
                 "project.run.stale-start",
@@ -320,8 +403,18 @@ enum ProjectHostSlot {
 struct PublishedProjectRuntime {
     epoch: u64,
     runtime: RuntimePublicationSlot,
-    startup_admission_revision: ProjectContentRevision,
-    _plan: RuntimePlan,
+    content: PublishedRuntimeContent,
+    _plan: RuntimeConfigurationPlan,
+}
+
+enum PublishedRuntimeContent {
+    Source {
+        startup_admission_revision: ProjectContentRevision,
+        _plan: RuntimePlan,
+    },
+    Processed {
+        _base: RuntimeContentBase,
+    },
 }
 
 impl PublishedProjectRuntime {
@@ -587,7 +680,13 @@ impl ProjectHost {
 
     fn running_content_revision(&self) -> Option<ProjectContentRevision> {
         match &self.slot {
-            ProjectHostSlot::Running(published) => Some(published.startup_admission_revision),
+            ProjectHostSlot::Running(published) => match &published.content {
+                PublishedRuntimeContent::Source {
+                    startup_admission_revision,
+                    ..
+                } => Some(*startup_admission_revision),
+                PublishedRuntimeContent::Processed { .. } => None,
+            },
             ProjectHostSlot::Empty | ProjectHostSlot::Cleaning { .. } => None,
         }
     }
@@ -728,6 +827,42 @@ impl ProjectHost {
         Ok(attempt)
     }
 
+    fn begin_processed_start(
+        &mut self,
+        base: RuntimeContentBase,
+        commands: Vec<GameplayCommandSubmission>,
+    ) -> Result<RuntimeStartAttempt, HostFault> {
+        if !matches!(self.slot, ProjectHostSlot::Empty) || self.start_claim.any_active() {
+            return Err(HostFault::new(single_error(
+                "project.run.busy",
+                "Project Host already owns an active run",
+            )));
+        }
+        verify_processed_runtime_plan(base.plan())?;
+        let content = base
+            .prepare_scene_content(base.catalog().startup_scene())
+            .map_err(|error| processed_content_fault(&error))?;
+        if !base.same_base(content.base())
+            || content.product() != base.catalog().startup_scene()
+            || !content
+                .scene
+                .candidate()
+                .definitions()
+                .matches(base.plan().schema_validation().bindings())
+        {
+            return Err(HostFault::new(single_error(
+                "project.run.processed-content-mismatch",
+                "Runtime startup content differs from its original admitted base",
+            )));
+        }
+        let startup_scene = SceneSource::from_hosted_runtime_content(content.scene.clone());
+        self.begin_start_inputs(
+            RuntimeStartContent::Processed { base, content },
+            startup_scene,
+            commands,
+        )
+    }
+
     fn begin_editor_start(
         &mut self,
         snapshot: ProjectContentSnapshot,
@@ -772,6 +907,19 @@ impl ProjectHost {
                 "Project content was not admitted against the selected runtime schema owners",
             )));
         }
+        self.begin_start_inputs(
+            RuntimeStartContent::Source { snapshot, plan },
+            startup_scene,
+            commands,
+        )
+    }
+
+    fn begin_start_inputs(
+        &mut self,
+        content: RuntimeStartContent,
+        startup_scene: SceneSource,
+        commands: Vec<GameplayCommandSubmission>,
+    ) -> Result<RuntimeStartAttempt, HostFault> {
         let epoch = self.next_epoch;
         self.next_epoch = self.next_epoch.checked_add(1).ok_or_else(|| {
             HostFault::new(single_error(
@@ -785,14 +933,13 @@ impl ProjectHost {
                 "Project Host already owns an active run",
             )));
         }
-        let stamp = RuntimeStartStamp::capture(&snapshot, &plan);
+        let stamp = RuntimeStartStamp::capture(&content);
         Ok(RuntimeStartAttempt {
             owner: Arc::clone(&self.start_claim),
             epoch,
             stamp,
             inputs: Some(RuntimeStartInputs {
-                snapshot,
-                plan,
+                content,
                 startup_scene,
                 commands,
                 obligations: RuntimeObligationLedger::new(),
@@ -815,13 +962,13 @@ impl ProjectHost {
         let inputs = attempt.take_for(self)?;
         let claim = ActiveStartClaim::new(Arc::clone(&self.start_claim), epoch);
         let RuntimeStartInputs {
-            snapshot,
-            plan,
+            content,
             startup_scene,
             commands,
             obligations,
             scene_preparation,
         } = inputs;
+        let plan = content.plan().clone();
         let task_report_required = project_requires_task_report(&plan);
 
         let mut candidate = match plan.plugin_plan().instantiate_runtime_candidate(
@@ -844,33 +991,39 @@ impl ProjectHost {
         };
 
         let admission_plan = plan.clone();
-        let admission_snapshot = snapshot.clone();
+        let admission_content = content.clone();
         let materialization = Arc::new(OnceLock::new());
         let command_result = Arc::clone(&materialization);
         let admission = candidate.with_admission_scope(move |scope| {
             scope.apply_command(move |world: &mut World| {
-                let value = materialize_project_runtime(
+                let value = materialize_runtime(
                     world,
                     &admission_plan,
-                    &admission_snapshot,
+                    &admission_content,
                     startup_scene,
                     commands,
                 )
                 .and_then(|diagnostics| {
-                    if let Some((candidate, loader)) = scene_preparation {
-                        scene_requests::install_context(
-                            world,
-                            candidate,
-                            admission_plan.clone(),
-                            loader,
-                        )
-                        .map_err(|_| {
-                            HostFault::new(single_error(
-                                "project.scene.context-install-failed",
-                                "Project Scene preparation context could not be installed",
-                            ))
-                        })?;
-                    }
+                    let context = match &admission_content {
+                        RuntimeStartContent::Source { plan, .. } => match scene_preparation {
+                            Some((candidate, loader)) => scene_requests::install_context(
+                                world,
+                                candidate,
+                                plan.clone(),
+                                loader,
+                            ),
+                            None => Ok(()),
+                        },
+                        RuntimeStartContent::Processed { base, .. } => {
+                            scene_requests::install_runtime_context(world, base.clone())
+                        }
+                    };
+                    context.map_err(|_| {
+                        HostFault::new(single_error(
+                            "project.scene.context-install-failed",
+                            "Project Scene preparation context could not be installed",
+                        ))
+                    })?;
                     Ok(diagnostics)
                 });
                 assert!(
@@ -986,7 +1139,7 @@ impl ProjectHost {
         }
         Ok(PreparedRuntimeStart {
             claim,
-            snapshot,
+            content,
             plan,
             runtime,
             diagnostics,
@@ -1004,7 +1157,7 @@ impl ProjectHost {
     fn commit_prepared_start(&mut self, prepared: PreparedRuntimeStart) -> DiagnosticReport {
         let PreparedRuntimeStart {
             claim,
-            snapshot,
+            content,
             plan,
             runtime,
             diagnostics,
@@ -1012,12 +1165,21 @@ impl ProjectHost {
         let epoch = claim.epoch();
         debug_assert!(matches!(self.slot, ProjectHostSlot::Empty));
         debug_assert!(claim.owner.is_active(epoch));
+        let content = match content {
+            RuntimeStartContent::Source { snapshot, plan } => PublishedRuntimeContent::Source {
+                // Freshness compares the admitted startup, even after a legal current-Scene change.
+                // Live sources and published Images retain their own decoded generation instead.
+                startup_admission_revision: snapshot.revision(),
+                _plan: plan,
+            },
+            RuntimeStartContent::Processed { base, .. } => {
+                PublishedRuntimeContent::Processed { _base: base }
+            }
+        };
         self.slot = ProjectHostSlot::Running(Box::new(PublishedProjectRuntime {
             epoch,
             runtime,
-            // Freshness compares the admitted startup, even after a legal current-Scene change.
-            // Live sources and published Images retain their own decoded generation instead.
-            startup_admission_revision: snapshot.revision(),
+            content,
             _plan: plan,
         }));
         claim.finish();
@@ -1402,30 +1564,59 @@ impl ProjectHost {
     }
 }
 
-fn project_requires_task_report(plan: &RuntimePlan) -> bool {
+fn project_requires_task_report(plan: &RuntimeConfigurationPlan) -> bool {
     plan.plugin_plan()
         .entries()
         .iter()
         .any(|entry| entry.plugin_id() == nara_tasks::TASK_PLUGIN_ID)
 }
 
-fn materialize_project_runtime(
+fn verify_processed_runtime_plan(plan: &RuntimeConfigurationPlan) -> Result<(), HostFault> {
+    for entry in plan.plugin_plan().entries() {
+        let plugin = entry.plugin_id();
+        let source_execution = plugin == nara_asset::ASSET_SOURCE_PLUGIN_ID
+            || plugin == nara_image::IMAGE_SOURCE_PLUGIN_ID;
+        #[cfg(feature = "asset-watch")]
+        let source_execution =
+            source_execution || plugin == nara_asset_watch::ASSET_WATCH_PLUGIN_ID;
+        if source_execution {
+            return Err(HostFault::new(single_diagnostic(attach_identifier(
+                Diagnostic::error(
+                    diagnostic_code("project.run.source-execution-not-allowed"),
+                    safe_summary("Processed Runtime content cannot execute source plugins"),
+                ),
+                "plugin",
+                plugin.as_str(),
+            ))));
+        }
+    }
+    Ok(())
+}
+
+fn materialize_runtime(
     world: &mut World,
-    plan: &RuntimePlan,
-    snapshot: &ProjectContentSnapshot,
+    plan: &RuntimeConfigurationPlan,
+    content: &RuntimeStartContent,
     startup_scene: SceneSource,
     commands: Vec<GameplayCommandSubmission>,
 ) -> Result<DiagnosticReport, HostFault> {
-    verify_runtime_registry(world, plan)?;
+    verify_runtime_component_bindings(world, plan.schema_validation().bindings())?;
     if !world.contains_resource::<GameplayCommandQueue>() {
         return Err(HostFault::new(single_error(
             "project.run.command-queue-missing",
             "Project runtime has no semantic command queue",
         )));
     }
+    // Processed Scene decoding resolves complete Products through installed native resources.
+    // Publish those resources while the candidate is still unpublished, before Scene admission.
+    if let RuntimeStartContent::Processed { content, .. } = content {
+        content_residency::publish_processed_startup(world, content)?;
+    }
     let diagnostics = materialize_startup_scene(world, startup_scene)
         .map_err(|error| HostFault::new(error.diagnostics().clone()))?;
-    content_residency::publish_startup(world, snapshot)?;
+    if let RuntimeStartContent::Source { snapshot, .. } = content {
+        content_residency::publish_startup(world, snapshot)?;
+    }
     let faults = world
         .get_resource::<RuntimeFaultReporter>()
         .cloned()
@@ -1452,7 +1643,7 @@ fn materialize_project_runtime(
             })?;
         }
     }
-    verify_runtime_registry(world, plan)?;
+    verify_runtime_component_bindings(world, plan.schema_validation().bindings())?;
     Ok(diagnostics)
 }
 
@@ -1608,10 +1799,6 @@ fn publish_snapshot_tilesets(
     Ok(())
 }
 
-fn verify_runtime_registry(world: &World, plan: &RuntimePlan) -> Result<(), HostFault> {
-    verify_runtime_component_bindings(world, plan.schema_validation().bindings())
-}
-
 fn verify_runtime_component_bindings(
     world: &World,
     expected: &SceneComponentBindings,
@@ -1680,6 +1867,43 @@ impl HostFault {
     const fn new(diagnostics: DiagnosticReport) -> Self {
         Self { diagnostics }
     }
+}
+
+fn processed_content_fault(error: &RuntimeContentError) -> HostFault {
+    let reason = match error {
+        RuntimeContentError::Host(_) => "capability-read-failed",
+        RuntimeContentError::Catalog(_) => "catalog-rejected",
+        RuntimeContentError::Configuration(_) => "configuration-rejected",
+        RuntimeContentError::Composition(_) => "composition-rejected",
+        RuntimeContentError::CatalogDigestMismatch => "catalog-digest-mismatch",
+        RuntimeContentError::TargetMismatch => "target-mismatch",
+        RuntimeContentError::RecipeMismatch => "recipe-mismatch",
+        RuntimeContentError::SchemaMismatch => "schema-mismatch",
+        RuntimeContentError::CodecsMismatch => "codecs-mismatch",
+        RuntimeContentError::MemberDigestMismatch => "member-digest-mismatch",
+        RuntimeContentError::UndeclaredProduct => "undeclared-product",
+        RuntimeContentError::UndeclaredScene => "undeclared-scene",
+        RuntimeContentError::UndeclaredDependency => "undeclared-dependency",
+        RuntimeContentError::NotScene => "not-scene",
+        RuntimeContentError::NotAsset => "not-asset",
+        RuntimeContentError::CodecNotSelected => "codec-not-selected",
+        RuntimeContentError::CodecMismatch => "codec-mismatch",
+        RuntimeContentError::CodecPanicked => "codec-panicked",
+        RuntimeContentError::ProductIdentityMismatch => "product-identity-mismatch",
+        RuntimeContentError::NativeResourceUnavailable => "native-resource-unavailable",
+        RuntimeContentError::TileSet(_) => "tileset-rejected",
+        RuntimeContentError::Tilemap(_) => "tilemap-rejected",
+        RuntimeContentError::Scene(_) => "scene-rejected",
+        RuntimeContentError::SceneReference(_) => "scene-reference-rejected",
+        RuntimeContentError::Asset(_) => "asset-decode-failed",
+        RuntimeContentError::Budget { .. } => "budget-exceeded",
+        RuntimeContentError::BudgetOverflow { .. } => "budget-overflow",
+    };
+    HostFault::new(single_diagnostic(failure_diagnostic(
+        "project.run.runtime-content-rejected",
+        "Runtime content was rejected before startup",
+        reason,
+    )))
 }
 
 fn runtime_plan_failure_report(error: &RuntimePlanError) -> DiagnosticReport {
@@ -1871,7 +2095,7 @@ fn plugin_plan_failure_report(error: &PluginPlanError) -> DiagnosticReport {
     single_diagnostic(diagnostic)
 }
 
-fn runtime_plan_selected_report(plan: &RuntimePlan) -> DiagnosticReport {
+fn runtime_plan_selected_report(plan: &RuntimeConfigurationPlan) -> DiagnosticReport {
     let fingerprint = format!("{:?}", plan.plugin_plan().fingerprint());
     let fingerprint = PublicDiagnosticIdentifier::new(&fingerprint)
         .expect("a plugin plan fingerprint is a valid public identifier");
@@ -2233,6 +2457,10 @@ fn inject_publication_fault_if_armed(reporter: &nara_app::RuntimeFaultReporter) 
 
 #[cfg(all(test, feature = "serde", feature = "runtime-2d"))]
 mod tests;
+
+#[cfg(all(test, feature = "serde", feature = "runtime-2d"))]
+#[path = "runtime/tests/processed_start.rs"]
+mod processed_start_tests;
 
 #[cfg(test)]
 mod component_binding_admission_tests {

@@ -1,27 +1,45 @@
 //! Independent processed TileSet delivery through the public Runtime and Scene owners.
 //!
-//! This consumer owns its concrete Image/TileSet aggregate. It does not qualify stock renderer
-//! resource routing, a packaged Player, GPU upload, or source-backed asset discovery.
+//! The aggregate tests own their Image/TileSet stores. The first-party HeadlessRun test separately
+//! exercises stock native residency, extraction, ImagePrepare and Scene travel. It requires the
+//! root presentation-2d feature, without a window or GPU backend. Neither path qualifies GPU upload
+//! or a packaged Player.
 
-use std::{fs, sync::Arc};
+use std::{
+    fs,
+    num::NonZeroU32,
+    sync::Arc,
+    time::{Duration, Instant},
+};
 
 use nara_asset::{
-    AssetError, AssetEvents, AssetPath, AssetProductRef, AssetRecord, AssetRef, AssetServer,
-    AssetSlotRevision, AssetSourceKind, AssetStateRevision, AssetStates, Assets, Handle,
-    ImportedProductId, ProjectAssetDatabase, RuntimeAssetCodec, StableAssetId,
+    AssetError, AssetEvents, AssetPath, AssetProductRef, AssetRecord, AssetRef, AssetRuntimeError,
+    AssetRuntimeLimits, AssetServer, AssetSlotRevision, AssetSourceKind, AssetStateRevision,
+    AssetStates, Assets, Handle, ImportedProductId, ProjectAssetDatabase, RuntimeAssetCodec,
+    StableAssetId,
 };
 use nara_core::{ByteLimit, Color, FormatKind, FormatVersion, ItemLimit, Vec2};
 use nara_ecs::{Component, Entity, Resource, World};
 use nara_engine::{
     ProductRecipe,
+    advanced_prelude::{CurrentScene, commit_prepared_project_scene},
+    app::{App, CoreStage, Plugin, PluginCategory, PluginDeclaration, PluginError, PluginId},
     project::{ProductCapability, RuntimeConfiguration, RuntimePreset},
-    project_host::{open_explicit_product_project_root, resolve_runtime_configuration},
+    project_host::{
+        HeadlessRun, HeadlessRunOptions, HeadlessRunOutcome, ProjectDomainAssets,
+        ProjectSceneRequestId, ProjectSceneRequestState, ProjectScenes,
+        open_explicit_product_project_root, resolve_runtime_configuration,
+    },
     runtime_content::{
-        RUNTIME_CONTENT_CATALOG_FILE, RuntimeContentAsset, RuntimeContentBase,
-        RuntimeContentBudgetKind, RuntimeContentCatalog, RuntimeContentCatalogDefinition,
-        RuntimeContentCatalogLimits, RuntimeContentDependency, RuntimeContentDependencyRole,
-        RuntimeContentError, RuntimeContentExpectation, RuntimeContentLimits, RuntimeContentMember,
-        RuntimeContentMemberKind, RuntimeContentTarget,
+        RUNTIME_CONTENT_CATALOG_FILE, RuntimeCodecDefinitionId, RuntimeContentAsset,
+        RuntimeContentBase, RuntimeContentBudgetKind, RuntimeContentCatalog,
+        RuntimeContentCatalogDefinition, RuntimeContentCatalogLimits, RuntimeContentDependency,
+        RuntimeContentDependencyRole, RuntimeContentError, RuntimeContentExpectation,
+        RuntimeContentLimits, RuntimeContentMember, RuntimeContentMemberKind, RuntimeContentTarget,
+    },
+    sprite_render::{
+        __private::{ExtractedSpriteKind, ExtractedSprites},
+        SpriteRenderStats,
     },
 };
 use nara_fs::ContentDigest;
@@ -29,6 +47,7 @@ use nara_identity::{EntityLookup, SpawnedSceneInstance, WorldIdentityDomain};
 use nara_image::{
     ImageAsset, ImageBytesImportRequest, ImageColorSpace, ImageContentSnapshot, ImageDomain,
     ImageExtent, ImageFormat, ImageImportSettings, ImageImporter, ImageRuntimeCodec,
+    PreparedImageSnapshot, PreparedImages, image_resource_key,
 };
 use nara_material::{AlphaMode2d, SamplerDescriptor};
 use nara_reflect::{
@@ -37,8 +56,8 @@ use nara_reflect::{
 };
 use nara_scene::{
     RuntimeSceneCandidate, RuntimeSceneDocumentCandidate, RuntimeSceneLimits,
-    SceneComponentBindings, SceneEntityId, SceneOccurrenceKey, SourceDocumentKey,
-    SourceDocumentKind,
+    SceneComponentBindings, SceneComponentRecord, SceneEntityId, SceneOccurrenceKey,
+    SourceDocumentKey, SourceDocumentKind,
     advanced::{
         PreparedSceneReplacement, SceneAssetBindings, SceneNativeRetirementClaims,
         SceneProductResource, SceneProductTransactionLimits,
@@ -58,6 +77,8 @@ const AUXILIARY: &str = "a5a0cd22-2b7f-4f08-810a-bd34d16f9b4a";
 const STARTUP_SOURCE: &str = "e1034378-3bbe-4198-8003-f4afbe747dd4";
 const LATER_SOURCE: &str = "1cb053a7-c717-42a8-bf94-888d655d985f";
 const UNRELATED_SOURCE: &str = "92b91d28-42f2-4bb5-bf92-9e985959f4ee";
+// Keep the alias after both real sources so acquisition still selects the concrete Product first.
+const NATIVE_ALIAS_SOURCE: &str = "fbb5dc12-516b-45e7-8e04-cad99a33f786";
 const TILEMAP: &str = "nara.tilemap.Tilemap";
 const SOURCE_FILE: &str = "authoring.png";
 const PRIMARY_IMAGE_FILE: &str = "primary.runtime.image";
@@ -66,6 +87,8 @@ const PRIMARY_TILESET_FILE: &str = "primary.runtime.tileset";
 const AUXILIARY_TILESET_FILE: &str = "auxiliary.runtime.tileset";
 const STARTUP_FILE: &str = "startup.runtime.json";
 const LATER_FILE: &str = "later.runtime.json";
+const RETENTION_PROBE_FILE: &str = "retention.probe";
+const RETENTION_PROBE_BYTES: &[u8] = b"runtime-native-retention-probe";
 const SOURCE_PNG: &[u8] =
     include_bytes!("../../../../samples/two-level-game/assets/textures/meadow.png");
 
@@ -108,6 +131,16 @@ fn occurrence() -> SceneOccurrenceKey {
 fn recipe() -> ProductRecipe {
     // The selected Runtime2d plan supplies the existing TILEMAP_SCHEMA_PROVIDER.
     ProductRecipe::new()
+        .add_runtime_image_codec::<ImageRuntimeCodec>(RuntimeCodecDefinitionId::new(
+            "consumer.runtime-tileset.image",
+            1,
+        ))
+        .unwrap()
+        .add_runtime_tileset_codec::<TileSetRuntimeCodec>(RuntimeCodecDefinitionId::new(
+            "consumer.runtime-tileset.tileset",
+            1,
+        ))
+        .unwrap()
 }
 
 fn target() -> RuntimeContentTarget {
@@ -166,8 +199,10 @@ fn processed_scene(
     source: &str,
     reference: AssetProductRef,
     tile: u32,
+    presented: bool,
+    direct_image: Option<AssetProductRef>,
 ) -> RuntimeSceneCandidate {
-    let encoded = serde_json::to_vec(&json!({
+    let mut document = json!({
         "kind": "runtime_scene", "format_version": 1, "engine_min_version": "0.1.0",
         "generator": {"name": "runtime-tileset-consumer", "version": "0.0.0"},
         "payload": {
@@ -179,8 +214,37 @@ fn processed_scene(
             "provenance": [{"entity": "terrain", "local_entity": "terrain",
                 "origin": {"kind": "local"}}]
         }
-    }))
-    .unwrap();
+    });
+    if presented {
+        let transform = bindings
+            .schema(&ComponentTypeId::new("nara.transform.Transform2d"))
+            .unwrap();
+        let record = SceneComponentRecord::new(
+            transform.version(),
+            transform.authoring_initial_value().unwrap().clone(),
+        );
+        document["payload"]["entities"][0]["components"]["nara.transform.Transform2d"] =
+            serde_json::to_value(record).unwrap();
+    }
+    if let Some(image) = direct_image {
+        let sprite = bindings
+            .schema(&ComponentTypeId::new("nara.sprite.Sprite"))
+            .unwrap();
+        let mut value = sprite.authoring_initial_value().unwrap().clone();
+        let ComponentValue::Map(fields) = &mut value else {
+            unreachable!("the Sprite initial value is an admitted map")
+        };
+        let Some(ComponentValue::Map(material)) = fields.get_mut("material") else {
+            unreachable!("the Sprite initial value contains its material")
+        };
+        material.insert(
+            "image".into(),
+            encode_asset_reference_value(&AssetRef::Product(image)),
+        );
+        document["payload"]["entities"][0]["components"]["nara.sprite.Sprite"] =
+            serde_json::to_value(SceneComponentRecord::new(sprite.version(), value)).unwrap();
+    }
+    let encoded = serde_json::to_vec(&document).unwrap();
     RuntimeSceneDocumentCandidate::from_json_bytes(&encoded, RuntimeSceneLimits::default())
         .unwrap()
         .admit(&source_key(source), bindings)
@@ -207,11 +271,16 @@ enum FixtureCase {
     WrongImageFamily,
     WrongImageExtent,
     OutsideAtlas,
+    NativeOmittedDependency,
+    NativeSoftDependency,
+    NativeImageAlias,
+    NativeTileSetAlias,
 }
 
 struct Fixture {
     directory: tempfile::TempDir,
     expected: RuntimeContentExpectation,
+    recipe: ProductRecipe,
     primary_pixels: Vec<u8>,
     auxiliary_pixels: Vec<u8>,
     extent: ImageExtent,
@@ -223,6 +292,10 @@ impl Fixture {
     }
 
     fn with_case(case: FixtureCase) -> Self {
+        Self::with_recipe(case, recipe(), false)
+    }
+
+    fn with_recipe(case: FixtureCase, recipe: ProductRecipe, presented: bool) -> Self {
         let directory = tempfile::tempdir().unwrap();
         fs::write(directory.path().join(SOURCE_FILE), SOURCE_PNG).unwrap();
         // This is the real producer import. Processed publication below never invents source facts.
@@ -270,11 +343,17 @@ impl Fixture {
         let mut configuration = RuntimeConfiguration::default();
         configuration.runtime.preset = RuntimePreset::LocalHeadless;
         configuration.capabilities.requested = vec![ProductCapability::Runtime2d];
+        if presented {
+            configuration
+                .capabilities
+                .requested
+                .push(ProductCapability::Presentation2d);
+        }
         configuration.tasks.io.workers = 1;
         configuration.tasks.compute.workers = 1;
         configuration.tasks.async_compute.workers = 1;
-        let plan =
-            resolve_runtime_configuration(&configuration.resolve().unwrap(), recipe()).unwrap();
+        let plan = resolve_runtime_configuration(&configuration.resolve().unwrap(), recipe.clone())
+            .unwrap();
         let mut members = Vec::new();
         for (path, source, reference, tile) in [
             (STARTUP_FILE, STARTUP_SOURCE, tileset_product(false), 0),
@@ -289,11 +368,33 @@ impl Fixture {
                 },
             ),
         ] {
-            let encoded =
-                processed_scene(plan.schema_validation().bindings(), source, reference, tile)
-                    .to_json_bytes()
-                    .unwrap();
+            let direct_image = (source == STARTUP_SOURCE
+                && matches!(
+                    case,
+                    FixtureCase::NativeOmittedDependency | FixtureCase::NativeSoftDependency
+                ))
+            .then_some(image_product(false));
+            let encoded = processed_scene(
+                plan.schema_validation().bindings(),
+                source,
+                reference,
+                tile,
+                presented,
+                direct_image,
+            )
+            .to_json_bytes()
+            .unwrap();
             fs::write(directory.path().join(path), &encoded).unwrap();
+            let mut dependencies = vec![RuntimeContentDependency::new(
+                reference,
+                RuntimeContentDependencyRole::Required,
+            )];
+            if let Some(image) = direct_image {
+                dependencies.push(RuntimeContentDependency::new(
+                    image,
+                    RuntimeContentDependencyRole::Required,
+                ));
+            }
             members.push(
                 RuntimeContentMember::new(
                     path,
@@ -302,10 +403,7 @@ impl Fixture {
                         source: source_key(source),
                     },
                     vec![product(source, false)],
-                    vec![RuntimeContentDependency::new(
-                        reference,
-                        RuntimeContentDependencyRole::Required,
-                    )],
+                    dependencies,
                 )
                 .unwrap(),
             );
@@ -323,10 +421,17 @@ impl Fixture {
                     })
                     .unwrap();
             let dependencies = if !auxiliary {
-                vec![RuntimeContentDependency::new(
-                    image_product(false),
-                    RuntimeContentDependencyRole::Required,
-                )]
+                match case {
+                    FixtureCase::NativeOmittedDependency => vec![],
+                    FixtureCase::NativeSoftDependency => vec![RuntimeContentDependency::new(
+                        image_product(false),
+                        RuntimeContentDependencyRole::Soft,
+                    )],
+                    _ => vec![RuntimeContentDependency::new(
+                        image_product(false),
+                        RuntimeContentDependencyRole::Required,
+                    )],
+                }
             } else {
                 match case {
                     FixtureCase::OmittedDependency => vec![],
@@ -353,6 +458,10 @@ impl Fixture {
                 PRIMARY_TILESET_FILE
             };
             fs::write(directory.path().join(path), &encoded).unwrap();
+            let mut products = vec![descriptor.product()];
+            if !auxiliary && matches!(case, FixtureCase::NativeTileSetAlias) {
+                products.push(product(NATIVE_ALIAS_SOURCE, false));
+            }
             members.push(
                 RuntimeContentMember::new(
                     path,
@@ -361,7 +470,7 @@ impl Fixture {
                         format: FormatKind::new(TileSetRuntimeCodec::RUNTIME_KIND).unwrap(),
                         version: FormatVersion::ONE,
                     },
-                    vec![descriptor.product()],
+                    products,
                     dependencies,
                 )
                 .unwrap(),
@@ -386,6 +495,10 @@ impl Fixture {
                 ImageRuntimeCodec::RUNTIME_KIND
             };
             fs::write(directory.path().join(path), &encoded).unwrap();
+            let mut products = vec![image_product(auxiliary)];
+            if !auxiliary && matches!(case, FixtureCase::NativeImageAlias) {
+                products.push(product(NATIVE_ALIAS_SOURCE, false));
+            }
             members.push(
                 RuntimeContentMember::new(
                     path,
@@ -394,7 +507,7 @@ impl Fixture {
                         format: FormatKind::new(format).unwrap(),
                         version: FormatVersion::ONE,
                     },
-                    vec![image_product(auxiliary)],
+                    products,
                     if wrong_family {
                         vec![RuntimeContentDependency::new(
                             image_product(false),
@@ -403,6 +516,26 @@ impl Fixture {
                     } else {
                         vec![]
                     },
+                )
+                .unwrap(),
+            );
+        }
+        if presented {
+            fs::write(
+                directory.path().join(RETENTION_PROBE_FILE),
+                RETENTION_PROBE_BYTES,
+            )
+            .unwrap();
+            members.push(
+                RuntimeContentMember::new(
+                    RETENTION_PROBE_FILE,
+                    ContentDigest::of_bytes(RETENTION_PROBE_BYTES),
+                    RuntimeContentMemberKind::Asset {
+                        format: FormatKind::new(RetentionProbeCodec::RUNTIME_KIND).unwrap(),
+                        version: FormatVersion::ONE,
+                    },
+                    vec![product(UNRELATED_SOURCE, false)],
+                    vec![],
                 )
                 .unwrap(),
             );
@@ -416,6 +549,7 @@ impl Fixture {
                     .schema_validation()
                     .composition_fingerprint()
                     .as_bytes(),
+                runtime_codecs_fingerprint: plan.runtime_codecs_fingerprint().as_bytes(),
                 startup_scene: product(STARTUP_SOURCE, false),
                 scenes: vec![product(STARTUP_SOURCE, false), product(LATER_SOURCE, false)],
                 addressable_roots: vec![tileset_product(false), tileset_product(true)],
@@ -435,6 +569,7 @@ impl Fixture {
         Self {
             directory,
             expected: RuntimeContentExpectation::new(ContentDigest::of_bytes(&encoded), target()),
+            recipe,
             primary_pixels,
             auxiliary_pixels,
             extent,
@@ -445,7 +580,7 @@ impl Fixture {
         RuntimeContentBase::open(
             &open_explicit_product_project_root(self.directory.path()).unwrap(),
             &self.expected,
-            recipe(),
+            self.recipe.clone(),
             limits,
         )
         .unwrap()
@@ -466,6 +601,7 @@ impl Fixture {
             AUXILIARY_TILESET_FILE,
             STARTUP_FILE,
             LATER_FILE,
+            RETENTION_PROBE_FILE,
             RUNTIME_CONTENT_CATALOG_FILE,
         ] {
             let path = self.directory.path().join(path);
@@ -492,6 +628,721 @@ impl Fixture {
         let base = self.open(limits.with_retained_bytes(ByteLimit::new(required).unwrap()));
         self.remove_outputs();
         base
+    }
+}
+
+/// An unreferenced selected format whose output promise makes every probe refuse before decode.
+/// Its Budget::required value observes the original base's live reservations without allocating.
+struct RetentionProbeDomain;
+
+impl nara_asset::AssetDomain for RetentionProbeDomain {
+    type Product = ();
+}
+
+struct RetentionProbeCodec;
+
+impl RuntimeAssetCodec<()> for RetentionProbeCodec {
+    const RUNTIME_KIND: &'static str = "runtime_native_retention_probe";
+    const RUNTIME_VERSION: u32 = 1;
+
+    fn runtime_limits() -> AssetRuntimeLimits {
+        AssetRuntimeLimits::new(
+            ByteLimit::new(RETENTION_PROBE_BYTES.len()).unwrap(),
+            ByteLimit::ONE,
+            ByteLimit::new(2 * 1024 * 1024 * 1024).unwrap(),
+        )
+    }
+
+    fn encode_runtime(_: &()) -> Result<Box<[u8]>, AssetRuntimeError> {
+        Ok(RETENTION_PROBE_BYTES.into())
+    }
+
+    fn decode_runtime(_: &[u8]) -> Result<(), AssetRuntimeError> {
+        panic!("the retention probe must refuse its output reservation before decode")
+    }
+
+    fn runtime_retained_bytes(_: &()) -> Result<usize, AssetRuntimeError> {
+        Ok(0)
+    }
+
+    fn visit_required_runtime_products<E>(
+        _: &(),
+        _: impl FnMut(AssetProductRef) -> Result<(), E>,
+    ) -> Result<(), E> {
+        Ok(())
+    }
+
+    fn contains_runtime_product(_: &(), reference: AssetProductRef) -> bool {
+        reference == product(UNRELATED_SOURCE, false)
+    }
+}
+
+fn retained_requirement(base: &RuntimeContentBase) -> usize {
+    match base.acquire_asset::<RetentionProbeDomain, RetentionProbeCodec>(product(
+        UNRELATED_SOURCE,
+        false,
+    )) {
+        Err(RuntimeContentError::Budget {
+            kind: RuntimeContentBudgetKind::RetainedBytes,
+            required,
+            ..
+        }) => required,
+        result => panic!("expected a predecode retained-output refusal: {result:?}"),
+    }
+}
+
+#[derive(Default, Clone, Resource)]
+struct HeadlessTileOutcome {
+    request: Option<ProjectSceneRequestId>,
+    startup_entity: Option<Entity>,
+    startup_handles: Option<PairHandles>,
+    primary_image: Option<PreparedImageSnapshot>,
+    primary_tileset_image: Option<PreparedImageSnapshot>,
+    auxiliary_image: Option<PreparedImageSnapshot>,
+    auxiliary_tileset_image: Option<PreparedImageSnapshot>,
+    primary_presented: bool,
+    auxiliary_presented: bool,
+    inspected_prepared: bool,
+    done: bool,
+}
+
+#[derive(Default)]
+struct HeadlessTileConsumerPlugin;
+
+impl Plugin for HeadlessTileConsumerPlugin {
+    fn declaration() -> &'static PluginDeclaration {
+        static DECLARATION: PluginDeclaration = PluginDeclaration::new(
+            PluginId::new("consumer.runtime-tileset.headless"),
+            PluginCategory::Runtime,
+        )
+        .requires_plugins(&[
+            nara_image::IMAGE_PLUGIN_ID,
+            nara_tilemap::TILESET_ASSET_PLUGIN_ID,
+        ]);
+        &DECLARATION
+    }
+
+    fn build(&self, app: &mut App) -> Result<(), PluginError> {
+        app.init_resource::<HeadlessTileOutcome>()?;
+        app.add_systems(CoreStage::Update, drive_headless_tile_travel)?;
+        app.add_systems(CoreStage::Last, observe_headless_tile_frame)?;
+        Ok(())
+    }
+}
+
+fn assert_no_source_execution(world: &World) {
+    assert!(!world.contains_resource::<ProjectAssetDatabase>());
+    assert!(!world.contains_resource::<nara_asset::AssetSourceChanges>());
+    assert!(!world.contains_resource::<nara_asset::AssetReloadRequests>());
+    assert!(!world.contains_resource::<nara_asset::AssetReloadDiagnostics>());
+    assert!(!world.contains_resource::<nara_asset::AssetLoadGenerations>());
+    assert!(!world.contains_resource::<nara_asset::AssetDependencyGraph>());
+    assert!(!world.contains_resource::<nara_image::ImageReloadStats>());
+    assert!(!world.contains_resource::<TileProducts>());
+}
+
+/// Reads the stores used by stock extraction, without publishing through the aggregate consumer.
+fn inspect_headless_tile(
+    world: &World,
+    auxiliary: bool,
+) -> (
+    Entity,
+    PairHandles,
+    PreparedImageSnapshot,
+    PreparedImageSnapshot,
+) {
+    assert_no_source_execution(world);
+    let current = CurrentScene::get(world).unwrap();
+    let entity = resolve(world, current.receipt());
+    let tilemap = world.get::<Tilemap>(entity).unwrap();
+    assert_eq!(tilemap.cell_count(), 1);
+    assert_eq!(
+        tilemap.get_cell(TileCoord::new(2, -3)).unwrap().tile,
+        TileIndex::new(u32::from(auxiliary))
+    );
+    let tileset_handle = tilemap.tileset.unwrap();
+    let tilesets = world.resource::<Assets<TileSet>>();
+    let tileset = tilesets.get(tileset_handle).unwrap();
+    let image_handle = tileset.material().image.unwrap();
+    let server = world.resource::<AssetServer>();
+    assert_eq!(
+        server.product(tileset_handle.id()),
+        Some(tileset_product(auxiliary))
+    );
+    assert_eq!(
+        server.product(image_handle.id()),
+        Some(image_product(auxiliary))
+    );
+    assert!(server.path(tileset_handle.id()).is_none());
+    assert!(server.path(image_handle.id()).is_none());
+    let images = world.resource::<Assets<ImageAsset>>();
+    let image = images.get(image_handle).unwrap();
+    assert_eq!(images.len(), 1);
+    assert_eq!(tilesets.len(), 1);
+    assert_eq!(world.resource::<TileSetAssets>().len(), 1);
+    assert_eq!(image.product(), Some(image_product(auxiliary)));
+    assert!(image.source().is_none());
+    let states = world.resource::<AssetStates>();
+    for id in [image_handle.id(), tileset_handle.id()] {
+        let state = states.state(id).unwrap();
+        assert!(state.usable_version().is_some());
+        assert!(state.source_hash().is_none());
+        assert!(state.import_hash().is_none());
+    }
+    let domains = world.resource::<ProjectDomainAssets>();
+    let cpu_images = domains.collection::<ImageDomain>().unwrap();
+    let cpu_tilesets = domains.collection::<TileSetDomain>().unwrap();
+    assert_eq!(cpu_images.source_records().len(), 0);
+    assert_eq!(cpu_tilesets.source_records().len(), 0);
+    assert_eq!(cpu_images.iter().len(), 1);
+    assert_eq!(cpu_tilesets.iter().len(), 1);
+    let cpu_image = cpu_images
+        .get(&AssetRef::Product(image_product(auxiliary)))
+        .unwrap();
+    assert_eq!(cpu_image.pixels().as_ptr(), image.pixels().as_ptr());
+    let descriptor = cpu_tilesets
+        .get(&AssetRef::Product(tileset_product(auxiliary)))
+        .unwrap();
+    assert_eq!(descriptor.product(), tileset_product(auxiliary));
+    assert_eq!(descriptor.image_product(), image_product(auxiliary));
+    assert_eq!(tileset.atlas(), Some(descriptor.atlas()));
+    descriptor.validate_image_extent(image.extent()).unwrap();
+    let image_content =
+        ImageContentSnapshot::capture(image_handle, server, states, images).unwrap();
+    let tile_content = tileset.image_content().unwrap();
+    assert!(tile_content.is_current(server, states, images));
+    assert!(tile_content.same_allocation(&image_content));
+    let prepared_image = image_content.prepared_snapshot();
+    let prepared_tile = tile_content.prepared_snapshot();
+    for prepared in [&prepared_image, &prepared_tile] {
+        assert!(prepared.resource().has_retention_owner());
+        assert_eq!(
+            prepared.resource().pixels().as_ptr(),
+            image.pixels().as_ptr()
+        );
+    }
+    (
+        entity,
+        PairHandles {
+            image: image_handle,
+            tileset: tileset_handle,
+        },
+        prepared_image,
+        prepared_tile,
+    )
+}
+
+fn drive_headless_tile_travel(world: &mut World) {
+    assert_no_source_execution(world);
+    if world.resource::<HeadlessTileOutcome>().done {
+        return;
+    }
+    let Some(request) = world.resource::<HeadlessTileOutcome>().request else {
+        if world
+            .resource::<HeadlessTileOutcome>()
+            .startup_entity
+            .is_none()
+        {
+            let (entity, handles, image, tile) = inspect_headless_tile(world, false);
+            let mut outcome = world.resource_mut::<HeadlessTileOutcome>();
+            outcome.startup_entity = Some(entity);
+            outcome.startup_handles = Some(handles);
+            outcome.primary_image = Some(image);
+            outcome.primary_tileset_image = Some(tile);
+        } else if world.resource::<HeadlessTileOutcome>().primary_presented {
+            let request = ProjectScenes::scope(world, |scenes| {
+                scenes.request(product(LATER_SOURCE, false)).unwrap()
+            });
+            world.resource_mut::<HeadlessTileOutcome>().request = Some(request);
+        }
+        return;
+    };
+    let ready = ProjectScenes::scope(world, |scenes| {
+        match scenes.state(request).unwrap() {
+            ProjectSceneRequestState::Preparing => return false,
+            ProjectSceneRequestState::Ready => {}
+            state => panic!("unexpected first-party Scene request state: {state:?}"),
+        }
+        let view = scenes.prepared(request).unwrap();
+        assert_eq!(view.selected_scene_path(), None);
+        assert_eq!(
+            view.selected_scene_product(),
+            Some(product(LATER_SOURCE, false))
+        );
+        assert_eq!(view.scene().roots, [tilemap_id()]);
+        let images = view.domain_assets().collection::<ImageDomain>().unwrap();
+        let tilesets = view.domain_assets().collection::<TileSetDomain>().unwrap();
+        assert_eq!(images.source_records().len(), 0);
+        assert_eq!(tilesets.source_records().len(), 0);
+        let image = images.get(&AssetRef::Product(image_product(true))).unwrap();
+        assert_eq!(image.product(), Some(image_product(true)));
+        assert!(image.source().is_none());
+        assert!(
+            images
+                .get(&AssetRef::Product(image_product(false)))
+                .is_none()
+        );
+        let descriptor = tilesets
+            .get(&AssetRef::Product(tileset_product(true)))
+            .unwrap();
+        assert_eq!(descriptor.image_product(), image_product(true));
+        descriptor.validate_image_extent(image.extent()).unwrap();
+        true
+    });
+    if !ready {
+        // Preparation runs on the existing I/O owner; yield without delaying the frame loop.
+        std::thread::yield_now();
+        return;
+    }
+    // Ready CPU data has not replaced the live native stores or current Scene.
+    inspect_headless_tile(world, false);
+    let report = commit_prepared_project_scene(
+        world,
+        request,
+        SceneProductTransactionLimits::new(ItemLimit::new(8).unwrap(), ItemLimit::ONE),
+        &[],
+        |_| {},
+    );
+    assert!(!report.diagnostics.has_errors(), "{report:?}");
+    assert!(report.instance.is_some());
+    ProjectScenes::scope(world, |scenes| {
+        assert_eq!(
+            scenes.state(request),
+            Some(ProjectSceneRequestState::Committed)
+        );
+        assert!(scenes.acknowledge(request));
+    });
+    let (entity, handles, image, tile) = inspect_headless_tile(world, true);
+    let old = world
+        .resource::<HeadlessTileOutcome>()
+        .startup_entity
+        .unwrap();
+    let previous = world
+        .resource::<HeadlessTileOutcome>()
+        .startup_handles
+        .unwrap();
+    assert_ne!(entity, old);
+    assert!(world.get_entity(old).is_err());
+    assert_ne!(handles.image, previous.image);
+    assert_ne!(handles.tileset, previous.tileset);
+    assert!(
+        world
+            .resource::<Assets<ImageAsset>>()
+            .get(previous.image)
+            .is_none()
+    );
+    assert!(
+        world
+            .resource::<Assets<TileSet>>()
+            .get(previous.tileset)
+            .is_none()
+    );
+    let mut outcome = world.resource_mut::<HeadlessTileOutcome>();
+    outcome.auxiliary_image = Some(image);
+    outcome.auxiliary_tileset_image = Some(tile);
+    outcome.inspected_prepared = true;
+}
+
+/// Observes actual stock extraction and ImagePrepare after all presentation stages have run.
+fn observe_headless_tile_frame(world: &mut World) {
+    let auxiliary = world.resource::<HeadlessTileOutcome>().inspected_prepared;
+    let (entity, handles, _, _) = inspect_headless_tile(world, auxiliary);
+    let stats = world.resource::<SpriteRenderStats>();
+    assert_eq!(stats.extracted_sprites, 0);
+    assert_eq!(stats.extracted_tile_cells, 1);
+    assert_eq!(stats.missing_tilesets, 0);
+    assert_eq!(stats.invalid_tile_regions, 0);
+    assert_eq!(stats.unprepared_textures, 0);
+    assert_eq!(stats.invalid_texture_regions, 0);
+    let extracted = world.resource::<ExtractedSprites>().as_slice();
+    assert_eq!(extracted.len(), 1);
+    assert_eq!(extracted[0].entity, entity);
+    assert_eq!(
+        extracted[0].kind,
+        ExtractedSpriteKind::TilemapCell {
+            coord: TileCoord::new(2, -3),
+            tile: TileIndex::new(u32::from(auxiliary)),
+        }
+    );
+    assert_eq!(extracted[0].material.image, Some(handles.image));
+    let content = extracted[0].image_content.as_ref().unwrap();
+    assert_eq!(content.product(), image_product(auxiliary));
+    assert!(content.is_current(
+        world.resource::<AssetServer>(),
+        world.resource::<AssetStates>(),
+        world.resource::<Assets<ImageAsset>>(),
+    ));
+    let prepared_images = world.resource::<PreparedImages>();
+    let prepared = prepared_images
+        .get(image_resource_key(handles.image))
+        .unwrap();
+    assert_eq!(prepared_images.len(), 1);
+    assert_eq!(
+        prepared.resource().pixels().as_ptr(),
+        content.pixels().as_ptr()
+    );
+    assert_eq!(prepared.resource().content_hash(), content.content_hash());
+    assert!(prepared.resource().has_retention_owner());
+    let prepared = prepared.clone();
+    let mut outcome = world.resource_mut::<HeadlessTileOutcome>();
+    if auxiliary {
+        outcome.auxiliary_image = Some(prepared);
+        outcome.auxiliary_presented = true;
+        outcome.done = true;
+    } else {
+        outcome.primary_image = Some(prepared);
+        outcome.primary_presented = true;
+    }
+}
+
+#[test]
+fn first_party_headless_run_publishes_and_travels_stock_tilesets_without_source_facets() {
+    let recipe = recipe()
+        .add_plugin::<HeadlessTileConsumerPlugin>()
+        .unwrap()
+        .add_runtime_asset_codec::<RetentionProbeDomain, RetentionProbeCodec>(
+            RuntimeCodecDefinitionId::new("consumer.runtime-tileset.retention-probe", 1),
+        )
+        .unwrap();
+    let fixture = Fixture::with_recipe(FixtureCase::Valid, recipe, true);
+    let base = fixture.capture();
+    for entry in base.plan().plugin_plan().entries() {
+        assert_ne!(entry.plugin_id(), nara_asset::ASSET_SOURCE_PLUGIN_ID);
+        assert_ne!(entry.plugin_id(), nara_image::IMAGE_SOURCE_PLUGIN_ID);
+    }
+    assert_eq!(fs::read_dir(fixture.directory.path()).unwrap().count(), 0);
+    let baseline = retained_requirement(&base);
+    let execution =
+        HeadlessRunOptions::frames(NonZeroU32::new(4_000).unwrap(), Duration::from_millis(1))
+            .stop_when(|outcome: &HeadlessTileOutcome| outcome.done);
+    let mut run = HeadlessRun::from_runtime_content(base.clone(), execution, Vec::new());
+    let deadline = Instant::now() + Duration::from_secs(15);
+    let mut outcome = loop {
+        let report = run.execute_bounded();
+        assert!(report.startup_content_closure().is_none());
+        match report.outcome() {
+            HeadlessRunOutcome::Completed(outcome) => {
+                assert!(
+                    !report.diagnostics().has_errors(),
+                    "{:?}",
+                    report.diagnostics()
+                );
+                break outcome.clone();
+            }
+            HeadlessRunOutcome::Failed => {
+                panic!(
+                    "first-party processed TileSet run failed: {:?}",
+                    report.diagnostics()
+                );
+            }
+            HeadlessRunOutcome::CleanupIncomplete => {
+                assert!(
+                    Instant::now() < deadline,
+                    "first-party Runtime cleanup did not complete"
+                );
+                std::thread::yield_now();
+            }
+        }
+    };
+    drop(run);
+    assert!(outcome.done);
+    assert!(outcome.inspected_prepared);
+    assert!(outcome.primary_presented);
+    assert!(outcome.auxiliary_presented);
+    let primary = outcome.primary_image.as_ref().unwrap();
+    let auxiliary = outcome.auxiliary_image.as_ref().unwrap();
+    assert_eq!(primary.resource().pixels(), fixture.primary_pixels);
+    assert_eq!(primary.resource().extent(), fixture.extent);
+    assert_eq!(auxiliary.resource().pixels(), fixture.auxiliary_pixels);
+    assert_eq!(auxiliary.resource().extent(), fixture.extent);
+    assert_eq!(primary.resource().color_space(), ImageColorSpace::Srgb);
+    assert_eq!(auxiliary.resource().color_space(), ImageColorSpace::Linear);
+    assert_eq!(
+        primary.resource().pixels().as_ptr(),
+        outcome
+            .primary_tileset_image
+            .as_ref()
+            .unwrap()
+            .resource()
+            .pixels()
+            .as_ptr()
+    );
+    assert_eq!(
+        auxiliary.resource().pixels().as_ptr(),
+        outcome
+            .auxiliary_tileset_image
+            .as_ref()
+            .unwrap()
+            .resource()
+            .pixels()
+            .as_ptr()
+    );
+    let escaped = outcome.primary_tileset_image.take().unwrap();
+    let last = escaped.clone();
+    drop(outcome);
+    let held = retained_requirement(&base);
+    assert!(
+        held > baseline,
+        "escaped native pixels retain the original output and metadata charge"
+    );
+    drop(escaped);
+    assert_eq!(retained_requirement(&base), held);
+    assert_eq!(last.resource().pixels(), fixture.primary_pixels);
+    assert!(last.resource().has_retention_owner());
+    drop(last);
+    assert_eq!(retained_requirement(&base), baseline);
+}
+
+/// Deliberately trusts file-local identity; the concrete native owner must check full cardinality.
+struct LaxImageIdentityCodec;
+
+impl RuntimeAssetCodec<ImageAsset> for LaxImageIdentityCodec {
+    const RUNTIME_KIND: &'static str = ImageRuntimeCodec::RUNTIME_KIND;
+    const RUNTIME_VERSION: u32 = ImageRuntimeCodec::RUNTIME_VERSION;
+
+    fn runtime_limits() -> AssetRuntimeLimits {
+        ImageRuntimeCodec::runtime_limits()
+    }
+
+    fn encode_runtime(value: &ImageAsset) -> Result<Box<[u8]>, AssetRuntimeError> {
+        ImageRuntimeCodec::encode_runtime(value)
+    }
+
+    fn decode_runtime(bytes: &[u8]) -> Result<ImageAsset, AssetRuntimeError> {
+        ImageRuntimeCodec::decode_runtime(bytes)
+    }
+
+    fn runtime_retained_bytes(value: &ImageAsset) -> Result<usize, AssetRuntimeError> {
+        ImageRuntimeCodec::runtime_retained_bytes(value)
+    }
+
+    fn visit_required_runtime_products<E>(
+        value: &ImageAsset,
+        visitor: impl FnMut(AssetProductRef) -> Result<(), E>,
+    ) -> Result<(), E> {
+        ImageRuntimeCodec::visit_required_runtime_products(value, visitor)
+    }
+
+    fn contains_runtime_product(value: &ImageAsset, reference: AssetProductRef) -> bool {
+        value
+            .product()
+            .is_some_and(|actual| actual.product() == reference.product())
+    }
+}
+
+/// Omits the actual Image demand and trusts aliases to exercise the independent native checks.
+struct LaxTileSetCodec;
+
+impl RuntimeAssetCodec<TileSetDescriptor> for LaxTileSetCodec {
+    const RUNTIME_KIND: &'static str = TileSetRuntimeCodec::RUNTIME_KIND;
+    const RUNTIME_VERSION: u32 = TileSetRuntimeCodec::RUNTIME_VERSION;
+
+    fn runtime_limits() -> AssetRuntimeLimits {
+        TileSetRuntimeCodec::runtime_limits()
+    }
+
+    fn encode_runtime(value: &TileSetDescriptor) -> Result<Box<[u8]>, AssetRuntimeError> {
+        TileSetRuntimeCodec::encode_runtime(value)
+    }
+
+    fn decode_runtime(bytes: &[u8]) -> Result<TileSetDescriptor, AssetRuntimeError> {
+        TileSetRuntimeCodec::decode_runtime(bytes)
+    }
+
+    fn runtime_retained_bytes(value: &TileSetDescriptor) -> Result<usize, AssetRuntimeError> {
+        TileSetRuntimeCodec::runtime_retained_bytes(value)
+    }
+
+    fn visit_required_runtime_products<E>(
+        _: &TileSetDescriptor,
+        _: impl FnMut(AssetProductRef) -> Result<(), E>,
+    ) -> Result<(), E> {
+        Ok(())
+    }
+
+    fn contains_runtime_product(value: &TileSetDescriptor, reference: AssetProductRef) -> bool {
+        value.product().product() == reference.product()
+    }
+}
+
+#[derive(Debug, Default, Clone, Resource)]
+struct NativeAdmissionOutcome;
+
+#[derive(Default)]
+struct NativeAdmissionPlugin;
+
+impl Plugin for NativeAdmissionPlugin {
+    fn declaration() -> &'static PluginDeclaration {
+        static DECLARATION: PluginDeclaration = PluginDeclaration::new(
+            PluginId::new("consumer.runtime-tileset.native-admission"),
+            PluginCategory::Runtime,
+        );
+        &DECLARATION
+    }
+
+    fn build(&self, app: &mut App) -> Result<(), PluginError> {
+        app.init_resource::<NativeAdmissionOutcome>()?;
+        Ok(())
+    }
+}
+
+fn lax_native_recipe() -> ProductRecipe {
+    ProductRecipe::new()
+        .add_runtime_image_codec::<LaxImageIdentityCodec>(RuntimeCodecDefinitionId::new(
+            "consumer.runtime-tileset.lax-image-identity",
+            1,
+        ))
+        .unwrap()
+        .add_runtime_tileset_codec::<LaxTileSetCodec>(RuntimeCodecDefinitionId::new(
+            "consumer.runtime-tileset.lax-tileset",
+            1,
+        ))
+        .unwrap()
+        .add_plugin::<NativeAdmissionPlugin>()
+        .unwrap()
+}
+
+fn assert_first_party_native_admission(base: RuntimeContentBase, refusal: Option<&str>) {
+    let execution = HeadlessRunOptions::<NativeAdmissionOutcome>::frames(
+        NonZeroU32::new(1).unwrap(),
+        Duration::ZERO,
+    );
+    let mut run = HeadlessRun::from_runtime_content(base, execution, Vec::new());
+    let mut report = run.execute_bounded();
+    if refusal.is_none() {
+        let deadline = Instant::now() + Duration::from_secs(15);
+        while matches!(report.outcome(), HeadlessRunOutcome::CleanupIncomplete) {
+            assert!(
+                Instant::now() < deadline,
+                "native admission control cleanup did not complete"
+            );
+            std::thread::yield_now();
+            report = run.execute_bounded();
+        }
+    }
+    assert!(report.startup_content_closure().is_none());
+    if let Some(reason) = refusal {
+        assert!(
+            matches!(report.outcome(), HeadlessRunOutcome::Failed),
+            "{report:?}"
+        );
+        let diagnostic = report
+            .diagnostics()
+            .iter()
+            .find(|diagnostic| diagnostic.code().as_str() == "project.run.runtime-content-rejected")
+            .expect(
+                "the concrete native owner must refuse during content preparation before startup",
+            );
+        assert!(
+            diagnostic.fields().iter().any(|field| {
+                field.key().as_str() == "reason" && field.display_value() == reason
+            }),
+            "{diagnostic:?}"
+        );
+    } else {
+        assert!(
+            matches!(report.outcome(), HeadlessRunOutcome::Completed(_)),
+            "{report:?}"
+        );
+        assert!(
+            !report.diagnostics().has_errors(),
+            "{:?}",
+            report.diagnostics()
+        );
+    }
+}
+
+#[test]
+fn first_party_native_tileset_requires_its_own_image_edge_even_with_empty_codec_inventory() {
+    for case in [
+        FixtureCase::NativeOmittedDependency,
+        FixtureCase::NativeSoftDependency,
+    ] {
+        let fixture = Fixture::with_recipe(case, lax_native_recipe(), false);
+        let base = fixture.capture();
+        let startup = product(STARTUP_SOURCE, false);
+        let scene = base.acquire_startup_scene().unwrap();
+        let sprite = &scene.candidate().document().entities[0].components
+            [&ComponentTypeId::new("nara.sprite.Sprite")];
+        let image_leaf = sprite
+            .value
+            .field("material")
+            .unwrap()
+            .field("image")
+            .unwrap();
+        assert_eq!(
+            decode_asset_reference_value(image_leaf).unwrap(),
+            AssetRef::Product(image_product(false))
+        );
+        assert!(
+            base.member(startup)
+                .unwrap()
+                .dependencies()
+                .iter()
+                .any(|dependency| {
+                    dependency.product() == image_product(false)
+                        && dependency.role() == RuntimeContentDependencyRole::Required
+                })
+        );
+        assert!(
+            base.member(tileset_product(false))
+                .unwrap()
+                .dependencies()
+                .iter()
+                .all(|dependency| {
+                    dependency.product() != image_product(false)
+                        || dependency.role() != RuntimeContentDependencyRole::Required
+                })
+        );
+        // Both real values are generically decodable, and the Scene independently requires Image.
+        let tileset = base
+            .acquire_asset::<TileSetDomain, LaxTileSetCodec>(tileset_product(false))
+            .unwrap();
+        let image = base
+            .acquire_asset::<ImageDomain, LaxImageIdentityCodec>(image_product(false))
+            .unwrap();
+        tileset
+            .product()
+            .validate_image_extent(image.product().extent())
+            .unwrap();
+        validate_cells(scene.candidate(), *tileset.product()).unwrap();
+        drop((scene, tileset, image));
+        assert_first_party_native_admission(base, Some("undeclared-dependency"));
+    }
+}
+
+#[test]
+fn first_party_native_cardinality_rejects_codec_approved_image_and_tileset_aliases() {
+    for case in [
+        FixtureCase::Valid,
+        FixtureCase::NativeImageAlias,
+        FixtureCase::NativeTileSetAlias,
+    ] {
+        let fixture = Fixture::with_recipe(case, lax_native_recipe(), false);
+        let base = fixture.capture();
+        let image = base
+            .acquire_asset::<ImageDomain, LaxImageIdentityCodec>(image_product(false))
+            .unwrap();
+        let tileset = base
+            .acquire_asset::<TileSetDomain, LaxTileSetCodec>(tileset_product(false))
+            .unwrap();
+        assert_eq!(image.product().product(), Some(image_product(false)));
+        assert_eq!(tileset.product().product(), tileset_product(false));
+        let actual = match case {
+            FixtureCase::NativeImageAlias => Some(image_product(false)),
+            FixtureCase::NativeTileSetAlias => Some(tileset_product(false)),
+            _ => None,
+        };
+        if let Some(actual) = actual {
+            let alias = product(NATIVE_ALIAS_SOURCE, false);
+            assert_ne!(actual, alias);
+            assert_eq!(actual.product(), alias.product());
+            let member = base.member(actual).unwrap();
+            assert_eq!(member.products(), &[actual, alias]);
+            assert!(std::ptr::eq(base.member(alias).unwrap(), member));
+        }
+        drop((image, tileset));
+        assert_first_party_native_admission(base, actual.map(|_| "product-identity-mismatch"));
     }
 }
 
