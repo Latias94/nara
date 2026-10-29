@@ -29,14 +29,14 @@ fn real_image_completion_uses_latest_accepted_revision_and_cannot_revive_unloade
             .as_ref()
             .unwrap()
             .resource()
-            .source_hash();
+            .content_hash();
         assert!(
             !initial_native
                 .image
                 .as_ref()
                 .unwrap()
                 .resource()
-                .retains_source_allocation()
+                .has_retention_owner()
         );
         assert_eq!(initial_native.allocation(), 1);
 
@@ -114,7 +114,7 @@ fn real_image_completion_uses_latest_accepted_revision_and_cannot_revive_unloade
         assert_eq!(native.value, 3);
         assert_eq!(native.allocation(), 2);
         assert_ne!(snapshot.identity(), &initial_identity);
-        assert_ne!(snapshot.resource().source_hash(), initial_hash);
+        assert_ne!(snapshot.resource().content_hash(), initial_hash);
         let prepared = runtime
             .world()
             .resource::<PreparedImages>()
@@ -129,7 +129,7 @@ fn real_image_completion_uses_latest_accepted_revision_and_cannot_revive_unloade
         )
         .unwrap();
         assert_eq!(snapshot, &facade_capture);
-        assert!(!snapshot.resource().retains_source_allocation());
+        assert!(!snapshot.resource().has_retention_owner());
         let retained_snapshot = snapshot.clone();
         let retained_pixel_digest = ContentDigest::of_bytes(snapshot.resource().pixels());
         let retained_pixel_len = snapshot.resource().pixel_len();
@@ -295,7 +295,7 @@ fn real_image_task_close_keeps_incomplete_owner_and_retires_native_effects_exact
             .unwrap();
         assert!(!image.pixels().is_empty());
         assert_eq!(prepared.resource().pixels(), image.pixels());
-        assert!(!prepared.resource().retains_source_allocation());
+        assert!(!prepared.resource().has_retention_owner());
         fixture.assert_import_work_released(runtime);
     });
 }

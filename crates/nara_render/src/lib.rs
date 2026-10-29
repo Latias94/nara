@@ -3,6 +3,8 @@
 mod canvas;
 mod frame;
 mod prepare;
+#[cfg(test)]
+mod prepare_tests;
 mod presentation;
 mod target;
 mod view;
@@ -54,7 +56,9 @@ use nara_transform::PresentedSpatialSnapshot2d;
 use nara_transform::Transform2d;
 use nara_window::{PrimaryWindowId, Window, WindowId};
 
-pub use prepare::{RenderResourceKey, RenderResourceKind, RenderResourceSnapshot};
+pub use prepare::{
+    RenderResourceContentHash, RenderResourceKey, RenderResourceKind, RenderResourceSnapshot,
+};
 
 #[doc(hidden)]
 pub mod __private {

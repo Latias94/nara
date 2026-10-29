@@ -1169,8 +1169,9 @@ impl EditorImageImportHost {
                 Ok(())
             })
             .unwrap_or(Err(EditorImageImportFailure::MetadataPublicationRejected))?;
-        if imported.image().source().stable_id() != pending.stable_id
-            || imported.image().source().path() != &pending.asset_path
+        let imported_source = imported.source();
+        if imported_source.stable_id() != pending.stable_id
+            || imported_source.path() != &pending.asset_path
             || imported.artifact().key().settings_hash() != pending.settings.settings_hash()
         {
             return Err(EditorImageImportFailure::ResultMismatch);

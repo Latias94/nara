@@ -1056,9 +1056,10 @@ impl EditorImageHydrationHost {
         {
             return Err(EditorImageHydrationFailureKind::SourceChanged);
         }
-        if imported.image().source().stable_id() != expected.stable_id()
-            || imported.image().source().path() != expected.asset_path()
-            || imported.image().source().settings() != expected.settings
+        let source = imported.source();
+        if source.stable_id() != expected.stable_id()
+            || source.path() != expected.asset_path()
+            || source.settings() != expected.settings
             || imported.artifact().key().settings_hash() != expected.settings.settings_hash()
         {
             return Err(EditorImageHydrationFailureKind::ResultMismatch);

@@ -284,9 +284,12 @@ fn assert_image_v2_last_good_after_post_operation_fault(
     let published = editor
         .test_image_import_asset(current.handle(), current.version())
         .expect("last-good v2 must match the actual usable Image publication");
-    assert_eq!(published.source().path(), path);
-    assert_eq!(published.source().stable_id(), current.stable_id());
-    assert_eq!(published.source().settings(), linear);
+    let source = published
+        .source()
+        .expect("Editor Image publication must retain actual import provenance");
+    assert_eq!(source.path(), path);
+    assert_eq!(source.stable_id(), current.stable_id());
+    assert_eq!(source.settings(), linear);
     assert_eq!(published.pixels(), &[24, 120, 220, 255]);
     assert!(
         editor

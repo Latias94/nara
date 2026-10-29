@@ -1,6 +1,6 @@
 # Asset Import Ownership And Processed Runtime Delivery
 
-**Date:** 2026-10-29. **Status:** Source/import, compound continuity/format and declared-product admission qualified; Runtime catalog delivery open.
+**Date:** 2026-10-29. **Status:** Source/import, compound identity, declared products, immutable local base and Image ownership qualified; integrated first-party processed delivery open.
 **Baseline:** `13a2744`.
 **Parent:** [Foundation rebaseline](2026-10-23-foundation-architecture-rebaseline-plan.md), R6/R7.
 
@@ -150,20 +150,44 @@ source snapshot:
 
 - Add a closed source/processed selection to the first-party Runtime Host and request context;
   startup and later requests must capture the original base, plan and native cleanup custody.
+  Include start inputs, prepared request views, later travel and game-facing typed CPU reads in
+  that selection. Select concrete Runtime codecs/publication facets through the original compiled
+  recipe/plan independently of source importers; complete Product lookup must not require fake
+  source records or paths after startup.
 - Add concrete Runtime-native resource codecs and residency owners. CPU decode, catalog membership
   and weak Product binding do not establish installed `Assets<T>` values or physical cleanup.
-  The current `ImageAsset` requires `ImageSourceMetadata` (path, import settings and artifact);
-  its Runtime codec must first separate backend-neutral pixel/descriptor identity from optional
-  real source-import provenance. Do not invent an import artifact, source path or settings to
-  construct processed pixels. `PreparedImageResource`, `ImageContentSnapshot` and
-  `image_descriptor_hash` currently also require source/import facts; include those consumers in
-  the same ownership replacement. A Runtime member digest is not an import-artifact digest.
-  TileSet Runtime dependencies likewise name complete Image Products,
+  The Image ownership replacement is qualified below: optional explicit Product, actual color/descriptor,
+  immutable pixel hash, optional real import provenance, neutral prepared-content identity and
+  a compact bounded `runtime_image` codec replace the mandatory-source data model. Include
+  `PreparedImageResource`, `ImageContentSnapshot`, import/Editor guards and actual escaped native
+  pixel custody in the same qualification. A Runtime member digest is not an import-artifact digest.
+  Anonymous procedural content remains directly constructible and preparable without source UUIDs
+  or PNG import. Managed capture requires a present matching Product and Runtime encoding refuses
+  anonymous values. TileSet Runtime dependencies likewise name complete Image Products,
   while receiving handles and source-path aliases remain their respective owners' concerns.
   Native publication and escaped pixel/render captures must retain their original decoded-output
   reservation and base after the acquisition wrapper retires. Reusing a source import lease or
   copying an unretained CPU value does not prove that lifetime; qualify cancellation, overlapping
   generations and the last shared pixel owner through the concrete publication transaction.
+  Before qualifying stock residency, replace whole-format maximum retained charges with a
+  concrete decoded-output cost query bounded by the original predecode promise. The current
+  generic acquisition retains that maximum for each output; increasing the aggregate cap would
+  conceal poor small-resource scaling. Keep upfront worst-case admission, refund only modeled
+  unused output after successful decode, and retain the actual admitted charge through escaped
+  owners. Challenge this with many small Images and overlapping large decodes, not only one
+  image at the reservation boundary. This uses the existing lease's finish-decode contract and
+  requires no new resource transaction or allocation interceptor.
+- Replace TileSet's source-only admission before attaching its Runtime codec. A processed
+  descriptor names its own complete Product, a complete Image Product and actual atlas/material
+  values. Source adapters supply real path/provenance; processed adapters supply same-base
+  catalog/codec facts. Both share actual Image snapshot, extent, atlas barrier and publication
+  baseline validation through the existing Scene/native transaction. Do not fabricate an
+  `AssetRecord`, `SourceHash` or source database for a processed value. At the content Host, check
+  the payload's actual Image dependency against present typed Products and Required declarations;
+  catalog edges alone do not prove it. Separate source-only auxiliary refusal from already bound
+  Runtime Products in native decode and persisted Tilemap admission. Before live mutation, reject
+  omitted/wrong-role dependencies, wrong Image family/extent and out-of-atlas Scene cells while
+  preserving the current Scene/resources. A codec round trip alone does not qualify this owner.
 - Resolve the stock `AssetPlugin`'s source-change dependency on an empty `ProjectAssetDatabase`
   before claiming an entirely source-facet-free composition. Current base acquisition constructs
   no database and performs no source I/O; a default plugin's empty source table is not a content
@@ -171,6 +195,19 @@ source snapshot:
 - Deliver a concrete processed input map, keep target build selection independent, then qualify
   a packaged executable with source/metadata/cache and Cargo unavailable. Local eager capture
   does not freeze a universal container, streaming or residency implementation.
+
+The next concrete dependency units are decoded-output charge/refund, TileSet content admission
+with actual dependencies/cells, then the complete first-party Host selection and native residency.
+Keep startup, later Scene acquisition and game-facing typed reads in that same Host qualification;
+adding a processed branch only at startup does not establish source-independent delivery.
+
+The [Image qualification](../knowledge/engineering/verification/2026-10/2026-10-29T090832Z-anonymous-and-processed-image-content-with-retained-native-publication-qualification-3e529af056d34a5caa2c12924c0c1014.md)
+records anonymous content, strict Runtime format, complete managed Product admission, original
+escaped pixel custody and source-owned refusal. Actual domains317, root1087, independent9,
+WGPU145, selected native Editor5 and Reference Game61 pass, with exact skipped/platform scope in
+the evidence. It also records the reviewed mandatory-Product correction and source-admission
+counterexamples. This closes the Image owner prerequisite, not stock residency or the packaged
+Player; the same evidence keeps whole-format retained charging and later owners explicit.
 
 ## Owning Decisions
 

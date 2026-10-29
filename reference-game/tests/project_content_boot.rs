@@ -81,7 +81,7 @@ fn assert_committed_content() {
         "textures/tiny-dungeon.png"
     );
     assert_eq!(
-        snapshot.images()[0].image().source().stable_id(),
+        snapshot.images()[0].source().stable_id(),
         texture_stable_id(),
     );
     assert_eq!(snapshot.images()[0].image().extent().width, 192);

@@ -5,21 +5,23 @@ use std::{
 };
 
 use nara_app::{App, CoreStage, Plugin, PluginError};
-use nara_asset::{
-    AssetSlotRevision, AssetStates, AssetVersion, Assets, Handle, ImportArtifactDigest, SourceHash,
-};
+use nara_asset::{AssetSlotRevision, AssetStates, AssetVersion, Assets, Handle};
 use nara_ecs::{Res, ResMut, Resource};
-use nara_render::{RenderResourceKey, RenderResourceKind, RenderResourceSnapshot};
+use nara_render::{
+    RenderResourceContentHash, RenderResourceKey, RenderResourceKind, RenderResourceSnapshot,
+};
 
-use crate::{ImageAsset, ImageColorSpace, ImageExtent, ImageFormat, asset::ImagePixelRetention};
+use crate::{
+    ImageAsset, ImageColorSpace, ImageContentHash, ImageExtent, ImageFormat,
+    asset::ImagePixelRetention,
+};
 
 #[derive(Clone)]
 pub struct PreparedImageResource {
     extent: ImageExtent,
     format: ImageFormat,
     color_space: ImageColorSpace,
-    source_hash: SourceHash,
-    artifact_hash: ImportArtifactDigest,
+    content_hash: ImageContentHash,
     pixels: Arc<Box<[u8]>>,
     retention: Option<ImagePixelRetention>,
 }
@@ -31,8 +33,7 @@ impl PreparedImageResource {
             extent: image.extent(),
             format: image.format(),
             color_space: image.color_space(),
-            source_hash: image.source().source_hash(),
-            artifact_hash: image.source().artifact().key().digest(),
+            content_hash: image.content_hash(),
             pixels: image.shared_pixels(),
             retention: image.shared_pixel_retention(),
         }
@@ -54,13 +55,8 @@ impl PreparedImageResource {
     }
 
     #[must_use]
-    pub const fn source_hash(&self) -> SourceHash {
-        self.source_hash
-    }
-
-    #[must_use]
-    pub const fn artifact_hash(&self) -> ImportArtifactDigest {
-        self.artifact_hash
+    pub const fn content_hash(&self) -> ImageContentHash {
+        self.content_hash
     }
 
     #[must_use]
@@ -73,9 +69,9 @@ impl PreparedImageResource {
         self.pixels.as_ref().as_ref()
     }
 
-    /// Reports whether this snapshot retains the source image's lifetime owner or import lease.
+    /// Reports whether this snapshot retains the image allocation's lifetime owner or lease.
     #[must_use]
-    pub const fn retains_source_allocation(&self) -> bool {
+    pub const fn has_retention_owner(&self) -> bool {
         self.retention.is_some()
     }
 }
@@ -87,10 +83,9 @@ impl Debug for PreparedImageResource {
             .field("extent", &self.extent)
             .field("format", &self.format)
             .field("color_space", &self.color_space)
-            .field("source_hash", &self.source_hash)
-            .field("artifact_hash", &self.artifact_hash)
+            .field("content_hash", &self.content_hash)
             .field("pixel_len", &self.pixels.len())
-            .field("retains_source_allocation", &self.retention.is_some())
+            .field("has_retention_owner", &self.retention.is_some())
             .finish()
     }
 }
@@ -100,8 +95,7 @@ impl PartialEq for PreparedImageResource {
         self.extent == other.extent
             && self.format == other.format
             && self.color_space == other.color_space
-            && self.source_hash == other.source_hash
-            && self.artifact_hash == other.artifact_hash
+            && self.content_hash == other.content_hash
             && self.pixels == other.pixels
             && self.retention.is_some() == other.retention.is_some()
     }
@@ -158,7 +152,7 @@ impl PreparedImageSnapshot {
                 image_resource_key(handle),
                 version,
                 slot,
-                image_descriptor_hash(image),
+                image_content_hash(image),
             ),
             resource: PreparedImageResource::from_image(image),
         }
@@ -286,7 +280,7 @@ pub fn prepare_images(
             key,
             version,
             images.slot_revision(handle),
-            image_descriptor_hash(image),
+            image_content_hash(image),
         );
 
         if prepared_images
@@ -310,27 +304,6 @@ pub fn image_resource_key(handle: nara_asset::Handle<ImageAsset>) -> RenderResou
 }
 
 #[must_use]
-pub fn image_descriptor_hash(image: &ImageAsset) -> ImportArtifactDigest {
-    let mut bytes = Vec::new();
-    bytes.extend_from_slice(&image.source().artifact().key().digest().as_bytes());
-    bytes.extend_from_slice(&image.source().source_hash().as_bytes());
-    bytes.extend_from_slice(&image.extent().width.to_le_bytes());
-    bytes.extend_from_slice(&image.extent().height.to_le_bytes());
-    bytes.push(image_format_tag(image.format()));
-    bytes.push(image_color_space_tag(image.color_space()));
-    bytes.extend_from_slice(&(image.pixels().len() as u64).to_le_bytes());
-    ImportArtifactDigest::from_bytes(bytes)
-}
-
-fn image_format_tag(format: ImageFormat) -> u8 {
-    match format {
-        ImageFormat::Rgba8 => 1,
-    }
-}
-
-fn image_color_space_tag(color_space: ImageColorSpace) -> u8 {
-    match color_space {
-        ImageColorSpace::Srgb => 1,
-        ImageColorSpace::Linear => 2,
-    }
+pub fn image_content_hash(image: &ImageAsset) -> RenderResourceContentHash {
+    RenderResourceContentHash::from_digest(image.content_hash().as_bytes())
 }

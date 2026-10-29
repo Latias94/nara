@@ -170,11 +170,8 @@ impl ImageFixture {
             .unwrap();
         assert!(!snapshot.resource().pixels().is_empty());
         assert_eq!(snapshot.resource().pixels(), image.pixels());
-        assert_eq!(
-            snapshot.resource().source_hash(),
-            image.source().source_hash()
-        );
-        assert!(!snapshot.resource().retains_source_allocation());
+        assert_eq!(snapshot.resource().content_hash(), image.content_hash());
+        assert!(!snapshot.resource().has_retention_owner());
         self.assert_import_work_released(runtime);
     }
 

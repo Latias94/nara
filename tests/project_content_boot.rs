@@ -311,7 +311,7 @@ fn path_tileset_discovery_completes_the_catalogue_for_a_later_stable_image_depen
     );
     assert_eq!(snapshot.images().len(), 1);
     assert_eq!(
-        snapshot.images()[0].image().source().stable_id(),
+        snapshot.images()[0].source().stable_id(),
         player_image_meta().identity().stable_id()
     );
     assert!(
@@ -444,9 +444,9 @@ fn strict_project_content_load_uses_the_persisted_linear_recipe() {
     let image = snapshot.images()[0].image();
 
     assert_eq!(image.color_space(), ImageColorSpace::Linear);
-    assert_eq!(image.source().settings(), *meta.settings());
+    assert_eq!(image.source().unwrap().settings(), *meta.settings());
     assert_eq!(
-        image.source().artifact().key().settings_hash(),
+        image.source().unwrap().artifact().key().settings_hash(),
         meta.settings().settings_hash()
     );
 }

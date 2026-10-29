@@ -2,7 +2,8 @@
 
 **Status**: Accepted
 **Date**: 2026-07-08
-**Amended**: 2026-10-23 for Image-owned immutable prepared captures
+**Amended**: 2026-10-23 for Image-owned immutable prepared captures; 2026-10-29 for
+source-independent Image content and neutral prepared-content hashes
 **Refined By**: ADR 0037: Runtime Asset Acquisition, Reload, and Lifetime Policy; ADR 0040:
 Render Resource Lifetime and Submitter Ownership; ADR 0054: GPU Upload Budget and Buffer
 Allocation Policy; ADR 0080: Domain-Owned TaskUpdate Integration Sets;
@@ -52,10 +53,13 @@ Rules:
 - Importers must not observe untracked ambient files, environment state, clocks, or mutable global
   ECS state. Dependency discovery and multi-product publication require a bounded tracked import
   context and an atomically published artifact group.
-- Image assets describe image content and import identity only. Sampler, alpha, tint, and material
-  policy live above images in `nara_material`.
+- Image content owns explicit extent/format/color interpretation and immutable pixels. Persistent
+  delivery and managed derivation require an explicit complete Product association; procedural
+  content can remain anonymous. Real source-import provenance is optional and cannot supply
+  mandatory Runtime state. Sampler, alpha, tint and material policy live above images in
+  `nara_material`.
 - `nara_render` owns backend-neutral render resource identity and frame phase vocabulary: loader
-  versions, exact asset-slot revisions, descriptor digests, and prepare/queue ordering. A neutral
+  versions, exact asset-slot revisions, content hashes, and prepare/queue ordering. A neutral
   identity alone does not prove association with any domain content.
 - `nara_image` owns `PreparedImageSnapshot`, an opaque association of exact immutable pixels and
   their complete render identity, and the `PreparedImages` collection of those captures. A managed
@@ -77,6 +81,49 @@ Rules:
   managed derivation authority while remaining eligible for their explicit rendering path.
 - Phase 1 can keep file IO and importing synchronous internally, but public load states and exact
   prepare snapshot identity must leave room for async task-pool integration.
+
+### Source-Independent Image Content
+
+`ImageAsset::new` accepts extent, format, color interpretation and pixel bytes without persistent
+identity. `from_product` explicitly associates content with a complete Product. `from_import`
+derives the PRIMARY Product and color from actual admitted import provenance.
+Imported metadata and the explicit descriptor must agree; general serialization recomputes
+content identity through construction and rejects contradictions. A processed image does not
+manufacture a source path, import settings or artifact record to satisfy a runtime constructor.
+An anonymous image does not invent a source UUID or pass through PNG import to become renderable.
+
+The Image owner computes a domain-separated `ImageContentHash` once from the complete actual
+extent/format/color/pixels. Equal content from different Products or import recipes has equal
+content hashes. Logical Product identity, native binding, AssetVersion, exact slot mutation and
+GPU Host/epoch retain their separate meanings. Render preparation uses the distinct
+`RenderResourceContentHash` in the existing complete snapshot. It never converts a source,
+import-artifact or Runtime member digest into prepared-content authority. The original key,
+version and slot remain required; equal content does not authorize a stale or foreign capture.
+
+`ImageContentSnapshot` requires a present complete Product and validates its type/binding plus the
+existing usable state, publication and slot evidence. Two absent Product associations cannot
+establish managed authority. Code-first `PreparedImageSnapshot` instead captures actual anonymous
+content through its typed store, usable version and exact slot. Path aliases are not Runtime
+membership proof. A managed snapshot's pixels and prepared projection remain readable after
+revocation while `is_authorized` refuses further
+derivation. Source-oriented import/reload, Editor metadata and TileSet-source publication require
+real source provenance explicitly; a processed image in a native store cannot impersonate it.
+
+The concrete `ImageRuntimeCodec` reads/writes `runtime_image` version 1: a small bounded JSON
+envelope preceded by `NRI\0` and its little-endian metadata length, followed by exact raw RGBA.
+Metadata carries only complete Product and actual descriptor/byte length. Validate header,
+version/engine, identity, dimensions and exact total length before copying pixel bytes. No
+source/import/cache fields, trusted cached content hash or alternate legacy reader is accepted.
+The independent family supports one actual PRIMARY or auxiliary Product per decoded value.
+Runtime encoding refuses anonymous content; decoding always produces the explicitly named Product.
+
+Native publication must keep the original decoded-output reservation and immutable base alive
+through escaped pixel/content/render owners. `share_with_retention_owner` composes a trusted
+owner with existing pixel custody without granting publication or exempting overlap accounting.
+The resulting immutable share can enter an existing product-owned native resource transaction;
+failed/cancelled Scene publication leaves last-good bindings and values intact. This boundary
+does not introduce a second native asset transaction, generic residency executor, render graph
+implementation or complete first-party packaged Player.
 
 The first implementation slice after scene/prefab serialization should therefore combine:
 

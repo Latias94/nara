@@ -299,8 +299,8 @@ fn desktop_profile_configures_one_window_slot_and_preserves_source_content() {
         repeated_snapshot.expanded_scene()
     );
     assert_eq!(
-        desktop_snapshot.images()[0].image().source().source_hash(),
-        repeated_snapshot.images()[0].image().source().source_hash()
+        desktop_snapshot.images()[0].source().source_hash(),
+        repeated_snapshot.images()[0].source().source_hash()
     );
 
     let (headless_candidate, headless_plan, headless_root) =
@@ -320,8 +320,8 @@ fn desktop_profile_configures_one_window_slot_and_preserves_source_content() {
         "the profiles authorize the same committed content closure",
     );
     assert_eq!(
-        headless_snapshot.images()[0].image().source().source_hash(),
-        desktop_snapshot.images()[0].image().source().source_hash(),
+        headless_snapshot.images()[0].source().source_hash(),
+        desktop_snapshot.images()[0].source().source_hash(),
     );
     // The materialized content and independently retainable startup closure each own a lease.
     assert_eq!(headless_loader.budget_snapshot().active_reservations(), 2);

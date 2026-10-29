@@ -36,7 +36,7 @@ fn independent_game_imports_committed_png_through_the_public_bounded_path() {
     imported
         .commit(&server, &mut images, &mut states, &mut events)
         .unwrap();
-    let last_good_hash = images.get(handle).unwrap().source().source_hash();
+    let last_good_hash = images.get(handle).unwrap().source().unwrap().source_hash();
     let last_good_version = states.version(handle.id()).unwrap();
     assert_budget_released(importer.budget_snapshot());
 
@@ -61,7 +61,7 @@ fn independent_game_imports_committed_png_through_the_public_bounded_path() {
                 && error.observed() == Some(TEXTURE_BYTES.len() as u64)
     ));
     assert_eq!(
-        images.get(handle).unwrap().source().source_hash(),
+        images.get(handle).unwrap().source().unwrap().source_hash(),
         last_good_hash
     );
     assert_eq!(states.version(handle.id()).unwrap(), last_good_version);

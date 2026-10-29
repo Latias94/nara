@@ -107,7 +107,7 @@ fn image_asset(pixels: [u8; 4]) -> ImageAsset {
         ArtifactFormatVersion::new(1),
     ))
     .unwrap();
-    ImageAsset::new(
+    ImageAsset::from_import(
         ImageSourceMetadata::new(
             AssetPath::new("ui/planner.png").unwrap(),
             ImageImportSettings::default(),
@@ -787,8 +787,8 @@ fn planned_packets_retain_image_snapshots_across_successor_publication() {
         successor_snapshot.identity().slot_revision()
     );
     assert_ne!(
-        first_snapshot.identity().descriptor_hash(),
-        successor_snapshot.identity().descriptor_hash()
+        first_snapshot.identity().content_hash(),
+        successor_snapshot.identity().content_hash()
     );
     assert_eq!(
         first.images()[0].snapshot().resource().pixels(),

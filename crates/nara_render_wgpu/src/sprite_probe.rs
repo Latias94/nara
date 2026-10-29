@@ -1,16 +1,10 @@
 use nara_app::{App, RuntimeInstance};
-use nara_asset::{
-    ArtifactFormatVersion, ArtifactLabel, AssetEvents, AssetPath, AssetStates, Assets, Handle,
-    ImportArtifactKey, ImportArtifactRecord, ImportDependencyDigest, ImportProfile,
-    ImportedAssetType, ImporterId, ImporterVersion, SourceHash, StableAssetId,
-};
+use nara_asset::{AssetEvents, AssetStates, Assets, Handle};
 use nara_core::{Color, Vec2};
 use nara_hierarchy::{
     HierarchyOperation, HierarchyPlacement, HierarchyPlacementOwner, HierarchyWriter,
 };
-use nara_image::{
-    ImageAsset, ImageColorSpace, ImageExtent, ImageFormat, ImageImportSettings, ImageSourceMetadata,
-};
+use nara_image::{ImageAsset, ImageColorSpace, ImageExtent, ImageFormat};
 use nara_material::{
     AlphaMode2d, Material2dDefinition, Material2dDefinitions, Material2dInput, SamplerDescriptor,
 };
@@ -216,43 +210,22 @@ fn publish_image(
     pixels: &[u8],
     color_space: ImageColorSpace,
 ) -> Handle<ImageAsset> {
-    let settings = ImageImportSettings::new(color_space);
-    let artifact = ImportArtifactRecord::new(ImportArtifactKey::new(
-        StableAssetId::parse_str("eeebd827-c451-43d3-b9ab-d87fab37802f").unwrap(),
-        SourceHash::from_bytes(pixels),
-        ImportDependencyDigest::empty(),
-        ImporterId::new("nara-material-probe").unwrap(),
-        ImporterVersion::new(1),
-        settings.settings_hash(),
-        ImportProfile::default(),
-        ImportedAssetType::new("image").unwrap(),
-        ArtifactLabel::default(),
-        ArtifactFormatVersion::new(1),
-    ))
-    .unwrap();
     let image = ImageAsset::new(
-        ImageSourceMetadata::new(
-            AssetPath::new("probe/palette.png").unwrap(),
-            settings,
-            artifact,
-        )
-        .unwrap(),
         ImageExtent::new((pixels.len() / 4) as u32, 1),
         ImageFormat::Rgba8,
+        color_space,
         pixels.to_vec(),
     )
     .unwrap();
     let handle = nara_asset::allocate_anonymous_handle().unwrap();
-    let source_hash = image.source().source_hash();
-    let import_hash = image.source().artifact().key().digest();
     images
         .commit_loaded(
             handle,
             image,
             states,
             &mut AssetEvents::default(),
-            Some(source_hash),
-            Some(import_hash),
+            None,
+            None,
         )
         .unwrap();
     handle

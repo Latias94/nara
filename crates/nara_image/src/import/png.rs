@@ -173,7 +173,7 @@ impl ImageImporter {
             stage: ImageImportStage::Finalize,
             kind: ImagePngFailureKind::DecoderContract,
         })?;
-        let image = ImageAsset::new(
+        let image = ImageAsset::from_import(
             source,
             ImageExtent::new(width, height),
             ImageFormat::Rgba8,

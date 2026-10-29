@@ -8,7 +8,10 @@ use nara_fs::ContentDigest;
 
 use crate::budget::{ImageImportCharge, ImageImportPixelLease, ImageImportReservation};
 use crate::limits::{ImageImportBudgetError, ImageImportMemoryPlan};
-use crate::{ImageAsset, ImageImportBudgetHost, ImageImportLimitKind, ImageImportSettings};
+use crate::{
+    ImageAsset, ImageImportBudgetHost, ImageImportLimitKind, ImageImportSettings,
+    ImageSourceMetadata,
+};
 
 use super::{ImageImportError, ImageImportStage, ImagePublicationFailureKind};
 
@@ -96,6 +99,13 @@ impl ImagePublicationSnapshot {
         if states.version(handle.id()).unwrap_or(AssetVersion::ZERO) != expected_version {
             return Err(ImagePublicationFailureKind::Stale);
         }
+        if previous.is_some_and(|image| {
+            image.source().is_none_or(|metadata| {
+                metadata.stable_id() != source.stable_id() || metadata.path() != source.path()
+            })
+        }) {
+            return Err(ImagePublicationFailureKind::TargetMismatch);
+        }
         let baseline = images
             .mutation_baseline(handle, states)
             .map_err(map_asset_state_error)?;
@@ -117,13 +127,14 @@ impl ImagePublicationSnapshot {
         states: &AssetStates,
     ) -> Result<(Self, Option<ImageImportSettings>), ImagePublicationFailureKind> {
         let previous = images.get(handle);
+        let snapshot =
+            Self::capture_observed(source, handle, expected_version, previous, images, states)?;
         let settings = states
             .state(handle.id())
             .and_then(|state| state.usable_version())
             .and(previous)
-            .map(|image| image.source().settings());
-        let snapshot =
-            Self::capture_observed(source, handle, expected_version, previous, images, states)?;
+            .and_then(ImageAsset::source)
+            .map(ImageSourceMetadata::settings);
         Ok((snapshot, settings))
     }
 
@@ -281,8 +292,16 @@ impl ImageImportedAsset {
     }
 
     #[must_use]
-    pub const fn artifact(&self) -> &ImportArtifactRecord {
-        self.image.source().artifact()
+    pub fn artifact(&self) -> &ImportArtifactRecord {
+        self.source().artifact()
+    }
+
+    /// Returns actual source provenance guaranteed by the private PNG import constructor.
+    #[must_use]
+    pub fn source(&self) -> &ImageSourceMetadata {
+        self.image
+            .source()
+            .expect("private image import results always contain actual source provenance")
     }
 
     #[must_use]
@@ -384,16 +403,17 @@ fn commit_published_image(
 ) -> Result<AssetVersion, ImagePublicationFailureKind> {
     let snapshot = &publication.snapshot;
     snapshot.validate_binding(asset_server)?;
-    if image.source().stable_id() != snapshot.source_stable_id
-        || image.source().path() != &snapshot.source_path
-    {
+    let source = image
+        .source()
+        .ok_or(ImagePublicationFailureKind::TargetMismatch)?;
+    if source.stable_id() != snapshot.source_stable_id || source.path() != &snapshot.source_path {
         return Err(ImagePublicationFailureKind::TargetMismatch);
     }
     snapshot.validate_state(states)?;
     snapshot.validate_baseline(images, states)?;
 
-    let source_hash = image.source().source_hash();
-    let artifact_hash = image.source().artifact().key().digest();
+    let source_hash = source.source_hash();
+    let artifact_hash = source.artifact().key().digest();
     let version = snapshot
         .mutation(images, states)?
         .commit_loaded(
@@ -414,7 +434,7 @@ impl Debug for ImageImportedAsset {
         formatter
             .debug_struct("ImageImportedAsset")
             .field("artifact", self.artifact())
-            .field("source", self.image.source())
+            .field("source", self.source())
             .field("extent", &self.image.extent())
             .field("format", &self.image.format())
             .field("color_space", &self.image.color_space())
@@ -434,3 +454,6 @@ fn map_asset_state_error(error: AssetStateError) -> ImagePublicationFailureKind 
         AssetStateError::MutationSuperseded { .. } => ImagePublicationFailureKind::StateChanged,
     }
 }
+
+#[cfg(test)]
+mod source_admission;

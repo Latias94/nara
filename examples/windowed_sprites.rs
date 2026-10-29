@@ -13,8 +13,6 @@ mod procedural_image;
 mod runtime_retirement;
 use runtime_retirement::finish_runtime_after_winit;
 
-const WINDOW_TEXTURE_STABLE_ID: &str = "b73f0f16-09e8-4265-b090-b689b41c197e";
-
 fn main() -> Result<(), Box<dyn Error>> {
     let mut app = App::new();
     app.add_plugins((
@@ -58,8 +56,9 @@ fn setup_scene(
     mut asset_server: ResMut<AssetServer>,
     mut images: ResMut<Assets<ImageAsset>>,
     mut states: ResMut<AssetStates>,
+    mut events: ResMut<AssetEvents>,
 ) {
-    let texture = import_demo_texture(&mut asset_server, &mut images, &mut states);
+    let texture = publish_demo_texture(&mut asset_server, &mut images, &mut states, &mut events);
 
     let camera = commands
         .spawn((
@@ -75,7 +74,7 @@ fn setup_scene(
 
     let texture_sprite = commands
         .spawn((
-            Name::new("imported texture"),
+            Name::new("procedural texture"),
             Transform2d::from_translation(Vec2::new(-80.0, 20.0)),
             Sprite::from_texture(texture, Vec2::new(80.0, 80.0)).with_layer(1),
         ))
@@ -119,25 +118,21 @@ fn setup_scene(
     );
 }
 
-fn import_demo_texture(
+fn publish_demo_texture(
     asset_server: &mut AssetServer,
     images: &mut Assets<ImageAsset>,
     states: &mut AssetStates,
+    events: &mut AssetEvents,
 ) -> Handle<ImageAsset> {
-    let record = AssetRecord::new(
-        StableAssetId::parse_str(WINDOW_TEXTURE_STABLE_ID).unwrap(),
-        AssetPath::new("textures/windowed-demo.png").unwrap(),
-        AssetSourceKind::Image,
-    );
-    procedural_image::import_rgba(
+    procedural_image::publish_rgba(
         asset_server,
         images,
         states,
-        record,
+        events,
         ImageExtent::new(2, 2),
-        &[
+        ImageColorSpace::Srgb,
+        vec![
             255, 255, 255, 255, 40, 180, 255, 255, 255, 80, 120, 255, 30, 40, 60, 255,
         ],
-        ImageImportSettings::default(),
     )
 }

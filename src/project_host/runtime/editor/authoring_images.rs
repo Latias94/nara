@@ -241,29 +241,32 @@ impl EditorAuthoringImageCatalogCandidate {
             let Some(stable_id) = server.stable_id(id) else {
                 return Err(EditorAuthoringImageCatalogError::IncompleteIdentity { id });
             };
-            if image.source().stable_id() != stable_id || image.source().path().as_str() != path {
+            let source = image
+                .source()
+                .ok_or(EditorAuthoringImageCatalogError::SourceIdentityMismatch { id })?;
+            if source.stable_id() != stable_id || source.path().as_str() != path {
                 return Err(EditorAuthoringImageCatalogError::SourceIdentityMismatch { id });
             }
             let Some(state) = states.state(id) else {
                 return Err(EditorAuthoringImageCatalogError::IncompleteLoadedState { id });
             };
             if state.load_state() != &LoadState::Loaded
-                || state.source_hash() != Some(image.source().source_hash())
-                || state.import_hash() != Some(image.source().artifact().key().digest())
+                || state.source_hash() != Some(source.source_hash())
+                || state.import_hash() != Some(source.artifact().key().digest())
             {
                 return Err(EditorAuthoringImageCatalogError::LoadedStateMismatch { id });
             }
 
-            let path = image.source().path().clone();
+            let path = source.path().clone();
             let product = EditorAuthoringImageProduct {
                 handle,
                 stable_id,
                 path: path.clone(),
                 version: state.version(),
                 slot_revision: images.slot_revision(handle),
-                source_hash: image.source().source_hash(),
-                artifact_hash: image.source().artifact().key().digest(),
-                settings: image.source().settings(),
+                source_hash: source.source_hash(),
+                artifact_hash: source.artifact().key().digest(),
+                settings: source.settings(),
                 extent: image.extent(),
                 format: image.format(),
             };

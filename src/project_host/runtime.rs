@@ -1492,7 +1492,7 @@ fn publish_snapshot_assets_with_database(
     {
         let mut server = world.resource_mut::<AssetServer>();
         for (index, content) in snapshot.images().iter().enumerate() {
-            let source = content.image().source();
+            let source = content.source();
             let record = AssetRecord::new(
                 source.stable_id(),
                 source.path().clone(),

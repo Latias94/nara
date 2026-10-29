@@ -1317,6 +1317,7 @@ dependencies = [
 name = "nara_image"
 version = "0.1.0"
 dependencies = [
+ "blake3",
  "nara_app",
  "nara_asset",
  "nara_core",
@@ -1327,6 +1328,7 @@ dependencies = [
  "nara_tasks",
  "png",
  "serde",
+ "serde_json",
 ]
 
 [[package]]
@@ -1399,6 +1401,7 @@ dependencies = [
 name = "nara_render"
 version = "0.1.0"
 dependencies = [
+ "blake3",
  "nara_app",
  "nara_asset",
  "nara_core",

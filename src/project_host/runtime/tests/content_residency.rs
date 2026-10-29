@@ -292,7 +292,11 @@ fn image_handle(world: &World, id: &str) -> Handle<ImageAsset> {
     let handle = world
         .resource::<Assets<ImageAsset>>()
         .iter()
-        .find(|(_, image)| image.source().stable_id() == record.stable_id())
+        .find(|(_, image)| {
+            image
+                .source()
+                .is_some_and(|source| source.stable_id() == record.stable_id())
+        })
         .unwrap()
         .0;
     assert_eq!(server.get_handle::<ImageAsset>(handle.id()), Some(handle));
@@ -325,7 +329,7 @@ fn foreign_image(record: &AssetRecord) -> ImageAsset {
         ArtifactLabel::default(),
         ArtifactFormatVersion::new(1),
     );
-    ImageAsset::new(
+    ImageAsset::from_import(
         ImageSourceMetadata::new(
             record.path().clone(),
             settings,

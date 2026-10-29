@@ -73,7 +73,7 @@ pub(super) fn validate_startup_images(
     let stable_ids = snapshot
         .images()
         .iter()
-        .map(|image| image.image().source().stable_id())
+        .map(|image| image.source().stable_id())
         .collect::<BTreeSet<_>>();
     let paths = snapshot
         .images()
@@ -130,7 +130,7 @@ impl ImagePublications {
         let mut publish = BTreeMap::new();
         let mut next_ids = BTreeSet::new();
         for (index, content) in snapshot.images().iter().enumerate() {
-            let source = content.image().source();
+            let source = content.source();
             let record = AssetRecord::new(
                 source.stable_id(),
                 source.path().clone(),
@@ -247,8 +247,12 @@ impl ImagePublications {
         }
         let mut receipts = Vec::with_capacity(self.publish.len());
         for item in self.publish.into_values() {
-            let source_hash = item.image.source().source_hash();
-            let import_hash = item.image.source().artifact().key().digest();
+            let source = item
+                .image
+                .source()
+                .expect("source Image publication retains imported provenance");
+            let source_hash = source.source_hash();
+            let import_hash = source.artifact().key().digest();
             images
                 .commit_loaded(
                     item.handle,

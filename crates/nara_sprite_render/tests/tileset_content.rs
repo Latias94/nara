@@ -128,7 +128,7 @@ fn image(record: &AssetRecord, width: u32, byte: u8) -> ImageAsset {
         ArtifactLabel::default(),
         ArtifactFormatVersion::new(1),
     );
-    ImageAsset::new(
+    ImageAsset::from_import(
         ImageSourceMetadata::new(
             record.path().clone(),
             settings,

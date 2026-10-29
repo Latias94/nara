@@ -71,6 +71,7 @@ their completion conditions do not automatically apply to later tasks.
 | Compiled source domains and Editor metadata import | [ADR 0103](adr/0103-concrete-domain-owned-asset-import-execution.md); [source-domain guide](../guides/project-asset-domains.md) |
 | Compound product identity, declared references, authored continuity and concrete processed format | [ADR 0122](adr/0122-scoped-imported-product-identity-and-authored-continuity.md); [ordered source/Runtime plan](../plans/2026-10-29-asset-import-and-runtime-delivery-plan.md) |
 | Verified immutable local Runtime base capture and typed acquisition | [Asset ownership](adr/0007-asset-identity-and-import-pipeline.md); [Runtime base guide](../guides/runtime-content-base.md) |
+| Source-independent Image content, compact Runtime format and retained prepared pixels | [Import/render seam](adr/0033-asset-import-and-render-resource-preparation-seam.md); [Runtime Image guide](../guides/runtime-images.md) |
 | Public extension ergonomics and complete compiled Editor construction | [Bevy comparison](../research/2026-10-22-bevy-public-extension-ergonomics.md); [implementation plan](../plans/2026-10-22-public-extension-ergonomics-plan.md) |
 | Supervised external Play and saved-source admission | [ADR 0116](adr/0116-standalone-supervised-editor-play.md) |
 | Historical plan and verification lineage | [Engineering memory](../knowledge/engineering/index.md) and [UI plan history](../plans/ui-program-roadmap.md) |

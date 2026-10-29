@@ -61,33 +61,26 @@ fn setup_scene(
     mut asset_server: ResMut<AssetServer>,
     mut images: ResMut<Assets<ImageAsset>>,
     mut states: ResMut<AssetStates>,
+    mut events: ResMut<AssetEvents>,
     materials: Res<Material2dDefinitions>,
 ) {
-    let indices = procedural_image::import_rgba(
+    let indices = procedural_image::publish_rgba(
         &mut asset_server,
         &mut images,
         &mut states,
-        AssetRecord::new(
-            StableAssetId::parse_str("9f9118bb-5643-4fe2-b28d-c84353f9ecb7").unwrap(),
-            AssetPath::new("textures/palette-indices.png").unwrap(),
-            AssetSourceKind::Image,
-        ),
+        &mut events,
         ImageExtent::new(2, 1),
-        &[0, 0, 0, 255, 255, 0, 0, 255],
-        ImageImportSettings::new(ImageColorSpace::Linear),
+        ImageColorSpace::Linear,
+        vec![0, 0, 0, 255, 255, 0, 0, 255],
     );
-    let palette = procedural_image::import_rgba(
+    let palette = procedural_image::publish_rgba(
         &mut asset_server,
         &mut images,
         &mut states,
-        AssetRecord::new(
-            StableAssetId::parse_str("65b23b4c-de75-4203-8bc6-f81fbcc7c213").unwrap(),
-            AssetPath::new("textures/palette-colors.png").unwrap(),
-            AssetSourceKind::Image,
-        ),
+        &mut events,
         ImageExtent::new(2, 1),
-        &[255, 70, 30, 255, 30, 200, 255, 255],
-        ImageImportSettings::new(ImageColorSpace::Srgb),
+        ImageColorSpace::Srgb,
+        vec![255, 70, 30, 255, 30, 200, 255, 255],
     );
     let camera = commands
         .spawn((

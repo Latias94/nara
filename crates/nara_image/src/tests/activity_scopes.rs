@@ -213,6 +213,7 @@ fn shared_image_scopes_keep_same_asset_key_and_result_application_independent() 
             .get(first_handle)
             .unwrap()
             .source()
+            .unwrap()
             .source_hash(),
         sibling
             .world()
@@ -220,6 +221,7 @@ fn shared_image_scopes_keep_same_asset_key_and_result_application_independent() 
             .get(sibling_handle)
             .unwrap()
             .source()
+            .unwrap()
             .source_hash()
     );
 

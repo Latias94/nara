@@ -69,13 +69,13 @@ fn saved_ui_prefab_refreshes_project_content_and_explicit_restart() {
             .any(|image| image.path().as_str() == "textures/player.png")
     );
     assert!(migrated_content.snapshot.source_upgrade_required());
-    let migrated_prefab = migrated_content
+    let source_prefab = migrated_content
         .snapshot
         .prefabs()
         .iter()
         .find(|prefab| prefab.path().as_str() == "reference-ui.prefab.json")
-        .expect("the migrated reference UI Prefab must remain in the source closure");
-    let migrated_visual = migrated_prefab
+        .expect("the reference UI Prefab must remain in the source closure");
+    let source_visual = source_prefab
         .document()
         .entities
         .iter()
@@ -85,10 +85,53 @@ fn saved_ui_prefab_refreshes_project_content_and_explicit_restart() {
                 .components
                 .get(&ComponentTypeId::new("nara.ui.UiVisual"))
         })
-        .expect("the migrated modal visual must remain present");
+        .expect("the authored modal visual must remain present");
+    assert_eq!(source_visual.version, ComponentSchemaVersion::ONE);
+    assert_eq!(
+        source_visual
+            .value
+            .get("background")
+            .unwrap()
+            .get("reference"),
+        Some(&ComponentValue::String("textures/player.png".to_owned())),
+        "source capture must preserve the original authored declaration"
+    );
+    let projected_id = migrated_content
+        .snapshot
+        .expanded_scene_provenance()
+        .iter()
+        .find_map(|(id, source)| {
+            (source.local_entity_id().as_str() == "modal-dim"
+                && source.projection_path().is_some_and(|path| {
+                    path.steps().last().is_some_and(|step| {
+                        matches!(step, PrefabProjectionStep::SourceEntity { canonical_source, .. }
+                            if canonical_source == source_prefab.source_key())
+                    })
+                }))
+            .then_some(id)
+        })
+        .expect("the modal must retain its exact source in effective compilation");
+    let migrated_visual = migrated_content
+        .snapshot
+        .expanded_scene()
+        .entities
+        .iter()
+        .find(|entity| &entity.id == projected_id)
+        .and_then(|entity| {
+            entity
+                .components
+                .get(&ComponentTypeId::new("nara.ui.UiVisual"))
+        })
+        .expect("effective compilation must include the migrated modal visual");
     assert_eq!(
         migrated_visual.version,
         ComponentSchemaVersion::new(2).unwrap()
+    );
+    let background = migrated_visual.value.get("background").unwrap();
+    assert!(background.get("reference").is_none());
+    assert_eq!(
+        nara::reflect::decode_asset_reference_value(background.get("image").unwrap()).unwrap(),
+        nara::asset::AssetRef::path("textures/player.png").unwrap()
     );
     drop(migrated_content);
     let stale_expected = UI_REFRESH_EXPECTED_SOURCE
@@ -795,9 +838,11 @@ fn runtime_structure_is_current(world: &World, expected: &SceneEntityId) -> bool
     world
         .get_resource::<Assets<ImageAsset>>()
         .is_some_and(|images| {
-            images
-                .iter()
-                .any(|(_, image)| image.source().path().as_str() == "textures/player.png")
+            images.iter().any(|(_, image)| {
+                image
+                    .source()
+                    .is_some_and(|source| source.path().as_str() == "textures/player.png")
+            })
         })
 }
 

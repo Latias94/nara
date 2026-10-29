@@ -9,10 +9,11 @@ mod limits;
 #[cfg(any(feature = "render-prepare", test))]
 mod prepare;
 mod reload;
+mod runtime;
 mod settings;
 
 pub use asset::{
-    ImageAsset, ImageAssetCreateError, ImageColorSpace, ImageExtent, ImageFormat,
+    ImageAsset, ImageAssetCreateError, ImageColorSpace, ImageContentHash, ImageExtent, ImageFormat,
     ImageSourceMetadata, ImageSourceMetadataCreateError,
 };
 pub use budget::{ImageImportBudgetHost, ImageImportBudgetSnapshot};
@@ -31,12 +32,15 @@ pub use limits::{
 pub use prepare::{
     IMAGE_PREPARE_PLUGIN_DECLARATION, IMAGE_PREPARE_PLUGIN_ID, ImagePreparePlugin,
     ImagePrepareStats, PreparedImageResource, PreparedImageSnapshot, PreparedImages,
-    image_descriptor_hash, image_resource_key, prepare_images,
+    image_content_hash, image_resource_key, prepare_images,
 };
 pub use reload::{
     IMAGE_PLUGIN_DECLARATION, IMAGE_PLUGIN_ID, ImagePlugin, ImageReloadError, ImageReloadStats,
     plugin,
 };
+pub use runtime::ImageDomain;
+#[cfg(feature = "serde")]
+pub use runtime::ImageRuntimeCodec;
 pub use settings::ImageImportSettings;
 
 #[cfg(test)]

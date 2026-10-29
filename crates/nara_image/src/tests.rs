@@ -124,7 +124,7 @@ impl RecoveryInterference {
                 .resource_mut::<AssetStates>()
                 .observe_metadata_change(handle.id()),
             Self::SlotAba => {
-                let image = ImageAsset::new(
+                let image = ImageAsset::from_import(
                     direct_image_source(),
                     ImageExtent::new(1, 1),
                     ImageFormat::Rgba8,
@@ -902,9 +902,9 @@ fn png_import_produces_rgba8_image_asset() {
     assert_eq!(imported.image().format(), ImageFormat::Rgba8);
     assert_eq!(imported.image().color_space(), ImageColorSpace::Srgb);
     assert_eq!(imported.image().pixels().len(), 8);
-    assert_eq!(imported.image().source().stable_id(), stable_id());
+    assert_eq!(imported.image().source().unwrap().stable_id(), stable_id());
     assert_eq!(
-        imported.image().source().path().as_str(),
+        imported.image().source().unwrap().path().as_str(),
         "textures/player.png"
     );
     assert!(
@@ -955,7 +955,7 @@ fn concrete_image_importer_owns_extension_admission() {
         &uppercase,
         &rgba_png(1, 1, &[0, 0, 255, 255]),
     );
-    assert_eq!(imported.image().source().path(), uppercase.path());
+    assert_eq!(imported.image().source().unwrap().path(), uppercase.path());
 
     let missing = image_record("textures/player");
     let error =
@@ -1509,7 +1509,7 @@ fn first_load_candidate_rejects_late_slot_occupation_and_releases_charge() {
         &rgba_png(1, 1, &[255, 0, 0, 255]),
     )
     .into_image();
-    let occupied_hash = occupied.source().source_hash();
+    let occupied_hash = occupied.source().unwrap().source_hash();
     assert!(images.insert(handle, occupied).is_none());
 
     let error = candidate
@@ -1518,7 +1518,7 @@ fn first_load_candidate_rejects_late_slot_occupation_and_releases_charge() {
 
     assert_eq!(error, ImagePublicationFailureKind::AlreadyLoaded);
     assert_eq!(
-        images.get(handle).unwrap().source().source_hash(),
+        images.get(handle).unwrap().source().unwrap().source_hash(),
         occupied_hash
     );
     assert!(states.state(handle.id()).is_none());
@@ -1744,7 +1744,7 @@ fn reload_candidate_rejects_missing_or_replaced_last_good_value() {
         &rgba_png(1, 1, &[0, 255, 0, 255]),
     )
     .into_image();
-    let replacement_hash = replacement.source().source_hash();
+    let replacement_hash = replacement.source().unwrap().source_hash();
     images.insert(handle, replacement);
 
     let replaced_error = replaced_candidate
@@ -1755,7 +1755,7 @@ fn reload_candidate_rejects_missing_or_replaced_last_good_value() {
         ImagePublicationFailureKind::ReloadValueChanged
     );
     assert_eq!(
-        images.get(handle).unwrap().source().source_hash(),
+        images.get(handle).unwrap().source().unwrap().source_hash(),
         replacement_hash
     );
     assert!(events.drain().is_empty());
@@ -1882,12 +1882,11 @@ fn code_first_prepared_capture_binds_the_actual_slot_without_a_managed_catalog()
     let mut images = Assets::default();
     let mut states = AssetStates::default();
     let mut events = AssetEvents::default();
-    let source = direct_image_source();
     let image = |pixels: Vec<u8>| {
         ImageAsset::new(
-            source.clone(),
             ImageExtent::new(1, 1),
             ImageFormat::Rgba8,
+            ImageColorSpace::Srgb,
             pixels,
         )
         .unwrap()
@@ -1919,9 +1918,9 @@ fn code_first_prepared_capture_binds_the_actual_slot_without_a_managed_catalog()
         first.identity().asset_version(),
         second.identity().asset_version()
     );
-    assert_eq!(
-        first.identity().descriptor_hash(),
-        second.identity().descriptor_hash()
+    assert_ne!(
+        first.identity().content_hash(),
+        second.identity().content_hash()
     );
     assert_ne!(
         first.identity().slot_revision(),
@@ -2121,6 +2120,7 @@ fn rejected_removal_revokes_prepared_image_and_retires_obsolete_completion() {
             .get(handle)
             .unwrap()
             .source()
+            .unwrap()
             .source_hash(),
         last_good_hash
     );
@@ -2184,8 +2184,9 @@ fn accepted_replacement_prepares_when_its_next_attempt_already_failed() {
         .get(handle)
         .unwrap()
         .source()
+        .unwrap()
         .clone();
-    let replacement = ImageAsset::new(
+    let replacement = ImageAsset::from_import(
         source,
         ImageExtent::new(1, 1),
         ImageFormat::Rgba8,
@@ -2250,7 +2251,7 @@ fn unchanged_image_snapshot_reuses_the_prepared_resource() {
 }
 
 #[test]
-fn direct_image_replacement_reprepares_when_asset_version_and_descriptor_are_unchanged() {
+fn direct_image_replacement_reprepares_when_asset_version_and_content_are_unchanged() {
     let (app, handle) = app_with_loaded_image(ImageImporter::default());
     let mut runtime = nara_app::RuntimeInstance::start(app).unwrap();
     runtime.drive(Duration::ZERO).unwrap();
@@ -2262,23 +2263,24 @@ fn direct_image_replacement_reprepares_when_asset_version_and_descriptor_are_unc
         .identity()
         .clone();
     let version = first.asset_version();
-    let descriptor = first.descriptor_hash();
+    let content = first.content_hash();
     let source = runtime
         .world()
         .resource::<Assets<ImageAsset>>()
         .get(handle)
         .unwrap()
         .source()
+        .unwrap()
         .clone();
     edit_image_pipeline(
         &mut runtime,
         ImagePipelineEdit::Insert {
             handle,
-            image: ImageAsset::new(
+            image: ImageAsset::from_import(
                 source,
                 ImageExtent::new(1, 1),
                 ImageFormat::Rgba8,
-                vec![255, 0, 255, 255],
+                vec![0, 0, 255, 255],
             )
             .unwrap(),
         },
@@ -2289,7 +2291,7 @@ fn direct_image_replacement_reprepares_when_asset_version_and_descriptor_are_unc
     let prepared = runtime.world().resource::<PreparedImages>();
     let second = prepared.get(image_resource_key(handle)).unwrap().identity();
     assert_eq!(second.asset_version(), version);
-    assert_eq!(second.descriptor_hash(), descriptor);
+    assert_eq!(second.content_hash(), content);
     assert_ne!(second.slot_revision(), first.slot_revision());
     assert_eq!(runtime.world().resource::<ImagePrepareStats>().prepared, 1);
     assert_eq!(prepared.len(), 1);
@@ -2404,6 +2406,7 @@ fn image_plugin_reloads_a_linear_image_with_its_accepted_recipe() {
         .get(handle)
         .unwrap()
         .source()
+        .unwrap()
         .source_hash();
     assert_eq!(runtime.world().resource::<ImageReloadStats>().applied, 1);
     assert!(
@@ -2429,9 +2432,9 @@ fn image_plugin_reloads_a_linear_image_with_its_accepted_recipe() {
         .resource::<Assets<ImageAsset>>()
         .get(handle)
         .unwrap();
-    assert_ne!(image.source().source_hash(), first_hash);
+    assert_ne!(image.source().unwrap().source_hash(), first_hash);
     assert_eq!(
-        image.source().settings(),
+        image.source().unwrap().settings(),
         ImageImportSettings::new(ImageColorSpace::Linear)
     );
     assert_eq!(image.color_space(), ImageColorSpace::Linear);
@@ -2509,10 +2512,10 @@ fn image_plugin_coalesced_source_and_metadata_changes_use_the_latest_recipe() {
             .get(handle)
             .map(|image| {
                 (
-                    image.source().settings(),
+                    image.source().unwrap().settings(),
                     image.color_space(),
                     image.pixels().to_vec(),
-                    image.source().artifact().key().settings_hash(),
+                    image.source().unwrap().artifact().key().settings_hash(),
                 )
             });
         let version = runtime
@@ -2651,7 +2654,7 @@ fn desired_metadata_survives_cross_frame_supersession_failure_and_queue_rejectio
             .resource::<Assets<ImageAsset>>()
             .get(handle)
             .unwrap();
-        assert_eq!(image.source().settings(), settings, "{trajectory}");
+        assert_eq!(image.source().unwrap().settings(), settings, "{trajectory}");
         assert_eq!(image.pixels(), &[0, 0, 255, 255], "{trajectory}");
         assert!(
             !runtime
@@ -2686,7 +2689,7 @@ fn desired_metadata_survives_cross_frame_supersession_failure_and_queue_rejectio
             .get(handle)
             .unwrap();
         assert_eq!(
-            image.source().settings(),
+            image.source().unwrap().settings(),
             settings,
             "successor: {trajectory}"
         );
@@ -2789,6 +2792,7 @@ fn public_reimport_supersedes_retained_reload_settings() {
                 .get(handle)
                 .unwrap()
                 .source()
+                .unwrap()
                 .settings(),
             settings
         );
@@ -2817,7 +2821,7 @@ fn public_reimport_supersedes_retained_reload_settings() {
             .resource::<Assets<ImageAsset>>()
             .get(handle)
             .unwrap();
-        assert_eq!(image.source().settings(), settings, "{trajectory}");
+        assert_eq!(image.source().unwrap().settings(), settings, "{trajectory}");
         assert_eq!(image.color_space(), ImageColorSpace::Linear);
         assert_eq!(image.pixels(), &[255, 255, 0, 255]);
         assert_eq!(
@@ -3009,6 +3013,7 @@ fn rejected_remove_revokes_retained_desired_before_request_admission() {
                 .get(handle)
                 .unwrap()
                 .source()
+                .unwrap()
                 .settings(),
             settings
         );
@@ -3260,7 +3265,7 @@ fn rejected_remove_and_metadata_requests_preserve_ordered_readmission() {
                 .resource::<Assets<ImageAsset>>()
                 .get(handle)
                 .unwrap();
-            assert_eq!(image.source().settings(), settings, "{trajectory}");
+            assert_eq!(image.source().unwrap().settings(), settings, "{trajectory}");
             assert_eq!(image.pixels(), &[0, 0, 255, 255]);
             runtime.finish().unwrap();
             remove_temp_root(&root);
@@ -3374,6 +3379,7 @@ fn public_metadata_observation_invalidates_old_task_and_retained_recipe() {
             .get(handle)
             .unwrap()
             .source()
+            .unwrap()
             .settings(),
         settings
     );
@@ -3465,7 +3471,7 @@ fn image_plugin_coalesced_removal_and_recreation_preserves_metadata_dirtiness() 
         .world()
         .resource::<Assets<ImageAsset>>()
         .get(handle)
-        .map(|image| (image.source().settings(), image.pixels().to_vec()));
+        .map(|image| (image.source().unwrap().settings(), image.pixels().to_vec()));
     let recreated_version = runtime
         .world()
         .resource::<AssetStates>()
@@ -3745,7 +3751,7 @@ fn image_plugin_recovers_a_removed_image_from_same_identity_metadata() {
         .get(handle)
         .map(|image| {
             (
-                image.source().settings(),
+                image.source().unwrap().settings(),
                 image.color_space(),
                 image.pixels().to_vec(),
             )
@@ -4180,7 +4186,7 @@ fn image_plugin_removed_image_recovery_cannot_bypass_metadata_identity() {
         .world()
         .resource::<Assets<ImageAsset>>()
         .get(handle)
-        .map(|image| (image.source().settings(), image.pixels().to_vec()));
+        .map(|image| (image.source().unwrap().settings(), image.pixels().to_vec()));
     let budget = importer.budget_snapshot();
     runtime.finish().unwrap();
     remove_temp_root(&temp_root);
@@ -4229,6 +4235,7 @@ fn image_plugin_meta_reload_preserves_last_good_but_revokes_changed_identity() {
         .get(handle)
         .unwrap()
         .source()
+        .unwrap()
         .artifact()
         .key()
         .settings_hash();
@@ -4246,10 +4253,13 @@ fn image_plugin_meta_reload_preserves_last_good_but_revokes_changed_identity() {
         .resource::<Assets<ImageAsset>>()
         .get(handle)
         .unwrap();
-    assert_eq!(image.source().settings(), ImageImportSettings::default());
+    assert_eq!(
+        image.source().unwrap().settings(),
+        ImageImportSettings::default()
+    );
     assert_eq!(image.color_space(), ImageColorSpace::Srgb);
     assert_eq!(
-        image.source().artifact().key().settings_hash(),
+        image.source().unwrap().artifact().key().settings_hash(),
         last_good_hash
     );
     assert_eq!(
@@ -4309,14 +4319,14 @@ fn image_plugin_meta_reload_preserves_last_good_but_revokes_changed_identity() {
         .resource::<Assets<ImageAsset>>()
         .get(handle)
         .unwrap();
-    assert_eq!(image.source().settings(), linear);
+    assert_eq!(image.source().unwrap().settings(), linear);
     assert_eq!(image.color_space(), ImageColorSpace::Linear);
     assert_eq!(
-        image.source().artifact().key().settings_hash(),
+        image.source().unwrap().artifact().key().settings_hash(),
         linear.settings_hash()
     );
     assert_ne!(
-        image.source().artifact().key().settings_hash(),
+        image.source().unwrap().artifact().key().settings_hash(),
         last_good_hash
     );
     assert_eq!(
@@ -4505,6 +4515,7 @@ fn budget_rejected_reload_preserves_last_good_value_and_asset_version() {
         .get(handle)
         .unwrap()
         .source()
+        .unwrap()
         .source_hash();
     let last_good_version = app
         .world()
@@ -4542,6 +4553,7 @@ fn budget_rejected_reload_preserves_last_good_value_and_asset_version() {
             .get(handle)
             .unwrap()
             .source()
+            .unwrap()
             .source_hash(),
         last_good_hash
     );
@@ -4653,7 +4665,7 @@ fn superseded_image_generation_publishes_while_obsolete_task_is_running() {
         &second_request,
         &[0, 255, 0, 255],
     );
-    let second_hash = second_imported.image().source().source_hash();
+    let second_hash = second_imported.image().source().unwrap().source_hash();
     let second = accepted_image_handle(app.world().resource::<TaskPools>().spawn(
         TaskPoolKind::Io,
         TaskSpawnRequest::new(2, IMAGE_RELOAD_TASK_DOMAIN),
@@ -4668,7 +4680,7 @@ fn superseded_image_generation_publishes_while_obsolete_task_is_running() {
         .world()
         .resource::<Assets<ImageAsset>>()
         .get(handle)
-        .map(|image| image.source().source_hash());
+        .map(|image| image.source().unwrap().source_hash());
     let running_before_release = runtime
         .world()
         .resource::<TaskPools>()
@@ -4682,7 +4694,7 @@ fn superseded_image_generation_publishes_while_obsolete_task_is_running() {
         .world()
         .resource::<Assets<ImageAsset>>()
         .get(handle)
-        .map(|image| image.source().source_hash());
+        .map(|image| image.source().unwrap().source_hash());
     runtime.finish().unwrap();
 
     assert!(running_before_release >= 1);
@@ -4926,7 +4938,7 @@ fn ordered_image_stream_waits_for_earlier_task_before_reverse_completion_apply()
     let importer = ImageImporter::default();
     let first_imported =
         imported_image_for_request(app.world(), &importer, &record, &request, &[255, 0, 0, 255]);
-    let first_hash = first_imported.image().source().source_hash();
+    let first_hash = first_imported.image().source().unwrap().source_hash();
     let second_imported =
         imported_image_for_request(app.world(), &importer, &record, &request, &[0, 255, 0, 255]);
     let (started_tx, started_rx) = mpsc::channel();
@@ -4982,6 +4994,7 @@ fn ordered_image_stream_waits_for_earlier_task_before_reverse_completion_apply()
             .get(handle)
             .unwrap()
             .source()
+            .unwrap()
             .source_hash(),
         first_hash
     );
@@ -5031,6 +5044,7 @@ fn result_becoming_stale_after_poll_is_retired_once_before_apply() {
             .get(handle)
             .unwrap()
             .source()
+            .unwrap()
             .source_hash(),
         last_good_hash
     );
@@ -5424,6 +5438,7 @@ fn panicked_image_reload_preserves_last_good_and_records_structured_failure() {
             .get(handle)
             .unwrap()
             .source()
+            .unwrap()
             .source_hash(),
         last_good_hash
     );
@@ -5490,7 +5505,7 @@ fn same_generation_coalesce_keeps_loading_until_replacement_is_ready() {
         imported_image_for_request(app.world(), &importer, &record, &request, &[255, 0, 0, 255]);
     let replacement_imported =
         imported_image_for_request(app.world(), &importer, &record, &request, &[0, 255, 0, 255]);
-    let replacement_hash = replacement_imported.image().source().source_hash();
+    let replacement_hash = replacement_imported.image().source().unwrap().source_hash();
     let spawn_request = TaskSpawnRequest::new(1, IMAGE_RELOAD_TASK_DOMAIN).with_overload(
         TaskOverloadPolicy::CoalescePending(TaskCoalesceKey::new(handle.id().raw())),
     );
@@ -5549,6 +5564,7 @@ fn same_generation_coalesce_keeps_loading_until_replacement_is_ready() {
             .get(handle)
             .unwrap()
             .source()
+            .unwrap()
             .source_hash(),
         replacement_hash
     );
@@ -5627,7 +5643,7 @@ fn slot_conflict_is_stale_and_does_not_mark_the_winning_value_failed() {
         &rgba_png(1, 1, &[0, 255, 0, 255]),
     )
     .into_image();
-    let winner_hash = winner.source().source_hash();
+    let winner_hash = winner.source().unwrap().source_hash();
     images.insert(handle, winner);
     let mut stats = ImageReloadStats::default();
 
@@ -5644,7 +5660,7 @@ fn slot_conflict_is_stale_and_does_not_mark_the_winning_value_failed() {
     assert_eq!(stats.stale, 1);
     assert_eq!(stats.failed, 0);
     assert_eq!(
-        images.get(handle).unwrap().source().source_hash(),
+        images.get(handle).unwrap().source().unwrap().source_hash(),
         winner_hash
     );
     assert_eq!(
@@ -5832,7 +5848,7 @@ fn slot_replacement_retires_an_old_failure_as_stale() {
         &rgba_png(1, 1, &[0, 255, 0, 255]),
     )
     .into_image();
-    let winner_hash = winner.source().source_hash();
+    let winner_hash = winner.source().unwrap().source_hash();
     images.insert(handle, winner);
     let mut diagnostics = AssetReloadDiagnostics::default();
     let mut stats = ImageReloadStats::default();
@@ -5852,7 +5868,7 @@ fn slot_replacement_retires_an_old_failure_as_stale() {
     assert_eq!(stats.failed, 0);
     assert!(diagnostics.is_empty());
     assert_eq!(
-        images.get(handle).unwrap().source().source_hash(),
+        images.get(handle).unwrap().source().unwrap().source_hash(),
         winner_hash
     );
     assert_eq!(
@@ -5930,7 +5946,7 @@ fn stale_removal_cannot_delete_a_newer_same_frame_publication() {
         &rgba_png(1, 1, &[0, 255, 0, 255]),
     )
     .into_image();
-    let replacement_hash = replacement.source().source_hash();
+    let replacement_hash = replacement.source().unwrap().source_hash();
     edit_image_pipeline(
         &mut runtime,
         ImagePipelineEdit::PendingReplacement(replacement),
@@ -5952,6 +5968,7 @@ fn stale_removal_cannot_delete_a_newer_same_frame_publication() {
             .get(handle)
             .unwrap()
             .source()
+            .unwrap()
             .source_hash(),
         replacement_hash
     );
@@ -6032,7 +6049,7 @@ fn image_plugin_removes_runtime_and_prepared_image() {
 }
 
 #[test]
-fn descriptor_hash_changes_when_content_descriptor_changes() {
+fn content_hash_changes_when_content_descriptor_changes() {
     let record = image_record("textures/player.png");
     let bytes = rgba_png(1, 1, &[0, 0, 255, 255]);
     let image = import_uncommitted(&ImageImporter::default(), &record, &bytes).into_image();
@@ -6044,10 +6061,7 @@ fn descriptor_hash_changes_when_content_descriptor_changes() {
     )
     .into_image();
 
-    assert_ne!(
-        image_descriptor_hash(&image),
-        image_descriptor_hash(&changed)
-    );
+    assert_ne!(image_content_hash(&image), image_content_hash(&changed));
 }
 
 fn direct_image_source() -> ImageSourceMetadata {
@@ -6101,7 +6115,7 @@ fn test_artifact_record(record: &AssetRecord, source_bytes: &[u8]) -> ImportArti
 fn image_asset_rejects_zero_overflowing_and_mismatched_rgba_storage() {
     for extent in [ImageExtent::new(0, 1), ImageExtent::new(1, 0)] {
         assert_eq!(
-            ImageAsset::new(
+            ImageAsset::from_import(
                 direct_image_source(),
                 extent,
                 ImageFormat::Rgba8,
@@ -6112,7 +6126,7 @@ fn image_asset_rejects_zero_overflowing_and_mismatched_rgba_storage() {
         );
     }
     assert_eq!(
-        ImageAsset::new(
+        ImageAsset::from_import(
             direct_image_source(),
             ImageExtent::new(u32::MAX, u32::MAX),
             ImageFormat::Rgba8,
@@ -6125,7 +6139,7 @@ fn image_asset_rejects_zero_overflowing_and_mismatched_rgba_storage() {
     );
     for (pixels, expected, actual) in [(vec![0; 3], 4, 3), (vec![0; 5], 4, 5)] {
         assert_eq!(
-            ImageAsset::new(
+            ImageAsset::from_import(
                 direct_image_source(),
                 ImageExtent::new(1, 1),
                 ImageFormat::Rgba8,
@@ -6149,7 +6163,7 @@ fn image_asset_reuses_the_admitted_pixel_allocation() {
     let pixels = vec![24, 120, 220, 255];
     let admitted_allocation = pixels.as_ptr();
 
-    let image = ImageAsset::new(
+    let image = ImageAsset::from_import(
         ImageSourceMetadata::new(
             record.path().clone(),
             ImageImportSettings::default(),
@@ -6219,7 +6233,7 @@ fn prepared_image_resource_retains_exact_pixels_across_source_replacement() {
 
     let old_allocation = image.pixels().as_ptr();
     let prepared = PreparedImageResource::from_image(&image);
-    let replacement = ImageAsset::new(
+    let replacement = ImageAsset::from_import(
         direct_image_source(),
         ImageExtent::new(1, 1),
         ImageFormat::Rgba8,
@@ -6231,7 +6245,7 @@ fn prepared_image_resource_retains_exact_pixels_across_source_replacement() {
     drop(owner);
     drop(image);
 
-    assert!(prepared.retains_source_allocation());
+    assert!(prepared.has_retention_owner());
     assert!(!dropped.load(std::sync::atomic::Ordering::SeqCst));
     assert_eq!(prepared.pixels(), old_bytes);
     assert_eq!(prepared.pixels().as_ptr(), old_allocation);
@@ -6264,7 +6278,7 @@ fn shared_image_pixels_keep_the_canonical_byte_content_wire_shape() {
 #[cfg(feature = "serde")]
 #[test]
 fn image_asset_deserialization_reuses_the_constructor_validation() {
-    let image = ImageAsset::new(
+    let image = ImageAsset::from_import(
         direct_image_source(),
         ImageExtent::new(1, 1),
         ImageFormat::Rgba8,
@@ -6619,7 +6633,7 @@ fn reserve_loaded_image_request(
             &states,
         )
         .unwrap();
-    let last_good_hash = imported.image().source().source_hash();
+    let last_good_hash = imported.image().source().unwrap().source_hash();
     imported
         .commit(&server, &mut images, &mut states, &mut events)
         .unwrap();

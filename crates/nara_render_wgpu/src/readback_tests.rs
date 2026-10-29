@@ -24,58 +24,29 @@ pub(crate) fn image_versions(width: u32, height: u32) -> [nara_image::PreparedIm
     let mut states = AssetStates::default();
     let mut events = AssetEvents::default();
     image_assets(width, height).map(|image| {
-        let source_hash = image.source().source_hash();
-        let import_hash = image.source().artifact().key().digest();
+        assert!(image.product().is_none());
+        assert!(image.source().is_none());
         let version = images
-            .commit_loaded(
-                handle,
-                image,
-                &mut states,
-                &mut events,
-                Some(source_hash),
-                Some(import_hash),
-            )
+            .commit_loaded(handle, image, &mut states, &mut events, None, None)
             .unwrap();
         let snapshot = PreparedImageSnapshot::capture(handle, &images, &states).unwrap();
         assert_eq!(snapshot.identity().asset_version(), version);
+        assert_eq!(
+            snapshot.identity().slot_revision(),
+            &images.slot_revision(handle)
+        );
         snapshot
     })
 }
 
 pub(crate) fn image_assets(width: u32, height: u32) -> [nara_image::ImageAsset; 2] {
-    use nara_asset::{
-        ArtifactFormatVersion, ArtifactLabel, AssetPath, ImportArtifactKey, ImportArtifactRecord,
-        ImportDependencyDigest, ImportProfile, ImportedAssetType, ImporterId, ImporterVersion,
-        SourceHash, StableAssetId,
-    };
-    use nara_image::{
-        ImageAsset, ImageExtent, ImageFormat, ImageImportSettings, ImageSourceMetadata,
-    };
+    use nara_image::{ImageAsset, ImageColorSpace, ImageExtent, ImageFormat};
     [[255, 0, 0, 255], [0, 255, 0, 255]].map(|color| {
         let pixels = color.repeat((width * height) as usize);
-        let settings = ImageImportSettings::default();
-        let artifact = ImportArtifactRecord::new(ImportArtifactKey::new(
-            StableAssetId::parse_str("d7961f69-0e25-41d5-8893-0ef85ab19615").unwrap(),
-            SourceHash::from_bytes(&pixels),
-            ImportDependencyDigest::empty(),
-            ImporterId::new("nara-wgpu-test").unwrap(),
-            ImporterVersion::new(1),
-            settings.settings_hash(),
-            ImportProfile::default(),
-            ImportedAssetType::new("image").unwrap(),
-            ArtifactLabel::default(),
-            ArtifactFormatVersion::new(1),
-        ))
-        .unwrap();
         ImageAsset::new(
-            ImageSourceMetadata::new(
-                AssetPath::new("readback/versions.png").unwrap(),
-                settings,
-                artifact,
-            )
-            .unwrap(),
             ImageExtent::new(width, height),
             ImageFormat::Rgba8,
+            ImageColorSpace::Srgb,
             pixels,
         )
         .unwrap()
@@ -238,6 +209,11 @@ fn exact_image_versions_render_together_and_repeat_without_reupload() {
     let [old, new] = two_image_versions();
     assert_eq!(old.identity().key(), new.identity().key());
     assert_ne!(old.identity(), new.identity());
+    assert_ne!(
+        old.identity().slot_revision(),
+        new.identity().slot_revision()
+    );
+    assert_ne!(old.identity().content_hash(), new.identity().content_hash());
     assert_eq!(
         old.identity().asset_version(),
         nara_asset::AssetVersion::from_raw(1)

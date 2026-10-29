@@ -37,17 +37,10 @@ fn captured_images(editor: bool, shared: bool) -> WgpuCapturedFrame {
     let mut events = AssetEvents::default();
     let handles = crate::readback_tests::image_assets(1, 1).map(|image| {
         let handle = nara_asset::allocate_anonymous_handle().unwrap();
-        let source = image.source().source_hash();
-        let artifact = image.source().artifact().key().digest();
+        assert!(image.product().is_none());
+        assert!(image.source().is_none());
         assets
-            .commit_loaded(
-                handle,
-                image,
-                &mut states,
-                &mut events,
-                Some(source),
-                Some(artifact),
-            )
+            .commit_loaded(handle, image, &mut states, &mut events, None, None)
             .unwrap();
         handle
     });

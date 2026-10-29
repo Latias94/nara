@@ -1035,7 +1035,7 @@ impl EditorImagePublicationPort {
         (RuntimeWorldAccessError, ImageImportedAsset),
     > {
         let record = {
-            let source = imported.image().source();
+            let source = imported.source();
             let record = AssetRecord::new(
                 source.stable_id(),
                 source.path().clone(),

@@ -969,8 +969,9 @@ fn apply_image_reload_results(
         let restore_eligible = attempt.recovery.is_some()
             || (request.previous_usable_version() == Some(request.expected_version())
                 && images.get(attempt.handle).is_some_and(|image| {
-                    image.source().stable_id() == request.stable_id()
-                        && image.source().path() == request.path()
+                    image.source().is_some_and(|source| {
+                        source.stable_id() == request.stable_id() && source.path() == request.path()
+                    })
                 }));
         match attempt
             .publication

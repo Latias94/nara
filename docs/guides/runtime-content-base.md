@@ -72,6 +72,10 @@ Product mapped to the member. The compound text consumer checks the enclosing so
 each auxiliary ID; valid bytes for a different source are rejected. Decoder and membership panics
 return a rejected acquisition without publishing a product.
 
+The concrete [Runtime Image guide](runtime-images.md) describes `ImageDomain` and
+`ImageRuntimeCodec`, source-independent pixels and the original decode reservation retained by
+escaped CPU/native/prepared captures. Image membership is one complete Product per member.
+
 ## Materialization And Retention
 
 `startup.scene_source()` shares its complete retained owner with the existing startup/current

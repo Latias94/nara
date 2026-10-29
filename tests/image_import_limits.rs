@@ -154,6 +154,7 @@ fn root_facade_plugin_reload_preserves_last_good_after_budget_rejection() {
         .get(handle)
         .unwrap()
         .source()
+        .unwrap()
         .source_hash();
     let last_good_version = app
         .world()
@@ -173,7 +174,7 @@ fn root_facade_plugin_reload_preserves_last_good_after_budget_rejection() {
         .resource::<Assets<ImageAsset>>()
         .get(handle)
         .unwrap();
-    assert_eq!(image.source().source_hash(), last_good_hash);
+    assert_eq!(image.source().unwrap().source_hash(), last_good_hash);
     assert_eq!(
         app.world()
             .resource::<AssetStates>()

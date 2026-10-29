@@ -727,8 +727,8 @@ fn queued_image_snapshots_survive_successor_publication_and_cache_removal() {
 
     let [old, new] = [vec![255; 16], [0, 255, 0, 255].repeat(4)].map(|pixels| {
         let image = test_image_with_pixels(pixels);
-        let source_hash = image.source().source_hash();
-        let import_hash = image.source().artifact().key().digest();
+        let source_hash = image.source().unwrap().source_hash();
+        let import_hash = image.source().unwrap().artifact().key().digest();
         let version = images
             .commit_loaded(
                 handle,
@@ -1549,8 +1549,8 @@ fn queued_item(entity_index: u32) -> QueuedSpriteItem {
 
 fn insert_loaded_image(app: &mut App, handle: Handle<ImageAsset>) {
     let image = test_image();
-    let source_hash = image.source().source_hash();
-    let import_hash = image.source().artifact().key().digest();
+    let source_hash = image.source().unwrap().source_hash();
+    let import_hash = image.source().unwrap().artifact().key().digest();
     let mut images = Assets::<ImageAsset>::default();
     let mut states = AssetStates::default();
     let mut events = AssetEvents::default();
@@ -1598,7 +1598,7 @@ fn test_image_with_pixels(pixels: Vec<u8>) -> ImageAsset {
         artifact,
     )
     .unwrap();
-    ImageAsset::new(source, ImageExtent::new(2, 2), ImageFormat::Rgba8, pixels).unwrap()
+    ImageAsset::from_import(source, ImageExtent::new(2, 2), ImageFormat::Rgba8, pixels).unwrap()
 }
 
 fn prepared_image_snapshot() -> PreparedImageSnapshot {
@@ -1606,8 +1606,8 @@ fn prepared_image_snapshot() -> PreparedImageSnapshot {
     let mut images = Assets::<ImageAsset>::default();
     let mut states = AssetStates::default();
     let image = test_image();
-    let source_hash = image.source().source_hash();
-    let import_hash = image.source().artifact().key().digest();
+    let source_hash = image.source().unwrap().source_hash();
+    let import_hash = image.source().unwrap().artifact().key().digest();
     images
         .commit_loaded(
             handle,

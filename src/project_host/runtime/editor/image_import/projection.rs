@@ -177,12 +177,13 @@ impl EditorImageImportHost {
         self.last_good(asset_path)
             .and_then(|last_good| {
                 let image = runtime.image_import_asset(last_good.handle(), last_good.version())?;
+                let source = image.source()?;
                 let expected_source_hash =
                     SourceHash::from_digest(*last_good.source_digest().as_bytes());
-                if image.source().stable_id() != last_good.stable_id()
-                    || image.source().path() != asset_path
-                    || image.source().source_hash() != expected_source_hash
-                    || image.source().settings().settings_hash() != last_good.settings_hash()
+                if source.stable_id() != last_good.stable_id()
+                    || source.path() != asset_path
+                    || source.source_hash() != expected_source_hash
+                    || source.settings().settings_hash() != last_good.settings_hash()
                 {
                     return None;
                 }
@@ -247,8 +248,8 @@ impl EditorImageImportHost {
                 Some(EditorImageImportAvailabilityView::LastGood {
                     stable_id: last_good.stable_id(),
                     version: last_good.version(),
-                    source_hash: image.source().source_hash(),
-                    active_settings: project_settings(image.source().settings()),
+                    source_hash: source.source_hash(),
+                    active_settings: project_settings(source.settings()),
                     dimensions: EditorImageDimensions::new(extent.width, extent.height),
                     freshness,
                 })

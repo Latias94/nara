@@ -103,6 +103,7 @@ fn public_asset_task_flow_preserves_last_good_after_failed_reload() {
         .get(handle)
         .unwrap()
         .source()
+        .unwrap()
         .source_hash();
     let last_good_version = app
         .world()
@@ -124,6 +125,7 @@ fn public_asset_task_flow_preserves_last_good_after_failed_reload() {
             .get(handle)
             .unwrap()
             .source()
+            .unwrap()
             .source_hash(),
         last_good_hash
     );

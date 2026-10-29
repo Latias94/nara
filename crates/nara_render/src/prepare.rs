@@ -1,6 +1,6 @@
 use std::fmt::{self, Display, Formatter};
 
-use nara_asset::{AssetId, AssetSlotRevision, AssetVersion, Handle, ImportArtifactDigest};
+use nara_asset::{AssetId, AssetSlotRevision, AssetVersion, Handle};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct RenderResourceKind(&'static str);
@@ -53,16 +53,62 @@ impl RenderResourceKey {
     }
 }
 
+/// BLAKE3 content hash of a complete backend-neutral prepared resource.
+///
+/// The resource domain owns the canonical encoding and its domain separation policy. The hashed
+/// content must cover both the prepared descriptor and its data. A domain can transfer an existing
+/// digest with [`Self::from_digest`] when it covers that same complete prepared content.
+///
+/// This hash does not identify a logical resource, an asset slot mutation, a GPU epoch, or an import
+/// artifact. Those identities remain the responsibility of their respective owners.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct RenderResourceContentHash([u8; 32]);
+
+impl RenderResourceContentHash {
+    /// Hashes the domain's complete canonical prepared descriptor and data encoding.
+    #[must_use]
+    pub fn from_bytes(bytes: impl AsRef<[u8]>) -> Self {
+        Self(*blake3::hash(bytes.as_ref()).as_bytes())
+    }
+
+    /// Wraps an existing BLAKE3 digest of the complete prepared content without hashing it again.
+    #[must_use]
+    pub const fn from_digest(digest: [u8; 32]) -> Self {
+        Self(digest)
+    }
+
+    #[must_use]
+    pub const fn as_bytes(self) -> [u8; 32] {
+        self.0
+    }
+}
+
 /// Complete backend-neutral identity of one prepared asset value.
 ///
 /// The slot revision binds the snapshot to the exact value stored in [`nara_asset::Assets`], even
 /// when a direct replacement does not advance loader-owned [`AssetVersion`] metadata.
+///
+/// The content hash has a distinct type from an import-artifact digest:
+///
+/// ```compile_fail
+/// use nara_asset::{AssetSlotRevision, AssetVersion, ImportArtifactDigest};
+/// use nara_render::{RenderResourceKey, RenderResourceSnapshot};
+///
+/// fn imported_snapshot(
+///     key: RenderResourceKey,
+///     version: AssetVersion,
+///     slot: AssetSlotRevision,
+///     artifact: ImportArtifactDigest,
+/// ) -> RenderResourceSnapshot {
+///     RenderResourceSnapshot::new(key, version, slot, artifact)
+/// }
+/// ```
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RenderResourceSnapshot {
     key: RenderResourceKey,
     asset_version: AssetVersion,
     slot_revision: AssetSlotRevision,
-    descriptor_hash: ImportArtifactDigest,
+    content_hash: RenderResourceContentHash,
 }
 
 impl RenderResourceSnapshot {
@@ -71,13 +117,13 @@ impl RenderResourceSnapshot {
         key: RenderResourceKey,
         asset_version: AssetVersion,
         slot_revision: AssetSlotRevision,
-        descriptor_hash: ImportArtifactDigest,
+        content_hash: RenderResourceContentHash,
     ) -> Self {
         Self {
             key,
             asset_version,
             slot_revision,
-            descriptor_hash,
+            content_hash,
         }
     }
 
@@ -98,7 +144,7 @@ impl RenderResourceSnapshot {
     }
 
     #[must_use]
-    pub const fn descriptor_hash(&self) -> ImportArtifactDigest {
-        self.descriptor_hash
+    pub const fn content_hash(&self) -> RenderResourceContentHash {
+        self.content_hash
     }
 }

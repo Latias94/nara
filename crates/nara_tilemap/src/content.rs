@@ -461,12 +461,14 @@ impl TileSetAssets {
             && server.stable_id(entry.handle.id()) == Some(entry.record.stable_id());
         let publication_revoked = entry.published.as_ref().is_some_and(|image| {
             !image.is_authorized(server, states, images)
-                || database
-                    .record_for_path(image.source().path())
-                    .is_none_or(|record| {
-                        record.source_kind() != &AssetSourceKind::Image
-                            || record.stable_id() != image.source().stable_id()
-                    })
+                || image.source().is_none_or(|source| {
+                    database
+                        .record_for_path(source.path())
+                        .is_none_or(|record| {
+                            record.source_kind() != &AssetSourceKind::Image
+                                || record.stable_id() != source.stable_id()
+                        })
+                })
         });
         if (!catalog_valid && entry.published.is_some()) || publication_revoked {
             if let Err(error) = revoke(entry.handle, tilesets, states, events) {
@@ -487,13 +489,13 @@ impl TileSetAssets {
         if !entry.source_active {
             return;
         }
-        let record = database.resolve_ref(&entry.desired.image).ok().cloned();
+        let record = database.resolve_ref(&entry.desired.image).ok();
         let image_handle = record
             .as_ref()
             .filter(|record| record.source_kind() == &AssetSourceKind::Image)
             .and_then(|record| server.reserve_record::<ImageAsset>(record).ok());
         let observation = DependencyObservation {
-            record,
+            record: record.cloned(),
             state: image_handle.map(|handle| states.state_revision(handle.id())),
             slot: image_handle.map(|handle| images.slot_revision(handle)),
         };
@@ -523,6 +525,14 @@ impl TileSetAssets {
                 }
                 Err(_) => return Err(TileSetAssetError::DependencyUnavailable),
             };
+            let record = record.ok_or(TileSetAssetError::DependencyUnavailable)?;
+            if record.source_kind() != &AssetSourceKind::Image
+                || image.source().is_none_or(|source| {
+                    source.path() != record.path() || source.stable_id() != record.stable_id()
+                })
+            {
+                return Err(TileSetAssetError::IdentityMismatch);
+            }
             entry
                 .desired
                 .validate_image_extent(image.extent())
@@ -678,6 +688,7 @@ mod tests {
 
     mod access;
     mod publication;
+    mod source_admission;
 
     struct Fixture {
         server: AssetServer,
@@ -804,7 +815,7 @@ mod tests {
             ArtifactLabel::default(),
             ArtifactFormatVersion::new(1),
         );
-        ImageAsset::new(
+        ImageAsset::from_import(
             ImageSourceMetadata::new(
                 record.path().clone(),
                 settings,
@@ -1071,6 +1082,7 @@ mod tests {
                 .image_content()
                 .unwrap()
                 .source()
+                .unwrap()
                 .path(),
             fixture.image_b.path()
         );

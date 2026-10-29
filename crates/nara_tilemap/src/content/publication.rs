@@ -218,8 +218,10 @@ impl TileSetAssets {
                 .map_err(|_| TileSetAssetError::DependencyUnavailable)?;
             if image_record.source_kind() != &nara_asset::AssetSourceKind::Image
                 || !record_matches(input.image_handle, image_record, server)
-                || input.image.source().path() != image_record.path()
-                || input.image.source().stable_id() != image_record.stable_id()
+                || input.image.source().is_none_or(|source| {
+                    source.path() != image_record.path()
+                        || source.stable_id() != image_record.stable_id()
+                })
             {
                 return Err(TileSetAssetError::IdentityMismatch);
             }
@@ -409,10 +411,13 @@ impl PreparedTileSetPublications<'_> {
                 .baseline
                 .commit_loaded(tileset, tilesets, states, events, Some(source_hash), None)
                 .expect("prepared TileSet publication version remains available");
+            let image_source = image
+                .source()
+                .expect("source TileSet publication admitted real Image provenance");
             let observation = DependencyObservation {
                 record: Some(nara_asset::AssetRecord::new(
-                    image.source().stable_id(),
-                    image.source().path().clone(),
+                    image_source.stable_id(),
+                    image_source.path().clone(),
                     nara_asset::AssetSourceKind::Image,
                 )),
                 state: Some(states.state_revision(image_handle.id())),

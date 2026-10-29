@@ -6101,7 +6101,7 @@ fn project_host_publishes_snapshot_images_without_copying_the_retained_pixels() 
     let (snapshot, plan) = project.snapshot_and_plan(false);
     assert_eq!(snapshot.images().len(), 1);
     let snapshot_pixels = snapshot.images()[0].image().pixels().as_ptr();
-    let snapshot_source = snapshot.images()[0].image().source().clone();
+    let snapshot_source = snapshot.images()[0].source().clone();
     let mut host = ProjectHost::new(RuntimeClosePolicy::default());
 
     let mut attempt = host.begin_start(snapshot, plan, Vec::new()).unwrap();
@@ -6115,7 +6115,7 @@ fn project_host_publishes_snapshot_images_without_copying_the_retained_pixels() 
         let runtime_images = runtime_images.iter().collect::<Vec<_>>();
         assert_eq!(runtime_images.len(), 1);
         let runtime_image = runtime_images[0].1;
-        assert_eq!(runtime_image.source(), &snapshot_source);
+        assert_eq!(runtime_image.source(), Some(&snapshot_source));
         assert_eq!(
             runtime_image.pixels().as_ptr(),
             snapshot_pixels,

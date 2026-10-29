@@ -353,15 +353,10 @@ pub(crate) enum WgpuUiPacketError {
 mod tests {
     use super::*;
 
-    use nara_asset::{
-        ArtifactFormatVersion, ArtifactLabel, AssetEvents, AssetPath, AssetStates, Assets,
-        ImportArtifactKey, ImportArtifactRecord, ImportDependencyDigest, ImportProfile,
-        ImportedAssetType, ImporterId, ImporterVersion, SourceHash, StableAssetId,
-    };
+    use nara_asset::{AssetEvents, AssetStates, Assets};
 
     use nara_image::{
-        ImageAsset, ImageExtent, ImageFormat, ImageImportSettings, ImageSourceMetadata,
-        PreparedImageSnapshot,
+        ImageAsset, ImageColorSpace, ImageExtent, ImageFormat, PreparedImageSnapshot,
     };
     use nara_text::{FontFace, bundled_font_face};
     use nara_ui_kernel::{
@@ -725,46 +720,24 @@ mod tests {
     }
 
     fn captured_image_snapshot() -> PreparedImageSnapshot {
-        let stable_id = StableAssetId::parse_str("d7961f69-0e25-41d5-8893-0ef85ab19615").unwrap();
-        let source_hash = SourceHash::from_bytes(b"wgpu image readback fixture");
-        let artifact = ImportArtifactRecord::new(ImportArtifactKey::new(
-            stable_id,
-            source_hash,
-            ImportDependencyDigest::empty(),
-            ImporterId::new("nara-wgpu-test").unwrap(),
-            ImporterVersion::new(1),
-            ImageImportSettings::default().settings_hash(),
-            ImportProfile::default(),
-            ImportedAssetType::new("image").unwrap(),
-            ArtifactLabel::default(),
-            ArtifactFormatVersion::new(1),
-        ))
-        .unwrap();
         let image = ImageAsset::new(
-            ImageSourceMetadata::new(
-                AssetPath::new("ui/readback.png").unwrap(),
-                ImageImportSettings::default(),
-                artifact,
-            )
-            .unwrap(),
             ImageExtent::new(1, 1),
             ImageFormat::Rgba8,
+            ImageColorSpace::Srgb,
             vec![240, 16, 120, 255],
         )
         .unwrap();
         let handle = nara_asset::allocate_anonymous_handle().unwrap();
         let mut images = Assets::<ImageAsset>::default();
         let mut states = AssetStates::default();
-        let source_hash = image.source().source_hash();
-        let import_hash = image.source().artifact().key().digest();
         images
             .commit_loaded(
                 handle,
                 image,
                 &mut states,
                 &mut AssetEvents::default(),
-                Some(source_hash),
-                Some(import_hash),
+                None,
+                None,
             )
             .unwrap();
         PreparedImageSnapshot::capture(handle, &images, &states).unwrap()

@@ -3,7 +3,8 @@
 **Status**: Accepted
 **Date**: 2026-07-09
 **Amended**: 2026-08-20 for the EIR-U0 canonical typed asset-metadata reset; 2026-10-24 for
-the unreleased schema-catalog envelope reset
+the unreleased schema-catalog envelope reset; 2026-10-29 for processed Runtime kinds and compact
+Image metadata framing
 **Implemented Slices**: RGF-U1 scene, prefab, scene-patch, and component-catalog envelopes; RGF-U12
 asset-metadata envelope
 **Refines**: ADR 0006, ADR 0007, ADR 0011, ADR 0037, ADR 0043, ADR 0045
@@ -77,6 +78,15 @@ Rules:
 | `component_schema_catalog` | 1 | 1 | none; semantic lineage is checked against its direct predecessor under ADR 0081 |
 | `authoring_schema_bundle` | 1 | 1 | none; embeds the recursive catalog under ADR 0081 |
 | `asset_meta` | 1 | 1 | none |
+| `runtime_scene` | 1 | 1 | none; Scene-owned flat processed representation |
+| `runtime_content_catalog` | 1 | 1 | none; independently expected immutable local base |
+| `runtime_image` metadata | 1 | 1 | none; compact Image-owned metadata envelope plus exact raw RGBA |
+
+The Image transport begins with `NRI\0`, a little-endian `u32` metadata length, that exact JSON
+envelope and raw pixel bytes. Its format owner bounds framing, metadata structure and pixel
+dimensions/length before allocation. The envelope policy does not require binary resource payloads
+to expand into JSON arrays or Base64; kind/version/engine/generator admission still uses the
+shared Core contract. The nonempty format-owner golden fixes both metadata and pixel framing.
 
 ADR 0115 resets the unreleased canonical `asset_meta` version-1 payload to one typed composition.
 The exact Image shape is a nested `asset` object containing `stable_id`, `path`, and

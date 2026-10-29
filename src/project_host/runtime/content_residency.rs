@@ -83,7 +83,7 @@ pub(super) fn publish_startup(
     let mut bindings = SceneAssetBindings::from_world(world);
     let mut images = Vec::with_capacity(snapshot.images().len());
     for content in snapshot.images() {
-        let source = content.image().source();
+        let source = content.source();
         let record = AssetRecord::new(
             source.stable_id(),
             source.path().clone(),
@@ -312,7 +312,7 @@ fn reserve_metadata(
         .images()
         .iter()
         .map(|content| {
-            let source = content.image().source();
+            let source = content.source();
             AssetRecord::new(
                 source.stable_id(),
                 source.path().clone(),

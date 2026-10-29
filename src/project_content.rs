@@ -206,8 +206,16 @@ impl ProjectTileSetContent {
 
 impl ProjectImageContent {
     #[must_use]
-    pub const fn path(&self) -> &AssetPath {
-        self.image.source().path()
+    pub fn path(&self) -> &AssetPath {
+        self.source().path()
+    }
+
+    /// Real source-import provenance captured by this source-only content owner.
+    #[must_use]
+    pub fn source(&self) -> &nara_image::ImageSourceMetadata {
+        self.image
+            .source()
+            .expect("Project source content admits only imported Images")
     }
 
     #[must_use]
