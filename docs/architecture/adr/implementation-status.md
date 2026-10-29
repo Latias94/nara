@@ -974,6 +974,14 @@ git show 9d50cf9:docs/architecture/adr/implementation-status.md
 | Revisit trigger | The concrete consumer, evidence or platform qualification needed to extend the recorded scope; not an automatic roadmap commitment. |
 | Last qualified | The original inspection date and source, not the date this index was edited. |
 
+The [Runtime configuration prerequisite](../../knowledge/engineering/verification/2026-10/2026-10-29T041356Z-admitted-exact-runtime-configuration-and-owner-initialization-qualification-106a7693310949e980e8cda1e52c5548.md)
+qualifies immutable admitted runtime-only values under ADR 0035, exact duration records and shared
+validation, source-input refusal, final-profile preset invariants and actual initial clock/diagnostic
+owners. Final Project 77, root boundary/startup 99, Reference Game 57 and all three selected native
+Windows/DX12 critical cases pass. The record distinguishes an earlier 956-case root run from the
+final exact-duration rerun and records Clippy/minimal/doctest scope. Source candidates keep real
+lineage; no source-free catalog or processed Scene is implemented by this configuration unit.
+
 ## Implementation Index
 
 | ADR | Decision | Implementation | Owner | Code | Verification | Coverage and remaining gap | Revisit trigger | Last qualified |

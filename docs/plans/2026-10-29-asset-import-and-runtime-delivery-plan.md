@@ -101,6 +101,18 @@ This ordering records current design constraints. The catalog format, processed 
 complete runtime-input resource representation still need concrete owner implementation and
 qualification; these bullets do not establish an implemented delivery path.
 
+The configuration unit `a5563ca` replaces `RuntimePlan`'s complete source-project settings with
+the admitted Runtime projection under [ADR 0035](../architecture/adr/0035-project-manifest-and-runtime-settings-authority.md).
+The existing source candidate still owns real source lineage. It also repairs the observed
+parse-only diagnostic-capacity setting through the configured Diagnostics definition `552fbb0`.
+Derived time values use exact integer seconds/nanoseconds rather than reverse-converting the
+source's floating-point seconds. Initial clocks precede plugin build/finish and participate in
+resolved identity; preset invariants follow the complete profile overlay. Its
+[qualification](../knowledge/engineering/verification/2026-10/2026-10-29T041356Z-admitted-exact-runtime-configuration-and-owner-initialization-qualification-106a7693310949e980e8cda1e52c5548.md)
+records exact round trips, source-input refusal, actual startup values, Reference Game consumers
+and all three selected Windows/DX12 critical trajectories. No catalog or source-free startup is
+implied by configuration alone. Continue Scene cook/admission before catalog wiring.
+
 ## Owning Decisions
 
 [ADR 0103](../architecture/adr/0103-concrete-domain-owned-asset-import-execution.md) already admits
