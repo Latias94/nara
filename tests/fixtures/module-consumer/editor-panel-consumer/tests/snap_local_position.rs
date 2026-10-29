@@ -713,7 +713,10 @@ mod panel {
             .cloned()
             .expect("the exact originator callback was retained");
         assert_eq!(evidence.borrow().queued, [retained.0]);
-        assert_eq!(evidence.borrow().finished, [retained.clone()]);
+        assert_eq!(
+            evidence.borrow().finished.as_slice(),
+            std::slice::from_ref(&retained)
+        );
         assert!(
             matches!(&retained.1, PanelActionDispatch::Dispatched(EditorActionOutcome::Workspace(report)) if report.applied)
         );

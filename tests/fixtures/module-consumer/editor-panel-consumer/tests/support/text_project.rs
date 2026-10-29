@@ -157,6 +157,10 @@ impl TextProject {
         .unwrap()
     }
 
+    #[allow(
+        dead_code,
+        reason = "Shared by integration binaries that do not all exercise source-backed Play."
+    )]
     pub fn reference_text(&self) {
         let caption = Caption {
             text: AssetRef::path("caption.txt").unwrap(),
@@ -178,6 +182,10 @@ impl TextProject {
         .unwrap();
     }
 
+    #[allow(
+        dead_code,
+        reason = "Shared by integration binaries that do not all exercise source-backed Play."
+    )]
     pub fn assert_check_and_play(&self) {
         self.reference_text();
         let receipt = nara::project_workflow::check_project(

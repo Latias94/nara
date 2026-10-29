@@ -205,6 +205,10 @@ impl fmt::Display for ConversionError {
 impl Error for ConversionError {}
 
 /// Converts only this pre-1.0 v1 fixture's typed prefab references, preserving bytes on failure.
+#[allow(
+    clippy::result_large_err,
+    reason = "The public AssetDatabaseError payload is intentionally preserved for typed assertions."
+)]
 pub fn stabilize_v1_scene_bytes(
     encoded: &mut Vec<u8>,
     registry: &ComponentRegistry,

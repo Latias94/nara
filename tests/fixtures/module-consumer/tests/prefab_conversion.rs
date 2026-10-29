@@ -1,6 +1,10 @@
 //! A separate workspace consumes the same nominal conversion through direct and root exports.
 
 #[path = "support/nested_schema.rs"]
+#[allow(
+    dead_code,
+    reason = "Other test binaries consume the remaining shared schema helpers."
+)]
 mod nested_schema;
 
 use std::{convert::Infallible, fs, sync::Arc, thread};
@@ -65,6 +69,10 @@ fn source(basis: &AuthoringSchemaBasis, request: &AssetRef) -> ResolvedPrefabSou
 }
 
 #[test]
+#[allow(
+    clippy::result_large_err,
+    reason = "The public PrefabConversionError is intentionally preserved across the worker boundary."
+)]
 fn independent_scene_request_runs_off_owner_and_preserves_remapped_data_through_disk_reopen() {
     let basis = basis();
     let original = document();

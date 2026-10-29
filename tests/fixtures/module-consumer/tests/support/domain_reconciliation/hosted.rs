@@ -525,12 +525,13 @@ fn maintenance(world: &mut World) {
         }
         let gameplay = control.effects.lock().unwrap().gameplay_frames;
         let elapsed = world.resource::<VirtualTime>().elapsed;
-        let mut progress = world.resource_mut::<Progress>();
-        progress.begun = true;
-        progress.gameplay = gameplay;
-        progress.elapsed = elapsed;
-        progress.entities_before_begin = entities_before_begin;
-        drop(progress);
+        {
+            let mut progress = world.resource_mut::<Progress>();
+            progress.begun = true;
+            progress.gameplay = gameplay;
+            progress.elapsed = elapsed;
+            progress.entities_before_begin = entities_before_begin;
+        }
         if control.scenario == Scenario::CancelBeforeRetirement {
             let mut access = SystemState::<ProjectScenes>::new(world);
             let mut scenes = access.get_mut(world).unwrap();
@@ -743,30 +744,31 @@ fn maintenance(world: &mut World) {
             world.resource_mut::<Outcome>().done = true;
             return;
         }
-        let mut progress = world.resource_mut::<Progress>();
-        if !progress.waited {
-            progress.waited = true;
-            return;
-        }
-        progress.waited = false;
-        progress.degradation += 1;
-        let phases = if progress.degradation == 1 {
-            assert_eq!(effects.retirement_calls, [1, 1]);
-            [
-                ManagedSceneDomainPhase::Retired,
-                ManagedSceneDomainPhase::Retiring,
-            ]
-        } else {
-            assert_eq!(effects.retirement_calls, [1, 2]);
-            assert_eq!(effects.reconciliation_calls, [1, 1]);
-            assert_eq!(effects.created, [4, 3]);
-            assert_eq!(effects.live, [2, 1]);
-            [
-                ManagedSceneDomainPhase::Reconciled,
-                ManagedSceneDomainPhase::Reconciling,
-            ]
+        let phases = {
+            let mut progress = world.resource_mut::<Progress>();
+            if !progress.waited {
+                progress.waited = true;
+                return;
+            }
+            progress.waited = false;
+            progress.degradation += 1;
+            if progress.degradation == 1 {
+                assert_eq!(effects.retirement_calls, [1, 1]);
+                [
+                    ManagedSceneDomainPhase::Retired,
+                    ManagedSceneDomainPhase::Retiring,
+                ]
+            } else {
+                assert_eq!(effects.retirement_calls, [1, 2]);
+                assert_eq!(effects.reconciliation_calls, [1, 1]);
+                assert_eq!(effects.created, [4, 3]);
+                assert_eq!(effects.live, [2, 1]);
+                [
+                    ManagedSceneDomainPhase::Reconciled,
+                    ManagedSceneDomainPhase::Reconciling,
+                ]
+            }
         };
-        drop(progress);
         drop(effects);
         let mut access = SystemState::<ProjectScenes>::new(world);
         let mut scenes = access.get_mut(world).unwrap();

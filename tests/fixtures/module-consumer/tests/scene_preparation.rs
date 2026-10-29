@@ -315,7 +315,6 @@ fn late_hierarchy_observer_rejects_before_scene_target_allocation() {
                 SceneEntityRecord::new(id("parent")).with_children([id("child")]),
                 SceneEntityRecord::new(id("child")),
             ],
-            ..Default::default()
         }),
     );
     let mut world = World::new();
