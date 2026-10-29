@@ -24,6 +24,7 @@ pub use identity::{
 };
 pub use plugin::{
     DIAGNOSTICS_PLUGIN_DECLARATION, DIAGNOSTICS_PLUGIN_ID, DiagnosticCleanupSet, DiagnosticsPlugin,
+    plugin,
 };
 pub use pressure::{
     PressureDraftError, PressureMeasurement, PressureMetricKind, PressurePublishOutcome,
@@ -55,6 +56,7 @@ pub const MAX_DIAGNOSTIC_DRAFT_TEXT_BYTES: usize = 1_024;
 pub const MAX_SAFE_STATIC_TEXT_BYTES: usize = 1_024;
 
 pub mod prelude {
+    pub use crate::plugin::plugin;
     pub use crate::{
         Diagnostic, DiagnosticCode, DiagnosticDedupePolicy, DiagnosticDomain, DiagnosticField,
         DiagnosticFieldClass, DiagnosticFieldKey, DiagnosticProducer, DiagnosticReport,
