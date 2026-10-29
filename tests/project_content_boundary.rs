@@ -328,7 +328,7 @@ fn document_catalog_mismatch_rejects_without_partial_publication() {
     assert_eq!(error.kind(), ProjectContentErrorKind::PrefabExpansion);
     assert!(
         error.diagnostics().iter().any(|diagnostic| {
-            diagnostic.code().as_str() == "scene.prefab-component-migration-failed"
+            diagnostic.code().as_str() == "scene.unknown-component"
                 && diagnostic.fields().iter().any(|field| {
                     field.key().as_str() == "component-id"
                         && field.display_value().as_ref() == "nara.test.MissingFromFrozenCatalog"

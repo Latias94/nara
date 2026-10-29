@@ -370,6 +370,9 @@ impl LoadContext<'_> {
         reference: &AssetRef,
         kind: &AssetSourceKind,
     ) -> Result<AssetPath, ProjectContentError> {
+        if !reference.is_primary() {
+            return Err(unsupported_product_selection(reference));
+        }
         if let AssetRef::Path(path) = reference {
             return Ok(path.clone());
         }
@@ -397,7 +400,7 @@ impl LoadContext<'_> {
                     self.index_metadata(assets, 0, meta_path.as_str())?;
                 }
             }
-            AssetRef::StableId(_) => self.ensure_reference_catalogue()?,
+            AssetRef::StableId(_) | AssetRef::Product(_) => self.ensure_reference_catalogue()?,
         }
         self.asset_database
             .resolve_ref(reference)

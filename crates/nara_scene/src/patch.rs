@@ -959,18 +959,12 @@ fn tree_cost(
                             add_scene_entity_id_cost(&mut cost, entity);
                             add_component_type_id_cost(&mut cost, component);
                             add_component_field_id_cost(&mut cost, field);
-                            // The existing wire convention is one Map and two String nodes.
-                            // Admit that temporary copy before asset_ref_value allocates it.
+                            // Admit the complete canonical value before encoding, including
+                            // the nested source/product maps of an explicit product selection.
                             // The bounded value walker separately admits its iterator scratch.
                             if let Some(admit) = admission.as_deref_mut() {
-                                let logical_bytes = match asset_ref {
-                                    AssetRef::Path(path) => {
-                                        13usize.checked_add(path.as_str().len())
-                                    }
-                                    AssetRef::StableId(_) => Some(54),
-                                };
-                                if !admit(logical_bytes.and_then(|bytes| bytes.checked_add(3 * 96)))
-                                {
+                                let (nodes, logical_bytes) = asset_ref_value_size(asset_ref);
+                                if !admit(logical_bytes.checked_add(nodes * 96)) {
                                     return None;
                                 }
                             }
@@ -1403,6 +1397,55 @@ mod bounded_cost_tests {
             .unwrap(),
             bounded_scene_patch_cost(&patch, ScenePatchApplyLimits::default())
         );
+    }
+
+    #[test]
+    fn admitted_product_field_cost_charges_nested_canonical_wire_before_materialization() {
+        for product in [
+            nara_asset::ImportedProductId::PRIMARY,
+            nara_asset::ImportedProductId::parse_subproduct("00000000-0000-4000-8000-000000000051")
+                .unwrap(),
+        ] {
+            let reference = AssetRef::Product(
+                nara_asset::AssetProductRef::new(
+                    "00000000-0000-4000-8000-000000000041".parse().unwrap(),
+                    product,
+                )
+                .unwrap(),
+            );
+            let value = asset_ref_value(&reference);
+            let cost = value.cost();
+            assert_eq!(
+                asset_ref_value_size(&reference),
+                (cost.nodes(), cost.logical_bytes())
+            );
+            let wire_bytes = cost.logical_bytes() + 96 * cost.nodes();
+            let patch = ScenePatchDocument::new([ScenePatchOperation::SetAssetRefField {
+                entity: SceneEntityId::new("a").unwrap(),
+                component: ComponentTypeId::new("c"),
+                component_version: ComponentSchemaVersion::ONE,
+                field: ComponentFieldId::new("product"),
+                asset_ref: reference,
+            }]);
+            let refused = bounded_scene_patch_cost_with_admission(
+                &patch,
+                ScenePatchApplyLimits::default(),
+                |bytes| {
+                    if bytes == Some(wire_bytes) {
+                        Err("product wire copy refused")
+                    } else {
+                        Ok(())
+                    }
+                },
+            );
+            assert_eq!(refused, Err("product wire copy refused"));
+            assert_eq!(
+                bounded_scene_patch_cost(&patch, ScenePatchApplyLimits::default())
+                    .unwrap()
+                    .value_cost(),
+                cost
+            );
+        }
     }
 
     #[test]
@@ -3382,15 +3425,20 @@ pub(crate) fn field_value_matches(field: &ComponentFieldSchema, value: &Componen
 }
 
 pub(crate) fn asset_ref_value(asset_ref: &AssetRef) -> ComponentValue {
+    nara_reflect::encode_asset_reference_value(asset_ref)
+}
+
+/// Nodes and logical bytes of the canonical field value, without allocating its wire strings.
+/// This models encoding work; an in-memory product reference itself owns no strings.
+pub(crate) fn asset_ref_value_size(asset_ref: &AssetRef) -> (usize, usize) {
     match asset_ref {
-        AssetRef::Path(path) => ComponentValue::map([
-            ("kind", ComponentValue::String("path".to_string())),
-            ("value", ComponentValue::String(path.as_str().to_string())),
-        ]),
-        AssetRef::StableId(id) => ComponentValue::map([
-            ("kind", ComponentValue::String("stable_id".to_string())),
-            ("value", ComponentValue::String(id.to_string())),
-        ]),
+        AssetRef::Path(path) => (3, 13_usize.saturating_add(path.as_str().len())),
+        AssetRef::StableId(_) => (3, 54),
+        // kind=product, value={source, product={kind=primary|subproduct, id?}}.
+        AssetRef::Product(reference) => match reference.product().as_subproduct() {
+            None => (6, 76),
+            Some(_) => (7, 117),
+        },
     }
 }
 

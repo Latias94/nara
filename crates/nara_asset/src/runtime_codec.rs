@@ -5,12 +5,25 @@ use std::{error::Error, fmt};
 use nara_core::ByteLimit;
 use nara_diagnostic::Diagnostic;
 
+use crate::ImportedProductId;
+
 /// The typed CPU product family shared by independently selected operation facets.
 ///
-/// This marker alone installs no source importer, Runtime decoder or Host service. Distinct
+/// This family alone installs no source importer, Runtime decoder, I/O or Host service. Distinct
 /// families may deliberately use the same Rust product type without sharing identity or storage.
 pub trait AssetDomain: Send + Sync + 'static {
     type Product: Send + Sync + 'static;
+
+    /// Reports whether an admitted CPU product contains the selected logical product ID.
+    ///
+    /// This is a trusted pure query over existing product data: implementations must not allocate,
+    /// perform I/O, load or mutate products, or publish state. The concrete domain owns auxiliary
+    /// membership. The default admits only the primary product; this query supplies no execution
+    /// or access authority.
+    #[must_use]
+    fn contains_product(_product: &Self::Product, id: ImportedProductId) -> bool {
+        id == ImportedProductId::PRIMARY
+    }
 }
 
 /// Conservative reservations for one trusted Runtime codec operation.
@@ -104,4 +117,28 @@ pub trait RuntimeAssetCodec<P: Send + Sync + 'static>: Send + Sync + 'static {
     fn encode_runtime(product: &P) -> Result<Box<[u8]>, AssetRuntimeError>;
 
     fn decode_runtime(bytes: &[u8]) -> Result<P, AssetRuntimeError>;
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    struct PrimaryDomain;
+
+    impl AssetDomain for PrimaryDomain {
+        type Product = String;
+    }
+
+    #[test]
+    fn default_domain_membership_admits_only_the_primary_product() {
+        let product = String::from("admitted primary product");
+        let auxiliary =
+            ImportedProductId::parse_subproduct("011a8cc0-343a-4b95-8adb-3aa6d81977ed").unwrap();
+
+        assert!(PrimaryDomain::contains_product(
+            &product,
+            ImportedProductId::PRIMARY
+        ));
+        assert!(!PrimaryDomain::contains_product(&product, auxiliary));
+    }
 }

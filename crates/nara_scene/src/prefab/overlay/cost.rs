@@ -1,5 +1,6 @@
 //! Borrowed raw-storage accounting, independent of activation and Schema availability.
 
+#[cfg(test)]
 use nara_asset::AssetRef;
 use nara_reflect::{
     ComponentFieldPathSegment, ComponentPropertyKey, ComponentPropertyStep, ComponentValue,
@@ -168,10 +169,7 @@ impl<'a, 'environment> CostWalker<'a, 'environment> {
                     )?;
                     // Preserve the exact patch owner's AssetRef wire-value convention:
                     // map keys, kind spelling and payload, without formatting/copying it.
-                    self.bytes(match &instance.source {
-                        AssetRef::Path(path) => 13_usize.saturating_add(path.as_str().len()),
-                        AssetRef::StableId(_) => 54,
-                    })?;
+                    self.bytes(crate::patch::asset_ref_value_size(&instance.source).1)?;
                     if let Some(overlay) = &instance.overrides {
                         self.reserve_scratch(&mut pending, 1)?;
                         pending.push(Frame::Overlay(overlay, depth.saturating_add(1)));

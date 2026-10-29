@@ -190,6 +190,7 @@ impl PrefabInstantiationReport {
 #[cfg_attr(feature = "serde", derive(serde::Serialize))]
 #[cfg_attr(feature = "serde", serde(deny_unknown_fields))]
 pub struct PrefabInstance {
+    /// A primary native Prefab source selector. Auxiliary imported products are not sources.
     pub source: AssetRef,
     #[cfg_attr(feature = "serde", serde(default))]
     pub overrides: Option<PrefabOverlay>,
@@ -210,6 +211,11 @@ impl<'de> serde::Deserialize<'de> for PrefabInstance {
         }
 
         let wire = PrefabInstanceWire::deserialize(deserializer)?;
+        if !wire.source.is_primary() {
+            return Err(serde::de::Error::custom(
+                "Prefab source must select a primary product",
+            ));
+        }
         Ok(Self {
             source: wire.source,
             overrides: wire.overrides,
@@ -222,6 +228,8 @@ impl<'de> serde::Deserialize<'de> for PrefabInstance {
 /// Requests are lookup coordinates, not semantic identity. Aliases of the same source must return
 /// the same key and document; distinct sources must not share a key. This applies equally to
 /// code-authored and file-backed resolvers, including document-only expansion.
+/// Auxiliary products must be refused before opening a native Prefab source. An explicit
+/// primary product requires an admitted stable source key matching its enclosing source ID.
 ///
 /// A bare document cannot satisfy the resolver contract:
 ///
@@ -343,6 +351,17 @@ impl ResolvedPrefabSource {
     pub const fn key(&self) -> &SourceDocumentKey {
         &self.key
     }
+
+    pub(crate) fn matches_request(&self, request: &AssetRef) -> bool {
+        request.is_primary()
+            && request.as_product().is_none_or(|reference| {
+                matches!(
+                    self.key.origin(),
+                    crate::SourceDocumentOrigin::StableAsset { stable_id }
+                        if *stable_id == reference.source()
+                )
+            })
+    }
 }
 
 #[derive(Debug, Default, Clone, PartialEq)]
@@ -432,6 +451,9 @@ impl InMemoryPrefabSourceResolver {
 
 impl PrefabSourceResolver for InMemoryPrefabSourceResolver {
     fn resolve_prefab(&self, source: &AssetRef) -> Option<ResolvedPrefabSource> {
+        if !source.is_primary() {
+            return None;
+        }
         self.requests
             .iter()
             .find(|(candidate, _)| candidate == source)
@@ -440,6 +462,7 @@ impl PrefabSourceResolver for InMemoryPrefabSourceResolver {
                     ResolvedPrefabSource::bound(Arc::clone(prefab), key.clone())
                 })
             })
+            .filter(|resolved| resolved.matches_request(source))
     }
 }
 

@@ -537,16 +537,7 @@ fn sprite_value(
 }
 
 fn asset_ref_value(asset_ref: &AssetRef) -> ComponentValue {
-    match asset_ref {
-        AssetRef::Path(path) => ComponentValue::map([
-            ("kind", ComponentValue::String("path".to_owned())),
-            ("value", ComponentValue::String(path.as_str().to_owned())),
-        ]),
-        AssetRef::StableId(id) => ComponentValue::map([
-            ("kind", ComponentValue::String("stable_id".to_owned())),
-            ("value", ComponentValue::String(id.to_string())),
-        ]),
-    }
+    nara::reflect::encode_asset_reference_value(asset_ref)
 }
 
 fn try_project_root_capability() -> Result<DirectoryCapability, ProjectContentFixtureError> {

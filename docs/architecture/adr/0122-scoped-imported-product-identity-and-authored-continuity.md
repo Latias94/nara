@@ -29,9 +29,28 @@ publication authority.
 The primary identity names the source's main product, including a compound bundle. Its auxiliary
 products keep their own IDs; the main bundle may own their complete immutable values. This does
 not require independent filesystem members, generic subresource residency or a global product
-registry. A complete reference can be consumed by that concrete bundle before every `AssetRef`,
-Scene source or reflection codec is migrated. Those integrations must preserve their existing
-authority and explicitly qualify their own reference traversal.
+registry. A complete reference can be consumed by that concrete bundle before every Scene source
+or Runtime store is migrated. The declared-reference integration uses `AssetRef::Product` in the
+existing Schema asset-reference leaf, traversal and rewrite. Ordinary path/stable source references
+remain primary selectors. Traversal preserves the complete product reference; resolving its source
+record is not proof that its product exists. The project Host asks the prepared domain to validate
+the selected product before publishing content. Primary-only handles and Prefab-source loading
+refuse auxiliary selection instead of discarding it. These integrations retain their existing
+authority and require their own qualification.
+
+`AssetDomain::contains_product(product, id)` is a trusted, pure query over existing product data
+with no allocation or I/O and the primary product as its default. The source Host invokes it
+under the domain's existing preparation budget and panic boundary, after preparing the actual
+value. Cached compiled Editor Play rechecks edited selections against that same prepared value
+under its existing content budget and a contained query. Required targets are collected and deduplicated
+with source discovery; they are not inferred from metadata or collected through a second walker.
+`ProjectAssetCollection::get` selects only the primary product. Compound consumers explicitly
+select the enclosing source, then pass the complete reference to their domain's own lookup API.
+
+Source-copy remapping preserves the internal product ID while changing an explicitly mapped
+enclosing stable source identity. A path-only destination cannot express that identity and
+rejects. An explicit complete-product mapping may choose a different product. This does not
+grant a Prefab-copy operation ownership of arbitrary compound sources or their sidecars.
 
 Canonical auxiliary IDs use lowercase hyphenated UUID text. Primary and auxiliary forms are
 explicitly discriminated; a nil UUID is not another spelling for primary. Duplicated source

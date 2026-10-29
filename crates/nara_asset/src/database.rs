@@ -332,6 +332,10 @@ impl ProjectAssetDatabase {
         true
     }
 
+    /// Resolves only the enclosing source identity, including for an explicit product reference.
+    ///
+    /// A registered source does not prove that its selected product exists. The concrete asset
+    /// domain must check that selection against the admitted product value.
     pub fn resolve_ref(&self, asset_ref: &AssetRef) -> Result<&AssetRecord, AssetDatabaseError> {
         match asset_ref {
             AssetRef::Path(path) => self
@@ -340,6 +344,9 @@ impl ProjectAssetDatabase {
             AssetRef::StableId(id) => self
                 .record_for_stable_id(*id)
                 .ok_or(AssetDatabaseError::UnknownStableId(*id)),
+            AssetRef::Product(reference) => self
+                .record_for_stable_id(reference.source())
+                .ok_or(AssetDatabaseError::UnknownStableId(reference.source())),
         }
     }
 

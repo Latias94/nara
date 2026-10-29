@@ -14,4 +14,4 @@ serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 
 [dev-dependencies]
-nara = { path = "../../../..", default-features = false, features = ["project-workflow"] }
+nara = { path = "../../../..", default-features = false, features = ["project-workflow", "tooling"] }

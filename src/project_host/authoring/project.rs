@@ -1740,6 +1740,7 @@ fn asset_ref_retained_bytes(
     Ok(match reference {
         AssetRef::Path(path) => path.as_str().len(),
         AssetRef::StableId(_) => 16,
+        AssetRef::Product(_) => size_of::<nara_asset::AssetProductRef>(),
     })
 }
 

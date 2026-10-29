@@ -6,6 +6,8 @@ mod complete_value;
 mod conversion;
 mod field_candidate;
 mod overlay;
+#[cfg(test)]
+mod product_reference_tests;
 mod read;
 mod reclassification;
 mod retention;
@@ -1790,6 +1792,9 @@ impl ClassificationContext<'_, '_, '_> {
                 .saturating_add(match reference.asset_ref() {
                     AssetRef::Path(path) => path.as_str().len(),
                     AssetRef::StableId(_) => 36,
+                    AssetRef::Product(_) => {
+                        crate::patch::asset_ref_value_size(reference.asset_ref()).1
+                    }
                 });
             for segment in reference.path().segments() {
                 self.asset_reference_bytes =

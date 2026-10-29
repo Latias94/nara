@@ -3,6 +3,7 @@ use std::cell::Cell;
 use nara_core::{ByteLimit, DepthLimit, ItemLimit};
 
 use super::*;
+use crate::authoring::PersistentFieldCodec;
 use crate::{
     ComponentCapability, ComponentFieldId, ComponentFieldSchema, ComponentSchema,
     ComponentSchemaVersion, ComponentShapeMember, ComponentTypeId, ComponentValueKind,

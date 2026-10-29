@@ -2055,7 +2055,7 @@ fn lower_descriptor_values(
                         blue,
                         alpha,
                         String::new(),
-                        codec::asset_ref_value(&asset_ref),
+                        nara_reflect::encode_asset_reference_value(&asset_ref),
                     )
                 }
                 _ => return Err(UiAuthoringEditError::OutOfRange),
@@ -2072,7 +2072,7 @@ fn lower_descriptor_values(
 }
 
 fn project_asset_path(value: &ComponentValue) -> Option<String> {
-    codec::read_asset_ref(value, "image brush")
+    nara_reflect::decode_asset_reference_value(value)
         .ok()?
         .as_path()
         .map(|path| path.as_str().to_owned())

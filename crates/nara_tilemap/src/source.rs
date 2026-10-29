@@ -1,6 +1,6 @@
 use std::{error::Error, fmt::Display};
 
-use nara_asset::{AssetRef, Handle};
+use nara_asset::{AssetProductRef, AssetRef, Handle};
 use nara_core::{
     ByteLimit, Color, DepthLimit, EngineVersion, FormatGenerator, FormatKind, ItemLimit,
     PersistentFileContract, PersistentFileEnvelope, SerdeShapeLimits,
@@ -169,6 +169,11 @@ impl TileSetSource {
     }
 
     pub(crate) fn validate(&self) -> Result<(), TileSetSourceFormatError> {
+        if let Some(reference) = self.image.as_product()
+            && !self.image.is_primary()
+        {
+            return Err(TileSetSourceFormatError::UnsupportedImageProduct(reference));
+        }
         if !self.atlas.is_valid() {
             return Err(TileSetSourceFormatError::InvalidAtlas);
         }
@@ -185,6 +190,7 @@ impl TileSetSource {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum TileSetSourceFormatError {
     Envelope(String),
+    UnsupportedImageProduct(AssetProductRef),
     InvalidAtlas,
     InvalidTint,
     ImageExtentMismatch,
@@ -194,6 +200,10 @@ impl Display for TileSetSourceFormatError {
     fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Self::Envelope(error) => formatter.write_str(error),
+            Self::UnsupportedImageProduct(reference) => write!(
+                formatter,
+                "tileset image product '{reference}' requires a primary image product"
+            ),
             Self::InvalidAtlas => formatter.write_str("tileset atlas layout is invalid"),
             Self::InvalidTint => formatter.write_str("tileset tint channels must be finite"),
             Self::ImageExtentMismatch => {
@@ -262,20 +272,59 @@ fn default_tint() -> Color {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use nara_asset::{ImportedProductId, StableAssetId};
     use nara_core::Vec2;
 
     #[test]
     fn source_envelope_round_trips() {
-        let source = TileSetSource::new(
+        let source_id = StableAssetId::parse_str("2f0d71c7-14fc-4ed4-b48b-1c61bba8b97f").unwrap();
+        for image in [
             AssetRef::path("textures/terrain.png").unwrap(),
+            AssetRef::product(AssetProductRef::new(source_id, ImportedProductId::PRIMARY).unwrap()),
+        ] {
+            let source =
+                TileSetSource::new(image, TileAtlasLayout::grid(Vec2::new(16.0, 16.0), 4, 2));
+            let encoded = source.encode_ron_bytes().unwrap();
+            let decoded = TileSetSource::decode_ron_bytes(
+                encoded.as_bytes(),
+                TileSetSourceFileLimits::default(),
+            )
+            .unwrap();
+
+            assert_eq!(decoded, source);
+        }
+    }
+
+    #[test]
+    fn source_rejects_auxiliary_image_at_persistence_and_materialization_boundaries() {
+        let source_id = StableAssetId::parse_str("2f0d71c7-14fc-4ed4-b48b-1c61bba8b97f").unwrap();
+        let product =
+            ImportedProductId::parse_subproduct("011a8cc0-343a-4b95-8adb-3aa6d81977ed").unwrap();
+        let reference = AssetProductRef::new(source_id, product).unwrap();
+        let source = TileSetSource::new(
+            AssetRef::product(reference),
             TileAtlasLayout::grid(Vec2::new(16.0, 16.0), 4, 2),
         );
-        let encoded = source.encode_ron_bytes().unwrap();
-        let decoded =
-            TileSetSource::decode_ron_bytes(encoded.as_bytes(), TileSetSourceFileLimits::default())
-                .unwrap();
+        let expected = TileSetSourceFormatError::UnsupportedImageProduct(reference);
+        assert_eq!(source.encode_ron_bytes(), Err(expected.clone()));
+        assert_eq!(
+            source
+                .clone()
+                .into_tileset(nara_asset::allocate_anonymous_handle().unwrap()),
+            Err(expected.clone()),
+        );
+        let envelope = PersistentFileEnvelope::canonical_v1(
+            FormatKind::new(TILESET_FORMAT_KIND).unwrap(),
+            current_engine_version(),
+            FormatGenerator::new("nara", current_engine_version()).unwrap(),
+            source,
+        );
+        let encoded = ron::ser::to_string(&envelope).unwrap();
 
-        assert_eq!(decoded, source);
+        assert_eq!(
+            TileSetSource::decode_ron_bytes(encoded.as_bytes(), TileSetSourceFileLimits::default()),
+            Err(expected),
+        );
     }
 
     #[test]

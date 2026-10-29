@@ -635,8 +635,8 @@ pub fn register_tilemap_components(
         },
         |tilemap, world, context| {
             let tileset = match tilemap.tileset {
-                Some(handle) => Some(asset_ref_value(
-                    &AssetRef::from_handle_with_policy(
+                Some(handle) => Some(
+                    AssetRef::from_handle_with_policy(
                         world.get_resource::<AssetServer>().ok_or_else(|| {
                             ComponentCodecError::Message(
                                 "AssetServer resource is missing".to_string(),
@@ -645,8 +645,9 @@ pub fn register_tilemap_components(
                         handle,
                         context.asset_ref_export_policy(),
                     )
+                    .map(|reference| nara_reflect::encode_asset_reference_value(&reference))
                     .map_err(|error| ComponentCodecError::Message(error.to_string()))?,
-                )?),
+                ),
                 None => None,
             };
 
@@ -810,6 +811,15 @@ fn prepare_tileset_handle(
     field: &str,
     asset_ref: AssetRef,
 ) -> Result<PreparedTileset, ComponentCodecError> {
+    if let Some(reference) = asset_ref.as_product()
+        && !asset_ref.is_primary()
+    {
+        return Err(invalid_asset_ref(
+            field,
+            &asset_ref,
+            AssetRefError::UnsupportedProductSelection(reference),
+        ));
+    }
     let expected_source_kind = tileset_asset_source_kind();
     if let Some(result) =
         context.resolve_asset_ref_with_kind::<TileSet>(&asset_ref, &expected_source_kind)
@@ -826,17 +836,15 @@ fn prepare_tileset_handle(
         };
     }
 
-    if let Some(stable_id) = asset_ref.as_stable_id() {
-        let Some(database) = context.project_asset_database() else {
-            return Err(invalid_asset_ref(
-                field,
-                &asset_ref,
-                AssetRefError::MissingProjectDatabase(stable_id),
-            ));
-        };
-        database.resolve_ref(&asset_ref).map_err(|error| {
-            ComponentCodecError::invalid_asset_ref(field, asset_ref.to_string(), error.to_string())
-        })?;
+    if let Some(stable_id) = asset_ref
+        .as_stable_id()
+        .or_else(|| asset_ref.as_product().map(|reference| reference.source()))
+    {
+        return Err(invalid_asset_ref(
+            field,
+            &asset_ref,
+            AssetRefError::MissingProjectDatabase(stable_id),
+        ));
     }
 
     Ok(PreparedTileset::Deferred(asset_ref))
@@ -1035,43 +1043,9 @@ fn read_optional_asset_ref(
 ) -> Result<Option<AssetRef>, ComponentCodecError> {
     match value {
         None | Some(ComponentValue::Null) => Ok(None),
-        Some(value) => read_asset_ref(value, field).map(Some),
-    }
-}
-
-fn read_asset_ref(value: &ComponentValue, field: &str) -> Result<AssetRef, ComponentCodecError> {
-    match value.field_str("kind")? {
-        "path" => AssetRef::path(value.field_str("value")?).map_err(|error| {
-            ComponentCodecError::invalid_asset_ref(
-                format!("{field}.value"),
-                value.field_str("value").unwrap_or_default(),
-                error.to_string(),
-            )
-        }),
-        "stable_id" => AssetRef::stable_id(value.field_str("value")?).map_err(|error| {
-            ComponentCodecError::invalid_asset_ref(
-                format!("{field}.value"),
-                value.field_str("value").unwrap_or_default(),
-                error.to_string(),
-            )
-        }),
-        _ => Err(ComponentCodecError::invalid_field(
-            format!("{field}.kind"),
-            "'path' or 'stable_id'",
-        )),
-    }
-}
-
-fn asset_ref_value(asset_ref: &AssetRef) -> Result<ComponentValue, ComponentCodecError> {
-    match asset_ref {
-        AssetRef::Path(path) => Ok(ComponentValue::map([
-            ("kind", ComponentValue::String("path".to_string())),
-            ("value", ComponentValue::String(path.as_str().to_string())),
-        ])),
-        AssetRef::StableId(id) => Ok(ComponentValue::map([
-            ("kind", ComponentValue::String("stable_id".to_string())),
-            ("value", ComponentValue::String(id.to_string())),
-        ])),
+        Some(value) => nara_reflect::decode_asset_reference_value(value)
+            .map(Some)
+            .map_err(|_| ComponentCodecError::invalid_field(field, "canonical asset reference")),
     }
 }
 
@@ -1087,7 +1061,8 @@ pub mod prelude {
 mod tests {
     use super::*;
     use nara_asset::{
-        AssetPath, AssetRecord, AssetSourceKind, ProjectAssetDatabase, StableAssetId,
+        AssetPath, AssetProductRef, AssetRecord, AssetSourceKind, ImportedProductId,
+        ProjectAssetDatabase, StableAssetId,
     };
     use nara_reflect::ComponentDecodeContext;
 
@@ -1294,38 +1269,151 @@ mod tests {
     }
 
     #[test]
-    fn tilemap_codec_resolves_stable_tileset_refs_during_preflight() {
+    fn tilemap_codec_resolves_stable_and_primary_product_tileset_refs_during_preflight() {
         let stable_id = stable_id("2f0d71c7-14fc-4ed4-b48b-1c61bba8b97f");
         let database = test_database(stable_id, "tilesets/terrain.ron");
-        let mut asset_server = AssetServer::new();
-        let prepared = {
-            let mut context = ComponentDecodeContext::with_asset_server(&mut asset_server)
-                .with_project_asset_database(&database);
-            let registry = frozen_tilemap_registry();
-            let snapshot = registry.snapshot().unwrap();
+        let registry = frozen_tilemap_registry();
+        let snapshot = registry.snapshot().unwrap();
+        for tileset in [
+            AssetRef::StableId(stable_id),
+            AssetRef::product(AssetProductRef::new(stable_id, ImportedProductId::PRIMARY).unwrap()),
+        ] {
+            let mut asset_server = AssetServer::new();
+            let prepared = {
+                let mut context = ComponentDecodeContext::with_asset_server(&mut asset_server)
+                    .with_project_asset_database(&database);
 
-            let prepared = snapshot
-                .preflight_component_with_context(
+                let prepared = snapshot
+                    .preflight_component_with_context(
+                        &tilemap_type_id(),
+                        &tilemap_value(tileset),
+                        &mut context,
+                    )
+                    .unwrap();
+                assert!(context.asset_server_touched());
+                prepared
+            };
+            let mut world = World::new();
+            let entity = world.spawn_empty().id();
+
+            prepared.apply(&mut world, entity).unwrap();
+
+            let tilemap = world.get::<Tilemap>(entity).unwrap();
+            let tileset = tilemap.tileset.unwrap();
+            assert_eq!(
+                asset_server.path(tileset.id()),
+                Some("tilesets/terrain.ron")
+            );
+            assert_eq!(asset_server.stable_id(tileset.id()), Some(stable_id));
+        }
+    }
+
+    #[test]
+    fn tilemap_codec_requires_database_for_primary_product_without_asset_server() {
+        let source = stable_id("2f0d71c7-14fc-4ed4-b48b-1c61bba8b97f");
+        let tileset =
+            AssetRef::product(AssetProductRef::new(source, ImportedProductId::PRIMARY).unwrap());
+        let registry = frozen_tilemap_registry();
+        let snapshot = registry.snapshot().unwrap();
+
+        let result =
+            snapshot.preflight_component(&tilemap_type_id(), &tilemap_value(tileset.clone()));
+
+        assert!(matches!(
+            result,
+            Err(ComponentCodecError::InvalidAssetRef { field, asset_ref, message })
+                if field == "tileset.value"
+                    && asset_ref == tileset.to_string()
+                    && message == AssetRefError::MissingProjectDatabase(source).to_string()
+        ));
+    }
+
+    #[test]
+    fn tilemap_codec_rejects_auxiliary_tileset_before_source_resolution() {
+        let source = stable_id("2f0d71c7-14fc-4ed4-b48b-1c61bba8b97f");
+        let product =
+            ImportedProductId::parse_subproduct("011a8cc0-343a-4b95-8adb-3aa6d81977ed").unwrap();
+        let reference = AssetProductRef::new(source, product).unwrap();
+        let tileset = AssetRef::product(reference);
+        let database = test_database(source, "tilesets/terrain.ron");
+        let registry = frozen_tilemap_registry();
+        let snapshot = registry.snapshot().unwrap();
+
+        for with_server in [false, true] {
+            for with_database in [false, true] {
+                let mut asset_server = AssetServer::new();
+                let mut context = if with_server {
+                    ComponentDecodeContext::with_asset_server(&mut asset_server)
+                } else {
+                    ComponentDecodeContext::new()
+                };
+                if with_database {
+                    context = context.with_project_asset_database(&database);
+                }
+                let result = snapshot.preflight_component_with_context(
                     &tilemap_type_id(),
-                    &tilemap_value(AssetRef::StableId(stable_id)),
+                    &tilemap_value(tileset.clone()),
                     &mut context,
-                )
-                .unwrap();
-            assert!(context.asset_server_touched());
-            prepared
-        };
-        let mut world = World::new();
-        let entity = world.spawn_empty().id();
+                );
 
-        prepared.apply(&mut world, entity).unwrap();
+                assert!(matches!(
+                    result,
+                    Err(ComponentCodecError::InvalidAssetRef { field, asset_ref, message })
+                        if field == "tileset.value"
+                            && asset_ref == tileset.to_string()
+                            && message == AssetRefError::UnsupportedProductSelection(reference).to_string()
+                ));
+                assert!(!context.asset_server_touched());
+                assert_eq!(asset_server, AssetServer::new());
+            }
+        }
+    }
 
-        let tilemap = world.get::<Tilemap>(entity).unwrap();
-        let tileset = tilemap.tileset.unwrap();
-        assert_eq!(
-            asset_server.path(tileset.id()),
-            Some("tilesets/terrain.ron")
-        );
-        assert_eq!(asset_server.stable_id(tileset.id()), Some(stable_id));
+    #[test]
+    fn tilemap_membership_preserves_primary_product_and_refuses_auxiliary_selection() {
+        let source = stable_id("2f0d71c7-14fc-4ed4-b48b-1c61bba8b97f");
+        let primary =
+            AssetRef::product(AssetProductRef::new(source, ImportedProductId::PRIMARY).unwrap());
+        let atlas = TileAtlasLayout::grid(Vec2::ONE, 1, 1);
+        let value = ComponentValue::map([
+            (
+                "tileset",
+                nara_reflect::encode_asset_reference_value(&primary),
+            ),
+            (
+                "cells",
+                ComponentValue::List(vec![tile_cell_value(0, 0, 0)]),
+            ),
+        ]);
+
+        validate_persisted_tilemap_membership(&value, |reference| {
+            assert_eq!(reference, &primary);
+            Some(atlas)
+        })
+        .unwrap();
+
+        let product =
+            ImportedProductId::parse_subproduct("011a8cc0-343a-4b95-8adb-3aa6d81977ed").unwrap();
+        let auxiliary = AssetRef::product(AssetProductRef::new(source, product).unwrap());
+        for cells in [Vec::new(), vec![tile_cell_value(0, 0, 0)]] {
+            let value = ComponentValue::map([
+                (
+                    "tileset",
+                    nara_reflect::encode_asset_reference_value(&auxiliary),
+                ),
+                ("cells", ComponentValue::List(cells)),
+            ]);
+            let result = validate_persisted_tilemap_membership(&value, |_| {
+                panic!("an auxiliary selection must not reach the primary atlas resolver")
+            });
+
+            assert!(matches!(
+                result,
+                Err(TilemapMembershipError::InvalidValue(ComponentCodecError::InvalidAssetRef {
+                    field, asset_ref, ..
+                })) if field == "tileset.value" && asset_ref == auxiliary.to_string()
+            ));
+        }
     }
 
     #[test]
@@ -1441,7 +1529,10 @@ mod tests {
             ("tile_size", vec2_value(Vec2::new(16.0, 16.0)).unwrap()),
             ("layer", ComponentValue::I64(0)),
             ("sort_key", ComponentValue::I64(0)),
-            ("tileset", asset_ref_value(&tileset).unwrap()),
+            (
+                "tileset",
+                nara_reflect::encode_asset_reference_value(&tileset),
+            ),
             ("cells", ComponentValue::List(Vec::new())),
         ])
     }

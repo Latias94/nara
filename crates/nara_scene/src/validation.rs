@@ -217,6 +217,8 @@ pub(crate) fn validate_expanded_values<E>(
                     continue;
                 }
             };
+            // Scene checks the enclosing source record only. The selected product's actual
+            // existence and typed domain admission belong to the root content owner.
             if let Some(database) = context.project_asset_database()
                 && let Some(reference) = references
                     .iter()
@@ -761,6 +763,7 @@ fn preflight_scene_with_context_options(
                     continue;
                 }
             };
+            // This strict database gate proves source identity, not domain product existence.
             if let Some(database) = context.project_asset_database()
                 && let Some(reference) = asset_references
                     .iter()

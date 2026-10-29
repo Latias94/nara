@@ -414,6 +414,7 @@ fn asset_ref_retained_bytes(reference: &AssetRef) -> Result<usize, SceneRetentio
     match reference {
         AssetRef::Path(path) => string_retained_bytes(path.as_str()),
         AssetRef::StableId(_) => Ok(16),
+        AssetRef::Product(_) => Ok(size_of::<nara_asset::AssetProductRef>()),
     }
 }
 

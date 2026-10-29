@@ -744,6 +744,11 @@ pub(super) fn diagnostics_bytes(entries: &[UnavailableRecordManifestEntry]) -> O
                 AssetRef::StableId(_) => {
                     36 + provenance_string_bytes("00000000-0000-0000-0000-000000000000")?
                 }
+                AssetRef::Product(reference) => {
+                    // with_asset_ref formats source/product, then copies the public identifier.
+                    let text = 36 + 1 + reference.product().as_subproduct().map_or(7, |_| 36);
+                    text * 2 + 2 * size_of::<usize>()
+                }
             })?;
         let fields = match location {
             AuthoringRecordLocation::EntityComponent { entity } => {

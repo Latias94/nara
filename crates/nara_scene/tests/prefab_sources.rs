@@ -330,6 +330,7 @@ fn request_bytes(source: &AssetRef) -> usize {
     match source {
         AssetRef::Path(path) => string_bytes(path.as_str()),
         AssetRef::StableId(_) => 16,
+        AssetRef::Product(_) => 0,
     }
 }
 

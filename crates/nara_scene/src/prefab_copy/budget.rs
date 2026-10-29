@@ -273,6 +273,9 @@ pub(super) fn asset_bytes(reference: &AssetRef) -> usize {
     std::mem::size_of::<AssetRef>().saturating_add(match reference {
         AssetRef::Path(path) => path.as_str().len(),
         AssetRef::StableId(_) => 36,
+        // Source and product identities are inline. Reflect separately admits all nested
+        // value nodes and strings when it encodes the rewritten canonical field payload.
+        AssetRef::Product(_) => 0,
     })
 }
 

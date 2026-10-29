@@ -3,7 +3,10 @@ use std::{
     fmt::{self, Display, Formatter},
 };
 
-use nara_asset::{AssetPathError, AssetRef, StableAssetIdError};
+use nara_asset::{
+    AssetPathError, AssetProductIdentityError, AssetProductRef, AssetRef, ImportedProductId,
+    StableAssetId, StableAssetIdError,
+};
 
 use crate::{
     ComponentCodecError, ComponentEntityReferenceRewriteError, ComponentFieldId,
@@ -44,6 +47,7 @@ impl DeclaredAssetReference {
         &self.path
     }
 
+    /// Returns the complete declared reference, including its source and product selector.
     #[must_use]
     pub const fn asset_ref(&self) -> &AssetRef {
         &self.asset_ref
@@ -92,6 +96,17 @@ pub enum DeclaredAssetReferenceError {
         path: ComponentFieldPath,
         source: StableAssetIdError,
     },
+    InvalidProductSource {
+        component: ComponentTypeId,
+        field: ComponentFieldId,
+        path: ComponentFieldPath,
+    },
+    InvalidProductIdentity {
+        component: ComponentTypeId,
+        field: ComponentFieldId,
+        path: ComponentFieldPath,
+        source: AssetProductIdentityError,
+    },
     Materialization {
         component: ComponentTypeId,
         source: ComponentCodecError,
@@ -128,6 +143,12 @@ impl Display for DeclaredAssetReferenceError {
             Self::InvalidStableId { .. } => {
                 "declared asset reference contains an invalid stable ID"
             }
+            Self::InvalidProductSource { .. } => {
+                "declared product reference requires a canonical source UUID"
+            }
+            Self::InvalidProductIdentity { .. } => {
+                "declared asset reference contains an invalid product identity"
+            }
             Self::Materialization { .. } => {
                 "declared asset reference default materialization rejected the effective value"
             }
@@ -144,6 +165,7 @@ impl Error for DeclaredAssetReferenceError {
             Self::FieldPath { source, .. } => Some(source),
             Self::InvalidPath { source, .. } => Some(source),
             Self::InvalidStableId { source, .. } => Some(source),
+            Self::InvalidProductIdentity { source, .. } => Some(source),
             Self::Materialization { source, .. } => Some(source),
             Self::RegistryNotFrozen
             | Self::UnknownComponent { .. }
@@ -151,6 +173,7 @@ impl Error for DeclaredAssetReferenceError {
             | Self::RequiredFieldIsNull { .. }
             | Self::InvalidValueShape { .. }
             | Self::InvalidKind { .. }
+            | Self::InvalidProductSource { .. }
             | Self::Traversal { .. } => None,
         }
     }
@@ -169,8 +192,8 @@ pub enum AssetReferenceCollectionError<E> {
 /// fills defaults or clones the input tree. The callback receives cumulative-work deltas:
 /// visited nodes, logical bytes, and modeled allocation bytes. Scratch growth and each owned
 /// output are admitted before allocation. Allocation includes the returned Vec's slots, leaf
-/// scratch, paths, field IDs and parsed asset paths (or failed stable-ID text); a caller's
-/// aggregate Vec is separate.
+/// scratch, paths, field IDs, parsed asset paths (or failed legacy stable-ID text), and bounded
+/// canonical product UUID parser scratch; a caller's aggregate Vec is separate.
 /// Whole new Vec requests are charged on growth, with no refunds for discarded scratch.
 ///
 /// A denied callback returns its exact error without allocating an error path. No callback
@@ -269,6 +292,21 @@ fn materialize_asset_references_with_admission<E>(
                     }
                     AssetReferenceValueError::StableId(source) => {
                         DeclaredAssetReferenceError::InvalidStableId {
+                            component,
+                            field,
+                            path,
+                            source,
+                        }
+                    }
+                    AssetReferenceValueError::ProductSource => {
+                        DeclaredAssetReferenceError::InvalidProductSource {
+                            component,
+                            field,
+                            path,
+                        }
+                    }
+                    AssetReferenceValueError::ProductIdentity(source) => {
+                        DeclaredAssetReferenceError::InvalidProductIdentity {
                             component,
                             field,
                             path,
@@ -584,6 +622,21 @@ fn parse_asset_reference(
                 source,
             }
         }
+        AssetReferenceValueError::ProductSource => {
+            DeclaredAssetReferenceError::InvalidProductSource {
+                component: component.clone(),
+                field: field.clone(),
+                path: path.clone(),
+            }
+        }
+        AssetReferenceValueError::ProductIdentity(source) => {
+            DeclaredAssetReferenceError::InvalidProductIdentity {
+                component: component.clone(),
+                field: field.clone(),
+                path: path.clone(),
+                source,
+            }
+        }
     })
 }
 
@@ -593,18 +646,46 @@ enum AssetReferenceValueError {
     Kind,
     Path(AssetPathError),
     StableId(StableAssetIdError),
+    ProductSource,
+    ProductIdentity(AssetProductIdentityError),
 }
 
 fn decode_asset_reference(value: &ComponentValue) -> Result<AssetRef, AssetReferenceValueError> {
-    let (kind, payload) = asset_reference_parts(value).ok_or(AssetReferenceValueError::Shape)?;
-    match kind {
-        "path" => AssetRef::path(payload).map_err(AssetReferenceValueError::Path),
-        "stable_id" => AssetRef::stable_id(payload).map_err(AssetReferenceValueError::StableId),
-        _ => Err(AssetReferenceValueError::Kind),
+    match asset_reference_parts(value)? {
+        AssetReferenceParts::Path(payload) => {
+            AssetRef::path(payload).map_err(AssetReferenceValueError::Path)
+        }
+        AssetReferenceParts::StableId(payload) => {
+            AssetRef::stable_id(payload).map_err(AssetReferenceValueError::StableId)
+        }
+        AssetReferenceParts::Product { source, subproduct } => {
+            // Bound UUID parser/error scratch before parsing. The old StableId spelling remains
+            // unchanged; only the structured product form requires canonical source text.
+            if source.len() != 36 {
+                return Err(AssetReferenceValueError::ProductSource);
+            }
+            let source_id = StableAssetId::parse_str(source)
+                .map_err(|_| AssetReferenceValueError::ProductSource)?;
+            if source_id.to_string() != source {
+                return Err(AssetReferenceValueError::ProductSource);
+            }
+            let product = match subproduct {
+                None => ImportedProductId::PRIMARY,
+                Some(id) => ImportedProductId::parse_subproduct(id)
+                    .map_err(AssetReferenceValueError::ProductIdentity)?,
+            };
+            AssetProductRef::new(source_id, product)
+                .map(AssetRef::product)
+                .map_err(AssetReferenceValueError::ProductIdentity)
+        }
     }
 }
 
-pub(crate) fn decode_asset_reference_value(
+/// Decodes the canonical asset-reference leaf used by persistent fields.
+///
+/// This checks reference syntax only. The caller owns value-size admission, source resolution
+/// and product existence. Budgeted Schema consumers should use the reference collectors.
+pub fn decode_asset_reference_value(
     value: &ComponentValue,
 ) -> Result<AssetRef, ComponentCodecError> {
     decode_asset_reference(value).map_err(|_| {
@@ -612,23 +693,171 @@ pub(crate) fn decode_asset_reference_value(
     })
 }
 
+/// Encodes one complete persistent asset-reference leaf without resolving its target.
+///
+/// Path and stable source selectors name the primary product. Product selectors retain their
+/// complete source and product identity. Callers with aggregate allocation limits admit the
+/// complete value cost before calling; the budgeted rewrite entry handles that admission.
+#[must_use]
+pub fn encode_asset_reference_value(reference: &AssetRef) -> ComponentValue {
+    let (kind, value) = match reference {
+        AssetRef::Path(path) => ("path", ComponentValue::String(path.as_str().to_owned())),
+        AssetRef::StableId(id) => ("stable_id", ComponentValue::String(id.to_string())),
+        AssetRef::Product(reference) => {
+            let product = match reference.product().as_subproduct() {
+                None => {
+                    ComponentValue::map([("kind", ComponentValue::String("primary".to_owned()))])
+                }
+                Some(id) => ComponentValue::map([
+                    ("kind", ComponentValue::String("subproduct".to_owned())),
+                    ("id", ComponentValue::String(id.to_string())),
+                ]),
+            };
+            (
+                "product",
+                ComponentValue::map([
+                    (
+                        "source",
+                        ComponentValue::String(reference.source().to_string()),
+                    ),
+                    ("product", product),
+                ]),
+            )
+        }
+    };
+    ComponentValue::map([
+        ("kind", ComponentValue::String(kind.to_owned())),
+        ("value", value),
+    ])
+}
+
 pub(crate) fn is_asset_reference_value(value: &ComponentValue) -> bool {
     decode_asset_reference(value).is_ok()
 }
 
-fn asset_reference_parts(value: &ComponentValue) -> Option<(&str, &str)> {
+enum AssetReferenceParts<'a> {
+    Path(&'a str),
+    StableId(&'a str),
+    Product {
+        source: &'a str,
+        subproduct: Option<&'a str>,
+    },
+}
+
+fn asset_reference_parts(
+    value: &ComponentValue,
+) -> Result<AssetReferenceParts<'_>, AssetReferenceValueError> {
     let ComponentValue::Map(fields) = value else {
-        return None;
+        return Err(AssetReferenceValueError::Shape);
     };
     if fields.len() != 2 {
-        return None;
+        return Err(AssetReferenceValueError::Shape);
     }
-    let (Some(ComponentValue::String(kind)), Some(ComponentValue::String(value))) =
+    let (Some(ComponentValue::String(kind)), Some(value)) =
         (fields.get("kind"), fields.get("value"))
     else {
-        return None;
+        return Err(AssetReferenceValueError::Shape);
     };
-    Some((kind.as_str(), value.as_str()))
+    match (kind.as_str(), value) {
+        ("path", ComponentValue::String(payload)) => Ok(AssetReferenceParts::Path(payload)),
+        ("stable_id", ComponentValue::String(payload)) => {
+            Ok(AssetReferenceParts::StableId(payload))
+        }
+        ("product", ComponentValue::Map(payload)) if payload.len() == 2 => {
+            let (Some(ComponentValue::String(source)), Some(ComponentValue::Map(product))) =
+                (payload.get("source"), payload.get("product"))
+            else {
+                return Err(AssetReferenceValueError::Shape);
+            };
+            let Some(ComponentValue::String(kind)) = product.get("kind") else {
+                return Err(AssetReferenceValueError::Shape);
+            };
+            let subproduct = match kind.as_str() {
+                "primary" if product.len() == 1 => None,
+                "subproduct" if product.len() == 2 => {
+                    let Some(ComponentValue::String(id)) = product.get("id") else {
+                        return Err(AssetReferenceValueError::Shape);
+                    };
+                    Some(id.as_str())
+                }
+                "primary" | "subproduct" => return Err(AssetReferenceValueError::Shape),
+                _ => return Err(AssetReferenceValueError::Kind),
+            };
+            Ok(AssetReferenceParts::Product { source, subproduct })
+        }
+        ("path" | "stable_id" | "product", _) => Err(AssetReferenceValueError::Shape),
+        _ => Err(AssetReferenceValueError::Kind),
+    }
+}
+
+/// Actual canonical leaf work, shared by reference traversal, validation and rewriting. This
+/// inspects the closed wire records only; it never walks Schema or allocates parser scratch.
+pub(crate) struct AssetReferenceValueWork {
+    pub(crate) nodes: usize,
+    pub(crate) depth: usize,
+    pub(crate) logical_bytes: usize,
+    pub(crate) payload_bytes: usize,
+    pub(crate) decode_allocation_bytes: usize,
+    pub(crate) map_entries: usize,
+}
+
+impl AssetReferenceValueWork {
+    fn text(kind_bytes: usize, payload_bytes: usize) -> Self {
+        Self {
+            nodes: 3,
+            depth: 2,
+            logical_bytes: 9usize
+                .saturating_add(kind_bytes)
+                .saturating_add(payload_bytes),
+            payload_bytes,
+            // AssetPath owns its text; failed legacy StableId parsing retains its input.
+            decode_allocation_bytes: payload_bytes,
+            map_entries: 2,
+        }
+    }
+
+    fn product(source_bytes: usize, subproduct_bytes: Option<usize>) -> Self {
+        let (nodes, map_entries, selector_bytes) = match subproduct_bytes {
+            None => (6, 5, 4usize + 7),
+            Some(bytes) => (7, 6, (4usize + 10 + 2).saturating_add(bytes)),
+        };
+        let payload_bytes = (6usize + 7)
+            .saturating_add(source_bytes)
+            .saturating_add(selector_bytes);
+        Self {
+            nodes,
+            depth: 4,
+            logical_bytes: (9usize + 7).saturating_add(payload_bytes),
+            payload_bytes,
+            // Canonical UUID checks allocate at most one 36-byte source string and one
+            // 36-byte product string. Wrong-length input refuses without copying it.
+            decode_allocation_bytes: usize::from(source_bytes == 36) * 36
+                + usize::from(subproduct_bytes == Some(36)) * 36,
+            map_entries,
+        }
+    }
+}
+
+pub(crate) fn asset_reference_value_work(
+    value: &ComponentValue,
+) -> Option<AssetReferenceValueWork> {
+    Some(match asset_reference_parts(value).ok()? {
+        AssetReferenceParts::Path(payload) => AssetReferenceValueWork::text(4, payload.len()),
+        AssetReferenceParts::StableId(payload) => AssetReferenceValueWork::text(9, payload.len()),
+        AssetReferenceParts::Product { source, subproduct } => {
+            AssetReferenceValueWork::product(source.len(), subproduct.map(str::len))
+        }
+    })
+}
+
+fn asset_reference_encoding_work(reference: &AssetRef) -> AssetReferenceValueWork {
+    match reference {
+        AssetRef::Path(path) => AssetReferenceValueWork::text(4, path.as_str().len()),
+        AssetRef::StableId(_) => AssetReferenceValueWork::text(9, 36),
+        AssetRef::Product(reference) => {
+            AssetReferenceValueWork::product(36, reference.product().as_subproduct().map(|_| 36))
+        }
+    }
 }
 
 #[cfg(test)]

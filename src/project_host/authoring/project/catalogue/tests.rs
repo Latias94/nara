@@ -5,7 +5,7 @@ use std::{
     sync::atomic::{AtomicU64, Ordering},
 };
 
-use nara_asset::{AssetMeta, AssetMetaIdentity, StableAssetId};
+use nara_asset::{AssetMeta, AssetMetaIdentity, AssetProductRef, ImportedProductId, StableAssetId};
 use nara_core::ItemLimit;
 use nara_fs::{CapabilityRights, HostCapabilityOptions, TrustMode};
 
@@ -13,6 +13,50 @@ use super::*;
 use crate::project_host::authoring::AuthoringProjectAdmissionLimits;
 
 static SEQUENCE: AtomicU64 = AtomicU64::new(0);
+
+#[test]
+fn product_source_lookup_never_admits_an_auxiliary_product_as_a_prefab() {
+    let fixture = CatalogueFixture::new();
+    let mut catalogue = ReferenceCatalogue::new(fixture.capability(), fixture.directories());
+    let mut budget =
+        AuthoringProjectAdmissionBudget::new(AuthoringProjectAdmissionLimits::default());
+    let auxiliary = AssetRef::Product(
+        AssetProductRef::new(
+            fixture.id(),
+            ImportedProductId::parse_subproduct("dd195b6a-449c-4e1a-bec5-24aa8d83870c").unwrap(),
+        )
+        .unwrap(),
+    );
+    assert!(
+        catalogue
+            .resolve(&auxiliary, true, &mut budget)
+            .unwrap()
+            .is_none()
+    );
+    assert!(!catalogue.is_indexed());
+    assert!(catalogue.lookups.is_empty());
+    let primary =
+        AssetRef::Product(AssetProductRef::new(fixture.id(), ImportedProductId::PRIMARY).unwrap());
+    let path = catalogue
+        .resolve(&primary, true, &mut budget)
+        .unwrap()
+        .unwrap();
+    let retained = budget.retained_candidate_bytes;
+    assert_eq!(
+        catalogue
+            .resolve(&AssetRef::StableId(fixture.id()), true, &mut budget)
+            .unwrap(),
+        Some(path)
+    );
+    assert_eq!(budget.retained_candidate_bytes, retained);
+    assert!(
+        catalogue
+            .resolve(&auxiliary, true, &mut budget)
+            .unwrap()
+            .is_none()
+    );
+    assert_eq!(catalogue.lookups.len(), 1);
+}
 
 #[test]
 fn exact_directory_and_file_open_costs_are_admitted_before_opening() {

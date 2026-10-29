@@ -786,7 +786,12 @@ fn brush_value(brush: &UiBrush) -> Result<ComponentValue, ComponentCodecError> {
                     error.to_string(),
                 )
             })?;
-            ("image", *tint, String::new(), asset_ref_value(&asset_ref))
+            (
+                "image",
+                *tint,
+                String::new(),
+                nara_reflect::encode_asset_reference_value(&asset_ref),
+            )
         }
     };
     let [red, green, blue, alpha] = color.components();
@@ -807,49 +812,9 @@ fn read_optional_asset_ref(
 ) -> Result<Option<AssetRef>, ComponentCodecError> {
     match value {
         None | Some(ComponentValue::Null) => Ok(None),
-        Some(value) => read_asset_ref(value, field).map(Some),
-    }
-}
-
-pub(crate) fn read_asset_ref(
-    value: &ComponentValue,
-    field: &str,
-) -> Result<AssetRef, ComponentCodecError> {
-    expect_fields(value, field, &["kind", "value"])?;
-    let kind = read_string(value.field("kind")?, &format!("{field}.kind"))?;
-    let reference = read_string(value.field("value")?, &format!("{field}.value"))?;
-    match kind.as_str() {
-        "path" => AssetRef::path(reference.clone()).map_err(|error| {
-            ComponentCodecError::invalid_asset_ref(
-                format!("{field}.value"),
-                reference,
-                error.to_string(),
-            )
-        }),
-        "stable_id" => AssetRef::stable_id(&reference).map_err(|error| {
-            ComponentCodecError::invalid_asset_ref(
-                format!("{field}.value"),
-                reference,
-                error.to_string(),
-            )
-        }),
-        _ => Err(ComponentCodecError::invalid_field(
-            format!("{field}.kind"),
-            "path or stable_id",
-        )),
-    }
-}
-
-pub(crate) fn asset_ref_value(asset_ref: &AssetRef) -> ComponentValue {
-    match asset_ref {
-        AssetRef::Path(path) => ComponentValue::map([
-            ("kind", ComponentValue::String("path".to_owned())),
-            ("value", ComponentValue::String(path.as_str().to_owned())),
-        ]),
-        AssetRef::StableId(id) => ComponentValue::map([
-            ("kind", ComponentValue::String("stable_id".to_owned())),
-            ("value", ComponentValue::String(id.to_string())),
-        ]),
+        Some(value) => nara_reflect::decode_asset_reference_value(value)
+            .map(Some)
+            .map_err(|_| ComponentCodecError::invalid_field(field, "canonical asset reference")),
     }
 }
 

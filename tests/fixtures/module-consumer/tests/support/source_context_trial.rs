@@ -236,6 +236,9 @@ impl<'root> FileSources<'root> {
         request: &AssetRef,
         registry: &ComponentRegistry,
     ) -> Result<BoundScene, Error> {
+        if !request.is_primary() {
+            return Err(Error::PolicyConflict);
+        }
         let mut admission = None;
         let (path, origin) = match self.policy {
             NativePolicy::ProjectLocation => {
@@ -251,7 +254,7 @@ impl<'root> FileSources<'root> {
             NativePolicy::StableMetadata => {
                 let path = match request {
                     AssetRef::Path(path) => path.clone(),
-                    AssetRef::StableId(_) => self
+                    AssetRef::StableId(_) | AssetRef::Product(_) => self
                         .database
                         .resolve_ref(request)
                         .map_err(|_| Error::Metadata)?

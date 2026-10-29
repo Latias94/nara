@@ -34,6 +34,10 @@ pub enum SourceDocumentOrigin {
 
 /// Canonical semantic identity for one admitted Scene or Prefab document.
 ///
+/// This identifies an entity-bearing source document, not an auxiliary imported product.
+/// An explicit primary product selector uses its admitted `StableAsset` origin; it does not
+/// introduce another source-key origin or establish that a selected domain product exists.
+///
 /// With the `serde` feature, the representation preserves the document kind and explicit
 /// origin. Deserialization validates an identity claim; it does not resolve a source or grant
 /// Host admission. Standalone serde is not file admission: the containing Scene format owns
@@ -180,6 +184,32 @@ mod tests {
         assert_eq!(
             SourceDocumentKey::named(universe(), "bad\0name", SourceDocumentKind::Scene),
             Err(SourceDocumentKeyError::NameContainsNull)
+        );
+    }
+
+    #[cfg(feature = "serde")]
+    #[test]
+    fn source_key_wire_preserves_document_identity_without_product_origins() {
+        let key = SourceDocumentKey::stable_asset(
+            "00000000-0000-4000-8000-000000000041".parse().unwrap(),
+            SourceDocumentKind::Prefab,
+        );
+        let json = serde_json::to_string(&key).unwrap();
+        let ron = ron::to_string(&key).unwrap();
+        assert_eq!(
+            serde_json::from_str::<SourceDocumentKey>(&json).unwrap(),
+            key
+        );
+        assert_eq!(ron::from_str::<SourceDocumentKey>(&ron).unwrap(), key);
+        assert!(
+            serde_json::from_value::<SourceDocumentKey>(serde_json::json!({
+                "kind": "prefab",
+                "origin": {"product": {
+                    "source": "00000000-0000-4000-8000-000000000041",
+                    "product": {"kind": "primary"}
+                }}
+            }))
+            .is_err()
         );
     }
 }

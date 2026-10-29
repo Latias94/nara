@@ -74,6 +74,7 @@ pub enum AssetRefExportPolicy {
 pub enum AssetRefError {
     InvalidPath(AssetPathError),
     MissingProjectDatabase(StableAssetId),
+    UnsupportedProductSelection(AssetProductRef),
     UnexpectedSourceKind {
         asset_ref: String,
         expected: AssetSourceKind,
@@ -94,6 +95,10 @@ impl Display for AssetRefError {
                     "stable asset id '{id}' requires a project asset database"
                 )
             }
+            Self::UnsupportedProductSelection(reference) => write!(
+                formatter,
+                "asset product '{reference}' cannot be selected by a primary runtime handle"
+            ),
             Self::UnexpectedSourceKind {
                 asset_ref,
                 expected,
@@ -130,25 +135,36 @@ impl From<AssetDatabaseError> for AssetRefError {
 }
 
 impl AssetRef {
+    /// Resolves a primary product handle, rejecting auxiliary selections before mutation.
     pub fn resolve<T: 'static>(
         &self,
         asset_server: &mut AssetServer,
     ) -> Result<Handle<T>, AssetRefError> {
+        self.validate_primary_selection()?;
         match self {
             Self::Path(path) => asset_server.reserve::<T>(path.as_str()).map_err(Into::into),
             Self::StableId(id) => Err(AssetRefError::MissingProjectDatabase(*id)),
+            Self::Product(reference) => {
+                Err(AssetRefError::MissingProjectDatabase(reference.source()))
+            }
         }
     }
 
+    /// Resolves a primary product handle through its registered source.
+    ///
+    /// Auxiliary selections require their concrete product owner and are rejected before any
+    /// handle allocation or source/type binding.
     pub fn resolve_with_database<T: 'static>(
         &self,
         asset_server: &mut AssetServer,
         database: &ProjectAssetDatabase,
     ) -> Result<Handle<T>, AssetRefError> {
+        self.validate_primary_selection()?;
         let record = database.resolve_ref(self)?;
         asset_server.reserve_record(record).map_err(Into::into)
     }
 
+    /// Resolves a primary product handle after checking the registered source kind.
     pub fn resolve_with_database_as<T: 'static>(
         &self,
         asset_server: &mut AssetServer,
@@ -159,11 +175,16 @@ impl AssetRef {
         asset_server.reserve_record(record).map_err(Into::into)
     }
 
+    /// Checks a primary selection's enclosing source identity and kind without reserving a handle.
+    ///
+    /// Auxiliary selections are rejected. Use `ProjectAssetDatabase::resolve_ref` to look up
+    /// their source, then let the concrete domain check membership in its admitted product.
     pub fn validate_with_database_as<'a>(
         &self,
         database: &'a ProjectAssetDatabase,
         expected_source_kind: &AssetSourceKind,
     ) -> Result<&'a AssetRecord, AssetRefError> {
+        self.validate_primary_selection()?;
         let record = database.resolve_ref(self)?;
         if record.source_kind() != expected_source_kind {
             return Err(AssetRefError::UnexpectedSourceKind {
@@ -173,6 +194,15 @@ impl AssetRef {
             });
         }
         Ok(record)
+    }
+
+    fn validate_primary_selection(&self) -> Result<(), AssetRefError> {
+        if let Self::Product(reference) = self
+            && !self.is_primary()
+        {
+            return Err(AssetRefError::UnsupportedProductSelection(*reference));
+        }
+        Ok(())
     }
 
     pub fn from_handle<T: 'static>(
@@ -416,6 +446,9 @@ mod tests {
         let mut server = AssetServer::new();
         let path_ref = AssetRef::path("textures/player.png").unwrap();
         let stable_ref = AssetRef::stable_id(stable_id().to_string()).unwrap();
+        let primary_ref = AssetRef::product(
+            AssetProductRef::new(stable_id(), ImportedProductId::PRIMARY).unwrap(),
+        );
 
         let path_handle = path_ref
             .resolve_with_database::<String>(&mut server, &database)
@@ -423,10 +456,176 @@ mod tests {
         let stable_handle = stable_ref
             .resolve_with_database::<String>(&mut server, &database)
             .unwrap();
+        let primary_handle = primary_ref
+            .resolve_with_database::<String>(&mut server, &database)
+            .unwrap();
+        let checked_primary_handle = primary_ref
+            .resolve_with_database_as::<String>(&mut server, &database, &AssetSourceKind::Image)
+            .unwrap();
 
         assert_eq!(path_handle, stable_handle);
+        assert_eq!(path_handle, primary_handle);
+        assert_eq!(path_handle, checked_primary_handle);
         assert_eq!(server.path(path_handle.id()), Some("textures/player.png"));
         assert_eq!(server.stable_id(path_handle.id()), Some(stable_id()));
+    }
+
+    #[test]
+    fn product_source_lookup_does_not_prove_product_membership() {
+        let mut database = ProjectAssetDatabase::default();
+        let record = asset_record("textures/player.png");
+        database.insert(record.clone()).unwrap();
+        let auxiliary =
+            ImportedProductId::parse_subproduct("011a8cc0-343a-4b95-8adb-3aa6d81977ed").unwrap();
+
+        for product in [ImportedProductId::PRIMARY, auxiliary] {
+            let known = AssetRef::product(AssetProductRef::new(stable_id(), product).unwrap());
+            let unknown =
+                AssetRef::product(AssetProductRef::new(other_stable_id(), product).unwrap());
+            assert_eq!(database.resolve_ref(&known), Ok(&record));
+            assert_eq!(
+                database.resolve_ref(&unknown),
+                Err(AssetDatabaseError::UnknownStableId(other_stable_id()))
+            );
+        }
+    }
+
+    #[test]
+    fn auxiliary_product_handle_attempts_reject_before_reservation_or_binding() {
+        let record = asset_record("textures/player.png");
+        let mut database = ProjectAssetDatabase::default();
+        database.insert(record.clone()).unwrap();
+        let product = AssetProductRef::new(
+            stable_id(),
+            ImportedProductId::parse_subproduct("011a8cc0-343a-4b95-8adb-3aa6d81977ed").unwrap(),
+        )
+        .unwrap();
+        let reference = AssetRef::product(product);
+        let expected = AssetRefError::UnsupportedProductSelection(product);
+
+        for existing_primary in [false, true] {
+            let mut server = AssetServer::new();
+            if existing_primary {
+                server.reserve::<u32>(record.path().as_str()).unwrap();
+            }
+            let baseline = server.clone();
+            assert_eq!(
+                reference.resolve::<String>(&mut server),
+                Err(expected.clone())
+            );
+            assert_eq!(server, baseline);
+            assert_eq!(
+                reference.resolve_with_database::<String>(&mut server, &database),
+                Err(expected.clone())
+            );
+            assert_eq!(server, baseline);
+            for kind in [AssetSourceKind::Image, AssetSourceKind::Scene] {
+                assert_eq!(
+                    reference.resolve_with_database_as::<String>(&mut server, &database, &kind),
+                    Err(expected.clone())
+                );
+                assert_eq!(server, baseline);
+                assert_eq!(
+                    reference.validate_with_database_as(&database, &kind),
+                    Err(expected.clone())
+                );
+            }
+            assert_eq!(server, baseline);
+        }
+        assert_eq!(
+            reference.validate_with_database_as(
+                &ProjectAssetDatabase::default(),
+                &AssetSourceKind::Image,
+            ),
+            Err(expected.clone())
+        );
+        assert_eq!(
+            expected.to_string(),
+            format!("asset product '{product}' cannot be selected by a primary runtime handle")
+        );
+    }
+
+    #[test]
+    fn primary_product_handles_require_database_kind_identity_and_type_proofs() {
+        let product = AssetProductRef::new(stable_id(), ImportedProductId::PRIMARY).unwrap();
+        let reference = AssetRef::product(product);
+        let mut server = AssetServer::new();
+        let baseline = server.clone();
+        assert_eq!(
+            reference.resolve::<String>(&mut server),
+            Err(AssetRefError::MissingProjectDatabase(stable_id()))
+        );
+        let mut database = ProjectAssetDatabase::default();
+        assert_eq!(
+            reference.resolve_with_database::<String>(&mut server, &database),
+            Err(AssetRefError::Database(
+                AssetDatabaseError::UnknownStableId(stable_id())
+            ))
+        );
+        let record = asset_record("textures/player.png");
+        database.insert(record.clone()).unwrap();
+        let wrong_kind = AssetRefError::UnexpectedSourceKind {
+            asset_ref: reference.to_string(),
+            expected: AssetSourceKind::Scene,
+            actual: AssetSourceKind::Image,
+        };
+        assert_eq!(
+            reference.validate_with_database_as(&database, &AssetSourceKind::Scene),
+            Err(wrong_kind.clone())
+        );
+        assert_eq!(
+            reference.resolve_with_database_as::<String>(
+                &mut server,
+                &database,
+                &AssetSourceKind::Scene,
+            ),
+            Err(wrong_kind)
+        );
+        assert_eq!(server, baseline);
+        assert_eq!(
+            reference.validate_with_database_as(&database, &AssetSourceKind::Image),
+            Ok(&record)
+        );
+
+        let handle = reference
+            .resolve_with_database::<String>(&mut server, &database)
+            .unwrap();
+        let baseline = server.clone();
+        assert!(matches!(
+            reference.resolve_with_database_as::<u32>(
+                &mut server,
+                &database,
+                &AssetSourceKind::Image,
+            ),
+            Err(AssetRefError::Asset(AssetError::AssetTypeMismatch { .. }))
+        ));
+        assert_eq!(server, baseline);
+        assert_eq!(
+            AssetRef::from_handle_with_policy(
+                &server,
+                handle,
+                AssetRefExportPolicy::StableIdWhenKnown,
+            )
+            .unwrap(),
+            AssetRef::StableId(stable_id())
+        );
+
+        let mut conflict_server = AssetServer::new();
+        conflict_server
+            .reserve_record::<String>(&AssetRecord::new(
+                other_stable_id(),
+                record.path().clone(),
+                AssetSourceKind::Image,
+            ))
+            .unwrap();
+        let baseline = conflict_server.clone();
+        assert!(matches!(
+            reference.resolve_with_database::<String>(&mut conflict_server, &database),
+            Err(AssetRefError::Asset(
+                AssetError::AssetIdAlreadyBoundToStableId { .. }
+            ))
+        ));
+        assert_eq!(conflict_server, baseline);
     }
 
     #[test]

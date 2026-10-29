@@ -62,9 +62,13 @@ impl ReferenceCatalogue {
         prefab: bool,
         budget: &mut AuthoringProjectAdmissionBudget,
     ) -> Result<Option<AssetPath>, AuthoringProjectSourceAdmissionError> {
+        if prefab && !reference.is_primary() {
+            return Ok(None);
+        }
         let stable_id = match reference {
             AssetRef::Path(path) => return Ok(Some(path.clone())),
             AssetRef::StableId(stable_id) => *stable_id,
+            AssetRef::Product(product) => product.source(),
         };
         self.ensure_indexed(budget)?;
         let key = (stable_id, prefab);
@@ -104,6 +108,9 @@ impl ReferenceCatalogue {
     }
 
     fn resolve_indexed(&self, reference: &AssetRef, prefab: bool) -> Option<&AssetPath> {
+        if prefab && !reference.is_primary() {
+            return None;
+        }
         self.database
             .resolve_ref(reference)
             .ok()

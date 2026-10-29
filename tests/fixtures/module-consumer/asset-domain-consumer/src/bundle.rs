@@ -284,6 +284,10 @@ impl TextBundleContinuity {
 
 impl AssetDomain for TextBundleDomain {
     type Product = TextBundle;
+
+    fn contains_product(product: &TextBundle, id: ImportedProductId) -> bool {
+        id == ImportedProductId::PRIMARY || product.entries.contains_key(&id)
+    }
 }
 
 impl SourceAssetImporter for TextBundleDomain {

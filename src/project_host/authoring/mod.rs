@@ -1884,16 +1884,8 @@ mod tests {
     fn property_overlay_assets_capture_actual_sources_without_complete_record_facts() {
         let owner = PersistentComponentSchemaOwnerId::try_new("nara.test.field-assets").unwrap();
         let component = ComponentTypeId::new("nara.test.FieldAssets");
-        let reference_value = |reference: AssetRef| {
-            let (kind, value) = match reference {
-                AssetRef::Path(path) => ("path", path.as_str().to_owned()),
-                AssetRef::StableId(id) => ("stable_id", id.to_string()),
-            };
-            ComponentValue::map([
-                ("kind", ComponentValue::String(kind.to_owned())),
-                ("value", ComponentValue::String(value)),
-            ])
-        };
+        let reference_value =
+            |reference: AssetRef| nara_reflect::encode_asset_reference_value(&reference);
         let path_value =
             |name: &str| reference_value(AssetRef::path(format!("{name}.png")).unwrap());
         let schema =

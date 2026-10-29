@@ -276,14 +276,7 @@ impl PersistentFieldCodec for AssetRef {
     }
 
     fn encode(&self) -> Result<ComponentValue, ComponentCodecError> {
-        let (kind, value) = match self {
-            Self::Path(path) => ("path", path.as_str().to_owned()),
-            Self::StableId(id) => ("stable_id", id.to_string()),
-        };
-        Ok(ComponentValue::map([
-            ("kind", ComponentValue::String(kind.to_owned())),
-            ("value", ComponentValue::String(value)),
-        ]))
+        Ok(crate::encode_asset_reference_value(self))
     }
 }
 

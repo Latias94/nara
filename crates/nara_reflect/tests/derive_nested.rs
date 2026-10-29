@@ -1,6 +1,6 @@
 use std::collections::BTreeMap;
 
-use nara_asset::AssetRef;
+use nara_asset::{AssetProductRef, AssetRef, ImportedProductId, StableAssetId};
 use nara_core::Vec2;
 use nara_ecs::{Component, World};
 use nara_identity::{EntityReference, SceneEntityId};
@@ -52,6 +52,21 @@ fn nested_probe() -> NestedReferenceProbe {
                 Some(AssetRef::path("textures/player.png").unwrap()),
                 None,
                 Some(AssetRef::stable_id("3c2d4005-63bd-4e2a-9792-bb2f48a12821").unwrap()),
+                Some(AssetRef::product(
+                    AssetProductRef::new(
+                        StableAssetId::parse_str("919617ea-c89c-4f83-9cce-b084de435a83").unwrap(),
+                        ImportedProductId::PRIMARY,
+                    )
+                    .unwrap(),
+                )),
+                Some(AssetRef::product(
+                    AssetProductRef::new(
+                        StableAssetId::parse_str("919617ea-c89c-4f83-9cce-b084de435a83").unwrap(),
+                        ImportedProductId::parse_subproduct("011a8cc0-343a-4b95-8adb-3aa6d81977ed")
+                            .unwrap(),
+                    )
+                    .unwrap(),
+                )),
             ],
         )]),
         weights: vec![0, u8::MAX],

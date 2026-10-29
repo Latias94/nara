@@ -143,6 +143,9 @@ impl EditorImageCatalogSnapshot {
     }
 
     pub(super) fn image_entry(&self, reference: &AssetRef) -> Option<&EditorImageCatalogEntry> {
+        if !reference.is_primary() {
+            return None;
+        }
         self.entries.iter().find(|entry| {
             let EditorImageMetadataStatus::Ready(metadata) = entry.metadata() else {
                 return false;
@@ -150,6 +153,7 @@ impl EditorImageCatalogSnapshot {
             match reference {
                 AssetRef::Path(path) => entry.asset_path() == path,
                 AssetRef::StableId(stable_id) => metadata.stable_id() == *stable_id,
+                AssetRef::Product(product) => metadata.stable_id() == product.source(),
             }
         })
     }

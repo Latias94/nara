@@ -872,6 +872,18 @@ where
         let instance = self
             .instance(&site)
             .ok_or(PrefabExpansionFailureKind::OwnerAdmission)?;
+        if !instance.source.is_primary() {
+            let diagnostic = with_asset_ref(
+                diagnostic_error(
+                    "scene.prefab-source-kind-invalid",
+                    "Auxiliary imported products cannot select a native Prefab source",
+                ),
+                "asset-ref",
+                &instance.source,
+            );
+            self.context.diagnostics.push(diagnostic);
+            return Err(PrefabExpansionFailureKind::OwnerAdmission.into());
+        }
         self.admit(
             provenance_asset_ref_bytes(&instance.source)
                 .and_then(|bytes| bytes.checked_add(size_of::<AssetRef>())),
@@ -953,6 +965,17 @@ where
                 diagnostic_error(
                     "scene.prefab-source-kind-invalid",
                     "Resolved source does not describe a Prefab",
+                ),
+                "asset-ref",
+                &request,
+            ));
+            return Err(PrefabExpansionFailureKind::OwnerAdmission.into());
+        }
+        if !source.matches_request(&request) {
+            self.context.diagnostics.push(with_asset_ref(
+                diagnostic_error(
+                    "scene.prefab-source-identity-invalid",
+                    "Primary product selection requires a matching admitted stable Prefab source",
                 ),
                 "asset-ref",
                 &request,

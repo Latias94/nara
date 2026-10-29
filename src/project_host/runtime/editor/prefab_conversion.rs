@@ -666,14 +666,7 @@ fn write_review_origin(
                 {
                     write!(output, " / {}:{entity}", source.source().project_path())?;
                 } else {
-                    match source_document {
-                        nara_asset::AssetRef::Path(path) => {
-                            write!(output, " / {path}:{entity}")?;
-                        }
-                        nara_asset::AssetRef::StableId(id) => {
-                            write!(output, " / {id}:{entity}")?;
-                        }
-                    }
+                    write!(output, " / {source_document}:{entity}")?;
                 }
             }
             nara_scene::PrefabProjectionStep::InstanceAddition { entity } => {

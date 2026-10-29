@@ -5,6 +5,7 @@ mod project_content_fixture;
 
 use nara::{
     asset::AssetRef,
+    core::ByteLimit,
     diagnostic::DiagnosticValueRef,
     project_host::{
         ProjectContentBudgetHost, ProjectContentBudgetKind, ProjectContentBudgetSnapshot,
@@ -12,7 +13,8 @@ use nara::{
     },
     reflect::{ComponentSchemaVersion, ComponentTypeId},
     scene::{
-        PrefabDocument, PrefabInstance, SceneComponentRecord, SceneDocument, SceneEntityRecord,
+        PrefabDocument, PrefabExpansionLimits, PrefabInstance, SceneComponentRecord, SceneDocument,
+        SceneEntityRecord,
     },
 };
 use project_content_fixture::{TestProject, image_meta, scene_id, sprite_value, valid_png_bytes};
@@ -32,9 +34,7 @@ fn assert_budget_boundary(kind: ProjectContentBudgetKind, expected: usize) {
     let observed = successful_high_water(kind, |_| {});
     assert_eq!(observed, expected, "the {kind:?} budget model drifted");
 
-    let exact = ProjectContentLimits::default()
-        .with_limit(kind, expected)
-        .unwrap();
+    let exact = fixture_limits().with_limit(kind, expected).unwrap();
     let exact_observed = successful_high_water_with_limits(kind, exact, |_| {});
     assert_eq!(
         exact_observed, expected,
@@ -44,11 +44,9 @@ fn assert_budget_boundary(kind: ProjectContentBudgetKind, expected: usize) {
     if expected == 1 {
         return;
     }
-    let rejected = ProjectContentLimits::default()
-        .with_limit(kind, expected - 1)
-        .unwrap();
+    let rejected = fixture_limits().with_limit(kind, expected - 1).unwrap();
     let (project, loader, result) = load_with_limits(rejected, |_| {});
-    let error = result.expect_err("limit+1 input must reject");
+    let error = result.expect_err(&format!("limit+1 {kind:?} input must reject"));
     assert_eq!(error.kind(), ProjectContentErrorKind::BudgetExceeded);
     assert!(error.diagnostics().iter().any(|diagnostic| {
         diagnostic
@@ -59,6 +57,29 @@ fn assert_budget_boundary(kind: ProjectContentBudgetKind, expected: usize) {
     assert_no_active_charges(loader.budget_snapshot());
     drop(loader);
     drop(project);
+}
+
+#[test]
+fn spare_compiler_work_reservation_shrinks_without_exceeding_the_host_limit() {
+    for kind in [
+        ProjectContentBudgetKind::WorkBytes,
+        ProjectContentBudgetKind::AggregateBytes,
+    ] {
+        let peak = successful_high_water_with_limits(kind, ProjectContentLimits::default(), |_| {});
+        let limit = peak - 1;
+        let limits = ProjectContentLimits::default()
+            .with_limit(kind, limit)
+            .unwrap();
+        let (project, loader, result) = load_with_limits(limits, |_| {});
+        let snapshot = result.unwrap();
+        assert!(loader.budget_snapshot().high_water(kind) <= limit);
+        assert_eq!(snapshot.prefabs().len(), 1);
+        assert_eq!(snapshot.images().len(), 1);
+        drop(snapshot);
+        assert_no_active_charges(loader.budget_snapshot());
+        drop(loader);
+        drop(project);
+    }
 }
 
 #[test]
@@ -146,7 +167,7 @@ fn failed_load_releases_every_charge_and_the_same_host_accepts_later_work() {
 #[test]
 fn shared_budget_host_contention_rejects_without_retry_or_partial_publication() {
     let aggregate = successful_high_water(ProjectContentBudgetKind::AggregateBytes, |_| {});
-    let limits = ProjectContentLimits::default()
+    let limits = fixture_limits()
         .with_limit(ProjectContentBudgetKind::AggregateBytes, aggregate)
         .unwrap();
     let budget_host = ProjectContentBudgetHost::new(limits);
@@ -302,7 +323,16 @@ fn duplicate_dependency_edges_share_unique_prefab_and_image_work() {
 }
 
 fn successful_high_water(kind: ProjectContentBudgetKind, configure: fn(&TestProject)) -> usize {
-    successful_high_water_with_limits(kind, ProjectContentLimits::default(), configure)
+    successful_high_water_with_limits(kind, fixture_limits(), configure)
+}
+
+fn fixture_limits() -> ProjectContentLimits {
+    // The compiler can lower its spare work reservation to the shared Host's remaining capacity.
+    // Keep this small fixture's expansion allowance below its fixed decode peak, so exact
+    // high-water/one-byte-short assertions exercise required work rather than spare capacity.
+    ProjectContentLimits::default().with_prefab_expansion(
+        PrefabExpansionLimits::default().with_working_bytes(ByteLimit::new(1024 * 1024).unwrap()),
+    )
 }
 
 fn successful_high_water_with_limits(

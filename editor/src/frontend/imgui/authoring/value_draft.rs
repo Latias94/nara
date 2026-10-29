@@ -4,7 +4,7 @@ use std::{
 };
 
 use nara::{
-    asset::AssetRef,
+    asset::{AssetProductRef, AssetRef, ImportedProductId, StableAssetId},
     identity::EntityReference,
     reflect::{ComponentValue, ComponentValueKind, ComponentValueShape},
     scene::SceneEntityId,
@@ -320,15 +320,11 @@ fn scalar_item(shape: &ComponentValueShape) -> bool {
 
 fn scalar_text(shape: &ComponentValueShape, value: &ComponentValue) -> String {
     if matches!(shape, ComponentValueShape::AssetRef) {
-        let kind = value.get("kind").and_then(ComponentValue::as_str);
-        let value = value
-            .get("value")
-            .and_then(ComponentValue::as_str)
-            .unwrap_or_default();
-        return if kind == Some("stable_id") {
-            format!("stable_id:{value}")
-        } else {
-            value.to_owned()
+        return match nara::reflect::decode_asset_reference_value(value) {
+            Ok(AssetRef::Path(path)) => path.to_string(),
+            Ok(AssetRef::StableId(id)) => format!("stable_id:{id}"),
+            Ok(reference @ AssetRef::Product(_)) => reference.to_string(),
+            Err(_) => String::new(),
         };
     }
     if matches!(shape, ComponentValueShape::EntityRef) {
@@ -356,19 +352,25 @@ pub(in crate::frontend::imgui) fn parse_scalar(
     text: &str,
 ) -> Result<ComponentValue, String> {
     if matches!(shape, ComponentValueShape::AssetRef) {
-        let reference = if let Some(id) = text.strip_prefix("stable_id:") {
-            AssetRef::stable_id(id).map_err(|error| error.to_string())
+        let reference = if let Some(product) = text.strip_prefix("product:") {
+            let (source, product) = product
+                .split_once('/')
+                .ok_or("Expected product:<source>/<primary-or-product-id>")?;
+            let source = StableAssetId::parse_str(source).map_err(|error| error.to_string())?;
+            let product = if product == "primary" {
+                ImportedProductId::PRIMARY
+            } else {
+                ImportedProductId::parse_subproduct(product).map_err(|error| error.to_string())?
+            };
+            AssetRef::Product(
+                AssetProductRef::new(source, product).map_err(|error| error.to_string())?,
+            )
+        } else if let Some(id) = text.strip_prefix("stable_id:") {
+            AssetRef::stable_id(id).map_err(|error| error.to_string())?
         } else {
-            AssetRef::path(text).map_err(|error| error.to_string())
-        }?;
-        let (kind, value) = match reference {
-            AssetRef::Path(path) => ("path", path.to_string()),
-            AssetRef::StableId(id) => ("stable_id", id.to_string()),
+            AssetRef::path(text).map_err(|error| error.to_string())?
         };
-        return Ok(ComponentValue::map([
-            ("kind", ComponentValue::String(kind.to_owned())),
-            ("value", ComponentValue::String(value)),
-        ]));
+        return Ok(nara::reflect::encode_asset_reference_value(&reference));
     }
     if matches!(shape, ComponentValueShape::EntityRef) {
         let id = text.strip_prefix("scene-local:").unwrap_or(text);
@@ -481,5 +483,36 @@ mod tests {
         assert_eq!(parse_scalar(&shape, "scene-local:target").unwrap(), value);
         assert_eq!(parse_scalar(&shape, "target").unwrap(), value);
         assert!(parse_scalar(&shape, "scene-local:bad id").is_err());
+    }
+
+    #[test]
+    fn asset_reference_drafts_preserve_complete_product_selection() {
+        let source = StableAssetId::parse_str("cc91a0c8-e2b4-42ae-9d78-3481b9f34d65").unwrap();
+        let shape = ComponentValueShape::AssetRef;
+        for reference in [
+            AssetRef::path("bundle.json").unwrap(),
+            AssetRef::StableId(source),
+            AssetRef::Product(AssetProductRef::new(source, ImportedProductId::PRIMARY).unwrap()),
+            AssetRef::Product(
+                AssetProductRef::new(
+                    source,
+                    ImportedProductId::parse_subproduct("10a5c635-e71b-478d-86c4-ef933956a425")
+                        .unwrap(),
+                )
+                .unwrap(),
+            ),
+        ] {
+            let value = nara::reflect::encode_asset_reference_value(&reference);
+            let text = scalar_text(&shape, &value);
+            assert!(!text.is_empty());
+            assert_eq!(parse_scalar(&shape, &text).unwrap(), value);
+        }
+        for text in [
+            "product:cc91a0c8-e2b4-42ae-9d78-3481b9f34d65",
+            "product:00000000-0000-0000-0000-000000000000/primary",
+            "product:cc91a0c8-e2b4-42ae-9d78-3481b9f34d65/unknown",
+        ] {
+            assert!(parse_scalar(&shape, text).is_err());
+        }
     }
 }

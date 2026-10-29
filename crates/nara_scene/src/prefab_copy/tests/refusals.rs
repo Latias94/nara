@@ -1,6 +1,6 @@
 use super::*;
 
-fn prepare_error(request: &PrefabCopyRequest) -> PrefabCopyError {
+pub(super) fn prepare_error(request: &PrefabCopyRequest) -> PrefabCopyError {
     let before: Vec<_> = request
         .sources
         .iter()
@@ -134,6 +134,31 @@ fn unsupplied_dependencies_and_identity_facts_have_no_fallback() {
     assert!(matches!(
         prepare_error(&request),
         PrefabCopyError::UnmappedSourceKey { .. }
+    ));
+}
+
+#[test]
+fn auxiliary_prefab_source_cannot_be_copied_into_a_primary_alias() {
+    let old: StableAssetId = "00000000-0000-4000-8000-000000000011".parse().unwrap();
+    let new: StableAssetId = "00000000-0000-4000-8000-000000000022".parse().unwrap();
+    let mut anchor = SceneEntityRecord::new(id("anchor"));
+    anchor.prefab = Some(PrefabInstance {
+        source: product(old, false),
+        overrides: None,
+    });
+    let request = PrefabCopyRequest::new(vec![
+        mapped_source("outer", PrefabDocument::from_ordered_roots([anchor])),
+        PrefabCopySource::new(
+            key("leaf"),
+            SourceDocumentKey::stable_asset(new, SourceDocumentKind::Prefab),
+            vec![product(old, false)],
+            product(new, true),
+            PrefabDocument::default(),
+        ),
+    ]);
+    assert!(matches!(
+        prepare_error(&request),
+        PrefabCopyError::AuxiliaryPrefabSource { .. }
     ));
 }
 

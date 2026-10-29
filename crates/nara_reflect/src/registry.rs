@@ -3187,14 +3187,11 @@ fn preflight_validation_value<E>(
                 )?;
             }
         }
-        (Shape::AssetRef, ComponentValue::Map(values)) => {
-            // is_asset_reference_value parses an owned AssetPath, or owns rejected UUID text.
-            if let Some(ComponentValue::String(payload)) = values.get("value") {
-                let kind_bytes = match values.get("kind") {
-                    Some(ComponentValue::String(kind)) => kind.len(),
-                    _ => 0,
-                };
-                admit(1, kind_bytes.saturating_add(payload.len()), payload.len())?;
+        (Shape::AssetRef, value) => {
+            // The same closed leaf grammar drives decoding and work admission. Product maps,
+            // source/selector text and UUID parser scratch must precede semantic validation.
+            if let Some(work) = crate::asset_reference::asset_reference_value_work(value) {
+                admit(work.nodes, work.logical_bytes, work.decode_allocation_bytes)?;
             }
         }
         _ => {}

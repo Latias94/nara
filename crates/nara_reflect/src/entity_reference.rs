@@ -893,6 +893,18 @@ impl<'schema, 'value, 'admission, E> PresentReferenceTraversal<'schema, 'value, 
             }
             (ComponentValueShape::AssetRef, value) => {
                 self.check_capability(field, ComponentCapability::AssetRef)?;
+                let asset_work = crate::asset_reference::asset_reference_value_work(value);
+                // Entity traversal also validates asset leaves. Admit the shared decoder's
+                // scratch before it parses either legacy text or a structured product.
+                if self.reference_kind != ComponentValueKind::AssetRef
+                    && let Some(work) = &asset_work
+                {
+                    self.admission.charge(
+                        work.nodes,
+                        work.logical_bytes,
+                        work.decode_allocation_bytes,
+                    )?;
+                }
                 if self.reference_kind != ComponentValueKind::AssetRef
                     && !crate::asset_reference::is_asset_reference_value(value)
                 {
@@ -904,9 +916,16 @@ impl<'schema, 'value, 'admission, E> PresentReferenceTraversal<'schema, 'value, 
                         .into(),
                     );
                 }
-                if let Some(payload) = value.get("value").and_then(ComponentValue::as_str) {
-                    self.result_bytes = self.result_bytes.saturating_add(payload.len());
-                }
+                let payload_bytes = asset_work.as_ref().map_or_else(
+                    || {
+                        value
+                            .get("value")
+                            .and_then(ComponentValue::as_str)
+                            .map_or(0, str::len)
+                    },
+                    |work| work.payload_bytes,
+                );
+                self.result_bytes = self.result_bytes.saturating_add(payload_bytes);
                 self.record(field, path, ComponentValueKind::AssetRef, value)?;
             }
             (ComponentValueShape::Record { members }, ComponentValue::Map(values)) => {
@@ -1033,7 +1052,12 @@ impl<'schema, 'value, 'admission, E> PresentReferenceTraversal<'schema, 'value, 
             }
             .into());
         }
-        let payload_bytes = if kind == ComponentValueKind::AssetRef {
+        let asset_work = (kind == ComponentValueKind::AssetRef)
+            .then(|| crate::asset_reference::asset_reference_value_work(value))
+            .flatten();
+        let payload_bytes = if let Some(work) = &asset_work {
+            work.payload_bytes
+        } else if kind == ComponentValueKind::AssetRef {
             value
                 .get("value")
                 .and_then(ComponentValue::as_str)
@@ -1051,16 +1075,13 @@ impl<'schema, 'value, 'admission, E> PresentReferenceTraversal<'schema, 'value, 
             size_of::<crate::DeclaredAssetReference>()
                 .checked_add(field.id().as_str().len())
                 .and_then(|bytes| {
-                    // Stable ID failures retain the supplied text in their typed error.
-                    let path_bytes = if matches!(
-                        value.get("kind").and_then(ComponentValue::as_str),
-                        Some("path" | "stable_id")
-                    ) {
-                        payload_bytes
-                    } else {
-                        0
-                    };
-                    bytes.checked_add(path_bytes)
+                    // Product diagnostics retain no supplied text, but canonical UUID checks
+                    // use bounded scratch. Legacy StableId failures still own their input.
+                    bytes.checked_add(
+                        asset_work
+                            .as_ref()
+                            .map_or(0, |work| work.decode_allocation_bytes),
+                    )
                 })
                 .ok_or(ComponentEntityReferenceRewriteError::ByteLimit {
                     maximum: self.limits.bytes().get(),

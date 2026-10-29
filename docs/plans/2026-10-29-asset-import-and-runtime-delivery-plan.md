@@ -64,6 +64,41 @@ Schema traversal or required-target validation for product references. Integrate
 boundary where the actual Runtime catalog consumer requires it; do not advertise current source
 Check as proving arbitrary subproduct selectors exist.
 
+The Runtime catalog step first replaces that opaque selector with a complete declared product
+reference in the existing asset-reference grammar. Reflect uses its existing asset leaf traversal
+and rewrite, while the project Host validates the selected product against the actual prepared
+domain value. Native primary-only stores and Prefab-source loading refuse auxiliary selections
+instead of silently loading their enclosing primary. Copying a source remaps its enclosing source
+identity and preserves its internal product-ID pattern. This reference integration is a
+prerequisite of the named catalog consumer, not completion of source-free delivery.
+
+### Runtime Base Implementation Order
+
+After the declared-product prerequisite, establish these owners in dependency order:
+
+- `nara_project` admits a profile-resolved Runtime configuration without authoring paths,
+  source identity, schema-bundle paths or import settings. Reuse its existing section validation,
+  lowering and product invariants; do not deserialize an effective value and bypass admission.
+  Projection refuses a remaining source-relative `input.action_map` until a concrete bounded
+  input resource has its own Runtime representation; explicit profile clearing remains valid.
+  Do not silently omit a requested input map.
+- Composition consumes the same admitted Runtime settings for source and catalog entry. Keep
+  source manifest/root lineage in the source candidate. Do not manufacture a `ProjectManifest`
+  or source lineage for processed delivery.
+- Bind the immutable base to a trusted expected catalog digest, target and this executable's
+  selected recipe/Schema before constructing the Runtime. A catalog cannot authorize itself by
+  supplying both its actual and expected digest. Source agreement and Runtime-base agreement
+  retain distinct proofs.
+- Prepare startup and later Scene requests from that exact admitted base and original plan.
+  Select the Scene representation through the Scene owner, preserve complete product identities,
+  and validate decoded domain products against their catalog identity. Reuse the existing Scene
+  transaction and physical cleanup owners. No authoring source, metadata or cache fallback is
+  permitted after selecting the processed base.
+
+This ordering records current design constraints. The catalog format, processed Scene format and
+complete runtime-input resource representation still need concrete owner implementation and
+qualification; these bullets do not establish an implemented delivery path.
+
 ## Owning Decisions
 
 [ADR 0103](../architecture/adr/0103-concrete-domain-owned-asset-import-execution.md) already admits

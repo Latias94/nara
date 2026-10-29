@@ -3,7 +3,7 @@ use std::{collections::BTreeMap, sync::Arc, time::Duration};
 use nara_app::{
     App, CoreStage, RuntimeControl, RuntimeControlRequestResult, RuntimeInstance, RuntimeState,
 };
-use nara_asset::AssetRef;
+use nara_asset::{AssetProductRef, AssetRef, ImportedProductId, StableAssetId};
 use nara_core::Vec2;
 use nara_ecs::{Entity, Res, ResMut, Resource, World};
 use nara_hierarchy::{
@@ -16,9 +16,10 @@ use nara_input::{
     InputTimeline, InputWindowEvent, InputWindowId, KeyCode, MAX_INPUT_TIMELINE_ENTRIES,
     MouseButton, PointerDriverInput, apply_mouse_driver_input_at, apply_pointer_driver_input_at,
 };
+use nara_reflect::__macro_support::PersistentFieldCodec;
 use nara_reflect::{
-    ComponentRegistry, ComponentRegistryPlugin, ComponentSchemaVersion, ComponentTypeId,
-    ComponentValue,
+    ComponentFieldPath, ComponentRegistry, ComponentRegistryPlugin, ComponentSchemaVersion,
+    ComponentTypeId, ComponentValue,
 };
 use nara_scene::{
     InMemoryPrefabSourceResolver, PrefabDocument, PrefabInstance, SceneDocument, SceneEntityId,
@@ -535,6 +536,50 @@ fn legacy_brush_migrations_preserve_roles_and_expose_image_asset_references() {
             .unwrap(),
         &ComponentValue::Null
     );
+}
+
+#[test]
+fn image_brush_preserves_declared_product_identity_and_rejects_non_path_consumption() {
+    let registry = frozen_ui_registry();
+    let snapshot = registry.snapshot().unwrap();
+    let component_id = ComponentTypeId::new("nara.ui.UiVisual");
+    let source = StableAssetId::parse_str("2f0d71c7-14fc-4ed4-b48b-1c61bba8b97f").unwrap();
+    let auxiliary =
+        ImportedProductId::parse_subproduct("011a8cc0-343a-4b95-8adb-3aa6d81977ed").unwrap();
+    let visual = UiVisual::image(
+        nara_ui_kernel::UiImageId::new("assets/ui/panel.png").unwrap(),
+        UiColor::rgba(1.0, 1.0, 1.0, 1.0),
+    );
+    let encoded = crate::codec::encode_visual(&visual).unwrap();
+    snapshot
+        .preflight_component(&component_id, &encoded)
+        .unwrap();
+
+    for product in [ImportedProductId::PRIMARY, auxiliary] {
+        let reference = AssetRef::product(AssetProductRef::new(source, product).unwrap());
+        let mut value = encoded.clone();
+        value
+            .set_path(
+                &ComponentFieldPath::from_fields(["background", "image"]),
+                reference.encode().unwrap(),
+            )
+            .unwrap();
+        let references = nara_reflect::collect_declared_asset_references(
+            &registry,
+            &component_id,
+            ComponentSchemaVersion(2),
+            &value,
+        )
+        .unwrap();
+
+        assert_eq!(references.len(), 1);
+        assert_eq!(references[0].asset_ref(), &reference);
+        assert!(matches!(
+            snapshot.preflight_component(&component_id, &value),
+            Err(nara_reflect::ComponentCodecError::InvalidField { field, expected })
+                if field == "background.image.kind" && expected == "path"
+        ));
+    }
 }
 
 #[test]

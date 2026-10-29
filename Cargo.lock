@@ -2139,6 +2139,7 @@ dependencies = [
  "nara_diagnostic",
  "nara_ecs",
  "nara_tasks",
+ "ron",
  "serde",
  "serde_json",
  "uuid",

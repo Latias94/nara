@@ -281,6 +281,12 @@ pub(crate) fn with_asset_ref(
                 Err(_) => with_sensitive(diagnostic, key),
             }
         }
+        AssetRef::Product(reference) => {
+            // UUID/product identity is public evidence. Slash keeps both coordinates in one
+            // identifier without using the colon-bearing lookup/display representation.
+            let product = format!("{}/{}", reference.source(), reference.product());
+            with_public_locator(diagnostic, key, &product)
+        }
     }
 }
 

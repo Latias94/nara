@@ -3,7 +3,9 @@ use std::{
     collections::{BTreeMap, BTreeSet},
 };
 
-use nara_asset::{AssetRef, AssetRefExportPolicy, ProjectAssetDatabase, StableAssetId};
+use nara_asset::{
+    AssetProductRef, AssetRef, AssetRefExportPolicy, ProjectAssetDatabase, StableAssetId,
+};
 use nara_diagnostic::{Diagnostic, DiagnosticReport};
 use nara_ecs::{Entity, World};
 use nara_hierarchy::{Children, HierarchyRoots, Parent, validate_hierarchy};
@@ -894,21 +896,27 @@ impl ExportValueContext<'_> {
 enum LoweredDataAssetReference<'a> {
     Path(&'a str),
     StableId(StableAssetId),
+    Product(AssetProductRef),
 }
 
 impl LoweredDataAssetReference<'_> {
     fn logical_bytes(&self) -> usize {
-        // The canonical asset wire value contains the keys "kind" and "value".
-        9_usize.saturating_add(match self {
-            Self::Path(path) => 4_usize.saturating_add(path.len()),
-            Self::StableId(_) => 9 + 36,
-        })
+        match self {
+            Self::Path(path) => 13_usize.saturating_add(path.len()),
+            Self::StableId(_) => 54,
+            Self::Product(reference) => {
+                crate::patch::asset_ref_value_size(&AssetRef::Product(*reference)).1
+            }
+        }
     }
 
     fn into_value(self) -> ComponentValue {
         let (kind, value) = match self {
             Self::Path(path) => ("path", path.to_owned()),
             Self::StableId(id) => ("stable_id", id.to_string()),
+            Self::Product(reference) => {
+                return crate::patch::asset_ref_value(&AssetRef::Product(reference));
+            }
         };
         ComponentValue::map([
             ("kind", ComponentValue::String(kind.to_owned())),
@@ -923,6 +931,9 @@ fn lower_data_asset_reference<'a>(
     database: Option<&'a ProjectAssetDatabase>,
 ) -> Option<LoweredDataAssetReference<'a>> {
     match (policy, reference) {
+        // Export policy chooses the spelling of primary source selectors only. An explicit
+        // product selection, including PRIMARY, remains complete under either policy.
+        (_, AssetRef::Product(reference)) => Some(LoweredDataAssetReference::Product(*reference)),
         (AssetRefExportPolicy::Path, AssetRef::Path(path)) => {
             Some(LoweredDataAssetReference::Path(path.as_str()))
         }

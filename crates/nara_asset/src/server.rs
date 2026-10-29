@@ -106,6 +106,10 @@ impl Display for AssetError {
 
 impl Error for AssetError {}
 
+/// Runtime identities and type claims for primary source products and anonymous assets.
+///
+/// Auxiliary product selection belongs to the concrete product owner. Resolve complete authored
+/// references through `AssetRef`; a source record alone carries no auxiliary selection.
 #[derive(Debug, Clone, PartialEq, Eq, Resource)]
 pub struct AssetServer {
     paths: HashMap<AssetPath, AssetId>,
@@ -152,6 +156,7 @@ impl AssetServer {
         Ok(id)
     }
 
+    /// Reserves the source's primary product; the record proves no auxiliary product membership.
     pub fn reserve_record<T: 'static>(
         &mut self,
         record: &AssetRecord,
@@ -168,6 +173,7 @@ impl AssetServer {
         self.claim(id)
     }
 
+    /// Binds only the source's primary runtime identity.
     pub fn reserve_record_id(&mut self, record: &AssetRecord) -> Result<AssetId, AssetError> {
         let path_id = self.paths.get(record.path()).copied();
         let stable_id = self.stable_ids.get(&record.stable_id()).copied();

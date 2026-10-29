@@ -125,6 +125,9 @@ fn copy_instance(
     mapping: &CopyMapping<'_>,
     budget: &mut CopyBudget,
 ) -> Result<(), PrefabCopyError> {
+    if !instance.source.is_primary() {
+        return Err(PrefabCopyError::AuxiliaryPrefabSource { source });
+    }
     instance.source = mapping.asset(&instance.source, source, budget)?;
     let Some(overlay) = &mut instance.overrides else {
         return Ok(());

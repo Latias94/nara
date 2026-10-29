@@ -697,9 +697,12 @@ impl EditorProjectSession {
             .as_ref()
             .ok_or("project.editor.prefab-source-not-an-anchor")?;
         let resolved_source;
+        if !instance.source.is_primary() {
+            return Err("project.editor.prefab-source-product-unsupported");
+        }
         let source = match &instance.source {
             AssetRef::Path(source) => source,
-            reference @ AssetRef::StableId(_) => {
+            reference @ (AssetRef::StableId(_) | AssetRef::Product(_)) => {
                 resolved_source = match &self.execution {
                     EditorExecutionLane::Authoring(snapshot) => snapshot
                         .asset_database()

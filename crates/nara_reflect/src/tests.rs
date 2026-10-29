@@ -430,16 +430,7 @@ fn asset_reference_defaults_require_the_exact_canonical_shape() {
 }
 
 fn asset_ref_value(asset_ref: &AssetRef) -> ComponentValue {
-    match asset_ref {
-        AssetRef::Path(path) => ComponentValue::map([
-            ("kind", ComponentValue::String("path".to_owned())),
-            ("value", ComponentValue::String(path.as_str().to_owned())),
-        ]),
-        AssetRef::StableId(id) => ComponentValue::map([
-            ("kind", ComponentValue::String("stable_id".to_owned())),
-            ("value", ComponentValue::String(id.to_string())),
-        ]),
-    }
+    crate::authoring::encode_persistent_field(asset_ref).unwrap()
 }
 
 #[test]

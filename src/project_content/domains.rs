@@ -34,13 +34,19 @@ pub struct ProjectAssetCollection<T> {
 }
 
 impl<T> ProjectAssetCollection<T> {
+    /// Looks up a primary product. Select a compound product through its domain's own API after
+    /// explicitly looking up the enclosing source; this method never discards an auxiliary ID.
     #[must_use]
     pub fn get(&self, reference: &AssetRef) -> Option<&T> {
+        if !reference.is_primary() {
+            return None;
+        }
         self.records
             .iter()
             .position(|record| match reference {
                 AssetRef::Path(path) => record.path() == path,
                 AssetRef::StableId(id) => record.stable_id() == *id,
+                AssetRef::Product(product) => record.stable_id() == product.source(),
             })
             .map(|index| &self.products[index])
     }
@@ -54,6 +60,10 @@ pub(super) trait ErasedCollection: Any + Send + Sync {
     fn domain_type(&self) -> std::any::TypeId;
     fn as_any(&self) -> &dyn Any;
     fn records(&self) -> &[AssetRecord];
+    fn validate_product_selections(
+        &self,
+        required: &mut RequiredAssetProducts,
+    ) -> Result<(), AssetProductRef>;
 }
 
 struct DomainCollection<D: AssetDomain>(ProjectAssetCollection<D::Product>);
@@ -67,6 +77,17 @@ impl<D: AssetDomain> ErasedCollection for DomainCollection<D> {
     }
     fn records(&self) -> &[AssetRecord] {
         &self.0.records
+    }
+    fn validate_product_selections(
+        &self,
+        required: &mut RequiredAssetProducts,
+    ) -> Result<(), AssetProductRef> {
+        for (record, product) in self.0.iter() {
+            if let Some(selections) = required.remove(&record.stable_id()) {
+                validate_product_membership::<D>(product, selections)?;
+            }
+        }
+        Ok(())
     }
 }
 
@@ -87,6 +108,30 @@ struct DomainAssetsInner {
 }
 
 impl ProjectDomainAssets {
+    pub(super) fn validate_product_selections(
+        &self,
+        required: &mut RequiredAssetProducts,
+    ) -> Result<(), ProjectContentError> {
+        catch_unwind(AssertUnwindSafe(|| {
+            for collection in &self.inner.collections {
+                collection
+                    .validate_product_selections(required)
+                    .map_err(missing_product)?;
+            }
+            if let Some(reference) = required.values().find_map(|products| products.first()) {
+                return Err(missing_product(*reference));
+            }
+            Ok(())
+        }))
+        .map_err(|_| {
+            ProjectContentError::single(
+                ProjectContentErrorKind::AssetDomain,
+                "project.content.domain-product-check-panicked",
+                "Prepared asset product membership query panicked",
+            )
+        })?
+    }
+
     pub(super) fn new(
         collections: Vec<Box<dyn ErasedCollection>>,
         lease: ProjectContentLease,
@@ -198,6 +243,7 @@ trait DomainProvider: Send + Sync {
         root: &nara_project::ProjectPath,
         records: Vec<AssetRecord>,
         cache: &mut SourceCache,
+        required_products: &mut RequiredAssetProducts,
     ) -> Result<Box<dyn ErasedCollection>, ProjectContentError>;
 }
 
@@ -218,6 +264,7 @@ impl<D: SourceAssetImporter> DomainProvider for TypedDomain<D> {
         root: &nara_project::ProjectPath,
         records: Vec<AssetRecord>,
         cache: &mut SourceCache,
+        required_products: &mut RequiredAssetProducts,
     ) -> Result<Box<dyn ErasedCollection>, ProjectContentError> {
         let limits = D::limits();
         let overhead = records.iter().try_fold(
@@ -292,6 +339,9 @@ impl<D: SourceAssetImporter> DomainProvider for TypedDomain<D> {
                 &mut read_dependency,
             ))
             .map_err(import_error)?;
+            if let Some(required) = required_products.remove(&record.stable_id()) {
+                validate_product_membership::<D>(&product, required).map_err(missing_product)?;
+            }
             drop(metadata);
             context.subtract_budget(ProjectContentBudgetKind::WorkBytes, metadata_work.reserved);
             context.subtract_budget(ProjectContentBudgetKind::WorkBytes, work.reserved);
@@ -386,6 +436,7 @@ impl LoadContext<'_> {
         assets: &DirectoryCapability,
         root: &nara_project::ProjectPath,
         paths: BTreeSet<AssetPath>,
+        required_products: &mut RequiredAssetProducts,
     ) -> Result<Vec<Box<dyn ErasedCollection>>, ProjectContentError> {
         let providers = self.domains;
         let mut collections = Vec::new();
@@ -444,7 +495,7 @@ impl LoadContext<'_> {
                     .cloned(),
             );
             let collection = catch_unwind(AssertUnwindSafe(|| {
-                provider.load(self, assets, root, records, &mut cache)
+                provider.load(self, assets, root, records, &mut cache, required_products)
             }))
             .map_err(|_| {
                 ProjectContentError::single(
@@ -459,7 +510,35 @@ impl LoadContext<'_> {
                 records_reservation.reserved,
             );
         }
+        if let Some(reference) = required_products
+            .values()
+            .find_map(|products| products.first())
+        {
+            return Err(missing_product(*reference));
+        }
         self.subtract_budget(ProjectContentBudgetKind::WorkBytes, cache.work_bytes);
         Ok(collections)
     }
+}
+
+fn validate_product_membership<D: AssetDomain>(
+    product: &D::Product,
+    required: BTreeSet<AssetProductRef>,
+) -> Result<(), AssetProductRef> {
+    for reference in required {
+        if !D::contains_product(product, reference.product()) {
+            return Err(reference);
+        }
+    }
+    Ok(())
+}
+
+fn missing_product(reference: AssetProductRef) -> ProjectContentError {
+    ProjectContentError::with_identifier(
+        ProjectContentErrorKind::AssetReference,
+        "project.content.asset-product-missing",
+        "Prepared asset does not contain a required product",
+        "asset-product",
+        &AssetRef::Product(reference).to_string(),
+    )
 }

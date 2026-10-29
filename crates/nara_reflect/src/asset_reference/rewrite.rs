@@ -8,14 +8,15 @@ use std::{
 
 use nara_asset::AssetRef;
 
-use super::{DeclaredAssetReference, asset_reference_parts, decode_asset_reference};
+use super::{
+    DeclaredAssetReference, asset_reference_encoding_work, asset_reference_value_work,
+    decode_asset_reference, encode_asset_reference_value,
+};
 use crate::{
-    ComponentCodecError, ComponentFieldPath, ComponentFieldPathSegment, ComponentValue,
-    EntityReferenceTraversalLimits, authoring::PersistentFieldCodec,
+    ComponentFieldPath, ComponentFieldPathSegment, ComponentValue, EntityReferenceTraversalLimits,
 };
 
 const MODELED_VALUE_NODE_BYTES: usize = 96;
-const STABLE_ASSET_ID_TEXT_BYTES: usize = 36;
 
 /// Separates stale or invalid recorded leaves, rewrite failures and caller work refusals.
 ///
@@ -45,10 +46,6 @@ pub enum AssetReferenceRewriteError<R, A = Infallible> {
     ChangedReference {
         path: ComponentFieldPath,
     },
-    Encoding {
-        path: ComponentFieldPath,
-        error: ComponentCodecError,
-    },
     Rewrite {
         path: ComponentFieldPath,
         error: R,
@@ -74,7 +71,7 @@ impl<R, A> Display for AssetReferenceRewriteError<R, A> {
             Self::DepthLimit { maximum } => {
                 write!(
                     formatter,
-                    "asset reference rewrite exceeded path depth {maximum}"
+                    "asset reference rewrite exceeded value depth {maximum}"
                 )
             }
             Self::ConflictingPaths { path, other } => write!(
@@ -95,12 +92,6 @@ impl<R, A> Display for AssetReferenceRewriteError<R, A> {
                 formatter,
                 "asset reference at '{path}' differs from the originally collected reference"
             ),
-            Self::Encoding { path, .. } => {
-                write!(
-                    formatter,
-                    "replacement asset reference at '{path}' could not be encoded"
-                )
-            }
             Self::Rewrite { path, .. } => {
                 write!(
                     formatter,
@@ -115,7 +106,6 @@ impl<R, A> Display for AssetReferenceRewriteError<R, A> {
 impl<R: Error + 'static, A: Error + 'static> Error for AssetReferenceRewriteError<R, A> {
     fn source(&self) -> Option<&(dyn Error + 'static)> {
         match self {
-            Self::Encoding { error, .. } => Some(error),
             Self::Rewrite { error, .. } => Some(error),
             Self::Admission(error) => Some(error),
             _ => None,
@@ -152,7 +142,7 @@ pub fn rewrite_declared_asset_references<E>(
 /// Rewrites collected leaves with explicit limits and pre-allocation work admission.
 ///
 /// The callback receives cumulative-work deltas: visited nodes, logical bytes and modeled
-/// allocation bytes. Limits bound cumulative node/byte work and recorded path depth. Work
+/// allocation bytes. Limits bound cumulative node/byte work and complete reference value depth. Work
 /// includes repeated path lookups, original reference decoding and replacement encoding.
 /// The sorted borrowed-path scratch, decoder allocations, complete replacement map and owned
 /// error paths are admitted before construction. Allocation uses the existing 96-byte value
@@ -187,25 +177,18 @@ pub fn rewrite_declared_asset_references_with_admission<R, A>(
                 path: work.copy_path(reference.path())?,
             });
         };
-        let (logical, allocated) = match asset_reference_parts(original) {
-            Some((kind, payload)) => {
-                let logical = kind
-                    .len()
-                    .checked_add(payload.len())
-                    .and_then(|bytes| bytes.checked_add(9))
-                    .ok_or_else(|| work.byte_limit())?;
-                let allocated = if matches!(kind, "path" | "stable_id") {
-                    payload.len()
-                } else {
-                    0
-                };
-                (logical, allocated)
-            }
-            None => (0, 0),
-        };
-        // The shared decoder owns a path String or the failed stable-ID text. Both are
-        // admitted before decoding; no replacement grammar is maintained by this helper.
-        work.charge(3, logical, allocated)?;
+        if let Some(decoded_work) = asset_reference_value_work(original) {
+            work.value_depth(reference.path(), decoded_work.depth)?;
+            work.charge(
+                decoded_work.nodes,
+                decoded_work.logical_bytes,
+                decoded_work.decode_allocation_bytes,
+            )?;
+        } else {
+            work.charge(1, 0, 0)?;
+        }
+        // The shared decoder's owned text and bounded product UUID scratch were admitted
+        // above. This helper maintains neither another wire grammar nor a Schema walker.
         let decoded = match decode_asset_reference(original) {
             Ok(decoded) => decoded,
             Err(_) => {
@@ -236,29 +219,17 @@ pub fn rewrite_declared_asset_references_with_admission<R, A>(
                 });
             }
         };
-        let (kind_bytes, payload_bytes) = match &replacement {
-            AssetRef::Path(path) => (4usize, path.as_str().len()),
-            AssetRef::StableId(_) => (9, STABLE_ASSET_ID_TEXT_BYTES),
-        };
-        let logical = payload_bytes
-            .checked_add(kind_bytes + 9)
+        let encoded_work = asset_reference_encoding_work(&replacement);
+        work.value_depth(reference.path(), encoded_work.depth)?;
+        let allocated = encoded_work
+            .logical_bytes
+            .checked_add(encoded_work.nodes * MODELED_VALUE_NODE_BYTES)
+            .and_then(|bytes| {
+                bytes.checked_add(encoded_work.map_entries * size_of::<(String, ComponentValue)>())
+            })
             .ok_or_else(|| work.byte_limit())?;
-        let allocated = logical
-            .checked_add(3 * MODELED_VALUE_NODE_BYTES)
-            .and_then(|bytes| bytes.checked_add(2 * size_of::<(String, ComponentValue)>()))
-            .ok_or_else(|| work.byte_limit())?;
-        work.charge(3, logical, allocated)?;
-        // Keep the sealed PersistentFieldCodec as the only canonical asset encoder.
-        let encoded = match replacement.encode() {
-            Ok(encoded) => encoded,
-            Err(error) => {
-                return Err(AssetReferenceRewriteError::Encoding {
-                    path: work.copy_path(reference.path())?,
-                    error,
-                });
-            }
-        };
-        *target = encoded;
+        work.charge(encoded_work.nodes, encoded_work.logical_bytes, allocated)?;
+        *target = encode_asset_reference_value(&replacement);
     }
     Ok(())
 }
@@ -385,6 +356,19 @@ impl<A> RewriteWork<'_, A> {
                 ComponentFieldPathSegment::Index(_) => size_of::<u32>(),
             };
             self.charge(1, bytes, 0)?;
+        }
+        Ok(())
+    }
+
+    fn value_depth<R>(
+        &self,
+        path: &ComponentFieldPath,
+        depth: usize,
+    ) -> Result<(), AssetReferenceRewriteError<R, A>> {
+        if path.segments().len().saturating_add(depth) > self.limits.depth().get() {
+            return Err(AssetReferenceRewriteError::DepthLimit {
+                maximum: self.limits.depth().get(),
+            });
         }
         Ok(())
     }

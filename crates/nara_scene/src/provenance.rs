@@ -45,6 +45,8 @@ pub(crate) fn provenance_asset_ref_bytes(source: &AssetRef) -> Option<usize> {
     match source {
         AssetRef::Path(path) => provenance_string_bytes(path.as_str()),
         AssetRef::StableId(_) => Some(16),
+        // Both identities are inline, already charged by the containing value's size_of.
+        AssetRef::Product(_) => Some(0),
     }
 }
 

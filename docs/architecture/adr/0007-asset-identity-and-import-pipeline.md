@@ -79,7 +79,10 @@ Core rules:
 
 ## Consequences
 
-- `AssetRef` in scene data should be able to represent both path and future stable ID forms.
+- `AssetRef` in scene data supports path and stable source forms. [ADR 0122](0122-scoped-imported-product-identity-and-authored-continuity.md)
+  adds a complete source-scoped product form through the same asset-reference Schema leaf.
+  Source-only resolution does not prove that the selected product exists, and primary-only
+  consumers refuse auxiliary selection.
 - `Handle<T>` should remain stable across reloads; asset data may carry an internal generation/version.
 - Import cache design is deferred but not ignored.
 - Asset loading can begin synchronous/path-based, but the API must allow asynchronous load states later.

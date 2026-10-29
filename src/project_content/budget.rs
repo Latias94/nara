@@ -673,6 +673,10 @@ struct ProjectContentLeaseInner {
 }
 
 impl ProjectContentLease {
+    pub(super) fn budget_ticket(&self) -> BudgetTicket {
+        self.inner.host.reserve()
+    }
+
     pub(crate) fn reserve_retained(
         &self,
         retained_bytes: usize,

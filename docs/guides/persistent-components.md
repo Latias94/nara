@@ -404,6 +404,13 @@ Narrow integer codecs check their declared range before conversion. Float codecs
 values and `f32` overflow; ordinary finite `f32` rounding is allowed. Integer wire kinds remain
 `I64` and `U64`, and both float types use the finite `F64` wire kind.
 
+`AssetRef::Product(AssetProductRef)` preserves a complete source-scoped product selection through
+the same asset-reference shape, including nested values and defaults. Handwritten codecs and
+field-edit payloads use `encode_asset_reference_value` and `decode_asset_reference_value` rather
+than reimplementing its wire grammar or importing derive internals. These helpers check syntax;
+source resolution and actual product membership belong to the content Host and selected domain.
+Use the budgeted collectors and rewrite when admitting an aggregate document.
+
 Type aliases and qualified type paths use ordinary Rust trait resolution. `Option<T>` has a
 required stored root and encodes `None` as explicit `Null`; it does not permit an absent root.
 Nested numeric domains apply to each element. Reference capabilities belong to the stable root

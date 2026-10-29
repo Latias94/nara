@@ -23,6 +23,18 @@ fn owner() -> PersistentComponentSchemaOwnerId {
 }
 
 fn asset_basis(field_count: usize, defaults: bool) -> AuthoringSchemaBasis {
+    asset_basis_with_reference(
+        field_count,
+        defaults,
+        &AssetRef::path("textures/a.png").unwrap(),
+    )
+}
+
+fn asset_basis_with_reference(
+    field_count: usize,
+    defaults: bool,
+    reference: &AssetRef,
+) -> AuthoringSchemaBasis {
     let schema = ComponentSchema::new(component(), "Assets", ComponentSchemaVersion::ONE)
         .with_capabilities(ComponentCapability::SCENE_AUTHORING)
         .with_fields((0..field_count).map(|index| {
@@ -33,7 +45,7 @@ fn asset_basis(field_count: usize, defaults: bool) -> AuthoringSchemaBasis {
                     &name,
                     ComponentFieldPath::from_fields([name.as_str()]),
                     nara_reflect::ComponentValueKind::AssetRef,
-                    crate::patch::asset_ref_value(&AssetRef::path("textures/a.png").unwrap()),
+                    crate::patch::asset_ref_value(reference),
                 )
             } else {
                 ComponentFieldSchema::optional(
@@ -318,6 +330,69 @@ fn default_asset_references_still_enforce_aggregate_node_and_byte_quotas() {
                 assert!(result.unwrap_err().diagnostics().iter().any(|diagnostic| {
                     diagnostic.code().as_str() == "scene.authoring-asset-reference-budget-exceeded"
                 }));
+            }
+        }
+    }
+}
+
+#[test]
+fn default_product_inventory_charges_complete_selection_bytes() {
+    for primary in [false, true] {
+        let reference = AssetRef::Product(
+            nara_asset::AssetProductRef::new(
+                "00000000-0000-4000-8000-000000000041".parse().unwrap(),
+                if primary {
+                    nara_asset::ImportedProductId::PRIMARY
+                } else {
+                    nara_asset::ImportedProductId::parse_subproduct(
+                        "00000000-0000-4000-8000-000000000051",
+                    )
+                    .unwrap()
+                },
+            )
+            .unwrap(),
+        );
+        let basis = asset_basis_with_reference(1, true, &reference);
+        let per_reference = crate::patch::asset_ref_value_size(&reference).1 + 2 * "image00".len();
+        let limits = SceneFileLimits::default()
+            .with_component_value_bytes(ByteLimit::new(3 * per_reference).unwrap());
+        for count in [3, 4] {
+            let document = SceneDocument::from_ordered_roots((0..count).map(|index| {
+                SceneEntityRecord::new(id(&format!("entity{index}")))
+                    .with_component(component(), record(ComponentValue::Map(BTreeMap::new())))
+            }));
+            crate::format::validate_scene_value_budget(&document, limits).unwrap();
+            let classified = classify_scene_document(
+                &document,
+                AuthoringDocumentSource::new(
+                    AssetRef::path("scenes/default-products.scene.json").unwrap(),
+                ),
+                AuthoringDocumentKind::Scene,
+                Arc::clone(&basis.0),
+                limits,
+            );
+            if count == 3 {
+                let classified = classified.unwrap();
+                let inventory = classified
+                    .schema_declared_asset_references()
+                    .collect::<Vec<_>>();
+                assert_eq!(inventory.len(), count);
+                assert!(
+                    inventory
+                        .iter()
+                        .all(|entry| entry.asset_ref() == &reference)
+                );
+            } else {
+                assert!(
+                    classified
+                        .unwrap_err()
+                        .diagnostics()
+                        .iter()
+                        .any(|diagnostic| {
+                            diagnostic.code().as_str()
+                                == "scene.authoring-asset-reference-budget-exceeded"
+                        })
+                );
             }
         }
     }

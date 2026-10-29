@@ -45,6 +45,13 @@ pub(crate) fn prefab_source_key(source: &AssetRef) -> SourceDocumentKey {
             SourceDocumentKind::Prefab,
         ),
         AssetRef::StableId(id) => SourceDocumentKey::stable_asset(*id, SourceDocumentKind::Prefab),
+        AssetRef::Product(reference) => {
+            assert!(
+                source.is_primary(),
+                "auxiliary products are not Prefab sources"
+            );
+            SourceDocumentKey::stable_asset(reference.source(), SourceDocumentKind::Prefab)
+        }
     }
 }
 
@@ -6545,16 +6552,7 @@ fn apply_fails_record(asset_ref: Option<AssetRef>) -> SceneComponentRecord {
 }
 
 fn asset_ref_value(asset_ref: &AssetRef) -> ComponentValue {
-    match asset_ref {
-        AssetRef::Path(path) => ComponentValue::map([
-            ("kind", ComponentValue::String("path".to_string())),
-            ("value", ComponentValue::String(path.as_str().to_string())),
-        ]),
-        AssetRef::StableId(id) => ComponentValue::map([
-            ("kind", ComponentValue::String("stable_id".to_string())),
-            ("value", ComponentValue::String(id.to_string())),
-        ]),
-    }
+    crate::patch::asset_ref_value(asset_ref)
 }
 
 fn test_database(stable_id: StableAssetId, path: &str) -> ProjectAssetDatabase {

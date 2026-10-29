@@ -707,28 +707,11 @@ fn a_retired_declared_target_refuses_the_entire_live_export() {
 }
 
 fn asset_value(reference: &AssetRef) -> ComponentValue {
-    let (kind, value) = match reference {
-        AssetRef::Path(path) => ("path", path.as_str().to_owned()),
-        AssetRef::StableId(id) => ("stable_id", id.to_string()),
-    };
-    ComponentValue::map([
-        ("kind", ComponentValue::String(kind.into())),
-        ("value", ComponentValue::String(value)),
-    ])
+    nara_reflect::encode_asset_reference_value(reference)
 }
 
 fn read_asset(value: &ComponentValue) -> Result<AssetRef, ComponentCodecError> {
-    let payload = value.field_str("value")?;
-    match value.field_str("kind")? {
-        "path" => AssetRef::path(payload)
-            .map_err(|_| ComponentCodecError::invalid_field("value", "asset path")),
-        "stable_id" => AssetRef::stable_id(payload)
-            .map_err(|_| ComponentCodecError::invalid_field("value", "stable asset ID")),
-        _ => Err(ComponentCodecError::invalid_field(
-            "kind",
-            "asset reference kind",
-        )),
-    }
+    nara_reflect::decode_asset_reference_value(value)
 }
 
 fn database(path: &str) -> (ProjectAssetDatabase, AssetRef) {

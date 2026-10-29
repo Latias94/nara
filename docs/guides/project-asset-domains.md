@@ -100,7 +100,10 @@ fn show_text(assets: nara::ecs::Res<nara::project_host::ProjectDomainAssets>) {
 ```
 
 `collection::<D: AssetDomain>()` distinguishes families even when they use the same Rust product type.
-`get(&AssetRef)` accepts either admitted path or stable identity. No mutable collection is exposed.
+`get(&AssetRef)` accepts an admitted path, stable identity or `Product` selecting `PRIMARY`.
+It refuses auxiliary selection. For a compound reference, explicitly look up its enclosing source
+with `AssetRef::StableId(reference.source())`, then use the concrete product's lookup API with the
+complete `AssetProductRef`. No mutable collection is exposed.
 Clone `ProjectDomainAssets` when retaining data beyond a borrow; this keeps its generation and
 budget alive. A domain whose products share allocations must retain this owner alongside them.
 
@@ -133,7 +136,13 @@ Neither format conversion method reads authoring source, sidecars or generated c
 cooking, member integrity, Runtime catalog admission, IO and publication remain separate owners.
 The compound text package uses this facet with `AssetProductRef` and `ImportedProductId` to keep
 two text entries stable across explicitly authored rebinds. The whole bundle owns the immutable
-entry map; this does not install global subresource loading or extend Scene's reference traversal.
+entry map. A persistent `AssetRef::Product(AssetProductRef)` uses the existing Schema asset leaf,
+collector and rewrite, including nested/default references. The project Host collects required
+targets during source discovery and calls `AssetDomain::contains_product` on the actual prepared
+value before publishing content. Its default accepts only `PRIMARY`; compound domains provide
+their bounded, pure membership query. Database source resolution alone does not prove product
+existence. Primary-only handles, Image/TileSet consumers and Prefab sources refuse auxiliary
+selection instead of silently loading the primary. This does not install global subresource loading.
 The [scoped identity decision](../architecture/adr/0122-scoped-imported-product-identity-and-authored-continuity.md)
 defines those limits. An encoded round trip alone is not source-free project delivery.
 

@@ -1,4 +1,4 @@
-use nara_asset::{AssetPath, StableAssetId};
+use nara_asset::{AssetPath, AssetProductRef, ImportedProductId, StableAssetId};
 use nara_reflect::{
     AuthoringSchemaBundle, AuthoringSchemaBundleOwner, ComponentCapability, ComponentFieldId,
     ComponentFieldPath, ComponentFieldSchema, ComponentPropertyPath, ComponentPropertyStep,
@@ -33,6 +33,20 @@ fn reference(name: &str) -> AssetRef {
 }
 fn asset(reference: &AssetRef) -> ComponentValue {
     crate::patch::asset_ref_value(reference)
+}
+
+fn product(source: StableAssetId, primary: bool) -> AssetRef {
+    AssetRef::Product(
+        AssetProductRef::new(
+            source,
+            if primary {
+                ImportedProductId::PRIMARY
+            } else {
+                ImportedProductId::parse_subproduct("00000000-0000-4000-8000-000000000033").unwrap()
+            },
+        )
+        .unwrap(),
+    )
 }
 fn field(name: &str, kind: ComponentValueKind) -> ComponentFieldSchema {
     ComponentFieldSchema::required(
@@ -594,6 +608,87 @@ fn admitted_stable_and_project_location_aliases_use_preferred_destination_refere
 }
 
 #[test]
+fn nested_primary_product_source_resolves_both_preferred_destination_spellings() {
+    let old: StableAssetId = "00000000-0000-4000-8000-000000000011".parse().unwrap();
+    let new: StableAssetId = "00000000-0000-4000-8000-000000000022".parse().unwrap();
+    let original = SourceDocumentKey::stable_asset(old, SourceDocumentKind::Prefab);
+    let destination = SourceDocumentKey::stable_asset(new, SourceDocumentKind::Prefab);
+    for preferred in [AssetRef::StableId(new), reference("copied-leaf")] {
+        let mut nested = anchor("host", "leaf", Some(PrefabOverlay::new(original.clone())));
+        nested.prefab.as_mut().unwrap().source = product(old, true);
+        let request = PrefabCopyRequest::new(vec![
+            mapped_source("outer", PrefabDocument::from_ordered_roots([nested])),
+            PrefabCopySource::new(
+                original.clone(),
+                destination.clone(),
+                vec![reference("leaf"), AssetRef::StableId(old)],
+                preferred.clone(),
+                PrefabDocument::from_ordered_roots([SceneEntityRecord::new(id("leaf"))]),
+            ),
+        ]);
+        // Preparation includes production compilation of the copied nested instance, rather
+        // than only checking the rewritten asset value in an ordinary component field.
+        let prepared = request
+            .prepare(&basis(), PrefabCopyLimits::default())
+            .unwrap();
+        let nested = prepared.sources()[0].document.entities[0]
+            .prefab
+            .as_ref()
+            .unwrap();
+        assert_eq!(nested.source, product(new, true));
+        assert_eq!(nested.overrides.as_ref().unwrap().base, destination);
+        assert_eq!(prepared.sources()[1].destination_reference(), &preferred);
+        assert_eq!(
+            request.sources[0].document.entities[0]
+                .prefab
+                .as_ref()
+                .unwrap()
+                .source,
+            product(old, true)
+        );
+    }
+}
+
+#[test]
+fn destination_product_resolution_requires_unique_keys_and_exact_aliases() {
+    let new: StableAssetId = "00000000-0000-4000-8000-000000000022".parse().unwrap();
+    let destination = SourceDocumentKey::stable_asset(new, SourceDocumentKind::Prefab);
+    for (other_destination, other_reference, duplicate_key) in [
+        (destination.clone(), reference("copied-other"), true),
+        (key("copied-other"), product(new, true), false),
+    ] {
+        let request = PrefabCopyRequest::new(vec![
+            PrefabCopySource::new(
+                key("leaf"),
+                destination.clone(),
+                vec![reference("leaf")],
+                product(new, true),
+                PrefabDocument::default(),
+            ),
+            PrefabCopySource::new(
+                key("other"),
+                other_destination,
+                vec![reference("other")],
+                other_reference,
+                PrefabDocument::default(),
+            ),
+        ]);
+        let error = refusals::prepare_error(&request);
+        if duplicate_key {
+            assert!(matches!(
+                error,
+                PrefabCopyError::DuplicateDestination { source: 1 }
+            ));
+        } else {
+            assert!(matches!(
+                error,
+                PrefabCopyError::DestinationAliasCollision { source: 1 }
+            ));
+        }
+    }
+}
+
+#[test]
 fn selected_nested_asset_shape_uses_scalar_payload_relative_paths() {
     let mut request = nested_fixture();
     request.sources[2]
@@ -652,5 +747,203 @@ fn selected_nested_asset_shape_uses_scalar_payload_relative_paths() {
         vec![ComponentPropertyStep::Member(ComponentFieldId::new(
             "source-member"
         ))]
+    );
+}
+
+#[test]
+fn nested_prefab_copy_remaps_product_sources_without_rekeying_inner_products() {
+    let old: StableAssetId = "00000000-0000-4000-8000-000000000011".parse().unwrap();
+    let new: StableAssetId = "00000000-0000-4000-8000-000000000022".parse().unwrap();
+    let mut request = nested_fixture();
+    request.sources[2]
+        .original_references
+        .push(AssetRef::StableId(old));
+    request.sources[2].destination_reference = AssetRef::StableId(new);
+    request.sources[2].destination =
+        SourceDocumentKey::stable_asset(new, SourceDocumentKind::Prefab);
+    let leaf = request.sources[2]
+        .document
+        .entities
+        .iter_mut()
+        .find(|entity| entity.id == id("a"))
+        .unwrap();
+    leaf.components.insert(
+        component("Assets"),
+        record(ComponentValue::map([
+            ("asset", asset(&product(old, false))),
+            (
+                "plain",
+                ComponentValue::String(product(old, false).to_string()),
+            ),
+        ])),
+    );
+    leaf.components.insert(
+        component("Container"),
+        record(ComponentValue::map([(
+            "payload",
+            ComponentValue::map([("source", asset(&product(old, true)))]),
+        )])),
+    );
+    let overlay = request.sources[0].document.entities[0]
+        .prefab
+        .as_mut()
+        .unwrap()
+        .overrides
+        .as_mut()
+        .unwrap();
+    let PrefabComponentIntent::Properties { claims, .. } = &mut overlay.components[1] else {
+        panic!("asset property");
+    };
+    claims[0].intent = PrefabPropertyIntent::Set(asset(&product(old, false)));
+    let originals: Vec<_> = request
+        .sources
+        .iter()
+        .map(|source| source.document.clone())
+        .collect();
+    let prepared = request
+        .prepare(&basis(), PrefabCopyLimits::default())
+        .unwrap();
+    assert!(
+        request
+            .sources
+            .iter()
+            .zip(originals)
+            .all(|(source, original)| source.document == original)
+    );
+    let leaf = prepared.sources()[2]
+        .document
+        .entities
+        .iter()
+        .find(|entity| entity.id == id("a"))
+        .unwrap();
+    assert_eq!(
+        leaf.components[&component("Assets")].value.get("asset"),
+        Some(&asset(&product(new, false)))
+    );
+    assert_eq!(
+        leaf.components[&component("Assets")].value.get("plain"),
+        Some(&ComponentValue::String(product(old, false).to_string()))
+    );
+    assert_eq!(
+        leaf.components[&component("Container")]
+            .value
+            .get("payload")
+            .unwrap()
+            .get("source"),
+        Some(&asset(&product(new, true)))
+    );
+    let overlay = prepared.sources()[0].document.entities[0]
+        .prefab
+        .as_ref()
+        .unwrap()
+        .overrides
+        .as_ref()
+        .unwrap();
+    let PrefabComponentIntent::Properties { target, claims, .. } = &overlay.components[1] else {
+        panic!("asset property");
+    };
+    assert_eq!(
+        claims[0].intent,
+        PrefabPropertyIntent::Set(asset(&product(new, false)))
+    );
+    assert_eq!(
+        target.through[0].expected_base,
+        SourceDocumentKey::stable_asset(new, SourceDocumentKind::Prefab)
+    );
+}
+
+#[test]
+fn product_copy_accepts_only_explicit_enclosing_source_mappings_with_stable_destinations() {
+    let old: StableAssetId = "00000000-0000-4000-8000-000000000011".parse().unwrap();
+    let new: StableAssetId = "00000000-0000-4000-8000-000000000022".parse().unwrap();
+    for stable_origin in [false, true] {
+        let original = if stable_origin {
+            SourceDocumentKey::stable_asset(old, SourceDocumentKind::Prefab)
+        } else {
+            key("leaf")
+        };
+        let aliases = if stable_origin {
+            vec![reference("leaf")]
+        } else {
+            vec![product(old, true)]
+        };
+        let source = PrefabCopySource::new(
+            original,
+            SourceDocumentKey::stable_asset(new, SourceDocumentKind::Prefab),
+            aliases,
+            AssetRef::StableId(new),
+            PrefabDocument::from_ordered_roots([SceneEntityRecord::new(id("leaf"))
+                .with_component(
+                    component("Assets"),
+                    record(ComponentValue::map([
+                        ("asset", asset(&product(old, false))),
+                        ("plain", ComponentValue::String("retained".into())),
+                    ])),
+                )]),
+        );
+        let prepared = PrefabCopyRequest::new(vec![source])
+            .prepare(&basis(), PrefabCopyLimits::default())
+            .unwrap();
+        assert_eq!(
+            prepared.sources()[0].document.entities[0].components[&component("Assets")]
+                .value
+                .get("asset"),
+            Some(&asset(&product(new, false)))
+        );
+    }
+    let source = PrefabCopySource::new(
+        key("leaf"),
+        key("copied-leaf"),
+        vec![AssetRef::StableId(old)],
+        reference("copied-leaf"),
+        PrefabDocument::from_ordered_roots([SceneEntityRecord::new(id("leaf")).with_component(
+            component("Assets"),
+            record(ComponentValue::map([
+                ("asset", asset(&product(old, false))),
+                ("plain", ComponentValue::String("retained".into())),
+            ])),
+        )]),
+    );
+    assert!(matches!(
+        refusals::prepare_error(&PrefabCopyRequest::new(vec![source])),
+        PrefabCopyError::ProductSourceIdentityUnavailable { .. }
+    ));
+}
+
+#[test]
+fn complete_product_copy_alias_precedes_enclosing_source_alias() {
+    let old: StableAssetId = "00000000-0000-4000-8000-000000000011".parse().unwrap();
+    let new: StableAssetId = "00000000-0000-4000-8000-000000000022".parse().unwrap();
+    let other: StableAssetId = "00000000-0000-4000-8000-000000000044".parse().unwrap();
+    let payload = record(ComponentValue::map([
+        ("asset", asset(&product(old, true))),
+        ("plain", ComponentValue::String("retained".into())),
+    ]));
+    let request = PrefabCopyRequest::new(vec![
+        PrefabCopySource::new(
+            key("explicit"),
+            SourceDocumentKey::stable_asset(new, SourceDocumentKind::Prefab),
+            vec![product(old, true)],
+            product(new, true),
+            PrefabDocument::from_ordered_roots([
+                SceneEntityRecord::new(id("leaf")).with_component(component("Assets"), payload)
+            ]),
+        ),
+        PrefabCopySource::new(
+            key("enclosing"),
+            SourceDocumentKey::stable_asset(other, SourceDocumentKind::Prefab),
+            vec![AssetRef::StableId(old)],
+            AssetRef::StableId(other),
+            PrefabDocument::default(),
+        ),
+    ]);
+    let prepared = request
+        .prepare(&basis(), PrefabCopyLimits::default())
+        .unwrap();
+    assert_eq!(
+        prepared.sources()[0].document.entities[0].components[&component("Assets")]
+            .value
+            .get("asset"),
+        Some(&asset(&product(new, true)))
     );
 }

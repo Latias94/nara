@@ -17,8 +17,9 @@ use std::{
 };
 
 use nara_asset::{
-    AssetMetaCandidate, AssetMetaFileLimits, AssetMetaIdentityCandidate, AssetPath, AssetRecord,
-    AssetRef, AssetSourceKind, ProjectAssetDatabase,
+    AssetMetaCandidate, AssetMetaFileLimits, AssetMetaIdentityCandidate, AssetPath,
+    AssetProductRef, AssetRecord, AssetRef, AssetSourceKind, ImportedProductId,
+    ProjectAssetDatabase, StableAssetId,
 };
 use nara_core::ByteLimit;
 use nara_diagnostic::{
@@ -31,8 +32,11 @@ use nara_image::{
     ImageImportSettings, ImageImporter, ImageImporterCreateError,
 };
 use nara_reflect::{
-    ComponentValueMaterializationLimits, DeclaredAssetReferenceError, SchemaCompositionFingerprint,
-    collect_declared_asset_references_from_schema,
+    __private::{
+        AssetReferenceCollectionError, collect_declared_effective_asset_references_with_admission,
+    },
+    ComponentValueMaterializationLimits, DeclaredAssetReference, DeclaredAssetReferenceError,
+    EntityReferenceTraversalLimits, SchemaCompositionFingerprint,
 };
 use nara_scene::{
     ExpandedSceneCandidate, PrefabDocument, PrefabDocumentCandidate, PrefabSourceResolver,
@@ -455,6 +459,7 @@ impl ProjectContentSnapshot {
                 diagnostics,
             ));
         }
+        self.validate_editor_product_selections(expanded, bindings)?;
         let retained_bytes = editor_startup_scene_retained_bytes(&expanded_candidate)?;
         let lease = self
             .inner
@@ -469,6 +474,58 @@ impl ProjectContentSnapshot {
             retained_bytes,
             Arc::clone(&self.inner.schema_authority),
         ))
+    }
+
+    fn validate_editor_product_selections(
+        &self,
+        document: &SceneDocument,
+        bindings: &SceneComponentBindings,
+    ) -> Result<(), ProjectContentError> {
+        let mut budget = self.inner._runtime_lease.budget_ticket();
+        let mut required = RequiredAssetProducts::default();
+        for entity in &document.entities {
+            for (component, value) in &entity.components {
+                let schema = bindings.schema(component).ok_or_else(|| {
+                    ProjectContentError::single(
+                        ProjectContentErrorKind::AssetReference,
+                        "project.content.asset-reference-invalid",
+                        "Editor Scene component has no admitted asset-reference schema",
+                    )
+                })?;
+                let (references, work_bytes) =
+                    collect_effective_asset_references(schema, value, &mut budget)?;
+                for reference in references {
+                    budget
+                        .add(ProjectContentBudgetKind::DependencyEdges, 1)
+                        .map_err(ProjectContentError::budget)?;
+                    let source = self
+                        .inner
+                        .assets
+                        .database()
+                        .resolve_ref(reference.asset_ref())
+                        .map_err(|_| {
+                            ProjectContentError::single(
+                                ProjectContentErrorKind::AssetReference,
+                                "project.content.asset-reference-unresolved",
+                                "Editor Scene asset source is outside the admitted content",
+                            )
+                        })?;
+                    if self.inner.domain_authority.supports(source.source_kind()) {
+                        require_asset_product(
+                            &mut required,
+                            &mut budget,
+                            required_product(reference.asset_ref(), source)?,
+                        )?;
+                    } else if !reference.asset_ref().is_primary() {
+                        return Err(unsupported_product_selection(reference.asset_ref()));
+                    }
+                }
+                budget.subtract(ProjectContentBudgetKind::WorkBytes, work_bytes);
+            }
+        }
+        self.inner
+            .domain_assets
+            .validate_product_selections(&mut required)
     }
 
     #[cfg(feature = "presentation-2d")]
@@ -511,9 +568,14 @@ struct SnapshotPrefabResolver<'a> {
 
 impl PrefabSourceResolver for SnapshotPrefabResolver<'_> {
     fn resolve_prefab(&self, source: &AssetRef) -> Option<ResolvedPrefabSource> {
+        if !source.is_primary() {
+            return None;
+        }
         let path = match source {
             AssetRef::Path(path) => path,
-            AssetRef::StableId(_) => self.database.resolve_ref(source).ok()?.path(),
+            AssetRef::StableId(_) | AssetRef::Product(_) => {
+                self.database.resolve_ref(source).ok()?.path()
+            }
         };
         self.prefabs
             .iter()
@@ -1081,7 +1143,11 @@ struct SourceCandidates {
     images: BTreeSet<AssetPath>,
     tilesets: BTreeSet<AssetPath>,
     domains: BTreeSet<AssetPath>,
+    products: RequiredAssetProducts,
+    product_work_bytes: usize,
 }
+
+type RequiredAssetProducts = BTreeMap<StableAssetId, BTreeSet<AssetProductRef>>;
 
 struct LoadContext<'a> {
     loader: &'a ProjectContentLoader,
@@ -1371,9 +1437,18 @@ impl<'a> LoadContext<'a> {
             )?;
         }
 
-        let sources = self.collect_source_candidates(expanded, &assets)?;
-        let domain_collections =
-            self.load_domains(&assets, &settings.paths.assets, sources.domains)?;
+        let mut sources = self.collect_source_candidates(expanded, &assets)?;
+        let domain_collections = self.load_domains(
+            &assets,
+            &settings.paths.assets,
+            sources.domains,
+            &mut sources.products,
+        )?;
+        drop(sources.products);
+        self.subtract_budget(
+            ProjectContentBudgetKind::WorkBytes,
+            sources.product_work_bytes,
+        );
         let (tilesets, tileset_work) =
             self.load_tilesets(&assets, &settings.paths.assets, sources.tilesets)?;
         let mut image_paths = sources.images;
@@ -1893,26 +1968,32 @@ impl<'a> LoadContext<'a> {
         let mut sources = SourceCandidates::default();
         for entity in &document.entities {
             for (component, record) in &entity.components {
-                let schema = self
-                    .validation
-                    .bindings()
-                    .schema(component)
-                    .ok_or_else(|| {
-                        map_asset_reference_error(DeclaredAssetReferenceError::UnknownComponent {
-                            component: component.clone(),
-                        })
-                    })?;
-                let references = collect_declared_asset_references_from_schema(
-                    schema,
-                    record.version,
-                    &record.value,
-                )
-                .map_err(map_asset_reference_error)?;
+                let validation = self.validation;
+                let schema = validation.bindings().schema(component).ok_or_else(|| {
+                    map_asset_reference_error(DeclaredAssetReferenceError::UnknownComponent {
+                        component: component.clone(),
+                    })
+                })?;
+                let (references, reference_work) =
+                    collect_effective_asset_references(schema, record, self.budget_mut())?;
                 for reference in references {
                     self.add_budget(ProjectContentBudgetKind::DependencyEdges, 1)?;
                     let source = self.discover_source_reference(assets, reference.asset_ref())?;
                     let path = source.path();
                     self.observe_path(path.as_str())?;
+                    if self.domains.supports(source.source_kind()) {
+                        let bytes = require_asset_product(
+                            &mut sources.products,
+                            self.budget_mut(),
+                            required_product(reference.asset_ref(), &source)?,
+                        )?;
+                        sources.product_work_bytes = sources
+                            .product_work_bytes
+                            .checked_add(bytes)
+                            .ok_or_else(|| overflow_budget(ProjectContentBudgetKind::WorkBytes))?;
+                    } else if !reference.asset_ref().is_primary() {
+                        return Err(unsupported_product_selection(reference.asset_ref()));
+                    }
                     let paths = match source.source_kind() {
                         AssetSourceKind::Image => &mut sources.images,
                         AssetSourceKind::Other(kind) if kind == "tileset" => &mut sources.tilesets,
@@ -1932,6 +2013,7 @@ impl<'a> LoadContext<'a> {
                         paths.insert(path.clone());
                     }
                 }
+                self.subtract_budget(ProjectContentBudgetKind::WorkBytes, reference_work);
             }
         }
         Ok(sources)
@@ -2044,6 +2126,9 @@ impl<'a> LoadContext<'a> {
                     .find(|tileset| match reference {
                         AssetRef::Path(path) => &tileset.path == path,
                         AssetRef::StableId(id) => &tileset.stable_id == id,
+                        AssetRef::Product(product) => {
+                            reference.is_primary() && tileset.stable_id == product.source()
+                        }
                     })
                     .map(|tileset| tileset.source.atlas)
             });
@@ -2628,6 +2713,87 @@ fn map_scene_diagnostics(
         default_kind
     };
     ProjectContentError::with_report(kind, diagnostics)
+}
+
+fn collect_effective_asset_references(
+    schema: &nara_reflect::ComponentSchema,
+    record: &nara_scene::SceneComponentRecord,
+    budget: &mut BudgetTicket,
+) -> Result<(Vec<DeclaredAssetReference>, usize), ProjectContentError> {
+    let mut work_bytes = 0usize;
+    let references = collect_declared_effective_asset_references_with_admission(
+        schema,
+        record.version,
+        &record.value,
+        EntityReferenceTraversalLimits::default(),
+        |_, _, allocation| {
+            budget
+                .add(ProjectContentBudgetKind::WorkBytes, allocation)
+                .map_err(ProjectContentError::budget)?;
+            work_bytes = work_bytes
+                .checked_add(allocation)
+                .ok_or_else(|| overflow_budget(ProjectContentBudgetKind::WorkBytes))?;
+            Ok(())
+        },
+    )
+    .map_err(|error| match error {
+        AssetReferenceCollectionError::Reference(error) => map_asset_reference_error(error),
+        AssetReferenceCollectionError::Admission(error) => error,
+    })?;
+    Ok((references, work_bytes))
+}
+
+fn required_product(
+    reference: &AssetRef,
+    source: &AssetRecord,
+) -> Result<AssetProductRef, ProjectContentError> {
+    match reference {
+        AssetRef::Product(reference) => Ok(*reference),
+        AssetRef::Path(_) | AssetRef::StableId(_) => {
+            AssetProductRef::new(source.stable_id(), ImportedProductId::PRIMARY)
+                .map_err(|_| catalogue::identity_conflict(source.path()))
+        }
+    }
+}
+
+fn require_asset_product(
+    required: &mut RequiredAssetProducts,
+    budget: &mut BudgetTicket,
+    product: AssetProductRef,
+) -> Result<usize, ProjectContentError> {
+    let selected = required.get(&product.source());
+    if selected.is_some_and(|products| products.contains(&product)) {
+        return Ok(0);
+    }
+    let bytes = checked_plan_sum(
+        ProjectContentBudgetKind::WorkBytes,
+        [
+            size_of::<AssetProductRef>() + BTREE_ENTRY_OVERHEAD,
+            if selected.is_none() {
+                size_of::<(StableAssetId, BTreeSet<AssetProductRef>)>() + BTREE_ENTRY_OVERHEAD
+            } else {
+                0
+            },
+        ],
+    )?;
+    budget
+        .add(ProjectContentBudgetKind::WorkBytes, bytes)
+        .map_err(ProjectContentError::budget)?;
+    required
+        .entry(product.source())
+        .or_default()
+        .insert(product);
+    Ok(bytes)
+}
+
+fn unsupported_product_selection(reference: &AssetRef) -> ProjectContentError {
+    ProjectContentError::with_identifier(
+        ProjectContentErrorKind::AssetReference,
+        "project.content.asset-product-unsupported",
+        "This asset source consumer supports only its primary product",
+        "asset-product",
+        &reference.to_string(),
+    )
 }
 
 fn tilemap_membership_error(
@@ -3388,6 +3554,52 @@ mod tests {
         );
         drop(snapshot);
         assert_eq!(loader.budget_snapshot().active_reservations(), 0);
+        // The path-only load above must avoid the deliberately invalid unused metadata. Explicit
+        // stable product selection now requires a complete valid identity catalogue instead.
+        fs::write(
+            project.root.join("assets/unused.png.meta"),
+            AssetMeta::new(
+                AssetMetaIdentity::new(
+                    StableAssetId::parse_str("706fd198-2412-4ccb-a398-f9f826fbe208").unwrap(),
+                    AssetPath::new("unused.png").unwrap(),
+                    AssetSourceKind::Image,
+                ),
+                nara_image::ImageImportSettings::default(),
+            )
+            .to_json_string()
+            .unwrap(),
+        )
+        .unwrap();
+        for product in [
+            nara_asset::ImportedProductId::PRIMARY,
+            nara_asset::ImportedProductId::parse_subproduct("dd195b6a-449c-4e1a-bec5-24aa8d83870c")
+                .unwrap(),
+        ] {
+            let reference =
+                nara_asset::AssetProductRef::new(metadata.identity().stable_id(), product).unwrap();
+            let mut selected = document.clone();
+            selected.entities[0]
+                .components
+                .get_mut(&data)
+                .unwrap()
+                .value = nara_reflect::encode_asset_reference_value(&AssetRef::Product(reference));
+            fs::write(
+                project.root.join("scenes/startup.scene.json"),
+                selected.to_json_string().unwrap(),
+            )
+            .unwrap();
+            if product == nara_asset::ImportedProductId::PRIMARY {
+                let selected = loader.load(&candidate, &plan).unwrap();
+                assert_eq!(selected.images().len(), 1);
+            } else {
+                let rejected = loader.load(&candidate, &plan).unwrap_err();
+                assert_eq!(rejected.kind(), ProjectContentErrorKind::AssetReference);
+                assert!(rejected.diagnostics().iter().any(|diagnostic| {
+                    diagnostic.code().as_str() == "project.content.asset-product-unsupported"
+                }));
+            }
+            assert_eq!(loader.budget_snapshot().active_reservations(), 0);
+        }
         let limits = ProjectContentLimits::default()
             .with_limit(ProjectContentBudgetKind::RetainedBytes, metadata_bytes - 1)
             .unwrap();

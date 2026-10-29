@@ -11,7 +11,7 @@ mod tests;
 
 use std::{collections::HashMap, error::Error, fmt, sync::Arc};
 
-use nara_asset::AssetRef;
+use nara_asset::{AssetProductRef, AssetRef, ImportedProductId};
 use nara_diagnostic::DiagnosticReport;
 use nara_reflect::{
     AssetReferenceRewriteError, ComponentCodecError, ComponentPropertyError,
@@ -28,6 +28,10 @@ use budget::CopyBudget;
 pub use budget::PrefabCopyLimits;
 
 /// One Host-admitted source, its complete lookup aliases and an independent destination.
+///
+/// This is a native Prefab closure member, not a general compound source-copy operation.
+/// Product fields may reuse an explicitly supplied enclosing source mapping, retaining their
+/// product IDs. A destination without stable source identity cannot represent that substitution.
 #[derive(Debug)]
 pub struct PrefabCopySource {
     original: SourceDocumentKey,
@@ -216,6 +220,12 @@ pub enum PrefabCopyError {
     UnmappedAssetReference {
         source: usize,
     },
+    ProductSourceIdentityUnavailable {
+        source: usize,
+    },
+    AuxiliaryPrefabSource {
+        source: usize,
+    },
     UnmappedSourceKey {
         source: usize,
     },
@@ -373,16 +383,74 @@ impl<'a> CopyMapping<'a> {
         budget: &mut CopyBudget,
     ) -> Result<AssetRef, PrefabCopyError> {
         budget.charge(1, budget::asset_bytes(reference), 0)?;
-        let index = self
-            .aliases
-            .get(reference)
-            .ok_or(PrefabCopyError::UnmappedAssetReference { source })?;
-        let destination = &self.sources[*index].destination_reference;
+        // A complete explicitly admitted selection wins over enclosing-source substitution.
+        // Source substitution never invents a product mapping or rekeys an inner product ID.
+        let exact = self.aliases.get(reference).copied();
+        let index = match exact {
+            Some(index) => index,
+            None => {
+                let product = reference
+                    .as_product()
+                    .ok_or(PrefabCopyError::UnmappedAssetReference { source })?;
+                let primary = AssetRef::Product(
+                    AssetProductRef::new(product.source(), ImportedProductId::PRIMARY)
+                        .expect("an admitted product has a non-nil source"),
+                );
+                if let Some(index) = self
+                    .aliases
+                    .get(&AssetRef::StableId(product.source()))
+                    .or_else(|| self.aliases.get(&primary))
+                {
+                    *index
+                } else {
+                    let mut selected = None;
+                    for (index, candidate) in self.sources.iter().enumerate() {
+                        budget.charge(1, candidate.original.retained_bytes(), 0)?;
+                        if matches!(
+                            candidate.original.origin(),
+                            crate::SourceDocumentOrigin::StableAsset { stable_id }
+                                if *stable_id == product.source()
+                        ) {
+                            selected = Some(index);
+                            break;
+                        }
+                    }
+                    selected.ok_or(PrefabCopyError::UnmappedAssetReference { source })?
+                }
+            }
+        };
+        let mapped = &self.sources[index];
+        let destination = &mapped.destination_reference;
         budget.charge(
             1,
             budget::asset_bytes(destination),
             budget::asset_bytes(destination),
         )?;
+        if let Some(product) = reference.as_product() {
+            if exact.is_some() && destination.as_product().is_some() {
+                return Ok(destination.clone());
+            }
+            let stable_id = match destination {
+                AssetRef::StableId(id) => Some(*id),
+                AssetRef::Product(reference) if destination.is_primary() => {
+                    Some(reference.source())
+                }
+                AssetRef::Path(_) => match mapped.destination.origin() {
+                    crate::SourceDocumentOrigin::StableAsset { stable_id } => Some(*stable_id),
+                    _ => None,
+                },
+                AssetRef::Product(_) => None,
+            }
+            .ok_or(PrefabCopyError::ProductSourceIdentityUnavailable { source })?;
+            let rewritten = AssetRef::Product(
+                AssetProductRef::new(stable_id, product.product())
+                    .map_err(|_| PrefabCopyError::ProductSourceIdentityUnavailable { source })?,
+            );
+            // Charge the inline replacement separately; Reflect admits its complete nested
+            // canonical value before allocating any encoded strings or map nodes.
+            budget.charge(1, budget::asset_bytes(&rewritten), 0)?;
+            return Ok(rewritten);
+        }
         Ok(destination.clone())
     }
 
@@ -455,6 +523,21 @@ fn validate_closure(
             let index = sources
                 .iter()
                 .position(|source| &source.destination_reference == reference)
+                .or_else(|| {
+                    let product = reference
+                        .as_product()
+                        .filter(|product| product.product() == ImportedProductId::PRIMARY)?;
+                    // Copying preserves explicit PRIMARY selections even when the preferred
+                    // destination spelling is a path or stable ID. Admission makes destination
+                    // keys unique; only their actual stable origin can prove this fallback.
+                    sources.iter().position(|source| {
+                        matches!(
+                            source.destination.origin(),
+                            crate::SourceDocumentOrigin::StableAsset { stable_id }
+                                if *stable_id == product.source()
+                        )
+                    })
+                })
                 .ok_or(PrefabCopyError::UnmappedAssetReference {
                     source: sources.len(),
                 })?;

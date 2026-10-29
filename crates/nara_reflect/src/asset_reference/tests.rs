@@ -506,3 +506,309 @@ fn selected_collectors_keep_exact_input_and_output_traversal_limits() {
         assert_eq!(value, original);
     }
 }
+
+fn product_reference(subproduct: bool) -> AssetRef {
+    AssetRef::product(
+        AssetProductRef::new(
+            StableAssetId::parse_str("919617ea-c89c-4f83-9cce-b084de435a83").unwrap(),
+            if subproduct {
+                ImportedProductId::parse_subproduct("011a8cc0-343a-4b95-8adb-3aa6d81977ed").unwrap()
+            } else {
+                ImportedProductId::PRIMARY
+            },
+        )
+        .unwrap(),
+    )
+}
+
+#[test]
+fn product_leaf_collectors_charge_complete_input_and_output_at_exact_limits() {
+    let component = ComponentTypeId::new("test.SelectedProducts");
+    let field = field(ComponentValueShape::AssetRef);
+    for subproduct in [false, true] {
+        let reference = product_reference(subproduct);
+        let value = crate::authoring::encode_persistent_field(&reference).unwrap();
+        let cost = value.cost();
+        let work = asset_reference_value_work(&value).unwrap();
+        assert_eq!(cost.nodes(), if subproduct { 7 } else { 6 });
+        assert_eq!(cost.logical_bytes(), if subproduct { 117 } else { 76 });
+        assert_eq!(work.nodes, cost.nodes());
+        assert_eq!(work.logical_bytes, cost.logical_bytes());
+        for payload_relative in [false, true] {
+            let path_bytes = if payload_relative { 0 } else { 13 };
+            let nodes = cost.nodes() + 1;
+            let bytes =
+                cost.logical_bytes() + field.id().as_str().len() + path_bytes + work.payload_bytes;
+            let depth = if payload_relative { 4 } else { 6 };
+            let result = collect(
+                payload_relative,
+                &component,
+                &field,
+                &value,
+                limits(nodes, bytes, depth),
+                |_, _, _| Ok::<(), ()>(()),
+            )
+            .unwrap();
+            assert_eq!(result.len(), 1);
+            assert_eq!(result[0].asset_ref(), &reference);
+            for (limits, source) in [
+                (
+                    limits(nodes - 1, bytes, depth),
+                    ComponentEntityReferenceRewriteError::NodeLimit { maximum: nodes - 1 },
+                ),
+                (
+                    limits(nodes, bytes - 1, depth),
+                    ComponentEntityReferenceRewriteError::ByteLimit { maximum: bytes - 1 },
+                ),
+                (
+                    limits(nodes, bytes, depth - 1),
+                    ComponentEntityReferenceRewriteError::DepthLimit { maximum: depth - 1 },
+                ),
+            ] {
+                assert_eq!(
+                    collect(
+                        payload_relative,
+                        &component,
+                        &field,
+                        &value,
+                        limits,
+                        |_, _, _| Ok::<(), ()>(())
+                    ),
+                    Err(AssetReferenceCollectionError::Reference(
+                        DeclaredAssetReferenceError::Traversal {
+                            component: component.clone(),
+                            source,
+                        }
+                    )),
+                );
+            }
+            let mut denied_at = None;
+            let result = collect(
+                payload_relative,
+                &component,
+                &field,
+                &value,
+                Default::default(),
+                |nodes, _, allocated| {
+                    if nodes == 1
+                        && allocated
+                            == size_of::<DeclaredAssetReference>()
+                                + field.id().as_str().len()
+                                + work.decode_allocation_bytes
+                    {
+                        denied_at = Some(allocation_calls());
+                        Err("product-output-cap")
+                    } else {
+                        Ok(())
+                    }
+                },
+            );
+            assert_eq!(
+                result,
+                Err(AssetReferenceCollectionError::Admission(
+                    "product-output-cap"
+                ))
+            );
+            assert_eq!(denied_at, Some(allocation_calls()));
+        }
+    }
+}
+
+#[test]
+fn oversized_product_identity_text_is_refused_before_copy_or_parser_allocation() {
+    let component = ComponentTypeId::new("test.SelectedProducts");
+    let field = field(ComponentValueShape::AssetRef);
+    let oversized = "private-identity".repeat(8192);
+    for path in [vec!["value", "source"], vec!["value", "product", "id"]] {
+        let mut value =
+            crate::authoring::encode_persistent_field(&product_reference(true)).unwrap();
+        *value
+            .get_path_mut(&ComponentFieldPath::from_fields(path))
+            .unwrap() = ComponentValue::String(oversized.clone());
+        let original = value.clone();
+        for payload_relative in [false, true] {
+            let mut denied_at = None;
+            let result = collect(
+                payload_relative,
+                &component,
+                &field,
+                &value,
+                Default::default(),
+                |nodes, logical, allocated| {
+                    if (nodes, logical, allocated) == (1, oversized.len(), 0) {
+                        denied_at = Some(allocation_calls());
+                        Err("product-read-cap")
+                    } else {
+                        Ok(())
+                    }
+                },
+            );
+            assert_eq!(
+                result,
+                Err(AssetReferenceCollectionError::Admission("product-read-cap"))
+            );
+            assert_eq!(denied_at, Some(allocation_calls()));
+            assert_eq!(value, original);
+        }
+    }
+}
+
+#[test]
+fn product_validation_and_entity_planning_admit_the_same_closed_leaf_before_parsing() {
+    use crate::__private::{
+        ComponentValueAdmissionError, EntityReferencePlanError,
+        plan_declared_entity_references_with_admission, validate_component_value_with_admission,
+    };
+
+    let schema = ComponentSchema::new(
+        ComponentTypeId::new("test.AdmittedProducts"),
+        "Admitted products",
+        ComponentSchemaVersion::ONE,
+    )
+    .with_fields([field(ComponentValueShape::AssetRef)]);
+    for subproduct in [false, true] {
+        let leaf =
+            crate::authoring::encode_persistent_field(&product_reference(subproduct)).unwrap();
+        let work = asset_reference_value_work(&leaf).unwrap();
+        let value = ComponentValue::map([("settings", ComponentValue::map([("image", leaf)]))]);
+        let original = value.clone();
+        let mut denied_at = None;
+        let result = validate_component_value_with_admission(
+            &schema,
+            &value,
+            Default::default(),
+            |nodes, logical, allocated| {
+                if (nodes, logical, allocated)
+                    == (work.nodes, work.logical_bytes, work.decode_allocation_bytes)
+                {
+                    denied_at = Some(allocation_calls());
+                    Err("product-validation-cap")
+                } else {
+                    Ok(())
+                }
+            },
+        );
+        assert_eq!(
+            result,
+            Err(ComponentValueAdmissionError::Admission(
+                "product-validation-cap"
+            ))
+        );
+        assert_eq!(denied_at, Some(allocation_calls()));
+        let mut denied_at = None;
+        let result = plan_declared_entity_references_with_admission::<(), _>(
+            &schema,
+            &value,
+            Default::default(),
+            |nodes, logical, allocated| {
+                if (nodes, logical, allocated)
+                    == (work.nodes, work.logical_bytes, work.decode_allocation_bytes)
+                {
+                    denied_at = Some(allocation_calls());
+                    Err("product-entity-plan-cap")
+                } else {
+                    Ok(())
+                }
+            },
+        );
+        assert!(matches!(
+            result,
+            Err(EntityReferencePlanError::Admission(
+                "product-entity-plan-cap"
+            ))
+        ));
+        assert_eq!(denied_at, Some(allocation_calls()));
+        assert_eq!(value, original);
+    }
+}
+
+#[test]
+fn product_rewrite_admits_decoder_and_complete_encoding_before_allocating() {
+    for subproduct in [false, true] {
+        let original =
+            crate::authoring::encode_persistent_field(&product_reference(subproduct)).unwrap();
+        let field = field(ComponentValueShape::AssetRef);
+        let references = collect_declared_value_asset_references_with_limits(
+            &ComponentTypeId::new("test.RewriteProducts"),
+            &field,
+            field.shape(),
+            &original,
+            Default::default(),
+        )
+        .unwrap();
+        let work = asset_reference_value_work(&original).unwrap();
+        for deny_encoding in [false, true] {
+            let mut value = original.clone();
+            let called = Cell::new(false);
+            let mut denied_at = None;
+            let result = rewrite_declared_asset_references_with_admission(
+                &mut value,
+                &references,
+                Default::default(),
+                |_| {
+                    called.set(true);
+                    Ok::<_, ()>(product_reference(subproduct))
+                },
+                |nodes, logical, allocated| {
+                    if nodes == work.nodes
+                        && logical == work.logical_bytes
+                        && called.get() == deny_encoding
+                        && allocated > 0
+                    {
+                        denied_at = Some(allocation_calls());
+                        Err("product-rewrite-cap")
+                    } else {
+                        Ok(())
+                    }
+                },
+            );
+            assert_eq!(
+                result,
+                Err(AssetReferenceRewriteError::Admission("product-rewrite-cap"))
+            );
+            assert_eq!(denied_at, Some(allocation_calls()));
+            assert_eq!(called.get(), deny_encoding);
+            assert_eq!(value, original);
+        }
+        // One recorded leaf, complete decoding and complete encoding are cumulative work.
+        for (limits, expected) in [
+            (
+                limits(2 * work.nodes, 4096, 4),
+                AssetReferenceRewriteError::NodeLimit {
+                    maximum: 2 * work.nodes,
+                },
+            ),
+            (
+                limits(128, 2 * work.logical_bytes - 1, 4),
+                AssetReferenceRewriteError::ByteLimit {
+                    maximum: 2 * work.logical_bytes - 1,
+                },
+            ),
+            (
+                limits(128, 4096, 3),
+                AssetReferenceRewriteError::DepthLimit { maximum: 3 },
+            ),
+        ] {
+            let mut value = original.clone();
+            let result = rewrite_declared_asset_references_with_admission(
+                &mut value,
+                &references,
+                limits,
+                |_| Ok::<_, ()>(product_reference(subproduct)),
+                |_, _, _| Ok::<_, ()>(()),
+            );
+            assert_eq!(result, Err(expected));
+            assert_eq!(value, original);
+        }
+        let mut value = original.clone();
+        rewrite_declared_asset_references_with_admission(
+            &mut value,
+            &references,
+            limits(1 + 2 * work.nodes, 2 * work.logical_bytes, 4),
+            |_| Ok::<_, ()>(product_reference(subproduct)),
+            |_, _, _| Ok::<_, ()>(()),
+        )
+        .unwrap();
+        assert_eq!(value, original);
+    }
+}
