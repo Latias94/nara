@@ -1,6 +1,6 @@
 # Asset Import Ownership And Processed Runtime Delivery
 
-**Date:** 2026-10-29. **Status:** Source/import, compound identity, declared products, immutable local base and concrete Image/TileSet ownership qualified; first-party processed delivery open.
+**Date:** 2026-10-29. **Status:** Source/import, compound identity, immutable base and bounded first-party processed startup/travel qualified; source Scene references, input and target/package delivery open.
 **Baseline:** `13a2744`.
 **Parent:** [Foundation rebaseline](2026-10-23-foundation-architecture-rebaseline-plan.md), R6/R7.
 
@@ -200,10 +200,10 @@ source snapshot:
   a packaged executable with source/metadata/cache and Cargo unavailable. Local eager capture
   does not freeze a universal container, streaming or residency implementation.
 
-TileSet content admission with actual dependencies/cells is qualified below. The next concrete
-unit is first-party Host selection and native residency through its existing lifecycle.
-Keep startup, later Scene acquisition and game-facing typed reads in that same Host qualification;
-adding a processed branch only at startup does not establish source-independent delivery.
+TileSet content admission with actual dependencies/cells is qualified below. The first-party
+Host unit joins startup, later Scene acquisition and game-facing typed reads through existing
+native residency and lifecycle owners. Its qualification follows the owner prerequisites below;
+adding a processed branch only at startup would not establish that complete consumer.
 
 ### First-Party Content Integration Boundary
 
@@ -221,8 +221,13 @@ Freeze concrete `<D, C>` Runtime codec contributions into the selected executabl
 independently of source importer selection. Catalog kind/version checks that selection and cannot
 select executable Rust code. Include admitted facet definition/configuration identity in the resolved
 executable/content agreement; equal format names alone do not prove the same compiled selection.
-Reuse the product's definition/fingerprint owners rather than persisting a Rust TypeId or function
-address. A missing or conflicting facet refuses before publication without source fallback.
+The admitted configuration plan owns frozen codec definitions and a dedicated canonical
+`runtime_codecs_fingerprint`, independently of plugin and Schema fingerprints. Each definition
+binds an author-versioned ID, actual format/role and frozen limits to its typed implementation.
+Do not introduce an unused registry plugin or persist Rust TypeIds/function addresses. Typed
+acquisition must enforce the original selection before any codec callback. A missing or
+conflicting facet refuses before publication without source fallback; multiple formats serving
+one family aggregate into one collection.
 Shared game-facing CPU collections index complete Products and retain
 actual `RuntimeContentAsset<P>` owners; real source records supply aliases only on the source path.
 Prepared request views borrow the selected preparation, and successful Scene publication alone
@@ -232,6 +237,18 @@ share one admitted decoded owner; retain each complete Product mapping and its m
 Do not decode an entire compound member once per selected auxiliary product by accident. Explicit
 independent acquisitions retain their existing separate charges, and collection/index metadata
 remains budgeted by its concrete preparation owner.
+
+Prepare Required Scene members as retained data rather than rejecting them as non-assets or
+instantiating them with the requested Scene. A Door target uses its actual complete Scene Product;
+finite A/B back-edges visit each member once and retain a flat dependency collection. Public travel
+still requires a declared Scene root. Qualify actual component-driven A-to-B-to-A requests after
+the captured files disappear, hidden dependency members, malformed dependencies and missing/Soft
+actual edges. Mere catalog-cycle acceptance does not qualify the preparation algorithm.
+
+The corresponding source authoring path needs a separate owning correction before claiming a
+complete authored Door workflow. The [source successor](#source-scene-reference-successor) below
+covers genuine Scene discovery, finite data dependencies, Product requests and source receipts.
+Direct processed format/catalog consumers do not qualify that source workflow automatically.
 
 Publish actual Images and TileSets to the existing top-level stores read by stock extraction and
 Image preparation. Extend existing residency receipts and Image ownership to complete Product keys;
@@ -243,6 +260,17 @@ native bindings and resources in the unpublished candidate World before material
 Scene; candidate retirement retains failed-start cleanup. Make the Asset source-change facet optional
 before claiming a composition with no source database. An empty default source table proves neither
 content agreement nor source-free facet selection.
+
+Before freezing another native resource family, provide a compiled typed publication facet for
+the same pre-materialization and Scene-replacement transaction. The present CPU codec extension
+does not install a third-party native resource, and the Host currently has concrete Image/TileSet
+adapters only. Use the actual Material/render consumer to qualify that successor: family-owned
+preparation, exact receiving baseline, failure/discard/retirement and an infallible shared commit
+tail. Preserve the existing separation of codec readiness, Product binding and native residency;
+do not infer publication authority from a Rust product type or turn the private role enum into an
+open mutable World callback. That extension can follow the same ownership model without changing
+logical Product identity or persistent member framing. It is a named successor contract to design
+before its public interface freezes, not a claim of generic native publication in this unit.
 
 The [Image qualification](../knowledge/engineering/verification/2026-10/2026-10-29T090832Z-anonymous-and-processed-image-content-with-retained-native-publication-qualification-3e529af056d34a5caa2c12924c0c1014.md)
 records anonymous content, strict Runtime format, complete managed Product admission, original
@@ -262,8 +290,105 @@ source-independent primary/auxiliary descriptors, shared native publication/reti
 membership and retained original Image output. Scene resource overlays retain concrete content
 baselines through native waits; Reference Game and the two-level consumer use checked owner
 generations. The record contains actual owner/root/independent/GPU/native/game results and limits.
-Proceed with the first-party integration boundary above; this owner qualification does not install
-processed Host startup/travel, game-facing collections or stock residency automatically.
+That owner qualification did not install processed Host startup/travel, game-facing collections
+or stock residency automatically. The [first-party successor](../knowledge/engineering/verification/2026-10/2026-10-29T152520Z-first-party-processed-runtime-hosts-and-explicit-source-facets-qualification-c2d2a14cd90243f0a200a287f1ce4d20.md)
+at `44470ed` qualifies that bounded integration, including exact plan-owned codecs, explicit source
+facets, complete CPU/native Products, cancelled/failed preparation, retained output and finite
+Door Scene data back-edges. Final root/owner1082, public80, independent84, Source/Editor55,
+Reference6 and all three selected native DX12 trajectories pass, with the recorded skips and
+platform/feature limits. It does not qualify source-authored Door dependencies, a processed input
+resource, target-build selection, third-party native publication or a standalone packaged Player.
+
+## Source Scene Reference Successor
+
+Complete the same Door workflow from authored Scenes and real metadata. The current source
+catalogue discovers Assets/Prefabs and its resource queue rejects Scene kind. Correct source
+identity, preparation, request authority and content receipts together; adding another scan root
+alone is insufficient.
+
+Before implementation, settle source-location indexing against its actual consumers. The existing
+database uses a root-relative `AssetPath` as a global path key across different roots. Challenge it
+with an Assets file, Prefab and Scene sharing the same relative name. Compare canonical
+project-relative locations, scoped relative locations and a separate document-source index;
+preserve global UUID uniqueness and the current Assets-relative meaning of a bare asset Path.
+Do not make file kind or a closed list of three directories the permanent location identity.
+Reconcile the owning Asset and Scene identity contracts, reload/watch aliases, authoring catalogue
+and Export mapping before freezing the selected representation. No virtual filesystem or generic
+mount executor is required by this correction.
+
+The preferred successor is a canonical logical source locator bound by the Host, with authored
+aliases and capability-relative read paths kept distinct. The
+[source-location design](../architecture/source-location-and-reference-resolution-design.md)
+compares all three alternatives, traces actual consumers and defines the independent comparison.
+It is not an Accepted or implemented contract. A scoped namespace needs its own equality and
+capability proof; a second document index alone cannot satisfy existing Scene validation/cook.
+Migrate the complete read/export/watch contract before adding source Scene dependencies.
+
+Use these workflow constraints for that choice:
+
+- Resolve a Scene Product through an actual primary Scene sidecar and the original source
+  candidate/plan. Keep `StableMetadata` and `ProjectLocation` source keys distinct under ADR 0038;
+  a nearby sidecar cannot silently change an existing location identity. Loading does not create
+  or repair metadata. Reject wrong kinds, auxiliary Scene selections, duplicate UUIDs and aliases.
+- Let game code pass the Door Product directly to the existing Scene request API. Preserve the
+  caller's original selection while retaining its actual resolved source separately. Perform
+  source discovery and Product-to-declared-root admission in the preparation worker, with truthful
+  Preparing/rejected observation. Required dependency membership does not grant public travel.
+  Revalidate original context, complete current receipt, selected source identity and exact
+  definitions at publication; Ready commit consumes captured facts without rediscovery.
+- Build one bounded Scene worklist in the existing source load context. Compile each actual Scene
+  once, including self-reference, A/B cycles and diamonds; reuse the production lazy Prefab compiler
+  and collect references only from effective results. Preserve the compiler's separate structural
+  cycle rules. Retain dependency Scenes as a flat collection under the shared source-content owner,
+  including escaped `SceneSource` lifetimes. Instantiate only the requested root. Sequential
+  decoders reuse work capacity; all indices, data and overlapping generations remain admitted.
+- Capture every actually used Scene and metadata file in the existing content receipt. A change to
+  Required B changes A's startup closure; an independent delivery root does not. Fix source-root
+  mapping in delivery union and the sibling Authoring capture path. Editor selection checks need
+  admitted dependent data, not merely a UUID in a catalogue. Save/content refresh must invalidate
+  the dependent Scene obligations while persisting only the authored document and its references.
+  Export continues to verify and copy the exact receipt without a second dependency discoverer.
+
+Qualify an independent source consumer with real sidecars and Door-driven A-to-B-to-A travel,
+dependency-only travel refusal, schema defaults and overlay-discarded references, malformed or
+missing dependencies, metadata changes after lookup, cross-root same names, Windows case aliases,
+and explicit moves preserving the authored Product. Include Save/Reopen/fresh load, Check and
+source-carrying Export away from the original project, failed-candidate last-good preservation,
+physical cancellation return, escaped owners and exact/one-short content budgets. This successor
+extends the existing source owner; it introduces no Scene manager or importer registry.
+
+## Input And Target-Build Successors
+
+The next input unit must start from actual source support. Current ActionMap serde rebuilds its
+runtime index, but is not a strict bounded persistent-file admission path. Source manifest
+`input.action_map` is currently refused during Runtime projection; no hidden source loader is
+already installing it. Preserve that truthful refusal until a concrete source owner supplies
+real input bytes, identity and content-receipt coverage. Never clear the requested path to make
+projection succeed.
+
+The candidate processed design uses an explicit complete action-map Product in admitted Runtime
+configuration as a startup root, independent of Scene roots. `nara_input` owns strict version-one
+format, finite immutable definition, compilation costs and receiving semantics; the selected
+family/codec participates in the existing original-plan agreement. Retain the actual acquisition
+with escaped compiled bindings, and account for any independently mutable context state. Install
+the map once before Startup in the unpublished World, explicitly reject competing plugin-owned
+configuration or a missing input owner, and preserve code-first configuration when no Product is
+selected. Scene travel must not reinstall a global map or silently start new input lifetimes.
+Use existing explicit context enable/disable operations for the two-Scene consumer. A future
+Scene-owned context definition needs its own concrete publication contract.
+
+Qualify actual physical-input-to-semantic-action behavior, held-action/context cancellation,
+failed Scene preservation and successful travel. A prebuilt process must run with only processed
+members and its executable, with source/metadata/cache/manifest and Cargo unavailable. Input
+codec success or a fabricated semantic command cannot prove this behavior. This is the current
+successor design candidate, not an implemented or independently qualified input format.
+
+Target-build selection remains separate: current export adapters hardcode starter bins,
+release/dev assumptions, desktop features and the Host triple. Select package/bin/profile,
+features, target and toolchain explicitly, distinguish Host tools from target artifacts and
+separate cross-build from target execution qualification. Runtime content configuration and
+run APIs never invoke Cargo. A processed input process fixture consumes a prebuilt executable;
+it does not establish a general build/export product.
 
 ## Owning Decisions
 

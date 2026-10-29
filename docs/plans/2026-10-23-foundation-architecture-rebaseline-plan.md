@@ -478,8 +478,8 @@ selected-instance complete conversion, not outer-only unpack, cross-source Apply
 
 ## R6: Resource Facets, Durable Continuity And Local Artifact Store
 
-**Design:** D10, D11, D13. **State:** source/import ownership and the compound continuity/Runtime
-format slice qualified; catalog delivery and durable artifact store remain open.
+**Design:** D10, D11, D13. **State:** source/import, compound continuity and bounded Runtime
+codec/base/Host slices qualified; durable artifact store and complete packaged delivery remain open.
 **Owners:** asset/domain contracts and project Host.
 
 Build one independent compound importer through typed source, Runtime decode, optional cook and
@@ -520,8 +520,8 @@ native trust. Delete duplicate root/domain registrations and incorrect recipe/co
 
 ## R7: Target Build And Base Source-Free Delivery
 
-**Design:** D12. **State:** in progress; immutable local capture/acquisition qualified,
-first-party packaged Host and target-build selection remain open.
+**Design:** D12. **State:** in progress; immutable local base and bounded first-party startup/travel
+qualified; source Scene references, processed input, target-build selection and packaged delivery remain open.
 **Owners:** Cargo tooling, Host capture/cook and Runtime loader.
 
 Separate Host tool selection, target executable artifacts, content cook, release candidate and
@@ -538,6 +538,16 @@ The [local-base qualification](../knowledge/engineering/verification/2026-10/202
 at `a3b235f` includes actual two-Scene same-plan managed consumption, complete compound identity,
 file removal/corruption, concurrent decode/retirement budgets and native regression scope. It does
 not complete first-party packaged launch, automatic family residency or target build selection.
+
+The [first-party integration successor](../knowledge/engineering/verification/2026-10/2026-10-29T152520Z-first-party-processed-runtime-hosts-and-explicit-source-facets-qualification-c2d2a14cd90243f0a200a287f1ce4d20.md)
+at `44470ed` closes bounded Host startup/Scene requests, stock Image/TileSet residency and typed
+CPU reads using the original base/plan. It removes mandatory source execution from native
+Asset/Image plugins and qualifies finite retained Scene data dependencies, cancellation, exact
+baselines and pre-allocation budgets. It does not qualify the complete packaged Player.
+Next correct [source locations and resolution](../architecture/source-location-and-reference-resolution-design.md)
+with the actual Source Door/Save/Export consumer, then implement input/target delivery through the
+ordered plan. Future third-party native families need a typed publication facet through the same
+owner before their Material/render interface freezes; CPU decode alone grants no residency.
 
 Acceptance: two clean content builds, a different host/target selection, source/cache inaccessible
 and no Cargo on the runtime machine, server stripping, wrong target/schema/digest rejection,
