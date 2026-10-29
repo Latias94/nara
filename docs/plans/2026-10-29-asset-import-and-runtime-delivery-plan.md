@@ -1,6 +1,6 @@
 # Asset Import Ownership And Processed Runtime Delivery
 
-**Date:** 2026-10-29. **Status:** Source/import ownership qualified; compound Runtime delivery open.
+**Date:** 2026-10-29. **Status:** Source/import and compound continuity/format qualified; Runtime catalog delivery open.
 **Baseline:** `13a2744`.
 **Parent:** [Foundation rebaseline](2026-10-23-foundation-architecture-rebaseline-plan.md), R6/R7.
 
@@ -48,8 +48,21 @@ foundation plan.
 
 Step 1 is implemented as `c352614`, with independently consumed parsing, Check/Play/Scene and
 Editor metadata workflows. The [qualification](../knowledge/engineering/verification/2026-10/2026-10-28T233934Z-source-import-contracts-below-project-hosts-with-typed-read-errors-e617bfdd9a104fb69bdf3a20936f7d57.md)
-records actual tests, the corrected held-parser fixture, dependency proof and limits. Steps 2-4
-remain open; source preparation does not imply processed Runtime support.
+records actual tests, the corrected held-parser fixture, dependency proof and limits.
+
+Step 2 has its [bounded qualification](../knowledge/engineering/verification/2026-10/2026-10-29T004054Z-compound-product-continuity-and-independent-runtime-format-qualification-a2d6d4837fd44218b7cb87f67cb38063.md)
+under [ADR 0122](../architecture/adr/0122-scoped-imported-product-identity-and-authored-continuity.md).
+The reviewed implementation is `9ba8624`.
+The product family marker no longer implies a source importer. A separately selected Runtime
+codec can serve that family's product. The compound consumer binds an explicit row assignment to
+exact primary source bytes; its Editor facet also validates previous-to-candidate settings through
+the actual metadata publication worker. A pure helper alone cannot establish that transition.
+Startup/later Scene source-free catalog admission remains step 3.
+The current Scene consumer uses an ordinary declared bundle `AssetRef` plus a concrete text
+selector, then constructs `AssetProductRef` for bundle lookup. This does not qualify generic
+Schema traversal or required-target validation for product references. Integrate that reference
+boundary where the actual Runtime catalog consumer requires it; do not advertise current source
+Check as proving arbitrary subproduct selectors exist.
 
 ## Owning Decisions
 

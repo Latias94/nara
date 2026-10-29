@@ -3,7 +3,7 @@ type: "Current State"
 title: "Current Engineering State"
 description: "Derived summary of immutable engineering-memory shards."
 tags: ["engineering-memory", "derived"]
-source_fingerprint: "07fe414431fd5a7943fac13c17e1ae18b5881170910681d23a5b6350c8ecb7c4"
+source_fingerprint: "127e2a28433c5ab0f4db133107c01e277b10d6f4e1aaa82fa598d28d4d23aeda"
 ---
 
 # Current State
@@ -12,8 +12,8 @@ source_fingerprint: "07fe414431fd5a7943fac13c17e1ae18b5881170910681d23a5b6350c8e
 
 This file is derived from immutable shards. Record new facts in shards, then render during integration.
 
-- Source fingerprint: `07fe414431fd5a7943fac13c17e1ae18b5881170910681d23a5b6350c8ecb7c4`
-- Immutable records: 1018
+- Source fingerprint: `127e2a28433c5ab0f4db133107c01e277b10d6f4e1aaa82fa598d28d4d23aeda`
+- Immutable records: 1019
 - Active lane heads: 1
 
 # Active Registrations
@@ -69,6 +69,7 @@ This file is derived from immutable shards. Record new facts in shards, then ren
 
 # Recent Evidence
 
+- **Verification Evidence**: [Compound product continuity and independent Runtime format qualification](verification/2026-10/2026-10-29T004054Z-compound-product-continuity-and-independent-runtime-format-qualification-a2d6d4837fd44218b7cb87f67cb38063.md) - Records scoped product identities, explicit authored rebind, bounded processed text format, actual two-Scene source consumption and predecessor-aware Editor publication.
 - **Verification Evidence**: [Source import contracts below project Hosts with typed read errors](verification/2026-10/2026-10-28T233934Z-source-import-contracts-below-project-hosts-with-typed-read-errors-e617bfdd9a104fb69bdf3a20936f7d57.md) - Qualifies the pure executing source/import facet, concrete reader errors and migrated project and Editor consumers; processed Runtime delivery remains open.
 - **Subagent Finding**: [Source-carrying export still lacks an independent verified Runtime content entry](subagents/2026-10/2026-10-28T225432Z-source-carrying-export-still-lacks-an-independent-verified-runtime-content-entry-b9156a4b7e2043f09f3ab41b78cf3bf8.md) - Distinguishes build-machine Cargo and qualified source-carrying delivery from the remaining processed Runtime catalog and subsequent Scene loading boundary.
 - **Verification Evidence**: [Installed creation-only owner successor preserves sources history and separate execution approval](verification/2026-10/2026-10-28T223626Z-installed-creation-only-owner-successor-preserves-sources-history-and-separate-execution-approval-57dec00a6525410f9abb79ec24a99e69.md) - Qualifies an actual catalog generation upgrade with source-owned history preparation and retained publication recovery, within creation-only data semantics.
@@ -80,7 +81,6 @@ This file is derived from immutable shards. Record new facts in shards, then ren
 - **Verification Evidence**: [Reviewed registered artifact unlink and truthful partial recovery qualification](verification/2026-10/2026-10-28T185322Z-reviewed-registered-artifact-unlink-and-truthful-partial-recovery-qualification-4c85687a35ef4b54b24b3fc98b6e5083.md) - Qualifies actual ready-artifact intent, per-member unlink, cancellation, result publication debt and exact Session/Application retention; incomplete publications remain open.
 - **Work Progress**: [Reviewed real artifact unlink integration and incomplete publication follow-up](progress/2026-10/2026-10-28T182559Z-reviewed-real-artifact-unlink-integration-and-incomplete-publication-follow-up-1de5c56631a146318b4b1098eb0fdfd8.md) - Records real ready-artifact disposal, namespace and cleanup corrections, focused verification and the concrete incomplete-publication owner successor.
 - **Verification Evidence**: [Managed source-tool artifact store and project-owned text template replacement](verification/2026-10/2026-10-28T163225Z-managed-source-tool-artifact-store-and-project-owned-text-template-replacement-7c31339a78064eb8bc385a9bd82b372a.md) - Qualifies fixed managed artifact publication/inventory and explicit project-owned text import while removing mixed-content source protection and retaining future real reclamation.
-- **Verification Evidence**: [Retained source objects and truthful source-tool physical cleanup qualification](verification/2026-10/2026-10-28T150643Z-retained-source-objects-and-truthful-source-tool-physical-cleanup-qualification-13bc9f4599ef4e839fd608dcfd7f4aed.md) - Qualifies retained document and metadata aliases, superseded cleanup observation, and terminal process cleanup failure without claiming artifact reclamation.
 
 # Integration Notes
 

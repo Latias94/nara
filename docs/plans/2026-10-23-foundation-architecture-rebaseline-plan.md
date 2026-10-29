@@ -470,8 +470,9 @@ selected-instance complete conversion, not outer-only unpack, cross-source Apply
 
 ## R6: Resource Facets, Durable Continuity And Local Artifact Store
 
-**Design:** D10, D11, D13. **State:** source/import ownership replacement qualified;
-processed Runtime and continuity remain unqualified. **Owners:** asset/domain contracts and project Host.
+**Design:** D10, D11, D13. **State:** source/import ownership and the compound continuity/Runtime
+format slice qualified; catalog delivery and durable artifact store remain open.
+**Owners:** asset/domain contracts and project Host.
 
 Build one independent compound importer through typed source, Runtime decode, optional cook and
 Editor facets; separate format contracts from root/2D dependencies. Choose authored continuity
@@ -486,6 +487,13 @@ first moves the existing executing source facet below root/Scene/2D while preser
 consumers, then qualifies compound continuity and processed delivery. Its
 [source-contract qualification](../knowledge/engineering/verification/2026-10/2026-10-28T233934Z-source-import-contracts-below-project-hosts-with-typed-read-errors-e617bfdd9a104fb69bdf3a20936f7d57.md)
 does not complete R6a or qualify a Runtime catalog.
+
+The [compound successor](../knowledge/engineering/verification/2026-10/2026-10-29T004054Z-compound-product-continuity-and-independent-runtime-format-qualification-a2d6d4837fd44218b7cb87f67cb38063.md)
+adds scoped primary/auxiliary identities under ADR 0122, explicit authored row continuity, a
+deterministic processed text codec and actual two-Scene source/Editor consumers. Reimport validates
+the admitted predecessor and retains metadata custody through physical task disposal. This closes
+that named format/continuity slice, not generic Schema product-reference traversal, Runtime
+catalog acquisition, source-free startup/later Scene loading or the complete R6a/R6b contract.
 
 The [delivery-boundary audit](../knowledge/engineering/subagents/2026-10/2026-10-28T225432Z-source-carrying-export-still-lacks-an-independent-verified-runtime-content-entry-b9156a4b7e2043f09f3ab41b78cf3bf8.md)
 locates the actual source-carrying loader and starter build-policy dependencies and recommends
