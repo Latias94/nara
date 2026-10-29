@@ -1,6 +1,6 @@
 # Asset Import Ownership And Processed Runtime Delivery
 
-**Date:** 2026-10-29. **Status:** Source/import, compound identity, declared products, immutable local base and Image ownership qualified; integrated first-party processed delivery open.
+**Date:** 2026-10-29. **Status:** Source/import, compound identity, declared products, immutable local base and concrete Image/TileSet ownership qualified; first-party processed delivery open.
 **Baseline:** `13a2744`.
 **Parent:** [Foundation rebaseline](2026-10-23-foundation-architecture-rebaseline-plan.md), R6/R7.
 
@@ -200,8 +200,8 @@ source snapshot:
   a packaged executable with source/metadata/cache and Cargo unavailable. Local eager capture
   does not freeze a universal container, streaming or residency implementation.
 
-The next concrete dependency units are TileSet content admission with actual dependencies/cells,
-then the complete first-party Host selection and native residency.
+TileSet content admission with actual dependencies/cells is qualified below. The next concrete
+unit is first-party Host selection and native residency through its existing lifecycle.
 Keep startup, later Scene acquisition and game-facing typed reads in that same Host qualification;
 adding a processed branch only at startup does not establish source-independent delivery.
 
@@ -255,6 +255,15 @@ Player. Its recorded whole-format retained-charge limitation is replaced by the
 That successor passes Asset/Image271, Host30 and independent64 tests, validates both complete
 compound data and actual native Image captures, and preserves predecode/last-owner bounds without
 raising limits. It does not qualify first-party residency, a packaged Player or later render work.
+
+The [TileSet/resource-baseline qualification](../knowledge/engineering/verification/2026-10/2026-10-29T114236Z-processed-tileset-ownership-and-exact-scene-resource-baselines-qualification-e5b31550eacc4fd1a3d4b6168fb4df52.md)
+at `7247273` closes the concrete TileSet prerequisite. It validates actual Required Image references,
+source-independent primary/auxiliary descriptors, shared native publication/retirement, exact cell
+membership and retained original Image output. Scene resource overlays retain concrete content
+baselines through native waits; Reference Game and the two-level consumer use checked owner
+generations. The record contains actual owner/root/independent/GPU/native/game results and limits.
+Proceed with the first-party integration boundary above; this owner qualification does not install
+processed Host startup/travel, game-facing collections or stock residency automatically.
 
 ## Owning Decisions
 

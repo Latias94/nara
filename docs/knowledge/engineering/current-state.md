@@ -3,7 +3,7 @@ type: "Current State"
 title: "Current Engineering State"
 description: "Derived summary of immutable engineering-memory shards."
 tags: ["engineering-memory", "derived"]
-source_fingerprint: "5dea6998a35503402f2a3a3d66d2d35f489488de3ff79cf5c0b43c4cfab485eb"
+source_fingerprint: "5e6dc40e5e21c4362653384de049801b2f0c302e1842d2aba0f49a5a0736235f"
 ---
 
 # Current State
@@ -12,8 +12,8 @@ source_fingerprint: "5dea6998a35503402f2a3a3d66d2d35f489488de3ff79cf5c0b43c4cfab
 
 This file is derived from immutable shards. Record new facts in shards, then render during integration.
 
-- Source fingerprint: `5dea6998a35503402f2a3a3d66d2d35f489488de3ff79cf5c0b43c4cfab485eb`
-- Immutable records: 1029
+- Source fingerprint: `5e6dc40e5e21c4362653384de049801b2f0c302e1842d2aba0f49a5a0736235f`
+- Immutable records: 1031
 - Active lane heads: 1
 
 # Active Registrations
@@ -69,6 +69,8 @@ This file is derived from immutable shards. Record new facts in shards, then ren
 
 # Recent Evidence
 
+- **Verification Evidence**: [Processed TileSet ownership and exact Scene resource baselines qualification](verification/2026-10/2026-10-29T114236Z-processed-tileset-ownership-and-exact-scene-resource-baselines-qualification-e5b31550eacc4fd1a3d4b6168fb4df52.md) - Qualifies actual Runtime dependencies, shared source and processed TileSet publication, concrete Scene resource baselines and retained native pixels through public games and DX12 consumers.
+- **Work Progress**: [Shared TileSet content ownership and concrete resource baseline integration](progress/2026-10/2026-10-29T101227Z-shared-tileset-content-ownership-and-concrete-resource-baseline-integration-839822b154f24bf6b658c0c9954fa2b1.md) - Records in-progress processed TileSet/native integration, actual dependency inventory and the resource-baseline correction; not qualification.
 - **Verification Evidence**: [Actual Runtime decoded-output charging and shared pixel retention qualification](verification/2026-10/2026-10-29T094316Z-actual-runtime-decoded-output-charging-and-shared-pixel-retention-qualification-14f023431b4c462dbeb1051f1739662e.md) - Qualifies required concrete codec cost queries, upfront maximum admission and actual output refunds through compound data, many small Images, held large decode and last-owner native captures.
 - **Verification Evidence**: [Anonymous and processed Image content with retained native publication qualification](verification/2026-10/2026-10-29T090832Z-anonymous-and-processed-image-content-with-retained-native-publication-qualification-3e529af056d34a5caa2c12924c0c1014.md) - Qualifies source-free Runtime Image decode, explicit managed Product admission, anonymous procedural render content and original output custody through CPU, public Scene, GPU and native Editor workflows.
 - **Work Progress**: [Source-independent Runtime Image ownership and final qualification in progress](progress/2026-10/2026-10-29T081235Z-source-independent-runtime-image-ownership-and-final-qualification-in-progress-421a0d14cb7a41c7877c249ec9184b8a.md) - Integrates actual pixel identity, bounded Runtime Image decode and source-owned rejection with independent native Scene consumers; final Host/native qualification and next-owner review remain active.
@@ -79,8 +81,6 @@ This file is derived from immutable shards. Record new facts in shards, then ren
 - **Verification Evidence**: [Admitted exact Runtime configuration and owner initialization qualification](verification/2026-10/2026-10-29T041356Z-admitted-exact-runtime-configuration-and-owner-initialization-qualification-106a7693310949e980e8cda1e52c5548.md) - Qualifies source-independent admitted Runtime values, exact duration records, final profile invariants and actual clock diagnostics ownership through public and native consumers.
 - **Verification Evidence**: [Declared product references and prepared content target admission qualification](verification/2026-10/2026-10-29T023522Z-declared-product-references-and-prepared-content-target-admission-qualification-37c1b3f6eeca448f928a6961f1c7ab6b.md) - Qualifies complete product references through shared Schema traversal, strict prepared-product checks, source copying and cached compiled Editor Play refusal and recovery.
 - **Work Progress**: [Declared product reference integration and cached Editor Play admission in progress](progress/2026-10/2026-10-29T013709Z-declared-product-reference-integration-and-cached-editor-play-admission-in-progress-0d7fa57efb5843c3a54807a0256bed32.md) - Records complete Product reference integration, two independent contract gaps and pending JSON/RON, cached Play and Prefab copy qualification.
-- **Verification Evidence**: [Compound product continuity and independent Runtime format qualification](verification/2026-10/2026-10-29T004054Z-compound-product-continuity-and-independent-runtime-format-qualification-a2d6d4837fd44218b7cb87f67cb38063.md) - Records scoped product identities, explicit authored rebind, bounded processed text format, actual two-Scene source consumption and predecessor-aware Editor publication.
-- **Verification Evidence**: [Source import contracts below project Hosts with typed read errors](verification/2026-10/2026-10-28T233934Z-source-import-contracts-below-project-hosts-with-typed-read-errors-e617bfdd9a104fb69bdf3a20936f7d57.md) - Qualifies the pure executing source/import facet, concrete reader errors and migrated project and Editor consumers; processed Runtime delivery remains open.
 
 # Integration Notes
 
