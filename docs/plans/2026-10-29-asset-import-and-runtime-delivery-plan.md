@@ -133,13 +133,17 @@ cases pass, with explicit skips/platform limits. This closes the Scene/binding p
 same-base catalog/startup/later acquisition, actual Runtime codecs for other resources and build
 selection remain open. Proposed ADR 0088 is not accepted wholesale by this result.
 
-The next local-base unit implements a strict version-one catalog, independent Host expectations,
+The local-base unit `a3b235f` implements a strict version-one catalog, independent Host expectations,
 verified immutable member capture and typed acquisition through the original executable plan.
 `RuntimeConfigurationPlan` removes source lineage from the shared composition algorithm while
 the source wrapper keeps its real lineage. The current-Scene owner accepts actual processed
 candidates through a private closed input selection. Compound codecs prove complete enclosing
 source/product identity; actual Scene references must match present Products and Required edges.
-This unit is under integration and qualification, not yet a complete first-party packaged Player.
+Its [qualification](../knowledge/engineering/verification/2026-10/2026-10-29T072753Z-immutable-local-runtime-base-and-shared-processed-scene-lifecycle-qualification-140b1b89e14c4130a72ac1c6d8f3de89.md)
+records final owner45, independent48, domains918, Reference Game57, all3 native DX12 critical
+cases, minimal features and correctness Clippy. The earlier broad root1084 and public-boundary
+corrections retain their exact scope. This qualifies local capture/acquisition and direct managed
+Scene use, not yet a complete first-party packaged Player.
 
 Keep the remaining step-3 ownership work explicit rather than disguising processed content as a
 source snapshot:

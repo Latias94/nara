@@ -3,7 +3,7 @@ type: "Current State"
 title: "Current Engineering State"
 description: "Derived summary of immutable engineering-memory shards."
 tags: ["engineering-memory", "derived"]
-source_fingerprint: "0c09213cc34fa3cac2ef08022cefb3c46f472a974174de30d2b76ad12219466f"
+source_fingerprint: "5d099ef09dd192e13c68626f8c14c49fcf88afbcc8f594c7eff81dbcd135a15c"
 ---
 
 # Current State
@@ -12,8 +12,8 @@ source_fingerprint: "0c09213cc34fa3cac2ef08022cefb3c46f472a974174de30d2b76ad1221
 
 This file is derived from immutable shards. Record new facts in shards, then render during integration.
 
-- Source fingerprint: `0c09213cc34fa3cac2ef08022cefb3c46f472a974174de30d2b76ad12219466f`
-- Immutable records: 1024
+- Source fingerprint: `5d099ef09dd192e13c68626f8c14c49fcf88afbcc8f594c7eff81dbcd135a15c`
+- Immutable records: 1026
 - Active lane heads: 1
 
 # Active Registrations
@@ -69,6 +69,8 @@ This file is derived from immutable shards. Record new facts in shards, then ren
 
 # Recent Evidence
 
+- **Verification Evidence**: [Immutable local Runtime base and shared processed Scene lifecycle qualification](verification/2026-10/2026-10-29T072753Z-immutable-local-runtime-base-and-shared-processed-scene-lifecycle-qualification-140b1b89e14c4130a72ac1c6d8f3de89.md) - Qualifies independently expected local content capture, complete Product decode, same-plan managed startup and replacement, bounded concurrent retention and source-free composition.
+- **Work Progress**: [Immutable Runtime base capture and shared source-free composition integration](progress/2026-10/2026-10-29T065031Z-immutable-runtime-base-capture-and-shared-source-free-composition-integration-134487d3e8f04aee93dfa3262536ada9.md) - Records the local catalog implementation, direct retained Runtime Scene ownership, independent review corrections and in-progress final qualification.
 - **Verification Evidence**: [Processed Runtime Scene and complete product binding qualification](verification/2026-10/2026-10-29T060803Z-processed-runtime-scene-and-complete-product-binding-qualification-cd202f5ff4514802a3c5f57a32b43b7a.md) - Qualifies source-independent Scene wire and native/data transactions, Product-index ownership and staged new-resource publication without a source database.
 - **Work Progress**: [Processed Runtime Scene and long-horizon render design integration](progress/2026-10/2026-10-29T051305Z-processed-runtime-scene-and-long-horizon-render-design-integration-5d66c9ed79cf47238e2c6253c51652c8.md) - Records source-independent Scene integration, initial public verification, active root qualification and the graph-first render design refinement.
 - **Verification Evidence**: [Admitted exact Runtime configuration and owner initialization qualification](verification/2026-10/2026-10-29T041356Z-admitted-exact-runtime-configuration-and-owner-initialization-qualification-106a7693310949e980e8cda1e52c5548.md) - Qualifies source-independent admitted Runtime values, exact duration records, final profile invariants and actual clock diagnostics ownership through public and native consumers.
@@ -79,8 +81,6 @@ This file is derived from immutable shards. Record new facts in shards, then ren
 - **Subagent Finding**: [Source-carrying export still lacks an independent verified Runtime content entry](subagents/2026-10/2026-10-28T225432Z-source-carrying-export-still-lacks-an-independent-verified-runtime-content-entry-b9156a4b7e2043f09f3ab41b78cf3bf8.md) - Distinguishes build-machine Cargo and qualified source-carrying delivery from the remaining processed Runtime catalog and subsequent Scene loading boundary.
 - **Verification Evidence**: [Installed creation-only owner successor preserves sources history and separate execution approval](verification/2026-10/2026-10-28T223626Z-installed-creation-only-owner-successor-preserves-sources-history-and-separate-execution-approval-57dec00a6525410f9abb79ec24a99e69.md) - Qualifies an actual catalog generation upgrade with source-owned history preparation and retained publication recovery, within creation-only data semantics.
 - **Work Progress**: [Installed creation metadata successor production integration and paired catalog boundary](progress/2026-10/2026-10-28T221627Z-installed-creation-metadata-successor-production-integration-and-paired-catalog-boundary-ad2d225ed6fe4aaea906239dac114022.md) - Records explicit owner-change admission, fresh Adapter evidence, repeatable paired catalog capture and pending complete consumer qualification.
-- **Subagent Finding**: [Installed existing-owner evolution is a separate transaction after additive adoption](subagents/2026-10/2026-10-28T214506Z-installed-existing-owner-evolution-is-a-separate-transaction-after-additive-adoption-6b701a39429c41ddbc273c80bab9474c.md) - Records four current refusal boundaries and a creation-metadata-only installed tool successor workflow without claiming value migration or implementation.
-- **Verification Evidence**: [Native Prefab template identity remapping and retained publication qualification](verification/2026-10/2026-10-28T211402Z-native-prefab-template-identity-remapping-and-retained-publication-qualification-288aa15af1244e52b81c3c364689d633.md) - Qualifies source-owned closed Prefab copying and explicit project publication with exact native identities, reference remaps and retained failure custody.
 
 # Integration Notes
 

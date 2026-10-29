@@ -1000,6 +1000,17 @@ separates earlier pre-correction root997 evidence. Weak binding does not prove m
 same-base catalog/startup/later acquisition, other Runtime resource codecs and the broader Proposed
 0088 remain open. This supplements the corresponding rows' earlier source/runtime-family scope.
 
+The [immutable local-base successor](../../knowledge/engineering/verification/2026-10/2026-10-29T072753Z-immutable-local-runtime-base-and-shared-processed-scene-lifecycle-qualification-140b1b89e14c4130a72ac1c6d8f3de89.md)
+at `a3b235f` adds shared source-free executable composition, independently expected strict-v1
+catalog capture, one Product/member index, actual Required dependency checks and complete decoded
+identity. The same current-Scene owner retains real processed candidates and their original base
+through startup/replacement/retirement. Final owner45, independent48, Asset/Scene918, Reference
+Game57 and all3 native DX12 critical cases pass; the record retains earlier root1084 scope and
+boundary corrections separately. This extends ADRs0006/0007/0035/0122 narrowly. First-party
+processed Runtime Host/request entry, automatic native family codecs/residency, empty source-facet
+composition, input maps and target build selection remain open. R6/R7 and Proposed0088 are not
+complete, and R8/R9 remain unimplemented.
+
 ## Implementation Index
 
 | ADR | Decision | Implementation | Owner | Code | Verification | Coverage and remaining gap | Revisit trigger | Last qualified |

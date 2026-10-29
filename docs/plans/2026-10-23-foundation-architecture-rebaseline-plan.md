@@ -516,7 +516,7 @@ native trust. Delete duplicate root/domain registrations and incorrect recipe/co
 
 ## R7: Target Build And Base Source-Free Delivery
 
-**Design:** D12. **State:** in progress; immutable local capture/acquisition is under qualification,
+**Design:** D12. **State:** in progress; immutable local capture/acquisition qualified,
 first-party packaged Host and target-build selection remain open.
 **Owners:** Cargo tooling, Host capture/cook and Runtime loader.
 
@@ -530,6 +530,10 @@ shared source-free executable composition, concrete processed Scene retention an
 local-base acquisition from subsequent native resource residency and first-party Runtime Host
 integration. The [base guide](../guides/runtime-content-base.md) states that boundary explicitly;
 the source-backed launch entry is not silently reclassified as processed delivery.
+The [local-base qualification](../knowledge/engineering/verification/2026-10/2026-10-29T072753Z-immutable-local-runtime-base-and-shared-processed-scene-lifecycle-qualification-140b1b89e14c4130a72ac1c6d8f3de89.md)
+at `a3b235f` includes actual two-Scene same-plan managed consumption, complete compound identity,
+file removal/corruption, concurrent decode/retirement budgets and native regression scope. It does
+not complete first-party packaged launch, automatic family residency or target build selection.
 
 Acceptance: two clean content builds, a different host/target selection, source/cache inaccessible
 and no Cargo on the runtime machine, server stripping, wrong target/schema/digest rejection,
