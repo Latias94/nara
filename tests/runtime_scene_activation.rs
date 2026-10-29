@@ -40,9 +40,25 @@ use nara::{
 };
 
 #[derive(Resource)]
-struct RunValue(u32);
+struct RunValue(u32, Arc<()>);
 
-impl SceneProductResource for RunValue {}
+impl RunValue {
+    fn new(value: u32) -> Self {
+        Self(value, Arc::new(()))
+    }
+}
+
+impl SceneProductResource for RunValue {
+    type Baseline = (u32, Arc<()>);
+
+    fn capture_baseline(&self) -> Self::Baseline {
+        (self.0, Arc::clone(&self.1))
+    }
+
+    fn matches_baseline(&self, baseline: &Self::Baseline) -> bool {
+        self.0 == baseline.0 && Arc::ptr_eq(&self.1, &baseline.1)
+    }
+}
 
 #[derive(Resource, Default)]
 struct NativeRetirements(usize);
@@ -167,7 +183,7 @@ fn app() -> App {
         StartupSceneActivationPlugin,
     ))
     .unwrap()
-    .insert_resource(RunValue(1))
+    .insert_resource(RunValue::new(1))
     .unwrap()
     .insert_resource(NativeRetirements::default())
     .unwrap();
@@ -277,7 +293,7 @@ fn runtime_startup_replacement_restart_and_source_transition_share_one_owner() {
         let source = runtime_source(&bindings, "next", false, "hidden");
         let report =
             replace_current_scene_with_product(world, &initial, source, limits(), &[], |writer| {
-                writer.replace_resource(RunValue(2));
+                writer.replace_resource(RunValue::new(2));
             });
         assert!(!report.diagnostics.has_errors(), "{report:?}");
         let second = report.instance.unwrap();
@@ -308,7 +324,7 @@ fn runtime_startup_replacement_restart_and_source_transition_share_one_owner() {
         assert_eq!(world.resource::<RunValue>().0, 2);
         let second_view = CurrentScene::get(world).unwrap().source_view();
         let report = restart_current_scene_with_product(world, &second, limits(), &[], |writer| {
-            writer.replace_resource(RunValue(3));
+            writer.replace_resource(RunValue::new(3));
         });
         assert!(!report.diagnostics.has_errors(), "{report:?}");
         let restarted = report.instance.unwrap();
@@ -392,7 +408,7 @@ fn failed_runtime_replacement_preserves_last_good_views_products_and_native_life
             limits(),
             &[],
             |writer| {
-                writer.replace_resource(RunValue(9));
+                writer.replace_resource(RunValue::new(9));
             },
         );
         assert!(report.diagnostics.has_errors(), "{report:?}");
@@ -419,7 +435,7 @@ fn failed_runtime_replacement_preserves_last_good_views_products_and_native_life
             limits(),
             &[],
             |writer| {
-                writer.replace_resource(RunValue(10));
+                writer.replace_resource(RunValue::new(10));
             },
         );
         assert!(report.diagnostics.has_errors(), "{report:?}");
@@ -439,7 +455,7 @@ fn failed_runtime_replacement_preserves_last_good_views_products_and_native_life
             limits(),
             &[],
             |writer| {
-                writer.replace_resource(RunValue(2));
+                writer.replace_resource(RunValue::new(2));
             },
         );
         assert!(!report.diagnostics.has_errors(), "{report:?}");

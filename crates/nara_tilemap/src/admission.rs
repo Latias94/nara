@@ -1,11 +1,9 @@
 use std::{error::Error, fmt};
 
-use nara_asset::{AssetRef, AssetRefError};
+use nara_asset::AssetRef;
 use nara_reflect::{ComponentCodecError, ComponentValue};
 
-use crate::{
-    TileAtlasLayout, TileCoord, TileIndex, invalid_asset_ref, read_cells, read_optional_asset_ref,
-};
+use crate::{TileAtlasLayout, TileCoord, TileIndex, read_cells, read_optional_asset_ref};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum TilemapMembershipError {
@@ -52,15 +50,6 @@ pub fn validate_persisted_tilemap_membership(
     else {
         return Ok(());
     };
-    if let Some(reference) = tileset.as_product()
-        && !tileset.is_primary()
-    {
-        return Err(TilemapMembershipError::InvalidValue(invalid_asset_ref(
-            "tileset.value",
-            &tileset,
-            AssetRefError::UnsupportedProductSelection(reference),
-        )));
-    }
     let cells = read_cells(value.get("cells")).map_err(TilemapMembershipError::InvalidValue)?;
     if cells.is_empty() {
         return Ok(());

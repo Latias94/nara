@@ -26,8 +26,8 @@ use nara_scene::{
     },
 };
 use nara_tilemap::{
-    __private::{PreparedTileSetPublications, TileSetOwnedSourceReceipt, TileSetPublicationInput},
-    TileSet, TileSetAssetError, TileSetAssets,
+    PreparedTileSetPublications, TileSet, TileSetAssetError, TileSetAssets, TileSetContentReceipt,
+    TileSetPublicationInput,
 };
 
 use super::{
@@ -45,7 +45,7 @@ use images::{ImagePublications, OwnedImage};
 struct ProjectSceneResidency {
     lineage: ProjectSettingsLineage,
     images: Vec<OwnedImage>,
-    tilesets: Vec<TileSetOwnedSourceReceipt>,
+    tilesets: Vec<TileSetContentReceipt>,
     catalog: Vec<AssetRecord>,
     _lease: ProjectContentLease,
 }
@@ -112,7 +112,7 @@ pub(super) fn publish_startup(
             .expect("startup published every admitted TileSet identity");
         let receipt = world
             .resource::<TileSetAssets>()
-            .owned_source_receipt(
+            .content_receipt(
                 handle,
                 world.resource::<Assets<TileSet>>(),
                 world.resource::<AssetStates>(),
@@ -136,7 +136,7 @@ struct PreparedResidency {
     bindings: SceneAssetBindings,
     images: ImagePublications,
     inputs: Vec<TileSetPublicationInput>,
-    retirements: Vec<TileSetOwnedSourceReceipt>,
+    retirements: Vec<TileSetContentReceipt>,
     catalog: CatalogChange,
     lease: ProjectContentLease,
 }
@@ -202,7 +202,7 @@ impl PreparedResidency {
                 .ok_or_else(resources_missing)?;
             let record =
                 AssetRecord::new(content.stable_id(), content.path().clone(), tileset_kind());
-            let mut input = TileSetPublicationInput::new(
+            let mut input = TileSetPublicationInput::from_source(
                 handle,
                 record,
                 content.source().clone(),
@@ -211,7 +211,7 @@ impl PreparedResidency {
                 image,
             );
             if let Some(receipt) = old_tilesets.get(&handle.id()) {
-                input = input.with_owned_source((*receipt).clone());
+                input = input.with_receipt((*receipt).clone());
             }
             next_ids.insert(handle.id());
             inputs.push(input);
@@ -302,7 +302,7 @@ fn reserve_metadata(
                 snapshot
                     .tilesets()
                     .len()
-                    .checked_mul(size_of::<TileSetOwnedSourceReceipt>())?,
+                    .checked_mul(size_of::<TileSetContentReceipt>())?,
             )
         })
         .ok_or_else(resources_missing)?;
@@ -344,6 +344,7 @@ fn tileset_failure(error: TileSetAssetError) -> HostFault {
     let summary = match error {
         TileSetAssetError::InvalidSourceKind => "Prepared Scene TileSet source kind is invalid",
         TileSetAssetError::InvalidSource => "Prepared Scene TileSet source is invalid",
+        TileSetAssetError::InvalidDescriptor => "Prepared Scene TileSet descriptor is invalid",
         TileSetAssetError::Capacity => "Prepared Scene exceeds TileSet source capacity",
         TileSetAssetError::RetentionCapacity => {
             "Prepared Scene exceeds retained TileSet Image capacity"

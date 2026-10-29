@@ -222,7 +222,7 @@ impl fmt::Display for RuntimeContentError {
             Self::UndeclaredProduct => "Runtime product is absent from the admitted catalog",
             Self::UndeclaredScene => "Runtime Scene is not a declared acquisition root",
             Self::UndeclaredDependency => {
-                "Runtime Scene requires a Product absent from its required dependency declarations"
+                "Runtime payload requires a Product absent from its required dependency declarations"
             }
             Self::NotScene => "Runtime product is not a Scene",
             Self::NotAsset => "Runtime product is not an asset member",
@@ -591,6 +591,9 @@ impl RuntimeContentBase {
                     return Err(RuntimeContentError::ProductIdentityMismatch);
                 }
             }
+            C::visit_required_runtime_products(&value, |dependency| {
+                self.validate_required_dependency(member, dependency)
+            })?;
             let product_retained =
                 C::runtime_retained_bytes(&value).map_err(RuntimeContentError::Asset)?;
             check(
@@ -629,6 +632,24 @@ impl RuntimeContentBase {
             .ok_or(RuntimeContentError::UndeclaredProduct)
     }
 
+    fn validate_required_dependency(
+        &self,
+        member: &RuntimeContentMember,
+        product: AssetProductRef,
+    ) -> Result<(), RuntimeContentError> {
+        self.member_index(product)?;
+        if !member
+            .dependencies()
+            .binary_search_by_key(&product, RuntimeContentDependency::product)
+            .is_ok_and(|index| {
+                member.dependencies()[index].role() == RuntimeContentDependencyRole::Required
+            })
+        {
+            return Err(RuntimeContentError::UndeclaredDependency);
+        }
+        Ok(())
+    }
+
     fn validate_scene_dependencies(
         &self,
         candidate: &RuntimeSceneCandidate,
@@ -659,17 +680,7 @@ impl RuntimeContentBase {
                     let AssetRef::Product(product) = reference.asset_ref() else {
                         return Err(RuntimeContentError::ProductIdentityMismatch);
                     };
-                    self.member_index(*product)?;
-                    if !member
-                        .dependencies()
-                        .binary_search_by_key(product, RuntimeContentDependency::product)
-                        .is_ok_and(|index| {
-                            member.dependencies()[index].role()
-                                == RuntimeContentDependencyRole::Required
-                        })
-                    {
-                        return Err(RuntimeContentError::UndeclaredDependency);
-                    }
+                    self.validate_required_dependency(member, *product)?;
                 }
             }
         }

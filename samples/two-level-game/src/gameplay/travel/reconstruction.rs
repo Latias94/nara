@@ -14,7 +14,7 @@ use nara::{
 
 use crate::{
     gameplay::{ActiveLevel, Progress, Session, fail, player},
-    save::{MAX_MARKERS, MarkerId, MarkerRecord},
+    save::{MAX_MARKERS, MarkerId},
 };
 
 #[derive(Component)]
@@ -58,10 +58,10 @@ pub(in crate::gameplay) fn observe_markers(world: &mut World) -> Result<Vec<Mark
     {
         return Err("a dynamic marker token no longer names its actual live identity".into());
     }
-    let key = world.resource::<ActiveLevel>().key;
+    let key = world.resource::<ActiveLevel>().key();
     let records = world
         .resource::<Progress>()
-        .0
+        .checkpoint()
         .markers
         .iter()
         .filter(|marker| marker.level == key)
@@ -84,8 +84,8 @@ pub(in crate::gameplay) fn observe_markers(world: &mut World) -> Result<Vec<Mark
 pub(in crate::gameplay) fn reconstruct(world: &mut World) -> Result<(), String> {
     let content = world
         .resource::<ActiveLevel>()
-        .content
-        .clone()
+        .content()
+        .cloned()
         .ok_or("active level content is unavailable")?;
     let entities = {
         let current = CurrentScene::get(world).ok_or("current Scene is unavailable")?;
@@ -115,15 +115,15 @@ pub(in crate::gameplay) fn reconstruct(world: &mut World) -> Result<(), String> 
 
 pub(in crate::gameplay) fn hide_collected(world: &mut World) {
     let level = world.resource::<ActiveLevel>();
-    let Some(content) = &level.content else {
+    let Some(content) = level.content() else {
         return;
     };
     let collected = world
         .resource::<Progress>()
-        .0
+        .checkpoint()
         .collected
         .iter()
-        .filter(|pickup| pickup.level == level.key)
+        .filter(|pickup| pickup.level == level.key())
         .map(|pickup| pickup.entity.clone())
         .collect::<BTreeSet<_>>();
     let ids = content.pickups.keys().cloned().collect::<Vec<_>>();
@@ -151,24 +151,8 @@ pub(super) fn add_marker(world: &mut World) -> Result<(), String> {
         .get::<Transform2d>(entity)
         .ok_or("explorer has no transform")?
         .translation;
-    let key = world.resource::<ActiveLevel>().key;
-    let mut progress = world.resource_mut::<Progress>();
-    if progress.0.markers.len() >= MAX_MARKERS {
-        return Err("dynamic marker limit reached".into());
-    }
-    let id = progress.0.next_marker_id;
-    let next = id
-        .get()
-        .checked_add(1)
-        .and_then(MarkerId::new)
-        .filter(|id| id.get() != u64::MAX)
-        .ok_or("marker identities are exhausted")?;
-    progress.0.markers.push(MarkerRecord {
-        id,
-        level: key,
-        position: position.to_array(),
-    });
-    progress.0.next_marker_id = next;
+    let key = world.resource::<ActiveLevel>().key();
+    let id = world.resource_mut::<Progress>().add_marker(key, position)?;
     println!("two_level_game: marker={} level={key:?}", id.get());
     if let Err(error) = rebuild_markers(world) {
         fail(world, error);
@@ -177,10 +161,10 @@ pub(super) fn add_marker(world: &mut World) -> Result<(), String> {
 }
 
 fn rebuild_markers(world: &mut World) -> Result<(), String> {
-    let key = world.resource::<ActiveLevel>().key;
+    let key = world.resource::<ActiveLevel>().key();
     let records = world
         .resource::<Progress>()
-        .0
+        .checkpoint()
         .markers
         .iter()
         .filter(|marker| marker.level == key)

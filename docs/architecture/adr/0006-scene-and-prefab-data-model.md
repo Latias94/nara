@@ -172,6 +172,15 @@ only the supplied complete Product bindings. Unknown selections never become imp
 failure or cancellation does not publish the private catalogue or resource overlay. ADR 0122 owns
 the identity/type contract, which alone proves neither membership nor residency.
 
+An opted-in product-owned replacement resource captures its concrete content baseline during
+preparation. The same transaction rechecks that baseline before publication, alongside resource
+presence, World/definition/asset bindings and native claims. Its owner defines the bounded pure
+capture and comparison over the incarnation and content facts relevant to replacement. Asset
+aggregates can reuse exact slot/state baselines; an immutable generation can use its actual owner
+identity. Mere type presence, collection length or an ECS change tick cannot establish this
+agreement. A stale resource rejects the whole candidate and leaves current resources, bindings
+and Scene intact. This extends the existing transaction, not a second resource commit protocol.
+
 This adopts only the Scene representation boundary needed by the ordered delivery workflow.
 Catalog integrity, target/executable compatibility, expected digests, resource residency and actual
 source-free startup/later acquisition belong to their Host and asset owners. Implementation and

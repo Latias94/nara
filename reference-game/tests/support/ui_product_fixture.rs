@@ -238,7 +238,7 @@ impl ProductUiCapture {
     }
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct PendingRetryReactivation {
     pub pending: WaveRetryStatus,
     pub after_reactivation: WaveRetryStatus,
@@ -352,7 +352,7 @@ pub fn capture_product_states(target: UiPhysicalTarget) -> ProductStateCaptureSe
     );
     let rejected_pending = capture(&rejected, target);
     drive_fixed(&mut rejected);
-    let retry = *rejected.world().resource::<WaveRetryStatus>();
+    let retry = rejected.world().resource::<WaveRetryStatus>().clone();
     assert_eq!(retry.phase(), WaveRetryPhase::Idle);
     assert_eq!(
         retry.last_rejection(),
@@ -539,7 +539,7 @@ pub fn exercise_winit_accessibility_mapping_canary() -> WinitAccessibilityMappin
         .expect("the platform accessibility activation frame should drive");
     drive_fixed(&mut runtime);
 
-    let status = *runtime.world().resource::<WaveRetryStatus>();
+    let status = runtime.world().resource::<WaveRetryStatus>().clone();
     let retry_batches = runtime
         .world()
         .resource::<presenter::ComponentRetryCommandTrace>()
@@ -599,7 +599,7 @@ fn exercise_retry_activation_at(
         .drive(Duration::ZERO)
         .expect("the product activation frame should drive");
     drive_fixed(&mut runtime);
-    let status = *runtime.world().resource::<WaveRetryStatus>();
+    let status = runtime.world().resource::<WaveRetryStatus>().clone();
     let ui_action_trace = runtime
         .world()
         .resource::<presenter::ComponentUiActionTrace>();
@@ -638,17 +638,17 @@ pub fn exercise_pending_retry_reactivation() -> PendingRetryReactivation {
         .drive(Duration::ZERO)
         .expect("the initial Retry activation frame should drive");
     drive_fixed(&mut runtime);
-    let pending = *runtime.world().resource::<WaveRetryStatus>();
+    let pending = runtime.world().resource::<WaveRetryStatus>().clone();
     assert_eq!(pending.phase(), WaveRetryPhase::Pending);
 
     inject_pointer_click(&mut runtime);
     runtime
         .drive(Duration::ZERO)
         .expect("the disabled Retry reactivation frame should drive");
-    let after_reactivation = *runtime.world().resource::<WaveRetryStatus>();
+    let after_reactivation = runtime.world().resource::<WaveRetryStatus>().clone();
 
     drive_fixed(&mut runtime);
-    let applied = *runtime.world().resource::<WaveRetryStatus>();
+    let applied = runtime.world().resource::<WaveRetryStatus>().clone();
     let run_generation = runtime.world().resource::<WaveRunGeneration>().get();
     stop_runtime(runtime);
     PendingRetryReactivation {
@@ -675,7 +675,7 @@ pub fn exercise_paused_retry_activation() -> (WaveRetryStatus, WaveRetryStatus) 
 
     inject_keyboard(&mut runtime, KeyCode::Enter);
     runtime.drive(Duration::ZERO).unwrap();
-    let while_paused = *runtime.world().resource::<WaveRetryStatus>();
+    let while_paused = runtime.world().resource::<WaveRetryStatus>().clone();
 
     assert!(matches!(
         runtime.request_control(RuntimeControl::Resume),
@@ -684,7 +684,7 @@ pub fn exercise_paused_retry_activation() -> (WaveRetryStatus, WaveRetryStatus) 
     runtime.drive(Duration::ZERO).unwrap();
     assert_eq!(runtime.state(), RuntimeState::Running);
     drive_fixed(&mut runtime);
-    let after_resume = *runtime.world().resource::<WaveRetryStatus>();
+    let after_resume = runtime.world().resource::<WaveRetryStatus>().clone();
     stop_runtime(runtime);
     (while_paused, after_resume)
 }
@@ -709,7 +709,7 @@ pub fn exercise_resize_cancels_retry_capture() -> LetterboxResizeOutcome {
     drive_until_surface_target(&mut runtime, LETTERBOX_RESIZE_TARGET);
     mouse(&mut runtime, ButtonDriverInput::Release(MouseButton::Left));
     runtime.drive(Duration::ZERO).unwrap();
-    let retry_status = *runtime.world().resource::<WaveRetryStatus>();
+    let retry_status = runtime.world().resource::<WaveRetryStatus>().clone();
     let capture = capture(&runtime, LETTERBOX_RESIZE_TARGET);
     let transform = active_ui_surface_slots(runtime.world())
         .expect("the component presenter should retain the reference surface slot")
@@ -938,7 +938,7 @@ fn stop_runtime(mut runtime: RuntimeInstance) {
 }
 
 fn derive_product_ui_state(world: &World) -> ProductUiState {
-    let retry = *world.resource::<WaveRetryStatus>();
+    let retry = world.resource::<WaveRetryStatus>().clone();
     match retry.phase() {
         WaveRetryPhase::Pending => ProductUiState::RetryPending,
         WaveRetryPhase::Applied => ProductUiState::RetryApplied,

@@ -324,6 +324,170 @@ fn exact_image_versions_render_together_and_repeat_without_reupload() {
     assert_eq!(repeated.reused_images, 3);
 }
 
+#[test]
+fn processed_tileset_captures_render_exact_versions_after_native_retirement() {
+    use nara_asset::{
+        AssetEvents, AssetProductRef, AssetServer, AssetStates, Assets, ImportedProductId,
+        RuntimeAssetCodec, StableAssetId,
+    };
+    use nara_core::Vec2;
+    use nara_image::{ImageAsset, ImageColorSpace, ImageExtent, ImageFormat, ImageRuntimeCodec};
+    use nara_material::{AlphaMode2d, SamplerDescriptor};
+    use nara_tilemap::{
+        TileAtlasLayout, TileIndex, TileSet, TileSetAssets, TileSetDescriptor,
+        TileSetPublicationInput, TileSetRuntimeCodec,
+    };
+    use std::sync::Arc;
+
+    for selection in [
+        ImportedProductId::PRIMARY,
+        ImportedProductId::parse_subproduct("011a8cc0-343a-4b95-8adb-3aa6d81977ed").unwrap(),
+    ] {
+        let product = |uuid| {
+            AssetProductRef::new(StableAssetId::parse_str(uuid).unwrap(), selection).unwrap()
+        };
+        let descriptor = TileSetDescriptor::new(
+            product("2f0d71c7-14fc-4ed4-b48b-1c61bba8b97f"),
+            product("b73f0f16-09e8-4265-b090-b689b41c197e"),
+            TileAtlasLayout::grid(Vec2::ONE, 2, 1),
+        )
+        .unwrap()
+        .with_sampler(SamplerDescriptor::NEAREST_CLAMP)
+        .with_alpha_mode(AlphaMode2d::Opaque);
+        let decoded = TileSetRuntimeCodec::decode_runtime(
+            &TileSetRuntimeCodec::encode_runtime(&descriptor).unwrap(),
+        )
+        .unwrap();
+        assert_eq!(decoded, descriptor);
+        let captures = {
+            let mut server = AssetServer::new();
+            let handle = server
+                .reserve_product::<TileSet>(decoded.product())
+                .unwrap();
+            let image_handle = server
+                .reserve_product::<ImageAsset>(decoded.image_product())
+                .unwrap();
+            let mut images = Assets::default();
+            let mut tilesets = Assets::default();
+            let mut states = AssetStates::default();
+            let mut events = AssetEvents::default();
+            let mut owner = TileSetAssets::default();
+            let mut receipt = None;
+            let captures = [
+                [0, 0, 255, 255, 255, 0, 0, 255],
+                [255, 0, 255, 255, 0, 255, 0, 255],
+            ]
+            .map(|pixels| {
+                let image = ImageAsset::from_product(
+                    decoded.image_product(),
+                    ImageExtent::new(2, 1),
+                    ImageFormat::Rgba8,
+                    ImageColorSpace::Srgb,
+                    pixels.to_vec(),
+                )
+                .unwrap();
+                let acquisition = ImageRuntimeCodec::decode_runtime(
+                    &ImageRuntimeCodec::encode_runtime(&image).unwrap(),
+                )
+                .unwrap();
+                let acquisition = Arc::new(acquisition);
+                // Concrete Arc custody models acquisition here; base and decoded-output cost
+                // custody are qualified separately by the independent consumer.
+                let image = acquisition.share_with_retention_owner(Arc::clone(&acquisition));
+                let mut input = TileSetPublicationInput::from_product(
+                    handle,
+                    decoded,
+                    image_handle,
+                    image.share_retained().unwrap(),
+                );
+                if let Some(previous) = receipt.take() {
+                    input = input.with_receipt(previous);
+                }
+                let prepared = owner
+                    .prepare_publications(vec![input], &[], &server, None, &tilesets, &states)
+                    .unwrap();
+                images
+                    .commit_loaded(image_handle, image, &mut states, &mut events, None, None)
+                    .unwrap();
+                receipt = prepared
+                    .commit(&server, &images, &mut tilesets, &mut states, &mut events)
+                    .pop();
+                let tileset = tilesets.get(handle).unwrap().clone();
+                let content = tileset.image_content().unwrap();
+                assert_eq!(content.product(), decoded.image_product());
+                assert!(content.source().is_none());
+                assert!(std::ptr::eq(
+                    content.pixels(),
+                    images.get(image_handle).unwrap().pixels()
+                ));
+                let snapshot = content.prepared_snapshot();
+                assert!(std::ptr::eq(content.pixels(), snapshot.resource().pixels()));
+                (tileset, snapshot, Arc::downgrade(&acquisition))
+            });
+            owner
+                .prepare_publications(
+                    Vec::new(),
+                    &[receipt.unwrap()],
+                    &server,
+                    None,
+                    &tilesets,
+                    &states,
+                )
+                .unwrap()
+                .commit(&server, &images, &mut tilesets, &mut states, &mut events);
+            assert!(
+                images
+                    .remove_with_state(image_handle, &mut states, &mut events)
+                    .unwrap()
+                    .is_some()
+            );
+            assert!(owner.is_empty() && tilesets.is_empty() && images.is_empty());
+            captures
+        };
+        let [
+            (old, old_prepared, old_owner),
+            (new, new_prepared, new_owner),
+        ] = captures;
+        assert_eq!(old_prepared.identity().key(), new_prepared.identity().key());
+        assert_ne!(old_prepared.identity(), new_prepared.identity());
+        let batches = [(old, old_prepared), (new, new_prepared)]
+            .into_iter()
+            .enumerate()
+            .map(|(index, (tileset, snapshot))| {
+                let region = tileset.normalized_region(TileIndex(1)).unwrap();
+                assert_eq!(region.min, Vec2::new(0.5, 0.0));
+                let mut batch = image_extent_admission_batch(snapshot, false);
+                batch.material.sampler = tileset.material().sampler;
+                batch.material.alpha_mode = tileset.material().alpha_mode;
+                batch.instances[0].center = [-0.5 + index as f32, 0.0];
+                batch.instances[0].x_axis = [0.5, 0.0];
+                batch.instances[0].uv_min = region.min.to_array();
+                batch.instances[0].uv_size = region.size.to_array();
+                batch
+            })
+            .collect::<Vec<_>>();
+        // Only the prepared captures remain: native stores, owner and TileSet copies are gone.
+        assert!(old_owner.upgrade().is_some() && new_owner.upgrade().is_some());
+        let pixels = render_batches_to_rgba(&batches).unwrap();
+        for y in 0..READBACK_EXTENT {
+            for x in 0..READBACK_EXTENT {
+                let expected = if x < READBACK_EXTENT / 2 {
+                    [255, 0, 0, 255]
+                } else {
+                    [0, 255, 0, 255]
+                };
+                assert_eq!(
+                    readback_pixel(&pixels, x, y),
+                    &expected,
+                    "{selection:?} at ({x}, {y})"
+                );
+            }
+        }
+        drop(batches);
+        assert!(old_owner.upgrade().is_none() && new_owner.upgrade().is_none());
+    }
+}
+
 pub(crate) fn readback_viewport() -> ViewportRect {
     ViewportRect::new(0, 0, READBACK_EXTENT, READBACK_EXTENT).unwrap()
 }

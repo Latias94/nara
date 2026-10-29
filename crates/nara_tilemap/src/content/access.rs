@@ -8,16 +8,17 @@ use nara_image::ImageAsset;
 use super::{TileSetAssetError, TileSetAssets};
 use crate::{TileSet, TileSetSource};
 
-/// Concrete access to TileSet source requests and Image-dependent publication.
+/// Concrete access to TileSet source requests and shared Image-dependent reconciliation.
 ///
 /// The Host supplies already admitted source records and decoded source data. This
 /// parameter performs no filesystem discovery or Image decoding. Install
 /// [`crate::TileSetAssetPlugin`] and [`nara_asset::AssetPlugin`] before using it.
+/// Source reconciliation requires a real project database; processed declarations do not.
 #[derive(SystemParam)]
 pub struct TileSetContent<'w> {
     owner: ResMut<'w, TileSetAssets>,
     server: ResMut<'w, AssetServer>,
-    database: Res<'w, ProjectAssetDatabase>,
+    database: Option<Res<'w, ProjectAssetDatabase>>,
     images: Res<'w, Assets<ImageAsset>>,
     tilesets: ResMut<'w, Assets<TileSet>>,
     states: ResMut<'w, AssetStates>,
@@ -48,6 +49,9 @@ impl TileSetContent<'_> {
     /// rejection reserves its admitted identity and publishes a load diagnostic.
     pub fn reject_source(&mut self, record: &AssetRecord) -> Result<(), TileSetAssetError> {
         validate_source_kind(record)?;
+        if self.owner.source_conflicts_with_product(record) {
+            return Err(TileSetAssetError::Superseded);
+        }
         let handle = self.source_handle(record);
         if let Some(handle) = handle {
             self.owner.reject_source(
@@ -92,7 +96,7 @@ impl TileSetContent<'_> {
     pub fn reconcile(&mut self) {
         self.owner.reconcile(
             &mut self.server,
-            &self.database,
+            self.database.as_deref(),
             &self.images,
             &mut self.tilesets,
             &mut self.states,

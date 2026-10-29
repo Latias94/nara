@@ -187,6 +187,11 @@ source snapshot:
   Runtime Products in native decode and persisted Tilemap admission. Before live mutation, reject
   omitted/wrong-role dependencies, wrong Image family/extent and out-of-atlas Scene cells while
   preserving the current Scene/resources. A codec round trip alone does not qualify this owner.
+  Product-owned resources staged with Scene publication capture concrete incarnation/content
+  baselines; recheck them after native waits and before the publication tail. A resource that still
+  exists but changed must reject the candidate, including same-tick ABA or a newly installed owner
+  with equal data. Temporary removal/return of the unchanged Rust owner keeps its logical identity.
+  Reuse that transaction's existing failure/discard/retry path instead of adding a second executor.
 - Resolve the stock `AssetPlugin`'s source-change dependency on an empty `ProjectAssetDatabase`
   before claiming an entirely source-facet-free composition. Current base acquisition constructs
   no database and performs no source I/O; a default plugin's empty source table is not a content
@@ -199,6 +204,45 @@ The next concrete dependency units are TileSet content admission with actual dep
 then the complete first-party Host selection and native residency.
 Keep startup, later Scene acquisition and game-facing typed reads in that same Host qualification;
 adding a processed branch only at startup does not establish source-independent delivery.
+
+### First-Party Content Integration Boundary
+
+After concrete TileSet admission, extend the existing Runtime Host, Scene request/travel owner and
+`content_residency` in that order. Use a private closed source/processed preparation result and
+request context. Source retains its candidate, plan, loader, lineage and actual aliases; processed
+retains `RuntimeContentScene`, the exact original `RuntimeContentBase`/configuration plan and
+decoded acquisitions. Source paths and complete Runtime Products are distinct request selections.
+Same catalog bytes do not establish the same base or executable-definition instance. Do not reopen
+the directory, reconstruct a recipe, manufacture a source Check receipt or use a dummy Scene path.
+Existing managed travel, physical cancellation return, native claims, discard/degraded retry and
+candidate cleanup remain the lifecycle owners.
+
+Freeze concrete `<D, C>` Runtime codec contributions into the selected executable recipe/plan
+independently of source importer selection. Catalog kind/version checks that selection and cannot
+select executable Rust code. Include admitted facet definition/configuration identity in the resolved
+executable/content agreement; equal format names alone do not prove the same compiled selection.
+Reuse the product's definition/fingerprint owners rather than persisting a Rust TypeId or function
+address. A missing or conflicting facet refuses before publication without source fallback.
+Shared game-facing CPU collections index complete Products and retain
+actual `RuntimeContentAsset<P>` owners; real source records supply aliases only on the source path.
+Prepared request views borrow the selected preparation, and successful Scene publication alone
+replaces the live CPU collection. Compound products must not silently select their enclosing primary.
+Within one prepared generation, products sharing one member and selected typed family/codec can
+share one admitted decoded owner; retain each complete Product mapping and its membership proof.
+Do not decode an entire compound member once per selected auxiliary product by accident. Explicit
+independent acquisitions retain their existing separate charges, and collection/index metadata
+remains budgeted by its concrete preparation owner.
+
+Publish actual Images and TileSets to the existing top-level stores read by stock extraction and
+Image preparation. Extend existing residency receipts and Image ownership to complete Product keys;
+keep `CatalogChange` in the source branch. Processed inputs use staged Product bindings, actual same-base
+Image decode and the shared TileSet owner with no database. Revalidate resource/slot/state/claim and
+binding baselines after native waits. The existing exclusive tail publishes Scene/bindings, Images,
+TileSets, CPU collection and current/residency receipts together. For startup, establish required
+native bindings and resources in the unpublished candidate World before materializing its processed
+Scene; candidate retirement retains failed-start cleanup. Make the Asset source-change facet optional
+before claiming a composition with no source database. An empty default source table proves neither
+content agreement nor source-free facet selection.
 
 The [Image qualification](../knowledge/engineering/verification/2026-10/2026-10-29T090832Z-anonymous-and-processed-image-content-with-retained-native-publication-qualification-3e529af056d34a5caa2c12924c0c1014.md)
 records anonymous content, strict Runtime format, complete managed Product admission, original

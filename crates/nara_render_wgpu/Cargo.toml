@@ -31,7 +31,7 @@ nara_hierarchy.workspace = true
 nara_input.workspace = true
 nara_reflect.workspace = true
 nara_sprite.workspace = true
-nara_tilemap.workspace = true
+nara_tilemap = { workspace = true, features = ["serde"] }
 nara_text.workspace = true
 nara_transform.workspace = true
 nara_ui.workspace = true

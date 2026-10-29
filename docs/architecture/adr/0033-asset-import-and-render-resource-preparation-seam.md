@@ -3,7 +3,7 @@
 **Status**: Accepted
 **Date**: 2026-07-08
 **Amended**: 2026-10-23 for Image-owned immutable prepared captures; 2026-10-29 for
-source-independent Image content and neutral prepared-content hashes
+source-independent Image/TileSet content and neutral prepared-content hashes
 **Refined By**: ADR 0037: Runtime Asset Acquisition, Reload, and Lifetime Policy; ADR 0040:
 Render Resource Lifetime and Submitter Ownership; ADR 0054: GPU Upload Budget and Buffer
 Allocation Policy; ADR 0080: Domain-Owned TaskUpdate Integration Sets;
@@ -124,6 +124,36 @@ The resulting immutable share can enter an existing product-owned native resourc
 failed/cancelled Scene publication leaves last-good bindings and values intact. This boundary
 does not introduce a second native asset transaction, generic residency executor, render graph
 implementation or complete first-party packaged Player.
+
+### Shared Source And Processed TileSet Publication
+
+`TileSetDescriptor` is source-independent CPU content: its own complete Product, one complete
+required Image Product, atlas layout and sampler/alpha/tint values. Both Product selections may
+be primary or auxiliary. The descriptor contains no native handles, source paths, import hashes
+or residency claims. Its concrete `runtime_tileset` version-one codec owns bounded strict format
+admission and visits the actual required Image Product through ADR 0007's inventory contract.
+
+The existing TileSet content owner retains one closed Source or Product declaration for each
+destination. A Source declaration requires actual admitted database records and Image import
+provenance. A Product declaration requires complete typed bindings and an actual Image with the
+exact declared Product. It does not reconstruct a source declaration or manufacture an
+`AssetRecord`, `SourceHash` or `ProjectAssetDatabase`. Source-only primary-selection restrictions
+remain in that adapter. Native Runtime decode can look up already bound auxiliary TileSets;
+persisted cell membership consumes the concrete owner's complete-reference-to-atlas proof.
+
+Both declarations use the same publication claims, value/state baselines, actual Image snapshot,
+exact extent arithmetic, atlas rebuild barrier, retained pixels and prepare/commit/retire path.
+Changing a declaration cannot bypass a live atlas barrier. A copied receipt does not establish
+that other residency holders retired. Reconciliation preserves last-good and does not churn an
+unchanged publication. Actual Image captures keep their original Runtime acquisition and
+decoded-output reservation through the last escaped TileSet or prepared-render owner.
+
+Content acquisition proves the actual Image dependency is present and Required in the captured
+base. The concrete publication owner additionally proves typed binding, actual Image identity and
+extent. The Scene/content adapter checks cell indices against that admitted atlas before live
+mutation. Neither a catalog edge nor descriptor decoding proves all these facts. Source and
+processed callers stage resources with the existing Scene/native transaction; independent
+product-owned resource aggregates do not imply that stock render extraction reads their fields.
 
 The first implementation slice after scene/prefab serialization should therefore combine:
 

@@ -69,8 +69,14 @@ inspection.
 Resource acquisition selects a concrete Rust family and codec. Kind/version must match before
 decode. The codec's complete-identity query and the family's membership query validate every
 Product mapped to the member. The compound text consumer checks the enclosing source as well as
-each auxiliary ID; valid bytes for a different source are rejected. Decoder and membership panics
-return a rejected acquisition without publishing a product.
+each auxiliary ID; valid bytes for a different source are rejected. The required
+`visit_required_runtime_products` query enumerates references from the decoded payload. The Host
+checks each against this base's membership and this member's Required declarations before
+returning the asset. Implement an explicit empty inventory when the format has no required
+references. The query borrows existing values, stops on the visitor's error and grants no I/O or
+dependency loading. Decoder/query panics return a rejected acquisition without publishing a product.
+This validates declarations, not the required asset's Rust family, decoded descriptor or residency;
+the concrete consuming owner still admits those facts.
 
 The concrete [Runtime Image guide](runtime-images.md) describes `ImageDomain` and
 `ImageRuntimeCodec`, source-independent pixels and the original decode reservation retained by
@@ -93,6 +99,21 @@ stage complete Product bindings and actual values through its transaction before
 codec can resolve them. Use `SceneAssetBindings::reserve_product` and an owned product resource
 overlay where appropriate. There is no source import fallback when the selected Runtime codec or
 residency owner is missing.
+
+A `SceneProductResource` supplies a concrete owned baseline through `capture_baseline` and
+`matches_baseline`. Preparation captures the currently installed resource; final publication checks
+that incarnation and its relevant content again. Use actual owner generations or precise value/state
+facts, including equal data in a newly installed owner and same-tick ABA. Temporarily removing and
+returning the same unchanged Rust owner does not create a new logical incarnation. Presence,
+collection length or an ECS change tick cannot authorize overwriting a newer resource. Stale
+refusal preserves the current Scene, bindings and resource values in the existing transaction.
+
+For a mutable game-owned resource, keep replacement-relevant fields private and advance a checked
+write generation in its mutation methods. Pair that counter with a stable owned incarnation; normal
+writes need no new identity allocation. Constructing another resource establishes a new incarnation,
+while data equality can continue to compare gameplay values alone. An immutable complete generation
+can instead use its retained owner identity. This is a concrete owner contract, not a World-wide
+resource writer policy or a requirement to wrap ordinary ECS access in document transactions.
 
 ## Bounds And Current Scope
 

@@ -55,11 +55,33 @@ impl SceneProductTransactionLimits {
     }
 }
 
-/// Marker for a product-owned resource that may move with an atomic scene replacement.
+/// Exact replacement baseline owned by a concrete product resource.
 ///
 /// A game or package implements this trait only for its own resource types. Rust's orphan rules
 /// prevent downstream code from opting engine-owned resources into this provisional writer.
-pub trait SceneProductResource: Resource<Mutability = Mutable> {}
+///
+/// Capture and comparison must be bounded, pure observations: no mutation, I/O, waiting, or
+/// external callbacks. The baseline must retain the resource incarnation and all content facts
+/// relevant to replacement. Owners must distinguish newly installed resource incarnations and
+/// writes that restore an earlier value (ABA), including writes within the same ECS change tick.
+/// A newly constructed resource must have a distinct baseline even with identical content. Use
+/// exact owner identities and mutation generations or equivalent per-slot/state facts; presence,
+/// collection length, a content hash alone, and ECS change ticks are insufficient.
+/// Temporarily removing and returning the same unchanged Rust owner preserves its logical
+/// incarnation; the ECS resource slot is not an independent revision authority here.
+///
+/// The Scene transaction retains one baseline from the installed resource during preparation
+/// and compares it again before publication. It does not infer resource ownership or revisions.
+pub trait SceneProductResource: Resource<Mutability = Mutable> {
+    /// Owned, immutable facts needed to admit replacement of this resource incarnation.
+    type Baseline: Send + Sync + 'static;
+
+    /// Captures the exact installed incarnation and replacement-relevant content facts.
+    fn capture_baseline(&self) -> Self::Baseline;
+
+    /// Whether this is still the captured incarnation with unchanged relevant content facts.
+    fn matches_baseline(&self, baseline: &Self::Baseline) -> bool;
+}
 
 pub(crate) enum SceneProductOverlayError {
     LimitExceeded,
@@ -69,6 +91,7 @@ pub(crate) enum SceneProductOverlayError {
     ExistingComponent(SceneEntityId),
     ReservedComponent(SceneEntityId),
     ResourceMissing,
+    ResourceChanged,
     DuplicateResource,
 }
 
@@ -83,7 +106,7 @@ struct PendingResourceWrite {
 }
 
 type LowerComponentWrite = dyn FnOnce(Entity, &mut LifecycleFreeInsertionPlan) + Send + Sync;
-type ValidateResourceWrite = dyn Fn(&World) -> bool + Send + Sync;
+type ValidateResourceWrite = dyn Fn(&World) -> Result<(), SceneProductOverlayError> + Send + Sync;
 type CommitResourceWrite = dyn FnOnce(&mut World) + Send + Sync;
 
 /// Scoped writer for runtime-only values attached to a replacement scene candidate.
@@ -189,11 +212,12 @@ impl<'world> SceneProductOverlayWriter<'world> {
     /// Replaces one existing product-owned resource during the scene commit tail.
     ///
     /// Resource insertion is deliberately unsupported: plugin composition must install the
-    /// resource before runtime publication, and the marker trait limits this path to downstream
-    /// product-owned types. A receipt-owning run resource that needs the resulting
-    /// `SpawnedSceneInstance` remains outside this writer: hold it through an exclusive
-    /// `World::resource_scope`, then update it without failure after a successful replacement
-    /// report and before the exclusive system returns.
+    /// resource before runtime publication, and the owner trait limits this path to downstream
+    /// product-owned types. The installed resource supplies an exact baseline; a missing or
+    /// changed resource rejects publication before any Scene, resource, or binding commit.
+    /// A receipt-owning run resource that needs the resulting `SpawnedSceneInstance` remains
+    /// outside this writer: hold it through an exclusive `World::resource_scope`, then update it
+    /// without failure after a successful replacement report and before the exclusive system returns.
     pub fn replace_resource<R>(&mut self, replacement: R) -> &mut Self
     where
         R: SceneProductResource,
@@ -201,17 +225,27 @@ impl<'world> SceneProductOverlayWriter<'world> {
         if self.error.is_some() || !self.reserve_write() {
             return self;
         }
-        if !self.world.contains_resource::<R>() {
+        let Some(installed) = self.world.get_resource::<R>() else {
             self.error = Some(SceneProductOverlayError::ResourceMissing);
             return self;
-        }
+        };
         if !self.seen_resources.insert(TypeId::of::<R>()) {
             self.error = Some(SceneProductOverlayError::DuplicateResource);
             return self;
         }
 
+        let baseline = installed.capture_baseline();
         self.resources.push(PendingResourceWrite {
-            validate: Box::new(World::contains_resource::<R>),
+            validate: Box::new(move |world| {
+                let installed = world
+                    .get_resource::<R>()
+                    .ok_or(SceneProductOverlayError::ResourceMissing)?;
+                if installed.matches_baseline(&baseline) {
+                    Ok(())
+                } else {
+                    Err(SceneProductOverlayError::ResourceChanged)
+                }
+            }),
             commit: Box::new(move |world| {
                 *world
                     .get_resource_mut::<R>()
@@ -249,11 +283,9 @@ pub(crate) struct PreparedSceneProductOverlay {
 
 impl PreparedSceneProductOverlay {
     pub(crate) fn validate_resources(&self, world: &World) -> Result<(), SceneProductOverlayError> {
-        if self.resources.iter().all(|write| (write.validate)(world)) {
-            Ok(())
-        } else {
-            Err(SceneProductOverlayError::ResourceMissing)
-        }
+        self.resources
+            .iter()
+            .try_for_each(|write| (write.validate)(world))
     }
 
     pub(crate) fn lower_components(
@@ -283,11 +315,9 @@ pub(crate) struct PreparedSceneProductResources {
 
 impl PreparedSceneProductResources {
     pub(crate) fn validate(&self, world: &World) -> Result<(), SceneProductOverlayError> {
-        if self.writes.iter().all(|write| (write.validate)(world)) {
-            Ok(())
-        } else {
-            Err(SceneProductOverlayError::ResourceMissing)
-        }
+        self.writes
+            .iter()
+            .try_for_each(|write| (write.validate)(world))
     }
 
     pub(crate) fn commit(self, world: &mut World) {

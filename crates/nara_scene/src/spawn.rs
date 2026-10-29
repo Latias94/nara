@@ -1089,6 +1089,13 @@ fn scene_product_rejection(
                 None,
             )
         }
+        PrepareSceneProductTransactionError::Overlay(SceneProductOverlayError::ResourceChanged) => {
+            (
+                "scene.product-resource-changed",
+                "Scene product resource incarnation or content changed after baseline capture",
+                None,
+            )
+        }
         PrepareSceneProductTransactionError::Overlay(
             SceneProductOverlayError::DuplicateResource,
         ) => (

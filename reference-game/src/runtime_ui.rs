@@ -258,7 +258,7 @@ fn project_runtime_ui(
                     *button = button.clone().with_enabled(retry_enabled);
                 }
             }
-            "input-hint" => replace_text_content(text, retry_hint(*retry)),
+            "input-hint" => replace_text_content(text, retry_hint(&retry)),
             _ => {}
         }
     }
@@ -271,7 +271,7 @@ fn replace_text_content(text: Option<nara::ecs::Mut<'_, UiText>>, content: impl 
     }
 }
 
-fn retry_hint(retry: WaveRetryStatus) -> &'static str {
+fn retry_hint(retry: &WaveRetryStatus) -> &'static str {
     if retry.phase() == WaveRetryPhase::Pending {
         return "Retry is pending";
     }

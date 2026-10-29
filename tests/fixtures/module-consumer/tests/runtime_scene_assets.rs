@@ -32,9 +32,31 @@ use nara_scene::{
 #[derive(Component)]
 struct Sample(Handle<String>);
 
-#[derive(Resource)]
-struct TextProducts(Assets<String>);
-impl SceneProductResource for TextProducts {}
+#[derive(Resource, Default)]
+struct TextProducts {
+    values: Assets<String>,
+    revision: Arc<()>,
+}
+
+impl TextProducts {
+    fn insert(&mut self, handle: Handle<String>, value: String) {
+        self.values.insert(handle, value);
+        // Retain write history even when the same slot returns to the same content.
+        self.revision = Arc::new(());
+    }
+}
+
+impl SceneProductResource for TextProducts {
+    type Baseline = Arc<()>;
+
+    fn capture_baseline(&self) -> Self::Baseline {
+        Arc::clone(&self.revision)
+    }
+
+    fn matches_baseline(&self, baseline: &Self::Baseline) -> bool {
+        Arc::ptr_eq(&self.revision, baseline)
+    }
+}
 
 fn component() -> ComponentTypeId {
     ComponentTypeId::new("consumer.runtime.Sample")
@@ -162,12 +184,12 @@ fn world_with_products() -> (World, Handle<String>, Handle<String>) {
     assert_ne!(primary.id(), auxiliary.id());
     assert!(server.path(primary.id()).is_none());
     assert!(server.path(auxiliary.id()).is_none());
-    let mut values = Assets::<String>::default();
+    let mut values = TextProducts::default();
     values.insert(primary, "processed-primary".into());
     values.insert(auxiliary, "processed-auxiliary".into());
     let mut world = World::new();
     world.insert_resource(server);
-    world.insert_resource(TextProducts(values));
+    world.insert_resource(values);
     (world, primary, auxiliary)
 }
 
@@ -205,7 +227,11 @@ fn processed_native_assets_resolve_actual_primary_and_auxiliary_values_without_s
             .unwrap();
         assert_eq!(sample.0, expected);
         assert_eq!(
-            world.resource::<TextProducts>().0.get(sample.0).unwrap(),
+            world
+                .resource::<TextProducts>()
+                .values
+                .get(sample.0)
+                .unwrap(),
             text
         );
         assert_eq!(
@@ -223,11 +249,19 @@ fn processed_native_assets_resolve_actual_primary_and_auxiliary_values_without_s
     assert_eq!(calls.load(Ordering::SeqCst), 2);
     retire_and_despawn_scene_instance(&mut world, &current).unwrap();
     assert_eq!(
-        world.resource::<TextProducts>().0.get(primary).unwrap(),
+        world
+            .resource::<TextProducts>()
+            .values
+            .get(primary)
+            .unwrap(),
         "processed-primary"
     );
     assert_eq!(
-        world.resource::<TextProducts>().0.get(auxiliary).unwrap(),
+        world
+            .resource::<TextProducts>()
+            .values
+            .get(auxiliary)
+            .unwrap(),
         "processed-auxiliary"
     );
 }
@@ -286,11 +320,19 @@ fn processed_native_missing_wrong_typed_and_stale_bindings_preserve_current_scen
     assert_eq!(resolve(&world, &current, 0), old);
     assert_eq!(world.get::<Sample>(old).unwrap().0, primary);
     assert_eq!(
-        world.resource::<TextProducts>().0.get(primary).unwrap(),
+        world
+            .resource::<TextProducts>()
+            .values
+            .get(primary)
+            .unwrap(),
         "processed-primary"
     );
     assert_eq!(
-        world.resource::<TextProducts>().0.get(auxiliary).unwrap(),
+        world
+            .resource::<TextProducts>()
+            .values
+            .get(auxiliary)
+            .unwrap(),
         "processed-auxiliary"
     );
     let current = bindings
@@ -312,12 +354,12 @@ fn replacement_values(
     auxiliary: Handle<String>,
     next: Handle<String>,
 ) -> TextProducts {
-    let current = &world.resource::<TextProducts>().0;
-    let mut values = Assets::default();
+    let current = &world.resource::<TextProducts>().values;
+    let mut values = TextProducts::default();
     values.insert(primary, current.get(primary).unwrap().clone());
     values.insert(auxiliary, current.get(auxiliary).unwrap().clone());
     values.insert(next, "new-processed-product".to_owned());
-    TextProducts(values)
+    values
 }
 
 #[test]
@@ -372,10 +414,76 @@ fn runtime_product_binding_value_and_native_scene_publish_through_one_existing_t
     assert!(
         world
             .resource::<TextProducts>()
-            .0
+            .values
             .get(rejected_handle)
             .is_none()
     );
+
+    let mut assets = SceneAssetBindings::from_world(&world);
+    let stale_handle = assets.reserve_product::<String>(next_ref).unwrap();
+    let values = replacement_values(&world, primary, auxiliary, stale_handle);
+    let pending = bindings
+        .prepare_runtime_scene_replacement_with_claims(
+            &mut world,
+            &next,
+            &current,
+            assets,
+            &claims,
+            limits,
+            &[],
+            |writer| {
+                callbacks.fetch_add(1, Ordering::SeqCst);
+                writer.replace_resource(values);
+            },
+        )
+        .unwrap_or_else(|report| panic!("processed replacement prepare failed: {report:?}"));
+    pending.validate_baseline(&mut world).unwrap();
+    let decoded = calls.load(Ordering::SeqCst);
+    let ticks = world.get_resource_change_ticks::<TextProducts>().unwrap();
+    {
+        let mut products = world.resource_mut::<TextProducts>();
+        products.insert(primary, "intervening-content".into());
+        products.insert(primary, "processed-primary".into());
+        assert_eq!(products.values.len(), 2);
+    }
+    let live_baseline = world.resource::<TextProducts>().capture_baseline();
+    assert_eq!(
+        world
+            .get_resource_change_ticks::<TextProducts>()
+            .unwrap()
+            .changed,
+        ticks.changed
+    );
+    let (pending, report) = match pending.commit(&mut world) {
+        Err(failure) => failure,
+        Ok(_) => panic!("a same-slot content ABA must reject product replacement"),
+    };
+    assert!(
+        report
+            .diagnostics
+            .iter()
+            .any(|diagnostic| { diagnostic.code().as_str() == "scene.product-resource-changed" })
+    );
+    assert!(report.instance.is_none());
+    assert_eq!(callbacks.load(Ordering::SeqCst), 2);
+    assert_eq!(calls.load(Ordering::SeqCst), decoded);
+    assert_eq!(world.resource::<AssetServer>(), &before);
+    assert_eq!(world.resource::<WorldIdentityDomain>().stats(), identity);
+    assert_eq!(resolve(&world, &current, 0), old);
+    assert!(
+        world
+            .resource::<TextProducts>()
+            .matches_baseline(&live_baseline)
+    );
+    assert!(
+        world
+            .resource::<TextProducts>()
+            .values
+            .get(stale_handle)
+            .is_none()
+    );
+    assert!(pending.discard(&mut world).is_ok());
+    assert_eq!(world.resource::<WorldIdentityDomain>().stats(), identity);
 
     let mut assets = SceneAssetBindings::from_world(&world);
     let canceled_handle = assets.reserve_product::<String>(next_ref).unwrap();
@@ -396,7 +504,7 @@ fn runtime_product_binding_value_and_native_scene_publish_through_one_existing_t
             },
         )
         .unwrap_or_else(|report| panic!("processed replacement prepare failed: {report:?}"));
-    assert_eq!(callbacks.load(Ordering::SeqCst), 2);
+    assert_eq!(callbacks.load(Ordering::SeqCst), 3);
     assert_eq!(world.resource::<AssetServer>(), &before);
     assert!(pending.discard(&mut world).is_ok());
     assert_eq!(world.resource::<AssetServer>(), &before);
@@ -404,7 +512,7 @@ fn runtime_product_binding_value_and_native_scene_publish_through_one_existing_t
     assert!(
         world
             .resource::<TextProducts>()
-            .0
+            .values
             .get(canceled_handle)
             .is_none()
     );
@@ -434,7 +542,7 @@ fn runtime_product_binding_value_and_native_scene_publish_through_one_existing_t
     assert!(
         world
             .resource::<TextProducts>()
-            .0
+            .values
             .get(next_handle)
             .is_none()
     );
@@ -443,7 +551,7 @@ fn runtime_product_binding_value_and_native_scene_publish_through_one_existing_t
         .unwrap_or_else(|_| panic!("processed replacement commit failed"));
     assert!(!report.diagnostics.has_errors(), "{report:?}");
     let current = report.instance.unwrap();
-    assert_eq!(callbacks.load(Ordering::SeqCst), 3);
+    assert_eq!(callbacks.load(Ordering::SeqCst), 4);
     assert_eq!(calls.load(Ordering::SeqCst), decoded);
     assert!(world.get_entity(old).is_err());
     assert_eq!(
@@ -455,7 +563,11 @@ fn runtime_product_binding_value_and_native_scene_publish_through_one_existing_t
         Some(next_ref)
     );
     assert_eq!(
-        world.resource::<TextProducts>().0.get(next_handle).unwrap(),
+        world
+            .resource::<TextProducts>()
+            .values
+            .get(next_handle)
+            .unwrap(),
         "new-processed-product"
     );
     retire_and_despawn_scene_instance(&mut world, &current).unwrap();

@@ -83,7 +83,7 @@ pub(super) fn consume(world: &mut World) {
         }
         let result = match kind.as_str() {
             TRAVEL | INSTANCE => {
-                let key = world.resource::<ActiveLevel>().key;
+                let key = world.resource::<ActiveLevel>().key();
                 let target = if kind == INSTANCE {
                     LevelKey::new(key.level(), if key.instance() == 0 { 1 } else { 0 }).unwrap()
                 } else {
@@ -93,7 +93,7 @@ pub(super) fn consume(world: &mut World) {
                         LevelId::Meadow
                     })
                 };
-                let mut checkpoint = world.resource::<Progress>().0.clone();
+                let mut checkpoint = world.resource::<Progress>().checkpoint().clone();
                 checkpoint.location = CheckpointLocation {
                     level: target,
                     anchor: SceneEntityId::new("checkpoint").unwrap(),
@@ -103,7 +103,7 @@ pub(super) fn consume(world: &mut World) {
             RETRY => retry_current(world),
             MARKER => add_marker(world),
             SAVE => {
-                let checkpoint = world.resource::<Progress>().0.clone();
+                let checkpoint = world.resource::<Progress>().checkpoint().clone();
                 let result = world.resource::<Storage>().save(&checkpoint);
                 if result.is_ok() {
                     world.resource_mut::<Session>().saves += 1;
@@ -130,8 +130,8 @@ pub(super) fn consume(world: &mut World) {
 }
 
 fn retry_current(world: &mut World) -> Result<(), String> {
-    let key = world.resource::<ActiveLevel>().key;
-    let progress = world.resource::<Progress>().0.clone();
+    let key = world.resource::<ActiveLevel>().key();
+    let progress = world.resource::<Progress>().checkpoint().clone();
     let (expected, content) = {
         let current = CurrentScene::get(world).ok_or("current Scene is unavailable")?;
         let content = Content::read(current.source())?;
@@ -149,11 +149,8 @@ fn retry_current(world: &mut World) -> Result<(), String> {
         &markers,
         |writer| {
             writer
-                .replace_resource(Progress(progress))
-                .replace_resource(ActiveLevel {
-                    key,
-                    content: Some(content),
-                });
+                .replace_resource(Progress::new(progress))
+                .replace_resource(ActiveLevel::new(key, Some(content)));
         },
     );
     if report.diagnostics.has_errors() || report.instance.is_none() {
@@ -277,11 +274,8 @@ pub(super) fn advance(world: &mut World) {
         &old_markers,
         |writer| {
             writer
-                .replace_resource(Progress(pending.checkpoint.clone()))
-                .replace_resource(ActiveLevel {
-                    key: pending.target,
-                    content: Some(content),
-                });
+                .replace_resource(Progress::new(pending.checkpoint.clone()))
+                .replace_resource(ActiveLevel::new(pending.target, Some(content)));
         },
     );
     if report.diagnostics.has_errors() || report.instance.is_none() {

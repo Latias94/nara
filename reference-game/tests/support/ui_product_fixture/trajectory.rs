@@ -67,7 +67,7 @@ pub fn capture_single_runtime_retry_trajectory(
         .drive(Duration::ZERO)
         .expect("the first Retry activation frame should drive");
     drive_fixed(&mut runtime);
-    let first_pending_retry = *runtime.world().resource::<WaveRetryStatus>();
+    let first_pending_retry = runtime.world().resource::<WaveRetryStatus>().clone();
     assert_eq!(first_pending_retry.phase(), WaveRetryPhase::Pending);
     let first_ui_action_sequence = first_pending_retry
         .pending_ui_action_sequence()
@@ -122,7 +122,7 @@ pub fn capture_single_runtime_retry_trajectory(
         .drive(Duration::ZERO)
         .expect("the second Retry activation frame should drive");
     drive_fixed(&mut runtime);
-    let second_pending_retry = *runtime.world().resource::<WaveRetryStatus>();
+    let second_pending_retry = runtime.world().resource::<WaveRetryStatus>().clone();
     assert_eq!(second_pending_retry.phase(), WaveRetryPhase::Pending);
     let second_ui_action_sequence = second_pending_retry
         .pending_ui_action_sequence()
@@ -135,7 +135,7 @@ pub fn capture_single_runtime_retry_trajectory(
         .drive(Duration::ZERO)
         .expect("the second Retry release frame should drive");
     drive_fixed(&mut runtime);
-    let applied_retry = *runtime.world().resource::<WaveRetryStatus>();
+    let applied_retry = runtime.world().resource::<WaveRetryStatus>().clone();
     assert_eq!(applied_retry.phase(), WaveRetryPhase::Applied);
     assert_eq!(
         applied_retry.applied_ui_action_sequence(),
@@ -167,7 +167,7 @@ pub fn capture_single_runtime_retry_trajectory(
 }
 
 fn assert_replacement_rejected(runtime: &nara::app::RuntimeInstance) {
-    let retry = *runtime.world().resource::<WaveRetryStatus>();
+    let retry = runtime.world().resource::<WaveRetryStatus>().clone();
     assert_eq!(retry.phase(), WaveRetryPhase::Idle);
     assert_eq!(
         retry.last_rejection(),

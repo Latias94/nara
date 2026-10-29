@@ -6,7 +6,7 @@ mod storage;
 mod travel;
 mod verification;
 
-use std::path::PathBuf;
+use std::{path::PathBuf, sync::Arc};
 
 use nara::{
     ProductConfiguration, ProductRecipe, SchemaContribution,
@@ -26,7 +26,10 @@ use nara::{
 
 use crate::{
     levels::{LevelId, LevelKey},
-    save::{Checkpoint, CheckpointLocation, MarkerId},
+    save::{
+        Checkpoint, CheckpointLocation, CollectedPickup, MAX_MARKERS, MAX_SCORE, MarkerId,
+        MarkerRecord,
+    },
 };
 use content::Content;
 
@@ -99,16 +102,138 @@ pub struct GameSnapshot {
     pub scene_members: usize,
 }
 
-#[derive(Resource, Clone)]
-pub(super) struct Progress(pub Checkpoint);
-impl SceneProductResource for Progress {}
-
-#[derive(Resource, Clone)]
-struct ActiveLevel {
-    pub key: LevelKey,
-    pub content: Option<Content>,
+/// Stable owner identity with a bounded write counter; ordinary mutations never allocate it.
+#[derive(Default)]
+struct ResourceRevision {
+    incarnation: Arc<()>,
+    generation: u64,
 }
-impl SceneProductResource for ActiveLevel {}
+
+impl ResourceRevision {
+    fn advance(&mut self) {
+        self.generation = self
+            .generation
+            .checked_add(1)
+            .expect("game resource mutation generation exhausted");
+    }
+
+    fn capture(&self) -> (Arc<()>, u64) {
+        (Arc::clone(&self.incarnation), self.generation)
+    }
+
+    fn matches(&self, baseline: &(Arc<()>, u64)) -> bool {
+        Arc::ptr_eq(&self.incarnation, &baseline.0) && self.generation == baseline.1
+    }
+}
+
+#[derive(Resource)]
+pub(super) struct Progress {
+    checkpoint: Checkpoint,
+    revision: ResourceRevision,
+}
+
+impl Progress {
+    fn new(checkpoint: Checkpoint) -> Self {
+        Self {
+            checkpoint,
+            revision: ResourceRevision::default(),
+        }
+    }
+
+    fn checkpoint(&self) -> &Checkpoint {
+        &self.checkpoint
+    }
+
+    fn set_anchor(&mut self, anchor: SceneEntityId) {
+        self.revision.advance();
+        self.checkpoint.location.anchor = anchor;
+    }
+
+    fn collect(&mut self, pickup: CollectedPickup) -> bool {
+        if self.checkpoint.collected.contains(&pickup) {
+            return false;
+        }
+        self.revision.advance();
+        self.checkpoint.collected.push(pickup);
+        self.checkpoint.score = self.checkpoint.score.saturating_add(10).min(MAX_SCORE);
+        true
+    }
+
+    fn add_marker(&mut self, level: LevelKey, position: Vec2) -> Result<MarkerId, String> {
+        if self.checkpoint.markers.len() >= MAX_MARKERS {
+            return Err("dynamic marker limit reached".into());
+        }
+        let id = self.checkpoint.next_marker_id;
+        let next = id
+            .get()
+            .checked_add(1)
+            .and_then(MarkerId::new)
+            .filter(|id| id.get() != u64::MAX)
+            .ok_or("marker identities are exhausted")?;
+        self.revision.advance();
+        self.checkpoint.markers.push(MarkerRecord {
+            id,
+            level,
+            position: position.to_array(),
+        });
+        self.checkpoint.next_marker_id = next;
+        Ok(id)
+    }
+}
+
+impl SceneProductResource for Progress {
+    type Baseline = (Arc<()>, u64);
+
+    fn capture_baseline(&self) -> Self::Baseline {
+        self.revision.capture()
+    }
+
+    fn matches_baseline(&self, baseline: &Self::Baseline) -> bool {
+        self.revision.matches(baseline)
+    }
+}
+
+#[derive(Resource)]
+struct ActiveLevel {
+    key: LevelKey,
+    content: Option<Content>,
+    revision: ResourceRevision,
+}
+
+impl ActiveLevel {
+    fn new(key: LevelKey, content: Option<Content>) -> Self {
+        Self {
+            key,
+            content,
+            revision: ResourceRevision::default(),
+        }
+    }
+
+    fn key(&self) -> LevelKey {
+        self.key
+    }
+
+    fn content(&self) -> Option<&Content> {
+        self.content.as_ref()
+    }
+
+    fn set_content(&mut self, content: Content) {
+        self.revision.advance();
+        self.content = Some(content);
+    }
+}
+
+impl SceneProductResource for ActiveLevel {
+    type Baseline = (Arc<()>, u64);
+
+    fn capture_baseline(&self) -> Self::Baseline {
+        self.revision.capture()
+    }
+
+    fn matches_baseline(&self, baseline: &Self::Baseline) -> bool {
+        self.revision.matches(baseline)
+    }
+}
 
 #[derive(Resource, Default)]
 pub(super) struct Session {
@@ -134,11 +259,11 @@ impl Plugin for ExplorationPlugin {
         app.world_mut()?
             .register_component::<travel::DynamicMarker>();
         let key = LevelKey::main(LevelId::STARTUP);
-        app.insert_resource(Progress(Checkpoint::new(CheckpointLocation {
+        app.insert_resource(Progress::new(Checkpoint::new(CheckpointLocation {
             level: key,
             anchor: SceneEntityId::new("checkpoint").unwrap(),
         })))?
-        .insert_resource(ActiveLevel { key, content: None })?
+        .insert_resource(ActiveLevel::new(key, None))?
         .insert_resource(Session::default())?
         .insert_resource(GameSnapshot::default())?
         .insert_resource(travel::Travel::default())?
@@ -205,8 +330,10 @@ fn initialize(world: &mut World) {
         .and_then(|current| Content::read(current.source()));
     match content {
         Ok(content) => {
-            world.resource_mut::<Progress>().0.location.anchor = content.checkpoint.clone();
-            world.resource_mut::<ActiveLevel>().content = Some(content);
+            world
+                .resource_mut::<Progress>()
+                .set_anchor(content.checkpoint.clone());
+            world.resource_mut::<ActiveLevel>().set_content(content);
             if let Err(error) = travel::reconstruct(world) {
                 fail(world, error);
             } else {
@@ -229,7 +356,7 @@ fn fail(world: &mut World, error: String) {
 }
 
 fn player(world: &World) -> Option<nara::ecs::Entity> {
-    let id = &world.resource::<ActiveLevel>().content.as_ref()?.player;
+    let id = &world.resource::<ActiveLevel>().content()?.player;
     let current = CurrentScene::get(world)?;
     match current.receipt().resolve(world, id) {
         EntityLookup::Resolved(entity) => Some(entity),
@@ -262,10 +389,9 @@ fn simulate(world: &mut World) {
         .clamp(Vec2::new(-280.0, -150.0), Vec2::new(280.0, 150.0));
     let position = transform.translation;
     let level = world.resource::<ActiveLevel>();
-    let key = level.key;
+    let key = level.key();
     let nearby = level
-        .content
-        .as_ref()
+        .content()
         .unwrap()
         .pickups
         .iter()
@@ -273,19 +399,13 @@ fn simulate(world: &mut World) {
         .map(|(id, _)| id.clone())
         .collect::<Vec<_>>();
     for entity in nearby {
-        let pickup = crate::save::CollectedPickup { level: key, entity };
+        let id = entity.clone();
+        let pickup = CollectedPickup { level: key, entity };
         let mut progress = world.resource_mut::<Progress>();
-        if !progress.0.collected.contains(&pickup) {
-            let id = pickup.entity.clone();
-            progress.0.collected.push(pickup);
-            progress.0.score = progress
-                .0
-                .score
-                .saturating_add(10)
-                .min(crate::save::MAX_SCORE);
+        if progress.collect(pickup) {
             println!(
                 "two_level_game: collected={id} level={key:?} score={}",
-                progress.0.score
+                progress.checkpoint().score
             );
         }
     }
@@ -309,10 +429,10 @@ fn capture(world: &mut World) {
         .unwrap_or(Vec2::ZERO);
     let current = CurrentScene::get(world);
     let receipt = current.as_ref().map(|current| current.receipt());
-    let progress = &world.resource::<Progress>().0;
+    let progress = world.resource::<Progress>().checkpoint();
     let level = world.resource::<ActiveLevel>();
     let session = world.resource::<Session>();
-    let visible = level.content.as_ref().map_or(0, |content| {
+    let visible = level.content().map_or(0, |content| {
         content
             .pickups
             .keys()
@@ -330,7 +450,7 @@ fn capture(world: &mut World) {
     });
     let snapshot = GameSnapshot {
         tick: world.resource::<nara::app::FixedTime>().tick(),
-        level: Some(level.key),
+        level: Some(level.key()),
         player,
         score: progress.score,
         collected: progress.collected.len(),
@@ -356,3 +476,6 @@ fn capture(world: &mut World) {
     };
     *world.resource_mut::<GameSnapshot>() = snapshot;
 }
+
+#[cfg(test)]
+mod resource_tests;

@@ -104,7 +104,12 @@ impl PreparedScenePublication {
             .validate(world)
             .map_err(|_| changed())?;
         if let Some(resources) = &self.product_resources {
-            resources.validate(world).map_err(|_| changed())?;
+            resources.validate(world).map_err(|error| {
+                scene_product_rejection(
+                    self.diagnostics.clone(),
+                    PrepareSceneProductTransactionError::Overlay(error),
+                )
+            })?;
         }
         validate_hierarchy(world).map_err(|_| changed())?;
         nara_identity::__private::validate_registered_identity_support_topology(
@@ -472,9 +477,12 @@ mod tests {
         ComponentSchema, ComponentSchemaVersion, ComponentTypeId, ComponentValue,
         ComponentValueKind, PreparedComponentCandidate,
     };
-    use std::sync::{
-        Arc, OnceLock,
-        atomic::{AtomicUsize, Ordering},
+    use std::{
+        collections::BTreeSet,
+        sync::{
+            Arc, OnceLock,
+            atomic::{AtomicUsize, Ordering},
+        },
     };
 
     #[derive(Component)]
@@ -489,8 +497,30 @@ mod tests {
     }
 
     #[derive(Resource)]
-    struct ProductValue(u32);
-    impl SceneProductResource for ProductValue {}
+    struct ProductValue(u32, Arc<()>);
+
+    impl ProductValue {
+        fn new(value: u32) -> Self {
+            Self(value, Arc::new(()))
+        }
+
+        fn set(&mut self, value: u32) {
+            self.0 = value;
+            self.1 = Arc::new(());
+        }
+    }
+
+    impl SceneProductResource for ProductValue {
+        type Baseline = (u32, Arc<()>);
+
+        fn capture_baseline(&self) -> Self::Baseline {
+            (self.0, Arc::clone(&self.1))
+        }
+
+        fn matches_baseline(&self, baseline: &Self::Baseline) -> bool {
+            self.0 == baseline.0 && Arc::ptr_eq(&self.1, &baseline.1)
+        }
+    }
 
     struct ProbeAsset;
 
@@ -607,7 +637,7 @@ mod tests {
     ) {
         let mut world = World::new();
         world.insert_resource(Removed::default());
-        world.insert_resource(ProductValue(1));
+        world.insert_resource(ProductValue::new(1));
         let mut registry = ComponentRegistry::new();
         registry.freeze().unwrap();
         let id = SceneEntityId::new("root").unwrap();
@@ -646,9 +676,164 @@ mod tests {
             &claims,
             limits(),
             &[],
-            |_| {},
+            |overlay| {
+                overlay.replace_resource(ProductValue::new(2));
+            },
         )
         .unwrap_or_else(|report| panic!("preparation failed: {:?}", report.diagnostics))
+    }
+
+    #[test]
+    fn resource_changes_reject_before_native_retirement_and_remain_discardable() {
+        for remove in [false, true] {
+            let (mut world, registry, candidate, current, old, id) = fixture();
+            let prepared = prepare_fixture_replacement(&mut world, &registry, &candidate, &current);
+            prepared.validate_baseline(&mut world).unwrap();
+            if remove {
+                world.remove_resource::<ProductValue>().unwrap();
+            } else {
+                world.resource_mut::<ProductValue>().set(7);
+            }
+            let report = prepared.validate_baseline(&mut world).unwrap_err();
+            let expected_code = if remove {
+                "scene.product-resource-missing"
+            } else {
+                "scene.product-resource-changed"
+            };
+            assert!(
+                report
+                    .diagnostics
+                    .iter()
+                    .any(|diagnostic| diagnostic.code().as_str() == expected_code),
+                "{:?}",
+                report.diagnostics
+            );
+            assert_eq!(world.resource::<Removed>().0, 0);
+            assert!(world.get::<NativeState>(old).is_some());
+            assert!(prepared.discard(&mut world).is_ok());
+            assert_eq!(current.resolve(&world, &id), EntityLookup::Resolved(old));
+            if remove {
+                assert!(!world.contains_resource::<ProductValue>());
+            } else {
+                assert_eq!(world.resource::<ProductValue>().0, 7);
+            }
+        }
+    }
+
+    #[test]
+    fn resource_changes_during_native_wait_reject_without_any_publication() {
+        for mutation in [
+            "same-tick",
+            "content-aba",
+            "equal-write",
+            "reinstalled",
+            "missing",
+        ] {
+            let (mut world, _, _, current, old, id) = fixture();
+            world.insert_resource(AssetServer::new());
+            world.resource_mut::<ProductValue>().set(1);
+            let original = world.resource::<ProductValue>().capture_baseline();
+            let old_source = world.get::<SceneEntitySource>(old).unwrap().clone();
+            let probe = Arc::new(NativePreparationProbe::default());
+            let (registry, candidate) = native_value_candidate(id.clone(), &probe);
+            let prepared = prepare_fixture_replacement(&mut world, &registry, &candidate, &current);
+            prepared.validate_baseline(&mut world).unwrap();
+            // Model the native owner's completed retirement after the original admission.
+            // The final commit must still compare the original product-resource baseline.
+            world.entity_mut(old).remove::<NativeState>();
+            let resource_ticks = world.get_resource_change_ticks::<ProductValue>().unwrap();
+            match mutation {
+                "same-tick" => world.resource_mut::<ProductValue>().set(7),
+                "content-aba" => {
+                    let mut resource = world.resource_mut::<ProductValue>();
+                    resource.set(7);
+                    resource.set(1);
+                }
+                "equal-write" => world.resource_mut::<ProductValue>().set(1),
+                "reinstalled" => {
+                    let removed = world.remove_resource::<ProductValue>().unwrap();
+                    assert!(removed.matches_baseline(&original));
+                    world.insert_resource(ProductValue::new(1));
+                }
+                "missing" => {
+                    world.remove_resource::<ProductValue>().unwrap();
+                }
+                _ => unreachable!(),
+            }
+            let live_resource = world.get_resource::<ProductValue>().map(|resource| {
+                assert!(!resource.matches_baseline(&original));
+                resource.capture_baseline()
+            });
+            if let Some(ticks) = world.get_resource_change_ticks::<ProductValue>() {
+                assert_eq!(ticks.changed, resource_ticks.changed, "case {mutation}");
+            }
+            let expected_code = if mutation == "missing" {
+                "scene.product-resource-missing"
+            } else {
+                "scene.product-resource-changed"
+            };
+            let entities = world
+                .iter_entities()
+                .map(|entity| entity.id())
+                .collect::<BTreeSet<_>>();
+            let identity = world.resource::<WorldIdentityDomain>().stats();
+            let hierarchy = world.resource::<HierarchyRoots>().as_slice().to_vec();
+            let server = world.resource::<AssetServer>().clone();
+            let server_ticks = world.get_resource_change_ticks::<AssetServer>().unwrap();
+            let scratch = prepared.0.spawned_by_id[&id];
+            let (prepared, report) = match prepared.commit(&mut world) {
+                Err(failure) => failure,
+                Ok(_) => panic!("changed resource must reject final publication: {mutation}"),
+            };
+
+            assert!(report.instance.is_none());
+            assert_eq!(report.retired_entities(), 0);
+            assert!(
+                report
+                    .diagnostics
+                    .iter()
+                    .any(|diagnostic| diagnostic.code().as_str() == expected_code),
+                "case {mutation}: {:?}",
+                report.diagnostics
+            );
+            assert_eq!(
+                world
+                    .iter_entities()
+                    .map(|entity| entity.id())
+                    .collect::<BTreeSet<_>>(),
+                entities
+            );
+            assert_eq!(world.resource::<WorldIdentityDomain>().stats(), identity);
+            assert_eq!(
+                world.resource::<HierarchyRoots>().as_slice(),
+                hierarchy.as_slice()
+            );
+            assert_eq!(current.resolve(&world, &id), EntityLookup::Resolved(old));
+            assert_eq!(world.get::<SceneEntitySource>(old), Some(&old_source));
+            assert!(world.get::<SceneEntitySource>(scratch).is_none());
+            assert!(world.get::<PreparedNativeValue>(scratch).is_none());
+            assert_eq!(prepared.0.spawned_by_id[&id], scratch);
+            assert_eq!(world.resource::<Removed>().0, 1);
+            match live_resource {
+                Some(baseline) => {
+                    assert!(world.resource::<ProductValue>().matches_baseline(&baseline));
+                }
+                None => assert!(!world.contains_resource::<ProductValue>()),
+            }
+            assert_eq!(world.resource::<AssetServer>(), &server);
+            let ticks = world.get_resource_change_ticks::<AssetServer>().unwrap();
+            assert_eq!(ticks.added, server_ticks.added);
+            assert_eq!(ticks.changed, server_ticks.changed);
+            let handle = *probe.handle.get().unwrap();
+            assert!(
+                world
+                    .resource::<AssetServer>()
+                    .get_handle::<ProbeAsset>(handle.id())
+                    .is_none()
+            );
+            assert_eq!(probe.runs.load(Ordering::Relaxed), 1);
+            assert_eq!(probe.drops.load(Ordering::Relaxed), 0);
+        }
     }
 
     #[test]
@@ -820,7 +1005,7 @@ mod tests {
             &[],
             move |overlay| {
                 count.fetch_add(1, Ordering::Relaxed);
-                overlay.replace_resource(ProductValue(2));
+                overlay.replace_resource(ProductValue::new(2));
             },
         )
         .unwrap_or_else(|report| panic!("preparation failed: {:?}", report.diagnostics));
@@ -829,6 +1014,7 @@ mod tests {
         assert_eq!(current.resolve(&world, &id), EntityLookup::Resolved(old));
         assert_eq!(probe.runs.load(Ordering::Relaxed), 1);
         assert_eq!(probe.drops.load(Ordering::Relaxed), 0);
+        prepared.validate_baseline(&mut world).unwrap();
         let handle = *probe.handle.get().unwrap();
         assert!(!world.contains_resource::<AssetServer>());
         let (prepared, report) = match prepared.commit(&mut world) {
@@ -870,6 +1056,7 @@ mod tests {
     #[test]
     fn cancelled_owned_replacement_disposes_native_value_without_publishing_its_asset() {
         let (mut world, _, _, current, old, id) = fixture();
+        let product_baseline = world.resource::<ProductValue>().capture_baseline();
         let probe = Arc::new(NativePreparationProbe::default());
         let (registry, candidate) = native_value_candidate(id.clone(), &probe);
         let prepared = prepare_fixture_replacement(&mut world, &registry, &candidate, &current);
@@ -879,6 +1066,11 @@ mod tests {
         assert_eq!(probe.runs.load(Ordering::Relaxed), 1);
         assert_eq!(probe.drops.load(Ordering::Relaxed), 1);
         assert!(!world.contains_resource::<AssetServer>());
+        assert!(
+            world
+                .resource::<ProductValue>()
+                .matches_baseline(&product_baseline)
+        );
         assert!(world.get::<NativeState>(old).is_some());
         assert_eq!(current.resolve(&world, &id), EntityLookup::Resolved(old));
         assert_eq!(world.resource::<Removed>().0, 0);

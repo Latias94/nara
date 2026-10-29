@@ -20,10 +20,26 @@ use nara_scene::{
 
 use super::*;
 
-#[derive(Debug, PartialEq, Eq, Resource)]
-struct RunValue(u32);
+#[derive(Debug, Resource)]
+struct RunValue(u32, Arc<()>);
 
-impl SceneProductResource for RunValue {}
+impl RunValue {
+    fn new(value: u32) -> Self {
+        Self(value, Arc::new(()))
+    }
+}
+
+impl SceneProductResource for RunValue {
+    type Baseline = (u32, Arc<()>);
+
+    fn capture_baseline(&self) -> Self::Baseline {
+        (self.0, Arc::clone(&self.1))
+    }
+
+    fn matches_baseline(&self, baseline: &Self::Baseline) -> bool {
+        self.0 == baseline.0 && Arc::ptr_eq(&self.1, &baseline.1)
+    }
+}
 
 fn source(name: &str) -> SceneSource {
     SceneSource::direct(
@@ -92,7 +108,7 @@ fn with_selected_current_scene(
         StartupSceneActivationPlugin,
     ))
     .unwrap()
-    .insert_resource(RunValue(1))
+    .insert_resource(RunValue::new(1))
     .unwrap()
     .add_systems(CoreStage::Update, move |world: &mut World| {
         if let Some(inspect) = inspection.lock().unwrap().take() {
@@ -212,7 +228,7 @@ fn mixed_startup_replacement_and_restart_preserve_selected_data_definitions() {
             limits(),
             &[],
             |writer| {
-                writer.replace_resource(RunValue(2));
+                writer.replace_resource(RunValue::new(2));
             },
         );
         assert!(
@@ -241,7 +257,7 @@ fn mixed_startup_replacement_and_restart_preserve_selected_data_definitions() {
             ComponentValue::map([("enabled", ComponentValue::Bool(false))])
         );
         assert_eq!(world.resource::<CurrentSceneOwner>().receipt(), &restarted);
-        assert_eq!(*world.resource::<RunValue>(), RunValue(2));
+        assert_eq!(world.resource::<RunValue>().0, 2);
         assert!(!matches!(
             initial.resolve(world, &id("a")),
             EntityLookup::Resolved(_)
@@ -291,7 +307,7 @@ fn replacement_rejects_equivalent_owner_catalog_with_another_admission_basis() {
         );
         assert_eq!(world.entities().len(), entities);
         assert_eq!(world.resource::<WorldIdentityDomain>().stats(), stats);
-        assert_eq!(*world.resource::<RunValue>(), RunValue(1));
+        assert_eq!(world.resource::<RunValue>().0, 1);
     });
 }
 
@@ -308,7 +324,7 @@ fn direct_replacement_changes_source_and_receipt_and_restart_uses_b() {
             limits(),
             &[],
             |writer| {
-                writer.replace_resource(RunValue(2));
+                writer.replace_resource(RunValue::new(2));
             },
         );
         assert!(!report.diagnostics.has_errors());
@@ -327,11 +343,11 @@ fn direct_replacement_changes_source_and_receipt_and_restart_uses_b() {
             EntityLookup::Resolved(_)
         ));
         assert_eq!(first_view.with_document(|_| ()), None);
-        assert_eq!(*world.resource::<RunValue>(), RunValue(2));
+        assert_eq!(world.resource::<RunValue>().0, 2);
         let second_view = source_view(world);
 
         let report = restart_current_scene_with_product(world, &second, limits(), &[], |writer| {
-            writer.replace_resource(RunValue(3));
+            writer.replace_resource(RunValue::new(3));
         });
         assert!(!report.diagnostics.has_errors());
         let restarted = report.instance.unwrap();
@@ -353,7 +369,7 @@ fn direct_replacement_changes_source_and_receipt_and_restart_uses_b() {
             second.resolve(world, &id("b")),
             EntityLookup::Resolved(_)
         ));
-        assert_eq!(*world.resource::<RunValue>(), RunValue(3));
+        assert_eq!(world.resource::<RunValue>().0, 3);
 
         let report = replace_current_scene_with_product(
             world,
@@ -422,7 +438,7 @@ fn stale_and_foreign_expected_receipts_reject_before_product_configuration() {
         );
         assert_eq!(world.entities().len(), entity_count);
         assert_eq!(world.resource::<WorldIdentityDomain>().stats(), stats);
-        assert_eq!(*world.resource::<RunValue>(), RunValue(1));
+        assert_eq!(world.resource::<RunValue>().0, 1);
     });
 }
 
@@ -448,7 +464,7 @@ fn rejected_candidate_keeps_the_current_pair_and_product_state() {
             limits(),
             &[],
             |writer| {
-                writer.replace_resource(RunValue(9));
+                writer.replace_resource(RunValue::new(9));
             },
         );
         assert!(report.diagnostics.has_errors());
@@ -461,7 +477,7 @@ fn rejected_candidate_keeps_the_current_pair_and_product_state() {
         );
         assert_eq!(world.entities().len(), entities);
         assert_eq!(world.resource::<WorldIdentityDomain>().stats(), stats);
-        assert_eq!(*world.resource::<RunValue>(), RunValue(1));
+        assert_eq!(world.resource::<RunValue>().0, 1);
         assert!(matches!(
             current.resolve(world, &id("a")),
             EntityLookup::Resolved(_)

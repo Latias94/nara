@@ -20,6 +20,7 @@ use nara_identity::{
     spawn_identity_entity,
 };
 use nara_reflect::{ComponentRegistry, ComponentSchemaVersion, ComponentValue};
+use std::sync::Arc;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Component)]
 struct RuntimeValue(u32);
@@ -30,10 +31,31 @@ struct RuntimeTag;
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Component)]
 struct RuntimeRetirement;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Resource)]
-struct RunState(u32);
+#[derive(Debug, Resource)]
+struct RunState(u32, Arc<()>);
 
-impl SceneProductResource for RunState {}
+impl RunState {
+    fn new(value: u32) -> Self {
+        Self(value, Arc::new(()))
+    }
+
+    fn set(&mut self, value: u32) {
+        self.0 = value;
+        self.1 = Arc::new(());
+    }
+}
+
+impl SceneProductResource for RunState {
+    type Baseline = (u32, Arc<()>);
+
+    fn capture_baseline(&self) -> Self::Baseline {
+        (self.0, Arc::clone(&self.1))
+    }
+
+    fn matches_baseline(&self, baseline: &Self::Baseline) -> bool {
+        self.0 == baseline.0 && Arc::ptr_eq(&self.1, &baseline.1)
+    }
+}
 
 #[derive(Debug, Default, Resource)]
 struct LifecycleCanary(u32);
@@ -54,7 +76,7 @@ impl ReplacementFixture {
         let target = scene_id("player");
         let document = SceneDocument::from_ordered_roots([SceneEntityRecord::new(target.clone())]);
         let mut world = World::new();
-        world.insert_resource(RunState(1));
+        world.insert_resource(RunState::new(1));
         let initial = crate::spawn_scene(
             &mut world,
             &registry,
@@ -184,7 +206,7 @@ fn product_replacement_commits_one_coherent_scene_generation() {
         ],
     );
     let mut world = World::new();
-    world.insert_resource(RunState(1));
+    world.insert_resource(RunState::new(1));
     world.register_component::<RuntimeValue>();
     let initial = crate::spawn_scene(
         &mut world,
@@ -224,7 +246,7 @@ fn product_replacement_commits_one_coherent_scene_generation() {
         |overlay| {
             overlay
                 .insert_component(child_id.clone(), RuntimeValue(7))
-                .replace_resource(RunState(2));
+                .replace_resource(RunState::new(2));
         },
     );
 
@@ -364,7 +386,7 @@ fn product_overlay_rejections_leave_the_old_generation_unchanged() {
             transaction_limits(overlay_limit, 1),
             &[],
             |overlay| {
-                overlay.replace_resource(RunState(2));
+                overlay.replace_resource(RunState::new(2));
                 match rejection {
                     "missing" => {
                         overlay.insert_component(missing, RuntimeValue(1));
@@ -403,7 +425,7 @@ fn product_overlay_rejections_leave_the_old_generation_unchanged() {
 fn overlay_rejection_does_not_flush_the_deferred_world_baseline() {
     let mut fixture = ReplacementFixture::new();
     fixture.world.commands().queue(|world: &mut World| {
-        world.resource_mut::<RunState>().0 = 99;
+        world.resource_mut::<RunState>().set(99);
     });
     let missing = scene_id("missing");
 
@@ -430,6 +452,72 @@ fn overlay_rejection_does_not_flush_the_deferred_world_baseline() {
     assert_eq!(fixture.world.resource::<RunState>().0, 1);
     fixture.world.flush();
     assert_eq!(fixture.world.resource::<RunState>().0, 99);
+}
+
+#[test]
+fn resource_baseline_is_captured_before_deferred_preparation_writes() {
+    for remove in [false, true] {
+        let mut fixture = ReplacementFixture::new();
+        let before_entities = fixture.entity_ids();
+        let before_stats = fixture.world.resource::<WorldIdentityDomain>().stats();
+        let old_source = fixture
+            .world
+            .get::<SceneEntitySource>(fixture.old_entity)
+            .unwrap()
+            .clone();
+        fixture.world.commands().queue(move |world: &mut World| {
+            if remove {
+                world.remove_resource::<RunState>().unwrap();
+            } else {
+                world.resource_mut::<RunState>().set(99);
+            }
+        });
+
+        let report = replace_expanded_scene_with_product(
+            &mut fixture.world,
+            &fixture.registry,
+            &ExpandedSceneCandidate::plain(
+                scene_source_key("scene-product/fixture"),
+                Arc::new(fixture.replacement.clone()),
+            ),
+            None,
+            &fixture.current,
+            transaction_limits(1, 1),
+            &[],
+            |overlay| {
+                overlay.replace_resource(RunState::new(2));
+            },
+        );
+
+        assert!(has_diagnostic(
+            &report,
+            if remove {
+                "scene.product-resource-missing"
+            } else {
+                "scene.product-resource-changed"
+            }
+        ));
+        assert!(report.instance.is_none());
+        assert_eq!(report.retired_entities(), 0);
+        assert_eq!(fixture.entity_ids(), before_entities);
+        assert_eq!(
+            fixture.world.resource::<WorldIdentityDomain>().stats(),
+            before_stats
+        );
+        assert_eq!(
+            fixture.current.resolve(&fixture.world, &fixture.target),
+            EntityLookup::Resolved(fixture.old_entity)
+        );
+        assert_eq!(
+            fixture.world.get::<SceneEntitySource>(fixture.old_entity),
+            Some(&old_source)
+        );
+        if remove {
+            assert!(!fixture.world.contains_resource::<RunState>());
+        } else {
+            assert_eq!(fixture.world.resource::<RunState>().0, 99);
+        }
+    }
 }
 
 #[test]
@@ -486,7 +574,7 @@ fn authored_component_collision_is_rejected_before_candidate_allocation() {
             ),
         )]);
     let mut world = World::new();
-    world.insert_resource(RunState(1));
+    world.insert_resource(RunState::new(1));
     let initial = crate::spawn_scene(
         &mut world,
         &registry,
@@ -576,7 +664,7 @@ fn overlay_lifecycle_rejection_rolls_back_scratch_and_resource_replacement() {
         &[],
         |overlay| {
             overlay
-                .replace_resource(RunState(2))
+                .replace_resource(RunState::new(2))
                 .insert_component(target, RuntimeValue(1));
         },
     );
@@ -604,7 +692,7 @@ fn overlay_lifecycle_rejection_preserves_completed_hierarchy_generation() {
     );
     let mut app = App::new();
     app.add_plugin(HierarchyPlugin).unwrap();
-    app.insert_resource(RunState(1)).unwrap();
+    app.insert_resource(RunState::new(1)).unwrap();
     app.init_resource::<OverlayLifecycleRejectionPort>()
         .unwrap();
     app.__register_driver_port::<OverlayLifecycleRejectionPort>(
@@ -1138,7 +1226,7 @@ fn expanded_candidate_source_observer_rejects_before_publication_and_preserves_o
         transaction_limits(1, 1),
         &[],
         |overlay| {
-            overlay.replace_resource(RunState(2));
+            overlay.replace_resource(RunState::new(2));
         },
     );
 

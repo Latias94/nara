@@ -19,28 +19,24 @@ use nara_reflect::{
 };
 
 mod admission;
+mod atlas;
 #[cfg(feature = "serde")]
 mod content;
+mod runtime;
 #[cfg(feature = "serde")]
 mod source;
 
 pub use admission::{TilemapMembershipError, validate_persisted_tilemap_membership};
+#[cfg(feature = "serde")]
+pub use runtime::TileSetRuntimeCodec;
+pub use runtime::{TileSetDescriptor, TileSetDescriptorError, TileSetDomain};
 
 #[cfg(feature = "serde")]
 pub use content::{
-    TILESET_ASSET_PLUGIN_DECLARATION, TILESET_ASSET_PLUGIN_ID, TileSetAssetError,
-    TileSetAssetLimits, TileSetAssetPlugin, TileSetAssets, TileSetContent,
-    TileSetRetentionSnapshot,
+    PreparedTileSetPublications, TILESET_ASSET_PLUGIN_DECLARATION, TILESET_ASSET_PLUGIN_ID,
+    TileSetAssetError, TileSetAssetLimits, TileSetAssetPlugin, TileSetAssets, TileSetContent,
+    TileSetContentReceipt, TileSetPublicationInput, TileSetRetentionSnapshot,
 };
-
-/// Finite prepared-publication inputs for the first-party project residency owner.
-#[doc(hidden)]
-#[cfg(feature = "serde")]
-pub mod __private {
-    pub use crate::content::{
-        PreparedTileSetPublications, TileSetOwnedSourceReceipt, TileSetPublicationInput,
-    };
-}
 
 #[cfg(feature = "serde")]
 pub use source::{
@@ -811,7 +807,8 @@ fn prepare_tileset_handle(
     field: &str,
     asset_ref: AssetRef,
 ) -> Result<PreparedTileset, ComponentCodecError> {
-    if let Some(reference) = asset_ref.as_product()
+    if context.project_asset_database().is_some()
+        && let Some(reference) = asset_ref.as_product()
         && !asset_ref.is_primary()
     {
         return Err(invalid_asset_ref(
@@ -1340,79 +1337,118 @@ mod tests {
         let snapshot = registry.snapshot().unwrap();
 
         for with_server in [false, true] {
-            for with_database in [false, true] {
-                let mut asset_server = AssetServer::new();
-                let mut context = if with_server {
-                    ComponentDecodeContext::with_asset_server(&mut asset_server)
-                } else {
-                    ComponentDecodeContext::new()
-                };
-                if with_database {
-                    context = context.with_project_asset_database(&database);
+            let mut asset_server = AssetServer::new();
+            let mut context = if with_server {
+                ComponentDecodeContext::with_asset_server(&mut asset_server)
+            } else {
+                ComponentDecodeContext::new()
+            }
+            .with_project_asset_database(&database);
+            let result = snapshot.preflight_component_with_context(
+                &tilemap_type_id(),
+                &tilemap_value(tileset.clone()),
+                &mut context,
+            );
+
+            assert!(matches!(
+                result,
+                Err(ComponentCodecError::InvalidAssetRef { field, asset_ref, message })
+                    if field == "tileset.value"
+                        && asset_ref == tileset.to_string()
+                        && message == AssetRefError::UnsupportedProductSelection(reference).to_string()
+            ));
+            assert!(!context.asset_server_touched());
+            assert_eq!(asset_server, AssetServer::new());
+        }
+    }
+
+    #[test]
+    fn tilemap_codec_looks_up_complete_runtime_products_without_source_metadata() {
+        let source = stable_id("2f0d71c7-14fc-4ed4-b48b-1c61bba8b97f");
+        let auxiliary =
+            ImportedProductId::parse_subproduct("011a8cc0-343a-4b95-8adb-3aa6d81977ed").unwrap();
+        let registry = frozen_tilemap_registry();
+        let snapshot = registry.snapshot().unwrap();
+        for selection in [ImportedProductId::PRIMARY, auxiliary] {
+            let reference = AssetProductRef::new(source, selection).unwrap();
+            let mut server = AssetServer::new();
+            let handle = server.reserve_product::<TileSet>(reference).unwrap();
+            let before = server.clone();
+            let mut context = ComponentDecodeContext::with_asset_server(&mut server);
+            let prepared = snapshot
+                .preflight_component_with_context(
+                    &tilemap_type_id(),
+                    &tilemap_value(AssetRef::Product(reference)),
+                    &mut context,
+                )
+                .unwrap();
+            assert!(context.asset_server_touched());
+            let mut world = World::new();
+            let entity = world.spawn_empty().id();
+            prepared.apply(&mut world, entity).unwrap();
+            assert_eq!(world.get::<Tilemap>(entity).unwrap().tileset, Some(handle));
+            assert_eq!(server, before);
+
+            for wrong_type in [false, true] {
+                let mut server = AssetServer::new();
+                if wrong_type {
+                    server.reserve_product::<String>(reference).unwrap();
                 }
+                let before = server.clone();
+                let mut context = ComponentDecodeContext::with_asset_server(&mut server);
                 let result = snapshot.preflight_component_with_context(
                     &tilemap_type_id(),
-                    &tilemap_value(tileset.clone()),
+                    &tilemap_value(AssetRef::Product(reference)),
                     &mut context,
                 );
-
                 assert!(matches!(
                     result,
-                    Err(ComponentCodecError::InvalidAssetRef { field, asset_ref, message })
-                        if field == "tileset.value"
-                            && asset_ref == tileset.to_string()
-                            && message == AssetRefError::UnsupportedProductSelection(reference).to_string()
+                    Err(ComponentCodecError::InvalidAssetRef { .. })
                 ));
-                assert!(!context.asset_server_touched());
-                assert_eq!(asset_server, AssetServer::new());
+                assert_eq!(server, before);
             }
         }
     }
 
     #[test]
-    fn tilemap_membership_preserves_primary_product_and_refuses_auxiliary_selection() {
+    fn tilemap_membership_resolves_the_complete_product_through_the_content_owner() {
         let source = stable_id("2f0d71c7-14fc-4ed4-b48b-1c61bba8b97f");
-        let primary =
-            AssetRef::product(AssetProductRef::new(source, ImportedProductId::PRIMARY).unwrap());
-        let atlas = TileAtlasLayout::grid(Vec2::ONE, 1, 1);
-        let value = ComponentValue::map([
-            (
-                "tileset",
-                nara_reflect::encode_asset_reference_value(&primary),
-            ),
-            (
-                "cells",
-                ComponentValue::List(vec![tile_cell_value(0, 0, 0)]),
-            ),
-        ]);
-
-        validate_persisted_tilemap_membership(&value, |reference| {
-            assert_eq!(reference, &primary);
-            Some(atlas)
-        })
-        .unwrap();
-
-        let product =
+        let auxiliary =
             ImportedProductId::parse_subproduct("011a8cc0-343a-4b95-8adb-3aa6d81977ed").unwrap();
-        let auxiliary = AssetRef::product(AssetProductRef::new(source, product).unwrap());
-        for cells in [Vec::new(), vec![tile_cell_value(0, 0, 0)]] {
+        let atlas = TileAtlasLayout::grid(Vec2::ONE, 1, 1);
+        for selection in [ImportedProductId::PRIMARY, auxiliary] {
+            let reference = AssetRef::Product(AssetProductRef::new(source, selection).unwrap());
             let value = ComponentValue::map([
                 (
                     "tileset",
-                    nara_reflect::encode_asset_reference_value(&auxiliary),
+                    nara_reflect::encode_asset_reference_value(&reference),
                 ),
-                ("cells", ComponentValue::List(cells)),
+                (
+                    "cells",
+                    ComponentValue::List(vec![tile_cell_value(0, 0, 0)]),
+                ),
             ]);
-            let result = validate_persisted_tilemap_membership(&value, |_| {
-                panic!("an auxiliary selection must not reach the primary atlas resolver")
-            });
-
+            validate_persisted_tilemap_membership(&value, |actual| {
+                assert_eq!(actual, &reference);
+                Some(atlas)
+            })
+            .unwrap();
             assert!(matches!(
-                result,
-                Err(TilemapMembershipError::InvalidValue(ComponentCodecError::InvalidAssetRef {
-                    field, asset_ref, ..
-                })) if field == "tileset.value" && asset_ref == auxiliary.to_string()
+                validate_persisted_tilemap_membership(&value, |_| None),
+                Err(TilemapMembershipError::TileSetUnavailable { tileset }) if tileset == reference
             ));
+
+            let empty = ComponentValue::map([
+                (
+                    "tileset",
+                    nara_reflect::encode_asset_reference_value(&reference),
+                ),
+                ("cells", ComponentValue::List(Vec::new())),
+            ]);
+            validate_persisted_tilemap_membership(&empty, |_| {
+                panic!("an empty map requires no atlas cell lookup")
+            })
+            .unwrap();
         }
     }
 

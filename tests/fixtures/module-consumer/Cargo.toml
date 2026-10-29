@@ -25,14 +25,17 @@ nara_core = { path = "../../../crates/nara_core" }
 nara_fs = { path = "../../../crates/nara_fs" }
 nara_hierarchy = { path = "../../../crates/nara_hierarchy" }
 nara_image = { path = "../../../crates/nara_image", features = ["render-prepare", "serde"] }
+nara_material = { path = "../../../crates/nara_material" }
 nara_render = { path = "../../../crates/nara_render" }
 nara_tasks = { path = "../../../crates/nara_tasks" }
+nara_tilemap = { path = "../../../crates/nara_tilemap", features = ["serde"] }
 nara_transform = { path = "../../../crates/nara_transform" }
 nara_identity = { path = "../../../crates/nara_identity", features = ["serde"] }
 nara_tooling = { path = "../../../crates/nara_tooling" }
 nara_ui_kernel = { path = "../../../crates/nara_ui_kernel" }
 ron = "0.8"
 serde = { version = "1", features = ["derive"] }
+serde_json = "1"
 tempfile = "3"
 toml = "1.1"
 uuid = "1.23.4"

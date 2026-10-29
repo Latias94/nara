@@ -222,6 +222,13 @@ mod codec {
         fn contains_runtime_product(product: &ImageAsset, reference: AssetProductRef) -> bool {
             product.product() == Some(reference)
         }
+
+        fn visit_required_runtime_products<E>(
+            _product: &ImageAsset,
+            _visitor: impl FnMut(AssetProductRef) -> Result<(), E>,
+        ) -> Result<(), E> {
+            Ok(())
+        }
     }
 
     fn checked_pixel_bytes(

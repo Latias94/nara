@@ -869,6 +869,13 @@ impl RuntimeAssetCodec<TextBundle> for PanickingDecode {
         TextBundleDomain::runtime_retained_bytes(product)
     }
 
+    fn visit_required_runtime_products<E>(
+        product: &TextBundle,
+        visitor: impl FnMut(AssetProductRef) -> Result<(), E>,
+    ) -> Result<(), E> {
+        TextBundleDomain::visit_required_runtime_products(product, visitor)
+    }
+
     fn contains_runtime_product(product: &TextBundle, reference: AssetProductRef) -> bool {
         TextBundleDomain::contains_runtime_product(product, reference)
     }
@@ -896,8 +903,49 @@ impl RuntimeAssetCodec<TextBundle> for PanickingIdentity {
         TextBundleDomain::runtime_retained_bytes(product)
     }
 
+    fn visit_required_runtime_products<E>(
+        product: &TextBundle,
+        visitor: impl FnMut(AssetProductRef) -> Result<(), E>,
+    ) -> Result<(), E> {
+        TextBundleDomain::visit_required_runtime_products(product, visitor)
+    }
+
     fn contains_runtime_product(_: &TextBundle, _: AssetProductRef) -> bool {
         panic!("consumer complete Runtime identity query failed");
+    }
+}
+
+struct PanickingDependencyInventory;
+
+impl RuntimeAssetCodec<TextBundle> for PanickingDependencyInventory {
+    const RUNTIME_KIND: &'static str = TextBundleDomain::RUNTIME_KIND;
+    const RUNTIME_VERSION: u32 = TextBundleDomain::RUNTIME_VERSION;
+
+    fn runtime_limits() -> AssetRuntimeLimits {
+        TextBundleDomain::runtime_limits()
+    }
+
+    fn encode_runtime(product: &TextBundle) -> Result<Box<[u8]>, AssetRuntimeError> {
+        TextBundleDomain::encode_runtime(product)
+    }
+
+    fn decode_runtime(encoded: &[u8]) -> Result<TextBundle, AssetRuntimeError> {
+        TextBundleDomain::decode_runtime(encoded)
+    }
+
+    fn runtime_retained_bytes(product: &TextBundle) -> Result<usize, AssetRuntimeError> {
+        TextBundleDomain::runtime_retained_bytes(product)
+    }
+
+    fn visit_required_runtime_products<E>(
+        _: &TextBundle,
+        _: impl FnMut(AssetProductRef) -> Result<(), E>,
+    ) -> Result<(), E> {
+        panic!("consumer Runtime dependency inventory failed");
+    }
+
+    fn contains_runtime_product(product: &TextBundle, reference: AssetProductRef) -> bool {
+        TextBundleDomain::contains_runtime_product(product, reference)
     }
 }
 
@@ -921,6 +969,13 @@ impl RuntimeAssetCodec<TextBundle> for WrongCodec {
 
     fn runtime_retained_bytes(_: &TextBundle) -> Result<usize, AssetRuntimeError> {
         panic!("the wrong codec must not query retained output");
+    }
+
+    fn visit_required_runtime_products<E>(
+        _: &TextBundle,
+        _: impl FnMut(AssetProductRef) -> Result<(), E>,
+    ) -> Result<(), E> {
+        panic!("the wrong codec must not inventory dependencies");
     }
 
     fn contains_runtime_product(_: &TextBundle, _: AssetProductRef) -> bool {
@@ -968,6 +1023,13 @@ impl<const MODE: u8> RuntimeAssetCodec<TextBundle> for InvalidRetainedCost<MODE>
             3 => Ok(size_of::<TextBundle>() - 1),
             _ => panic!("the under-inline promise must not reach the retained-cost query"),
         }
+    }
+
+    fn visit_required_runtime_products<E>(
+        product: &TextBundle,
+        visitor: impl FnMut(AssetProductRef) -> Result<(), E>,
+    ) -> Result<(), E> {
+        TextBundleDomain::visit_required_runtime_products(product, visitor)
     }
 
     fn contains_runtime_product(product: &TextBundle, reference: AssetProductRef) -> bool {
@@ -1031,7 +1093,7 @@ fn invalid_retained_costs_preserve_typed_errors_and_the_next_full_decode_reserva
 }
 
 #[test]
-fn wrong_codec_and_panicking_decode_or_membership_do_not_spend_the_next_decode_reservation() {
+fn wrong_codec_and_panicking_queries_preserve_the_next_decode_reservation() {
     let fixture = Fixture::new();
     let base = fixture.open_for_one_asset();
     assert!(matches!(
@@ -1048,6 +1110,10 @@ fn wrong_codec_and_panicking_decode_or_membership_do_not_spend_the_next_decode_r
     ));
     assert!(matches!(
         base.acquire_asset::<TextBundleDomain, PanickingIdentity>(selected(FIRST)),
+        Err(RuntimeContentError::CodecPanicked),
+    ));
+    assert!(matches!(
+        base.acquire_asset::<TextBundleDomain, PanickingDependencyInventory>(selected(FIRST)),
         Err(RuntimeContentError::CodecPanicked),
     ));
     let recovered = base
@@ -1219,6 +1285,12 @@ impl RuntimeAssetCodec<TextBundle> for HeldDecode {
     }
     fn runtime_retained_bytes(product: &TextBundle) -> Result<usize, AssetRuntimeError> {
         TextBundleDomain::runtime_retained_bytes(product)
+    }
+    fn visit_required_runtime_products<E>(
+        product: &TextBundle,
+        visitor: impl FnMut(AssetProductRef) -> Result<(), E>,
+    ) -> Result<(), E> {
+        TextBundleDomain::visit_required_runtime_products(product, visitor)
     }
     fn contains_runtime_product(product: &TextBundle, reference: AssetProductRef) -> bool {
         TextBundleDomain::contains_runtime_product(product, reference)

@@ -77,5 +77,7 @@ refuse source-free values where that contract needs provenance.
 The [independent consumer](../../tests/fixtures/module-consumer/tests/runtime_image_delivery.rs)
 uses actual primary/auxiliary images, native Scene handles, exact definitions, failure/discard/
 successful product transactions and escaped CPU/prepared lifetime checks. The first-party Runtime
-Host, processed TileSet codec and automatic resource residency remain work in the
+Host and automatic stock resource residency remain work in the
 [ordered delivery plan](../plans/2026-10-29-asset-import-and-runtime-delivery-plan.md).
+The [Runtime TileSet guide](runtime-tilesets.md) describes source-independent descriptors and
+their shared concrete publication owner, including actual Image dependencies and cell admission.

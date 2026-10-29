@@ -10,7 +10,7 @@ pub(crate) struct PreparedProjectSceneReplacement {
     staged_server: AssetServer,
     images: ImagePublications,
     inputs: Vec<TileSetPublicationInput>,
-    retirements: Vec<TileSetOwnedSourceReceipt>,
+    retirements: Vec<TileSetContentReceipt>,
     catalog: CatalogChange,
     lease: ProjectContentLease,
 }
@@ -147,7 +147,7 @@ impl PreparedProjectSceneReplacement {
                 inputs,
                 &self.retirements,
                 &self.staged_server,
-                &self.catalog.database,
+                Some(&self.catalog.database),
                 world.resource::<Assets<TileSet>>(),
                 world.resource::<AssetStates>(),
             ) {
@@ -245,7 +245,7 @@ fn share_inputs(
 fn probe_tilesets(
     world: &mut World,
     inputs: &[TileSetPublicationInput],
-    retirements: &[TileSetOwnedSourceReceipt],
+    retirements: &[TileSetContentReceipt],
     server: &AssetServer,
     database: &ProjectAssetDatabase,
 ) -> Result<(), HostFault> {
@@ -259,7 +259,7 @@ fn probe_tilesets(
                 inputs,
                 retirements,
                 server,
-                database,
+                Some(database),
                 world.resource::<Assets<TileSet>>(),
                 world.resource::<AssetStates>(),
             )

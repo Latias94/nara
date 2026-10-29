@@ -86,9 +86,21 @@ struct ImageProducts {
     images: Assets<ImageAsset>,
     states: AssetStates,
     events: AssetEvents,
+    // Every publication rotates this owner identity, including equal-content writes.
+    revision: Arc<()>,
 }
 
-impl SceneProductResource for ImageProducts {}
+impl SceneProductResource for ImageProducts {
+    type Baseline = Arc<()>;
+
+    fn capture_baseline(&self) -> Self::Baseline {
+        Arc::clone(&self.revision)
+    }
+
+    fn matches_baseline(&self, baseline: &Self::Baseline) -> bool {
+        Arc::ptr_eq(&self.revision, baseline)
+    }
+}
 
 impl ImageProducts {
     fn publish(&mut self, handle: Handle<ImageAsset>, value: ImageAsset) {
@@ -102,6 +114,7 @@ impl ImageProducts {
                 None,
             )
             .unwrap();
+        self.revision = Arc::new(());
         let state = self.states.state(handle.id()).unwrap();
         assert!(state.usable_version().is_some());
         assert!(state.source_hash().is_none());
@@ -614,6 +627,13 @@ impl RuntimeAssetCodec<ImageAsset> for ObservedImageCodec {
         ImageRuntimeCodec::runtime_retained_bytes(product)
     }
 
+    fn visit_required_runtime_products<E>(
+        product: &ImageAsset,
+        visitor: impl FnMut(AssetProductRef) -> Result<(), E>,
+    ) -> Result<(), E> {
+        ImageRuntimeCodec::visit_required_runtime_products(product, visitor)
+    }
+
     fn contains_runtime_product(product: &ImageAsset, reference: AssetProductRef) -> bool {
         ImageRuntimeCodec::contains_runtime_product(product, reference)
     }
@@ -805,7 +825,7 @@ fn failed_and_canceled_replacements_keep_current_image_before_atomic_binding_val
         .unwrap();
     let old = resolve(&world, &current);
     let identity = world.resource::<WorldIdentityDomain>().stats();
-    let content = world
+    let mut content = world
         .resource::<ImageProducts>()
         .capture(&world, primary_handle);
     let before = world.resource::<AssetServer>().clone();
@@ -862,7 +882,7 @@ fn failed_and_canceled_replacements_keep_current_image_before_atomic_binding_val
             .get(rejected)
             .is_none()
     );
-    for cancel in [true, false] {
+    for action in ["rewrite", "cancel", "commit"] {
         let mut assets = SceneAssetBindings::from_world(&world);
         let next_handle = assets.reserve_product::<ImageAsset>(auxiliary()).unwrap();
         let products = replacement_products(&world, primary_handle, next_handle, &auxiliary_value);
@@ -890,7 +910,48 @@ fn failed_and_canceled_replacements_keep_current_image_before_atomic_binding_val
             &products.states,
             &products.images
         ));
-        if cancel {
+        if action == "rewrite" {
+            pending.validate_baseline(&mut world).unwrap();
+            let ticks = world.get_resource_change_ticks::<ImageProducts>().unwrap();
+            world
+                .resource_mut::<ImageProducts>()
+                .publish(primary_handle, retained_image(&primary_value));
+            let products = world.resource::<ImageProducts>();
+            let live_baseline = products.capture_baseline();
+            assert_eq!(products.images.len(), 1);
+            assert!(!content.is_current(
+                world.resource::<AssetServer>(),
+                &products.states,
+                &products.images
+            ));
+            assert_eq!(
+                world
+                    .get_resource_change_ticks::<ImageProducts>()
+                    .unwrap()
+                    .changed,
+                ticks.changed
+            );
+            let (pending, report) = match pending.commit(&mut world) {
+                Err(failure) => failure,
+                Ok(_) => panic!("equal-content Image republication must reject replacement"),
+            };
+            assert!(report.diagnostics.iter().any(|diagnostic| {
+                diagnostic.code().as_str() == "scene.product-resource-changed"
+            }));
+            assert!(report.instance.is_none());
+            assert_eq!(world.resource::<AssetServer>(), &before);
+            assert_eq!(world.resource::<WorldIdentityDomain>().stats(), identity);
+            assert_eq!(resolve(&world, &current), old);
+            let products = world.resource::<ImageProducts>();
+            assert!(products.matches_baseline(&live_baseline));
+            assert!(products.images.get(next_handle).is_none());
+            pending
+                .discard(&mut world)
+                .unwrap_or_else(|_| panic!("stale Image product discard failed"));
+            content = world
+                .resource::<ImageProducts>()
+                .capture(&world, primary_handle);
+        } else if action == "cancel" {
             pending
                 .discard(&mut world)
                 .unwrap_or_else(|_| panic!("Image product discard failed"));
@@ -1258,6 +1319,7 @@ fn escaped_cpu_and_prepared_captures_keep_decoded_output_charged_until_the_last_
         mut images,
         mut states,
         mut events,
+        ..
     } = world.remove_resource::<ImageProducts>().unwrap();
     drop(
         images

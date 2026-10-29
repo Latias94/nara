@@ -9,7 +9,17 @@ use crate::advanced::{
 #[derive(Resource)]
 struct RetainedProduct(Arc<()>);
 
-impl SceneProductResource for RetainedProduct {}
+impl SceneProductResource for RetainedProduct {
+    type Baseline = Arc<()>;
+
+    fn capture_baseline(&self) -> Self::Baseline {
+        Arc::clone(&self.0)
+    }
+
+    fn matches_baseline(&self, baseline: &Self::Baseline) -> bool {
+        Arc::ptr_eq(&self.0, baseline)
+    }
+}
 
 struct Fixture {
     world: World,

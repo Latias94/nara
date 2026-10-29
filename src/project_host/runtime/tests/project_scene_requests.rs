@@ -20,9 +20,25 @@ struct RequestProbe(Mutex<Option<ProbeAction>>);
 struct RequestProbePlugin(Arc<RequestProbe>);
 
 #[derive(Debug, Default, Resource)]
-struct CommittedLevel(u32);
+struct CommittedLevel(u32, Arc<()>);
 
-impl SceneProductResource for CommittedLevel {}
+impl CommittedLevel {
+    fn new(value: u32) -> Self {
+        Self(value, Arc::new(()))
+    }
+}
+
+impl SceneProductResource for CommittedLevel {
+    type Baseline = (u32, Arc<()>);
+
+    fn capture_baseline(&self) -> Self::Baseline {
+        (self.0, Arc::clone(&self.1))
+    }
+
+    fn matches_baseline(&self, baseline: &Self::Baseline) -> bool {
+        self.0 == baseline.0 && Arc::ptr_eq(&self.1, &baseline.1)
+    }
+}
 
 impl Plugin for RequestProbePlugin {
     fn declaration() -> &'static PluginDeclaration {
@@ -226,7 +242,7 @@ fn original_host_prepares_inspectable_scene_then_commits_and_acknowledges_b_to_a
         // Ready content remains data until the game explicitly accepts it.
         assert_eq!(current(world), original);
         let report = commit_prepared_project_scene(world, b, limits(), &[], |writer| {
-            writer.replace_resource(CommittedLevel(1));
+            writer.replace_resource(CommittedLevel::new(1));
         });
         assert!(!report.diagnostics.has_errors(), "{:?}", report.diagnostics);
         let receipt = report.instance.unwrap();
@@ -271,7 +287,7 @@ fn original_host_prepares_inspectable_scene_then_commits_and_acknowledges_b_to_a
             prepared.scene().clone()
         };
         let report = commit_prepared_project_scene(world, a, limits(), &[], |writer| {
-            writer.replace_resource(CommittedLevel(2));
+            writer.replace_resource(CommittedLevel::new(2));
         });
         assert!(!report.diagnostics.has_errors(), "{:?}", report.diagnostics);
         assert_eq!(current(world), (target, report.instance.unwrap()));

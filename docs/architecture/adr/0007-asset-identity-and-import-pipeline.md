@@ -135,9 +135,16 @@ Scene acquisition admits the actual processed Scene against the catalog's contai
 and the original exact definitions. It traverses declared effective asset leaves through Reflect
 and checks complete Product membership and required dependency declarations. A claimed dependency
 table alone does not prove that the Scene payload is closed. Concrete resource acquisition checks
-the selected codec kind/version and the actual decoded products. `RuntimeAssetCodec` supplies a
-pure complete-identity query that includes the enclosing source; an equal auxiliary ID from another
-source cannot adopt the catalog's identity. Failure or panic publishes no typed product or World
+the selected codec kind/version and the actual decoded products. `RuntimeAssetCodec` supplies
+required pure queries for complete identity, actual required Product references and retained cost.
+The identity query includes the enclosing source; an equal auxiliary ID from another source cannot
+adopt the catalog's identity. The required-reference visitor borrows the actual decoded value,
+including nested compound products. The Host checks each visited Product against the same base's
+membership and this member's Required declarations before returning a candidate. A codec without
+required references implements an explicit empty inventory; Soft edges cannot satisfy this check.
+These queries neither load dependencies nor select their Rust codecs, native values or residency.
+Concrete owners still admit the required resource's actual family, descriptor and publication.
+Failure or panic publishes no typed product or World
 mutation, and its reservations return through the same owner.
 
 The immutable base and decoded candidates retain explicit encoded, work and logical retained-byte

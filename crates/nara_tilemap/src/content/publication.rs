@@ -9,21 +9,24 @@ use nara_asset::{
 };
 use nara_image::{ImageAsset, ImageContentSnapshot};
 
-use super::{DependencyObservation, RetainedImage, TileSetAssetError, TileSetAssets, TileSetEntry};
-use crate::{TileSet, TileSetSource};
+use super::{
+    DependencyObservation, RetainedImage, TileSetAssetError, TileSetAssets, TileSetDeclaration,
+    TileSetEntry,
+};
+use crate::{TileSet, TileSetDescriptor, TileSetSource};
 
-/// Observation of one exact desired-source claim, not residency or exclusive ownership by itself.
+/// Observation of one exact content declaration claim, not residency or exclusive ownership itself.
 ///
-/// The project owner captures this only for a source it installed. Copied handles or receipts do
+/// The content owner captures this only for a declaration it installed. Copied handles or receipts do
 /// not prove that another residency holder has retired. Automatic dependency reconciliation keeps
-/// the claim; another desired source or a superseding storage writer invalidates it.
+/// the claim; another declaration or a superseding storage writer invalidates it.
 #[derive(Debug, Clone)]
-pub struct TileSetOwnedSourceReceipt {
+pub struct TileSetContentReceipt {
     handle: Handle<TileSet>,
     claim: Weak<()>,
 }
 
-impl TileSetOwnedSourceReceipt {
+impl TileSetContentReceipt {
     #[must_use]
     pub const fn handle(&self) -> Handle<TileSet> {
         self.handle
@@ -33,31 +36,26 @@ impl TileSetOwnedSourceReceipt {
 /// One destination TileSet and the admitted immutable Image allocation it will consume.
 pub struct TileSetPublicationInput {
     handle: Handle<TileSet>,
-    record: AssetRecord,
-    source: TileSetSource,
-    source_hash: SourceHash,
+    declaration: TileSetDeclaration,
     image_handle: Handle<ImageAsset>,
     image: ImageAsset,
-    owned_source: Option<TileSetOwnedSourceReceipt>,
+    receipt: Option<TileSetContentReceipt>,
 }
 
 impl TileSetPublicationInput {
     /// Shares the same immutable candidate pixels for a retained owner-thread preparation.
-    #[doc(hidden)]
     pub fn share_retained(&self) -> Option<Self> {
         Some(Self {
             handle: self.handle,
-            record: self.record.clone(),
-            source: self.source.clone(),
-            source_hash: self.source_hash,
+            declaration: self.declaration.clone(),
             image_handle: self.image_handle,
             image: self.image.share_retained()?,
-            owned_source: self.owned_source.clone(),
+            receipt: self.receipt.clone(),
         })
     }
 
     #[must_use]
-    pub fn new(
+    pub fn from_source(
         handle: Handle<TileSet>,
         record: AssetRecord,
         source: TileSetSource,
@@ -67,18 +65,37 @@ impl TileSetPublicationInput {
     ) -> Self {
         Self {
             handle,
-            record,
-            source,
-            source_hash,
+            declaration: TileSetDeclaration::Source {
+                record,
+                source,
+                source_hash,
+            },
             image_handle,
             image,
-            owned_source: None,
+            receipt: None,
+        }
+    }
+
+    /// Supplies processed content and its actual Image without source records or import hashes.
+    #[must_use]
+    pub fn from_product(
+        handle: Handle<TileSet>,
+        descriptor: TileSetDescriptor,
+        image_handle: Handle<ImageAsset>,
+        image: ImageAsset,
+    ) -> Self {
+        Self {
+            handle,
+            declaration: TileSetDeclaration::Product(descriptor),
+            image_handle,
+            image,
+            receipt: None,
         }
     }
 
     #[must_use]
-    pub fn with_owned_source(mut self, receipt: TileSetOwnedSourceReceipt) -> Self {
-        self.owned_source = Some(receipt);
+    pub fn with_receipt(mut self, receipt: TileSetContentReceipt) -> Self {
+        self.receipt = Some(receipt);
         self
     }
 }
@@ -123,6 +140,7 @@ struct PreparedInput {
     input: TileSetPublicationInput,
     guard: SlotGuard<TileSet>,
     claim: Arc<()>,
+    image_record: Option<AssetRecord>,
     retention: usize,
 }
 
@@ -134,7 +152,7 @@ enum PreparedRetention {
 /// Synchronous reservation of one finite publication/retirement set.
 ///
 /// The exclusive owner borrow prevents another request or reconciliation from spending the
-/// checked entry and retained-pixel capacity. Preparation changes no desired sources, diagnostics,
+/// checked entry and retained-pixel capacity. Preparation changes no declarations, diagnostics,
 /// states or publications. Dropping this plan releases its candidate Images and reservation.
 /// Commit must follow the matching Image publication in the same exclusive World transaction.
 #[must_use]
@@ -146,34 +164,32 @@ pub struct PreparedTileSetPublications<'owner> {
 }
 
 impl TileSetAssets {
-    /// Captures a source claim after the caller's own successful installation.
-    #[doc(hidden)]
-    pub fn owned_source_receipt(
+    /// Captures a declaration claim after the caller's own successful installation.
+    pub fn content_receipt(
         &self,
         handle: Handle<TileSet>,
         tilesets: &Assets<TileSet>,
         states: &AssetStates,
-    ) -> Option<TileSetOwnedSourceReceipt> {
+    ) -> Option<TileSetContentReceipt> {
         let entry = self.entries.get(&handle.id())?;
-        entry_is_current(entry, tilesets, states).then(|| TileSetOwnedSourceReceipt {
+        entry_is_current(entry, tilesets, states).then(|| TileSetContentReceipt {
             handle,
-            claim: Arc::downgrade(&entry.source_claim),
+            claim: Arc::downgrade(&entry.claim),
         })
     }
 
-    /// Preflights a finite residency transition without publishing any source or Image.
+    /// Preflights a finite residency transition without publishing any TileSet or Image.
     ///
     /// Handles must already be bound in the same staged server used for Scene decoding. Existing
-    /// entries require their caller-owned source claim. Shared entries retain their atlas barrier;
-    /// only an explicit, disjoint retirement can remove a source and allow fresh layout admission.
-    #[doc(hidden)]
+    /// entries require their caller-owned declaration claim. Shared entries retain their atlas
+    /// barrier; only an explicit, disjoint retirement can allow fresh layout admission.
     #[allow(clippy::too_many_arguments)]
     pub fn prepare_publications<'owner>(
         &'owner mut self,
         inputs: Vec<TileSetPublicationInput>,
-        retirements: &[TileSetOwnedSourceReceipt],
+        retirements: &[TileSetContentReceipt],
         server: &AssetServer,
-        database: &ProjectAssetDatabase,
+        database: Option<&ProjectAssetDatabase>,
         tilesets: &Assets<TileSet>,
         states: &AssetStates,
     ) -> Result<PreparedTileSetPublications<'owner>, TileSetAssetError> {
@@ -188,7 +204,7 @@ impl TileSetAssets {
                 .get(&receipt.handle.id())
                 .ok_or(TileSetAssetError::Superseded)?;
             validate_claim(entry, receipt, tilesets, states)?;
-            if !record_matches(receipt.handle, &entry.record, server) {
+            if !entry.declaration.binding_matches(receipt.handle, server) {
                 return Err(TileSetAssetError::IdentityMismatch);
             }
             retired.push(SlotGuard::capture(receipt.handle, tilesets, states)?);
@@ -201,39 +217,31 @@ impl TileSetAssets {
             if !ids.insert(input.handle.id()) {
                 return Err(TileSetAssetError::InvalidPublicationBatch);
             }
-            input
-                .source
-                .validate()
-                .map_err(|_| TileSetAssetError::InvalidSource)?;
-            if input.record.source_kind() != &crate::tileset_asset_source_kind() {
-                return Err(TileSetAssetError::InvalidSourceKind);
-            }
-            if !record_matches(input.handle, &input.record, server)
-                || database.record_for_path(input.record.path()) != Some(&input.record)
+            input.declaration.validate()?;
+            if !input
+                .declaration
+                .is_admitted(input.handle, server, database)
             {
                 return Err(TileSetAssetError::IdentityMismatch);
             }
-            let image_record = database
-                .resolve_ref(&input.source.image)
-                .map_err(|_| TileSetAssetError::DependencyUnavailable)?;
-            if image_record.source_kind() != &nara_asset::AssetSourceKind::Image
-                || !record_matches(input.image_handle, image_record, server)
-                || input.image.source().is_none_or(|source| {
-                    source.path() != image_record.path()
-                        || source.stable_id() != image_record.stable_id()
-                })
-            {
-                return Err(TileSetAssetError::IdentityMismatch);
-            }
+            input.declaration.validate_image_identity(
+                input.image_handle,
+                input
+                    .image
+                    .product()
+                    .ok_or(TileSetAssetError::IdentityMismatch)?,
+                input.image.source(),
+                server,
+                database,
+            )?;
             input
-                .source
-                .validate_image_extent(input.image.extent())
-                .map_err(|_| TileSetAssetError::ImageExtentMismatch)?;
+                .declaration
+                .validate_image_extent(input.image.extent())?;
             let claim = if let Some(entry) = self.entries.get(&input.handle.id()) {
                 validate_claim(
                     entry,
                     input
-                        .owned_source
+                        .receipt
                         .as_ref()
                         .ok_or(TileSetAssetError::Superseded)?,
                     tilesets,
@@ -241,20 +249,17 @@ impl TileSetAssets {
                 )?;
                 if entry
                     .accepted_atlas
-                    .is_some_and(|atlas| atlas != input.source.atlas)
+                    .is_some_and(|atlas| atlas != input.declaration.atlas())
                 {
                     return Err(TileSetAssetError::AtlasLayoutChangeRequiresRebuild);
                 }
-                if entry.record == input.record
-                    && entry.desired == input.source
-                    && entry.source_hash == input.source_hash
-                {
-                    Arc::clone(&entry.source_claim)
+                if entry.declaration == input.declaration {
+                    Arc::clone(&entry.claim)
                 } else {
                     Arc::new(())
                 }
             } else {
-                if input.owned_source.is_some()
+                if input.receipt.is_some()
                     || tilesets.get(input.handle).is_some()
                     || states
                         .state(input.handle.id())
@@ -302,10 +307,12 @@ impl TileSetAssets {
                 retained.len() - 1
             };
             let guard = SlotGuard::capture(input.handle, tilesets, states)?;
+            let image_record = input.declaration.image_record(database).cloned();
             prepared.push(PreparedInput {
                 input,
                 guard,
                 claim,
+                image_record,
                 retention: retention_index,
             });
         }
@@ -328,13 +335,13 @@ impl PreparedTileSetPublications<'_> {
         tilesets: &mut Assets<TileSet>,
         states: &mut AssetStates,
         events: &mut AssetEvents,
-    ) -> Vec<TileSetOwnedSourceReceipt> {
+    ) -> Vec<TileSetContentReceipt> {
         let mut captured = Vec::with_capacity(self.inputs.len());
         for prepared in &self.inputs {
             prepared.guard.assert_current(tilesets, states);
             let input = &prepared.input;
             assert!(
-                record_matches(input.handle, &input.record, server),
+                input.declaration.binding_matches(input.handle, server),
                 "prepared TileSet identity changed"
             );
             let image = ImageContentSnapshot::capture(input.image_handle, server, states, images)
@@ -344,12 +351,22 @@ impl PreparedTileSetPublications<'_> {
                 "prepared destination Image allocation changed"
             );
             assert_eq!(
+                Some(image.product()),
+                input.image.product(),
+                "prepared destination Image product changed"
+            );
+            assert_eq!(
                 image.source(),
                 input.image.source(),
                 "prepared destination Image source changed"
             );
             assert_eq!(image.extent(), input.image.extent());
             assert_eq!(image.format(), input.image.format());
+            assert_eq!(image.color_space(), input.image.color_space());
+            input
+                .declaration
+                .validate_image_extent(image.extent())
+                .expect("prepared TileSet descriptor still matches its Image");
             captured.push(image);
         }
         for retirement in &self.retirements {
@@ -360,7 +377,7 @@ impl PreparedTileSetPublications<'_> {
                 .get(&retirement.handle.id())
                 .expect("borrowed TileSet owner retains its entry");
             assert!(
-                record_matches(retirement.handle, &entry.record, server),
+                entry.declaration.binding_matches(retirement.handle, server),
                 "prepared TileSet retirement identity changed"
             );
         }
@@ -372,7 +389,7 @@ impl PreparedTileSetPublications<'_> {
                 PreparedRetention::New => None,
             })
             .collect::<Vec<_>>();
-        // Explicit, source-scoped unload removes the desired entry, so TaskUpdate cannot revive it.
+        // Explicit retirement removes the declaration, so TaskUpdate cannot revive it.
         for retirement in self.retirements {
             retirement
                 .baseline
@@ -395,48 +412,45 @@ impl PreparedTileSetPublications<'_> {
             let image = image.with_retention_owner(Arc::clone(owner));
             let TileSetPublicationInput {
                 handle,
-                record,
-                source,
-                source_hash,
+                declaration,
                 image_handle,
                 ..
             } = prepared.input;
-            let tileset = source
+            let tileset = declaration
                 .clone()
                 .into_tileset(image_handle)
-                .expect("prepared TileSet source remains valid")
+                .expect("prepared TileSet declaration remains valid")
                 .with_image_content(image.clone());
             prepared
                 .guard
                 .baseline
-                .commit_loaded(tileset, tilesets, states, events, Some(source_hash), None)
+                .commit_loaded(
+                    tileset,
+                    tilesets,
+                    states,
+                    events,
+                    declaration.source_hash(),
+                    None,
+                )
                 .expect("prepared TileSet publication version remains available");
-            let image_source = image
-                .source()
-                .expect("source TileSet publication admitted real Image provenance");
-            let observation = DependencyObservation {
-                record: Some(nara_asset::AssetRecord::new(
-                    image_source.stable_id(),
-                    image_source.path().clone(),
-                    nara_asset::AssetSourceKind::Image,
-                )),
-                state: Some(states.state_revision(image_handle.id())),
-                slot: Some(images.slot_revision(image_handle)),
-            };
-            receipts.push(TileSetOwnedSourceReceipt {
+            let observation = DependencyObservation::capture(
+                prepared.image_record,
+                Some(image_handle),
+                images,
+                states,
+            );
+            receipts.push(TileSetContentReceipt {
                 handle,
                 claim: Arc::downgrade(&prepared.claim),
             });
             self.owner.entries.insert(
                 handle.id(),
                 TileSetEntry {
-                    source_claim: prepared.claim,
+                    claim: prepared.claim,
                     handle,
-                    record,
-                    accepted_atlas: Some(source.atlas),
-                    desired: source,
-                    source_hash,
-                    source_active: true,
+                    accepted_atlas: Some(declaration.atlas()),
+                    declaration,
+                    active: true,
                     published: Some(image),
                     observation: Some(observation),
                     slot: tilesets.slot_revision(handle),
@@ -451,12 +465,12 @@ impl PreparedTileSetPublications<'_> {
 
 fn validate_claim(
     entry: &TileSetEntry,
-    receipt: &TileSetOwnedSourceReceipt,
+    receipt: &TileSetContentReceipt,
     tilesets: &Assets<TileSet>,
     states: &AssetStates,
 ) -> Result<(), TileSetAssetError> {
     if receipt.handle != entry.handle
-        || !Weak::ptr_eq(&receipt.claim, &Arc::downgrade(&entry.source_claim))
+        || !Weak::ptr_eq(&receipt.claim, &Arc::downgrade(&entry.claim))
         || !entry_is_current(entry, tilesets, states)
     {
         return Err(TileSetAssetError::Superseded);
@@ -472,16 +486,6 @@ fn entry_is_current(
     entry.error != Some(TileSetAssetError::Superseded)
         && entry.slot == tilesets.slot_revision(entry.handle)
         && entry.state == states.state_revision(entry.handle.id())
-}
-
-fn record_matches<T: 'static>(
-    handle: Handle<T>,
-    record: &AssetRecord,
-    server: &AssetServer,
-) -> bool {
-    server.get_handle::<T>(handle.id()) == Some(handle)
-        && server.path(handle.id()) == Some(record.path().as_str())
-        && server.stable_id(handle.id()) == Some(record.stable_id())
 }
 
 fn same_pixels(left: &[u8], right: &[u8]) -> bool {

@@ -138,6 +138,14 @@ decoded product's enclosing source and its selected product ID. The Runtime Host
 catalog mapping for a shared member. Accepting any source merely because a subproduct ID matches
 would let valid bytes for another resource inherit the catalog's identity.
 
+Implement `visit_required_runtime_products` over the actual decoded value, explicitly returning
+an empty inventory for a format without required references. The Host checks each visited Product
+against the same captured base and this member's Required declarations. Stop on the visitor's
+concrete error; the query allocates no scratch, loads nothing and performs no external effects.
+`runtime_retained_bytes` reports the actual modeled inline/owned storage after decode, bounded
+by the pre-reserved maximum. Query failure or panic returns no usable candidate and releases
+the original reservation. These checks do not establish native residency or select another codec.
+
 Neither format conversion method reads authoring source, sidecars or generated cache. Target
 cooking, member integrity, Runtime catalog admission, IO and publication remain separate owners.
 The compound text package uses this facet with `AssetProductRef` and `ImportedProductId` to keep
@@ -147,8 +155,10 @@ collector and rewrite, including nested/default references. The project Host col
 targets during source discovery and calls `AssetDomain::contains_product` on the actual prepared
 value before publishing content. Its default accepts only `PRIMARY`; compound domains provide
 their bounded, pure membership query. Database source resolution alone does not prove product
-existence. Primary-only Image/TileSet codecs and Prefab sources refuse auxiliary
-selection instead of silently loading the primary. This does not install global subresource loading.
+existence. Source-database Image/TileSet resolution and Prefab sources refuse auxiliary
+selection instead of silently loading the primary. Already admitted complete Runtime Products
+can resolve through their typed bindings without a source database. This does not install global
+subresource loading.
 The [scoped identity decision](../architecture/adr/0122-scoped-imported-product-identity-and-authored-continuity.md)
 defines those limits. An encoded round trip alone is not source-free project delivery.
 
@@ -172,7 +182,11 @@ uses actual primary/auxiliary values with native Scene codecs and no decode-time
 The same consumer stages a new later-Scene Product through `SceneAssetBindings::reserve_product`
 and supplies its values through the existing product resource overlay. A final native failure or
 explicit discard leaves both the old catalogue and actual values intact. Successful replacement
-publishes all three together without changing the live server during preparation.
+publishes all three together without changing the live server during preparation. Product-owned
+resource overlays capture the installed resource's concrete incarnation/content baseline and
+recheck it before commit; mere resource presence cannot authorize overwriting newer values.
+The [Runtime TileSet guide](runtime-tilesets.md) applies this same transaction to actual
+Image/TileSet values, required Image dependencies and persisted cell membership.
 
 ## Editor Metadata Import
 

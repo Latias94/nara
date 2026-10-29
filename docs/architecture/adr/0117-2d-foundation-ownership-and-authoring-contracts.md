@@ -171,8 +171,13 @@ managed Image publication must also match the exact storage slot: raw mutable st
 authorize retained derived content. Resolved TileSet fields are private; changing its Image/atlas
 through a code-first builder discards the admitted content snapshot.
 
-The concrete TileSet asset owner keeps one latest desired source separately from its published Image
-dependency. Failed or missing desired dependencies do not erase published dependency revocation.
+The concrete TileSet asset owner keeps one latest Source or source-independent Product declaration
+separately from its published Image dependency. ADR 0033 owns their shared admission and publication
+contract. A Product descriptor names complete TileSet/Image identities and actual atlas/material
+values without source records, paths or import hashes. Source adapters still require real database
+and Image provenance; processed adapters prove complete bindings and actual Image content. Both
+use the same reconciliation, claim, atlas barrier, mutation baseline and retained-pixel owner.
+Failed or missing desired dependencies do not erase published dependency revocation.
 Current metadata admission and source/catalog changes drive recovery, including a dependency path
 that initially has no metadata. Reconciliation does not scan the filesystem or introduce a generic
 import executor; Host capabilities own discovery and existing Image work owns decoding/publication.

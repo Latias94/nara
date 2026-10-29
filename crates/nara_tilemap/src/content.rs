@@ -7,22 +7,24 @@ use std::{
 
 use nara_app::{App, CoreStage, Plugin, PluginError};
 use nara_asset::{
-    AssetError, AssetEvents, AssetId, AssetRecord, AssetServer, AssetSlotRevision, AssetSourceKind,
-    AssetStateError, AssetStateRevision, AssetStates, AssetTaskUpdateSet, Assets, Handle,
-    LoadState, ProjectAssetDatabase, SourceHash,
+    AssetError, AssetEvents, AssetId, AssetProductRef, AssetRecord, AssetServer, AssetSlotRevision,
+    AssetSourceKind, AssetStateError, AssetStateRevision, AssetStates, AssetTaskUpdateSet, Assets,
+    Handle, ImportedProductId, LoadState, ProjectAssetDatabase, SourceHash,
 };
 use nara_core::{ByteLimit, ItemLimit};
 use nara_ecs::{Resource, schedule::IntoScheduleConfigs};
-use nara_image::{ImageAsset, ImageContentError, ImageContentSnapshot};
+use nara_image::{
+    ImageAsset, ImageContentError, ImageContentSnapshot, ImageExtent, ImageSourceMetadata,
+};
 
-use crate::{TileAtlasLayout, TileSet, TileSetSource};
+use crate::{TileAtlasLayout, TileSet, TileSetDescriptor, TileSetSource};
 
 mod access;
 mod publication;
 
 pub use access::TileSetContent;
 pub use publication::{
-    PreparedTileSetPublications, TileSetOwnedSourceReceipt, TileSetPublicationInput,
+    PreparedTileSetPublications, TileSetContentReceipt, TileSetPublicationInput,
 };
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -86,18 +88,202 @@ struct RetainedImage {
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct DependencyObservation {
     record: Option<AssetRecord>,
+    handle: Option<Handle<ImageAsset>>,
     state: Option<AssetStateRevision>,
     slot: Option<AssetSlotRevision>,
 }
 
+impl DependencyObservation {
+    fn capture(
+        record: Option<AssetRecord>,
+        handle: Option<Handle<ImageAsset>>,
+        images: &Assets<ImageAsset>,
+        states: &AssetStates,
+    ) -> Self {
+        Self {
+            record,
+            handle,
+            state: handle.map(|handle| states.state_revision(handle.id())),
+            slot: handle.map(|handle| images.slot_revision(handle)),
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq)]
+enum TileSetDeclaration {
+    Source {
+        record: AssetRecord,
+        source: TileSetSource,
+        source_hash: SourceHash,
+    },
+    Product(TileSetDescriptor),
+}
+
+impl TileSetDeclaration {
+    fn source(&self) -> Option<(&AssetRecord, &TileSetSource)> {
+        match self {
+            Self::Source { record, source, .. } => Some((record, source)),
+            Self::Product(_) => None,
+        }
+    }
+
+    fn source_hash(&self) -> Option<SourceHash> {
+        match self {
+            Self::Source { source_hash, .. } => Some(*source_hash),
+            Self::Product(_) => None,
+        }
+    }
+
+    fn atlas(&self) -> TileAtlasLayout {
+        match self {
+            Self::Source { source, .. } => source.atlas,
+            Self::Product(descriptor) => descriptor.atlas(),
+        }
+    }
+
+    fn validate(&self) -> Result<(), TileSetAssetError> {
+        match self {
+            Self::Source { record, source, .. } => {
+                source
+                    .validate()
+                    .map_err(|_| TileSetAssetError::InvalidSource)?;
+                if record.source_kind() != &crate::tileset_asset_source_kind() {
+                    return Err(TileSetAssetError::InvalidSourceKind);
+                }
+                Ok(())
+            }
+            Self::Product(descriptor) => descriptor
+                .validate()
+                .map_err(|_| TileSetAssetError::InvalidDescriptor),
+        }
+    }
+
+    fn binding_matches(&self, handle: Handle<TileSet>, server: &AssetServer) -> bool {
+        match self {
+            Self::Source { record, .. } => record_matches(handle, record, server),
+            Self::Product(descriptor) => product_matches(handle, descriptor.product(), server),
+        }
+    }
+
+    fn is_admitted(
+        &self,
+        handle: Handle<TileSet>,
+        server: &AssetServer,
+        database: Option<&ProjectAssetDatabase>,
+    ) -> bool {
+        self.binding_matches(handle, server)
+            && match self {
+                Self::Source { record, .. } => database.is_some_and(|database| {
+                    database.record_for_path(record.path()) == Some(record)
+                }),
+                Self::Product(_) => true,
+            }
+    }
+
+    fn image_record<'database>(
+        &self,
+        database: Option<&'database ProjectAssetDatabase>,
+    ) -> Option<&'database AssetRecord> {
+        let (_, source) = self.source()?;
+        database?.resolve_ref(&source.image).ok()
+    }
+
+    fn published_image_is_admitted(
+        &self,
+        image: &ImageContentSnapshot,
+        database: Option<&ProjectAssetDatabase>,
+    ) -> bool {
+        match self {
+            Self::Source { .. } => image.source().is_some_and(|source| {
+                database
+                    .and_then(|database| database.record_for_path(source.path()))
+                    .is_some_and(|record| {
+                        record.source_kind() == &AssetSourceKind::Image
+                            && record.stable_id() == source.stable_id()
+                    })
+            }),
+            Self::Product(_) => true,
+        }
+    }
+
+    fn validate_image_identity(
+        &self,
+        handle: Handle<ImageAsset>,
+        product: AssetProductRef,
+        source: Option<&ImageSourceMetadata>,
+        server: &AssetServer,
+        database: Option<&ProjectAssetDatabase>,
+    ) -> Result<(), TileSetAssetError> {
+        let valid = match self {
+            Self::Source { .. } => {
+                let record = self
+                    .image_record(database)
+                    .ok_or(TileSetAssetError::DependencyUnavailable)?;
+                record.source_kind() == &AssetSourceKind::Image
+                    && record_matches(handle, record, server)
+                    && product.source() == record.stable_id()
+                    && product.product() == ImportedProductId::PRIMARY
+                    && source.is_some_and(|source| {
+                        source.path() == record.path() && source.stable_id() == record.stable_id()
+                    })
+            }
+            Self::Product(descriptor) => {
+                product == descriptor.image_product() && product_matches(handle, product, server)
+            }
+        };
+        valid
+            .then_some(())
+            .ok_or(TileSetAssetError::IdentityMismatch)
+    }
+
+    fn validate_image_extent(&self, extent: ImageExtent) -> Result<(), TileSetAssetError> {
+        match self {
+            Self::Source { source, .. } => source
+                .validate_image_extent(extent)
+                .map_err(|_| TileSetAssetError::ImageExtentMismatch),
+            Self::Product(descriptor) => descriptor
+                .validate_image_extent(extent)
+                .map_err(|_| TileSetAssetError::ImageExtentMismatch),
+        }
+    }
+
+    fn into_tileset(self, image: Handle<ImageAsset>) -> Result<TileSet, TileSetAssetError> {
+        match self {
+            Self::Source { source, .. } => source
+                .into_tileset(image)
+                .map_err(|_| TileSetAssetError::InvalidSource),
+            Self::Product(descriptor) => descriptor
+                .into_tileset(image)
+                .map_err(|_| TileSetAssetError::InvalidDescriptor),
+        }
+    }
+}
+
+fn record_matches<T: 'static>(
+    handle: Handle<T>,
+    record: &AssetRecord,
+    server: &AssetServer,
+) -> bool {
+    server.get_handle::<T>(handle.id()) == Some(handle)
+        && server.path(handle.id()) == Some(record.path().as_str())
+        && server.stable_id(handle.id()) == Some(record.stable_id())
+}
+
+fn product_matches<T: 'static>(
+    handle: Handle<T>,
+    product: AssetProductRef,
+    server: &AssetServer,
+) -> bool {
+    server.get_handle::<T>(handle.id()) == Some(handle)
+        && server.product(handle.id()) == Some(product)
+}
+
 #[derive(Debug)]
 struct TileSetEntry {
-    source_claim: Arc<()>,
+    claim: Arc<()>,
     handle: Handle<TileSet>,
-    record: AssetRecord,
-    desired: TileSetSource,
-    source_hash: SourceHash,
-    source_active: bool,
+    declaration: TileSetDeclaration,
+    active: bool,
     accepted_atlas: Option<TileAtlasLayout>,
     published: Option<ImageContentSnapshot>,
     observation: Option<DependencyObservation>,
@@ -106,7 +292,7 @@ struct TileSetEntry {
     error: Option<TileSetAssetError>,
 }
 
-/// Concrete reconciliation owner for decoded TileSet sources and exact Image dependencies.
+/// Concrete reconciliation owner for TileSet declarations and exact Image dependencies.
 #[derive(Debug, Resource)]
 pub struct TileSetAssets {
     limits: TileSetAssetLimits,
@@ -154,14 +340,31 @@ impl TileSetAssets {
 
     #[must_use]
     pub fn desired(&self, handle: Handle<TileSet>) -> Option<&TileSetSource> {
-        self.entries.get(&handle.id()).map(|entry| &entry.desired)
+        self.entries
+            .get(&handle.id())?
+            .declaration
+            .source()
+            .map(|(_, source)| source)
     }
 
     /// Enumerates admitted source ownership for concrete Host refresh and dependency demand.
     pub fn sources(&self) -> impl Iterator<Item = (Handle<TileSet>, &AssetRecord, &TileSetSource)> {
-        self.entries
-            .values()
-            .map(|entry| (entry.handle, &entry.record, &entry.desired))
+        self.entries.values().filter_map(|entry| {
+            entry
+                .declaration
+                .source()
+                .map(|(record, source)| (entry.handle, record, source))
+        })
+    }
+
+    fn source_conflicts_with_product(&self, record: &AssetRecord) -> bool {
+        self.entries.values().any(|entry| match &entry.declaration {
+            TileSetDeclaration::Source { .. } => false,
+            TileSetDeclaration::Product(descriptor) => {
+                descriptor.product().source() == record.stable_id()
+                    && descriptor.product().product() == ImportedProductId::PRIMARY
+            }
+        })
     }
 
     #[must_use]
@@ -189,16 +392,27 @@ impl TileSetAssets {
         tilesets: &Assets<TileSet>,
         states: &mut AssetStates,
     ) -> Result<Handle<TileSet>, TileSetAssetError> {
-        source
-            .validate()
-            .map_err(|_| TileSetAssetError::InvalidSource)?;
-        if record.source_kind() != &AssetSourceKind::Other(String::from("tileset")) {
-            return Err(TileSetAssetError::InvalidSourceKind);
+        let declaration = TileSetDeclaration::Source {
+            record,
+            source,
+            source_hash,
+        };
+        declaration.validate()?;
+        let (record, _) = declaration
+            .source()
+            .expect("source request has a source record");
+        if self.source_conflicts_with_product(record) {
+            return Err(TileSetAssetError::Superseded);
         }
         let existing = self
             .entries
             .values()
-            .find(|entry| entry.record.path() == record.path())
+            .find(|entry| {
+                entry
+                    .declaration
+                    .source()
+                    .is_some_and(|(existing, _)| existing.path() == record.path())
+            })
             .map(|entry| entry.handle);
         if existing.is_none_or(|handle| !self.entries.contains_key(&handle.id()))
             && self.entries.len() >= self.limits.entries.get()
@@ -206,7 +420,7 @@ impl TileSetAssets {
             return Err(TileSetAssetError::Capacity);
         }
         let handle = server
-            .reserve_record::<TileSet>(&record)
+            .reserve_record::<TileSet>(record)
             .map_err(TileSetAssetError::Asset)?;
         let published = self
             .entries
@@ -221,10 +435,8 @@ impl TileSetAssets {
             .get(&handle.id())
             .and_then(|entry| entry.accepted_atlas);
         if self.entries.get(&handle.id()).is_some_and(|entry| {
-            entry.record == record
-                && entry.source_hash == source_hash
-                && entry.desired == source
-                && entry.source_active
+            entry.declaration == declaration
+                && entry.active
                 && entry.slot == tilesets.slot_revision(handle)
                 && entry.state == states.state_revision(handle.id())
                 && entry.error != Some(TileSetAssetError::Superseded)
@@ -244,28 +456,24 @@ impl TileSetAssets {
             }
             return Ok(handle);
         }
-        let source_claim = self
+        let claim = self
             .entries
             .get(&handle.id())
             .filter(|entry| {
-                entry.record == record
-                    && entry.desired == source
-                    && entry.source_hash == source_hash
+                entry.declaration == declaration
                     && entry.slot == tilesets.slot_revision(handle)
                     && entry.state == states.state_revision(handle.id())
                     && entry.error != Some(TileSetAssetError::Superseded)
             })
-            .map_or_else(|| Arc::new(()), |entry| Arc::clone(&entry.source_claim));
+            .map_or_else(|| Arc::new(()), |entry| Arc::clone(&entry.claim));
         states.set_loading(handle.id());
         self.entries.insert(
             handle.id(),
             TileSetEntry {
-                source_claim,
+                claim,
                 handle,
-                record,
-                desired: source,
-                source_hash,
-                source_active: true,
+                declaration,
+                active: true,
                 accepted_atlas,
                 published,
                 observation: None,
@@ -294,7 +502,11 @@ impl TileSetAssets {
         states: &mut AssetStates,
         events: &mut AssetEvents,
     ) -> Result<bool, TileSetAssetError> {
-        let Some(entry) = self.entries.get_mut(&handle.id()) else {
+        let Some(entry) = self
+            .entries
+            .get_mut(&handle.id())
+            .filter(|entry| entry.declaration.source().is_some())
+        else {
             return Ok(false);
         };
         if entry.error == Some(TileSetAssetError::Superseded)
@@ -303,10 +515,10 @@ impl TileSetAssets {
         {
             return Err(TileSetAssetError::Superseded);
         }
-        if !entry.source_active {
+        if !entry.active {
             return Ok(true);
         }
-        entry.source_active = false;
+        entry.active = false;
         states.set_loading(handle.id());
         let message = TileSetAssetError::InvalidSource.to_string();
         if entry.published.is_some() {
@@ -354,7 +566,11 @@ impl TileSetAssets {
         states: &mut AssetStates,
         events: &mut AssetEvents,
     ) -> Result<bool, TileSetAssetError> {
-        let Some(entry) = self.entries.get_mut(&handle.id()) else {
+        let Some(entry) = self
+            .entries
+            .get_mut(&handle.id())
+            .filter(|entry| entry.declaration.source().is_some())
+        else {
             return Ok(false);
         };
         if entry.error == Some(TileSetAssetError::Superseded)
@@ -363,7 +579,7 @@ impl TileSetAssets {
         {
             return Err(TileSetAssetError::Superseded);
         }
-        if !entry.source_active && entry.published.is_none() {
+        if !entry.active && entry.published.is_none() {
             return Ok(true);
         }
         let result = revoke(handle, tilesets, states, events);
@@ -371,7 +587,7 @@ impl TileSetAssets {
             states.invalidate_publication(handle.id());
             tilesets.remove(handle);
         }
-        entry.source_active = false;
+        entry.active = false;
         entry.published = None;
         entry.error = Some(TileSetAssetError::IdentityMismatch);
         refresh_entry(entry, tilesets, states);
@@ -383,7 +599,7 @@ impl TileSetAssets {
     pub fn reconcile(
         &mut self,
         server: &mut AssetServer,
-        database: &ProjectAssetDatabase,
+        database: Option<&ProjectAssetDatabase>,
         images: &Assets<ImageAsset>,
         tilesets: &mut Assets<TileSet>,
         states: &mut AssetStates,
@@ -438,7 +654,7 @@ impl TileSetAssets {
         &mut self,
         entry: &mut TileSetEntry,
         server: &mut AssetServer,
-        database: &ProjectAssetDatabase,
+        database: Option<&ProjectAssetDatabase>,
         images: &Assets<ImageAsset>,
         tilesets: &mut Assets<TileSet>,
         states: &mut AssetStates,
@@ -455,20 +671,14 @@ impl TileSetAssets {
             refresh_entry(entry, tilesets, states);
             return;
         }
-        let catalog_valid = database.record_for_path(entry.record.path()) == Some(&entry.record)
-            && server.get_handle::<TileSet>(entry.handle.id()) == Some(entry.handle)
-            && server.path(entry.handle.id()) == Some(entry.record.path().as_str())
-            && server.stable_id(entry.handle.id()) == Some(entry.record.stable_id());
+        let catalog_valid = entry
+            .declaration
+            .is_admitted(entry.handle, server, database);
         let publication_revoked = entry.published.as_ref().is_some_and(|image| {
             !image.is_authorized(server, states, images)
-                || image.source().is_none_or(|source| {
-                    database
-                        .record_for_path(source.path())
-                        .is_none_or(|record| {
-                            record.source_kind() != &AssetSourceKind::Image
-                                || record.stable_id() != source.stable_id()
-                        })
-                })
+                || !entry
+                    .declaration
+                    .published_image_is_admitted(image, database)
         });
         if (!catalog_valid && entry.published.is_some()) || publication_revoked {
             if let Err(error) = revoke(entry.handle, tilesets, states, events) {
@@ -483,22 +693,24 @@ impl TileSetAssets {
             refresh_entry(entry, tilesets, states);
         }
         if !catalog_valid {
+            entry.observation = None;
             entry.error = Some(TileSetAssetError::IdentityMismatch);
             return;
         }
-        if !entry.source_active {
+        if !entry.active {
             return;
         }
-        let record = database.resolve_ref(&entry.desired.image).ok();
-        let image_handle = record
-            .as_ref()
-            .filter(|record| record.source_kind() == &AssetSourceKind::Image)
-            .and_then(|record| server.reserve_record::<ImageAsset>(record).ok());
-        let observation = DependencyObservation {
-            record: record.cloned(),
-            state: image_handle.map(|handle| states.state_revision(handle.id())),
-            slot: image_handle.map(|handle| images.slot_revision(handle)),
+        let record = entry.declaration.image_record(database);
+        let image_handle = match &entry.declaration {
+            TileSetDeclaration::Source { .. } => record
+                .filter(|record| record.source_kind() == &AssetSourceKind::Image)
+                .and_then(|record| server.reserve_record::<ImageAsset>(record).ok()),
+            TileSetDeclaration::Product(descriptor) => server
+                .resolve_product::<ImageAsset>(descriptor.image_product())
+                .ok(),
         };
+        let observation =
+            DependencyObservation::capture(record.cloned(), image_handle, images, states);
         if entry.observation.as_ref() == Some(&observation) && !publication_revoked {
             return;
         }
@@ -506,7 +718,7 @@ impl TileSetAssets {
         let result = (|| {
             if entry
                 .accepted_atlas
-                .is_some_and(|atlas| atlas != entry.desired.atlas)
+                .is_some_and(|atlas| atlas != entry.declaration.atlas())
             {
                 return Err(TileSetAssetError::AtlasLayoutChangeRequiresRebuild);
             }
@@ -525,43 +737,46 @@ impl TileSetAssets {
                 }
                 Err(_) => return Err(TileSetAssetError::DependencyUnavailable),
             };
-            let record = record.ok_or(TileSetAssetError::DependencyUnavailable)?;
-            if record.source_kind() != &AssetSourceKind::Image
-                || image.source().is_none_or(|source| {
-                    source.path() != record.path() || source.stable_id() != record.stable_id()
-                })
-            {
-                return Err(TileSetAssetError::IdentityMismatch);
-            }
-            entry
-                .desired
-                .validate_image_extent(image.extent())
-                .map_err(|_| TileSetAssetError::ImageExtentMismatch)?;
+            entry.declaration.validate_image_identity(
+                handle,
+                image.product(),
+                image.source(),
+                server,
+                database,
+            )?;
+            entry.declaration.validate_image_extent(image.extent())?;
             let tileset = entry
-                .desired
+                .declaration
                 .clone()
-                .into_tileset(handle)
-                .map_err(|_| TileSetAssetError::InvalidSource)?;
+                .into_tileset(handle)?
+                .with_image_content(image.clone());
+            let source_hash = entry.declaration.source_hash();
+            // Dependency diagnostics can change without changing the admitted publication.
+            // A pending or failed TileSet still needs its own successful publication to recover.
+            if entry.error.is_none()
+                && states.state(entry.handle.id()).is_some_and(|state| {
+                    state.load_state() == &LoadState::Loaded
+                        && state.usable_version().is_some()
+                        && state.source_hash() == source_hash
+                })
+                && states.published_slot_revision(entry.handle.id()) == Some(&entry.slot)
+                && tilesets.get(entry.handle) == Some(&tileset)
+            {
+                return Ok(None);
+            }
             states
                 .next_version(entry.handle.id())
                 .map_err(TileSetAssetError::State)?;
             let image = self.retain_image(image)?;
             let tileset = tileset.with_image_content(image.clone());
             tilesets
-                .commit_loaded(
-                    entry.handle,
-                    tileset,
-                    states,
-                    events,
-                    Some(entry.source_hash),
-                    None,
-                )
+                .commit_loaded(entry.handle, tileset, states, events, source_hash, None)
                 .map_err(TileSetAssetError::State)?;
             Ok(Some(image))
         })();
         match result {
             Ok(Some(image)) => {
-                entry.accepted_atlas = Some(entry.desired.atlas);
+                entry.accepted_atlas = Some(entry.declaration.atlas());
                 entry.published = Some(image);
                 entry.error = None;
             }
@@ -601,6 +816,7 @@ fn revoke(
 pub enum TileSetAssetError {
     InvalidSourceKind,
     InvalidSource,
+    InvalidDescriptor,
     Capacity,
     RetentionCapacity,
     DependencyUnavailable,
@@ -621,7 +837,8 @@ impl fmt::Display for TileSetAssetError {
             _ => formatter.write_str(match self {
                 Self::InvalidSourceKind => "TileSet source kind is invalid",
                 Self::InvalidSource => "TileSet source is invalid",
-                Self::Capacity => "TileSet source capacity is exhausted",
+                Self::InvalidDescriptor => "TileSet product descriptor is invalid",
+                Self::Capacity => "TileSet content capacity is exhausted",
                 Self::RetentionCapacity => "TileSet retained Image capacity is exhausted",
                 Self::DependencyUnavailable => "TileSet Image dependency is unavailable",
                 Self::ImageExtentMismatch => {
@@ -630,7 +847,7 @@ impl fmt::Display for TileSetAssetError {
                 Self::AtlasLayoutChangeRequiresRebuild => {
                     "TileSet atlas layout changes require rebuilding its consumers"
                 }
-                Self::IdentityMismatch => "TileSet source identity is no longer admitted",
+                Self::IdentityMismatch => "TileSet content identity is no longer admitted",
                 Self::Superseded => "TileSet publication was superseded by another writer",
                 Self::InvalidPublicationBatch => {
                     "TileSet publication inputs overlap or repeat an identity"
@@ -687,6 +904,7 @@ mod tests {
     use crate::{TileAtlasLayout, TileIndex};
 
     mod access;
+    mod processed;
     mod publication;
     mod source_admission;
 
@@ -776,7 +994,7 @@ mod tests {
         fn reconcile(&mut self) {
             self.owner.reconcile(
                 &mut self.server,
-                &self.database,
+                Some(&self.database),
                 &self.images,
                 &mut self.tilesets,
                 &mut self.states,

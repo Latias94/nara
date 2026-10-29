@@ -117,7 +117,7 @@ pub(crate) fn initialize_reference_run(
     *movement = prepared.baseline.movement;
     *generation = prepared.baseline.generation;
     *retry = prepared.baseline.retry;
-    *state = prepared.baseline.state.clone();
+    *state = prepared.baseline.state;
     *snapshot = WaveSnapshot::default();
     commands.insert_resource(WaveRunOwner::new(activation.receipt().clone(), entities));
     Ok(())
@@ -443,7 +443,7 @@ pub(crate) fn consume_retry_commands(world: &mut World) -> Result<(), BevyError>
 
 fn apply_wave_reset(world: &mut World) -> Result<bool, BevyError> {
     let fixed_tick = world.resource::<FixedTime>().tick();
-    let mut next_generation = *world.resource::<WaveRunGeneration>();
+    let mut next_generation = world.resource::<WaveRunGeneration>().clone();
     if next_generation.advance_for_reset(fixed_tick).is_none() {
         world
             .resource_mut::<WaveRetryStatus>()
@@ -452,7 +452,7 @@ fn apply_wave_reset(world: &mut World) -> Result<bool, BevyError> {
     }
 
     world.resource_scope(|world, mut owner: Mut<WaveRunOwner>| {
-        let status = *world.resource::<WaveRetryStatus>();
+        let status = world.resource::<WaveRetryStatus>();
         let last_rejection = status.last_rejection();
         let ui_action_sequence = status.pending_ui_action_sequence();
         let (expected, prepared) = {
@@ -484,15 +484,15 @@ fn apply_wave_reset(world: &mut World) -> Result<bool, BevyError> {
                 .expect("the reference projectile limit is non-zero"),
         );
         let retirements = owner.projectile_tokens().to_vec();
-        let baseline = prepared.baseline.clone();
         let mut report =
             restart_current_scene_with_product(world, &expected, limits, &retirements, |writer| {
                 prepared.write_overlay(writer);
+                let baseline = prepared.baseline;
                 writer
                     .replace_resource(baseline.movement)
                     .replace_resource(baseline.generation)
                     .replace_resource(baseline.retry)
-                    .replace_resource(baseline.state.clone())
+                    .replace_resource(baseline.state)
                     .replace_resource(WaveSnapshot::default());
             });
         if report.diagnostics.has_errors() {
@@ -524,14 +524,14 @@ pub(crate) fn consume_movement_commands(
     }
 
     let result = (|| {
-        let mut next_movement = *movement;
+        let commands = batch
+            .commands()
+            .iter()
+            .filter(|command| command.command_type().as_str() == MOVE_COMMAND_TYPE);
         let mut changed = false;
-        for command in batch.commands() {
-            if command.command_type().as_str() != MOVE_COMMAND_TYPE {
-                continue;
-            }
-            let command = movement_intent(command.payload())?;
-            next_movement.apply(command.direction, command.pressed);
+        // Validate the immutable batch before changing the installed resource.
+        for command in commands.clone() {
+            movement_intent(command.payload())?;
             changed = true;
         }
         if !changed {
@@ -550,8 +550,12 @@ pub(crate) fn consume_movement_commands(
         let Some(mut velocity) = player else {
             return Err(BevyError::error(ReferenceSimulationError::MissingPlayer));
         };
-        velocity.value = next_movement.velocity();
-        *movement = next_movement;
+        for command in commands {
+            let command = movement_intent(command.payload())
+                .expect("the immutable movement batch was validated before mutation");
+            movement.apply(command.direction, command.pressed);
+        }
+        velocity.value = movement.velocity();
         Ok(())
     })();
     state.reject_on_error(result)
@@ -748,9 +752,9 @@ pub(crate) fn validate_wave_topology(
 
         let enemy_count = u64::try_from(enemy_count)
             .map_err(|_| BevyError::error(ReferenceSimulationError::TooManyEnemies))?;
-        if let Some(planned) = state.planned_enemies {
+        if let Some(planned) = state.planned_enemies() {
             let observed = enemy_count
-                .checked_add(state.defeated_enemies)
+                .checked_add(state.defeated_enemies())
                 .ok_or_else(|| BevyError::error(ReferenceSimulationError::ProgressOverflow))?;
             if observed != planned {
                 return Err(BevyError::error(
@@ -758,7 +762,7 @@ pub(crate) fn validate_wave_topology(
                 ));
             }
         } else {
-            state.planned_enemies = Some(enemy_count);
+            state.set_planned_enemies(enemy_count);
         }
         Ok(())
     })();
@@ -1012,12 +1016,12 @@ fn fire_automatic_weapons_inner(world: &mut World) -> Result<(), BevyError> {
         }
         let next_projectile_id = world
             .resource::<WaveState>()
-            .next_projectile_id
+            .next_projectile_id()
             .checked_add(1)
             .ok_or_else(|| {
                 BevyError::error(ReferenceSimulationError::ProjectileIdentityOverflow)
             })?;
-        let projectile_id = ProjectileId(world.resource::<WaveState>().next_projectile_id);
+        let projectile_id = ProjectileId(world.resource::<WaveState>().next_projectile_id());
         let offset = target_position - player.1;
         let velocity = Vec2::new(axis_velocity(offset.x, 2.0), axis_velocity(offset.y, 2.0));
         let token = spawn_identity_entity(world)
@@ -1046,7 +1050,9 @@ fn fire_automatic_weapons_inner(world: &mut World) -> Result<(), BevyError> {
                 remaining_ticks: PROJECTILE_TTL_TICKS,
             },
         ));
-        world.resource_mut::<WaveState>().next_projectile_id = next_projectile_id;
+        world
+            .resource_mut::<WaveState>()
+            .set_next_projectile_id(next_projectile_id);
         world
             .get_mut::<WeaponCooldown>(weapon_entity)
             .expect("validated weapon cooldown remains present")
@@ -1350,15 +1356,14 @@ fn retire_expired_entities_inner(world: &mut World) -> Result<(), BevyError> {
             .ok_or_else(|| BevyError::error(ReferenceSimulationError::ScoreOverflow))?;
         let mut state = world.resource_mut::<WaveState>();
         let score = state
-            .score
+            .score()
             .checked_add(earned)
             .ok_or_else(|| BevyError::error(ReferenceSimulationError::ScoreOverflow))?;
         let defeated_enemies = state
-            .defeated_enemies
+            .defeated_enemies()
             .checked_add(kills)
             .ok_or_else(|| BevyError::error(ReferenceSimulationError::ProgressOverflow))?;
-        state.score = score;
-        state.defeated_enemies = defeated_enemies;
+        state.record_defeats(score, defeated_enemies);
         Ok(())
     })
 }
@@ -1397,7 +1402,7 @@ pub(crate) fn evaluate_wave_outcome(
             WaveOutcome::Running
         };
         if outcome.is_terminal() {
-            state.outcome = outcome;
+            state.finish(outcome);
         }
         Ok(())
     })();

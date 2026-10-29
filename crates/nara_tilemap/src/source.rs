@@ -9,7 +9,7 @@ use nara_core::{
 use nara_image::{ImageAsset, ImageExtent};
 use nara_material::{AlphaMode2d, SamplerDescriptor};
 
-use crate::{TileAtlasLayout, TileSet};
+use crate::{TileAtlasLayout, TileSet, atlas::matches_image_extent};
 
 pub const TILESET_FORMAT_KIND: &str = "tileset";
 
@@ -105,22 +105,7 @@ impl TileSetSource {
         image_extent: ImageExtent,
     ) -> Result<(), TileSetSourceFormatError> {
         self.validate()?;
-        let atlas_extent = self.atlas.atlas_size();
-        let exact_extent = exact_atlas_axis_matches(
-            self.atlas.tile_size.x,
-            self.atlas.columns,
-            self.atlas.margin.x,
-            self.atlas.spacing.x,
-            image_extent.width,
-        ) && exact_atlas_axis_matches(
-            self.atlas.tile_size.y,
-            self.atlas.rows,
-            self.atlas.margin.y,
-            self.atlas.spacing.y,
-            image_extent.height,
-        ) && f64::from(atlas_extent.x) == f64::from(image_extent.width)
-            && f64::from(atlas_extent.y) == f64::from(image_extent.height);
-        exact_extent
+        matches_image_extent(self.atlas, image_extent)
             .then_some(())
             .ok_or(TileSetSourceFormatError::ImageExtentMismatch)
     }
@@ -211,52 +196,6 @@ impl Display for TileSetSourceFormatError {
             }
         }
     }
-}
-
-fn exact_atlas_axis_matches(
-    tile_size: f32,
-    count: u32,
-    margin: f32,
-    spacing: f32,
-    extent: u32,
-) -> bool {
-    let tile_size = f64::from(tile_size);
-    let count = f64::from(count);
-    let spacing = f64::from(spacing);
-    let tiles = tile_size * count;
-    let gaps = spacing * (count - 1.0);
-    let terms = [
-        tiles,
-        tile_size.mul_add(count, -tiles),
-        f64::from(margin) * 2.0,
-        gaps,
-        spacing.mul_add(count - 1.0, -gaps),
-        -f64::from(extent),
-    ];
-    let mut expansion = [0.0; 6];
-    let mut length = 0;
-    for term in terms {
-        let mut accumulator = term;
-        let mut next_length = 0;
-        for index in 0..length {
-            let component = expansion[index];
-            let sum = accumulator + component;
-            let component_in_sum = sum - accumulator;
-            let residual =
-                (accumulator - (sum - component_in_sum)) + (component - component_in_sum);
-            if residual != 0.0 {
-                expansion[next_length] = residual;
-                next_length += 1;
-            }
-            accumulator = sum;
-        }
-        if accumulator != 0.0 {
-            expansion[next_length] = accumulator;
-            next_length += 1;
-        }
-        length = next_length;
-    }
-    length == 0
 }
 
 impl Error for TileSetSourceFormatError {}

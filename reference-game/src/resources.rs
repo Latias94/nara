@@ -1,4 +1,4 @@
-use std::{collections::BTreeMap, error::Error, fmt};
+use std::{collections::BTreeMap, error::Error, fmt, sync::Arc};
 
 use nara::{
     ecs::Entity,
@@ -22,6 +22,37 @@ pub(crate) const KILL_SCORE: u64 = 100;
 pub(crate) const MAX_WAVE_ENEMIES: usize = 64;
 pub(crate) const MAX_WAVE_PROJECTILES: usize = 128;
 pub(crate) const MAX_WAVE_SCENE_ENTITIES: usize = 256;
+
+/// One game-owned incarnation plus its bounded write generation.
+/// Cloning creates a new incarnation; normal writes never allocate an identity.
+#[derive(Debug, Default)]
+pub(crate) struct WaveResourceRevision {
+    incarnation: Arc<()>,
+    generation: u64,
+}
+
+impl Clone for WaveResourceRevision {
+    fn clone(&self) -> Self {
+        Self::default()
+    }
+}
+
+impl WaveResourceRevision {
+    pub(crate) fn advance(&mut self) {
+        self.generation = self
+            .generation
+            .checked_add(1)
+            .expect("wave resource mutation generation exhausted");
+    }
+
+    pub(crate) fn capture(&self) -> (Arc<()>, u64) {
+        (Arc::clone(&self.incarnation), self.generation)
+    }
+
+    pub(crate) fn matches(&self, baseline: &(Arc<()>, u64)) -> bool {
+        Arc::ptr_eq(&self.incarnation, &baseline.0) && self.generation == baseline.1
+    }
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum MovementDirection {
@@ -89,26 +120,42 @@ impl MovementDirection {
     }
 }
 
-#[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Resource)]
+#[derive(Debug, Default, Clone, Resource)]
 pub(crate) struct MovementIntent {
     left: bool,
     right: bool,
     up: bool,
     down: bool,
+    revision: WaveResourceRevision,
 }
+
+impl PartialEq for MovementIntent {
+    fn eq(&self, other: &Self) -> bool {
+        (self.left, self.right, self.up, self.down)
+            == (other.left, other.right, other.up, other.down)
+    }
+}
+
+impl Eq for MovementIntent {}
 
 impl MovementIntent {
     pub(crate) fn apply(&mut self, direction: MovementDirection, pressed: bool) {
+        self.revision.advance();
         match direction {
             MovementDirection::Left => self.left = pressed,
             MovementDirection::Right => self.right = pressed,
             MovementDirection::Up => self.up = pressed,
             MovementDirection::Down => self.down = pressed,
-            MovementDirection::Stop => *self = Self::default(),
+            MovementDirection::Stop => {
+                self.left = false;
+                self.right = false;
+                self.up = false;
+                self.down = false;
+            }
         }
     }
 
-    pub(crate) fn velocity(self) -> Vec2 {
+    pub(crate) fn velocity(&self) -> Vec2 {
         let x = self.right as i8 - self.left as i8;
         let y = self.up as i8 - self.down as i8;
         let scale = if x != 0 && y != 0 {
@@ -131,35 +178,47 @@ impl ProjectileId {
 }
 
 /// Monotonic game-owned run generation within one engine runtime generation.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Resource)]
+/// Cloning preserves the run values and creates an independent resource incarnation.
+#[derive(Debug, Clone, Resource)]
 pub struct WaveRunGeneration {
     generation: u64,
     start_fixed_tick: u64,
+    revision: WaveResourceRevision,
 }
+
+impl PartialEq for WaveRunGeneration {
+    fn eq(&self, other: &Self) -> bool {
+        self.generation == other.generation && self.start_fixed_tick == other.start_fixed_tick
+    }
+}
+
+impl Eq for WaveRunGeneration {}
 
 impl Default for WaveRunGeneration {
     fn default() -> Self {
         Self {
             generation: 1,
             start_fixed_tick: 0,
+            revision: WaveResourceRevision::default(),
         }
     }
 }
 
 impl WaveRunGeneration {
     #[must_use]
-    pub const fn get(self) -> u64 {
+    pub const fn get(&self) -> u64 {
         self.generation
     }
 
     #[must_use]
-    pub const fn run_tick(self, fixed_tick: u64) -> Option<u64> {
+    pub const fn run_tick(&self, fixed_tick: u64) -> Option<u64> {
         fixed_tick.checked_sub(self.start_fixed_tick)
     }
 
     pub(crate) fn advance_for_reset(&mut self, fixed_tick: u64) -> Option<()> {
         let generation = self.generation.checked_add(1)?;
         let start_fixed_tick = fixed_tick.checked_sub(1)?;
+        self.revision.advance();
         self.generation = generation;
         self.start_fixed_tick = start_fixed_tick;
         Some(())
@@ -190,12 +249,24 @@ pub enum WaveRetryRejection {
 }
 
 /// Inspectable game-owned retry state; it never requests platform or runtime replacement.
-#[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Resource)]
+/// Cloning preserves the status values and creates an independent resource incarnation.
+#[derive(Debug, Default, Clone, Resource)]
 pub struct WaveRetryStatus {
     pending: Option<WaveRetryAttempt>,
     applied: Option<WaveRetryAttempt>,
     last_rejection: Option<WaveRetryRejection>,
+    revision: WaveResourceRevision,
 }
+
+impl PartialEq for WaveRetryStatus {
+    fn eq(&self, other: &Self) -> bool {
+        self.pending == other.pending
+            && self.applied == other.applied
+            && self.last_rejection == other.last_rejection
+    }
+}
+
+impl Eq for WaveRetryStatus {}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 struct WaveRetryAttempt {
@@ -205,7 +276,7 @@ struct WaveRetryAttempt {
 
 impl WaveRetryStatus {
     #[must_use]
-    pub const fn phase(self) -> WaveRetryPhase {
+    pub const fn phase(&self) -> WaveRetryPhase {
         if self.pending.is_some() {
             WaveRetryPhase::Pending
         } else if self.applied.is_some() {
@@ -216,7 +287,7 @@ impl WaveRetryStatus {
     }
 
     #[must_use]
-    pub const fn pending_generation(self) -> Option<u64> {
+    pub const fn pending_generation(&self) -> Option<u64> {
         match self.pending {
             Some(attempt) => Some(attempt.generation),
             None => None,
@@ -224,7 +295,7 @@ impl WaveRetryStatus {
     }
 
     #[must_use]
-    pub const fn pending_ui_action_sequence(self) -> Option<u64> {
+    pub const fn pending_ui_action_sequence(&self) -> Option<u64> {
         match self.pending {
             Some(attempt) => attempt.ui_action_sequence,
             None => None,
@@ -232,7 +303,7 @@ impl WaveRetryStatus {
     }
 
     #[must_use]
-    pub const fn applied_generation(self) -> Option<u64> {
+    pub const fn applied_generation(&self) -> Option<u64> {
         match self.applied {
             Some(attempt) => Some(attempt.generation),
             None => None,
@@ -240,7 +311,7 @@ impl WaveRetryStatus {
     }
 
     #[must_use]
-    pub const fn applied_ui_action_sequence(self) -> Option<u64> {
+    pub const fn applied_ui_action_sequence(&self) -> Option<u64> {
         match self.applied {
             Some(attempt) => attempt.ui_action_sequence,
             None => None,
@@ -248,7 +319,7 @@ impl WaveRetryStatus {
     }
 
     #[must_use]
-    pub const fn last_rejection(self) -> Option<WaveRetryRejection> {
+    pub const fn last_rejection(&self) -> Option<WaveRetryRejection> {
         self.last_rejection
     }
 
@@ -257,6 +328,7 @@ impl WaveRetryStatus {
         generation: u64,
         ui_action_sequence: Option<u64>,
     ) -> bool {
+        self.revision.advance();
         if self.pending_generation() == Some(generation) {
             self.last_rejection = Some(WaveRetryRejection::AlreadyPending);
             return false;
@@ -274,10 +346,12 @@ impl WaveRetryStatus {
     }
 
     pub(crate) fn reject_duplicate(&mut self) {
+        self.revision.advance();
         self.last_rejection = Some(WaveRetryRejection::AlreadyPending);
     }
 
     pub(crate) fn reject(&mut self, rejection: WaveRetryRejection) {
+        self.revision.advance();
         self.pending = None;
         self.last_rejection = Some(rejection);
     }
@@ -288,6 +362,7 @@ impl WaveRetryStatus {
         ui_action_sequence: Option<u64>,
         last_rejection: Option<WaveRetryRejection>,
     ) {
+        self.revision.advance();
         self.pending = None;
         self.applied = Some(WaveRetryAttempt {
             generation,
@@ -297,7 +372,17 @@ impl WaveRetryStatus {
     }
 }
 
-impl SceneProductResource for WaveRetryStatus {}
+impl SceneProductResource for WaveRetryStatus {
+    type Baseline = (Arc<()>, u64);
+
+    fn capture_baseline(&self) -> Self::Baseline {
+        self.revision.capture()
+    }
+
+    fn matches_baseline(&self, baseline: &Self::Baseline) -> bool {
+        self.revision.matches(baseline)
+    }
+}
 
 #[derive(Debug, Resource)]
 pub(crate) struct WaveRunOwner {
@@ -365,7 +450,7 @@ impl WaveRunOwner {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 pub(crate) struct WaveRunBaseline {
     pub(crate) movement: MovementIntent,
     pub(crate) generation: WaveRunGeneration,
@@ -373,14 +458,15 @@ pub(crate) struct WaveRunBaseline {
     pub(crate) state: WaveState,
 }
 
-#[derive(Debug, Clone, Resource)]
+#[derive(Debug, Resource)]
 pub(crate) struct WaveState {
-    pub(crate) outcome: WaveOutcome,
-    pub(crate) score: u64,
-    pub(crate) planned_enemies: Option<u64>,
-    pub(crate) defeated_enemies: u64,
-    pub(crate) next_projectile_id: u64,
+    outcome: WaveOutcome,
+    score: u64,
+    planned_enemies: Option<u64>,
+    defeated_enemies: u64,
+    next_projectile_id: u64,
     tick_gate: WaveTickGate,
+    revision: WaveResourceRevision,
 }
 
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
@@ -401,16 +487,59 @@ impl Default for WaveState {
             defeated_enemies: 0,
             next_projectile_id: 1,
             tick_gate: WaveTickGate::Pending,
+            revision: WaveResourceRevision::default(),
         }
     }
 }
 
 impl WaveState {
+    pub(crate) const fn outcome(&self) -> WaveOutcome {
+        self.outcome
+    }
+
+    pub(crate) const fn score(&self) -> u64 {
+        self.score
+    }
+
+    pub(crate) const fn planned_enemies(&self) -> Option<u64> {
+        self.planned_enemies
+    }
+
+    pub(crate) const fn defeated_enemies(&self) -> u64 {
+        self.defeated_enemies
+    }
+
+    pub(crate) const fn next_projectile_id(&self) -> u64 {
+        self.next_projectile_id
+    }
+
+    pub(crate) fn set_planned_enemies(&mut self, count: u64) {
+        self.revision.advance();
+        self.planned_enemies = Some(count);
+    }
+
+    pub(crate) fn set_next_projectile_id(&mut self, id: u64) {
+        self.revision.advance();
+        self.next_projectile_id = id;
+    }
+
+    pub(crate) fn record_defeats(&mut self, score: u64, defeated_enemies: u64) {
+        self.revision.advance();
+        self.score = score;
+        self.defeated_enemies = defeated_enemies;
+    }
+
+    pub(crate) fn finish(&mut self, outcome: WaveOutcome) {
+        self.revision.advance();
+        self.outcome = outcome;
+    }
+
     pub(crate) const fn is_running(&self) -> bool {
         matches!(self.outcome, WaveOutcome::Running)
     }
 
     pub(crate) fn begin_tick(&mut self) {
+        self.revision.advance();
         self.tick_gate = if self.is_running() {
             WaveTickGate::Pending
         } else {
@@ -419,6 +548,7 @@ impl WaveState {
     }
 
     pub(crate) fn begin_projection_only_tick(&mut self) {
+        self.revision.advance();
         self.tick_gate = if self.is_running() {
             WaveTickGate::ProjectionOnly
         } else {
@@ -443,11 +573,13 @@ impl WaveState {
 
     pub(crate) fn admit_tick(&mut self) {
         if self.tick_is_pending() {
+            self.revision.advance();
             self.tick_gate = WaveTickGate::Admitted;
         }
     }
 
     pub(crate) fn reject_tick(&mut self) {
+        self.revision.advance();
         self.tick_gate = WaveTickGate::Rejected;
     }
 
@@ -459,6 +591,41 @@ impl WaveState {
     }
 }
 
-impl SceneProductResource for MovementIntent {}
-impl SceneProductResource for WaveRunGeneration {}
-impl SceneProductResource for WaveState {}
+impl SceneProductResource for MovementIntent {
+    type Baseline = (Arc<()>, u64);
+
+    fn capture_baseline(&self) -> Self::Baseline {
+        self.revision.capture()
+    }
+
+    fn matches_baseline(&self, baseline: &Self::Baseline) -> bool {
+        self.revision.matches(baseline)
+    }
+}
+
+impl SceneProductResource for WaveRunGeneration {
+    type Baseline = (Arc<()>, u64);
+
+    fn capture_baseline(&self) -> Self::Baseline {
+        self.revision.capture()
+    }
+
+    fn matches_baseline(&self, baseline: &Self::Baseline) -> bool {
+        self.revision.matches(baseline)
+    }
+}
+
+impl SceneProductResource for WaveState {
+    type Baseline = (Arc<()>, u64);
+
+    fn capture_baseline(&self) -> Self::Baseline {
+        self.revision.capture()
+    }
+
+    fn matches_baseline(&self, baseline: &Self::Baseline) -> bool {
+        self.revision.matches(baseline)
+    }
+}
+
+#[cfg(test)]
+mod tests;

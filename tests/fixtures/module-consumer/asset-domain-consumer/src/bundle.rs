@@ -661,6 +661,13 @@ impl RuntimeAssetCodec<TextBundle> for TextBundleDomain {
         Ok(retained)
     }
 
+    fn visit_required_runtime_products<E>(
+        _product: &TextBundle,
+        _visitor: impl FnMut(AssetProductRef) -> Result<(), E>,
+    ) -> Result<(), E> {
+        Ok(())
+    }
+
     fn contains_runtime_product(product: &TextBundle, reference: AssetProductRef) -> bool {
         product.source == reference.source()
             && <Self as AssetDomain>::contains_product(product, reference.product())

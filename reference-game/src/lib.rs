@@ -56,7 +56,10 @@ pub use runtime_ui::{
     REFERENCE_RETRY_ACTION, REFERENCE_RUNTIME_UI_PLUGIN_ID, REFERENCE_UI_SURFACE_ID,
     ReferenceHudProjection, ReferenceRuntimeUiPlugin,
 };
-pub use snapshot::{EnemySnapshot, PlayerSnapshot, ProjectileSnapshot, WaveOutcome, WaveSnapshot};
+pub use snapshot::{
+    EnemySnapshot, PlayerSnapshot, ProjectileSnapshot, WaveOutcome, WaveSnapshot,
+    WaveSnapshotContent,
+};
 #[cfg(feature = "desktop")]
 pub use ui::{REFERENCE_DESKTOP_PLUGIN_ID, ReferenceDesktopPlugin};
 pub use ui_observation::{

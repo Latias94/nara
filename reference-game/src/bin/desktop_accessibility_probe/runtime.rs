@@ -159,7 +159,14 @@ fn observe_runtime_trajectory(world: &mut World) {
         state.journal_high_water
     };
     let generation = world.resource::<WaveRunGeneration>().get();
-    let retry = *world.resource::<WaveRetryStatus>();
+    let (applied_generation, applied_ui_action_sequence, last_rejection) = {
+        let retry = world.resource::<WaveRetryStatus>();
+        (
+            retry.applied_generation(),
+            retry.applied_ui_action_sequence(),
+            retry.last_rejection(),
+        )
+    };
     let projection = *world.resource::<ReferenceHudProjection>();
     let terminal_wgpu_frame = latest_presented
         .as_ref()
@@ -221,9 +228,9 @@ fn observe_runtime_trajectory(world: &mut World) {
         evidence.fail(format!(
             "run generation advanced past the one-shot Retry proof: {generation}"
         ));
-    } else if retry.applied_generation() == Some(generation) {
+    } else if applied_generation == Some(generation) {
         if evidence
-            .observe_retry_applied(generation, retry.applied_ui_action_sequence())
+            .observe_retry_applied(generation, applied_ui_action_sequence)
             .is_ok()
             && let Some(presented) = latest_presented.as_ref()
         {
@@ -243,8 +250,11 @@ fn observe_runtime_trajectory(world: &mut World) {
                 Err(error) => evidence.fail(error),
             }
         }
-    } else if evidence.has_observed_action() && retry.last_rejection().is_some() {
-        evidence.fail(format!("product Retry was rejected: {retry:?}"));
+    } else if evidence.has_observed_action() && last_rejection.is_some() {
+        evidence.fail(format!(
+            "product Retry was rejected: {:?}",
+            world.resource::<WaveRetryStatus>()
+        ));
     }
 
     if !had_retry_actions && evidence.phase() == ProbePhase::PlatformVerified {

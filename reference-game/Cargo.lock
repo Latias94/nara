@@ -2280,12 +2280,14 @@ dependencies = [
  "nara_app",
  "nara_asset",
  "nara_core",
+ "nara_diagnostic",
  "nara_ecs",
  "nara_image",
  "nara_material",
  "nara_reflect",
  "ron",
  "serde",
+ "serde_json",
 ]
 
 [[package]]

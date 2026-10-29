@@ -332,7 +332,7 @@ mod tests {
 
     #[test]
     fn defeated_wave_uses_the_same_stable_json_schema() {
-        let snapshot = WaveSnapshot {
+        let snapshot = WaveSnapshot::new(nara_reference_game::WaveSnapshotContent {
             tick: 4,
             outcome: nara_reference_game::WaveOutcome::Defeated,
             player: nara_reference_game::PlayerSnapshot {
@@ -340,8 +340,8 @@ mod tests {
                 position: nara::prelude::Vec2::ZERO,
                 hit_points: 0,
             },
-            ..WaveSnapshot::default()
-        };
+            ..Default::default()
+        });
         let mut stdout = Vec::new();
         let mut stderr = Vec::new();
 

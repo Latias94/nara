@@ -1,4 +1,4 @@
-use std::{error::Error, fmt};
+use std::{error::Error, fmt, ops::Deref, sync::Arc};
 
 use nara::{
     app::RuntimeFaultReporter,
@@ -11,7 +11,8 @@ use nara::{
 use crate::{
     EnemyRole, Health, PlayerRole, ProjectileLifetime, ProjectileRole, Velocity2d, WaveSpawn,
     resources::{
-        MAX_WAVE_ENEMIES, MAX_WAVE_PROJECTILES, ProjectileId, WaveRunGeneration, WaveRunOwner,
+        MAX_WAVE_ENEMIES, MAX_WAVE_PROJECTILES, ProjectileId, WaveResourceRevision,
+        WaveRunGeneration, WaveRunOwner,
     },
 };
 
@@ -63,8 +64,9 @@ pub struct ProjectileSnapshot {
     pub ttl_ticks: u64,
 }
 
-#[derive(Debug, Default, Clone, PartialEq, Resource)]
-pub struct WaveSnapshot {
+/// Complete wave data exposed as an immutable view by [`WaveSnapshot`].
+#[derive(Debug, Default, Clone, PartialEq)]
+pub struct WaveSnapshotContent {
     pub run_generation: u64,
     pub tick: u64,
     pub outcome: WaveOutcome,
@@ -76,12 +78,61 @@ pub struct WaveSnapshot {
     pub projectiles: Vec<ProjectileSnapshot>,
 }
 
-impl SceneProductResource for WaveSnapshot {}
+/// One published wave observation. Cloning creates an independent resource incarnation.
+///
+/// Fields remain readable through the immutable content view. Publish a complete new value to
+/// change the observation so even an equal-content publication invalidates a retained baseline.
+#[derive(Debug, Default, Clone, Resource)]
+pub struct WaveSnapshot {
+    content: WaveSnapshotContent,
+    revision: WaveResourceRevision,
+}
+
+impl PartialEq for WaveSnapshot {
+    fn eq(&self, other: &Self) -> bool {
+        self.content == other.content
+    }
+}
+
+impl Deref for WaveSnapshot {
+    type Target = WaveSnapshotContent;
+
+    fn deref(&self) -> &Self::Target {
+        &self.content
+    }
+}
+
+impl SceneProductResource for WaveSnapshot {
+    type Baseline = (Arc<()>, u64);
+
+    fn capture_baseline(&self) -> Self::Baseline {
+        self.revision.capture()
+    }
+
+    fn matches_baseline(&self, baseline: &Self::Baseline) -> bool {
+        self.revision.matches(baseline)
+    }
+}
 
 impl WaveSnapshot {
+    /// Creates a new resource incarnation from complete wave data.
+    #[must_use]
+    pub fn new(content: WaveSnapshotContent) -> Self {
+        Self {
+            content,
+            revision: WaveResourceRevision::default(),
+        }
+    }
+
+    /// Publishes a complete observation, advancing the write generation even for equal content.
+    pub fn publish(&mut self, content: WaveSnapshotContent) {
+        self.revision.advance();
+        self.content = content;
+    }
+
     #[must_use]
     pub const fn is_terminal(&self) -> bool {
-        self.outcome.is_terminal()
+        self.content.outcome.is_terminal()
     }
 }
 
@@ -200,19 +251,21 @@ pub(crate) fn capture_wave_snapshot(
     }
     projectile_values.sort_by_key(|projectile| projectile.id);
 
-    snapshot.run_generation = run.get();
-    snapshot.tick = run_tick;
-    snapshot.outcome = state.outcome;
-    snapshot.score = state.score;
-    snapshot.planned_enemies = state.planned_enemies.unwrap_or_default();
-    snapshot.defeated_enemies = state.defeated_enemies;
-    snapshot.player = PlayerSnapshot {
-        id: source.entity_id.as_str().to_owned(),
-        position: player_global.translation(),
-        hit_points: player_health.current,
-    };
-    snapshot.enemies = enemy_values;
-    snapshot.projectiles = projectile_values;
+    snapshot.publish(WaveSnapshotContent {
+        run_generation: run.get(),
+        tick: run_tick,
+        outcome: state.outcome(),
+        score: state.score(),
+        planned_enemies: state.planned_enemies().unwrap_or_default(),
+        defeated_enemies: state.defeated_enemies(),
+        player: PlayerSnapshot {
+            id: source.entity_id.as_str().to_owned(),
+            position: player_global.translation(),
+            hit_points: player_health.current,
+        },
+        enemies: enemy_values,
+        projectiles: projectile_values,
+    });
     Ok(())
 }
 

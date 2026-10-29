@@ -135,6 +135,22 @@ pub trait RuntimeAssetCodec<P: Send + Sync + 'static>: Send + Sync + 'static {
     /// account for.
     fn runtime_retained_bytes(product: &P) -> Result<usize, AssetRuntimeError>;
 
+    /// Visits actual Product references required by this decoded value.
+    ///
+    /// The content Host checks each reference against the same captured base and the member's
+    /// Required declarations before returning the candidate. Catalog edges alone cannot prove
+    /// that the decoded payload is closed. Enumerate every required reference, including nested
+    /// products in a compound value; soft references do not participate in required admission.
+    /// A codec with no required references must implement that empty inventory explicitly.
+    ///
+    /// This trusted bounded query borrows existing values and grants no I/O, allocation, mutation,
+    /// dependency loading or publication. Stop and propagate the visitor's concrete failure
+    /// unchanged. The original decode work promise covers this inventory operation.
+    fn visit_required_runtime_products<E>(
+        product: &P,
+        visitor: impl FnMut(AssetProductRef) -> Result<(), E>,
+    ) -> Result<(), E>;
+
     /// Checks the complete logical identity carried by a decoded product.
     ///
     /// The content Host calls this for every product mapped to the encoded member, including

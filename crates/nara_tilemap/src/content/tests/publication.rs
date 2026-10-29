@@ -1,5 +1,4 @@
 use super::*;
-use crate::__private::{TileSetOwnedSourceReceipt, TileSetPublicationInput};
 
 fn destination_image(record: &AssetRecord, byte: u8) -> ImageAsset {
     let mut image = image(record, 2, 1, byte);
@@ -20,7 +19,7 @@ fn input(
         .unwrap();
     let handle = fixture.server.reserve_record::<TileSet>(&record).unwrap();
     (
-        TileSetPublicationInput::new(
+        TileSetPublicationInput::from_source(
             handle,
             record,
             source,
@@ -42,10 +41,10 @@ fn terrain_input(
     input(fixture, record, source, image)
 }
 
-fn receipt(fixture: &Fixture, handle: Handle<TileSet>) -> TileSetOwnedSourceReceipt {
+fn receipt(fixture: &Fixture, handle: Handle<TileSet>) -> TileSetContentReceipt {
     fixture
         .owner
-        .owned_source_receipt(handle, &fixture.tilesets, &fixture.states)
+        .content_receipt(handle, &fixture.tilesets, &fixture.states)
         .unwrap()
 }
 
@@ -65,14 +64,14 @@ fn dropped_plan_changes_no_desired_source_diagnostic_publication_or_retention() 
     let allocation = image.pixels().as_ptr();
     let desired = source("a.png").with_tint(nara_core::Color::rgb(1.0, 0.0, 0.0));
     let (input, _, _) = terrain_input(&mut fixture, desired, &image);
-    let input = input.with_owned_source(claim.clone());
+    let input = input.with_receipt(claim.clone());
     let prepared = fixture
         .owner
         .prepare_publications(
             vec![input],
             &[],
             &fixture.server,
-            &fixture.database,
+            Some(&fixture.database),
             &fixture.tilesets,
             &fixture.states,
         )
@@ -95,7 +94,7 @@ fn dropped_plan_changes_no_desired_source_diagnostic_publication_or_retention() 
                 Vec::new(),
                 &[claim],
                 &fixture.server,
-                &fixture.database,
+                Some(&fixture.database),
                 &fixture.tilesets,
                 &fixture.states,
             )
@@ -131,12 +130,12 @@ fn prepare_rejects_extent_and_aggregate_retention_before_any_image_publication()
             source("a.png")
         };
         let (input, _, _) = terrain_input(&mut fixture, desired, &image);
-        let input = input.with_owned_source(claim);
+        let input = input.with_receipt(claim);
         let result = fixture.owner.prepare_publications(
             vec![input],
             &[],
             &fixture.server,
-            &fixture.database,
+            Some(&fixture.database),
             &fixture.tilesets,
             &fixture.states,
         );
@@ -186,7 +185,7 @@ fn aggregate_plan_deduplicates_one_image_and_installs_its_exact_postpublication_
             vec![first, second],
             &[],
             &fixture.server,
-            &fixture.database,
+            Some(&fixture.database),
             &fixture.tilesets,
             &fixture.states,
         )
@@ -219,7 +218,7 @@ fn aggregate_plan_deduplicates_one_image_and_installs_its_exact_postpublication_
     assert_eq!(
         claims
             .iter()
-            .map(TileSetOwnedSourceReceipt::handle)
+            .map(TileSetContentReceipt::handle)
             .collect::<Vec<_>>(),
         [first_handle, second_handle]
     );
@@ -276,7 +275,7 @@ fn aggregate_plan_checks_entry_image_and_byte_ceilings_before_claiming_any_sourc
         let event_count = fixture.events.len();
         assert!(
             matches!(fixture.owner.prepare_publications(vec![first, second], &[], &fixture.server,
-            &fixture.database, &fixture.tilesets, &fixture.states), Err(error) if error == expected)
+            Some(&fixture.database), &fixture.tilesets, &fixture.states), Err(error) if error == expected)
         );
         assert!(fixture.owner.is_empty());
         assert_eq!(
@@ -318,7 +317,7 @@ fn owned_explicit_unload_frees_entries_prevents_resurrection_and_permits_fresh_l
             Vec::new(),
             &[claim],
             &fixture.server,
-            &fixture.database,
+            Some(&fixture.database),
             &fixture.tilesets,
             &fixture.states,
         )
@@ -359,7 +358,7 @@ fn owned_explicit_unload_frees_entries_prevents_resurrection_and_permits_fresh_l
             vec![input],
             &[],
             &fixture.server,
-            &fixture.database,
+            Some(&fixture.database),
             &fixture.tilesets,
             &fixture.states,
         )
@@ -403,7 +402,7 @@ fn owned_explicit_unload_frees_entries_prevents_resurrection_and_permits_fresh_l
             Vec::new(),
             &claims,
             &fixture.server,
-            &fixture.database,
+            Some(&fixture.database),
             &fixture.tilesets,
             &fixture.states,
         )
@@ -449,13 +448,13 @@ fn shared_and_automatically_revoked_sources_keep_the_atlas_barrier() {
             TileAtlasLayout::grid(Vec2::new(2.0, 1.0), 1, 1),
         );
         let (input, _, _) = terrain_input(&mut fixture, changed, &image);
-        let input = input.with_owned_source(claim);
+        let input = input.with_receipt(claim);
         assert!(matches!(
             fixture.owner.prepare_publications(
                 vec![input],
                 &[],
                 &fixture.server,
-                &fixture.database,
+                Some(&fixture.database),
                 &fixture.tilesets,
                 &fixture.states
             ),
@@ -488,7 +487,7 @@ fn source_claim_survives_reconciliation_but_rejects_foreign_desired_or_raw_stora
                 Vec::new(),
                 &[claim.clone()],
                 &fixture.server,
-                &fixture.database,
+                Some(&fixture.database),
                 &fixture.tilesets,
                 &fixture.states,
             )
@@ -500,7 +499,7 @@ fn source_claim_survives_reconciliation_but_rejects_foreign_desired_or_raw_stora
             Vec::new(),
             &[claim],
             &fixture.server,
-            &fixture.database,
+            Some(&fixture.database),
             &fixture.tilesets,
             &fixture.states
         ),
@@ -516,7 +515,7 @@ fn source_claim_survives_reconciliation_but_rejects_foreign_desired_or_raw_stora
             Vec::new(),
             &[claim],
             &fixture.server,
-            &fixture.database,
+            Some(&fixture.database),
             &fixture.tilesets,
             &fixture.states
         ),
@@ -537,7 +536,7 @@ fn duplicate_or_overlapping_batch_inputs_reject_without_claiming_an_entry() {
             vec![first, second],
             &[],
             &fixture.server,
-            &fixture.database,
+            Some(&fixture.database),
             &fixture.tilesets,
             &fixture.states
         ),
@@ -549,13 +548,13 @@ fn duplicate_or_overlapping_batch_inputs_reject_without_claiming_an_entry() {
     fixture.reconcile();
     let claim = receipt(&fixture, handle);
     let (input, _, _) = terrain_input(&mut fixture, source("a.png"), &image);
-    let input = input.with_owned_source(claim.clone());
+    let input = input.with_receipt(claim.clone());
     assert!(matches!(
         fixture.owner.prepare_publications(
             vec![input],
             &[claim],
             &fixture.server,
-            &fixture.database,
+            Some(&fixture.database),
             &fixture.tilesets,
             &fixture.states
         ),
@@ -574,14 +573,14 @@ fn commit_rejects_another_image_allocation_before_changing_any_tileset() {
     let slot = fixture.tilesets.slot_revision(handle);
     let image = destination_image(&fixture.image_a, 90);
     let (input, _, image_handle) = terrain_input(&mut fixture, source("a.png"), &image);
-    let input = input.with_owned_source(claim);
+    let input = input.with_receipt(claim);
     let prepared = fixture
         .owner
         .prepare_publications(
             vec![input],
             &[],
             &fixture.server,
-            &fixture.database,
+            Some(&fixture.database),
             &fixture.tilesets,
             &fixture.states,
         )
@@ -628,7 +627,7 @@ fn commit_rejects_state_drift_before_removing_an_owned_source() {
             Vec::new(),
             &[claim],
             &fixture.server,
-            &fixture.database,
+            Some(&fixture.database),
             &fixture.tilesets,
             &fixture.states,
         )
