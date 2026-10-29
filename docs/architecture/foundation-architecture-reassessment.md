@@ -763,6 +763,10 @@ output/slot publication, including failed, retried and out-of-order candidates. 
 captured image never advances history or locks independent Worlds to a shared Host frame counter.
 Effect compatibility distinguishes camera motion from a cut. Proposed ADR 0121 owns the detailed
 write, output-lease and history transition contracts; these remain unqualified design decisions.
+Its [identity, wiring and candidate boundaries](adr/0121-composable-render-programs-and-host-execution.md#identity-wiring-and-candidate-boundaries)
+also specify stable Feature incarnations, semantic outputs and independent publication groups.
+The [R8 counterexamples](../plans/2026-10-23-foundation-architecture-rebaseline-plan.md#r8-external-render-feature-and-host-local-execution)
+must challenge those contracts before interface freeze; this remains Proposed work.
 
 **Execution direction.** Runner/Editor-local GPU Host consumes captured producer streams. Prefer
 that over per-World GPU ownership or a mandatory dedicated thread. Local/browser affinity is
@@ -836,6 +840,9 @@ A shared shader-input/artifact change invalidates only its dependent pipelines; 
 selected, include a shared import and failed/missing-resolution dependency case. Rejected
 shader/layout candidates preserve last-good within a valid epoch; device loss cannot retain old GPU objects.
 Measure cold compile, edit-to-ready and variant count; no unmeasured speed claim.
+R9 also requires [retained-capture generation interleaving](../plans/2026-10-23-foundation-architecture-rebaseline-plan.md#r9-material-artifacts-views-color-and-domain-render-locality):
+compatible publication, rejected interfaces and late realization cannot change another capture's
+pinned generation or silently increase pipeline variants for ordinary value/content updates.
 
 ## D16: Views, Coordinates, Color And Render Projection
 

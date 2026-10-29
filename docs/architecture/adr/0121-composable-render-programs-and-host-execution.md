@@ -2,7 +2,7 @@
 
 **Status**: Proposed
 **Date**: 2026-10-23
-**Revised**: 2026-10-29 after source/design review; still Proposed
+**Revised**: 2026-10-30 after bounded contract review; still Proposed
 **Owner**: Render semantics, concrete domain features, WGPU execution and native target Hosts
 **Would Replace In Part**: ADR 0017, ADR 0094, ADR 0105
 **Would Refine**: ADR 0012, ADR 0032, ADR 0040, ADR 0054, ADR 0078, ADR 0096, ADR 0106
@@ -86,6 +86,41 @@ different owners. Ordinary callers install/select contributions rather than driv
 Exact native Device/Queue access can escape a borrow; target authority is a trusted-code protocol,
 not a type-system sandbox. Withhold submission/finalization from the ordinary encoding surface
 without building a universal GPU wrapper or behavior verifier.
+
+### Identity, Wiring And Candidate Boundaries
+
+The October 30 amendment adds the following three boundary contracts. Exact output leases,
+predecessor-checked history, stream retirement and recovery remain the already specified basis.
+These additions refine the proposal and report no implementation or qualification.
+
+**Instance and graph identity.** Feature instances have stable identities within their declared
+owner scope, independent of captured Rust type, registration order and list position. Reordering
+preserves identity; removal and recreation or incompatible replacement starts a new incarnation
+unless the owner explicitly admits continuity under the effect's compatibility rules. Graph-local
+resource handles belong to one candidate; each locally produced version has exactly one producer.
+Foreign-candidate handles and duplicate producers reject. Cross-candidate use requires an explicit
+exact-version import. These identities do not replace asset, source or product identity, View
+incarnation or device epoch.
+
+**Semantic wiring and compatibility.** Render Programs explicitly wire code-owned semantic inputs
+and outputs to exact resource versions. Pre-UI Scene color, resolved color and the final UI
+composite are not implicitly interchangeable because their physical descriptors match. Image
+compatibility includes extent, format, sample count, subresource range, permitted accesses and
+color/alpha meaning. Resolves and conversions produce explicit output versions. Missing required
+outputs and unsupported resource combinations reject admission. Initial support may remain single
+sample and bounded full 2D subresources while rejecting other combinations. Small typed output
+structures and explicit wiring suffice; no global output-name resolver or RHI descriptor mirror
+is required.
+
+**Candidate publication.** Each candidate declares an output publication group and its complete
+required dependency closure. Initially keep producer-output groups and Editor composition in
+separate candidates. One Host drive may service several candidates; sharing resources or a
+submission does not merge independently declared publication or failure domains. Content and
+preparation failures reject affected candidates and their dependent work while independent
+candidates continue; device/Host failures retain their domain-wide scope. A selected fallback is
+a separately validated candidate with pinned initialized inputs. Failed preparation cannot publish
+partial outputs or advance history. Existing presentation and interaction owners still decide
+display and input authority; this does not require arbitrary partial-graph publication.
 
 ### Execution Ownership
 
@@ -173,11 +208,27 @@ arbitrary shader's inverse.
 8. A bounded accumulation effect pins history inputs through failed realization, dropped candidates,
    retry and out-of-order completion. Verify exact predecessor admission, coherent output/slot
    publication and camera-cut reset without requiring complete TAA or reprojection.
+9. Two Views each install two instances of the same accumulation Feature. Reorder Views and
+   instances, then remove/recreate one instance. Live histories remain associated with their exact
+   instances and late old-incarnation work cannot attach to the replacement. Reject foreign-candidate
+   handles and duplicate local producers; cross-candidate reuse requires an exact-version import.
+10. Explicitly wire a pre-UI Scene-color consumer while a same-descriptor final composite is also
+    available; registration order cannot retarget it. A multisampled attachment cannot satisfy a
+    single-sample input without an admitted explicit resolve. Reject an unsupported resolve path at
+    admission; this negative case does not qualify MSAA rendering.
+11. Keep an Editor popup compositing an exact older Scene output and another producer advancing while
+    the Scene effect's second pass is pending or rejected. Its output group and history cannot
+    publish partially. Any selected fallback is separately validated; independent candidates keep
+    progressing and their presentation/input outcomes remain truthful.
 
 Shader/material artifacts and shared View envelope details are separate owner designs in
 [reassessment D15/D16](../foundation-architecture-reassessment.md#d15-shader-material-and-pipeline-resources).
 They should not be smuggled into this proposal as universal descriptors or claimed implemented.
-Their minimum target/color/time facts co-develop with this seam. The
+Their minimum target/color/time facts co-develop with this seam. The additional retained-capture,
+interface-rejection and late-realization interleaving belongs to
+[R9b acceptance](../../plans/2026-10-23-foundation-architecture-rebaseline-plan.md#r9-material-artifacts-views-color-and-domain-render-locality)
+under the existing declaration-generation contract; it follows the selected seam and relevant
+immutable shader inputs rather than gating the first R8 effect. The
 [source/design review](../../research/2026-10-29-render-architecture-and-refactor-plan-review.md)
 records the compared upstream implementations, physical-resource and retirement gaps, phased
 deletion and remaining experiments. This revision does not promote the proposal to Accepted.

@@ -567,6 +567,13 @@ Design for shared/branching intermediates, multiple views, custom Editor composi
 targets and recovery now; do not select an initial linear core merely because one effect is small.
 Use pinned Bevy and Godot as primary architecture evidence without copying a historical graph API.
 
+ADR 0121's [identity, wiring and candidate boundaries](../architecture/adr/0121-composable-render-programs-and-host-execution.md#identity-wiring-and-candidate-boundaries)
+close three remaining shared contracts before interface freeze: stable Feature-instance and
+candidate-local resource identities, explicit semantic-output/resource compatibility, and output
+publication groups with scoped failure. These additions extend the already specified exact output
+leases, history transitions, stream retirement and recovery basis. They remain Proposed design
+requirements, with no implementation or qualification claim.
+
 Validate the architecture on an independent two-pass Scene-color blur, keeping Runtime HUD crisp,
 then retain original color for an Editor before/after view and independently chain a second effect.
 Compare viable slot, ordered-plan and open-schedule controls against the resource graph on that
@@ -631,6 +638,21 @@ Add a clipped Nara-owned drawing tracer with a live Scene image and overlapping 
 It validates image import, clip order, resize/DPI and exact composite/input joins through this Host,
 without requiring the Editor to inherit Runtime UiFrame primitives or finishing the R11 toolkit.
 
+Reuse the blur, accumulation and drawing tracers for three added minimal counterexamples:
+
+- Two Views each install two instances of one accumulation Feature. Reorder Views/instances and
+  remove/recreate one instance: live history remains associated with its instance, replacement
+  rejects late old-incarnation work, and foreign-candidate handles/duplicate local producers reject.
+  Cross-candidate reuse uses an exact-version import.
+- Wire pre-UI Scene color explicitly while a same-descriptor final composite is available. Neither
+  registration order nor descriptor equality may select the wrong output. A multisampled attachment
+  needs an explicit resolved version for a single-sample consumer, or admission rejects the
+  unsupported path. This negative case does not claim MSAA support.
+- Hold the Scene effect's second pass pending or reject its preparation while an Editor popup uses
+  an exact older Scene output and another producer advances. Reject the affected complete output
+  group without partial output/history publication; any fallback is separately validated and
+  independent candidates retain progress and truthful presentation/input outcomes.
+
 The [rendering source/design review](../research/2026-10-29-render-architecture-and-refactor-plan-review.md)
 records the comparison, pinned upstream evidence, failure cases and staged deletion. It is research
 evidence; ADR 0121 stays Proposed and no new rendering qualification follows from this amendment.
@@ -673,6 +695,18 @@ depth/unit tracer follows the 2D seam; general 3D support does not gate the firs
 Acceptance: second material layout, shared shader-dependency invalidation, compile failure keeping
 same-epoch last-good, pipeline variant accounting, drawing/picking inverse/DPI/mirror tests,
 transparent offscreen composition readback and bounded 3D depth/unit sample. Do not claim 3D support.
+
+Additional R9b acceptance exercises the declaration-generation contract above under interleaving.
+Within one valid Host/device epoch, retain capture A with its exact material declaration, shader
+artifact, binding ABI and graph resource versions. Publish a compatible edited generation B, reject
+an incompatible interface/layout candidate C, then complete a delayed realization for A. C cannot
+destroy compatible B or reinterpret A. Late A work may finish for retained A but cannot replace B
+as current; current publication must match its expected declaration generation. A uses only its own
+artifacts, bindings and declared resource accesses. Use value-only and ordinary texture-content-only
+edits as controls: their bindings/resources update without new pipeline variants, and unrelated
+materials remain usable.
+The rejected edit can target an admitted declaration; arbitrary shader-authored layout creation
+still needs its separate consumer qualification. This adds acceptance criteria, not executed evidence.
 
 Compare bounds-only and domain-local immutable geometry blocks on representative map/view
 workloads. Dirty hints alone are not authority; old packet captures remain immutable. Measure
