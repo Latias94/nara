@@ -115,6 +115,14 @@ orders concrete comparisons and fearless replacements. ADR 0119 adopts the Schem
 correction; 0120 and 0121 remain Proposed. Coverage does not mean the replacements are implemented
 or every recommended ADR amendment has been applied.
 
+The October 29 [rendering source/design review](../research/2026-10-29-render-architecture-and-refactor-plan-review.md)
+compares pinned Bevy/Godot composition, resource versions, native authority, stream completion,
+transparent outputs and material bindings. The plan and Proposed ADR 0121 prefer a finite resource
+graph with typed contributions for foreseeable shared/branching and Editor workflows. Ordered-plan
+and slot controls test that architecture rather than making minimum initial code the objective.
+Rendering implementation/qualification remains open; the report also separates its initial trial
+recommendation from this longer-horizon design refinement.
+
 The October 27 [custom-drawn UI study](../research/2026-10-27-custom-drawn-editor-ui-boundaries.md)
 and [language/extension study](../research/2026-10-27-language-extension-product-boundaries.md)
 integrate the updated conversation against pinned reference code and official documentation.

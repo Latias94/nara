@@ -11,6 +11,13 @@ ADR 0119 metadata authority are documentation decisions, not new runtime qualifi
 evidence. Its narrow closed Scene data-family subset is adopted under ADR 0006; broader executable
 publication/replacement remains Proposed. 0121 remains not-started. Exact native binding and
 stock-render ownership are retained.
+
+The [October 29 rendering review](../../research/2026-10-29-render-architecture-and-refactor-plan-review.md)
+and long-horizon refinement prefer a finite explicit resource graph, typed contributions and
+runner-owned execution in Proposed 0121. Design covers foreseeable shared/cross-view output,
+texture/buffer access, history and Nara-owned drawing before interface freeze; concrete graph,
+compute/storage and material consumers still require qualification. R8/R9 remain not started.
+
 The reviewed recommendation to amend/replace another ADR is not silently counted as implementation.
 The October 27 [UI](../../research/2026-10-27-custom-drawn-editor-ui-boundaries.md) and
 [language/extension](../../research/2026-10-27-language-extension-product-boundaries.md) studies

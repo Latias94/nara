@@ -714,13 +714,20 @@ encoding chooses their order. An independent two-pass effect cannot contribute c
 without editing that owner. Immutable packet safety does not logically imply closed topology.
 The existing Editor execution already demonstrates a Host outside the gameplay World.
 
-**Alternatives.** Named effect slots are ergonomic but insufficient for arbitrary intermediate
-dependencies. An open render ECS/schedule gives broad control but leaves resource obligations
-to authors. Prefer typed Features plus a bounded versioned logical color/depth dependency plan;
-simple slots may lower into it. Do not add aliasing, pass fusion or multi-queue scheduling now.
+**Alternatives.** Named slots can own a complete two-pass effect and private scratch. Compare
+preserved original color and a second independent effect before declaring them insufficient.
+An open render ECS/schedule gives broad control with explicit author resource obligations.
+The preferred full-workflow design is typed Features over an explicit finite resource-dependency
+graph, with slots lowering into the same model. Design shared/branching intermediates, cross-view
+consumers, custom Editor drawing and offscreen/recovery now. The user prioritizes avoiding another
+large architectural replacement over minimizing initial implementation. Viable ordered-plan/slot
+controls should falsify the graph's premises on those workflows, not automatically select the
+smallest demo. Pinned Bevy and Godot are primary architecture precedents rather than a mandate to
+copy a historical graph API. Aliasing, pass fusion and multi-queue scheduling are separate
+mechanisms, not prerequisites to a coherent resource graph.
 
 ```text
-Stock2d RenderProgram + independent Outline Feature
+Stock2d RenderProgram + independent Blur Feature + retained original/second consumer
  -> captured owned inputs -> validate initialized logical resource versions
  -> realize required pipelines for host/device epoch -> encode -> Host finalizes target
 ```
@@ -730,6 +737,24 @@ WGPU descriptors into another RHI. The Host alone acquires, submits and presents
 replacement can reuse that Host; replacing the entire Host is a separate privileged integration.
 First-party Sprite/UI encoding must enter through the same Feature seam, not central new fields
 per package. Exact native code remains fully trusted, not type-system sandboxed.
+
+Pair captured Rust types and exact native adapters at registration, erasing inside the Host at
+operation granularity. Registration, immutable frame data and Host/epoch-local mutable state are
+distinct. Define actual output storage, initialization and read/write aliasing before promising
+logical versions; live earlier outputs cannot be silently overwritten. Imports/exports, buffer
+and storage accesses and temporal lifetimes must extend the same identity/dependency model;
+their later implementation still needs real consumers. The
+[rendering source/design review](../research/2026-10-29-render-architecture-and-refactor-plan-review.md)
+records comparison evidence and the initial experiment recommendations, followed by the parent's
+long-horizon design refinement. This direction is not production qualification of Proposed 0121.
+
+Graph dependency declarations are independent of registration order; serial topological execution
+is an implementation policy. Design texture/buffer sampled, attachment, storage and copy access
+together. Qualify the extension with compute statistics feeding a storage-buffer-backed custom
+histogram. History imports a previous producer/View/Feature-instance/slot version rather than
+creating a current-graph cycle. Define initialization, producer-output publication/advance and
+invalidation; redisplaying a captured image does not advance history or lock independent Worlds
+to a shared Host frame counter.
 
 **Execution direction.** Runner/Editor-local GPU Host consumes captured producer streams. Prefer
 that over per-World GPU ownership or a mandatory dedicated thread. Local/browser affinity is
@@ -743,8 +768,15 @@ reacquisition. Old-epoch GPU objects are never new-device last-good. Queue submi
 publication, presentation and physical completion are different observations. Independent
 windows are not a globally atomic present transaction.
 
-**Acceptance and deletion.** External two-pass outline/blur runs in Runtime, Scene View and
-offscreen, then an independent renderer replaces Stock2d without core package-specific branches.
+Stream close uses that stream's retained submitted prefix and terminalizes queued UI work;
+whole-Host queue-empty shutdown cannot gate one departing stream while others continue submitting.
+Late capability demand must fit the enabled device or request explicit reconstruction without
+resetting healthy streams. Qualify window-free GPU initialization and a Nara-owned clipped drawing
+consumer; the intended Editor handoff does not depend on Runtime UiFrame vocabulary.
+
+**Acceptance and deletion.** External two-pass blur, retained original and a chained independent
+effect run in Runtime, Scene View and offscreen; cross-view consumption challenges the resource
+model. An independent renderer replaces Stock2d without core package-specific branches.
 Two producer streams, two windows and one image target survive one stream's close and device
 loss. Replace tests forbidding all public topology with tests forbidding unauthorized target
 authority. Preserve 0077 as historical; do not resurrect its entire family/recipe taxonomy.
@@ -774,9 +806,19 @@ Distinguish invalid content from transient allocation failure. Do not use static
 as content identity or untracked ambient includes. Durable materials and transient per-instance
 overrides differ. No visual shader graph prerequisite is needed.
 
+One declaration supplies semantic material Schema and a separate GPU binding/layout projection.
+Use an actual shader-layout encoder and compiler interface rather than treating Rust memory or
+semantic field kind as uniform ABI. Initially qualify two admitted layouts and unchanged-interface
+shader edits. Design a shader-authored Schema/interface admission route into the same material
+model before freeze, with authored stable field identity independent of Rust type identity.
+Broader prebuilt-Editor layout creation needs separate qualification. Shader dependency edges
+include failed/missing inputs and are replaced with each admitted closure; uniform values and
+texture-content changes do not create pipelines.
+
 **Acceptance.** Convert the current palette consumer to Save/Check/Export; add a second layout.
-A shared WESL dependency change invalidates only its dependent pipelines. Rejected shader/layout
-candidates preserve last-good within a valid epoch; device loss cannot retain old GPU objects.
+A shared shader-input/artifact change invalidates only its dependent pipelines; if WESL is
+selected, include a shared import and failed/missing-resolution dependency case. Rejected
+shader/layout candidates preserve last-good within a valid epoch; device loss cannot retain old GPU objects.
 Measure cold compile, edit-to-ready and variant count; no unmeasured speed claim.
 
 ## D16: Views, Coordinates, Color And Render Projection
@@ -796,6 +838,12 @@ not an arbitrary GPU Host wall clock. Prefer distinct LinearRgba/Srgba types in 
 design; target transfer and alpha representation are explicit. Premultiplied composition is a
 measured correctness/API choice, not excluded by unreleased backward compatibility or adopted
 as universal HDR policy.
+
+The initial reusable transparent-image tracer uses linear premultiplied accumulated color with
+explicit source/shader alpha facts and alpha-zero/readback controls. Captured shader time must
+distinguish Editor real time, paused Play virtual time and exact Step; replay cannot read a later
+Host wall clock. Coordinate-changing effects supply an admitted input/display mapping or disable
+precise picking. Color-image success alone does not prove an arbitrary shader's spatial inverse.
 
 **Projection alternatives.** Bounds-only culling is the cheap control; domain-owned immutable
 geometry blocks avoid repeated static lowering; a global retained render scene adds another

@@ -66,6 +66,10 @@ to alter concurrent work. Execution automation state remains external to the arc
    and unrelated changes. Commit coherent verified units with precise Conventional Commits.
 7. Report failed experiments honestly. Failure may select a simpler design or narrow support;
    it does not justify silently weakening publication, identity or physical retirement guarantees.
+8. Design shared contracts for named foreseeable engine workflows before freezing them. The user
+   prioritizes avoiding another large architectural replacement over minimizing initial code.
+   Stage implementation depth, not the identity, dependency and ownership model. Compare total
+   integration/evolution cost; a smaller demo is not evidence for a deliberately restricted core.
 
 ## Dependency Shape
 
@@ -531,15 +535,65 @@ Delete implicit profile-name-to-Cargo policy and code/source/package generation 
 **Design:** D14. **State:** not started. **Owners:** render semantics/domain adapters/WGPU Host;
 Proposed 0121.
 
-Compare named slots, typed logical resource plan and open render schedules on the same independent
-two-pass effect. Prefer typed Feature inputs/dependencies if they close composition without a
-new GPU compiler. Move stock Sprite/UI encoding behind that same seam. GPU Host is runner-local;
-captured producer streams, policy selection and whole-Host authority remain distinct.
+The preferred complete design is typed Features over an explicit resource-dependency graph, with
+runner-owned GPU execution. Named slots are convenient placement that lowers into this same model.
+Design for shared/branching intermediates, multiple views, custom Editor composition, offscreen
+targets and recovery now; do not select an initial linear core merely because one effect is small.
+Use pinned Bevy and Godot as primary architecture evidence without copying a historical graph API.
+
+Validate the architecture on an independent two-pass Scene-color blur, keeping Runtime HUD crisp,
+then retain original color for an Editor before/after view and independently chain a second effect.
+Compare viable slot, ordered-plan and open-schedule controls against the resource graph on that
+complete consumer, including cross-view consumption. A slot can own both passes and private scratch;
+two passes alone do not prove a graph necessary. Counterexamples must challenge the preferred
+graph's dependency/lifetime model, author ergonomics and evolution cost, not just its initial line
+count. Record concrete reasons if the full-workflow evidence selects another complete design.
+
+Before freezing an interface, define physical resource versions, initialization, read/write aliases,
+target usages and the supported 2D subresource scope. Initially keep live transient outputs distinct;
+shared logical IDs alone do not preserve old pixels. Pair a typed immutable capture with its exact
+native adapter at registration; erase only inside the Host at feature/operation granularity.
+Separate registration, captured values and Host/epoch-local state. Move stock Sprite/UI encoding
+through that same seam. Avoid a public Any bag or gameplay-owned Reset/Collect/Seal choreography.
+Raw exact-wgpu adapters remain trusted Rust, not a sandbox; keep submission/finalization out of the
+ordinary contribution API without implementing a second Queue/RHI or source-analysis verifier.
+Design import/export and lifetime boundaries so future buffer/storage operations and temporal
+resources have explicit access/initialization/retention semantics within the same graph. Initial
+image-only qualification does not claim those operations implemented. Keep automatic aliasing,
+pass fusion and execution parallelism separate from the foundational graph contract.
+Dependency declarations must not depend on registration/insertion order; initial execution may
+use a deterministic serial topological order. Design texture and buffer access together, including
+sampled/attachment/storage/copy use and legal read-write distinctions. Conservative whole-resource
+tracking is an initial support choice, not an API assumption that every operation exchanges color.
+Add a small compute luminance-to-storage-buffer/custom-drawn-histogram consumer to challenge that
+model before interface freeze, rather than merely reserving a future enum name.
+
+Represent history as an import of a previous producer/View/Feature-instance/history-slot version,
+not a cycle in the current graph. Define initialization, producer-output publication/advance and
+invalidation for resize, camera/policy changes and device loss. Re-presenting the same captured
+Scene image must not advance history. Per-capture graphs and Host composition must let independent
+streams progress without requiring every World to supply a fresh frame in lockstep.
+
+GPU Host is runner-local. Distinguish stream/view incarnations, captures, policy revisions, target
+generations and Host/device epochs through existing owners. Close requirements before device
+creation; late requirements must fit the enabled device or explicitly request reconstruction while
+other streams continue. Qualify window-free GPU initialization without a dummy window. Stream close
+stops admission, terminalizes pending UI work and retains its submission prefix through physical
+completion; whole-Host queue-empty drain is not a per-stream close requirement. Bound pending and
+in-flight work per stream and cumulatively per Host drive. Preserve supervised ordinary project
+Play; local GPU sharing does not authorize arbitrary project Rust inside the generic Editor.
 
 Acceptance: Runtime/Scene View/offscreen, intermediate textures, independent renderer policy,
 two producer streams/two windows/image target, one-stream close, old packets and device loss.
 Reject cycles/uninitialized input and unauthorized acquire/submit/present. Generated/history
 resources reset, external ones reacquire; multi-window present is not globally atomic.
+Add a clipped Nara-owned drawing tracer with a live Scene image and overlapping control/popup.
+It validates image import, clip order, resize/DPI and exact composite/input joins through this Host,
+without requiring the Editor to inherit Runtime UiFrame primitives or finishing the R11 toolkit.
+
+The [rendering source/design review](../research/2026-10-29-render-architecture-and-refactor-plan-review.md)
+records the comparison, pinned upstream evidence, failure cases and staged deletion. It is research
+evidence; ADR 0121 stays Proposed and no new rendering qualification follows from this amendment.
 
 No mandatory render thread, RHI descriptor mirror, aliasing compiler or resurrection of all 0077.
 Delete central package-specific payload/match growth and tests prohibiting any public topology.
@@ -552,10 +606,25 @@ Turn the palette consumer into durable typed parameters/references plus tracked 
 artifacts. Derive one inspectable binding model rather than maintaining Rust and dynamic metadata
 separately. Introduce shared View envelope with typed projection, explicit transfer/alpha and
 captured time; investigate distinct linear/sRGB types as an unreleased breaking change.
+Keep persistent material meaning distinct from its generated binding ABI and shader interface.
+Uniform values and ordinary texture-content changes do not create pipeline variants. Initially
+qualify two admitted layouts and unchanged-layout shader editing. Before interface freeze, design
+shader-authored layout admission into the same material/binding model, including authored stable
+field identity; do not make Rust type identity the persistent layout model. Broader prebuilt-Editor
+layout creation still needs its own consumer qualification. Use actual shader-layout and
+compiler dependency results rather than repository parsers. WGSL may qualify first; WESL is a
+frontend choice, not the resource identity or a full-CAS prerequisite.
 
 R9a View identity/target/transfer/alpha/captured-time facts are designed with R8's external pass,
 not deferred until the complete asset/cache work. R9b is durable shader/material preparation and
 dependency invalidation. R9c is optional measured geometry retention, not shared protocol admission.
+The initial reusable transparent-output tracer uses linear premultiplied accumulated color with
+explicit source/shader alpha facts and numeric readback controls. Authored color and image formats
+remain separate; do not premultiply gamma-encoded bytes or infer transfer from texture format alone.
+Captured shader clocks distinguish Editor real time, paused Play virtual time and exact Step.
+Replaying one capture at a later Host wall time must not advance it. Coordinate-changing effects
+must provide an admitted display/input mapping or explicitly disable precise picking. A bounded
+depth/unit tracer follows the 2D seam; general 3D support does not gate the first effect.
 
 Acceptance: second material layout, shared shader-dependency invalidation, compile failure keeping
 same-epoch last-good, pipeline variant accounting, drawing/picking inverse/DPI/mirror tests,
