@@ -32,8 +32,14 @@ Use pinned Bevy and Godot as primary architecture references rather than treatin
 RenderGraph API or the absence of one as the desired result. Dependency declarations do not derive
 meaning from registration/insertion order; initial execution can use deterministic serial
 topological order. The core design covers texture and buffer resources with sampled, attachment,
-storage and copy access, distinguishing supported read-write storage from illegal feedback.
-Writes produce distinct live outputs; initialization and physical aliasing obligations are explicit.
+storage, copy, uniform, vertex/index and indirect access. Distinguish supported read-write storage
+from illegal feedback rather than treating every buffer use as storage.
+Each logical write declares either discard initialization or preservation from an exact predecessor
+version. A fresh allocation does not inherit predecessor contents. Initial preserving writes use a
+distinct allocation plus explicit initialization/copy; physical reuse requires proof that no other
+live read, export or history needs the predecessor. In-place mutation is not an implicit write mode.
+This also applies to attachment `Load` and storage read-modify-write. Writes produce distinct live
+outputs; initialization and physical aliasing obligations are explicit.
 Initial image support may use bounded full 2D subresources and conservative whole-resource access;
 reject unsupported use. A small viewport does not initialize an entire attachment, and `Load` reads
 prior contents. Keep adapter-private buffers private unless they cross
@@ -43,12 +49,27 @@ extend this same dependency model before freezing it. Their implementation needs
 consumers; an image tracer does not qualify them. This is not a second RHI or a requirement to
 implement every scheduler/allocator optimization before the graph becomes useful.
 
+Same-execution cross-View dependencies are graph edges. Cross-capture composition instead imports
+an exact immutable output lease published by the Host. Selecting a latest-output policy resolves
+once at composition admission; it cannot retarget an admitted consumer as the producer advances.
+The first unavailable output yields an explicit unavailable result or caller-selected initialized
+fallback. Paused producers keep their last admitted output. Closing a producer stops new work and
+input authority; already retained outputs remain physically held through their actual consumers
+and submissions. Device loss revokes old-epoch presentation authority. A cloned native TextureView
+alone is not a pixel-version lease and cannot protect an output from later overwrites.
+
 History imports a previous producer/View/Feature-instance/history-slot version and publishes a
-successor; it does not create a cycle in the current graph. Define initialization, advancement at
-producer-output publication and invalidation on resize, camera/policy change and device loss.
-Repeated display of one capture never advances history. Per-capture dependency graphs and Host
-composition preserve independent stream progress rather than requiring every World to provide a
-fresh frame in lockstep. Retained physical versions remain tied to submission/completion custody.
+successor; it does not create a cycle in the current graph. Admission pins each history input and
+its expected predecessor revision. All slots advanced by one output validate and publish with that
+output; an outdated successor cannot replace a newer history chain. Initial execution may serialize
+each slot. Retry uses the pinned inputs or explicitly prepares a new candidate, never silently
+switches to latest history. Failure or supersession before output publication does not advance
+history; a later window-present failure does not roll back an already published producer output.
+Repeated display of one capture never advances history. The effect defines initialization and
+compatibility, including resize, policy changes and camera cuts versus compatible camera motion;
+device loss invalidates GPU history. Per-capture graphs and exact output leases preserve independent
+stream progress rather than requiring every World to provide a fresh frame in lockstep. Retained
+physical versions remain tied to submission/completion custody.
 
 Simple named effect slots lower into this graph; they must not become a second submission
 mechanism. An open render ECS/schedule remains a comparison alternative, not an assumed complete
@@ -88,7 +109,12 @@ sharing; this proposal does not introduce cross-process GPU-object transport.
 Publish a validated plan plus required realizations as a complete candidate. Keep last-good only
 within a valid compatible epoch. Host identity and device epoch bind every physical object and
 asynchronous result; loss revokes old presentation authority. Uploaded content can reconstruct
-from captures, GPU-generated/history content resets, and external content reacquires authority.
+from retained exact captures or an immutable processed-content lease that can decode that same
+generation. Recovery eligibility is a separate lifetime from GPU completion: releasing the last
+reconstruction input ends that eligibility. Never reconstruct an old generation by looking up the
+current asset or mutable source. Initial policy can retain CPU projections; permanent full CPU
+copies are not part of every future resource contract. Source and processed inputs share this
+boundary. GPU-generated/history content resets, and external content reacquires authority.
 
 Submission, image publication, window presentation and physical GPU completion are separate.
 Targets have independent lifetime and finalization; presenting one window cannot be rolled back
@@ -128,7 +154,10 @@ arbitrary shader's inverse.
    graph's dependency model and ergonomics rather than decide whether to include that candidate.
 2. A second code-provided renderer replaces Stock2d policy using the same execution Host.
 3. Two producer streams feed two windows and one image target; retiring one stream preserves
-   the others. Inject device loss, reject old realizations/results and finish Ready or Unavailable.
+   the others. Run them at different rates, pause one and retain an exact older output while the
+   other continues. Inject device loss, reject old realizations/results and finish Ready or
+   Unavailable. Release current captures while retaining the selected recovery input; reconstruction
+   must use that generation or report unavailable when its input was explicitly retired.
 4. Reject uninitialized reads, cycles, incompatible resources and unauthorized target actions.
    Retain exact captured content while a newer domain projection is published.
 5. Match native/platform verification to the actual changed seam and record unqualified targets.
@@ -137,9 +166,13 @@ arbitrary shader's inverse.
    advanced. Exercise a Nara-owned clipped drawing tracer with Scene-image import and a popup,
    resize/DPI, stale mapping and presentation failures. This does not qualify the full Editor UI.
 7. Add compute luminance statistics into a storage buffer and consume that result in a custom-drawn
-   histogram. Retain a previous preview for comparison. Challenge resource kinds, cross-view
-   consumers, history scoping and order-independent declaration before freezing the core; a future
-   buffer enum case alone is not extension evidence.
+   histogram, including a storage-to-draw-input path. Preserve raw statistics while a successor
+   normalizes them, so a comparison consumer detects accidental predecessor overwrite. Challenge
+   resource kinds, cross-view consumers and order-independent declaration before freezing the
+   core; a future buffer enum case alone is not extension evidence.
+8. A bounded accumulation effect pins history inputs through failed realization, dropped candidates,
+   retry and out-of-order completion. Verify exact predecessor admission, coherent output/slot
+   publication and camera-cut reset without requiring complete TAA or reprojection.
 
 Shader/material artifacts and shared View envelope details are separate owner designs in
 [reassessment D15/D16](../foundation-architecture-reassessment.md#d15-shader-material-and-pipeline-resources).

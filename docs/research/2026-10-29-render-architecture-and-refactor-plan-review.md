@@ -53,6 +53,26 @@ qualification; resource identity, access vocabulary and history ownership are no
 not postponed foundations. Shared shader-input/artifact invalidation is required; WESL import
 and missing-resolution cases apply when that frontend is selected, not as a prerequisite to WGSL.
 
+**Second contract review.** A focused Astra max source review challenged the remaining prose against
+preserving buffer/attachment writes, two independently paced producers, failed/out-of-order history
+candidates, shader-authored binding changes and device recovery after submission completion.
+The proposed owner contracts now distinguish discard from preservation of an exact predecessor,
+same-execution graph edges from cross-capture immutable output leases, and history input capture
+from predecessor-checked output/slot publication. Initial preserving writes can use explicit copies;
+initial history execution can serialize each slot. These implementation policies do not change
+logical resource meaning when later optimizations arrive.
+
+The same review joins both material authoring routes to one versioned declaration with separate
+semantic field, binding ABI and shader-interface identities; shared bindings must expose their graph
+resource access. Recovery promises retain exact CPU projections or same-generation immutable decode
+leases independently of GPU completion. A clone of a reusable target's TextureView cannot preserve
+old pixels, and a current-asset lookup cannot reconstruct an old capture. Godot's existing
+[resource usage categories][godot-rd-usage] include uniform, vertex/index and indirect buffers;
+Bevy's [TAA reset contract][bevy-taa-reset] distinguishes camera cuts from ordinary motion. These
+are source precedents for the failure cases, not proof of Nara's eventual interfaces or performance.
+Proposed ADR 0121 and R8/R9 own the detailed amendments and executable tracers. Rendering remains
+not started; no native/GPU support claim follows from these decisions.
+
 **Scope and evidence.** This is a source/design audit, not an implementation or qualification
 result. ADR 0121 is [Proposed][adr0121]; [R8/R9 remain not started][plan-render]. No Cargo command,
 test, formatter, branch change or commit was run. The only repository write is this report.
@@ -646,6 +666,7 @@ research evidence only; it neither amends an ADR nor declares a rendering milest
 [bevy-device-plan]: https://github.com/bevyengine/bevy/blob/85503941e488152711a4695bbe248e9ed9f453fc/crates/bevy_render/src/renderer/mod.rs#L319-L364
 [bevy-material]: https://github.com/bevyengine/bevy/blob/85503941e488152711a4695bbe248e9ed9f453fc/crates/bevy_sprite_render/src/mesh2d/material.rs#L74-L183
 [bevy-shader-deps]: https://github.com/bevyengine/bevy/blob/85503941e488152711a4695bbe248e9ed9f453fc/crates/bevy_shader/src/shader_cache.rs#L322-L430
+[bevy-taa-reset]: https://github.com/bevyengine/bevy/blob/85503941e488152711a4695bbe248e9ed9f453fc/crates/bevy_anti_alias/src/taa/mod.rs#L116-L124
 [godot-compositor]: https://github.com/godotengine/godot/blob/81ab961f91066a63bcbf3ec340962bb1a1ada558/scene/resources/compositor.h#L39-L95
 [godot-compositor-run]: https://github.com/godotengine/godot/blob/81ab961f91066a63bcbf3ec340962bb1a1ada558/servers/rendering/renderer_rd/renderer_scene_render_rd.cpp#L298-L317
 [godot-rd-usage]: https://github.com/godotengine/godot/blob/81ab961f91066a63bcbf3ec340962bb1a1ada558/servers/rendering/rendering_device_graph.h#L155-L213

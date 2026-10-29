@@ -749,12 +749,20 @@ records comparison evidence and the initial experiment recommendations, followed
 long-horizon design refinement. This direction is not production qualification of Proposed 0121.
 
 Graph dependency declarations are independent of registration order; serial topological execution
-is an implementation policy. Design texture/buffer sampled, attachment, storage and copy access
-together. Qualify the extension with compute statistics feeding a storage-buffer-backed custom
-histogram. History imports a previous producer/View/Feature-instance/slot version rather than
-creating a current-graph cycle. Define initialization, producer-output publication/advance and
-invalidation; redisplaying a captured image does not advance history or lock independent Worlds
-to a shared Host frame counter.
+is an implementation policy. Design texture/buffer sampled, attachment, storage, copy, uniform,
+vertex/index and indirect access together. Discard and preserve-from-predecessor writes differ;
+fresh storage does not inherit old contents and live old versions cannot be overwritten. Qualify
+compute statistics feeding a storage-buffer-backed custom histogram with preserved raw results
+and a storage-to-draw-input path. Same-execution cross-View reads are graph edges; cross-capture
+reads use exact output leases selected once at composition admission. Independently paced streams
+must preserve old preview pixels while newer outputs publish.
+
+History imports a previous producer/View/Feature-instance/slot version rather than creating a
+current-graph cycle. Pin its inputs at admission and validate exact predecessors for coherent
+output/slot publication, including failed, retried and out-of-order candidates. Redisplaying a
+captured image never advances history or locks independent Worlds to a shared Host frame counter.
+Effect compatibility distinguishes camera motion from a cut. Proposed ADR 0121 owns the detailed
+write, output-lease and history transition contracts; these remain unqualified design decisions.
 
 **Execution direction.** Runner/Editor-local GPU Host consumes captured producer streams. Prefer
 that over per-World GPU ownership or a mandatory dedicated thread. Local/browser affinity is
@@ -763,8 +771,11 @@ requested and enabled differ. Offscreen GPU is distinct from content-only Headle
 Play stream must not destroy a shared Editor device.
 
 **Recovery.** Host identity plus epoch binds every physical resource/result. Uploaded content may
-be rebuilt from immutable captures; generated/history resources reset; external resources require
-reacquisition. Old-epoch GPU objects are never new-device last-good. Queue submission, image
+be rebuilt only while exact immutable captures or same-generation processed-content decode leases
+remain retained. Recovery eligibility outlives completion only when those inputs do; current-asset
+lookup and mutable source cannot restore an old capture. Retaining CPU projections is an initial
+policy, not mandatory permanent duplication. Generated/history resources reset; external resources
+require reacquisition. Old-epoch GPU objects are never new-device last-good. Queue submission, image
 publication, presentation and physical completion are different observations. Independent
 windows are not a globally atomic present transaction.
 
@@ -806,12 +817,17 @@ Distinguish invalid content from transient allocation failure. Do not use static
 as content identity or untracked ambient includes. Durable materials and transient per-instance
 overrides differ. No visual shader graph prerequisite is needed.
 
-One declaration supplies semantic material Schema and a separate GPU binding/layout projection.
+One versioned declaration supplies semantic material Schema and a separate GPU binding/layout projection.
 Use an actual shader-layout encoder and compiler interface rather than treating Rust memory or
 semantic field kind as uniform ABI. Initially qualify two admitted layouts and unchanged-interface
 shader edits. Design a shader-authored Schema/interface admission route into the same material
 model before freeze, with authored stable field identity independent of Rust type identity.
-Broader prebuilt-Editor layout creation needs separate qualification. Shader dependency edges
+Both Rust and shader authoring publish the same declaration family. Stable semantic field identity,
+binding ABI and shader interface have distinct identities admitted as one compatible generation.
+Captured values pin that generation; incompatible field/layout changes require explicit migration
+or refusal. Shared GPU bindings identify the graph resource version and declared access they use;
+an opaque bind group cannot hide cross-Feature dependencies. Broader prebuilt-Editor layout creation
+needs separate qualification. Shader dependency edges
 include failed/missing inputs and are replaced with each admitted closure; uniform values and
 texture-content changes do not create pipelines.
 

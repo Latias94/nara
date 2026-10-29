@@ -70,6 +70,10 @@ to alter concurrent work. Execution automation state remains external to the arc
    prioritizes avoiding another large architectural replacement over minimizing initial code.
    Stage implementation depth, not the identity, dependency and ownership model. Compare total
    integration/evolution cost; a smaller demo is not evidence for a deliberately restricted core.
+   Record the future workflow and the contract it constrains, then challenge that contract with a
+   bounded executable consumer. Defer unneeded optimizations or support breadth behind that same
+   model. Do not call a throwaway architectural restriction an incremental implementation merely
+   because its replacement is scheduled later.
 
 ## Dependency Shape
 
@@ -575,16 +579,26 @@ image-only qualification does not claim those operations implemented. Keep autom
 pass fusion and execution parallelism separate from the foundational graph contract.
 Dependency declarations must not depend on registration/insertion order; initial execution may
 use a deterministic serial topological order. Design texture and buffer access together, including
-sampled/attachment/storage/copy use and legal read-write distinctions. Conservative whole-resource
+sampled/attachment/storage/copy/uniform/vertex/index/indirect use and legal read-write distinctions.
+Declare discard versus preserve-from-exact-predecessor for each write; a new allocation does not
+inherit old data and cannot overwrite a still-live read/export/history version. Initially use
+distinct storage plus explicit initialization/copy for preserving writes. Conservative whole-resource
 tracking is an initial support choice, not an API assumption that every operation exchanges color.
-Add a small compute luminance-to-storage-buffer/custom-drawn-histogram consumer to challenge that
-model before interface freeze, rather than merely reserving a future enum name.
+Add a compute luminance-to-storage-buffer/custom-drawn-histogram consumer with preserved raw
+statistics and a storage-to-draw-input path before interface freeze, rather than merely reserving
+a future enum name.
 
 Represent history as an import of a previous producer/View/Feature-instance/history-slot version,
-not a cycle in the current graph. Define initialization, producer-output publication/advance and
-invalidation for resize, camera/policy changes and device loss. Re-presenting the same captured
-Scene image must not advance history. Per-capture graphs and Host composition must let independent
-streams progress without requiring every World to supply a fresh frame in lockstep.
+not a cycle in the current graph. Pin history inputs during admission and require exact predecessor
+agreement for coherent producer-output/slot publication; serialize slots initially if needed.
+Failed/superseded candidates do not advance history, retry cannot silently change inputs, and
+later present failure does not roll back published output. Qualify a bounded accumulation effect
+with dropped, failed and out-of-order candidates. Effects define initialization and compatibility
+for resize, policy changes and camera cuts versus compatible motion. Re-presenting the same
+captured Scene image must not advance history. Same-execution cross-View reads use graph edges;
+cross-capture composition selects exact Host output leases once at admission. Test independently
+paced streams with one paused and an older preview retained while another publishes. Producer
+close and input revocation do not silently release consumers' physical output custody.
 
 GPU Host is runner-local. Distinguish stream/view incarnations, captures, policy revisions, target
 generations and Host/device epochs through existing owners. Close requirements before device
@@ -599,6 +613,10 @@ Acceptance: Runtime/Scene View/offscreen, intermediate textures, independent ren
 two producer streams/two windows/image target, one-stream close, old packets and device loss.
 Reject cycles/uninitialized input and unauthorized acquire/submit/present. Generated/history
 resources reset, external ones reacquire; multi-window present is not globally atomic.
+Recovery promises retain exact CPU projections or same-generation immutable processed decode
+leases independently of GPU completion. Release that input explicitly or reconstruct from it;
+never look up current assets/source to recreate an older capture. CPU eviction/streaming can
+follow this contract without requiring every resource to retain a full CPU copy permanently.
 Add a clipped Nara-owned drawing tracer with a live Scene image and overlapping control/popup.
 It validates image import, clip order, resize/DPI and exact composite/input joins through this Host,
 without requiring the Editor to inherit Runtime UiFrame primitives or finishing the R11 toolkit.
@@ -622,7 +640,11 @@ Keep persistent material meaning distinct from its generated binding ABI and sha
 Uniform values and ordinary texture-content changes do not create pipeline variants. Initially
 qualify two admitted layouts and unchanged-layout shader editing. Before interface freeze, design
 shader-authored layout admission into the same material/binding model, including authored stable
-field identity; do not make Rust type identity the persistent layout model. Broader prebuilt-Editor
+field identity; do not make Rust type identity the persistent layout model. Both authoring routes
+publish the same versioned declaration, with separate semantic fields, binding ABI and shader
+interface identities admitted as one compatible generation. Captures pin it; incompatible changes
+explicitly migrate or refuse. Shared GPU bindings join graph resource versions and declared accesses
+instead of hiding cross-Feature dependencies inside opaque bind groups. Broader prebuilt-Editor
 layout creation still needs its own consumer qualification. Use actual shader-layout and
 compiler dependency results rather than repository parsers. WGSL may qualify first; WESL is a
 frontend choice, not the resource identity or a full-CAS prerequisite.
