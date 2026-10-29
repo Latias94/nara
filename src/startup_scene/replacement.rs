@@ -11,7 +11,8 @@ use nara_scene::{
 };
 
 use super::{
-    CurrentSceneOwner, SceneSource, StartupSceneActivationAuthority, StartupSceneActivationPhase,
+    CurrentSceneOwner, RetainedSceneCandidate, SceneSource, StartupSceneActivationAuthority,
+    StartupSceneActivationPhase,
 };
 use std::sync::Arc;
 
@@ -47,8 +48,8 @@ where
 
 /// Replaces the committed data-only Scene and its retained source in one exclusive operation.
 ///
-/// This operation currently requires both sources to be direct managed-App sources. Project-backed
-/// replacement needs a separate residency preflight, publication and retirement contract; passing a
+/// Both Scenes may be expanded or processed Runtime inputs. Project-backed replacement needs a
+/// separate residency preflight, publication and retirement contract; passing a
 /// project source here is rejected before the callback or any Scene mutation. Use
 /// [`restart_current_scene_with_product`] to restart already resident project content.
 ///
@@ -110,18 +111,40 @@ where
     }
     world.resource_scope(|world, mut owner: Mut<CurrentSceneOwner>| {
         let source = source.map_or_else(|| Arc::clone(&owner.source), Arc::new);
+        if !source.matches_component_bindings(&bindings) {
+            return rejected(
+                "scene.current.component-bindings-mismatch",
+                "Current Scene candidate does not match the installed component definitions",
+            );
+        }
         let assets = SceneAssetBindings::from_world(world);
-        let prepared = match bindings.prepare_scene_replacement_with_claims(
-            world,
-            &source.candidate,
-            source.asset_database(),
-            &owner.receipt,
-            assets,
-            &SceneNativeRetirementClaims::default(),
-            limits,
-            additional_retirements,
-            configure,
-        ) {
+        let prepared = match &source.candidate {
+            RetainedSceneCandidate::Expanded(candidate) => bindings
+                .prepare_scene_replacement_with_claims(
+                    world,
+                    candidate,
+                    source.asset_database(),
+                    &owner.receipt,
+                    assets,
+                    &SceneNativeRetirementClaims::default(),
+                    limits,
+                    additional_retirements,
+                    configure,
+                ),
+            #[cfg(feature = "serde")]
+            RetainedSceneCandidate::Runtime(candidate) => bindings
+                .prepare_runtime_scene_replacement_with_claims(
+                    world,
+                    candidate,
+                    &owner.receipt,
+                    assets,
+                    &SceneNativeRetirementClaims::default(),
+                    limits,
+                    additional_retirements,
+                    configure,
+                ),
+        };
+        let prepared = match prepared {
             Ok(prepared) => prepared,
             Err(report) => return report,
         };

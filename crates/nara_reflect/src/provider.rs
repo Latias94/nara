@@ -222,6 +222,11 @@ macro_rules! fingerprint_type {
 
         impl $name {
             #[must_use]
+            pub const fn as_bytes(self) -> [u8; 32] {
+                self.0
+            }
+
+            #[must_use]
             pub fn to_hex(self) -> String {
                 blake3::Hash::from_bytes(self.0).to_hex().to_string()
             }

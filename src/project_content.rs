@@ -5,7 +5,6 @@ mod catalogue;
 mod closure;
 mod delivery;
 mod domains;
-pub(crate) mod format_diagnostic;
 
 use std::{
     collections::{BTreeMap, BTreeSet, VecDeque},
@@ -2680,7 +2679,7 @@ fn map_format_error(
     summary: &'static str,
     error: &SceneFormatError,
 ) -> ProjectContentError {
-    let diagnostic = format_diagnostic::scene_format_diagnostic(code, summary, error);
+    let diagnostic = crate::scene_format_diagnostic::scene_format_diagnostic(code, summary, error);
     let source = PublicDiagnosticIdentifier::new(path).map_or_else(
         |_| DiagnosticField::sensitive(field_key(source_key)),
         |value| DiagnosticField::public_identifier(field_key(source_key), value),

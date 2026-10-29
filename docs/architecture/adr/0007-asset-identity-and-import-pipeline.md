@@ -104,7 +104,50 @@ weak handle identity alone cannot authorize loading or residency.
   admitted primary and auxiliary resources without a source database.
 - `Handle<T>` should remain stable across reloads; asset data may carry an internal generation/version.
 - Import cache design is deferred but not ignored.
-- Asset loading can begin synchronous/path-based, but the API must allow asynchronous load states later.
+- Acquisition, immutable encoded content, typed decode and native residency remain separate
+  owners; choosing a synchronous caller does not merge their identities or lifetime contracts.
+
+### Verified Local Runtime Bases
+
+The root content Host owns a concrete `runtime_content_catalog`, canonical version 1, and an
+immutable local encoded base. The Host supplies the expected catalog content digest and selected
+target/profile independently of package bytes. Catalog data cannot select Rust code or authorize
+itself. Its admitted Runtime configuration is composed with the executable's selected recipe
+through the same capability, plugin and native/data Schema closure as source-backed composition,
+without manufacturing a source manifest, project lineage or authoring Schema-bundle receipt.
+The catalog's recipe and Schema fingerprints must agree with that executable composition.
+
+Each complete `AssetProductRef` maps to exactly one bounded member and its declared Runtime
+format. Several products may share one compound member. Member paths, encoded digests, logical
+products, executable definitions and native handles remain separate identities. Required edges
+must close within the base; soft references do not implicitly acquire absent content. Startup,
+later Scene roots and explicitly addressable roots are declared, rather than inferred from file
+names. Duplicate mappings, incompatible path aliases and invalid roots reject admission.
+
+Opening the base captures and verifies every declared member before publishing the immutable
+base. Later acquisition uses only those captured bytes and the original exact executable plan;
+it does not reopen changed files, create a source database, import metadata or fall back to cache.
+Content mutation after capture cannot redirect an existing base. This eager local capture is an
+implementation policy, not a requirement that future container or streaming providers merge
+membership, readiness and residency.
+
+Scene acquisition admits the actual processed Scene against the catalog's containing identity
+and the original exact definitions. It traverses declared effective asset leaves through Reflect
+and checks complete Product membership and required dependency declarations. A claimed dependency
+table alone does not prove that the Scene payload is closed. Concrete resource acquisition checks
+the selected codec kind/version and the actual decoded products. `RuntimeAssetCodec` supplies a
+pure complete-identity query that includes the enclosing source; an equal auxiliary ID from another
+source cannot adopt the catalog's identity. Failure or panic publishes no typed product or World
+mutation, and its reservations return through the same owner.
+
+The immutable base and decoded candidates retain explicit encoded, work and logical retained-byte
+bounds. Compiled recipe/Schema construction and domain codec promises keep their existing limits;
+these ledgers do not intercept arbitrary native allocations or measure RSS. Encoded integrity,
+typed candidate readiness, native resource publication and physical retirement are separate facts.
+This adopts only local capture/acquisition and shared composition/Scene retention. Automatic
+resource residency, a packaged Player entry, target cooking/stripping, input-map delivery, CAS,
+resolver replacement, patch/DLC and remote trust still need their complete workflows and evidence
+under the ordered delivery plan. Proposed ADR 0088 is not accepted wholesale.
 
 ## Implementation Notes
 

@@ -1,10 +1,28 @@
 //! Safe format facts shared by strict content Check and ordinary authoring Open.
 
 use nara_core::{EngineVersion, PersistentFileContractError, SerdeShapeError};
-use nara_diagnostic::{Diagnostic, DiagnosticField, PublicDiagnosticIdentifier};
+use nara_diagnostic::{
+    Diagnostic, DiagnosticCode, DiagnosticField, DiagnosticFieldKey, PublicDiagnosticIdentifier,
+    SafeSummary,
+};
 use nara_scene::{SceneFileBudgetKind, SceneFileEncoding, SceneFormatError};
 
-use super::{attach_field, diagnostic, field_key};
+fn diagnostic(code: &'static str, summary: &'static str) -> Diagnostic {
+    Diagnostic::error(
+        DiagnosticCode::new(code).expect("Scene format diagnostic codes are engine-owned"),
+        SafeSummary::new(summary).expect("Scene format summaries are engine-owned"),
+    )
+}
+
+fn field_key(key: &'static str) -> DiagnosticFieldKey {
+    DiagnosticFieldKey::new(key).expect("Scene format field keys are engine-owned")
+}
+
+fn attach_field(diagnostic: Diagnostic, field: DiagnosticField) -> Diagnostic {
+    diagnostic
+        .try_with_field(field)
+        .expect("Scene format diagnostics use unique bounded fields")
+}
 
 /// Projects typed facts only. Parser messages can contain arbitrary document contents.
 pub(crate) fn scene_format_diagnostic(

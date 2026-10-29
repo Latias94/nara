@@ -818,7 +818,7 @@ fn admission_error(
         E::SourceFormat { path, source, .. } => {
             let mut report = DiagnosticReport::default();
             report.push(with_source(
-                crate::project_content::format_diagnostic::scene_format_diagnostic(
+                crate::scene_format_diagnostic::scene_format_diagnostic(
                     "project.editor.scene-capture-source-format-invalid",
                     "A selected Scene dependency has an invalid source format",
                     &source,

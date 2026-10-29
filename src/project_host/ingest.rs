@@ -238,23 +238,20 @@ fn validate_product_request(
         manifest_digest,
         settings,
         runtime_configuration,
-        explicit: admission.explicit,
-        implied: admission.implied,
-        normalized: admission.normalized,
-        required: admission.required,
-        compiled: admission.compiled,
+        capabilities: admission,
     })
 }
 
-struct RuntimeCapabilityAdmission {
-    explicit: ProductCapabilitySet,
-    implied: ProductCapabilitySet,
-    normalized: ProductCapabilitySet,
-    required: ProductCapabilitySet,
-    compiled: super::composition::CompiledProductCapabilities,
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub(super) struct RuntimeCapabilityAdmission {
+    pub(super) explicit: ProductCapabilitySet,
+    pub(super) implied: ProductCapabilitySet,
+    pub(super) normalized: ProductCapabilitySet,
+    pub(super) required: ProductCapabilitySet,
+    pub(super) compiled: super::composition::CompiledProductCapabilities,
 }
 
-fn validate_runtime_capabilities(
+pub(super) fn validate_runtime_capabilities(
     settings: &EffectiveRuntimeConfiguration,
 ) -> Result<RuntimeCapabilityAdmission, ProjectCandidateError> {
     let explicit = settings.requested_capabilities();

@@ -49,6 +49,242 @@ pub(crate) fn startup_scene_retained_bytes(
     ])
 }
 
+#[cfg(feature = "serde")]
+pub(crate) fn direct_runtime_scene_retained_bytes(
+    candidate: &nara_scene::RuntimeSceneCandidate,
+) -> Result<usize, SceneRetentionOverflow> {
+    checked_sum([
+        runtime_startup_scene_retained_bytes(candidate)?,
+        2 * ARC_CONTROL_BLOCK_BYTES,
+        size_of::<std::sync::Arc<nara_scene::RuntimeSceneCandidate>>(),
+    ])
+}
+
+/// Charges the immutable candidate and all logically retained metadata, including shared owners.
+/// The native witness is weak and therefore does not retain executable codecs or a registry.
+#[cfg(feature = "serde")]
+pub(crate) fn runtime_startup_scene_retained_bytes(
+    candidate: &nara_scene::RuntimeSceneCandidate,
+) -> Result<usize, SceneRetentionOverflow> {
+    checked_sum([
+        size_of::<nara_scene::RuntimeSceneCandidate>(),
+        candidate.source_key().retained_bytes(),
+        scene_retained_bytes(candidate.document())?,
+        scene_provenance_retained_bytes(candidate.provenance())?,
+        runtime_definition_retained_bytes(candidate.definitions())?,
+    ])
+}
+
+#[cfg(feature = "serde")]
+fn runtime_definition_retained_bytes(
+    definitions: &nara_scene::SceneComponentBindingsWitness,
+) -> Result<usize, SceneRetentionOverflow> {
+    let owners = definitions.data_owners();
+    let mut total = checked_sum([
+        size_of_val(definitions),
+        ARC_CONTROL_BLOCK_BYTES,
+        checked_product(
+            owners.len(),
+            size_of::<nara_reflect::ComponentSchemaOwnerSnapshot>(),
+        )?,
+    ])?;
+    for owner in owners {
+        checked_add_to(
+            &mut total,
+            checked_sum([
+                ARC_CONTROL_BLOCK_BYTES,
+                size_of_val(owner.owner_id()),
+                string_retained_bytes(owner.owner_id().as_str())?,
+                schema_catalog_retained_bytes(owner.current())?,
+                size_of::<Option<nara_reflect::ComponentSchemaCatalog>>(),
+                owner
+                    .predecessor()
+                    .map_or(Ok(0), schema_catalog_retained_bytes)?,
+            ])?,
+        )?;
+    }
+    Ok(total)
+}
+
+#[cfg(feature = "serde")]
+fn schema_catalog_retained_bytes(
+    catalog: &nara_reflect::ComponentSchemaCatalog,
+) -> Result<usize, SceneRetentionOverflow> {
+    let nara_reflect::ComponentSchemaCatalog {
+        generation: _,
+        predecessor: _,
+        components,
+        type_tombstones,
+    } = catalog;
+    let mut total = checked_sum([
+        size_of_val(catalog),
+        checked_product(
+            components.capacity(),
+            size_of::<nara_reflect::ComponentSchema>(),
+        )?,
+        checked_product(
+            type_tombstones.capacity(),
+            size_of::<nara_reflect::ComponentTypeId>(),
+        )?,
+    ])?;
+    for tombstone in type_tombstones {
+        checked_add_to(&mut total, string_retained_bytes(tombstone.as_str())?)?;
+    }
+    for schema in components {
+        let nara_reflect::ComponentSchema {
+            id,
+            aliases,
+            version: _,
+            capabilities,
+            fields,
+            field_tombstones,
+            authoring_initial_value,
+        } = schema;
+        checked_add_to(
+            &mut total,
+            checked_sum([
+                string_retained_bytes(id.as_str())?,
+                schema_aliases_retained_bytes(aliases)?,
+                schema_capabilities_retained_bytes(capabilities)?,
+                checked_product(
+                    fields.capacity(),
+                    size_of::<nara_reflect::ComponentFieldSchema>(),
+                )?,
+                checked_product(
+                    field_tombstones.capacity(),
+                    size_of::<nara_reflect::ComponentFieldId>(),
+                )?,
+                authoring_initial_value
+                    .as_ref()
+                    .map_or(Ok(0), component_value_retained_bytes)?,
+            ])?,
+        )?;
+        for tombstone in field_tombstones {
+            checked_add_to(&mut total, string_retained_bytes(tombstone.as_str())?)?;
+        }
+        for field in fields {
+            checked_add_to(&mut total, schema_field_dynamic_bytes(field)?)?;
+        }
+    }
+    Ok(total)
+}
+
+#[cfg(feature = "serde")]
+fn schema_aliases_retained_bytes(aliases: &Vec<String>) -> Result<usize, SceneRetentionOverflow> {
+    let mut total = checked_product(aliases.capacity(), size_of::<String>())?;
+    for alias in aliases {
+        checked_add_to(&mut total, string_retained_bytes(alias)?)?;
+    }
+    Ok(total)
+}
+
+#[cfg(feature = "serde")]
+fn schema_capabilities_retained_bytes(
+    capabilities: &std::collections::BTreeSet<nara_reflect::ComponentCapability>,
+) -> Result<usize, SceneRetentionOverflow> {
+    checked_product(
+        capabilities.len(),
+        size_of::<nara_reflect::ComponentCapability>() + BTREE_ENTRY_OVERHEAD,
+    )
+}
+
+#[cfg(feature = "serde")]
+fn schema_field_dynamic_bytes(
+    field: &nara_reflect::ComponentFieldSchema,
+) -> Result<usize, SceneRetentionOverflow> {
+    let nara_reflect::ComponentFieldSchema {
+        id,
+        aliases,
+        path,
+        shape,
+        required: _,
+        capabilities,
+        default_value,
+        member_tombstones,
+    } = field;
+    let mut total = checked_sum([
+        string_retained_bytes(id.as_str())?,
+        schema_aliases_retained_bytes(aliases)?,
+        checked_product(
+            path.segments().len(),
+            size_of::<nara_reflect::ComponentFieldPathSegment>(),
+        )?,
+        schema_shape_dynamic_bytes(shape)?,
+        schema_capabilities_retained_bytes(capabilities)?,
+        default_value
+            .as_ref()
+            .map_or(Ok(0), component_value_retained_bytes)?,
+        checked_product(
+            member_tombstones.capacity(),
+            size_of::<nara_reflect::ComponentMemberPath>(),
+        )?,
+    ])?;
+    for segment in path.segments() {
+        if let nara_reflect::ComponentFieldPathSegment::Field(name) = segment {
+            checked_add_to(&mut total, string_retained_bytes(name)?)?;
+        }
+    }
+    for tombstone in member_tombstones {
+        checked_add_to(
+            &mut total,
+            checked_product(
+                tombstone.segments().len(),
+                size_of::<nara_reflect::ComponentMemberPathSegment>(),
+            )?,
+        )?;
+        for segment in tombstone.segments() {
+            if let nara_reflect::ComponentMemberPathSegment::Member(id) = segment {
+                checked_add_to(&mut total, string_retained_bytes(id.as_str())?)?;
+            }
+        }
+    }
+    Ok(total)
+}
+
+#[cfg(feature = "serde")]
+fn schema_shape_dynamic_bytes(
+    shape: &nara_reflect::ComponentValueShape,
+) -> Result<usize, SceneRetentionOverflow> {
+    use nara_reflect::ComponentValueShape;
+    match shape {
+        ComponentValueShape::Record { members } => {
+            let mut total = checked_product(
+                members.capacity(),
+                size_of::<nara_reflect::ComponentShapeMember>(),
+            )?;
+            for member in members {
+                checked_add_to(
+                    &mut total,
+                    checked_sum([
+                        string_retained_bytes(&member.name)?,
+                        member
+                            .id
+                            .as_ref()
+                            .map_or(Ok(0), |id| string_retained_bytes(id.as_str()))?,
+                        schema_shape_dynamic_bytes(&member.shape)?,
+                    ])?,
+                )?;
+            }
+            Ok(total)
+        }
+        ComponentValueShape::KeyedList { item, key } => checked_sum([
+            size_of::<ComponentValueShape>(),
+            string_retained_bytes(key.as_str())?,
+            schema_shape_dynamic_bytes(item)?,
+        ]),
+        ComponentValueShape::List { item: value }
+        | ComponentValueShape::Map { value }
+        | ComponentValueShape::Optional { value } => checked_sum([
+            size_of::<ComponentValueShape>(),
+            schema_shape_dynamic_bytes(value)?,
+        ]),
+        ComponentValueShape::Scalar { .. }
+        | ComponentValueShape::EntityRef
+        | ComponentValueShape::AssetRef
+        | ComponentValueShape::Opaque { .. } => Ok(0),
+    }
+}
+
 pub(crate) fn scene_provenance_retained_bytes(
     provenance: &SceneEntityProvenanceMap,
 ) -> Result<usize, SceneRetentionOverflow> {
@@ -795,5 +1031,103 @@ mod tests {
             long.source_key().retained_bytes() - short.source_key().retained_bytes(),
         );
         assert!(direct_startup_scene_retained_bytes(&short).unwrap() > short_bytes);
+    }
+
+    #[cfg(feature = "serde")]
+    #[test]
+    fn runtime_retention_charges_unused_definitions_and_enforces_the_exact_direct_limit() {
+        use nara_reflect::{
+            ComponentCapability, ComponentFieldId, ComponentFieldPath, ComponentFieldSchema,
+            ComponentSchema, ComponentSchemaCatalog, ComponentSchemaOwnerSnapshot,
+            ComponentSchemaVersion, ComponentTypeId, ComponentValue, ComponentValueKind,
+            PersistentComponentSchemaOwnerId,
+        };
+        use nara_scene::{RuntimeSceneCandidate, RuntimeSceneLimits, SceneComponentBindings};
+
+        let mut registry = ComponentRegistry::new();
+        registry.freeze().unwrap();
+        let document =
+            std::sync::Arc::new(SceneDocument::from_ordered_roots([SceneEntityRecord::new(
+                scene_id("local"),
+            )]));
+        let key = SourceDocumentKey::named(
+            "840ad54a-4b14-4f32-954a-e873ff0d6e41".parse().unwrap(),
+            "retention.runtime-definitions",
+            SourceDocumentKind::Scene,
+        )
+        .unwrap();
+        let cook = |alias: &str, initial: &str| {
+            let owner = ComponentSchemaOwnerSnapshot::admit(
+                PersistentComponentSchemaOwnerId::try_new("test.retention.runtime-data").unwrap(),
+                ComponentSchemaCatalog {
+                    components: vec![
+                        ComponentSchema::new(
+                            ComponentTypeId::new("test.retention.Unused"),
+                            alias,
+                            ComponentSchemaVersion::ONE,
+                        )
+                        .with_capabilities(ComponentCapability::SCENE_AUTHORING)
+                        .with_fields([ComponentFieldSchema::required(
+                            ComponentFieldId::new("value"),
+                            "Value",
+                            ComponentFieldPath::empty(),
+                            ComponentValueKind::String,
+                        )
+                        .with_capabilities(ComponentCapability::SCENE_AUTHORING)])
+                        .with_authoring_initial_value(ComponentValue::String(initial.to_owned())),
+                    ],
+                    ..Default::default()
+                },
+                None,
+            )
+            .unwrap();
+            let bindings =
+                SceneComponentBindings::new(registry.snapshot().unwrap(), [owner]).unwrap();
+            RuntimeSceneCandidate::cook(
+                &ExpandedSceneCandidate::plain(key.clone(), std::sync::Arc::clone(&document)),
+                &bindings,
+                &nara_asset::ProjectAssetDatabase::default(),
+                RuntimeSceneLimits::default(),
+            )
+            .unwrap()
+        };
+        let short = cook("Short", "x");
+        let long_alias = "A longer unused definition alias";
+        let long = cook(long_alias, "x");
+        let initial = "A retained creation template independent of the document";
+        let template = cook("Short", initial);
+        assert_eq!(short.document(), long.document());
+        assert_eq!(short.provenance(), long.provenance());
+        assert_eq!(short.provenance().len(), 1);
+        assert_eq!(
+            runtime_startup_scene_retained_bytes(&long).unwrap()
+                - runtime_startup_scene_retained_bytes(&short).unwrap(),
+            long_alias.len() - "Short".len()
+        );
+        assert_eq!(
+            runtime_startup_scene_retained_bytes(&template).unwrap()
+                - runtime_startup_scene_retained_bytes(&short).unwrap(),
+            initial.len() - "x".len()
+        );
+        let required = direct_runtime_scene_retained_bytes(&template).unwrap();
+        let source = crate::startup_scene::SceneSource::runtime(
+            template,
+            nara_core::ByteLimit::new(required).unwrap(),
+        )
+        .unwrap();
+        assert_eq!(source.retained_bytes(), required);
+        assert!(!source.is_project_backed());
+        assert!(source.asset_database().is_none());
+        assert_eq!(
+            crate::startup_scene::SceneSource::runtime(
+                cook("Short", initial),
+                nara_core::ByteLimit::new(required - 1).unwrap(),
+            )
+            .unwrap_err(),
+            crate::startup_scene::SceneSourceError::RetainedBytesExceeded {
+                required,
+                limit: required - 1,
+            }
+        );
     }
 }

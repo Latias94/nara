@@ -115,8 +115,14 @@ mod project_diagnostic_ids;
 #[cfg(all(feature = "runtime-2d", feature = "serde"))]
 mod project_content;
 
+#[cfg(all(feature = "runtime-2d", feature = "serde"))]
+pub mod runtime_content;
+
 #[cfg(feature = "runtime-core")]
 mod scene_retention;
+
+#[cfg(all(feature = "runtime-core", feature = "serde"))]
+mod scene_format_diagnostic;
 
 #[cfg(feature = "runtime-core")]
 mod startup_scene;

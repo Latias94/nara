@@ -73,6 +73,12 @@ with source discovery; they are not inferred from metadata or collected through 
 `ProjectAssetCollection::get` selects only the primary product. Compound consumers explicitly
 select the enclosing source, then pass the complete reference to their domain's own lookup API.
 
+Processed acquisition additionally invokes the selected `RuntimeAssetCodec`'s
+`contains_runtime_product(product, reference)` for every mapping of the verified member. This
+pure query validates the complete enclosing-source and product identity carried by the actual
+decoded payload. The file-local family query alone cannot establish enclosing-source agreement.
+Catalog membership, format admission and native residency remain separate proofs under ADR 0007.
+
 Source-copy remapping preserves the internal product ID while changing an explicitly mapped
 enclosing stable source identity. A path-only destination cannot express that identity and
 rejects. An explicit complete-product mapping may choose a different product. This does not

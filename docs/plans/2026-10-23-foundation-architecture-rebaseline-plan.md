@@ -516,12 +516,20 @@ native trust. Delete duplicate root/domain registrations and incorrect recipe/co
 
 ## R7: Target Build And Base Source-Free Delivery
 
-**Design:** D12. **State:** not started. **Owners:** Cargo tooling, Host capture/cook and Runtime loader.
+**Design:** D12. **State:** in progress; immutable local capture/acquisition is under qualification,
+first-party packaged Host and target-build selection remain open.
+**Owners:** Cargo tooling, Host capture/cook and Runtime loader.
 
 Separate Host tool selection, target executable artifacts, content cook, release candidate and
 target-runner activation. Keep a source-carrying option but move fixed starter assumptions into
 its adapter. Build a verified immutable base Runtime catalog; directory transport is sufficient.
 Do not block it on patch/DLC, remote authenticity or full cross-file Editor recovery.
+
+The [ordered delivery plan](2026-10-29-asset-import-and-runtime-delivery-plan.md) now separates
+shared source-free executable composition, concrete processed Scene retention and verified
+local-base acquisition from subsequent native resource residency and first-party Runtime Host
+integration. The [base guide](../guides/runtime-content-base.md) states that boundary explicitly;
+the source-backed launch entry is not silently reclassified as processed delivery.
 
 Acceptance: two clean content builds, a different host/target selection, source/cache inaccessible
 and no Cargo on the runtime machine, server stripping, wrong target/schema/digest rejection,

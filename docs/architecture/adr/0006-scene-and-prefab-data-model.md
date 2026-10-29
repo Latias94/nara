@@ -156,6 +156,14 @@ source-backed Scenes through a private closed input selection. It does not creat
 transaction or public generic provider interface. Runtime prepare and commit retain the existing
 receiving-World/definition/native-claim checks and last-good replacement behavior.
 
+The root retained current-Scene owner accepts source expansion and processed Runtime candidates
+through one private closed input selection. Startup activation, replacement, restart, native
+claims and publication keep the same lifecycle. A Runtime input retains its actual processed
+candidate and exact definitions; it does not synthesize an expanded source or project database.
+Bounded source views expose the representation they actually retain. A Runtime-content Scene
+also retains the original immutable base and its decoded-output reservation until the last
+owning current/candidate reference retires. A non-owning view cannot prolong that custody.
+
 Immutability and the exact witness carry the processed-value invariant into ordinary preflight;
 preparation does not repeat the complete pure admission pass or reopen source migration.
 Concrete content owners may stage newly admitted Product bindings through `SceneAssetBindings`

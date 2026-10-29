@@ -31,6 +31,14 @@ use nara_reflect::{
 };
 use nara_scene::{SceneComponentBindingError, SceneComponentBindings};
 
+use super::ingest::RuntimeCapabilityAdmission;
+
+mod runtime_configuration;
+
+pub use runtime_configuration::{
+    RuntimeConfigurationPlan, RuntimeConfigurationPlanError, resolve_runtime_configuration,
+};
+
 /// The product capabilities compiled into this root package instance.
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub struct CompiledProductCapabilities(ProductCapabilitySet);
@@ -104,11 +112,7 @@ pub struct ProjectSettingsCandidate {
     pub(super) manifest_digest: ContentDigest,
     pub(super) settings: EffectiveProjectSettings,
     pub(super) runtime_configuration: EffectiveRuntimeConfiguration,
-    pub(super) explicit: ProductCapabilitySet,
-    pub(super) implied: ProductCapabilitySet,
-    pub(super) normalized: ProductCapabilitySet,
-    pub(super) required: ProductCapabilitySet,
-    pub(super) compiled: CompiledProductCapabilities,
+    pub(super) capabilities: RuntimeCapabilityAdmission,
 }
 
 impl ProjectSettingsCandidate {
@@ -135,27 +139,27 @@ impl ProjectSettingsCandidate {
 
     #[must_use]
     pub const fn explicit_capabilities(&self) -> ProductCapabilitySet {
-        self.explicit
+        self.capabilities.explicit
     }
 
     #[must_use]
     pub const fn implied_capabilities(&self) -> ProductCapabilitySet {
-        self.implied
+        self.capabilities.implied
     }
 
     #[must_use]
     pub const fn normalized_capabilities(&self) -> ProductCapabilitySet {
-        self.normalized
+        self.capabilities.normalized
     }
 
     #[must_use]
     pub const fn required_capabilities(&self) -> ProductCapabilitySet {
-        self.required
+        self.capabilities.required
     }
 
     #[must_use]
     pub const fn compiled_capabilities(&self) -> CompiledProductCapabilities {
-        self.compiled
+        self.capabilities.compiled
     }
 }
 
@@ -167,11 +171,11 @@ impl fmt::Debug for ProjectSettingsCandidate {
             .field("manifest_digest", &self.manifest_digest)
             .field("runtime_preset", &self.settings.runtime_preset)
             .field("profile_present", &self.settings.profile_name.is_some())
-            .field("explicit", &self.explicit)
-            .field("implied", &self.implied)
-            .field("normalized", &self.normalized)
-            .field("required", &self.required)
-            .field("compiled", &self.compiled)
+            .field("explicit", &self.capabilities.explicit)
+            .field("implied", &self.capabilities.implied)
+            .field("normalized", &self.capabilities.normalized)
+            .field("required", &self.capabilities.required)
+            .field("compiled", &self.capabilities.compiled)
             .finish()
     }
 }
@@ -426,13 +430,7 @@ impl SchemaValidationInput {
 #[derive(Clone)]
 pub struct RuntimePlan {
     lineage: ProjectSettingsLineage,
-    settings: EffectiveRuntimeConfiguration,
-    compiled: CompiledProductCapabilities,
-    explicit: ProductCapabilitySet,
-    normalized: ProductCapabilitySet,
-    required: ProductCapabilitySet,
-    plugin_plan: PluginPlan,
-    schema_validation: SchemaValidationInput,
+    configuration: RuntimeConfigurationPlan,
     #[cfg(all(feature = "runtime-2d", feature = "serde"))]
     pub(crate) asset_domains: crate::project_content::ProjectAssetDomains,
 }
@@ -442,12 +440,7 @@ impl fmt::Debug for RuntimePlan {
         formatter
             .debug_struct("RuntimePlan")
             .field("lineage", &self.lineage)
-            .field("compiled", &self.compiled)
-            .field("explicit", &self.explicit)
-            .field("normalized", &self.normalized)
-            .field("required", &self.required)
-            .field("plugin_plan_fingerprint", &self.plugin_plan.fingerprint())
-            .field("schema_validation", &self.schema_validation)
+            .field("configuration", &self.configuration)
             .finish_non_exhaustive()
     }
 }
@@ -463,22 +456,22 @@ impl RuntimePlan {
     ///
     /// Project paths, authoring inputs and profile selection remain with the source candidate.
     pub const fn settings(&self) -> &EffectiveRuntimeConfiguration {
-        &self.settings
+        self.configuration.settings()
     }
 
     #[must_use]
     pub const fn compiled_capabilities(&self) -> CompiledProductCapabilities {
-        self.compiled
+        self.configuration.compiled_capabilities()
     }
 
     #[must_use]
     pub const fn explicit_capabilities(&self) -> ProductCapabilitySet {
-        self.explicit
+        self.configuration.explicit_capabilities()
     }
 
     #[must_use]
     pub const fn normalized_capabilities(&self) -> ProductCapabilitySet {
-        self.normalized
+        self.configuration.normalized_capabilities()
     }
 
     /// Returns the conservative product-capability witness used to admit this plan.
@@ -487,17 +480,17 @@ impl RuntimePlan {
     /// therefore deterministic and monotonic, but is not a minimal dependency solution.
     #[must_use]
     pub const fn required_capabilities(&self) -> ProductCapabilitySet {
-        self.required
+        self.configuration.required_capabilities()
     }
 
     #[must_use]
     pub const fn plugin_plan(&self) -> &PluginPlan {
-        &self.plugin_plan
+        self.configuration.plugin_plan()
     }
 
     #[must_use]
     pub const fn schema_validation(&self) -> &SchemaValidationInput {
-        &self.schema_validation
+        self.configuration.schema_validation()
     }
 }
 
@@ -704,14 +697,21 @@ fn project_runtime_plugins_from_profile(
 ) -> ProjectRuntimePlugins {
     ProjectRuntimePlugins {
         lineage: candidate.lineage,
-        plugins: plugins.edit().configure(nara_diagnostic::plugin(
-            candidate.runtime_configuration().diagnostics().runtime,
-            nara_diagnostic::RuntimePressureSettings::default(),
-        )),
+        plugins: configured_profile_plugins(candidate.runtime_configuration(), plugins),
         recipe: crate::ProductRecipe::new(),
         overlay: None,
         host_policy: None,
     }
+}
+
+fn configured_profile_plugins(
+    settings: &EffectiveRuntimeConfiguration,
+    plugins: crate::product::ProjectProfilePlugins,
+) -> EditedPluginGroup<crate::product::ProjectProfilePlugins> {
+    plugins.edit().configure(nara_diagnostic::plugin(
+        settings.diagnostics().runtime,
+        nara_diagnostic::RuntimePressureSettings::default(),
+    ))
 }
 
 /// Builds the file-backed project request for one ordinary product recipe.
@@ -820,9 +820,40 @@ pub fn resolve_runtime_plan(
         return Err(CompositionError::ProjectLineageMismatch.into());
     }
 
+    let resolved = resolve_runtime_composition(
+        candidate.runtime_configuration(),
+        candidate.capabilities,
+        ProjectRuntimeAppPlugins {
+            plugins: request.plugins,
+            recipe: request.recipe,
+            overlay: request.overlay,
+            host_policy: request.host_policy,
+        },
+        known_providers,
+    )?;
+    Ok(RuntimePlan {
+        lineage: candidate.lineage,
+        configuration: resolved.configuration,
+        #[cfg(all(feature = "runtime-2d", feature = "serde"))]
+        asset_domains: resolved.asset_domains,
+    })
+}
+
+struct ResolvedRuntimeComposition {
+    configuration: RuntimeConfigurationPlan,
+    #[cfg(all(feature = "runtime-2d", feature = "serde"))]
+    asset_domains: crate::project_content::ProjectAssetDomains,
+}
+
+fn resolve_runtime_composition(
+    settings: &EffectiveRuntimeConfiguration,
+    capabilities: RuntimeCapabilityAdmission,
+    mut request: ProjectRuntimeAppPlugins,
+    known_providers: impl IntoIterator<Item = ComponentSchemaProviderDefinition>,
+) -> Result<ResolvedRuntimeComposition, RuntimePlanError> {
     if let Some(plugin) = request
         .recipe
-        .unsupported_default_plugin(candidate.normalized_capabilities())
+        .unsupported_default_plugin(capabilities.normalized)
     {
         return Err(CompositionError::UnsupportedDefaultConfiguration { plugin }.into());
     }
@@ -837,15 +868,12 @@ pub fn resolve_runtime_plan(
     #[cfg(all(feature = "runtime-2d", feature = "serde"))]
     let asset_domains = request.recipe.asset_domains.clone();
     let snapshot_cell = Arc::new(OnceLock::new());
-    let request = request.configure(preloaded_component_registry_plugin(Arc::clone(
-        &snapshot_cell,
-    )));
-    let plugin_plan = PluginPlan::resolve(ProjectRuntimeAppPlugins {
-        plugins: request.plugins,
-        recipe: request.recipe,
-        overlay: request.overlay,
-        host_policy: request.host_policy,
-    })?;
+    request.plugins = request
+        .plugins
+        .configure(preloaded_component_registry_plugin(Arc::clone(
+            &snapshot_cell,
+        )));
+    let plugin_plan = PluginPlan::resolve(request)?;
     if let Some(plugin) =
         crate::product::data_contributor_mismatch(&data_contributors, plugin_plan.entries())
     {
@@ -862,7 +890,7 @@ pub fn resolve_runtime_plan(
         }
         .into());
     }
-    let required = resolve_product_requirements(candidate, &plugin_plan)?;
+    let required = resolve_product_requirements(capabilities, &plugin_plan)?;
     let schema_validation = resolve_schema_validation(
         &plugin_plan,
         known_providers.into_iter().chain(recipe_providers),
@@ -872,25 +900,26 @@ pub fn resolve_runtime_plan(
         .set(schema_validation.snapshot().clone())
         .map_err(|_| CompositionError::SchemaAuthorityPublicationFailed)?;
 
-    Ok(RuntimePlan {
-        lineage: candidate.lineage,
-        settings: candidate.runtime_configuration.clone(),
-        compiled: candidate.compiled,
-        explicit: candidate.explicit,
-        normalized: candidate.normalized,
-        required,
-        plugin_plan,
-        schema_validation,
+    Ok(ResolvedRuntimeComposition {
+        configuration: RuntimeConfigurationPlan {
+            settings: settings.clone(),
+            compiled: capabilities.compiled,
+            explicit: capabilities.explicit,
+            normalized: capabilities.normalized,
+            required,
+            plugin_plan,
+            schema_validation,
+        },
         #[cfg(all(feature = "runtime-2d", feature = "serde"))]
         asset_domains,
     })
 }
 
 fn resolve_product_requirements(
-    candidate: &ProjectSettingsCandidate,
+    capabilities: RuntimeCapabilityAdmission,
     plugin_plan: &PluginPlan,
 ) -> Result<ProductCapabilitySet, CompositionError> {
-    let mut required = candidate.required;
+    let mut required = capabilities.required;
     for entry in plugin_plan.entries() {
         for declared in entry.declaration().requires_product_capabilities {
             let Some(capability) = product_capability(*declared) else {
@@ -899,13 +928,13 @@ fn resolve_product_requirements(
                     capability: *declared,
                 });
             };
-            if !candidate.normalized.contains(capability) {
+            if !capabilities.normalized.contains(capability) {
                 return Err(CompositionError::UnrequestedProductCapability {
                     plugin: entry.plugin_id(),
                     capability,
                 });
             }
-            if !candidate.compiled.capabilities().contains(capability) {
+            if !capabilities.compiled.capabilities().contains(capability) {
                 return Err(CompositionError::UncompiledProductCapability {
                     plugin: entry.plugin_id(),
                     capability,
@@ -928,7 +957,7 @@ fn resolve_product_requirements(
             continue;
         }
 
-        let requested_alternatives = alternatives.intersection(candidate.normalized);
+        let requested_alternatives = alternatives.intersection(capabilities.normalized);
         if requested_alternatives.is_empty() {
             return Err(CompositionError::UnrequestedProductCapabilityAlternatives {
                 plugin: entry.plugin_id(),
@@ -936,7 +965,7 @@ fn resolve_product_requirements(
             });
         }
         for capability in requested_alternatives.iter() {
-            if !candidate.compiled.capabilities().contains(capability) {
+            if !capabilities.compiled.capabilities().contains(capability) {
                 return Err(CompositionError::UncompiledProductCapability {
                     plugin: entry.plugin_id(),
                     capability,

@@ -55,6 +55,14 @@ effective source project. Project path and authoring policy checks remain with s
 This separation does not authorize a source-free base: that entry must bind its own expected
 content, target and executable/Schema agreement rather than inventing source lineage.
 
+`RuntimeConfigurationPlan` resolves admitted Runtime settings with the executable's actual Rust
+recipe, without a source candidate or lineage. `RuntimePlan` retains real source lineage around
+that same composition owner. Both use one capability/default/plugin/Schema resolution path;
+cloning the configuration plan preserves exact definitions rather than resolving equivalent
+fingerprints again. Source import selection is not Runtime codec or content acquisition authority.
+The independently expected immutable base under ADR 0007 binds its original configuration plan
+for startup and later acquisition; a decoded settings record alone grants no content authority.
+
 All selected settings must affect their actual owner. In particular, the diagnostic capacity
 configures the real Diagnostics plugin through a canonical definition; parsing it without
 changing runtime storage is insufficient. Configured diagnostic definitions include all runtime

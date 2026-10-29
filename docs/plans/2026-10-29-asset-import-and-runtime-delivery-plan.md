@@ -133,6 +133,41 @@ cases pass, with explicit skips/platform limits. This closes the Scene/binding p
 same-base catalog/startup/later acquisition, actual Runtime codecs for other resources and build
 selection remain open. Proposed ADR 0088 is not accepted wholesale by this result.
 
+The next local-base unit implements a strict version-one catalog, independent Host expectations,
+verified immutable member capture and typed acquisition through the original executable plan.
+`RuntimeConfigurationPlan` removes source lineage from the shared composition algorithm while
+the source wrapper keeps its real lineage. The current-Scene owner accepts actual processed
+candidates through a private closed input selection. Compound codecs prove complete enclosing
+source/product identity; actual Scene references must match present Products and Required edges.
+This unit is under integration and qualification, not yet a complete first-party packaged Player.
+
+Keep the remaining step-3 ownership work explicit rather than disguising processed content as a
+source snapshot:
+
+- Add a closed source/processed selection to the first-party Runtime Host and request context;
+  startup and later requests must capture the original base, plan and native cleanup custody.
+- Add concrete Runtime-native resource codecs and residency owners. CPU decode, catalog membership
+  and weak Product binding do not establish installed `Assets<T>` values or physical cleanup.
+  The current `ImageAsset` requires `ImageSourceMetadata` (path, import settings and artifact);
+  its Runtime codec must first separate backend-neutral pixel/descriptor identity from optional
+  real source-import provenance. Do not invent an import artifact, source path or settings to
+  construct processed pixels. `PreparedImageResource`, `ImageContentSnapshot` and
+  `image_descriptor_hash` currently also require source/import facts; include those consumers in
+  the same ownership replacement. A Runtime member digest is not an import-artifact digest.
+  TileSet Runtime dependencies likewise name complete Image Products,
+  while receiving handles and source-path aliases remain their respective owners' concerns.
+  Native publication and escaped pixel/render captures must retain their original decoded-output
+  reservation and base after the acquisition wrapper retires. Reusing a source import lease or
+  copying an unretained CPU value does not prove that lifetime; qualify cancellation, overlapping
+  generations and the last shared pixel owner through the concrete publication transaction.
+- Resolve the stock `AssetPlugin`'s source-change dependency on an empty `ProjectAssetDatabase`
+  before claiming an entirely source-facet-free composition. Current base acquisition constructs
+  no database and performs no source I/O; a default plugin's empty source table is not a content
+  agreement or source metadata. Do not fabricate source records to satisfy processed loading.
+- Deliver a concrete processed input map, keep target build selection independent, then qualify
+  a packaged executable with source/metadata/cache and Cargo unavailable. Local eager capture
+  does not freeze a universal container, streaming or residency implementation.
+
 ## Owning Decisions
 
 [ADR 0103](../architecture/adr/0103-concrete-domain-owned-asset-import-execution.md) already admits

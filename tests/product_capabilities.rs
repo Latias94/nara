@@ -125,6 +125,8 @@ fn root_manifest_exposes_only_coarse_product_capabilities() {
     assert_eq!(
         feature_members(features, "serde"),
         [
+            "dep:serde",
+            "dep:serde_json",
             "nara_asset?/serde",
             "nara_core?/serde",
             "nara_diagnostic?/serde",
@@ -147,7 +149,7 @@ fn root_manifest_exposes_only_coarse_product_capabilities() {
 
     for dependency in package["dependencies"].as_array().unwrap() {
         let name = dependency["name"].as_str().unwrap();
-        if name.starts_with("nara_") {
+        if dependency["kind"].is_null() && name.starts_with("nara_") {
             assert_eq!(
                 dependency["optional"].as_bool(),
                 Some(true),
@@ -201,6 +203,14 @@ fn examples_and_optional_tests_declare_their_capability_ceiling() {
     assert_eq!(targets["scene_file_workspace"], ["tooling", "serde"]);
     assert_eq!(targets["product_capabilities"], ["runtime-core"]);
     assert_eq!(targets["project_composition"], ["runtime-core"]);
+    assert_eq!(
+        targets["runtime_configuration_composition"],
+        ["runtime-core"]
+    );
+    assert_eq!(
+        targets["runtime_scene_activation"],
+        ["runtime-core", "serde"]
+    );
     assert_eq!(targets["scene_authoring_session"], ["runtime-core"]);
     assert_eq!(targets["scene_inspector"], ["tooling"]);
     assert_eq!(targets["scene_patch_transactions"], ["runtime-core"]);

@@ -639,6 +639,11 @@ impl RuntimeAssetCodec<TextBundle> for TextBundleDomain {
         validate_product(&product).map_err(runtime_error)?;
         Ok(product)
     }
+
+    fn contains_runtime_product(product: &TextBundle, reference: AssetProductRef) -> bool {
+        product.source == reference.source()
+            && <Self as AssetDomain>::contains_product(product, reference.product())
+    }
 }
 
 fn validate_product(product: &TextBundle) -> Result<(), TextBundleError> {

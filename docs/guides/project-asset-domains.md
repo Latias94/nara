@@ -132,6 +132,12 @@ budgets. The caller reserves these before the operation and separately accounts 
 collection and overlapping generations. The codec validates its own bounded format and semantic
 invariants and returns `AssetRuntimeError` with an actionable diagnostic.
 
+Implement `contains_runtime_product(&product, reference)` as a pure complete-identity query.
+Unlike the source import family's file-local membership query, this check includes both the
+decoded product's enclosing source and its selected product ID. The Runtime Host checks every
+catalog mapping for a shared member. Accepting any source merely because a subproduct ID matches
+would let valid bytes for another resource inherit the catalog's identity.
+
 Neither format conversion method reads authoring source, sidecars or generated cache. Target
 cooking, member integrity, Runtime catalog admission, IO and publication remain separate owners.
 The compound text package uses this facet with `AssetProductRef` and `ImportedProductId` to keep
@@ -145,6 +151,12 @@ existence. Primary-only Image/TileSet codecs and Prefab sources refuse auxiliary
 selection instead of silently loading the primary. This does not install global subresource loading.
 The [scoped identity decision](../architecture/adr/0122-scoped-imported-product-identity-and-authored-continuity.md)
 defines those limits. An encoded round trip alone is not source-free project delivery.
+
+The root `runtime_content` module captures a Host-expected immutable local base and admits typed
+Scene/resource acquisitions from those verified bytes with the original executable composition.
+Its catalog contains processed members, declared dependencies and roots, rather than authoring
+metadata. See the [Runtime base guide](runtime-content-base.md) for the capture and decode boundary
+and the integration work still needed before a complete packaged Player claim.
 
 For processed Runtime resources, a concrete content owner can reserve a complete identity with
 `AssetServer::reserve_product::<T>(reference)` and prepare the actual `Assets<T>` value through

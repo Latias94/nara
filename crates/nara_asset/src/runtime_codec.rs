@@ -5,7 +5,7 @@ use std::{error::Error, fmt};
 use nara_core::ByteLimit;
 use nara_diagnostic::Diagnostic;
 
-use crate::ImportedProductId;
+use crate::{AssetProductRef, ImportedProductId};
 
 /// The typed CPU product family shared by independently selected operation facets.
 ///
@@ -117,6 +117,16 @@ pub trait RuntimeAssetCodec<P: Send + Sync + 'static>: Send + Sync + 'static {
     fn encode_runtime(product: &P) -> Result<Box<[u8]>, AssetRuntimeError>;
 
     fn decode_runtime(bytes: &[u8]) -> Result<P, AssetRuntimeError>;
+
+    /// Checks the complete logical identity carried by a decoded product.
+    ///
+    /// The content Host calls this for every product mapped to the encoded member, including
+    /// its enclosing source. A valid payload for another source must not acquire the catalog's
+    /// identity merely because its auxiliary ID or display name happens to match. This trusted
+    /// pure query performs no I/O, allocation, mutation or publication. Catalog membership and
+    /// residency remain separate Host obligations.
+    #[must_use]
+    fn contains_runtime_product(product: &P, reference: AssetProductRef) -> bool;
 }
 
 #[cfg(test)]

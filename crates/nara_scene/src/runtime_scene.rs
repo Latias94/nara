@@ -82,6 +82,15 @@ impl RuntimeSceneLimits {
         self.base.component_materialization_limits()
     }
 
+    /// Uses the same reference-work policy as processed Scene value admission.
+    ///
+    /// Content Hosts inventory already admitted values with this bound, so their dependency
+    /// checks do not introduce an unrelated smaller limit than the Scene owner itself.
+    #[must_use]
+    pub fn reference_traversal_limits(self) -> nara_reflect::EntityReferenceTraversalLimits {
+        crate::validation::reference_traversal_limits(self.value_limits())
+    }
+
     #[must_use]
     pub const fn with_base(mut self, limits: SceneFileLimits) -> Self {
         self.base = limits;

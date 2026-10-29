@@ -146,6 +146,14 @@ impl std::fmt::Debug for SceneComponentBindingsWitness {
 }
 
 impl SceneComponentBindingsWitness {
+    /// Borrows admitted data-owner metadata without upgrading native executable authority.
+    ///
+    /// Content owners use this view to account for Schema metadata retained by a candidate.
+    #[must_use]
+    pub fn data_owners(&self) -> &[ComponentSchemaOwnerSnapshot] {
+        &self.owners
+    }
+
     /// Requires the exact native snapshot and the exact owner snapshots in canonical owner order.
     ///
     /// Separately admitted equivalent catalogs do not match. Matching does not retain or upgrade

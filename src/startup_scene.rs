@@ -35,6 +35,8 @@ use nara_ecs::{
     system::SystemParam,
 };
 use nara_identity::SpawnedSceneInstance;
+#[cfg(feature = "serde")]
+use nara_scene::RuntimeSceneCandidate;
 use nara_scene::{
     ExpandedSceneCandidate, SceneComponentBindings, SceneDocument, SceneOccurrenceKey,
     scene_component_bindings, validate_scene_component_bindings_authority,
@@ -44,6 +46,8 @@ use nara_scene::{
 use crate::project_content::{
     ProjectContentAssets, ProjectContentGenerationLease, ProjectContentLease,
 };
+#[cfg(feature = "serde")]
+use crate::scene_retention::direct_runtime_scene_retained_bytes;
 use crate::scene_retention::direct_startup_scene_retained_bytes;
 
 /// Stable plugin identity for the provisional advanced startup-scene activation seam.
@@ -89,21 +93,31 @@ enum SceneRetention {
         retained_bytes: usize,
         schema_authority: Arc<nara_scene::SceneComponentBindingsWitness>,
     },
+    #[cfg(all(feature = "runtime-2d", feature = "serde"))]
+    RuntimeContent(crate::runtime_content::RuntimeContentScene),
     Direct {
         retained_bytes: usize,
         _limit: usize,
     },
 }
 
+enum RetainedSceneCandidate {
+    Expanded(Arc<ExpandedSceneCandidate>),
+    #[cfg(feature = "serde")]
+    Runtime(Arc<RuntimeSceneCandidate>),
+}
+
 /// Move-only retained source accepted by startup materialization or current-Scene replacement.
 ///
 /// File-backed callers receive this value from Project Content. Direct managed-App callers use
-/// [`SceneSource::direct`] and must declare a deterministic logical retained-byte limit.
+/// [`SceneSource::direct`] for expanded sources or `SceneSource::runtime` for processed Scenes,
+/// and must declare a deterministic logical retained-byte limit. The processed entry requires
+/// the `serde` feature.
 /// That direct limit is neither allocator-capacity nor RSS accounting and does not claim a Project
 /// Content reservation. The value deliberately does not implement `Clone`: exactly one
 /// materialization consumes exactly one source owner.
 pub struct SceneSource {
-    candidate: Arc<ExpandedSceneCandidate>,
+    candidate: RetainedSceneCandidate,
     retention: SceneRetention,
 }
 
@@ -138,7 +152,36 @@ impl SceneSource {
             });
         }
         Ok(Self {
-            candidate: Arc::new(candidate),
+            candidate: RetainedSceneCandidate::Expanded(Arc::new(candidate)),
+            retention: SceneRetention::Direct {
+                retained_bytes,
+                _limit: limit,
+            },
+        })
+    }
+
+    /// Binds an admitted processed Scene for a direct managed-App integration.
+    ///
+    /// The candidate retains its exact component definition witness and never acquires a source
+    /// database or source receipt. The deterministic logical charge includes its flat document,
+    /// provenance and retained definition metadata, even when that metadata is shared elsewhere.
+    /// The explicit limit is neither allocator/RSS accounting nor a content-Host reservation.
+    #[cfg(feature = "serde")]
+    pub fn runtime(
+        candidate: RuntimeSceneCandidate,
+        retained_byte_limit: ByteLimit,
+    ) -> Result<Self, SceneSourceError> {
+        let retained_bytes = direct_runtime_scene_retained_bytes(&candidate)
+            .map_err(|_| SceneSourceError::RetainedBytesOverflow)?;
+        let limit = retained_byte_limit.get();
+        if retained_bytes > limit {
+            return Err(SceneSourceError::RetainedBytesExceeded {
+                required: retained_bytes,
+                limit,
+            });
+        }
+        Ok(Self {
+            candidate: RetainedSceneCandidate::Runtime(Arc::new(candidate)),
             retention: SceneRetention::Direct {
                 retained_bytes,
                 _limit: limit,
@@ -156,7 +199,7 @@ impl SceneSource {
         schema_authority: Arc<nara_scene::SceneComponentBindingsWitness>,
     ) -> Self {
         Self {
-            candidate,
+            candidate: RetainedSceneCandidate::Expanded(candidate),
             retention: SceneRetention::Project {
                 _lease: lease,
                 _generation: generation,
@@ -167,15 +210,39 @@ impl SceneSource {
         }
     }
 
+    #[cfg(all(feature = "runtime-2d", feature = "serde"))]
+    pub(crate) fn from_runtime_content(
+        content: crate::runtime_content::RuntimeContentScene,
+    ) -> Self {
+        Self {
+            candidate: RetainedSceneCandidate::Runtime(content.candidate_arc()),
+            retention: SceneRetention::RuntimeContent(content),
+        }
+    }
+
     #[must_use]
     pub(crate) fn document(&self) -> &SceneDocument {
-        self.candidate.document()
+        match &self.candidate {
+            RetainedSceneCandidate::Expanded(candidate) => candidate.document(),
+            #[cfg(feature = "serde")]
+            RetainedSceneCandidate::Runtime(candidate) => candidate.document(),
+        }
+    }
+
+    fn expanded_scene(&self) -> Option<&ExpandedSceneCandidate> {
+        match &self.candidate {
+            RetainedSceneCandidate::Expanded(candidate) => Some(candidate),
+            #[cfg(feature = "serde")]
+            RetainedSceneCandidate::Runtime(_) => None,
+        }
     }
 
     pub(crate) fn asset_database(&self) -> Option<&nara_asset::ProjectAssetDatabase> {
         match &self.retention {
             #[cfg(all(feature = "runtime-2d", feature = "serde"))]
             SceneRetention::Project { assets, .. } => Some(assets.database()),
+            #[cfg(all(feature = "runtime-2d", feature = "serde"))]
+            SceneRetention::RuntimeContent(_) => None,
             SceneRetention::Direct { .. } => None,
         }
     }
@@ -184,16 +251,26 @@ impl SceneSource {
         match self.retention {
             #[cfg(all(feature = "runtime-2d", feature = "serde"))]
             SceneRetention::Project { .. } => true,
+            #[cfg(all(feature = "runtime-2d", feature = "serde"))]
+            SceneRetention::RuntimeContent(_) => false,
             SceneRetention::Direct { .. } => false,
         }
     }
 
     fn matches_component_bindings(&self, bindings: &SceneComponentBindings) -> bool {
+        #[cfg(feature = "serde")]
+        if let RetainedSceneCandidate::Runtime(candidate) = &self.candidate {
+            return candidate.definitions().matches(bindings);
+        }
         match &self.retention {
             #[cfg(all(feature = "runtime-2d", feature = "serde"))]
             SceneRetention::Project {
                 schema_authority, ..
             } => schema_authority.matches(bindings),
+            #[cfg(all(feature = "runtime-2d", feature = "serde"))]
+            SceneRetention::RuntimeContent(_) => unreachable!(
+                "Runtime content always retains a processed Scene with its own definitions"
+            ),
             SceneRetention::Direct { .. } => {
                 let _ = bindings;
                 true
@@ -202,10 +279,12 @@ impl SceneSource {
     }
 
     #[must_use]
-    pub(crate) const fn retained_bytes(&self) -> usize {
+    pub(crate) fn retained_bytes(&self) -> usize {
         match &self.retention {
             #[cfg(all(feature = "runtime-2d", feature = "serde"))]
             SceneRetention::Project { retained_bytes, .. } => *retained_bytes,
+            #[cfg(all(feature = "runtime-2d", feature = "serde"))]
+            SceneRetention::RuntimeContent(content) => content.retained_bytes(),
             SceneRetention::Direct { retained_bytes, .. } => *retained_bytes,
         }
     }
@@ -215,6 +294,8 @@ impl SceneSource {
         match self.retention {
             #[cfg(all(feature = "runtime-2d", feature = "serde"))]
             SceneRetention::Project { .. } => None,
+            #[cfg(all(feature = "runtime-2d", feature = "serde"))]
+            SceneRetention::RuntimeContent(_) => None,
             SceneRetention::Direct { _limit, .. } => Some(_limit),
         }
     }
@@ -231,6 +312,8 @@ impl fmt::Debug for SceneSource {
                 &match self.retention {
                     #[cfg(all(feature = "runtime-2d", feature = "serde"))]
                     SceneRetention::Project { .. } => "project-content",
+                    #[cfg(all(feature = "runtime-2d", feature = "serde"))]
+                    SceneRetention::RuntimeContent(_) => "runtime-content",
                     SceneRetention::Direct { .. } => "direct-limit",
                 },
             )
@@ -251,15 +334,31 @@ impl SceneSourceView {
 
     /// Borrows the exact expanded candidate and admitted asset database together.
     ///
-    /// Both values come from the same retained source owner. Direct sources have no project
-    /// database. Returns `None` after the root activation owner retires, even if another caller
-    /// still retains the underlying document.
+    /// Both values come from the same retained source owner. Direct expanded sources have no
+    /// project database. Returns `None` for a processed Runtime Scene or after the root activation
+    /// owner retires, even if another caller still retains the underlying document.
     pub fn with_expanded_scene<R>(
         &self,
         inspect: impl FnOnce(&ExpandedSceneCandidate, Option<&nara_asset::ProjectAssetDatabase>) -> R,
     ) -> Option<R> {
         let source = self.source.upgrade()?;
-        Some(inspect(&source.candidate, source.asset_database()))
+        Some(inspect(source.expanded_scene()?, source.asset_database()))
+    }
+
+    /// Borrows the exact admitted processed candidate while the current owner retains it.
+    ///
+    /// Returns `None` for an expanded source or after owner retirement. The bounded borrow does
+    /// not retain the candidate, its definitions or the Runtime content base beyond this call.
+    #[cfg(feature = "serde")]
+    pub fn with_runtime_scene<R>(
+        &self,
+        inspect: impl FnOnce(&RuntimeSceneCandidate) -> R,
+    ) -> Option<R> {
+        let source = self.source.upgrade()?;
+        match &source.candidate {
+            RetainedSceneCandidate::Expanded(_) => None,
+            RetainedSceneCandidate::Runtime(candidate) => Some(inspect(candidate)),
+        }
     }
 
     /// Returns the logical retained-byte charge owned by the root activation authority.
@@ -609,14 +708,16 @@ pub fn materialize_startup_scene(
     // The product owns one current-Scene slot for the complete managed runtime lifetime.
     let occurrence = SceneOccurrenceKey::new("nara.product", "current-scene")
         .expect("the product declares a valid startup occurrence");
-    let prepared = bindings
-        .prepare_scene(
-            world,
-            &source.candidate,
-            &occurrence,
-            source.asset_database(),
-        )
-        .map_err(|report| StartupSceneMaterializeError::new(report.diagnostics))?;
+    let prepared = match &source.candidate {
+        RetainedSceneCandidate::Expanded(candidate) => {
+            bindings.prepare_scene(world, candidate, &occurrence, source.asset_database())
+        }
+        #[cfg(feature = "serde")]
+        RetainedSceneCandidate::Runtime(candidate) => {
+            bindings.prepare_runtime_scene(world, candidate, &occurrence)
+        }
+    }
+    .map_err(|report| StartupSceneMaterializeError::new(report.diagnostics))?;
     let mut report = prepared.commit(world);
     if report.diagnostics.has_errors() {
         return Err(StartupSceneMaterializeError::new(report.diagnostics));
@@ -771,7 +872,7 @@ mod tests {
         let report = spawn_scene(
             &mut world,
             &registry,
-            &source.candidate,
+            source.expanded_scene().unwrap(),
             &SceneOccurrenceKey::new("startup-fixture", "current").unwrap(),
             None,
         );

@@ -374,6 +374,16 @@ path = "tests/project_composition.rs"
 required-features = ["runtime-core"]
 
 [[test]]
+name = "runtime_configuration_composition"
+path = "tests/runtime_configuration_composition.rs"
+required-features = ["runtime-core"]
+
+[[test]]
+name = "runtime_scene_activation"
+path = "tests/runtime_scene_activation.rs"
+required-features = ["runtime-core", "serde"]
+
+[[test]]
 name = "project_content_boot"
 path = "tests/project_content_boot.rs"
 required-features = ["runtime-2d", "serde"]

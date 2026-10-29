@@ -559,7 +559,7 @@ impl AuthoringDocumentAdmissionError {
                 }
                 _ => "Editor document source format is invalid",
             };
-            return crate::project_content::format_diagnostic::scene_format_diagnostic(
+            return crate::scene_format_diagnostic::scene_format_diagnostic(
                 self.code(),
                 summary,
                 error,

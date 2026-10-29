@@ -56,8 +56,9 @@ pub use crate::project_content::{
 };
 pub use composition::{
     CompiledProductCapabilities, CompositionError, ProjectSettingsCandidate,
-    ProjectSettingsLineage, RuntimePlan, RuntimePlanError, SchemaValidationInput,
-    compiled_product_capabilities, resolve_product_recipe,
+    ProjectSettingsLineage, RuntimeConfigurationPlan, RuntimeConfigurationPlanError, RuntimePlan,
+    RuntimePlanError, SchemaValidationInput, compiled_product_capabilities, resolve_product_recipe,
+    resolve_runtime_configuration,
 };
 pub use ingest::{ProjectCandidateError, ProjectCandidateErrorKind, ingest_project_manifest};
 #[cfg(all(feature = "runtime-2d", feature = "serde"))]

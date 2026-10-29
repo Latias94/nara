@@ -271,7 +271,7 @@ fn replacement_rejects_equivalent_owner_catalog_with_another_admission_basis() {
         let assets = nara_scene::advanced::SceneAssetBindings::from_world(world);
         let result = foreign.prepare_scene_replacement_with_claims(
             world,
-            &next.candidate,
+            next.expanded_scene().unwrap(),
             None,
             &current,
             assets,
