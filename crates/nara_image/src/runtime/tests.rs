@@ -1,4 +1,4 @@
-use std::collections::BTreeSet;
+use std::{collections::BTreeSet, sync::Arc};
 
 use image::ImageEncoder;
 use nara_asset::{
@@ -141,6 +141,14 @@ fn anonymous_images_cannot_be_encoded_or_claim_product_membership() {
                 .as_str(),
             "image.runtime-product"
         );
+        assert_eq!(
+            ImageRuntimeCodec::runtime_retained_bytes(&anonymous)
+                .unwrap_err()
+                .diagnostic()
+                .code()
+                .as_str(),
+            "image.runtime-product"
+        );
         for selector in [ImportedProductId::PRIMARY, auxiliary()] {
             assert!(!ImageDomain::contains_product(&anonymous, selector));
             assert!(!ImageRuntimeCodec::contains_runtime_product(
@@ -175,6 +183,14 @@ fn png_import_cooks_to_identical_pixels_without_source_or_import_provenance() {
             .unwrap();
         assert!(imported.source().is_some());
         assert_eq!(imported.product(), Some(primary()));
+        assert_eq!(
+            ImageRuntimeCodec::runtime_retained_bytes(&imported)
+                .unwrap_err()
+                .diagnostic()
+                .code()
+                .as_str(),
+            "image.runtime-retention"
+        );
         let encoded = ImageRuntimeCodec::encode_runtime(&imported).unwrap();
         let header_length = u32::from_le_bytes(encoded[4..8].try_into().unwrap()) as usize;
         let header: Value = serde_json::from_slice(&encoded[8..8 + header_length]).unwrap();
@@ -197,6 +213,7 @@ fn png_import_cooks_to_identical_pixels_without_source_or_import_provenance() {
         assert_eq!(decoded.content_hash(), imported.content_hash());
         assert!(decoded.source().is_none());
         assert!(decoded.share_retained().is_none());
+        assert!(ImageRuntimeCodec::runtime_retained_bytes(&decoded).is_ok());
     }
 }
 
@@ -315,6 +332,14 @@ fn dimensions_and_aggregate_pixel_count_are_checked_before_pixel_length() {
     .unwrap();
     assert_eq!(
         ImageRuntimeCodec::encode_runtime(&oversized)
+            .unwrap_err()
+            .diagnostic()
+            .code()
+            .as_str(),
+        "image.runtime-dimensions"
+    );
+    assert_eq!(
+        ImageRuntimeCodec::runtime_retained_bytes(&oversized)
             .unwrap_err()
             .diagnostic()
             .code()
@@ -516,4 +541,101 @@ fn codec_promises_cover_binary_output_copying_and_retained_product_without_impor
     assert_eq!(limits.retained_bytes().get(), 65 * 1024 * 1024);
     assert!(limits.encoded_bytes().get() < 128 * 1024 * 1024);
     assert!(limits.work_bytes().get() >= 2 * limits.encoded_bytes().get());
+
+    // Prove coverage at the maximum pixel length without allocating a 64 MiB test fixture.
+    let decoded = ImageRuntimeCodec::decode_runtime(GOLDEN).unwrap();
+    let overhead = ImageRuntimeCodec::runtime_retained_bytes(&decoded).unwrap() - PIXELS.len();
+    assert!(overhead >= size_of::<ImageAsset>());
+    assert!(codec::MAX_RGBA_BYTES.checked_add(overhead).unwrap() <= limits.retained_bytes().get());
+}
+
+#[test]
+fn decoded_retained_cost_counts_inline_value_fixed_pixels_and_shared_allocation_overhead() {
+    for extent in [ImageExtent::new(1, 1), ImageExtent::new(32, 16)] {
+        let pixel_bytes = usize::try_from(extent.pixel_count() * 4).unwrap();
+        let mut pixels = Vec::with_capacity(pixel_bytes + 4096);
+        pixels.resize(pixel_bytes, 17);
+        let original = ImageAsset::from_product(
+            primary(),
+            extent,
+            ImageFormat::Rgba8,
+            ImageColorSpace::Srgb,
+            pixels,
+        )
+        .unwrap();
+        let encoded = ImageRuntimeCodec::encode_runtime(&original).unwrap();
+        let decoded = ImageRuntimeCodec::decode_runtime(&encoded).unwrap();
+        let expected =
+            size_of::<ImageAsset>() + pixel_bytes + size_of::<Box<[u8]>>() + 2 * size_of::<usize>();
+
+        assert_eq!(
+            ImageRuntimeCodec::runtime_retained_bytes(&original).unwrap(),
+            expected
+        );
+        let shared_pixels = decoded.shared_pixels();
+        let owners_before = Arc::strong_count(&shared_pixels);
+        for _ in 0..2 {
+            let actual = ImageRuntimeCodec::runtime_retained_bytes(&decoded).unwrap();
+            assert_eq!(actual, expected);
+            assert!(actual > pixel_bytes);
+            assert!(actual >= size_of::<ImageAsset>());
+            assert!(actual < ImageRuntimeCodec::runtime_limits().retained_bytes().get());
+            assert_eq!(Arc::strong_count(&shared_pixels), owners_before);
+        }
+        assert!(decoded.source().is_none());
+        assert!(decoded.share_retained().is_none());
+        assert_eq!(decoded, original);
+    }
+}
+
+#[test]
+fn runtime_retained_cost_refuses_attached_external_owners_without_changing_custody() {
+    let mut decoded = ImageRuntimeCodec::decode_runtime(GOLDEN).unwrap();
+    let owner = Arc::new(vec![0_u8; 1024]);
+    assert!(decoded.try_attach_retention_owner(Arc::clone(&owner)));
+    let owners_before = Arc::strong_count(&owner);
+    let content_hash = decoded.content_hash();
+
+    assert_eq!(
+        ImageRuntimeCodec::runtime_retained_bytes(&decoded)
+            .unwrap_err()
+            .diagnostic()
+            .code()
+            .as_str(),
+        "image.runtime-retention"
+    );
+    assert_eq!(Arc::strong_count(&owner), owners_before);
+    assert_eq!(decoded.content_hash(), content_hash);
+    assert!(decoded.source().is_none());
+    assert!(decoded.share_retained().is_some());
+}
+
+#[test]
+fn runtime_retained_cost_refuses_import_leases_without_releasing_or_borrowing_their_charge() {
+    use crate::budget::{ImageImportCharge, ImageImportPixelLease};
+    use crate::{ImageImportBudgetHost, ImageImportLimits};
+
+    let host = ImageImportBudgetHost::new(ImageImportLimits::default()).unwrap();
+    let reservation = host
+        .reserve(ImageImportCharge::retained_pixels(PIXELS.len()))
+        .unwrap();
+    let (lease, overlap) =
+        ImageImportPixelLease::from_publication(reservation, PIXELS.len()).unwrap();
+    drop(overlap);
+    let mut decoded = ImageRuntimeCodec::decode_runtime(GOLDEN).unwrap();
+    assert!(decoded.try_attach_import_pixel_lease(lease));
+    let before = host.snapshot();
+
+    assert_eq!(
+        ImageRuntimeCodec::runtime_retained_bytes(&decoded)
+            .unwrap_err()
+            .diagnostic()
+            .code()
+            .as_str(),
+        "image.runtime-retention"
+    );
+    assert_eq!(host.snapshot(), before);
+    assert_eq!(host.snapshot().active_rgba_bytes(), PIXELS.len());
+    drop(decoded);
+    assert_eq!(host.snapshot().active_bytes(), 0);
 }

@@ -368,6 +368,22 @@ impl ImageAsset {
         self.pixels.as_ref().as_ref()
     }
 
+    /// Models a decoded Runtime value without source provenance or attached lifetime owners.
+    ///
+    /// The inline value includes its Product identity and Arc handle. Out-of-line storage is the
+    /// exact boxed pixel length plus the Arc's boxed-slice handle and two reference counters.
+    /// Allocator metadata and size-class rounding are outside this logical model. Shared pixels
+    /// count in full; this borrowed query neither clones their Arc nor inspects external owners.
+    #[cfg(feature = "serde")]
+    pub(crate) fn runtime_retained_bytes(&self) -> Option<usize> {
+        if self.source.is_some() || self.retention.is_some() {
+            return None;
+        }
+        size_of::<Self>()
+            .checked_add(size_of::<Box<[u8]>>() + 2 * size_of::<usize>())
+            .and_then(|bytes| bytes.checked_add(self.pixels.len()))
+    }
+
     #[cfg(any(feature = "render-prepare", test))]
     pub(crate) fn shared_pixels(&self) -> Arc<Box<[u8]>> {
         Arc::clone(&self.pixels)

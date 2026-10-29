@@ -1,4 +1,4 @@
-use std::sync::Arc;
+use std::{mem::size_of, sync::Arc};
 
 use nara_asset::{
     AssetImportError, AssetImportSource, AssetMeta, AssetMetaIdentity, AssetMetaIdentityCandidate,
@@ -6,8 +6,9 @@ use nara_asset::{
     SourceAssetImporter, SourceHash, StableAssetId,
 };
 use nara_asset_domain_consumer::{
-    TextBundle, TextBundleContinuity, TextBundleDomain, TextBundleIdentityDecision,
-    TextBundleRebindAssignment, TextBundleRowAssignment, TextBundleSettings, TextDomain,
+    TextBundle, TextBundleContinuity, TextBundleDomain, TextBundleEntry,
+    TextBundleIdentityDecision, TextBundleRebindAssignment, TextBundleRowAssignment,
+    TextBundleSettings, TextDomain,
     bundle::{
         MAX_BUNDLE_CHARACTERS, MAX_BUNDLE_ENTRIES, MAX_BUNDLE_RETIRED, MAX_BUNDLE_SOURCE_BYTES,
         MAX_BUNDLE_SUFFIX_BYTES,
@@ -527,6 +528,52 @@ fn runtime_is_deterministic_cooked_only_and_independent_of_authoring_inputs() {
     assert!(TextBundleDomain::decode_runtime(RAW).is_err());
 }
 
+#[test]
+fn runtime_retained_cost_counts_inline_map_entries_and_cooked_strings() {
+    let bundle = prepare(RAW, settings(RAW), b" world").unwrap();
+    let encoded = TextBundleDomain::encode_runtime(&bundle).unwrap();
+    let expected = size_of::<TextBundle>()
+        + 2 * (size_of::<(ImportedProductId, TextBundleEntry)>() + 10 * size_of::<usize>())
+        + "Opening".len()
+        + "Hello world".len()
+        + "Ending".len()
+        + "Goodbye world".len();
+    assert_eq!(
+        TextBundleDomain::runtime_retained_bytes(&bundle).unwrap(),
+        expected
+    );
+    let decoded = TextBundleDomain::decode_runtime(&encoded).unwrap();
+    assert_eq!(
+        TextBundleDomain::runtime_retained_bytes(&decoded).unwrap(),
+        expected
+    );
+    assert!(expected < TextBundleDomain::runtime_limits().retained_bytes().get());
+    assert_eq!(TextBundleDomain::encode_runtime(&bundle).unwrap(), encoded);
+    assert_eq!(decoded, bundle);
+}
+
+#[test]
+fn runtime_retained_cost_depends_on_cooked_bytes_instead_of_json_escaping() {
+    let mut observations = Vec::new();
+    for text in ["x".repeat(64), "\0".repeat(64)] {
+        let raw = serde_json::to_vec(&json!({
+            "suffix": "suffix.txt",
+            "entries": [{"name": "entry", "text": text}],
+        }))
+        .unwrap();
+        let settings = TextBundleSettings::initial(&raw, 64, [id(1)]).unwrap();
+        let bundle = prepare(&raw, settings, b"").unwrap();
+        let encoded = TextBundleDomain::encode_runtime(&bundle).unwrap();
+        let decoded = TextBundleDomain::decode_runtime(&encoded).unwrap();
+        observations.push((
+            encoded.len(),
+            TextBundleDomain::runtime_retained_bytes(&decoded).unwrap(),
+        ));
+    }
+    assert!(observations[1].0 > observations[0].0);
+    assert_eq!(observations[0].1, observations[1].1);
+}
+
 fn runtime_wire() -> Value {
     let bundle = prepare(RAW, settings(RAW), b"!").unwrap();
     serde_json::from_slice(&TextBundleDomain::encode_runtime(&bundle).unwrap()).unwrap()
@@ -651,6 +698,17 @@ fn maximum_multibyte_and_escaped_text_round_trip_through_the_runtime_format() {
             product.entries()[&id(1)].text.chars().count(),
             MAX_BUNDLE_CHARACTERS
         );
-        assert_eq!(TextBundleDomain::decode_runtime(&encoded).unwrap(), product);
+        let decoded = TextBundleDomain::decode_runtime(&encoded).unwrap();
+        let retained = TextBundleDomain::runtime_retained_bytes(&decoded).unwrap();
+        assert_eq!(
+            retained,
+            size_of::<TextBundle>()
+                + size_of::<(ImportedProductId, TextBundleEntry)>()
+                + 10 * size_of::<usize>()
+                + "boundary".len()
+                + product.entries()[&id(1)].text.len(),
+        );
+        assert!(retained <= TextBundleDomain::runtime_limits().retained_bytes().get());
+        assert_eq!(decoded, product);
     }
 }

@@ -30,7 +30,10 @@ pub trait AssetDomain: Send + Sync + 'static {
 ///
 /// The caller bounds encoded input before reading and reserves work and retained output before
 /// decoding. Encoding also reserves work and encoded output while retaining the original product.
-/// Codecs enforce their format bounds; these promises are not allocation interception.
+/// Retained output includes the inline product and all allocations it owns, excluding encoded
+/// input and Host wrapper/base storage. After decode, the caller can refund unused output through
+/// [`RuntimeAssetCodec::runtime_retained_bytes`], bounded by the original promise. Codecs enforce
+/// their format bounds; these promises are not allocation interception.
 #[derive(Debug, Clone, Copy)]
 pub struct AssetRuntimeLimits {
     encoded_bytes: ByteLimit,
@@ -117,6 +120,20 @@ pub trait RuntimeAssetCodec<P: Send + Sync + 'static>: Send + Sync + 'static {
     fn encode_runtime(product: &P) -> Result<Box<[u8]>, AssetRuntimeError>;
 
     fn decode_runtime(bytes: &[u8]) -> Result<P, AssetRuntimeError>;
+
+    /// Reports the complete modeled retention of a returned decoded product.
+    ///
+    /// Include `size_of::<P>()`, owned strings/collections and shared allocations kept by this
+    /// product. Exclude the caller's encoded input, immutable base, wrapper and temporary decode
+    /// work. The result must fit [`AssetRuntimeLimits::retained_bytes`] as reserved before decode;
+    /// a product cannot borrow unreserved capacity after allocation. Multiple decoded products
+    /// are charged independently; cloning their shared Host wrapper retains one charge.
+    ///
+    /// This trusted bounded query only borrows the actual decoded value. It must not allocate
+    /// product/query scratch, perform I/O, mutate/publish state or acquire dependencies. A bounded
+    /// domain diagnostic may report a value whose retained allocations this concrete codec cannot
+    /// account for.
+    fn runtime_retained_bytes(product: &P) -> Result<usize, AssetRuntimeError>;
 
     /// Checks the complete logical identity carried by a decoded product.
     ///

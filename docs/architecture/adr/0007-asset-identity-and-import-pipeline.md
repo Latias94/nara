@@ -144,6 +144,15 @@ The immutable base and decoded candidates retain explicit encoded, work and logi
 bounds. Compiled recipe/Schema construction and domain codec promises keep their existing limits;
 these ledgers do not intercept arbitrary native allocations or measure RSS. Encoded integrity,
 typed candidate readiness, native resource publication and physical retirement are separate facts.
+Concrete Runtime codecs report a bounded borrowed retention cost for their actual decoded value,
+including the inline product and its owned allocations. The Host reserves the codec's complete
+maximum work/output promise before decode, checks actual retention against that original promise,
+then releases unused output and temporary work. Wrapper/base storage remains the Host's charge;
+the inline product is not counted twice. Failure, a cost-query panic or an exceeded promise
+publishes nothing and cannot borrow capacity after allocation. Shared acquisition/pixel owners
+retain the same admitted charge through their existing custody; independent decodes are charged
+independently even when they select the same logical Product. Cost queries grant no I/O,
+dependency acquisition, publication or native residency authority.
 This adopts only local capture/acquisition and shared composition/Scene retention. Automatic
 resource residency, a packaged Player entry, target cooking/stripping, input-map delivery, CAS,
 resolver replacement, patch/DLC and remote trust still need their complete workflows and evidence

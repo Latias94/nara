@@ -33,10 +33,12 @@ Each decoded value contains exactly its actual PRIMARY or auxiliary Product, not
 Encoding an anonymous image refuses with `image.runtime-product`; choose its persistent Product
 explicitly when producing delivery content.
 
-Current generic base acquisition retains the codec's conservative maximum output charge per
-decoded Image, including small ones. This checkpoint qualifies bounded capture and lifetime, not
-stock many-image residency. The ordered plan requires a decoded-output cost bounded by the
-original promise before that workflow is qualified; increasing aggregate caps is not its remedy.
+Base acquisition reserves the codec's conservative maximum before decoding, then checks its
+borrowed `runtime_retained_bytes` result and retains the actual modeled output plus Host wrapper.
+The Image codec accounts for returned pixel storage and its inline/shared-allocation overhead;
+the original acquisition carries that charge through escaped captures. This does not select
+automatic residency or a native publication policy. A new decode still requires enough free
+capacity for its upfront maximum while previous outputs remain charged.
 
 Use the existing [verified Runtime base](runtime-content-base.md) and the concrete family/codec:
 

@@ -80,6 +80,36 @@ layout and usage must be represented explicitly in the Image owner and included 
 encoding. Material alpha/sampler policy remains above Image; a source-independent image does not
 implement the proposed render graph or every native residency owner.
 
+## Runtime Output Cost
+
+The next consumer exposed a separate scaling defect: generic base acquisition retained the
+codec's whole-format maximum for each decoded output. A four-byte image therefore occupied the
+same logical output budget as the maximum supported image. Raising the aggregate cap would hide
+the mismatch and weaken concurrent decode admission.
+
+Keep the complete maximum promise before invoking a trusted decoder, then query its actual
+returned product through required `RuntimeAssetCodec::runtime_retained_bytes`. This belongs to
+the concrete codec because its decoded representation determines the allocations; the generic
+Host owns wrapper/base overhead, checked admission, refund and shared lifetime. A default maximum
+query would silently preserve the defect when an implementation forgets its contract. A public
+generic allocation walker or residency executor is unnecessary for the concrete Image/compound
+consumers. The bounded query reports inline product plus owned heap storage, has no effects or
+product/query-scratch allocation, and may refuse through the existing domain diagnostic.
+
+Image output has exact fixed-size pixels and known Arc storage. Source provenance and opaque
+attached owners refuse this query because this decoder returns neither and cannot account for
+arbitrary external custody. The Host checks the original maximum, retains actual product/wrapper
+cost and releases temporary work. Independent acquisitions remain independently charged; clones
+and escaped pixel owners retain their original acquisition charge. A new decode still needs its
+full upfront headroom. This is logical ownership accounting, not allocator/RSS measurement.
+
+The pinned Bevy `bevy_render/src/render_asset.rs` independently asks concrete render assets for
+`byte_len` to throttle GPU upload. Godot `core/io/image.cpp::get_data_size` reports actual pixel
+data length. These support querying concrete content rather than a source recipe, but neither
+is Nara's complete decoded-output/Host-wrapper model: upload bytes, pixel bytes, retained CPU
+ownership and physical GPU residency remain different costs. Nara does not copy Bevy's optional
+upload query or Godot's pixel-only size as a complete Runtime retention guarantee.
+
 ## Owning Sources
 
 - [Import/render seam](../architecture/adr/0033-asset-import-and-render-resource-preparation-seam.md)

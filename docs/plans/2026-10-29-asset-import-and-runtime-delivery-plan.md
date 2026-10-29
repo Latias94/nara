@@ -169,14 +169,13 @@ source snapshot:
   reservation and base after the acquisition wrapper retires. Reusing a source import lease or
   copying an unretained CPU value does not prove that lifetime; qualify cancellation, overlapping
   generations and the last shared pixel owner through the concrete publication transaction.
-  Before qualifying stock residency, replace whole-format maximum retained charges with a
-  concrete decoded-output cost query bounded by the original predecode promise. The current
-  generic acquisition retains that maximum for each output; increasing the aggregate cap would
-  conceal poor small-resource scaling. Keep upfront worst-case admission, refund only modeled
-  unused output after successful decode, and retain the actual admitted charge through escaped
-  owners. Challenge this with many small Images and overlapping large decodes, not only one
-  image at the reservation boundary. This uses the existing lease's finish-decode contract and
-  requires no new resource transaction or allocation interceptor.
+  The decoded-output successor replaces whole-format maximum retained charges with a required
+  concrete codec query bounded by the original predecode promise. It retains upfront worst-case
+  admission, refunds only modeled unused output after successful decode, and retains the actual
+  charge through escaped owners. The linked qualification covers 32 small independent Images,
+  a held 4 MiB decoded output, overlapping work/output promises and typed cost-query failures.
+  It uses the existing lease's finish-decode contract; caps, publication and persistent formats
+  are unchanged. Stock residency remains a separate concrete owner workflow.
 - Replace TileSet's source-only admission before attaching its Runtime codec. A processed
   descriptor names its own complete Product, a complete Image Product and actual atlas/material
   values. Source adapters supply real path/provenance; processed adapters supply same-base
@@ -196,8 +195,8 @@ source snapshot:
   a packaged executable with source/metadata/cache and Cargo unavailable. Local eager capture
   does not freeze a universal container, streaming or residency implementation.
 
-The next concrete dependency units are decoded-output charge/refund, TileSet content admission
-with actual dependencies/cells, then the complete first-party Host selection and native residency.
+The next concrete dependency units are TileSet content admission with actual dependencies/cells,
+then the complete first-party Host selection and native residency.
 Keep startup, later Scene acquisition and game-facing typed reads in that same Host qualification;
 adding a processed branch only at startup does not establish source-independent delivery.
 
@@ -207,7 +206,11 @@ escaped pixel custody and source-owned refusal. Actual domains317, root1087, ind
 WGPU145, selected native Editor5 and Reference Game61 pass, with exact skipped/platform scope in
 the evidence. It also records the reviewed mandatory-Product correction and source-admission
 counterexamples. This closes the Image owner prerequisite, not stock residency or the packaged
-Player; the same evidence keeps whole-format retained charging and later owners explicit.
+Player. Its recorded whole-format retained-charge limitation is replaced by the
+[actual-output qualification](../knowledge/engineering/verification/2026-10/2026-10-29T094316Z-actual-runtime-decoded-output-charging-and-shared-pixel-retention-qualification-14f023431b4c462dbeb1051f1739662e.md).
+That successor passes Asset/Image271, Host30 and independent64 tests, validates both complete
+compound data and actual native Image captures, and preserves predecode/last-owner bounds without
+raising limits. It does not qualify first-party residency, a packaged Player or later render work.
 
 ## Owning Decisions
 

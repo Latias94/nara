@@ -99,9 +99,17 @@ residency owner is missing.
 Catalog decoding enforces encoded, structural, count, string/path and modeled work bounds before
 publishing a catalog. Base capture separately bounds each member, total encoded bytes and logical
 retained storage. Typed acquisition reserves trusted codec work and retained-output promises
-before calling the codec. Scene decoding uses its own bounded allocation model and checked
-retention cost. Concurrent acquisitions share one base budget; failed, panicked or dropped
-outputs release their reservations. Shared clones retain the same reservation.
+before calling the codec. After checking decoded membership, it calls the codec's bounded
+`runtime_retained_bytes` query over that actual value. The query includes the inline product and
+owned allocations, excludes encoded/base/wrapper storage and allocates no product/query scratch.
+Only a bounded domain diagnostic may be constructed on refusal; the query performs no effects.
+An underestimated promise or unaccountable value refuses; no post-allocation capacity is borrowed.
+Only validated output refunds unused retained capacity and temporary work. The Host adds wrapper
+storage once and exposes the complete admitted output charge through
+`RuntimeContentAsset::retained_bytes`. Scene decoding uses its existing bounded allocation model
+and checked retention cost. Concurrent acquisitions share one base budget; failed, panicked or
+dropped outputs release their reservations. Shared clones retain the same reservation, while
+separate decodes of one Product remain independently charged.
 
 These are modeled content-owner costs, not allocator capacity or RSS. Compiled plugin/Schema
 construction and allocations inside trusted native code retain their existing owner contracts.

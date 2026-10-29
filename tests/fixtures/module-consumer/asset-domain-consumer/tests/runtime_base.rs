@@ -5,6 +5,7 @@
 
 use std::{
     fs,
+    mem::size_of,
     path::PathBuf,
     sync::{
         Arc, Mutex,
@@ -57,6 +58,7 @@ use nara_asset::{
     ImportedProductId, RuntimeAssetCodec, SourceAssetImporter, StableAssetId,
 };
 use nara_asset_domain_consumer::{TextBundle, TextBundleDomain, TextBundleSettings};
+use nara_diagnostic::{Diagnostic, DiagnosticCode, SafeSummary};
 
 const BUNDLE_SOURCE: &str = "cc91a0c8-e2b4-42ae-9d78-3481b9f34d65";
 const OTHER_SOURCE: &str = "af3176df-4556-45a5-9b2f-334ce47a5fbf";
@@ -863,6 +865,10 @@ impl RuntimeAssetCodec<TextBundle> for PanickingDecode {
         panic!("consumer Runtime decoder failed");
     }
 
+    fn runtime_retained_bytes(product: &TextBundle) -> Result<usize, AssetRuntimeError> {
+        TextBundleDomain::runtime_retained_bytes(product)
+    }
+
     fn contains_runtime_product(product: &TextBundle, reference: AssetProductRef) -> bool {
         TextBundleDomain::contains_runtime_product(product, reference)
     }
@@ -884,6 +890,10 @@ impl RuntimeAssetCodec<TextBundle> for PanickingIdentity {
 
     fn decode_runtime(encoded: &[u8]) -> Result<TextBundle, AssetRuntimeError> {
         TextBundleDomain::decode_runtime(encoded)
+    }
+
+    fn runtime_retained_bytes(product: &TextBundle) -> Result<usize, AssetRuntimeError> {
+        TextBundleDomain::runtime_retained_bytes(product)
     }
 
     fn contains_runtime_product(_: &TextBundle, _: AssetProductRef) -> bool {
@@ -909,8 +919,114 @@ impl RuntimeAssetCodec<TextBundle> for WrongCodec {
         panic!("the wrong codec must not decode");
     }
 
+    fn runtime_retained_bytes(_: &TextBundle) -> Result<usize, AssetRuntimeError> {
+        panic!("the wrong codec must not query retained output");
+    }
+
     fn contains_runtime_product(_: &TextBundle, _: AssetProductRef) -> bool {
         panic!("the wrong codec must not inspect a product");
+    }
+}
+
+struct InvalidRetainedCost<const MODE: u8>;
+
+impl<const MODE: u8> RuntimeAssetCodec<TextBundle> for InvalidRetainedCost<MODE> {
+    const RUNTIME_KIND: &'static str = TextBundleDomain::RUNTIME_KIND;
+    const RUNTIME_VERSION: u32 = TextBundleDomain::RUNTIME_VERSION;
+
+    fn runtime_limits() -> AssetRuntimeLimits {
+        let limits = TextBundleDomain::runtime_limits();
+        if MODE == 4 {
+            AssetRuntimeLimits::new(
+                limits.encoded_bytes(),
+                limits.work_bytes(),
+                bytes(size_of::<TextBundle>() - 1),
+            )
+        } else {
+            limits
+        }
+    }
+
+    fn encode_runtime(product: &TextBundle) -> Result<Box<[u8]>, AssetRuntimeError> {
+        TextBundleDomain::encode_runtime(product)
+    }
+
+    fn decode_runtime(encoded: &[u8]) -> Result<TextBundle, AssetRuntimeError> {
+        assert_ne!(MODE, 4, "an under-inline promise must refuse before decode");
+        TextBundleDomain::decode_runtime(encoded)
+    }
+
+    fn runtime_retained_bytes(_: &TextBundle) -> Result<usize, AssetRuntimeError> {
+        match MODE {
+            0 => panic!("consumer Runtime retained-cost query failed"),
+            1 => Err(AssetRuntimeError::new(Diagnostic::error(
+                DiagnosticCode::new("consumer.text-bundle.retained-refused").unwrap(),
+                SafeSummary::new("The consumer refused the decoded product retention query")
+                    .unwrap(),
+            ))),
+            2 => Ok(TextBundleDomain::runtime_limits().retained_bytes().get() + 1),
+            3 => Ok(size_of::<TextBundle>() - 1),
+            _ => panic!("the under-inline promise must not reach the retained-cost query"),
+        }
+    }
+
+    fn contains_runtime_product(product: &TextBundle, reference: AssetProductRef) -> bool {
+        TextBundleDomain::contains_runtime_product(product, reference)
+    }
+}
+
+#[test]
+fn invalid_retained_costs_preserve_typed_errors_and_the_next_full_decode_reservation() {
+    let fixture = Fixture::new();
+    let base = fixture.open_for_one_asset();
+    let inline = size_of::<TextBundle>();
+    let promised = TextBundleDomain::runtime_limits().retained_bytes().get();
+    for mode in 0..=4 {
+        let result = match mode {
+            0 => base.acquire_asset::<TextBundleDomain, InvalidRetainedCost<0>>(selected(FIRST)),
+            1 => base.acquire_asset::<TextBundleDomain, InvalidRetainedCost<1>>(selected(FIRST)),
+            2 => base.acquire_asset::<TextBundleDomain, InvalidRetainedCost<2>>(selected(FIRST)),
+            3 => base.acquire_asset::<TextBundleDomain, InvalidRetainedCost<3>>(selected(FIRST)),
+            4 => base.acquire_asset::<TextBundleDomain, InvalidRetainedCost<4>>(selected(FIRST)),
+            _ => unreachable!(),
+        };
+        match (mode, result) {
+            (0, Err(RuntimeContentError::CodecPanicked)) => {}
+            (1, Err(RuntimeContentError::Asset(error))) => assert_eq!(
+                error.diagnostic().code().as_str(),
+                "consumer.text-bundle.retained-refused",
+            ),
+            (
+                2,
+                Err(RuntimeContentError::Budget {
+                    kind: RuntimeContentBudgetKind::RetainedBytes,
+                    required,
+                    limit,
+                }),
+            ) => {
+                assert_eq!(required, promised + 1);
+                assert_eq!(limit, promised);
+            }
+            (
+                3 | 4,
+                Err(RuntimeContentError::Budget {
+                    kind: RuntimeContentBudgetKind::RetainedBytes,
+                    required,
+                    limit,
+                }),
+            ) => {
+                assert_eq!(required, inline);
+                assert_eq!(limit, inline - 1);
+            }
+            (mode, result) => panic!("unexpected retained-cost mode {mode} result: {result:?}"),
+        }
+        let recovered = base
+            .acquire_asset::<TextBundleDomain, TextBundleDomain>(selected(FIRST))
+            .unwrap();
+        assert_eq!(
+            recovered.product().get(&selected(FIRST)).unwrap().text,
+            "Hello world",
+        );
     }
 }
 
@@ -1100,6 +1216,9 @@ impl RuntimeAssetCodec<TextBundle> for HeldDecode {
         started.send(()).unwrap();
         release.recv_timeout(Duration::from_secs(5)).unwrap();
         TextBundleDomain::decode_runtime(encoded)
+    }
+    fn runtime_retained_bytes(product: &TextBundle) -> Result<usize, AssetRuntimeError> {
+        TextBundleDomain::runtime_retained_bytes(product)
     }
     fn contains_runtime_product(product: &TextBundle, reference: AssetProductRef) -> bool {
         TextBundleDomain::contains_runtime_product(product, reference)

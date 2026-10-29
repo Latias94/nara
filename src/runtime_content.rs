@@ -537,7 +537,9 @@ impl RuntimeContentBase {
     /// Decodes a concrete compiled format and verifies every Product mapped to that member.
     ///
     /// This operation grants no native-store publication. The resulting typed product retains
-    /// its exact base and promised output reservation until its last shared owner is dropped.
+    /// its exact base and checked actual output reservation until its last shared owner is dropped.
+    /// The complete maximum output/work promise is admitted before decode; unused output and
+    /// temporary work are refunded only after the decoded value and its cost are validated.
     pub fn acquire_asset<D, C>(
         &self,
         product: AssetProductRef,
@@ -561,16 +563,25 @@ impl RuntimeContentBase {
                 self.inner.members[index].len(),
                 limits.encoded_bytes().get(),
             )?;
-            let retained = checked_add(
+            check(
+                RuntimeContentBudgetKind::RetainedBytes,
+                size_of::<D::Product>(),
+                limits.retained_bytes().get(),
+            )?;
+            // The codec accounts for the complete product. Only the enclosing wrapper and its
+            // Arc control block are additional Host storage; do not count the inline value twice.
+            let metadata = size_of::<RuntimeContentAssetInner<D::Product>>()
+                - size_of::<D::Product>()
+                + crate::scene_retention::ARC_CONTROL_BLOCK_BYTES;
+            let promised = checked_add(
                 RuntimeContentBudgetKind::RetainedBytes,
                 limits.retained_bytes().get(),
-                size_of::<RuntimeContentAssetInner<D::Product>>()
-                    + crate::scene_retention::ARC_CONTROL_BLOCK_BYTES,
+                metadata,
             )?;
             let mut lease = self
                 .inner
                 .budget
-                .reserve(retained, limits.work_bytes().get())?;
+                .reserve(promised, limits.work_bytes().get())?;
             let value = C::decode_runtime(&self.inner.members[index])
                 .map_err(RuntimeContentError::Asset)?;
             for reference in member.products() {
@@ -580,6 +591,23 @@ impl RuntimeContentBase {
                     return Err(RuntimeContentError::ProductIdentityMismatch);
                 }
             }
+            let product_retained =
+                C::runtime_retained_bytes(&value).map_err(RuntimeContentError::Asset)?;
+            check(
+                RuntimeContentBudgetKind::RetainedBytes,
+                size_of::<D::Product>(),
+                product_retained,
+            )?;
+            check(
+                RuntimeContentBudgetKind::RetainedBytes,
+                product_retained,
+                limits.retained_bytes().get(),
+            )?;
+            let retained = checked_add(
+                RuntimeContentBudgetKind::RetainedBytes,
+                product_retained,
+                metadata,
+            )?;
             lease.finish_decode(retained)?;
             Ok(RuntimeContentAsset {
                 inner: Arc::new(RuntimeContentAssetInner {
@@ -587,6 +615,7 @@ impl RuntimeContentBase {
                     _lease: lease,
                     base: self.clone(),
                     reference: product,
+                    retained_bytes: retained,
                 }),
             })
         }))
@@ -658,6 +687,7 @@ struct RuntimeContentAssetInner<P> {
     _lease: DecodeLease,
     base: RuntimeContentBase,
     reference: AssetProductRef,
+    retained_bytes: usize,
 }
 impl<P> Clone for RuntimeContentAsset<P> {
     fn clone(&self) -> Self {
@@ -678,6 +708,15 @@ impl<P> RuntimeContentAsset<P> {
     #[must_use]
     pub fn base(&self) -> &RuntimeContentBase {
         &self.inner.base
+    }
+
+    /// Complete modeled product and wrapper charge, shared by all clones of this acquisition.
+    ///
+    /// The immutable base has its own shared charge. This value describes the admitted retention
+    /// model, not allocator capacity or process memory.
+    #[must_use]
+    pub fn retained_bytes(&self) -> usize {
+        self.inner.retained_bytes
     }
 }
 impl<P> fmt::Debug for RuntimeContentAsset<P> {

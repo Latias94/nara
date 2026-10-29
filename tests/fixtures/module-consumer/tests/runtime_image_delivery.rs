@@ -3,12 +3,19 @@
 //! This consumer owns native residency. It does not install a generic packaged Player or infer
 //! GPU upload, publication authority or source provenance from a successful CPU decode.
 
-use std::{fs, sync::Arc};
+use std::{
+    cell::{Cell, RefCell},
+    fs,
+    mem::size_of,
+    sync::{Arc, mpsc},
+    thread,
+    time::Duration,
+};
 
 use nara_asset::{
-    AssetDomain, AssetEvents, AssetPath, AssetProductRef, AssetRecord, AssetRef, AssetServer,
-    AssetSourceKind, AssetStates, Assets, Handle, ImportedProductId, ProjectAssetDatabase,
-    RuntimeAssetCodec, StableAssetId,
+    AssetDomain, AssetEvents, AssetPath, AssetProductRef, AssetRecord, AssetRef, AssetRuntimeError,
+    AssetRuntimeLimits, AssetServer, AssetSourceKind, AssetStates, Assets, Handle,
+    ImportedProductId, ProjectAssetDatabase, RuntimeAssetCodec, StableAssetId,
 };
 use nara_core::{ByteLimit, FormatKind, FormatVersion, ItemLimit};
 use nara_ecs::{Component, Entity, Resource, World};
@@ -440,6 +447,29 @@ impl Fixture {
         }
     }
 
+    fn small_images() -> Self {
+        Self::with_primary_image(
+            ImageAsset::from_product(
+                primary(),
+                ImageExtent::new(2, 1),
+                ImageFormat::Rgba8,
+                ImageColorSpace::Srgb,
+                vec![3, 5, 7, 255, 11, 13, 17, 127],
+            )
+            .unwrap(),
+        )
+    }
+
+    fn with_primary_image(image: ImageAsset) -> Self {
+        let mut fixture = Self::new();
+        let encoded = ImageRuntimeCodec::encode_runtime(&image).unwrap();
+        fixture.replace_primary(&encoded, ImageRuntimeCodec::RUNTIME_KIND);
+        fixture.primary_pixels = image.pixels().to_vec();
+        fixture.primary_extent = image.extent();
+        fixture.primary_hash = image.content_hash();
+        fixture
+    }
+
     fn open(
         &self,
         limits: RuntimeContentLimits,
@@ -466,6 +496,15 @@ impl Fixture {
     }
 
     fn open_for_one_image(&self) -> RuntimeContentBase {
+        self.open(
+            RuntimeContentLimits::default()
+                .with_retained_bytes(bytes(self.one_image_retained_limit())),
+        )
+        .unwrap()
+    }
+
+    /// Includes the captured base and one complete maximum codec/Host output reservation.
+    fn one_image_retained_limit(&self) -> usize {
         let limits = RuntimeContentLimits::default()
             .with_retained_bytes(ImageRuntimeCodec::runtime_limits().retained_bytes());
         let probe = self.open(limits).unwrap();
@@ -490,8 +529,7 @@ impl Fixture {
                 ..
             })
         ));
-        self.open(limits.with_retained_bytes(bytes(required)))
-            .unwrap()
+        required
     }
 
     fn replace_primary(&mut self, encoded: &[u8], format: &str) {
@@ -538,6 +576,46 @@ impl Fixture {
         )
         .unwrap();
         self.expected = RuntimeContentExpectation::new(ContentDigest::of_bytes(&encoded), target());
+    }
+}
+
+thread_local! {
+    static IMAGE_DECODE_CALLS: Cell<usize> = const { Cell::new(0) };
+    static IMAGE_DECODE_GATE: RefCell<Option<(mpsc::Sender<()>, mpsc::Receiver<()>)>> =
+        const { RefCell::new(None) };
+}
+
+/// Observes actual Image decoding without changing its format, promises or cost query.
+struct ObservedImageCodec;
+
+impl RuntimeAssetCodec<ImageAsset> for ObservedImageCodec {
+    const RUNTIME_KIND: &'static str = ImageRuntimeCodec::RUNTIME_KIND;
+    const RUNTIME_VERSION: u32 = ImageRuntimeCodec::RUNTIME_VERSION;
+
+    fn runtime_limits() -> AssetRuntimeLimits {
+        ImageRuntimeCodec::runtime_limits()
+    }
+
+    fn encode_runtime(product: &ImageAsset) -> Result<Box<[u8]>, AssetRuntimeError> {
+        ImageRuntimeCodec::encode_runtime(product)
+    }
+
+    fn decode_runtime(encoded: &[u8]) -> Result<ImageAsset, AssetRuntimeError> {
+        IMAGE_DECODE_CALLS.set(IMAGE_DECODE_CALLS.get() + 1);
+        let image = ImageRuntimeCodec::decode_runtime(encoded)?;
+        if let Some((started, release)) = IMAGE_DECODE_GATE.with_borrow_mut(Option::take) {
+            started.send(()).unwrap();
+            release.recv_timeout(Duration::from_secs(10)).unwrap();
+        }
+        Ok(image)
+    }
+
+    fn runtime_retained_bytes(product: &ImageAsset) -> Result<usize, AssetRuntimeError> {
+        ImageRuntimeCodec::runtime_retained_bytes(product)
+    }
+
+    fn contains_runtime_product(product: &ImageAsset, reference: AssetProductRef) -> bool {
+        ImageRuntimeCodec::contains_runtime_product(product, reference)
     }
 }
 
@@ -928,6 +1006,230 @@ fn runtime_base_rejects_foreign_product_wrong_codec_corruption_and_missing_image
         last_good.acquire_asset::<ImageDomain, ImageRuntimeCodec>(absent()),
         Err(RuntimeContentError::UndeclaredProduct)
     ));
+}
+
+#[test]
+fn many_independent_small_images_refund_maximum_output_until_the_last_shared_owner() {
+    const COUNT: usize = 32;
+
+    let fixture = Fixture::small_images();
+    let one_image = fixture.one_image_retained_limit();
+    let probe = fixture
+        .open(RuntimeContentLimits::default().with_retained_bytes(bytes(one_image)))
+        .unwrap();
+    let first = probe
+        .acquire_asset::<ImageDomain, ImageRuntimeCodec>(primary())
+        .unwrap();
+    let actual = first.retained_bytes();
+    let product_bytes = ImageRuntimeCodec::runtime_retained_bytes(first.product()).unwrap();
+    assert!(product_bytes >= size_of::<ImageAsset>() + fixture.primary_pixels.len());
+    assert!(
+        actual > product_bytes,
+        "the Host wrapper must also be charged"
+    );
+    let maximum =
+        ImageRuntimeCodec::runtime_limits().retained_bytes().get() + (actual - product_bytes);
+    assert!(COUNT * actual < maximum);
+    drop((first, probe));
+
+    // One base + one maximum decode + the actual charges of the preceding outputs.
+    // This is smaller than the old charge for even two maximum-sized outputs.
+    let cap = one_image + (COUNT - 1) * actual;
+    assert!(cap < one_image + maximum);
+    let base = fixture
+        .open(RuntimeContentLimits::default().with_retained_bytes(bytes(cap)))
+        .unwrap();
+    fixture.remove_files();
+    let calls = IMAGE_DECODE_CALLS.get();
+    let mut outputs: Vec<Arc<RuntimeContentAsset<ImageAsset>>> = Vec::new();
+    for index in 0..COUNT {
+        let reference = if index % 2 == 0 {
+            primary()
+        } else {
+            auxiliary()
+        };
+        let value = Arc::new(
+            base.acquire_asset::<ImageDomain, ObservedImageCodec>(reference)
+                .unwrap(),
+        );
+        assert_eq!(value.reference(), reference);
+        assert_eq!(value.product().product(), Some(reference));
+        assert!(value.product().source().is_none());
+        assert_eq!(value.retained_bytes(), actual);
+        assert!(std::ptr::eq(value.base().catalog(), base.catalog()));
+        assert!(std::ptr::eq(value.base().plan(), base.plan()));
+        assert_eq!(
+            value.product().pixels(),
+            if reference == primary() {
+                fixture.primary_pixels.as_slice()
+            } else {
+                AUXILIARY_PIXELS
+            }
+        );
+        for previous in &outputs {
+            assert!(!std::ptr::eq(
+                previous.product().pixels().as_ptr(),
+                value.product().pixels().as_ptr()
+            ));
+        }
+        outputs.push(value);
+    }
+    assert_eq!(IMAGE_DECODE_CALLS.get(), calls + COUNT);
+
+    let assert_full = || {
+        let calls = IMAGE_DECODE_CALLS.get();
+        let result = base.acquire_asset::<ImageDomain, ObservedImageCodec>(primary());
+        assert!(matches!(
+            result,
+            Err(RuntimeContentError::Budget {
+                kind: RuntimeContentBudgetKind::RetainedBytes,
+                required,
+                limit,
+            }) if required == cap + actual && limit == cap
+        ));
+        assert_eq!(IMAGE_DECODE_CALLS.get(), calls, "refused before decode");
+    };
+    assert_full();
+
+    let value = outputs.remove(0);
+    let owner = Arc::downgrade(&value);
+    let shared = value.as_ref().clone();
+    assert_eq!(shared.retained_bytes(), actual);
+    assert!(std::ptr::eq(
+        shared.product().pixels().as_ptr(),
+        value.product().pixels().as_ptr()
+    ));
+    let (world, handle) = initial_world(&value);
+    let content = world.resource::<ImageProducts>().capture(&world, handle);
+    let prepared = content.prepared_snapshot();
+    assert_prepared(&prepared, &content);
+    let prepared_clone = prepared.clone();
+    drop((world, content, value));
+    assert!(owner.upgrade().is_some());
+    assert_full();
+    drop(prepared);
+    assert_eq!(prepared_clone.resource().pixels(), fixture.primary_pixels);
+    assert!(owner.upgrade().is_some());
+    assert_full();
+    drop(prepared_clone);
+    assert!(owner.upgrade().is_none());
+    assert_eq!(shared.product().pixels(), fixture.primary_pixels);
+    assert_full();
+    drop(shared);
+
+    let recovered = Arc::new(
+        base.acquire_asset::<ImageDomain, ObservedImageCodec>(primary())
+            .unwrap(),
+    );
+    assert_eq!(recovered.retained_bytes(), actual);
+    assert_eq!(recovered.product().pixels(), fixture.primary_pixels);
+    for remaining in &outputs {
+        assert!(!std::ptr::eq(
+            remaining.product().pixels().as_ptr(),
+            recovered.product().pixels().as_ptr()
+        ));
+    }
+    outputs.push(recovered);
+    assert_eq!(outputs.len(), COUNT);
+    assert_eq!(IMAGE_DECODE_CALLS.get(), calls + COUNT + 1);
+    assert_full();
+}
+
+#[test]
+fn held_image_decode_keeps_full_retained_and_work_promises_until_success() {
+    let fixture = Fixture::with_primary_image(
+        ImageAsset::from_product(
+            primary(),
+            ImageExtent::new(1024, 1024),
+            ImageFormat::Rgba8,
+            ImageColorSpace::Srgb,
+            vec![37; 4 * 1024 * 1024],
+        )
+        .unwrap(),
+    );
+    assert_eq!(fixture.primary_pixels.len(), 4 * 1024 * 1024);
+    let one_image = fixture.one_image_retained_limit();
+    let probe = fixture
+        .open(RuntimeContentLimits::default().with_retained_bytes(bytes(one_image)))
+        .unwrap();
+    let value = probe
+        .acquire_asset::<ImageDomain, ImageRuntimeCodec>(primary())
+        .unwrap();
+    let actual = value.retained_bytes();
+    let product_bytes = ImageRuntimeCodec::runtime_retained_bytes(value.product()).unwrap();
+    let codec = ImageRuntimeCodec::runtime_limits();
+    let maximum = codec.retained_bytes().get() + (actual - product_bytes);
+    assert!(actual < maximum);
+    drop((value, probe));
+
+    let retained_cap = one_image + actual;
+    let cases = [
+        (
+            fixture
+                .open(RuntimeContentLimits::default().with_retained_bytes(bytes(retained_cap)))
+                .unwrap(),
+            RuntimeContentBudgetKind::RetainedBytes,
+            one_image + maximum,
+            retained_cap,
+        ),
+        (
+            fixture
+                .open(
+                    RuntimeContentLimits::default()
+                        .with_retained_bytes(bytes(one_image + maximum))
+                        .with_work_bytes(codec.work_bytes()),
+                )
+                .unwrap(),
+            RuntimeContentBudgetKind::WorkBytes,
+            2 * codec.work_bytes().get(),
+            codec.work_bytes().get(),
+        ),
+    ];
+    fixture.remove_files();
+    for (base, kind, required, limit) in cases {
+        let (started, observe) = mpsc::channel();
+        let (release, blocked) = mpsc::channel();
+        let first = thread::scope(|scope| {
+            let base = &base;
+            let held = scope.spawn(move || {
+                IMAGE_DECODE_GATE.with_borrow_mut(|gate| {
+                    assert!(gate.is_none());
+                    *gate = Some((started, blocked));
+                });
+                base.acquire_asset::<ImageDomain, ObservedImageCodec>(primary())
+            });
+            observe.recv_timeout(Duration::from_secs(10)).unwrap();
+            let calls = IMAGE_DECODE_CALLS.get();
+            let refused = base.acquire_asset::<ImageDomain, ObservedImageCodec>(auxiliary());
+            let after = IMAGE_DECODE_CALLS.get();
+            release.send(()).unwrap();
+            let first = held.join().unwrap().unwrap();
+            assert!(matches!(
+                refused,
+                Err(RuntimeContentError::Budget {
+                    kind: refused_kind,
+                    required: refused_required,
+                    limit: refused_limit,
+                }) if (refused_kind, refused_required, refused_limit) == (kind, required, limit)
+            ));
+            assert_eq!(
+                after, calls,
+                "overlapping decode refused before codec entry"
+            );
+            first
+        });
+        assert_eq!(first.retained_bytes(), actual);
+        assert_eq!(first.product().pixels(), fixture.primary_pixels);
+        let second = base
+            .acquire_asset::<ImageDomain, ObservedImageCodec>(auxiliary())
+            .unwrap();
+        assert!(second.retained_bytes() < actual);
+        assert_eq!(second.product().pixels(), AUXILIARY_PIXELS);
+        assert!(!std::ptr::eq(
+            first.product().pixels().as_ptr(),
+            second.product().pixels().as_ptr()
+        ));
+    }
 }
 
 #[test]

@@ -9,6 +9,7 @@ use std::{
     collections::{BTreeMap, BTreeSet},
     error::Error,
     fmt,
+    mem::size_of,
 };
 
 use nara_asset::{
@@ -37,6 +38,8 @@ const MAX_ENTRY_TEXT_BYTES: usize = MAX_BUNDLE_CHARACTERS * 4;
 const MAX_COOKED_TEXT_BYTES: usize = 64 * 1024;
 const MAX_RUNTIME_BYTES: usize = 512 * 1024;
 const RETAINED_BYTES: usize = 256 * 1024;
+const STRING_ALLOCATION_OVERHEAD: usize = 2 * size_of::<usize>();
+const BTREE_ENTRY_OVERHEAD: usize = 6 * size_of::<usize>();
 const ENGINE_VERSION: &str = "0.1.0";
 
 pub struct TextBundleDomain;
@@ -638,6 +641,24 @@ impl RuntimeAssetCodec<TextBundle> for TextBundleDomain {
         };
         validate_product(&product).map_err(runtime_error)?;
         Ok(product)
+    }
+
+    fn runtime_retained_bytes(product: &TextBundle) -> Result<usize, AssetRuntimeError> {
+        validate_product(product).map_err(runtime_error)?;
+        // Match the Host's logical string/BTreeMap model, excluding wire bytes and decode scratch.
+        // The immutable admitted product has at most MAX_BUNDLE_ENTRIES entries.
+        let mut retained = size_of::<TextBundle>();
+        for entry in product.entries.values() {
+            retained = retained
+                .checked_add(
+                    size_of::<(ImportedProductId, TextBundleEntry)>() + BTREE_ENTRY_OVERHEAD,
+                )
+                .and_then(|bytes| bytes.checked_add(entry.name.len()))
+                .and_then(|bytes| bytes.checked_add(entry.text.len()))
+                .and_then(|bytes| bytes.checked_add(2 * STRING_ALLOCATION_OVERHEAD))
+                .ok_or_else(|| runtime_error(invalid_runtime()))?;
+        }
+        Ok(retained)
     }
 
     fn contains_runtime_product(product: &TextBundle, reference: AssetProductRef) -> bool {

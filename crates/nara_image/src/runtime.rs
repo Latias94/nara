@@ -36,6 +36,14 @@ impl AssetDomain for ImageDomain {
 /// retained output. These are conservative logical costs, not allocator interception or RSS
 /// measurements. Encoded input and output reservations remain the caller's responsibility.
 ///
+/// Decoded-output costing covers only values with a complete Product identity, valid Runtime
+/// dimensions and pixels, no source provenance and no attached retention owner, as returned by
+/// this decoder. The cost is `size_of::<ImageAsset>() + pixels.len() + size_of::<Box<[u8]>>() +
+/// 2 * size_of::<usize>()`: the inline value, fixed-size pixel allocation and modeled Arc storage
+/// for its boxed-slice handle and two reference counters. Shared pixels count in full. Captured
+/// encoded input, the immutable base, codec scratch and the Host wrapper are excluded. Source
+/// provenance and attached external owners are rejected because this codec cannot bound them.
+///
 /// Decoding creates an immutable product without a retention owner. A publishing Host must keep
 /// its decoded-output reservation alive through every escaped pixel or prepared-render owner;
 /// the codec neither manufactures an import lease nor performs I/O or publication.
@@ -198,6 +206,17 @@ mod codec {
             pixels.extend_from_slice(&bytes[end..]);
             ImageAsset::from_product(product, extent, format, color_space, pixels)
                 .map_err(|_| pixel_length_error())
+        }
+
+        fn runtime_retained_bytes(product: &ImageAsset) -> Result<usize, AssetRuntimeError> {
+            if product.product().is_none() {
+                return Err(product_error());
+            }
+            let pixel_bytes = checked_pixel_bytes(product.extent(), product.format())?;
+            if product.pixels().len() != pixel_bytes {
+                return Err(pixel_length_error());
+            }
+            product.runtime_retained_bytes().ok_or_else(retention_error)
         }
 
         fn contains_runtime_product(product: &ImageAsset, reference: AssetProductRef) -> bool {
@@ -379,7 +398,14 @@ mod codec {
     fn product_error() -> AssetRuntimeError {
         failure(
             "image.runtime-product",
-            "Runtime Image encoding requires an explicit complete Product identity",
+            "Runtime Image requires an explicit complete Product identity",
+        )
+    }
+
+    fn retention_error() -> AssetRuntimeError {
+        failure(
+            "image.runtime-retention",
+            "Runtime Image costing requires source-free pixels without attached retention owners",
         )
     }
 
