@@ -79,8 +79,6 @@ fn runtime_with_scene(
 ) -> RuntimeInstance {
     let loader = ProjectContentLoader::new(root).unwrap();
     let snapshot = loader.load(&candidate, &plan).unwrap();
-    let runtime_time = plan.settings().runtime.runtime_time_settings();
-    let fixed_time = plan.settings().runtime.fixed_time();
     let source = snapshot.scene_source();
     let sealed = plan.plugin_plan().instantiate().unwrap();
     let mut runtime = RuntimeAdmissionReservation::try_acquire()
@@ -94,8 +92,6 @@ fn runtime_with_scene(
     runtime
         .with_admission_scope(move |scope| {
             scope.apply_command(move |world: &mut nara::prelude::World| {
-                world.insert_resource(runtime_time);
-                world.insert_resource(fixed_time);
                 let report = materialize_startup_scene(world, source)
                     .expect("the retained parity scene should materialize");
                 assert!(!report.has_errors(), "{report:#?}");

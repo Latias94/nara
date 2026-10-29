@@ -1,7 +1,7 @@
 use nara_app::{
     PluginDefinition, PluginGroup, PluginGroupBuilder, PluginGroupId, PluginSlot, PluginSlotId,
 };
-use nara_project::{EffectiveProjectSettings, ProductCapabilitySet, RuntimePreset};
+use nara_project::{EffectiveRuntimeConfiguration, ProductCapabilitySet, RuntimePreset};
 
 use super::{HeadlessRuntimePlugins, MinimalPlugins, ServerPlugins};
 
@@ -19,12 +19,14 @@ const SLOT_PROJECT_PRIMARY_UI_SURFACE: PluginSlotId =
     PluginSlotId::new("nara.plugins.slot.project-primary-ui-surface");
 const SLOT_STARTUP_SCENE_ACTIVATION: PluginSlotId =
     PluginSlotId::new("nara.plugins.slot.startup-scene-activation");
+const SLOT_RUNTIME_TIME: PluginSlotId = PluginSlotId::new("nara.plugins.slot.runtime-time");
 
 #[derive(Debug, Clone)]
 pub(crate) struct ProjectProfilePlugins {
     preset: RuntimePreset,
     capabilities: ProductCapabilitySet,
     task_config: nara_tasks::TaskPoolConfig,
+    time_definition: PluginDefinition,
     primary_window: Option<nara_window::Window>,
     #[cfg(any(
         feature = "presentation-2d",
@@ -45,41 +47,42 @@ enum ProjectProfilePlacement {
 
 impl ProjectProfilePlugins {
     pub(crate) fn new(
-        settings: &EffectiveProjectSettings,
+        settings: &EffectiveRuntimeConfiguration,
         capabilities: ProductCapabilitySet,
     ) -> Self {
         Self::with_placement(settings, capabilities, ProjectProfilePlacement::Shipping)
     }
 
     pub(crate) fn for_editor_play(
-        settings: &EffectiveProjectSettings,
+        settings: &EffectiveRuntimeConfiguration,
         capabilities: ProductCapabilitySet,
     ) -> Self {
         Self::with_placement(settings, capabilities, ProjectProfilePlacement::EditorPlay)
     }
 
     fn with_placement(
-        settings: &EffectiveProjectSettings,
+        settings: &EffectiveRuntimeConfiguration,
         capabilities: ProductCapabilitySet,
         placement: ProjectProfilePlacement,
     ) -> Self {
         Self {
-            preset: settings.runtime_preset,
+            preset: settings.runtime_preset(),
             capabilities,
-            task_config: settings.tasks.pool_config,
-            primary_window: settings.window.to_window(),
+            task_config: settings.tasks().pool_config,
+            time_definition: super::runtime_time::definition(settings.runtime()),
+            primary_window: settings.window().to_window(),
             #[cfg(any(
                 feature = "presentation-2d",
                 feature = "presentation-ui",
                 feature = "render-wgpu"
             ))]
-            render_definition: nara_render::plugin(settings.render.world_canvas.map(|canvas| {
+            render_definition: nara_render::plugin(settings.render().world_canvas.map(|canvas| {
                 nara_render::WorldCanvas::new(canvas.width, canvas.height)
                     .expect("resolved project world canvas extents are positive")
             })),
             #[cfg(feature = "runtime-ui")]
             primary_ui_surface: settings
-                .ui
+                .ui()
                 .primary_surface
                 .map(super::ui_surface::AcceptedPrimaryUiSurfaceProfile::from_effective),
             placement,
@@ -102,14 +105,20 @@ impl PluginGroup for ProjectProfilePlugins {
             || self
                 .capabilities
                 .contains(nara_project::ProductCapability::RuntimeUi);
+        let builder = PluginGroupBuilder::new().add_slot(
+            PluginSlot::required(SLOT_RUNTIME_TIME, super::runtime_time::PLUGIN_ID),
+            self.time_definition,
+        );
         let builder = match self.preset {
-            RuntimePreset::Minimal if product_group_includes_minimal => PluginGroupBuilder::new(),
-            RuntimePreset::Minimal => PluginGroupBuilder::new()
-                .add_edited_group(MinimalPlugins.edit().configure(task_plugin.clone())),
-            RuntimePreset::LocalHeadless => PluginGroupBuilder::new()
+            RuntimePreset::Minimal if product_group_includes_minimal => builder,
+            RuntimePreset::Minimal => {
+                builder.add_edited_group(MinimalPlugins.edit().configure(task_plugin.clone()))
+            }
+            RuntimePreset::LocalHeadless => builder
                 .add_edited_group(HeadlessRuntimePlugins.edit().configure(task_plugin.clone())),
-            RuntimePreset::Server => PluginGroupBuilder::new()
-                .add_edited_group(ServerPlugins.edit().configure(task_plugin.clone())),
+            RuntimePreset::Server => {
+                builder.add_edited_group(ServerPlugins.edit().configure(task_plugin.clone()))
+            }
         };
 
         #[cfg(feature = "runtime-2d")]

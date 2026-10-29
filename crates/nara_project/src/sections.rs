@@ -24,8 +24,8 @@ use crate::path::ProjectPath;
 use crate::profile::ProjectProfileError;
 use crate::validation::{
     duration_from_positive_seconds, error, validate_duration_seconds, validate_fixed_step_limits,
-    validate_path_field, with_field_path, with_public_bool, with_public_identifier,
-    with_public_u64,
+    validate_path_field, validate_time_scale, with_field_path, with_public_bool,
+    with_public_identifier, with_public_u64,
 };
 
 // The manifest keeps entry capacity configurable while reserving enough space for
@@ -264,19 +264,11 @@ impl Default for ProjectRuntimeManifest {
 
 impl ProjectRuntimeManifest {
     pub(crate) fn validate_into(&self, diagnostics: &mut DiagnosticReport, prefix: &str) {
-        if !self.time_scale.is_finite() || self.time_scale < 0.0 {
-            let diagnostic = error(
-                "project.runtime.invalid-time-scale",
-                "Runtime time scale must be finite and non-negative",
-            );
-            let diagnostic = with_field_path(diagnostic, &format!("{prefix}.time_scale"));
-            let diagnostic = with_public_bool(diagnostic, "finite", self.time_scale.is_finite());
-            diagnostics.push(with_public_bool(
-                diagnostic,
-                "non_negative",
-                self.time_scale >= 0.0,
-            ));
-        }
+        validate_time_scale(
+            diagnostics,
+            &format!("{prefix}.time_scale"),
+            self.time_scale,
+        );
         validate_duration_seconds(
             diagnostics,
             &format!("{prefix}.max_delta_seconds"),
@@ -306,17 +298,37 @@ impl ProjectRuntimeManifest {
                 field: "runtime.fixed_timestep_seconds",
             },
         )?;
-        let runtime_time = RuntimeTimeSettings::new(self.paused, self.time_scale, max_delta)
-            .map_err(ProjectProfileError::InvalidRuntimeSettings)?;
-        let fixed_time = FixedTime::new(fixed_timestep)
-            .map_err(ProjectProfileError::InvalidRuntimeSettings)?
-            .with_max_steps_per_frame(self.max_fixed_steps_per_frame)
-            .map_err(ProjectProfileError::InvalidRuntimeSettings)?
-            .with_max_debt_steps(self.max_fixed_debt_steps)
-            .map_err(ProjectProfileError::InvalidRuntimeSettings)?
-            .with_catch_up_policy(self.catch_up_policy.into());
-        Ok(EffectiveRuntimeSettings::new(runtime_time, fixed_time))
+        lower_runtime_settings(
+            self.paused,
+            self.time_scale,
+            max_delta,
+            fixed_timestep,
+            self.max_fixed_steps_per_frame,
+            self.max_fixed_debt_steps,
+            self.catch_up_policy,
+        )
     }
+}
+
+pub(crate) fn lower_runtime_settings(
+    paused: bool,
+    time_scale: f32,
+    max_delta: Duration,
+    fixed_timestep: Duration,
+    max_steps_per_frame: u32,
+    max_debt_steps: u32,
+    catch_up_policy: ProjectFixedCatchUpPolicy,
+) -> Result<EffectiveRuntimeSettings, ProjectProfileError> {
+    let runtime_time = RuntimeTimeSettings::new(paused, time_scale, max_delta)
+        .map_err(ProjectProfileError::InvalidRuntimeSettings)?;
+    let fixed_time = FixedTime::new(fixed_timestep)
+        .map_err(ProjectProfileError::InvalidRuntimeSettings)?
+        .with_max_steps_per_frame(max_steps_per_frame)
+        .map_err(ProjectProfileError::InvalidRuntimeSettings)?
+        .with_max_debt_steps(max_debt_steps)
+        .map_err(ProjectProfileError::InvalidRuntimeSettings)?
+        .with_catch_up_policy(catch_up_policy.into());
+    Ok(EffectiveRuntimeSettings::new(runtime_time, fixed_time))
 }
 
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Deserialize, Serialize)]

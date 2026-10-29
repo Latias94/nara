@@ -2,7 +2,7 @@
 
 **Status**: Accepted
 **Date**: 2026-07-09
-**Last Revised**: 2026-10-28
+**Last Revised**: 2026-10-29
 **Refines**: ADR 0020: Project Source Layout
 **Refined By**: ADR 0039: Main Loop, Time Domains, Pause, and Runtime State; ADR 0041: Input Routing,
 Actions, Text Input, UI Focus, and Accessibility; ADR 0046: Plugin Metadata and Default Plugin
@@ -19,6 +19,54 @@ choose a physics, audio, text, UI, or other plugin implementation. Cargo and Rus
 composition select implementations. Plugin settings stay in typed Rust until a concrete file-backed
 consumer separately admits either a plugin-owned versioned asset or a namespaced manifest
 extension; this ADR does not create a generic plugin-settings registry.
+
+## Runtime Configuration Projection
+
+`nara_project` owns a separate `RuntimeConfiguration` value and its admitted
+`EffectiveRuntimeConfiguration`. A source project's selected profile is resolved before
+projection. The Runtime value contains only its preset/capability request, time, task, render,
+UI, window and diagnostic settings. Source paths, the source universe/identity policy,
+authoring Schema-bundle location, content/startup selection, profile name and external Play
+protocol remain with their owning source or delivery contracts.
+
+This is a derived delivery representation, not another authoring-settings authority. It reuses
+the existing section validation, lowering and product invariants. Directly constructed or decoded
+values must pass those checks before becoming effective settings. Effective Runtime values have
+no deserializer or mutable public fields that can bypass admission. Projection from the publicly
+constructible effective project value rechecks its settings rather than assuming that every
+caller obtained it from manifest resolution.
+
+Export and readmission preserve all admitted runtime values exactly. Derived Runtime time records
+store integer seconds and nanoseconds, so exporting an already lowered duration never requires
+reconstructing a floating-point source value. Source manifests retain their readable seconds
+fields. Both paths use the same time and fixed-work admission rules. Projection rejects public
+effective task and diagnostic policies that their selected raw section codecs cannot express,
+rather than truncating timeouts or silently discarding policy.
+
+Source-relative `input.action_map` has no admitted processed Runtime representation yet. A
+remaining path explicitly refuses Runtime projection; selecting a profile that explicitly clears
+it is valid. Projection must not silently discard a requested input map. A concrete input-resource
+delivery workflow can replace this restriction later through its own owner.
+
+Root composition consumes the admitted Runtime values for its plugin and product-capability
+closures. Its source candidate retains actual project/manifest/profile lineage separately;
+the source-backed Runtime plan continues binding that lineage without storing the entire
+effective source project. Project path and authoring policy checks remain with source Hosts.
+This separation does not authorize a source-free base: that entry must bind its own expected
+content, target and executable/Schema agreement rather than inventing source lineage.
+
+All selected settings must affect their actual owner. In particular, the diagnostic capacity
+configures the real Diagnostics plugin through a canonical definition; parsing it without
+changing runtime storage is insufficient. Configured diagnostic definitions include all runtime
+and pressure limits/retention so different behavior cannot share an equivalent definition key.
+
+Initial Runtime time settings are installed before ordinary product plugin `build` and `finish`,
+so plugins deriving state from fixed timestep or time scale observe the admitted values.
+Materialization does not overwrite these clocks after plugin initialization. A canonical private
+time definition includes pause, scale, maximum delta, timestep, fixed-work/debt limits and
+catch-up policy in the plugin fingerprint; runtime counters are not configuration identity.
+Preset invariants apply after the complete profile overlay. A base server preset must not leak
+its forced window/catch-up values into a later non-server preset.
 
 ## Context
 

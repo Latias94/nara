@@ -272,6 +272,7 @@ impl ProjectManifest {
 
         let mut settings = EffectiveProjectSettings::from_manifest(self)?;
         let Some(profile_name) = profile else {
+            settings.enforce_product_invariants();
             return Ok(settings);
         };
         let Some(overlay) = self.profiles.get(profile_name) else {

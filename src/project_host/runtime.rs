@@ -1423,9 +1423,6 @@ fn materialize_project_runtime(
             "Project runtime has no semantic command queue",
         )));
     }
-    world.insert_resource(plan.settings().runtime.runtime_time_settings());
-    world.insert_resource(plan.settings().runtime.fixed_time());
-
     let diagnostics = materialize_startup_scene(world, startup_scene)
         .map_err(|error| HostFault::new(error.diagnostics().clone()))?;
     content_residency::publish_startup(world, snapshot)?;

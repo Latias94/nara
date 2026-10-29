@@ -20,6 +20,7 @@ use thiserror::Error;
 
 mod default_settings;
 mod profile;
+mod runtime_time;
 #[cfg(feature = "runtime-ui")]
 mod ui_surface;
 

@@ -39,8 +39,9 @@ pub struct EffectiveProjectSettings {
 }
 
 impl EffectiveProjectSettings {
+    // Resolve profile overlays before enforcing rules derived from the final runtime preset.
     pub(crate) fn from_manifest(manifest: &ProjectManifest) -> Result<Self, ProjectProfileError> {
-        let mut settings = Self {
+        Ok(Self {
             schema_version: manifest.schema_version,
             project: EffectiveProjectInfo {
                 name: manifest.project.name.clone(),
@@ -70,22 +71,16 @@ impl EffectiveProjectSettings {
             input: manifest.input.clone().lower()?,
             diagnostics: manifest.diagnostics.lower()?,
             execution: EffectiveProjectExecutionSettings::default(),
-        };
-        settings.enforce_product_invariants();
-        Ok(settings)
+        })
     }
 
     pub(crate) fn apply_profile_kind_defaults(&mut self, kind: ProjectProfileKind) {
         match kind {
             ProjectProfileKind::Headless => {
                 self.runtime_preset = RuntimePreset::LocalHeadless;
-                self.window.enabled = false;
             }
             ProjectProfileKind::Server => {
                 self.runtime_preset = RuntimePreset::Server;
-                self.window.enabled = false;
-                self.runtime
-                    .force_catch_up_policy(FixedCatchUpPolicy::PreserveDebt);
             }
             ProjectProfileKind::Editor
             | ProjectProfileKind::Dev
@@ -95,30 +90,25 @@ impl EffectiveProjectSettings {
     }
 
     pub(crate) fn enforce_profile_kind_invariants(&mut self, kind: ProjectProfileKind) {
-        match kind {
-            ProjectProfileKind::Headless => {
-                self.runtime_preset = RuntimePreset::LocalHeadless;
-                self.window.enabled = false;
-            }
-            ProjectProfileKind::Server => {
-                self.runtime_preset = RuntimePreset::Server;
-                self.window.enabled = false;
-                self.runtime
-                    .force_catch_up_policy(FixedCatchUpPolicy::PreserveDebt);
-            }
-            ProjectProfileKind::Editor
-            | ProjectProfileKind::Dev
-            | ProjectProfileKind::Release
-            | ProjectProfileKind::Custom => {}
+        self.apply_profile_kind_defaults(kind);
+        if kind == ProjectProfileKind::Headless {
+            self.window.enabled = false;
         }
     }
 
     pub(crate) fn enforce_product_invariants(&mut self) {
-        if self.runtime_preset == RuntimePreset::Server {
-            self.window.enabled = false;
-            self.runtime
-                .force_catch_up_policy(FixedCatchUpPolicy::PreserveDebt);
-        }
+        enforce_runtime_preset_invariants(self.runtime_preset, &mut self.runtime, &mut self.window);
+    }
+}
+
+pub(crate) fn enforce_runtime_preset_invariants(
+    preset: RuntimePreset,
+    runtime: &mut EffectiveRuntimeSettings,
+    window: &mut EffectiveWindowSettings,
+) {
+    if preset == RuntimePreset::Server {
+        window.enabled = false;
+        runtime.force_catch_up_policy(FixedCatchUpPolicy::PreserveDebt);
     }
 }
 
@@ -162,7 +152,7 @@ pub struct EffectiveUiSettings {
 }
 
 impl EffectiveUiSettings {
-    fn from_manifest(ui: ProjectUiManifest) -> Self {
+    pub(crate) fn from_manifest(ui: ProjectUiManifest) -> Self {
         Self {
             primary_surface: ui.primary_surface.map(EffectivePrimaryUiSurface::from),
         }

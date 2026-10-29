@@ -522,8 +522,6 @@ fn render_runtime_with_admission_edit(
     let loader = ProjectContentLoader::new(root).unwrap();
     let content = loader.load(&project, &plan).unwrap();
     let source = content.scene_source();
-    let runtime_time = plan.settings().runtime.runtime_time_settings();
-    let fixed_time = plan.settings().runtime.fixed_time();
     let sealed = plan.plugin_plan().instantiate().unwrap();
     let mut candidate = RuntimeAdmissionReservation::try_acquire()
         .unwrap()
@@ -536,8 +534,6 @@ fn render_runtime_with_admission_edit(
     candidate
         .with_admission_scope(move |scope| {
             scope.apply_command(move |world: &mut nara::prelude::World| {
-                world.insert_resource(runtime_time);
-                world.insert_resource(fixed_time);
                 let report = materialize_startup_scene(world, source)
                     .expect("the retained render scene should materialize");
                 assert!(!report.has_errors(), "{report:#?}");

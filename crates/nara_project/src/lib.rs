@@ -25,6 +25,7 @@ mod manifest;
 mod path;
 mod profile;
 mod render;
+mod runtime_configuration;
 mod sections;
 mod validation;
 
@@ -52,6 +53,10 @@ pub use render::{
     EffectiveRenderSettings, EffectiveWorldCanvas, ProjectRenderManifest, ProjectRenderPatch,
     ProjectWorldCanvasManifest,
 };
+pub use runtime_configuration::{
+    EffectiveRuntimeConfiguration, RuntimeConfiguration, RuntimeConfigurationError,
+    RuntimeTimeConfiguration,
+};
 pub use sections::{
     NativeDocumentIdentity, ProjectAuthoringManifest, ProjectCapabilitiesManifest,
     ProjectDiagnosticsManifest, ProjectFixedCatchUpPolicy, ProjectInfo, ProjectInputManifest,
@@ -67,23 +72,24 @@ pub mod prelude {
         DESKTOP_SUPERVISED_PLAY_V1_CONTRACT, EffectiveDiagnosticsSettings, EffectiveInputSettings,
         EffectivePrimaryUiSurface, EffectiveProjectContentSettings,
         EffectiveProjectExecutionSettings, EffectiveProjectInfo, EffectiveProjectPaths,
-        EffectiveProjectSettings, EffectiveRenderSettings, EffectiveRuntimeSettings,
-        EffectiveStartupSettings, EffectiveTaskSettings, EffectiveUiSafeArea, EffectiveUiSettings,
-        EffectiveWindowSettings, EffectiveWorldCanvas, MAX_PROJECT_CONTENT_SCENES,
-        MAX_PROJECT_EXECUTION_CONTRACT_BYTES, MAX_PROJECT_FIXED_DEBT_STEPS,
-        MAX_PROJECT_FIXED_STEPS_PER_FRAME, MAX_PROJECT_UI_LOGICAL_EXTENT, NativeDocumentIdentity,
-        ProductCapability, ProductCapabilitySet, ProjectAuthoringManifest,
-        ProjectCapabilitiesManifest, ProjectCapabilitiesPatch, ProjectContentManifest,
-        ProjectDiagnosticsManifest, ProjectExecutionContract, ProjectExecutionPatch,
-        ProjectFixedCatchUpPolicy, ProjectInfo, ProjectInputManifest, ProjectManifest,
-        ProjectManifestLoad, ProjectManifestMutationError, ProjectManifestWriteError, ProjectPath,
-        ProjectPathError, ProjectPathsManifest, ProjectPresentMode, ProjectProfileError,
-        ProjectProfileKind, ProjectProfileOverlay, ProjectRenderManifest, ProjectRenderPatch,
-        ProjectRuntimeManifest, ProjectStartupManifest, ProjectTaskPoolManifest,
-        ProjectTaskPoolPatch, ProjectTaskShutdownManifest, ProjectTaskShutdownPatch,
-        ProjectTasksManifest, ProjectTasksPatch, ProjectUiManifest, ProjectUiPatch,
-        ProjectUiSafeAreaManifest, ProjectUiSurfaceManifest, ProjectWindowManifest,
-        ProjectWindowMode, ProjectWorldCanvasManifest, RuntimePreset, SourceUniverseId,
+        EffectiveProjectSettings, EffectiveRenderSettings, EffectiveRuntimeConfiguration,
+        EffectiveRuntimeSettings, EffectiveStartupSettings, EffectiveTaskSettings,
+        EffectiveUiSafeArea, EffectiveUiSettings, EffectiveWindowSettings, EffectiveWorldCanvas,
+        MAX_PROJECT_CONTENT_SCENES, MAX_PROJECT_EXECUTION_CONTRACT_BYTES,
+        MAX_PROJECT_FIXED_DEBT_STEPS, MAX_PROJECT_FIXED_STEPS_PER_FRAME,
+        MAX_PROJECT_UI_LOGICAL_EXTENT, NativeDocumentIdentity, ProductCapability,
+        ProductCapabilitySet, ProjectAuthoringManifest, ProjectCapabilitiesManifest,
+        ProjectCapabilitiesPatch, ProjectContentManifest, ProjectDiagnosticsManifest,
+        ProjectExecutionContract, ProjectExecutionPatch, ProjectFixedCatchUpPolicy, ProjectInfo,
+        ProjectInputManifest, ProjectManifest, ProjectManifestLoad, ProjectManifestMutationError,
+        ProjectManifestWriteError, ProjectPath, ProjectPathError, ProjectPathsManifest,
+        ProjectPresentMode, ProjectProfileError, ProjectProfileKind, ProjectProfileOverlay,
+        ProjectRenderManifest, ProjectRenderPatch, ProjectRuntimeManifest, ProjectStartupManifest,
+        ProjectTaskPoolManifest, ProjectTaskPoolPatch, ProjectTaskShutdownManifest,
+        ProjectTaskShutdownPatch, ProjectTasksManifest, ProjectTasksPatch, ProjectUiManifest,
+        ProjectUiPatch, ProjectUiSafeAreaManifest, ProjectUiSurfaceManifest, ProjectWindowManifest,
+        ProjectWindowMode, ProjectWorldCanvasManifest, RuntimeConfiguration,
+        RuntimeConfigurationError, RuntimePreset, RuntimeTimeConfiguration, SourceUniverseId,
         SourceUniverseIdError,
     };
 }

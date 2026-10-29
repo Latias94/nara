@@ -22,8 +22,8 @@ use crate::sections::{
 };
 use crate::validation::{
     duration_from_positive_seconds, error, validate_duration_seconds, validate_fixed_step_limits,
-    validate_optional_path_field, validate_path_field, with_field_path, with_public_bool,
-    with_public_u64,
+    validate_optional_path_field, validate_path_field, validate_time_scale, with_field_path,
+    with_public_bool, with_public_u64,
 };
 
 #[derive(Debug, Clone, PartialEq, Deserialize, Serialize, Default)]
@@ -361,20 +361,8 @@ pub struct ProjectRuntimePatch {
 
 impl ProjectRuntimePatch {
     fn validate_into(&self, diagnostics: &mut DiagnosticReport, prefix: &str) {
-        if let Some(time_scale) = self.time_scale
-            && (!time_scale.is_finite() || time_scale < 0.0)
-        {
-            let diagnostic = error(
-                "project.runtime.invalid-time-scale",
-                "Runtime time scale must be finite and non-negative",
-            );
-            let diagnostic = with_field_path(diagnostic, &format!("{prefix}.time_scale"));
-            let diagnostic = with_public_bool(diagnostic, "finite", time_scale.is_finite());
-            diagnostics.push(with_public_bool(
-                diagnostic,
-                "non_negative",
-                time_scale >= 0.0,
-            ));
+        if let Some(time_scale) = self.time_scale {
+            validate_time_scale(diagnostics, &format!("{prefix}.time_scale"), time_scale);
         }
         if let Some(seconds) = self.max_delta_seconds {
             validate_duration_seconds(diagnostics, &format!("{prefix}.max_delta_seconds"), seconds);

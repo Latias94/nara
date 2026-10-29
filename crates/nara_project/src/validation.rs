@@ -144,6 +144,38 @@ pub(crate) fn duration_from_positive_seconds(value: f64) -> Option<Duration> {
         .filter(|duration| !duration.is_zero())
 }
 
+pub(crate) fn validate_time_scale(
+    diagnostics: &mut DiagnosticReport,
+    field_path: &str,
+    value: f32,
+) {
+    if !value.is_finite() || value < 0.0 {
+        let diagnostic = error(
+            "project.runtime.invalid-time-scale",
+            "Runtime time scale must be finite and non-negative",
+        );
+        let diagnostic = with_field_path(diagnostic, field_path);
+        let diagnostic = with_public_bool(diagnostic, "finite", value.is_finite());
+        diagnostics.push(with_public_bool(diagnostic, "non_negative", value >= 0.0));
+    }
+}
+
+pub(crate) fn validate_nonzero_duration(
+    diagnostics: &mut DiagnosticReport,
+    field_path: &str,
+    value: Duration,
+) {
+    if value.is_zero() {
+        diagnostics.push(with_field_path(
+            error(
+                "project.runtime.invalid-duration",
+                "Runtime duration must be greater than zero",
+            ),
+            field_path,
+        ));
+    }
+}
+
 pub(crate) fn validate_duration_seconds(
     diagnostics: &mut DiagnosticReport,
     field_path: &str,

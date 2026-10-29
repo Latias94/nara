@@ -1774,7 +1774,7 @@ impl EditorProjectSession {
         #[cfg(any(feature = "presentation-2d", feature = "presentation-ui"))]
         let (game_view_config, host_policy) = match game_view::editor_game_view_bridge_definition(
             candidate.normalized_capabilities(),
-            candidate.settings().window.to_window(),
+            candidate.runtime_configuration().window().to_window(),
         ) {
             Some((config, definition)) => (Some(config), host_policy.with_definition(definition)),
             None => (None, host_policy),

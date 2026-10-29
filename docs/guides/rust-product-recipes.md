@@ -10,6 +10,31 @@ contributions. See [Project Asset Domains](project-asset-domains.md) for typed p
 dependency reads and the Check/Play/source-Export boundary. Domain registration selects project
 content preparation; runtime systems consume the published collection through a normal plugin.
 
+## Resolved project configuration
+
+The selected project profile resolves before Runtime composition. A
+`ProjectSettingsCandidate` retains the source paths, profile and manifest lineage in `settings()`;
+its `runtime_configuration()` exposes only the admitted values used by the Runtime.
+`RuntimePlan::settings()` returns that same `EffectiveRuntimeConfiguration`, with getters for
+time, tasks, render, UI, window, diagnostics, preset and requested capabilities.
+
+Use `EffectiveRuntimeConfiguration::to_configuration()` to export those values as a serializable
+`RuntimeConfiguration`. Decoding or constructing that raw record does not admit it: call
+`resolve()` and handle its structured diagnostics. Export and readmission preserve the admitted
+values, including duration precision. `RuntimeTimeConfiguration` exposes Rust `Duration` fields;
+their wire values contain integer `secs` and `nanos`, while source manifests continue to use
+floating-point seconds. The effective value has no deserializer or mutable getters.
+
+A source-relative `input.action_map` currently refuses Runtime projection because it has no
+processed input-resource representation. A selected profile may explicitly clear it with
+`clear_action_map = true`. The Host never silently drops a requested map. This configuration
+projection alone is not a source-free content catalog or executable launch entry.
+
+Initial clock values are installed before ordinary plugin `build` and `finish`, so a plugin may
+derive its initial state from the selected fixed timestep or time scale. These values and the
+actual diagnostic storage configuration participate in the resolved plugin fingerprint. Runtime
+ticks, elapsed time and accumulated debt do not participate in configuration identity.
+
 ## Runtime-only plugins
 
 Use `add_plugin` for a stateless plugin that implements `Default`:

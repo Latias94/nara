@@ -327,7 +327,7 @@ impl EditorProjectSession {
                     .and_then(|snapshot| snapshot.settings().ui.primary_surface)
                     .or_else(|| {
                         self.trusted_compiled()
-                            .and_then(|lane| lane.plan.settings().ui.primary_surface)
+                            .and_then(|lane| lane.plan.settings().ui().primary_surface)
                     })
                     .map(crate::product::AcceptedPrimaryUiSurfaceProfile::from_effective);
                 let canvas = self.ui_preview.prepare(

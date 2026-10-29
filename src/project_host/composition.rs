@@ -10,7 +10,10 @@ use nara_app::{
     PluginId, PluginPlan, PluginPlanError, PluginProductCapability, PluginSchemaProviderId,
 };
 use nara_fs::{ContentDigest, FileIdentity};
-use nara_project::{EffectiveProjectSettings, ProductCapability, ProductCapabilitySet};
+use nara_project::{
+    EffectiveProjectSettings, EffectiveRuntimeConfiguration, ProductCapability,
+    ProductCapabilitySet,
+};
 use nara_reflect::__private::{
     ResolvedComponentSchemaProvider, register_or_validate_resolved_schema_provider,
     resolve_schema_provider,
@@ -100,6 +103,7 @@ pub struct ProjectSettingsCandidate {
     pub(super) lineage: ProjectSettingsLineage,
     pub(super) manifest_digest: ContentDigest,
     pub(super) settings: EffectiveProjectSettings,
+    pub(super) runtime_configuration: EffectiveRuntimeConfiguration,
     pub(super) explicit: ProductCapabilitySet,
     pub(super) implied: ProductCapabilitySet,
     pub(super) normalized: ProductCapabilitySet,
@@ -121,6 +125,12 @@ impl ProjectSettingsCandidate {
     #[must_use]
     pub const fn settings(&self) -> &EffectiveProjectSettings {
         &self.settings
+    }
+
+    /// Runtime-only values admitted from the fully resolved source profile.
+    #[must_use]
+    pub const fn runtime_configuration(&self) -> &EffectiveRuntimeConfiguration {
+        &self.runtime_configuration
     }
 
     #[must_use]
@@ -416,7 +426,7 @@ impl SchemaValidationInput {
 #[derive(Clone)]
 pub struct RuntimePlan {
     lineage: ProjectSettingsLineage,
-    settings: EffectiveProjectSettings,
+    settings: EffectiveRuntimeConfiguration,
     compiled: CompiledProductCapabilities,
     explicit: ProductCapabilitySet,
     normalized: ProductCapabilitySet,
@@ -449,7 +459,10 @@ impl RuntimePlan {
     }
 
     #[must_use]
-    pub const fn settings(&self) -> &EffectiveProjectSettings {
+    /// Returns only the admitted values consumed by the Runtime composition.
+    ///
+    /// Project paths, authoring inputs and profile selection remain with the source candidate.
+    pub const fn settings(&self) -> &EffectiveRuntimeConfiguration {
         &self.settings
     }
 
@@ -679,7 +692,7 @@ pub fn project_runtime_plugins(candidate: &ProjectSettingsCandidate) -> ProjectR
     project_runtime_plugins_from_profile(
         candidate,
         crate::product::ProjectProfilePlugins::new(
-            candidate.settings(),
+            candidate.runtime_configuration(),
             candidate.normalized_capabilities(),
         ),
     )
@@ -691,7 +704,10 @@ fn project_runtime_plugins_from_profile(
 ) -> ProjectRuntimePlugins {
     ProjectRuntimePlugins {
         lineage: candidate.lineage,
-        plugins: plugins.edit(),
+        plugins: plugins.edit().configure(nara_diagnostic::plugin(
+            candidate.runtime_configuration().diagnostics().runtime,
+            nara_diagnostic::RuntimePressureSettings::default(),
+        )),
         recipe: crate::ProductRecipe::new(),
         overlay: None,
         host_policy: None,
@@ -718,7 +734,7 @@ pub(crate) fn editor_play_runtime_plugins_with_recipe(
         project_runtime_plugins_from_profile(
             candidate,
             crate::product::ProjectProfilePlugins::for_editor_play(
-                candidate.settings(),
+                candidate.runtime_configuration(),
                 candidate.normalized_capabilities(),
             ),
         ),
@@ -858,7 +874,7 @@ pub fn resolve_runtime_plan(
 
     Ok(RuntimePlan {
         lineage: candidate.lineage,
-        settings: candidate.settings.clone(),
+        settings: candidate.runtime_configuration.clone(),
         compiled: candidate.compiled,
         explicit: candidate.explicit,
         normalized: candidate.normalized,

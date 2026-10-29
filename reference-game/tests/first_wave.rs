@@ -1745,8 +1745,6 @@ fn admit_adapter_candidate_with_edit(
     source: SceneSource,
     edit: impl FnOnce(&mut World) + Send + Sync + 'static,
 ) -> nara::app::RuntimeCandidate {
-    let runtime_time = plan.settings().runtime.runtime_time_settings();
-    let fixed_time = plan.settings().runtime.fixed_time();
     let sealed = plan.plugin_plan().instantiate().unwrap();
     let mut candidate = RuntimeAdmissionReservation::try_acquire()
         .unwrap()
@@ -1759,8 +1757,6 @@ fn admit_adapter_candidate_with_edit(
     candidate
         .with_admission_scope(move |scope| {
             scope.apply_command(move |world: &mut World| {
-                world.insert_resource(runtime_time);
-                world.insert_resource(fixed_time);
                 let report = materialize_startup_scene(world, source)
                     .expect("the retained startup scene should materialize");
                 assert!(!report.has_errors(), "{report:#?}");

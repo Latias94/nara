@@ -419,8 +419,6 @@ fn rejected_physical_local_command_faults_the_managed_runtime() {
     let (project, plan, root) = desktop_candidate_plan_and_root();
     let loader = ProjectContentLoader::new(root).unwrap();
     let snapshot = loader.load(&project, &plan).unwrap();
-    let runtime_time = plan.settings().runtime.runtime_time_settings();
-    let fixed_time = plan.settings().runtime.fixed_time();
     let source = snapshot.scene_source();
     let sealed = plan.plugin_plan().instantiate().unwrap();
     let mut candidate = RuntimeAdmissionReservation::try_acquire()
@@ -434,8 +432,6 @@ fn rejected_physical_local_command_faults_the_managed_runtime() {
     candidate
         .with_admission_scope(move |scope| {
             scope.apply_command(move |world: &mut nara::prelude::World| {
-                world.insert_resource(runtime_time);
-                world.insert_resource(fixed_time);
                 let report = materialize_startup_scene(world, source)
                     .expect("the retained desktop scene should materialize");
                 assert!(!report.has_errors(), "{report:#?}");
@@ -497,8 +493,6 @@ fn desktop_runtime_with_context(context: Option<Arc<AtomicBool>>) -> RuntimeInst
     };
     let loader = ProjectContentLoader::new(root).unwrap();
     let snapshot = loader.load(&candidate, &plan).unwrap();
-    let runtime_time = plan.settings().runtime.runtime_time_settings();
-    let fixed_time = plan.settings().runtime.fixed_time();
     let source = snapshot.scene_source();
     let sealed = plan.plugin_plan().instantiate().unwrap();
     let mut candidate = RuntimeAdmissionReservation::try_acquire()
@@ -512,8 +506,6 @@ fn desktop_runtime_with_context(context: Option<Arc<AtomicBool>>) -> RuntimeInst
     candidate
         .with_admission_scope(move |scope| {
             scope.apply_command(move |world: &mut nara::prelude::World| {
-                world.insert_resource(runtime_time);
-                world.insert_resource(fixed_time);
                 let report = materialize_startup_scene(world, source)
                     .expect("the retained desktop scene should materialize");
                 assert!(!report.has_errors(), "{report:#?}");

@@ -8,8 +8,8 @@ use nara_fs::{
     ContentDigest, FileCapability, FileIdentity, FsError, FsOperation, PathValidationError,
 };
 use nara_project::{
-    DEFAULT_MANIFEST_BYTE_LIMIT, EffectiveProjectSettings, ProductCapability, ProductCapabilitySet,
-    ProjectManifest, ProjectProfileError, RuntimePreset,
+    DEFAULT_MANIFEST_BYTE_LIMIT, EffectiveProjectSettings, EffectiveRuntimeConfiguration,
+    ProductCapability, ProductCapabilitySet, ProjectManifest, ProjectProfileError, RuntimePreset,
 };
 
 use super::composition::{
@@ -26,6 +26,7 @@ pub enum ProjectCandidateErrorKind {
     ManifestTooLarge,
     Manifest,
     Profile,
+    RuntimeConfiguration,
     PresetConflict,
     InvalidCapabilityClosure,
     UnavailableCapabilities,
@@ -94,6 +95,9 @@ impl fmt::Display for ProjectCandidateError {
             }
             ProjectCandidateErrorKind::Manifest => "project manifest is invalid",
             ProjectCandidateErrorKind::Profile => "project profile is invalid",
+            ProjectCandidateErrorKind::RuntimeConfiguration => {
+                "project Runtime configuration is invalid"
+            }
             ProjectCandidateErrorKind::PresetConflict => {
                 "runtime preset conflicts with requested product capabilities"
             }
@@ -222,7 +226,38 @@ fn validate_product_request(
     lineage: ProjectSettingsLineage,
     manifest_digest: ContentDigest,
 ) -> Result<ProjectSettingsCandidate, ProjectCandidateError> {
-    let explicit = settings.requested_capabilities;
+    let runtime_configuration = settings.runtime_configuration().map_err(|error| {
+        ProjectCandidateError::new(
+            ProjectCandidateErrorKind::RuntimeConfiguration,
+            error.diagnostics().clone(),
+        )
+    })?;
+    let admission = validate_runtime_capabilities(&runtime_configuration)?;
+    Ok(ProjectSettingsCandidate {
+        lineage,
+        manifest_digest,
+        settings,
+        runtime_configuration,
+        explicit: admission.explicit,
+        implied: admission.implied,
+        normalized: admission.normalized,
+        required: admission.required,
+        compiled: admission.compiled,
+    })
+}
+
+struct RuntimeCapabilityAdmission {
+    explicit: ProductCapabilitySet,
+    implied: ProductCapabilitySet,
+    normalized: ProductCapabilitySet,
+    required: ProductCapabilitySet,
+    compiled: super::composition::CompiledProductCapabilities,
+}
+
+fn validate_runtime_capabilities(
+    settings: &EffectiveRuntimeConfiguration,
+) -> Result<RuntimeCapabilityAdmission, ProjectCandidateError> {
+    let explicit = settings.requested_capabilities();
     let required = ProductCapabilitySet::singleton(ProductCapability::RuntimeCore);
     let normalized = explicit.union(required);
     let implied = normalized.difference(explicit);
@@ -244,7 +279,7 @@ fn validate_product_request(
         ));
     }
 
-    if settings.runtime_preset == RuntimePreset::Server {
+    if settings.runtime_preset() == RuntimePreset::Server {
         let forbidden = ProductCapabilitySet::from_capabilities([
             ProductCapability::Runtime2d,
             ProductCapability::RuntimeUi,
@@ -275,10 +310,7 @@ fn validate_product_request(
         ));
     }
 
-    Ok(ProjectSettingsCandidate {
-        lineage,
-        manifest_digest,
-        settings,
+    Ok(RuntimeCapabilityAdmission {
         explicit,
         implied,
         normalized,
