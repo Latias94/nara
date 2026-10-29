@@ -89,9 +89,22 @@ without building a universal GPU wrapper or behavior verifier.
 
 ### Identity, Wiring And Candidate Boundaries
 
-The October 30 amendment adds the following three boundary contracts. Exact output leases,
+The October 30 amendments define the following boundary contracts. Exact output leases,
 predecessor-checked history, stream retirement and recovery remain the already specified basis.
 These additions refine the proposal and report no implementation or qualification.
+
+**Contribution lifecycle.** Each contribution is admitted under an explicit owner scope with a
+registration identity and incarnation. Its descriptor, exact immutable capture/native-adapter pair
+and capability requirements form one installed definition. Feature-instance identity additionally
+distinguishes the owner's instances of that registration; Rust type and list position are not
+instance identities. Initial composition may freeze registrations at Host construction. Before
+an update/removal interface freezes, define withdrawal as stopping new admission and fencing the
+old incarnation, while retained candidates keep the exact definition needed for realization,
+encoding and cleanup. They never look up a replacement through a current registration. Removal
+completes after actual retained/code/native uses retire through their owners; route removal alone
+is insufficient. A successor is separately admitted against enabled capabilities, or requests
+explicit Host reconstruction. This specifies lifetime boundaries, not dynamic loading, a native
+ABI, hot unload or a universal mutable contribution registry.
 
 **Instance and graph identity.** Feature instances have stable identities within their declared
 owner scope, independent of captured Rust type, registration order and list position. Reordering
@@ -121,6 +134,45 @@ candidates continue; device/Host failures retain their domain-wide scope. A sele
 a separately validated candidate with pinned initialized inputs. Failed preparation cannot publish
 partial outputs or advance history. Existing presentation and interaction owners still decide
 display and input authority; this does not require arbitrary partial-graph publication.
+
+### Imported Content And UI Output Boundaries
+
+**Captured content to graph input.** A domain's capture step may resolve a selected logical asset
+through its actual content owner. It retains exact immutable content and any same-generation
+reconstruction lease before GPU candidate preparation. Existing `PreparedImageSnapshot` is the
+initial Image boundary; no universal content wrapper is required. Persistent Product association
+is retained when present, but procedural content need not invent one. GPU realization/import
+consumes that exact capture rather than querying current source, Product bindings or mutable World
+state to recreate its meaning. Content ownership stays independent of GPU Host identity.
+
+The Host admits the physical import into its own identity/device epoch, with exact resource
+version, initialized range, extent/format/sample count, color/alpha interpretation and permitted
+usages where applicable. A graph import retains those facts and physical custody through its
+actual candidate/submission uses. Content publication or a later realization cannot retarget it.
+Domain admission/revocation, retained readability, recovery eligibility and physical GPU completion
+keep separate meanings. A new import must satisfy its current authority; existing admitted packets
+retain their exact input under their original lifetime and epoch rules. Concrete content owners
+still publish/retire content, and the Host still realizes device objects. The Material/native-family
+publication successor in R7 must join this seam before its public interface freezes. This is not
+a source resolver, generic GPU registry or second RHI.
+
+**Graph output to UI composition.** An Editor or Runtime UI adapter imports an exact Host-issued
+output lease, retaining producer/View/capture/output version, physical compatibility, color/alpha
+meaning and Host/device epoch. Its owned render candidate/composite packet retains that lease;
+an opaque UI equality key alone carries no custody. `UiImageId` and the neutral `UiFrame` keep
+their existing identity-only image meaning. Nara's custom-drawn Editor is free to use its own
+drawing vocabulary without receiving raw target acquire/submit/present authority.
+
+The display occurrence separately owns its destination rectangle, clipping, DPI/coordinate
+transform and interaction policy. Composite admission joins these exact facts with the output's
+producer mapping/picking facts; two panels can display one output with different placements.
+An effect that cannot preserve/provide a valid mapping explicitly disables precise picking.
+The presented composite receipt, not the output's texture identity, grants input authority.
+Initial realization may use direct sampling or an explicit copied version; record that choice,
+copy cost and completion/retirement custody. A producer's next output cannot overwrite a retained
+version. On unavailable input, preserve only an authorized compatible last-good presentation or
+reject explicitly; device loss cannot preserve old-epoch authority. No lookup of the latest output,
+source or asset may reconstruct an older UI capture.
 
 ### Execution Ownership
 
@@ -220,6 +272,16 @@ arbitrary shader's inverse.
     the Scene effect's second pass is pending or rejected. Its output group and history cannot
     publish partially. Any selected fallback is separately validated; independent candidates keep
     progressing and their presentation/input outcomes remain truthful.
+12. Withdraw a contribution with retained captures, a pending realization and submitted work, then
+    admit a replacement. New admission refuses the withdrawn incarnation; old work never resolves
+    the replacement, actual cleanup keeps its required definition alive, and unrelated streams
+    continue. Initial static registration does not qualify runtime replacement or hot unload.
+13. Import a captured Image through the same content-to-Host seam from both source and processed
+    content, then publish a successor and retire live stores. Old admitted packets retain their
+    exact generation; new imports require current authority. Display one exact Scene output in
+    two clipped UI placements and reject stale input/composite mappings independently. Exercise
+    the selected copy/direct-sampling path and device-epoch refusal without requiring a complete
+    custom-drawn Editor toolkit.
 
 Shader/material artifacts and shared View envelope details are separate owner designs in
 [reassessment D15/D16](../foundation-architecture-reassessment.md#d15-shader-material-and-pipeline-resources).

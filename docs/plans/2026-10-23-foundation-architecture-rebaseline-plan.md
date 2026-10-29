@@ -549,6 +549,13 @@ with the actual Source Door/Save/Export consumer, then implement input/target de
 ordered plan. Future third-party native families need a typed publication facet through the same
 owner before their Material/render interface freezes; CPU decode alone grants no residency.
 
+Decide the future content-set boundary now: Product identity never becomes a package/mount key.
+A provider or overlay must contribute a separately admitted immutable context, with its selected
+membership/dependency closure and original executable plan; it cannot mutate a live base or
+retarget admitted acquisitions/recovery inputs. Equal catalog bytes do not establish the same
+base/plan owner. This preserves the directory-backed implementation without selecting overlay
+precedence, a package resolver or another storage executor.
+
 Acceptance: two clean content builds, a different host/target selection, source/cache inaccessible
 and no Cargo on the runtime machine, server stripping, wrong target/schema/digest rejection,
 failed candidate retaining last-good executable/data. State non-hermetic inputs and actual
@@ -573,6 +580,16 @@ candidate-local resource identities, explicit semantic-output/resource compatibi
 publication groups with scoped failure. These additions extend the already specified exact output
 leases, history transitions, stream retirement and recovery basis. They remain Proposed design
 requirements, with no implementation or qualification claim.
+
+The [content import/UI output boundary](../architecture/adr/0121-composable-render-programs-and-host-execution.md#imported-content-and-ui-output-boundaries)
+also closes the cross-owner seams before interface freeze. Capture exact domain content before
+Host/device-local import; preserve procedural inputs and existing Image snapshots without a
+mandatory universal lease type. UI composition retains exact Host outputs in its adapter-owned
+packet, while kernel image keys remain opaque identities. Display placement/clip/input mapping
+joins the producer output at composite admission. Qualify source/processed generation interleaving,
+contribution withdrawal with retained work, and two UI placements of one output. Initial static
+registration and one copy/direct-sampling path are legitimate staged capabilities within that
+contract; dynamic loading, hot unload and a complete toolkit are separate work.
 
 Validate the architecture on an independent two-pass Scene-color blur, keeping Runtime HUD crisp,
 then retain original color for an Editor before/after view and independently chain a second effect.
@@ -748,6 +765,12 @@ Preserve current semantic owners and use Dear's existing workflow behavior as th
 Nara-owned controls, identity, interaction, layout and drawing. Mature text/layout primitives
 may be reused without importing a complete foreign UI runtime. No third-party embedding
 experiment or demonstration that adoption fails is required first.
+
+Consume Scene render results through R8's exact Host output/composite boundary. Keep physical
+leases in the UI adapter's owned render packet and display/input facts in its composite receipt;
+do not put GPU custody in `UiImageId` or merge a panel's clipping with producer View identity.
+Qualify the selected copy/direct-sampling path and its retirement cost before replacing the
+working viewport integration. This preserves the current typed UI Image contract.
 
 Use the same useful document tool and an actual Nara-owned window/render-view handoff. Establish
 these observations before replacing the selected frontend:

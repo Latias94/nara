@@ -765,6 +765,12 @@ Effect compatibility distinguishes camera motion from a cut. Proposed ADR 0121 o
 write, output-lease and history transition contracts; these remain unqualified design decisions.
 Its [identity, wiring and candidate boundaries](adr/0121-composable-render-programs-and-host-execution.md#identity-wiring-and-candidate-boundaries)
 also specify stable Feature incarnations, semantic outputs and independent publication groups.
+The [cross-owner import/output contracts](adr/0121-composable-render-programs-and-host-execution.md#imported-content-and-ui-output-boundaries)
+separate immutable domain captures from Host/device imports and exact output leases from UI
+placement/input receipts. Contribution withdrawal retains the exact definition needed by admitted
+work. Kernel image identities do not acquire GPU custody, and future content providers cannot
+mutate an admitted base/plan. These contracts constrain later implementation without introducing
+a universal resource registry, content wrapper or package resolver.
 The [R8 counterexamples](../plans/2026-10-23-foundation-architecture-rebaseline-plan.md#r8-external-render-feature-and-host-local-execution)
 must challenge those contracts before interface freeze; this remains Proposed work.
 
