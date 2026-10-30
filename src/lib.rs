@@ -106,6 +106,9 @@ pub mod project_host;
 #[cfg(feature = "project-workflow")]
 pub mod project_workflow;
 
+#[cfg(feature = "project-workflow")]
+pub mod asset_build;
+
 #[cfg(feature = "project-tooling")]
 pub mod project_tooling;
 

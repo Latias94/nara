@@ -71,3 +71,12 @@ independent of GUI dependencies and selects the Editor facet separately from the
 Its [qualification record](../../../../docs/verification/2026-10-21-editor-source-domain-import.md)
 covers canonical metadata publication followed by Check/Play; it does not install a native or
 GPU product in the Editor.
+
+The [durable build consumer](tests/durable_build.rs) separately selects this domain's optional
+`SourceAssetBuild` facet. It exercises normalized settings, actual raw/optional observations,
+two clean stores, fresh-process verified reuse, Product continuity after cache deletion and
+whole-group interrupted publication. Its real Scene/bundle outputs feed the existing retained
+Runtime pack and managed travel through public APIs. The sibling
+[Image consumer](../tests/durable_image_build.rs) executes actual processed-input cooking for
+different target dimensions. These build operations do not install an importer registry or
+qualify target executable selection, a packaged Player or GPU cooking.

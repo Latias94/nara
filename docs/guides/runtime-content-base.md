@@ -11,10 +11,11 @@ cook a target, select Cargo artifacts or qualify a complete packaged Player. Fir
 residency supports the explicitly selected Image and TileSet facets; other families expose typed
 CPU collections and keep concrete native publication with their consuming owner.
 
-The reference-demand and deep-validation changes are being integrated under the
-[CP3 plan](../plans/2026-10-30-reference-validity-and-load-demand-plan.md). Complete consumer
-qualification remains in progress; this API description supplies no new native/platform or
-performance qualification.
+Reference demand and deep validation have
+[bounded production qualification](../knowledge/engineering/verification/2026-10/2026-10-30T172312Z-reference-validity-and-current-demand-production-replacement-qualification-b16511fa33a74c2b808270394b28bf62.md)
+under the [CP3 plan](../plans/2026-10-30-reference-validity-and-load-demand-plan.md). Encoded
+backing has its separate retained-pack evidence. This API description supplies no new
+native/platform or performance qualification.
 
 ## Authority And Identity
 

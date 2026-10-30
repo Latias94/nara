@@ -158,9 +158,11 @@ The October 30 [research disposition](../research/2026-10-30-engine-direction-re
 reconciles the user-supplied archive against `b939da2`, preserving the ten original studies and
 their different reference revisions. It refines the existing units below rather than adding a
 parallel roadmap or reopening qualified source-free, Input-definition and Prefab replacements.
-Its risk/capability findings are not new product qualification. The current endpoint-retirement
-unit continues first; reference demand, motion phases and render/UI completion constrain later
-interfaces before they freeze.
+Its risk/capability findings are not new product qualification. Its
+[implemented-successor checkpoint](../research/2026-10-30-engine-direction-reconciliation.md#implemented-successors)
+records the qualified endpoint/reference-demand/backing successors and the current local-build
+entry; the original receiving-baseline order is historical. Motion phases and render/UI
+completion still constrain their later interfaces before they freeze.
 
 ## R1: Minimal Semantic Tool And Exact Operation Outcomes
 
@@ -550,7 +552,8 @@ selected-instance complete conversion, not outer-only unpack, cross-source Apply
 ## R6: Resource Facets, Durable Continuity And Local Artifact Store
 
 **Design:** D10, D11, D13. **State:** source/import, compound continuity and bounded Runtime
-codec/base/Host slices qualified; durable artifact store and complete packaged delivery remain open.
+codec/base/Host and finite local-build slices qualified; general build scheduling and complete
+packaged delivery remain open.
 **Owners:** asset/domain contracts and project Host.
 
 Build one independent compound importer through typed source, Runtime decode, optional cook and
@@ -575,7 +578,13 @@ reload/prepared consumers; that prerequisite does not qualify durable groups or 
 The [qualified prerequisite](../knowledge/engineering/verification/2026-10/2026-10-30T201802Z-source-import-recipes-and-target-sensitive-cpu-image-cook-prerequisite-qualification-462c0179d20b44fd8545d4c135e814f9.md)
 now records the actual recipe replacement and real CPU target-sensitive Image transform, with
 owning/downstream/public/native evidence. Tracked closed execution, durable groups and target
-build/delivery remain open; the CPU transform does not complete those contracts.
+build/delivery were not qualified by that prerequisite alone. The
+[local-build qualification](../knowledge/engineering/verification/2026-10/2026-10-30T231610Z-tracked-local-artifact-builds-and-complete-group-publication-qualification-d3fcd08e15e04d45812ae09d7c81e944.md)
+now closes the finite R6b outcome: typed tracked compound/processed Image execution, complete
+local publication/reuse, actual interruption/fresh-process cases and original Runtime custody.
+Its Root/Asset1252, final independent57, owner20 and feature/Clippy evidence retain their exact
+scope. This does not qualify general dependency scheduling, target executable selection or a
+packaged Player.
 
 The [ordered importer and delivery plan](2026-10-29-asset-import-and-runtime-delivery-plan.md)
 first moves the existing executing source facet below root/Scene/2D while preserving all actual

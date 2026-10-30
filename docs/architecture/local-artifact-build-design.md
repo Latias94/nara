@@ -1,6 +1,6 @@
 # Local Artifact Build Authority And Publication
 
-Date: 2026-10-31. Status: design and implementation in progress; not qualified.
+Date: 2026-10-31. Status: finite typed local-build contract implemented and qualified in the linked scope.
 Parent: [foundation R6/R7](../plans/2026-10-23-foundation-architecture-rebaseline-plan.md#r6-resource-facets-durable-continuity-and-local-artifact-store).
 Owners: [ADR 0007](adr/0007-asset-identity-and-import-pipeline.md),
 [ADR 0103](adr/0103-concrete-domain-owned-asset-import-execution.md) and the bounded
@@ -18,8 +18,11 @@ This work follows the qualified reference-demand and retained-pack units. Runtim
 separate consumers of selected build outputs; Runtime acquisition does not invoke a builder.
 The source recipe correction and CPU Image transform now have
 [bounded qualification](../knowledge/engineering/verification/2026-10/2026-10-30T201802Z-source-import-recipes-and-target-sensitive-cpu-image-cook-prerequisite-qualification-462c0179d20b44fd8545d4c135e814f9.md).
-The closed executing build and local publication protocol below remain unimplemented; their
-selected requirements are not an availability claim.
+The [complete local-build qualification](../knowledge/engineering/verification/2026-10/2026-10-30T231610Z-tracked-local-artifact-builds-and-complete-group-publication-qualification-d3fcd08e15e04d45812ae09d7c81e944.md)
+records tracked compound/processed Image execution, verified reuse, complete publication and
+original Runtime custody. The bounded contract is selected in
+[ADR 0103](adr/0103-concrete-domain-owned-asset-import-execution.md#finite-typed-local-builds-2026-10-31-refinement),
+without accepting the rest of Proposed ADR 0087 or qualifying target executable/package delivery.
 
 ## Identity And Ownership
 
@@ -158,6 +161,17 @@ and local group publication through the actual compound source/runtime codec con
 the concrete target-sensitive and processed-dependency cook before the general build/cook
 interface freezes. Do not count the source provenance correction as completed R6b.
 
-The exact public build facade and storage module placement remain open until the source-backed
-consumer audit establishes the execution seam. No generic erased executor, new VFS, remote cache,
-language-neutral build graph, package resolver or automatic native trust is selected.
+The consumer audit selects the pure optional `nara_asset::SourceAssetBuild` facet below root,
+Scene and presentation. The root `asset_build` module, enabled by `project-workflow`, owns
+`ArtifactSourceRequest`, `build_source`, concrete `build_image_import` / `cook_image_group`
+adapters and `ArtifactBuildStore`. Reuse of filesystem capabilities, aggregate operation budgets
+and Runtime-delivery consumers belongs at this Host boundary; it does not justify a new crate
+or moving Image orchestration into `nara_asset`.
+
+`ArtifactBuildResult` owns either a verified reuse group or a successful publication receipt
+with its rebuild reason. `Hit`/`Built`, current bytes and optional `publication_receipt()` are
+views of that one outcome. Store commit and the build facade preserve the actual index
+replacement, lock and directory-sync evidence. An `Uncertain` error retains that receipt and its cause. Runtime
+catalogue/pack admission and typed publication remain the existing delivery owners. No generic
+erased executor, new VFS, remote cache, language-neutral build graph, package resolver or
+automatic native trust is selected.

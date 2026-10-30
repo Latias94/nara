@@ -124,11 +124,14 @@ records complete owner/public Headless workflows; the file's continued availabil
 from immutable admitted meaning. GPU/streaming performance and general providers remain separate.
 The [local artifact build design](local-artifact-build-design.md),
 [source/consumer study](../research/2026-10-31-local-build-recipes-and-publication.md) and
-[unit plan](../plans/2026-10-31-local-artifact-build-plan.md) own the next R6b boundary.
+[unit plan](../plans/2026-10-31-local-artifact-build-plan.md) own the finite R6b boundary.
 Source import provenance, closed execution recipes, actual output digests and group publication
 are distinct. The [qualified recipe/CPU cook prerequisites](../knowledge/engineering/verification/2026-10/2026-10-30T201802Z-source-import-recipes-and-target-sensitive-cpu-image-cook-prerequisite-qualification-462c0179d20b44fd8545d4c135e814f9.md)
-remove synthetic source artifact records and add actual target-dependent pixels. Durable-store,
-tracked build execution and complete target-build qualification remain open.
+remove synthetic source artifact records and add actual target-dependent pixels. The
+[local-build qualification](../knowledge/engineering/verification/2026-10/2026-10-30T231610Z-tracked-local-artifact-builds-and-complete-group-publication-qualification-d3fcd08e15e04d45812ae09d7c81e944.md)
+adds actual tracked compound/processed Image execution, complete local groups, fresh-process
+reuse and original Runtime custody. General graph scheduling and complete target executable/
+package delivery remain open.
 
 ## Background Designs
 

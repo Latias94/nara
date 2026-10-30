@@ -13,9 +13,10 @@ use std::{
 };
 
 use nara_asset::{
-    AssetDomain, AssetImportError, AssetImportLimits, AssetImportSource, AssetPath,
-    AssetProductRef, AssetReferenceDemand, AssetRuntimeError, AssetRuntimeLimits,
-    ImportedProductId, RuntimeAssetCodec, SourceAssetImporter, SourceHash, StableAssetId,
+    AssetBuildSource, AssetDomain, AssetImportError, AssetImportLimits, AssetImportSource,
+    AssetPath, AssetProductRef, AssetReferenceDemand, AssetRuntimeError, AssetRuntimeLimits,
+    ImportedProductId, RuntimeAssetCodec, SourceAssetBuild, SourceAssetImporter, SourceHash,
+    StableAssetId,
 };
 use nara_core::{
     ByteLimit, DepthLimit, EngineVersion, FormatGenerator, FormatKind, ItemLimit,
@@ -380,6 +381,76 @@ impl SourceAssetImporter for TextBundleDomain {
             source: source_id,
             entries,
         })
+    }
+}
+
+impl SourceAssetBuild for TextBundleDomain {
+    type Codec = Self;
+
+    const BUILD_ID: &'static str = "consumer.text-bundle.source-build";
+    const BUILD_REVISION: u32 = 1;
+
+    fn normalize_settings(mut settings: Self::Settings) -> Result<Self::Settings, Diagnostic> {
+        settings
+            .validate()
+            .map_err(TextBundleError::into_diagnostic)?;
+        settings
+            .continuity
+            .assignments
+            .sort_unstable_by_key(|assignment| assignment.row);
+        settings.continuity.retired.sort_unstable();
+        Ok(settings)
+    }
+
+    fn build<E>(source: &mut AssetBuildSource<'_, E>) -> Result<TextBundle, AssetImportError<E>> {
+        let mut product = source.prepare_import::<Self>()?;
+        let admitted = source
+            .metadata()
+            .admit::<Self::Settings>()
+            .map_err(|_| import_error(invalid_settings()))?;
+        let maximum = admitted.settings().max_characters;
+        let path = AssetPath::new("build-suffix.txt").expect("fixed valid build suffix path");
+        let Some(suffix) =
+            source.read_optional_dependency(&path, byte_limit(MAX_BUNDLE_SUFFIX_BYTES))?
+        else {
+            return Ok(product);
+        };
+        if suffix.len() > MAX_BUNDLE_SUFFIX_BYTES {
+            return Err(import_error(invalid_suffix()));
+        }
+        let suffix = std::str::from_utf8(&suffix).map_err(|_| import_error(invalid_suffix()))?;
+        let suffix_characters = suffix.chars().count();
+        let mut cooked_bytes = 0_usize;
+        for entry in product.entries.values() {
+            if entry.text.chars().count() + suffix_characters > maximum {
+                return Err(import_error(too_long()));
+            }
+            cooked_bytes += entry.text.len() + suffix.len();
+        }
+        if cooked_bytes > MAX_COOKED_TEXT_BYTES {
+            return Err(import_error(too_long()));
+        }
+        for entry in product.entries.values_mut() {
+            entry.text.push_str(suffix);
+        }
+        Ok(product)
+    }
+
+    fn visit_products<E>(
+        product: &TextBundle,
+        mut visitor: impl FnMut(AssetProductRef) -> Result<(), E>,
+    ) -> Result<(), E> {
+        visitor(
+            AssetProductRef::new(product.source, ImportedProductId::PRIMARY)
+                .expect("admitted bundle has a valid source identity"),
+        )?;
+        for id in product.entries.keys() {
+            visitor(
+                AssetProductRef::new(product.source, *id)
+                    .expect("admitted bundle has valid auxiliary identities"),
+            )?;
+        }
+        Ok(())
     }
 }
 

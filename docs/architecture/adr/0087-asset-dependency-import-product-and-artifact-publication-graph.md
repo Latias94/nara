@@ -2,7 +2,7 @@
 
 **Status**: Proposed
 **Date**: 2026-07-13
-**Last Revised**: 2026-10-23
+**Last Revised**: 2026-10-31
 **Owner**: `nara_asset`, importer-owning domains, and authoring hosts
 **Admission Trigger**: A bounded multi-product importer proves tracked dependency discovery,
 stable product reconciliation, exact invalidation, and crash-safe old-or-new artifact-group
@@ -12,9 +12,11 @@ measured project graph proves that the proposed local graph and publication unit
 **Related**: ADR 0007, ADR 0033, ADR 0037, ADR 0048, ADR 0049, ADR 0051, ADR 0052, ADR 0068,
 ADR 0070, ADR 0080, ADR 0083
 **Accepted Extracted Slice**: [ADR 0103](0103-concrete-domain-owned-asset-import-execution.md)
-accepts concrete domain-owned single-product import execution and retires the unused generic
-registry. This ADR remains Proposed for tracked dependency discovery, multi-product identity,
-reconciliation, invalidation graphs, and atomic artifact-group publication.
+accepts concrete domain-owned import execution and retires the unused generic registry. Its
+finite typed local-build refinement additionally selects explicit tracked inputs, closed recipes
+and whole-group local publication, with qualification retained in its implementation plan.
+This ADR remains Proposed for the general dependency/reconciliation/invalidation graph and
+broader scheduling/publication requirements beyond that bounded slice.
 The separate [ADR 0122](0122-scoped-imported-product-identity-and-authored-continuity.md) adopts
 the logical product identity and authored-continuity semantics only; it does not qualify this
 artifact-group graph or its publication contract.

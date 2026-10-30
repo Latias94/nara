@@ -70,7 +70,11 @@ Source import provenance uses `ImportRecipe` and `ImportRecipeDigest` for the ac
 settings, dependency and versioned importer facts. It does not fabricate an artifact file/path
 or identify output bytes. A reusable artifact group needs independently verified output content,
 complete membership and its closed executing build recipe; the
-[local build design](../local-artifact-build-design.md) owns that in-progress successor.
+[local build design](../local-artifact-build-design.md) owns that in-progress successor. The
+finite typed contract in [ADR 0103](0103-concrete-domain-owned-asset-import-execution.md#finite-typed-local-builds-2026-10-31-refinement)
+selects current-input replay, separate seed/closed-recipe associations and complete local group
+publication. A generated lookup hint is not a current hit, and a verified encoded group grants
+neither Runtime acquisition nor native residency by itself.
 
 ### Canonical source locations and scoped references
 
@@ -167,7 +171,8 @@ weak handle identity alone cannot authorize loading or residency.
   source consumers refuse auxiliary selection. Complete Runtime Product bindings support explicitly
   admitted primary and auxiliary resources without a source database.
 - `Handle<T>` should remain stable across reloads; asset data may carry an internal generation/version.
-- Import cache design is deferred but not ignored.
+- Finite local build reuse follows ADR 0103's explicit typed execution and complete group contract.
+  General dependency scheduling, remote reuse and target executable delivery retain separate owners.
 - Acquisition, immutable encoded content, typed decode and native residency remain separate
   owners; choosing a synchronous caller does not merge their identities or lifetime contracts.
 
@@ -371,7 +376,7 @@ under the ordered delivery plan. Proposed ADR 0088 is not accepted wholesale.
 
 ## Follow-Up Questions
 
-- Which concrete import inputs and target facts belong in each artifact recipe identity?
+- Which additional domains need target facts or processed observations beyond the finite typed builds?
 - Which additional content families qualify source-independent Runtime preparation and publication?
 - What project-level diagnostics should be emitted for repeatedly failing hot reloads?
 

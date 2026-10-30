@@ -130,3 +130,20 @@ CP3 demand. It preserves complete captured availability and adds original-file a
 temporary reads with actual public travel/cancellation, exact budgets and escaped pixel evidence.
 These successors do not rewrite this report's receiving snapshot or imported studies, qualify
 general streaming/GPU performance, or close the remaining R5/R6/R8/R11/Editor workflows above.
+
+The [source-recipe/CPU Image cook prerequisite](../knowledge/engineering/verification/2026-10/2026-10-30T201802Z-source-import-recipes-and-target-sensitive-cpu-image-cook-prerequisite-qualification-462c0179d20b44fd8545d4c135e814f9.md)
+is also qualified at `ec7fe1b`: actual six-field source recipes replace synthetic artifact
+records, and a concrete CPU cook produces real target-dependent pixels. The execution
+entry at that baseline was steps 3-5 of the [local artifact plan](../plans/2026-10-31-local-artifact-build-plan.md):
+tracked compound/processed Image execution, durable complete-group publication, verified reuse
+and retained original Runtime custody. The subsequent
+[local-build qualification](../knowledge/engineering/verification/2026-10/2026-10-30T231610Z-tracked-local-artifact-builds-and-complete-group-publication-qualification-d3fcd08e15e04d45812ae09d7c81e944.md)
+closes that finite R6b outcome. General graph scheduling, target executable selection and complete
+packaged delivery retain their separate remaining work.
+
+A subsequent recheck of the same supplied ZIP against `ec7fe1b` found all ten imported research
+documents byte-identical and no missing foundation work unit requiring a reordered roadmap.
+Schema/claim evolution, joint motion/executor selection, exact render-output/UI completion,
+material ABI evolution and the editable Nara-drawn Inspector retain their existing consumer
+gates. This current checkpoint supersedes the historical execution order above; it does not
+rewrite its receiving-baseline observations or treat planned capabilities as implemented.

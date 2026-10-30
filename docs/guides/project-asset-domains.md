@@ -330,6 +330,75 @@ metadata bytes.
 Editor native/GPU publication, arbitrary import-only products, automatic reimport, durable caches
 and dynamic project plugin loading remain separate contracts.
 
+## Finite Local Artifact Builds
+
+Source-backed Check/Play remains usable without a durable build cache. A domain that also
+supports generated encoded output implements the optional `nara_asset::SourceAssetBuild` facet:
+select its `RuntimeAssetCodec`, name the build ID/revision, normalize effective settings and
+enumerate every actual primary/auxiliary Product. Only this facet requires serializable settings.
+Its default `build` executes the unchanged source importer. A custom build may additionally use
+`AssetBuildSource::read_optional_dependency`; `None` records actual absence, while authority,
+budget and I/O failures preserve the caller's error.
+
+With the root `project-workflow` feature, a trusted compiled Host opens an `ArtifactBuildStore`
+from an existing read/write directory capability and explicit `ArtifactBuildLimits`. It supplies
+an `ArtifactSourceRequest` with the actual source directory, logical scope, local alias and
+selected versioned definition. The definition's implementation digest names independently
+observed implementation bytes; a revision string or hash of an unused label is insufficient.
+Generated cache metadata records that selection and cannot choose executable code.
+
+```rust,ignore
+use nara::asset_build::{ArtifactSourceRequest, build_source};
+
+let request = ArtifactSourceRequest::new(
+    source_directory,
+    source_scope,
+    local_source_path,
+    selected_build_definition,
+);
+let result = build_source::<MyDomain>(&store, &request, |point| {
+    revalidate_selected_request(point)
+})?;
+if let Some(receipt) = result.publication_receipt() {
+    observe_publication(receipt.index_receipt(), receipt.directory_sync_tier());
+}
+let group = result.into_group();
+let runtime_bytes = group.member_bytes("runtime").expect("source build Runtime member");
+```
+
+The Host admits/normalizes current metadata before probing reuse. It records the exact normalized
+values passed to execution and replays the prior raw/presence observations against current inputs.
+Raw read limits belong to the source domain, independently of encoded output member size. A miss
+replaces the observation set with the current execution's actual reads; discarded dependencies
+do not remain in a successor recipe. The callback runs on reuse and publication boundaries, must
+fence the current request, and must not re-enter the same store while its commit lock is held.
+The source executor revalidates actual file bindings and bytes after the callback.
+
+`build_image_import` imports an actual PNG into source-free Runtime Image bytes. The explicit
+`cook_image_group` adapter consumes a verified group's captured member and runs the real CPU
+Image cook with the selected settings, target and limits. The caller fences that immutable
+upstream group's current selection; immutability alone does not establish that it is still desired.
+Processed observations include the complete upstream group, member, format and Product, so raw
+PNG equality does not hide changed color-space settings. The adapter does not resize an atlas
+implicitly or invoke GPU work.
+
+A result is current `Hit` or `Built`, with a reason and complete verified encoded group. A build
+retains its actual successful publication receipt; reuse performs no index replacement and has
+no new receipt. Publication writes blobs and manifest before the single final index boundary.
+An error or panic after that boundary returns `ArtifactBuildError::Uncertain` with the actual
+receipt and cause. Missing/corrupt generated data is an explicit invalid-cache result; it never
+becomes a current hit or silently usable last-good output. Lock/directory-sync guarantee tiers
+are observations, not a promise of portable crash atomicity.
+
+Groups retain exact captured bytes and their original allowance across store drop or cache
+deletion. Feed those bytes into the existing Runtime catalogue/pack delivery path; Runtime
+acquisition never invokes this builder. Product identity remains authored, independently of
+recipe/content hashes and generated names. See the independent
+[compound execution consumer](../../tests/fixtures/module-consumer/asset-domain-consumer/tests/durable_build.rs)
+and [Image cook/delivery consumer](../../tests/fixtures/module-consumer/tests/durable_image_build.rs)
+for complete capability-backed examples. Target executable selection and a packaged Player
+remain separate from these local build operations.
+
 ## Executable Delivery
 
 Declare the domain package in the game's own Cargo dependencies and register it in the product

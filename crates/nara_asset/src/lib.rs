@@ -1,5 +1,7 @@
 //! Asset identity, project metadata, typed handles, and in-memory asset tables.
 
+#[cfg(feature = "serde")]
+mod build;
 mod database;
 #[cfg(feature = "serde")]
 mod format;
@@ -21,6 +23,8 @@ use std::{
     fmt::{self, Display, Formatter},
 };
 
+#[cfg(feature = "serde")]
+pub use build::{AssetBuildSource, SourceAssetBuild};
 pub use database::{
     AssetDatabaseError, AssetMeta, AssetMetaIdentity, AssetRecord, AssetReferenceResolver,
     AssetSourceKind, ProjectAssetDatabase,

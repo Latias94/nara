@@ -124,6 +124,11 @@ borrowed input, encoded output and aggregate operation custody. This pure CPU op
 publish a reusable group, select an executable target or install native resources. Atlas layouts
 that depend on exact Image extents require their own explicit coordinated cook.
 
+For tracked reusable output, the root `asset_build::build_image_import` and `cook_image_group`
+adapters execute this path against exact captured inputs and publish a complete local group.
+See [finite local artifact builds](project-asset-domains.md#finite-local-artifact-builds) for
+current-input reuse, successful/uncertain receipts and the separate Runtime-delivery handoff.
+
 ## Use Images In UI
 
 The Scene/ECS UI adapter binds an Image explicitly with

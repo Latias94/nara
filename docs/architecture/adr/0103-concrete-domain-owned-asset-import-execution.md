@@ -9,8 +9,8 @@
 [ADR 0046](0046-plugin-metadata-and-default-plugin-groups.md), and
 [ADR 0095](0095-plugin-owned-specialized-domains-and-project-configuration.md)
 **Extracted From**: [ADR 0087](0087-asset-dependency-import-product-and-artifact-publication-graph.md),
-which remains Proposed for multi-product dependency discovery, artifact-group reconciliation, and
-crash-safe group publication
+which remains Proposed for the general dependency/reconciliation graph beyond the finite typed
+local-build slice below
 **Refined By**: [ADR 0115](0115-editor-image-import-metadata-and-authoring-publication.md): Editor
 Image Import Metadata and Authoring Publication
 **Implementation Plan**: [Ordered UI Kernel and Engine Boundary Correction](../../plans/2026-08-04-002-refactor-ordered-ui-kernel-and-engine-boundary-correction-plan.md), NUI-U3
@@ -85,8 +85,9 @@ flowchart LR
   publication semantics, with comparison to representative domains where reuse is claimed. A
   second real implementation is useful evidence, not a blanket permission gate for a first owner
   contract or compound-import study.
-- Multi-product dependency tracking and artifact-group publication remain governed by Proposed ADR
-  0087 until its own admission evidence is complete.
+- General multi-product dependency scheduling and reconciliation remain Proposed under ADR 0087.
+  The finite typed local-build refinement below selects its narrower executing/publication contract;
+  selection and implementation qualification remain separate.
 - ADR 0115's explicit Editor Import/Reimport lane and Host-private referenced-image hydration
   worklist are two consumers of the same Image-domain implementation. Host-owned metadata
   publication and a concrete Editor image store do not prove that their distinct publication rules
@@ -216,8 +217,9 @@ Editor settings, Check, source-backed Play, processed decode and Export without 
 production domains, the whole ADR 0087 graph or a complete source-free packaging product. Each
 operation must name its own input/identity/budget/result/publication contract. Missing Runtime or
 cook facets return operation-unavailable; import registration or Check success does not imply
-processed Runtime support. Tracked cross-product inputs, stable subproduct reconciliation and
-artifact-group publication remain separate Proposed obligations under ADR 0083/0087.
+processed Runtime support. General cross-product scheduling and source reconciliation remain
+Proposed under ADR 0083/0087. The later finite local-build refinement selects only explicit
+tracked inputs and complete local group publication; it does not adopt that general graph.
 
 `AssetDomain` names the typed product independently of executable operations. The source facet
 inherits that marker; `RuntimeAssetCodec` separately owns bounded deterministic encode/decode for
@@ -260,6 +262,45 @@ freeze and production/platform claims require their matching later evidence; his
 are evidence navigation, not authorization gates for this study. See foundation reassessment
 [D10](../foundation-architecture-reassessment.md#d10-resource-extension-facets) and
 [D18](../foundation-architecture-reassessment.md#d18-decision-scope-evidence-and-deletion-discipline).
+
+### Finite Typed Local Builds (2026-10-31 refinement)
+
+An explicitly selected compiled Host may execute a finite source build or concrete Image cook
+and publish its complete encoded output group to a local generated store. This is a separate
+operation from source-backed Check/Play, Editor metadata import, Runtime acquisition and native
+resource publication. The refinement selects a contract; its
+[implementation plan](../../plans/2026-10-31-local-artifact-build-plan.md) retains the actual
+qualification boundary.
+
+`nara_asset::SourceAssetBuild` is an optional typed facet over the existing source importer. Only
+this facet requires serializable settings. It normalizes the same admitted settings used for
+execution, supports tracked required/optional reads and enumerates actual Product mappings.
+The pure facet receives no directory writes, scheduling registry, Scene or mutable World.
+The root `asset_build` module owns the concrete executing Host, source capabilities, aggregate
+budgets and local store. Image import/cook remain explicit adapters using their domain codecs;
+the shared layer neither discovers importers nor schedules a general dependency graph.
+
+Product identity, pre-discovery seed, closed recipe, output content digest and complete group
+manifest are distinct. The Host selects versioned definitions with explicit implementation
+content authority. Current admitted normalized metadata and consumed target facts enter the
+seed; actual scoped raw/presence and verified processed-member observations close the recipe.
+Build observations do not replace the codec's actual Immediate/Deferred Runtime references.
+A stored seed association is a verified historical hint. The execution owner must replay current
+inputs and revalidate its request before returning a current hit or publishing a successor.
+
+Local publication verifies every selected member and serializes cooperating owners through an
+original retained lock. It publishes content blobs, then the complete manifest, then one index
+replacement as the success visibility boundary. Seed hints and successful closed-recipe
+associations remain separate so A-to-B-to-A cannot hide different output for the same recipe.
+Expected file identity is a binding check, not compare-and-swap; lock and directory-sync tiers
+must be reported without a sandbox or stronger crash-durability claim. Failures after index
+replacement retain the actual publication receipt as uncertain, including callback panic.
+
+Verified groups capture exact encoded bytes and their original retained budget lease. Cooking
+and delivery consume those bytes rather than verify a generated name and reopen it later.
+Escaped groups, admitted Runtime bases and decoded/native values retain their own original
+owners across cache deletion or replacement. This adds no global semantic budget manager,
+remote cache, VFS, generic importer registry or Runtime build fallback.
 
 ## Alternatives Considered
 
