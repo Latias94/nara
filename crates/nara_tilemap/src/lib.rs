@@ -30,7 +30,8 @@ mod runtime;
 mod source;
 
 pub use admission::{
-    TilemapMembershipError, tilemap_membership_work_bytes, validate_persisted_tilemap_membership,
+    TilemapMembershipError, TilemapMembershipRequirement, prepare_persisted_tilemap_membership,
+    tilemap_membership_work_bytes, validate_persisted_tilemap_membership,
 };
 #[cfg(feature = "serde")]
 pub use runtime::TileSetRuntimeCodec;
@@ -1525,6 +1526,11 @@ mod tests {
             ),
         ]);
         let atlas = TileAtlasLayout::grid(Vec2::ONE, 1, 1);
+        let requirement = prepare_persisted_tilemap_membership(&value)
+            .unwrap()
+            .unwrap();
+        assert_eq!(requirement.asset_ref(), &reference);
+        requirement.validate_atlas(Some(atlas)).unwrap();
         validate_persisted_tilemap_membership(&value, |_| Some(atlas)).unwrap();
         assert_eq!(
             tilemap_membership_work_bytes(&value),
@@ -1548,6 +1554,10 @@ mod tests {
                 ]),
             ),
         ]);
+        assert!(matches!(
+            prepare_persisted_tilemap_membership(&value),
+            Err(TilemapMembershipError::InvalidValue(_))
+        ));
         assert!(matches!(
             validate_persisted_tilemap_membership(&value, |_| {
                 panic!("invalid duplicate coordinates must refuse before resolving an atlas")
@@ -1583,6 +1593,11 @@ mod tests {
                 ("cells", ComponentValue::List(Vec::new())),
             ]);
             assert_eq!(tilemap_membership_work_bytes(&value), Some(bytes));
+            assert!(
+                prepare_persisted_tilemap_membership(&value)
+                    .unwrap()
+                    .is_none()
+            );
             validate_persisted_tilemap_membership(&value, |_| {
                 panic!("an empty map requires no atlas cell lookup")
             })
@@ -1593,6 +1608,11 @@ mod tests {
             ComponentValue::map([("tileset", ComponentValue::Null)]),
         ] {
             assert_eq!(tilemap_membership_work_bytes(&value), Some(0));
+            assert!(
+                prepare_persisted_tilemap_membership(&value)
+                    .unwrap()
+                    .is_none()
+            );
         }
     }
 
@@ -1623,6 +1643,16 @@ mod tests {
                 validate_persisted_tilemap_membership(&value, |_| None),
                 Err(TilemapMembershipError::TileSetUnavailable { tileset }) if tileset == reference
             ));
+            let requirement = prepare_persisted_tilemap_membership(&value)
+                .unwrap()
+                .unwrap();
+            drop(value);
+            assert_eq!(requirement.asset_ref(), &reference);
+            requirement.validate_atlas(Some(atlas)).unwrap();
+            assert!(matches!(
+                requirement.validate_atlas(None),
+                Err(TilemapMembershipError::TileSetUnavailable { tileset }) if tileset == reference
+            ));
 
             let empty = ComponentValue::map([
                 (
@@ -1633,6 +1663,187 @@ mod tests {
             ]);
             validate_persisted_tilemap_membership(&empty, |_| {
                 panic!("an empty map requires no atlas cell lookup")
+            })
+            .unwrap();
+        }
+    }
+
+    #[test]
+    fn prepared_membership_reports_highest_actual_tile_at_smallest_coordinate() {
+        let reference = AssetRef::path("tilesets/terrain.ron").unwrap();
+        let cells = vec![
+            tile_cell_value(9, -1, 7),
+            tile_cell_value(-5, 4, 3),
+            tile_cell_value(-2, 5, 7),
+            tile_cell_value(0, -3, 1),
+        ];
+        let atlas = TileAtlasLayout::grid(Vec2::ONE, 2, 1);
+        for cells in [cells.clone(), cells.into_iter().rev().collect()] {
+            let value = ComponentValue::map([
+                (
+                    "tileset",
+                    nara_reflect::encode_asset_reference_value(&reference),
+                ),
+                ("cells", ComponentValue::List(cells)),
+            ]);
+            let expected = || TilemapMembershipError::TileOutsideAtlas {
+                tileset: reference.clone(),
+                coord: TileCoord::new(-2, 5),
+                tile: TileIndex::new(7),
+            };
+            assert_eq!(
+                validate_persisted_tilemap_membership(&value, |_| Some(atlas)),
+                Err(expected())
+            );
+            let requirement = prepare_persisted_tilemap_membership(&value)
+                .unwrap()
+                .unwrap();
+            drop(value);
+            assert_eq!(requirement.asset_ref(), &reference);
+            assert_eq!(requirement.validate_atlas(Some(atlas)), Err(expected()));
+            assert_eq!(
+                requirement.validate_atlas(None),
+                Err(TilemapMembershipError::TileSetUnavailable {
+                    tileset: reference.clone(),
+                })
+            );
+        }
+    }
+
+    #[test]
+    fn prepared_membership_matches_all_cell_checks_across_atlas_thresholds() {
+        let reference = AssetRef::path("tilesets/terrain.ron").unwrap();
+        for tiles in [[0, 1, 2], [6, 0, 4], [7, 7, 1], [u32::MAX, 1, 0]] {
+            let value = ComponentValue::map([
+                (
+                    "tileset",
+                    nara_reflect::encode_asset_reference_value(&reference),
+                ),
+                (
+                    "cells",
+                    ComponentValue::List(vec![
+                        tile_cell_value(2, 1, tiles[0]),
+                        tile_cell_value(-1, 0, tiles[1]),
+                        tile_cell_value(0, -2, tiles[2]),
+                    ]),
+                ),
+            ]);
+            let requirement = prepare_persisted_tilemap_membership(&value)
+                .unwrap()
+                .unwrap();
+            for columns in 1..=8 {
+                let atlas = TileAtlasLayout::grid(Vec2::ONE, columns, 1);
+                assert_eq!(
+                    requirement.validate_atlas(Some(atlas)).is_ok(),
+                    tiles
+                        .iter()
+                        .all(|tile| atlas.contains_tile(TileIndex::new(*tile))),
+                    "tiles {tiles:?}, atlas {atlas:?}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn prepared_membership_handles_large_atlases_and_invalid_layouts() {
+        let reference = AssetRef::path("tilesets/terrain.ron").unwrap();
+        let value = ComponentValue::map([
+            (
+                "tileset",
+                nara_reflect::encode_asset_reference_value(&reference),
+            ),
+            (
+                "cells",
+                ComponentValue::List(vec![tile_cell_value(3, -2, u32::MAX)]),
+            ),
+        ]);
+        let requirement = prepare_persisted_tilemap_membership(&value)
+            .unwrap()
+            .unwrap();
+        let large = TileAtlasLayout::grid(Vec2::ONE, u32::MAX, 2);
+        requirement.validate_atlas(Some(large)).unwrap();
+        let one_row = TileAtlasLayout::grid(Vec2::ONE, u32::MAX, 1);
+        let mut invalid = large;
+        invalid.columns = 0;
+        for atlas in [one_row, invalid] {
+            assert_eq!(
+                requirement.validate_atlas(Some(atlas)),
+                Err(TilemapMembershipError::TileOutsideAtlas {
+                    tileset: reference.clone(),
+                    coord: TileCoord::new(3, -2),
+                    tile: TileIndex::new(u32::MAX),
+                })
+            );
+        }
+    }
+
+    #[test]
+    fn prepared_membership_checks_every_cell_before_resolving_an_atlas() {
+        let reference = AssetRef::path("tilesets/terrain.ron").unwrap();
+        let value = ComponentValue::map([
+            (
+                "tileset",
+                nara_reflect::encode_asset_reference_value(&reference),
+            ),
+            (
+                "cells",
+                ComponentValue::List(vec![
+                    tile_cell_value(0, 0, u32::MAX),
+                    ComponentValue::map([
+                        (
+                            "coord",
+                            ComponentValue::map([
+                                ("x", ComponentValue::I64(1)),
+                                ("y", ComponentValue::I64(0)),
+                            ]),
+                        ),
+                        ("cell", ComponentValue::Null),
+                    ]),
+                ]),
+            ),
+        ]);
+        assert!(matches!(
+            prepare_persisted_tilemap_membership(&value),
+            Err(TilemapMembershipError::InvalidValue(_))
+        ));
+        assert!(matches!(
+            validate_persisted_tilemap_membership(&value, |_| {
+                panic!("invalid local cells must refuse before resolving an atlas")
+            }),
+            Err(TilemapMembershipError::InvalidValue(_))
+        ));
+    }
+
+    #[test]
+    fn prepared_membership_checks_present_empty_references_and_skips_absent_tilesets() {
+        let malformed = ComponentValue::map([
+            ("tileset", ComponentValue::Bool(true)),
+            ("cells", ComponentValue::List(Vec::new())),
+        ]);
+        assert!(matches!(
+            prepare_persisted_tilemap_membership(&malformed),
+            Err(TilemapMembershipError::InvalidValue(_))
+        ));
+        assert!(matches!(
+            validate_persisted_tilemap_membership(&malformed, |_| {
+                panic!("an invalid reference must refuse before resolving an atlas")
+            }),
+            Err(TilemapMembershipError::InvalidValue(_))
+        ));
+        for value in [
+            ComponentValue::map([("cells", ComponentValue::Bool(true))]),
+            ComponentValue::map([
+                ("tileset", ComponentValue::Null),
+                ("cells", ComponentValue::Bool(true)),
+            ]),
+        ] {
+            assert!(
+                prepare_persisted_tilemap_membership(&value)
+                    .unwrap()
+                    .is_none()
+            );
+            validate_persisted_tilemap_membership(&value, |_| {
+                panic!("an absent tileset requires no atlas lookup")
             })
             .unwrap();
         }

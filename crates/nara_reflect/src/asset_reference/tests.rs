@@ -113,7 +113,9 @@ fn collect<E>(
 #[test]
 fn selected_collectors_admit_actual_long_asset_paths_before_parsing() {
     let component = ComponentTypeId::new("test.SelectedAssets");
-    let field = field(ComponentValueShape::AssetRef);
+    let field = field(ComponentValueShape::asset_ref(
+        AssetReferenceDemand::Immediate,
+    ));
     for payload_relative in [false, true] {
         for length in [5, 64 * 1024] {
             let path = "a".repeat(length);
@@ -203,7 +205,7 @@ fn selected_refusal_precedes_dynamic_name_path_and_leaf_vector_growth() {
 
     let component = ComponentTypeId::new("test.SelectedAssets");
     let field = field(ComponentValueShape::map(ComponentValueShape::list(
-        ComponentValueShape::AssetRef,
+        ComponentValueShape::asset_ref(AssetReferenceDemand::Immediate),
     )));
     let name = "m".repeat(1003);
     let value = ComponentValue::map([(
@@ -271,7 +273,9 @@ fn selected_immediate_refusal_preserves_borrowed_owner_error_without_allocating(
     struct OwnerFailure<'a>(&'a u8);
     let marker = 7;
     let component = ComponentTypeId::new("test.SelectedAssets");
-    let field = field(ComponentValueShape::AssetRef);
+    let field = field(ComponentValueShape::asset_ref(
+        AssetReferenceDemand::Immediate,
+    ));
     let value = asset("a.png");
     let original = value.clone();
     for payload_relative in [false, true] {
@@ -312,7 +316,9 @@ fn nested_selected_shape_borrows_its_owner_and_fits_a_small_actual_work_cap() {
                 "selected",
                 ComponentValueShape::record_members([ComponentShapeMember::new(
                     "images",
-                    ComponentValueShape::list(ComponentValueShape::AssetRef),
+                    ComponentValueShape::list(ComponentValueShape::asset_ref(
+                        AssetReferenceDemand::Immediate,
+                    )),
                 )]),
             ),
             ComponentShapeMember::new("unused", ComponentValueKind::String),
@@ -405,7 +411,9 @@ fn nested_selected_shape_borrows_its_owner_and_fits_a_small_actual_work_cap() {
 #[test]
 fn selected_collectors_preserve_reference_errors_and_source_values() {
     let component = ComponentTypeId::new("test.SelectedAssets");
-    let field = field(ComponentValueShape::AssetRef);
+    let field = field(ComponentValueShape::asset_ref(
+        AssetReferenceDemand::Immediate,
+    ));
     for value in [
         ComponentValue::Null,
         ComponentValue::String("invalid".into()),
@@ -457,7 +465,9 @@ fn selected_collectors_preserve_reference_errors_and_source_values() {
 #[test]
 fn selected_collectors_keep_exact_input_and_output_traversal_limits() {
     let component = ComponentTypeId::new("test.SelectedAssets");
-    let field = field(ComponentValueShape::AssetRef);
+    let field = field(ComponentValueShape::asset_ref(
+        AssetReferenceDemand::Immediate,
+    ));
     let value = asset("a.png");
     let original = value.clone();
     for (payload_relative, bytes, depth) in [(false, 41, 4), (true, 28, 2)] {
@@ -553,7 +563,9 @@ fn decode_work_query_borrows_payloads_without_parsing_or_allocating() {
 #[test]
 fn product_leaf_collectors_charge_complete_input_and_output_at_exact_limits() {
     let component = ComponentTypeId::new("test.SelectedProducts");
-    let field = field(ComponentValueShape::AssetRef);
+    let field = field(ComponentValueShape::asset_ref(
+        AssetReferenceDemand::Immediate,
+    ));
     for subproduct in [false, true] {
         let reference = product_reference(subproduct);
         let value = crate::authoring::encode_persistent_field(&reference).unwrap();
@@ -646,7 +658,9 @@ fn product_leaf_collectors_charge_complete_input_and_output_at_exact_limits() {
 #[test]
 fn oversized_product_identity_text_is_refused_before_copy_or_parser_allocation() {
     let component = ComponentTypeId::new("test.SelectedProducts");
-    let field = field(ComponentValueShape::AssetRef);
+    let field = field(ComponentValueShape::asset_ref(
+        AssetReferenceDemand::Immediate,
+    ));
     let oversized = "private-identity".repeat(8192);
     for path in [vec!["value", "source"], vec!["value", "product", "id"]] {
         let mut value =
@@ -694,7 +708,9 @@ fn product_validation_and_entity_planning_admit_the_same_closed_leaf_before_pars
         "Admitted products",
         ComponentSchemaVersion::ONE,
     )
-    .with_fields([field(ComponentValueShape::AssetRef)]);
+    .with_fields([field(ComponentValueShape::asset_ref(
+        AssetReferenceDemand::Immediate,
+    ))]);
     for subproduct in [false, true] {
         let leaf =
             crate::authoring::encode_persistent_field(&product_reference(subproduct)).unwrap();
@@ -756,7 +772,9 @@ fn product_rewrite_admits_decoder_and_complete_encoding_before_allocating() {
     for subproduct in [false, true] {
         let original =
             crate::authoring::encode_persistent_field(&product_reference(subproduct)).unwrap();
-        let field = field(ComponentValueShape::AssetRef);
+        let field = field(ComponentValueShape::asset_ref(
+            AssetReferenceDemand::Immediate,
+        ));
         let references = collect_declared_value_asset_references_with_limits(
             &ComponentTypeId::new("test.RewriteProducts"),
             &field,

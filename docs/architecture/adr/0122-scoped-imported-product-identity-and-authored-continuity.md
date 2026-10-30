@@ -138,8 +138,9 @@ source/catalogue binding only. Generic metadata cannot prove that an auxiliary P
 inside the current compound payload. Strict saved-source Check/Export and actual acquisition
 still execute the domain's real importer/codec and membership query before their respective
 success/publication. Do not expose resolved targets as validated decoded Products or inspect
-domain-private settings in the Host. This unqualified successor is separate from the current
-eager preparation contract; no default-success target validator is selected.
+domain-private settings in the Host. The [demand-aware successor](../../knowledge/engineering/verification/2026-10/2026-10-30T172312Z-reference-validity-and-current-demand-production-replacement-qualification-b16511fa33a74c2b808270394b28bf62.md)
+qualifies this separation through actual source/processed consumers; no default-success target
+validator is selected.
 
 `AssetDomain` identifies a typed CPU product family. Source/import and processed Runtime codec
 facets are independently implemented and selected under ADR 0103. The family marker alone

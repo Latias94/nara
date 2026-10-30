@@ -15,8 +15,8 @@ use nara_identity::{EntityLookup, SpawnedSceneInstance, WorldIdentityDomain};
 use nara_reflect::{
     ComponentCapability, ComponentCodecError, ComponentFieldId, ComponentFieldPath,
     ComponentFieldSchema, ComponentRegistry, ComponentSchema, ComponentSchemaVersion,
-    ComponentTypeId, ComponentValueShape, PreparedComponentCandidate, decode_asset_reference_value,
-    encode_asset_reference_value,
+    ComponentTypeId, ComponentValueKind, ComponentValueShape, PreparedComponentCandidate,
+    decode_asset_reference_value, encode_asset_reference_value,
 };
 use nara_scene::{
     ExpandedSceneCandidate, RuntimeSceneCandidate, RuntimeSceneDocumentCandidate,
@@ -102,7 +102,7 @@ fn bindings(calls: &Arc<AtomicUsize>) -> SceneComponentBindings {
                     ComponentFieldId::new("value"),
                     "Value",
                     ComponentFieldPath::empty(),
-                    ComponentValueShape::AssetRef,
+                    ComponentValueShape::from(ComponentValueKind::AssetRef),
                 )
                 .with_capabilities(ComponentCapability::SCENE_AUTHORING)
                 .with_capability(ComponentCapability::AssetRef)]),

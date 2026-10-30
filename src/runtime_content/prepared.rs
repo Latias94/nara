@@ -1,4 +1,4 @@
-//! A complete processed Scene closure prepared from one original immutable base.
+//! Actual-demand Scene preparation from one original immutable base.
 
 use std::{mem::size_of, sync::Arc};
 
@@ -10,11 +10,15 @@ use nara_tilemap::{
 };
 
 use super::{
-    RuntimeCodecRole, RuntimeContentAsset, RuntimeContentBase, RuntimeContentBudgetKind,
-    RuntimeContentDependencyRole, RuntimeContentError, RuntimeContentLease,
-    RuntimeContentMemberKind, RuntimeContentScene,
+    DecodeLease, RuntimeCodecRole, RuntimeContentAsset, RuntimeContentBase,
+    RuntimeContentBudgetKind, RuntimeContentError, RuntimeContentLease, RuntimeContentMemberKind,
+    RuntimeContentScene, codecs::DecodedAsset, native::validate_tileset_image,
+    traversal::MemberTraversal,
 };
 use crate::project_content::ProjectDomainAssets;
+
+#[cfg(test)]
+mod tests;
 
 pub(crate) struct ProcessedSceneContent {
     pub(crate) scene: RuntimeContentScene,
@@ -26,9 +30,10 @@ pub(crate) struct ProcessedSceneContent {
     pub(crate) _lease: RuntimeContentLease,
 }
 
-struct RequiredMembers {
-    indices: Vec<usize>,
-    _lease: RuntimeContentLease,
+struct DecodedClosure {
+    scenes: Vec<(usize, RuntimeContentScene)>,
+    assets: Vec<DecodedAsset>,
+    _work: DecodeLease,
 }
 
 impl ProcessedSceneContent {
@@ -42,78 +47,99 @@ impl ProcessedSceneContent {
 }
 
 impl RuntimeContentBase {
-    /// Prepares one complete Required resource closure without mutating a receiving World.
+    fn decode_current_closure(
+        &self,
+        product: AssetProductRef,
+    ) -> Result<DecodedClosure, RuntimeContentError> {
+        let count = self.catalog().members().len();
+        let scene_capacity = self
+            .catalog()
+            .members()
+            .iter()
+            .filter(|member| matches!(member.kind(), RuntimeContentMemberKind::Scene { .. }))
+            .count();
+        let asset_capacity = count - scene_capacity;
+        let output_bytes = scene_capacity
+            .checked_mul(size_of::<(usize, RuntimeContentScene)>())
+            .and_then(|bytes| {
+                bytes.checked_add(asset_capacity.checked_mul(size_of::<DecodedAsset>())?)
+            })
+            .ok_or(RuntimeContentError::BudgetOverflow {
+                kind: RuntimeContentBudgetKind::WorkBytes,
+            })?;
+        // Scratch is bounded before allocation and overlaps every live decoder promise. Actual
+        // decoded values keep their independent retained leases throughout discovery and assembly.
+        let mut pending = MemberTraversal::new(self)?;
+        let output_work = self.inner.budget.reserve(0, output_bytes)?;
+        let root = self.member_index(product)?;
+        let mut scenes = Vec::with_capacity(scene_capacity);
+        let mut assets = Vec::with_capacity(asset_capacity);
+        pending.enqueue(self, root)?;
+        while let Some(index) = pending.next() {
+            let member = &self.catalog().members()[index];
+            match member.kind() {
+                RuntimeContentMemberKind::Scene { .. } => {
+                    let selected = if index == root {
+                        product
+                    } else {
+                        *member
+                            .products()
+                            .first()
+                            .ok_or(RuntimeContentError::ProductIdentityMismatch)?
+                    };
+                    scenes.push((index, self.acquire_scene_member(selected)?));
+                }
+                RuntimeContentMemberKind::Asset { .. } => {
+                    assets.push(self.plan().runtime_codecs().acquire_member(self, index)?);
+                }
+            }
+            // Acquisition has now admitted the exact actual dependency set. Unverified catalogue
+            // edges never enter the pending set or cause a decoder/native preparation to run.
+            pending.follow_admitted(self, index, false)?;
+        }
+        scenes.sort_unstable_by_key(|(index, _)| *index);
+        assets.sort_unstable_by_key(|asset| asset.member);
+        drop(pending);
+        Ok(DecodedClosure {
+            scenes,
+            assets,
+            _work: output_work,
+        })
+    }
+
+    /// Prepares only verified Immediate data/resources without mutating a receiving World.
     pub(crate) fn prepare_scene_content(
         &self,
         product: AssetProductRef,
     ) -> Result<Arc<ProcessedSceneContent>, RuntimeContentError> {
-        let count = self.catalog().members().len();
-        // Graph scratch belongs to preparation, not the published Scene's retained charge.
-        // Each member is visited at most once, including cyclic declarations.
-        let graph_bytes = count
-            .checked_mul(size_of::<bool>() + 2 * size_of::<usize>())
-            .ok_or(RuntimeContentError::BudgetOverflow {
-                kind: RuntimeContentBudgetKind::WorkBytes,
-            })?;
-        let scene = self.acquire_scene(product)?;
-        let graph_work = self.inner.budget.reserve(0, graph_bytes)?;
-        let root = self.member_index(product)?;
-        let mut seen = vec![false; count];
-        let mut pending = Vec::with_capacity(count);
-        let mut members = Vec::with_capacity(count);
-        seen[root] = true;
-        pending.push(root);
-        while let Some(index) = pending.pop() {
-            let member = &self.catalog().members()[index];
-            if index != root {
-                members.push(index);
-            }
-            for dependency in member.dependencies() {
-                if dependency.role() != RuntimeContentDependencyRole::Required {
-                    continue;
-                }
-                let next = self.member_index(dependency.product())?;
-                if !seen[next] {
-                    seen[next] = true;
-                    pending.push(next);
-                }
-            }
+        if !self.catalog().scenes().contains(&product) {
+            return Err(RuntimeContentError::UndeclaredScene);
         }
-        members.sort_unstable();
-        // The finite membership graph is complete. Keep its index under retained admission
-        // while sequential Scene/asset decoders reuse the released work allowance.
-        let index_bytes =
-            count
-                .checked_mul(size_of::<usize>())
-                .ok_or(RuntimeContentError::BudgetOverflow {
-                    kind: RuntimeContentBudgetKind::RetainedBytes,
-                })?;
-        let members = RequiredMembers {
-            _lease: self.reserve_retained(index_bytes)?,
-            indices: members,
-        };
-        drop((pending, seen, graph_work));
-        let members = &members.indices;
-        let scene_count = members
+        let decoded = self.decode_current_closure(product)?;
+        let root = self.member_index(product)?;
+        let scene = decoded
+            .scenes
             .iter()
-            .filter(|index| {
-                matches!(
-                    self.catalog().members()[**index].kind(),
-                    RuntimeContentMemberKind::Scene { .. }
-                )
-            })
-            .count();
+            .find(|(index, _)| *index == root)
+            .ok_or(RuntimeContentError::NotScene)?
+            .1
+            .clone();
+        let scene_count = decoded.scenes.len() - 1;
         let codecs = self.plan().runtime_codecs();
-        let image_count = members
+        let image_count = decoded
+            .assets
             .iter()
-            .filter(|index| {
-                codecs.role(&self.catalog().members()[**index]) == Some(RuntimeCodecRole::Image)
+            .filter(|asset| {
+                codecs.role(&self.catalog().members()[asset.member])
+                    == Some(RuntimeCodecRole::Image)
             })
             .count();
-        let tileset_count = members
+        let tileset_count = decoded
+            .assets
             .iter()
-            .filter(|index| {
-                codecs.role(&self.catalog().members()[**index]) == Some(RuntimeCodecRole::TileSet)
+            .filter(|asset| {
+                codecs.role(&self.catalog().members()[asset.member])
+                    == Some(RuntimeCodecRole::TileSet)
             })
             .count();
         let kind = RuntimeContentBudgetKind::RetainedBytes;
@@ -133,17 +159,12 @@ impl RuntimeContentBase {
             .ok_or(RuntimeContentError::BudgetOverflow { kind })?;
         let lease = self.reserve_retained(bytes)?;
         let mut dependencies = Vec::with_capacity(scene_count);
-        for index in members {
-            let member = &self.catalog().members()[*index];
-            if matches!(member.kind(), RuntimeContentMemberKind::Scene { .. }) {
-                let product = *member
-                    .products()
-                    .first()
-                    .ok_or(RuntimeContentError::ProductIdentityMismatch)?;
-                dependencies.push(self.acquire_scene_member(product)?);
+        for (index, scene) in &decoded.scenes {
+            if *index != root {
+                dependencies.push(scene.clone());
             }
         }
-        let domains = codecs.prepare_collections(self, members)?;
+        let domains = codecs.prepare_collections(self, &decoded.assets)?;
         let mut images = Vec::with_capacity(image_count);
         if let Some(collection) = domains.collection::<ImageDomain>() {
             images.extend(
@@ -172,35 +193,20 @@ impl RuntimeContentBase {
                     .cloned(),
             );
         }
+        // Typed collections and native preparations share these acquisitions. Only the discovery
+        // wrappers are temporary; no codec runs again when the final collections are assembled.
+        drop(decoded);
         for image in &images {
-            let product = image
-                .product()
-                .product()
-                .ok_or(RuntimeContentError::ProductIdentityMismatch)?;
-            if self
-                .member(image.reference())
-                .map(|member| member.products())
-                != Some(&[product][..])
-            {
-                return Err(RuntimeContentError::ProductIdentityMismatch);
-            }
+            self.image_fact(image.reference(), image.product())?;
         }
         for tileset in &tilesets {
             let descriptor = tileset.product();
-            let member = self
-                .member(tileset.reference())
-                .ok_or(RuntimeContentError::ProductIdentityMismatch)?;
-            if member.products() != &[descriptor.product()] {
-                return Err(RuntimeContentError::ProductIdentityMismatch);
-            }
-            self.validate_required_dependency(member, descriptor.image_product())?;
+            self.validate_tileset_member(tileset.reference(), descriptor)?;
             let image = images
                 .iter()
                 .find(|image| image.product().product() == Some(descriptor.image_product()))
-                .ok_or(RuntimeContentError::NativeResourceUnavailable)?;
-            descriptor
-                .validate_image_extent(image.product().extent())
-                .map_err(RuntimeContentError::TileSet)?;
+                .map(|image| image.product().extent());
+            validate_tileset_image(descriptor, image)?;
         }
         let tilemap = nara_reflect::ComponentTypeId::new("nara.tilemap.Tilemap");
         for entity in std::iter::once(&scene)

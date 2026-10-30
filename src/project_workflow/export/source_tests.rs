@@ -35,7 +35,20 @@ pub struct SourceText {
     pub source: nara_asset::AssetRef,
 }
 
-nara_reflect::persistent_components! { pub mod source_text_components = [SourceText]; }
+#[derive(nara_ecs::Component, nara_reflect::PersistentComponent)]
+#[nara(
+    id = "test.export.FutureTarget",
+    version = 1,
+    alias = "Future target",
+    component_capabilities(scene),
+    field_capabilities(scene)
+)]
+pub struct FutureTarget {
+    #[nara(id = "target", alias = "Target", capabilities(scene, asset_ref), asset_demand = deferred)]
+    pub target: nara_asset::AssetRef,
+}
+
+nara_reflect::persistent_components! { pub mod source_text_components = [SourceText, FutureTarget]; }
 
 #[derive(Default)]
 struct SourceTextPlugin;
@@ -98,6 +111,219 @@ fn source_text_recipe() -> ProductRecipe {
         .unwrap()
         .add_asset_domain::<SourceTextDomain>()
         .unwrap()
+}
+
+#[test]
+fn deferred_dependency_only_scenes_and_importer_reads_export_and_recheck_after_relocation() {
+    use crate::project_host::{ProjectContentLoader, ProjectContentMemberKind};
+    use nara_asset::{
+        AssetMeta, AssetMetaIdentity, AssetPath, AssetProductRef, AssetRef, AssetSourceKind,
+        ImportedProductId, StableAssetId,
+    };
+    use nara_reflect::{ComponentSchemaVersion, ComponentTypeId, PersistentComponentProvider};
+
+    let project = SourceProject::new();
+    let manifest_path = project.root.join("nara.toml");
+    let manifest = fs::read_to_string(&manifest_path)
+        .unwrap()
+        .replace("scenes = [\"b.scene.json\"]", "scenes = []");
+    fs::write(&manifest_path, manifest).unwrap();
+    let product = |id: u8| {
+        AssetProductRef::new(
+            StableAssetId::parse_str(format!("6c420000-0000-4000-8000-{id:012x}")).unwrap(),
+            ImportedProductId::PRIMARY,
+        )
+        .unwrap()
+    };
+    let future_scene = |target| {
+        SceneDocument::from_ordered_roots([nara_scene::SceneEntityRecord::new(
+            nara_identity::SceneEntityId::new("door").unwrap(),
+        )
+        .with_component(
+            ComponentTypeId::new("test.export.FutureTarget"),
+            nara_scene::SceneComponentRecord::new(
+                ComponentSchemaVersion::ONE,
+                FutureTarget {
+                    target: AssetRef::Product(target),
+                }
+                .__encode_persistent_component()
+                .unwrap(),
+            ),
+        )])
+    };
+    for (name, id, scene) in [
+        ("a.scene.json", 1, future_scene(product(2))),
+        ("b.scene.json", 2, future_scene(product(3))),
+        (
+            "c.scene.json",
+            3,
+            SceneDocument::from_ordered_roots([nara_scene::SceneEntityRecord::new(
+                nara_identity::SceneEntityId::new("text").unwrap(),
+            )
+            .with_component(
+                ComponentTypeId::new("test.export.SourceText"),
+                nara_scene::SceneComponentRecord::new(
+                    ComponentSchemaVersion::ONE,
+                    SourceText {
+                        source: AssetRef::path("text.txt").unwrap(),
+                    }
+                    .__encode_persistent_component()
+                    .unwrap(),
+                ),
+            )]),
+        ),
+    ] {
+        fs::write(
+            project.root.join("scenes").join(name),
+            scene.to_json_string().unwrap(),
+        )
+        .unwrap();
+        fs::write(
+            project.root.join("scenes").join(format!("{name}.meta")),
+            AssetMeta::new(
+                AssetMetaIdentity::new(
+                    product(id).source(),
+                    AssetPath::new(name).unwrap(),
+                    AssetSourceKind::Scene,
+                ),
+                (),
+            )
+            .to_json_string()
+            .unwrap(),
+        )
+        .unwrap();
+    }
+    fs::write(project.root.join("assets/text.txt"), b"future source").unwrap();
+    fs::write(
+        project.root.join("assets/suffix.txt"),
+        b"actual importer dependency",
+    )
+    .unwrap();
+    fs::write(
+        project.root.join("assets/text.txt.meta"),
+        AssetMeta::new(
+            AssetMetaIdentity::new(
+                product(4).source(),
+                AssetPath::new("text.txt").unwrap(),
+                AssetSourceKind::Other(
+                    <SourceTextDomain as nara_asset::SourceAssetImporter>::SOURCE_KIND.into(),
+                ),
+            ),
+            (),
+        )
+        .to_json_string()
+        .unwrap(),
+    )
+    .unwrap();
+    let root = host_fs::readable_directory(&project.root).unwrap();
+    let manifest = root
+        .open_file(&RelativePath::new("nara.toml").unwrap())
+        .unwrap();
+    let candidate = ingest_project_manifest(&manifest, None).unwrap();
+    let plan = resolve_product_recipe(&candidate, source_text_recipe()).unwrap();
+    fs::write(
+        project.root.join("schema/authoring.bundle.json"),
+        plan.schema_validation()
+            .authoring_schema_bundle()
+            .to_json_string()
+            .unwrap(),
+    )
+    .unwrap();
+
+    let current = ProjectContentLoader::new(root.share())
+        .unwrap()
+        .load(&candidate, &plan)
+        .unwrap();
+    assert!(current.scene_dependencies().is_empty());
+    assert!(
+        current
+            .domain_assets()
+            .collection::<SourceTextDomain>()
+            .is_none()
+    );
+    let delivery =
+        check_project(ProjectCheckRequest::new(root.share(), source_text_recipe())).unwrap();
+    assert_eq!(
+        delivery
+            .scene_roots()
+            .iter()
+            .map(|path| path.as_str())
+            .collect::<Vec<_>>(),
+        ["a.scene.json"]
+    );
+    for path in [
+        "scenes/b.scene.json",
+        "scenes/c.scene.json",
+        "assets/text.txt",
+        "assets/suffix.txt",
+    ] {
+        assert!(
+            !delivery
+                .startup_content()
+                .members()
+                .iter()
+                .any(|member| member.path().as_str() == path)
+        );
+        assert!(
+            delivery
+                .members()
+                .iter()
+                .any(|member| member.path().as_str() == path),
+            "{path}"
+        );
+    }
+    assert_eq!(
+        delivery
+            .members()
+            .iter()
+            .filter(|member| member.kind() == ProjectContentMemberKind::Scene)
+            .count(),
+        3
+    );
+    drop(current);
+    let prepare = |destination: &str| {
+        let build = project
+            .synthetic_build(
+                delivery.startup_content(),
+                &delivery.schema_fingerprint().to_string(),
+            )
+            .unwrap();
+        prepare_project_export(ProjectExportRequest::new(
+            host_fs::writable_directory(&project.root).unwrap(),
+            RelativeComponent::new(destination).unwrap(),
+            delivery.clone(),
+            build,
+        ))
+    };
+    let prepared = prepare("future-published").unwrap();
+    let published = match prepared.publish() {
+        super::ProjectExportOutcome::Published(receipt) => receipt,
+        other => panic!("strict future delivery must publish: {other:?}"),
+    };
+    let relocated = project.root.join("future-published/project");
+    for member in delivery.members() {
+        assert_eq!(
+            fs::read(relocated.join(member.path().as_str())).unwrap(),
+            fs::read(project.root.join(member.path().as_str())).unwrap()
+        );
+    }
+    let checked = check_project(ProjectCheckRequest::new(
+        host_fs::readable_directory(&relocated).unwrap(),
+        source_text_recipe(),
+    ))
+    .unwrap();
+    assert_eq!(checked.members(), delivery.members());
+    assert_eq!(
+        published.plan().members().len(),
+        delivery.members().len() + 2
+    );
+    fs::write(
+        project.root.join("assets/suffix.txt"),
+        b"changed future dependency",
+    )
+    .unwrap();
+    assert!(prepare("changed-future").is_err());
+    assert!(!project.root.join("changed-future").exists());
 }
 
 #[test]

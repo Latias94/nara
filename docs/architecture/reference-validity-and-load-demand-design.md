@@ -1,6 +1,7 @@
 # Reference Validity And Current Load Demand
 
-Date: 2026-10-30. Status: selected CP3 design; implementation and qualification outstanding.
+Date: 2026-10-30. Status: implemented and
+[qualified in bounded scope](../knowledge/engineering/verification/2026-10/2026-10-30T172312Z-reference-validity-and-current-demand-production-replacement-qualification-b16511fa33a74c2b808270394b28bf62.md).
 Owner: [foundation R6/R7](../plans/2026-10-23-foundation-architecture-rebaseline-plan.md#r7-target-build-and-base-source-free-delivery).
 Execution: [complete consumer plan](../plans/2026-10-30-reference-validity-and-load-demand-plan.md).
 Baseline: `8e175db`. This design does not implement CP4 backing/residency policy.
@@ -73,6 +74,21 @@ from all these facts.
    membership, and drops nonresident outputs between finite validation units. It does not publish
    native stores. Opening an immutable base still proves captured bytes/agreement; that operation
    alone does not prove every member's payload semantics. Expose the deep result distinctly.
+
+   Processed deep validation decodes each member once. Before dropping the output, retain only
+   bounded CPU facts needed by the existing Image/TileSet/Tilemap contracts: exact Product and
+   Image extent, the Copy TileSet descriptor, and a compact Tilemap atlas requirement. The Tilemap
+   owner still parses every cell and checks duplicate coordinates through its one parser. Because
+   atlas membership is a continuous prefix of tile indices, its greatest actual tile is a
+   sufficient witness; ties use the smallest coordinate for deterministic diagnostics. Empty
+   cells retain their existing no-atlas-obligation behavior. An obligation is not a successful
+   cross-member validation until the actual descriptor is checked.
+
+   These facts retain independent shared Work reservations through final verification, overlapping
+   the current decoder's promises and parser scratch. Vector growth admits old and new allocations
+   before transfer. Deep Check may still refuse its finite summary budget; it claims neither
+   constant memory, native device creation nor arbitrary gameplay success. It does not keep Scene
+   candidates, Image pixels or acquisition owners alive merely to finish the deep traversal.
 
 The catalogue is a compiled dependency declaration, not a second semantic owner. The executable
 Schema/codec determines actual demand. One typed Product may have both leaf uses without two

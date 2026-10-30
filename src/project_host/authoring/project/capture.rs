@@ -445,7 +445,7 @@ pub(crate) struct AuthoringDocumentCapture {
     pub(super) prefab_scope: Arc<AssetPathScope>,
     pub(super) unresolved_dependencies: Box<[AuthoringUnresolvedDependency]>,
     pub(super) source_facts: Arc<[Arc<AuthoringSourceFact>]>,
-    pub(super) stable_lookups: Arc<[catalogue::StableLookupObservation]>,
+    pub(super) stable_lookups: Arc<[catalogue::ReferenceObservation]>,
     pub(super) usage: AuthoringProjectAdmissionUsage,
     pub(super) host_retained_bytes: usize,
     pub(super) preview: Option<CapturedAuthoringPreview>,
@@ -463,7 +463,7 @@ pub(crate) struct CapturedAuthoringPreview {
 pub(crate) struct AuthoringSourceValidation {
     schema: Arc<AuthoringSchemaReceipt>,
     sources: Arc<[Arc<AuthoringSourceFact>]>,
-    stable_lookups: Arc<[catalogue::StableLookupObservation]>,
+    stable_lookups: Arc<[catalogue::ReferenceObservation]>,
     retained_capture_bytes: usize,
 }
 
@@ -489,7 +489,7 @@ impl AuthoringSourceValidation {
     pub(super) fn new(
         schema: Arc<AuthoringSchemaReceipt>,
         sources: Arc<[Arc<AuthoringSourceFact>]>,
-        stable_lookups: Arc<[catalogue::StableLookupObservation]>,
+        stable_lookups: Arc<[catalogue::ReferenceObservation]>,
         retained_capture_bytes: usize,
     ) -> Self {
         Self {
@@ -553,7 +553,7 @@ impl AuthoringSourceValidation {
         for source in schema_source_facts(&self.schema) {
             revalidate_source_fact(&self.schema.project_root, &source, budget)?;
         }
-        ReferenceCatalogue::revalidate_lookups(
+        ReferenceCatalogue::revalidate_observations(
             &self.schema.project_root,
             ReferenceCatalogue::project_bindings(&self.schema.settings),
             &self.stable_lookups,
@@ -805,8 +805,7 @@ pub(super) fn capture_scene(
                     binding.scope.resolve(path),
                     AssetSourceKind::Prefab,
                 );
-                charge_database_record(&record, budget)?;
-                insert_asset_record(&mut asset_database, record)?;
+                admit_asset_record(&mut asset_database, &record, budget)?;
                 continue;
             }
             let directory = open_source_directory(
@@ -825,7 +824,7 @@ pub(super) fn capture_scene(
                         },
                     );
                 }
-                insert_asset_record(&mut asset_database, record)?;
+                admit_asset_record(&mut asset_database, record, budget)?;
                 identities.insert(source.identity(), LoadedIdentity::AssetMetadata);
                 source_facts.insert(source.project_path().as_str().to_owned(), source);
             }
@@ -904,7 +903,7 @@ pub(super) fn capture_scene(
             prefab_path_bytes,
         )?,
     )?;
-    let stable_lookups = catalogue.into_lookup_observations(budget)?;
+    let stable_lookups = catalogue.into_reference_observations(budget)?;
     let usage = budget.usage();
     Ok(AuthoringDocumentCapture {
         readiness,

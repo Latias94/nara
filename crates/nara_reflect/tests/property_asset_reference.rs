@@ -2,14 +2,15 @@ use nara_asset::AssetRef;
 use nara_core::{ByteLimit, DepthLimit, ItemLimit};
 use nara_identity::SceneEntityId;
 use nara_reflect::{
-    ComponentCapability, ComponentEntityReferenceRewriteError, ComponentFieldId,
-    ComponentFieldPath, ComponentFieldSchema, ComponentMemberPath, ComponentMemberPathSegment,
-    ComponentPropertyError, ComponentPropertyKey, ComponentPropertyPath,
-    ComponentPropertyReadBudget, ComponentPropertySchemaClaim, ComponentPropertyStep,
-    ComponentSchema, ComponentSchemaVersion, ComponentShapeMember, ComponentTypeId, ComponentValue,
-    ComponentValueKind, ComponentValueShape, DeclaredAssetReferenceError, EntityReference,
-    EntityReferenceTraversalLimits, collect_declared_value_asset_references_with_limits,
-    resolve_component_property_in_root, resolve_component_property_schema_claim,
+    AssetReferenceDemand, ComponentCapability, ComponentEntityReferenceRewriteError,
+    ComponentFieldId, ComponentFieldPath, ComponentFieldSchema, ComponentMemberPath,
+    ComponentMemberPathSegment, ComponentPropertyError, ComponentPropertyKey,
+    ComponentPropertyPath, ComponentPropertyReadBudget, ComponentPropertySchemaClaim,
+    ComponentPropertyStep, ComponentSchema, ComponentSchemaVersion, ComponentShapeMember,
+    ComponentTypeId, ComponentValue, ComponentValueKind, ComponentValueShape,
+    DeclaredAssetReferenceError, EntityReference, EntityReferenceTraversalLimits,
+    collect_declared_value_asset_references_with_limits, resolve_component_property_in_root,
+    resolve_component_property_schema_claim,
 };
 
 fn id(value: &str) -> ComponentFieldId {
@@ -80,7 +81,7 @@ fn root_and_renamed_nested_claims_keep_the_original_field_and_selected_payload_p
         let schema = schema(ComponentValueShape::record_members([member(
             wire,
             "image",
-            ComponentValueShape::AssetRef,
+            ComponentValueShape::asset_ref(AssetReferenceDemand::Immediate),
         )]));
         let original = schema.clone();
         let root = claim(&schema, &path([])).unwrap();
@@ -88,7 +89,10 @@ fn root_and_renamed_nested_claims_keep_the_original_field_and_selected_payload_p
         assert!(std::ptr::eq(root.field, &schema.fields()[0]));
         assert!(std::ptr::eq(selected.field, root.field));
         assert!(std::ptr::eq(root.shape, root.field.shape()));
-        assert_eq!(selected.shape, &ComponentValueShape::AssetRef);
+        assert_eq!(
+            selected.shape,
+            &ComponentValueShape::asset_ref(AssetReferenceDemand::Immediate)
+        );
         assert_eq!(selected.field.aliases(), ["Original metadata"]);
         assert!(selected.field.has_capability(ComponentCapability::Scene));
 
@@ -127,7 +131,11 @@ fn keyed_claims_check_the_declared_identity_policy_without_claiming_an_item_exis
     let row = ComponentValueShape::record_members([
         member("wire_id", "id", ComponentValueKind::String),
         member("wire_slug", "slug", ComponentValueKind::String),
-        member("wire_image", "image", ComponentValueShape::AssetRef),
+        member(
+            "wire_image",
+            "image",
+            ComponentValueShape::asset_ref(AssetReferenceDemand::Immediate),
+        ),
     ]);
     let keyed_schema = schema(ComponentValueShape::keyed_list(row.clone(), id("id")));
     let item = |by, key| ComponentPropertyStep::ListItem { by: id(by), key };
@@ -136,7 +144,10 @@ fn keyed_claims_check_the_declared_identity_policy_without_claiming_an_item_exis
         ComponentPropertyStep::Member(id("image")),
     ]);
     let selected = claim(&keyed_schema, &selected_path).unwrap();
-    assert_eq!(selected.shape, &ComponentValueShape::AssetRef);
+    assert_eq!(
+        selected.shape,
+        &ComponentValueShape::asset_ref(AssetReferenceDemand::Immediate)
+    );
     let assets = collect_declared_value_asset_references_with_limits(
         keyed_schema.id(),
         selected.field,
@@ -193,7 +204,7 @@ fn optional_map_claims_use_literal_keys_without_observing_missing_or_null_values
         ComponentValueShape::optional(ComponentValueShape::record_members([member(
             "wire_image",
             "image",
-            ComponentValueShape::AssetRef,
+            ComponentValueShape::asset_ref(AssetReferenceDemand::Immediate),
         )])),
     )));
     let selected_path = path([
@@ -201,7 +212,10 @@ fn optional_map_claims_use_literal_keys_without_observing_missing_or_null_values
         ComponentPropertyStep::Member(id("image")),
     ]);
     let selected = claim(&schema, &selected_path).unwrap();
-    assert_eq!(selected.shape, &ComponentValueShape::AssetRef);
+    assert_eq!(
+        selected.shape,
+        &ComponentValueShape::asset_ref(AssetReferenceDemand::Immediate)
+    );
     for (value, expected) in [
         (
             ComponentValue::Null,
@@ -258,8 +272,15 @@ fn optional_map_claims_use_literal_keys_without_observing_missing_or_null_values
 #[test]
 fn unknown_retired_anonymous_and_wire_name_selectors_never_acquire_a_schema_claim() {
     let mut schema = schema(ComponentValueShape::record_members([
-        member("wire_image", "image", ComponentValueShape::AssetRef),
-        ComponentShapeMember::new("anonymous", ComponentValueShape::AssetRef),
+        member(
+            "wire_image",
+            "image",
+            ComponentValueShape::asset_ref(AssetReferenceDemand::Immediate),
+        ),
+        ComponentShapeMember::new(
+            "anonymous",
+            ComponentValueShape::asset_ref(AssetReferenceDemand::Immediate),
+        ),
     ]))
     .with_field_tombstones([id("retired-root")]);
     schema.fields[0]
@@ -381,7 +402,7 @@ fn schema_claim_scan_limits_include_selector_roots_tombstones_and_optional_map_w
         ComponentValueShape::optional(ComponentValueShape::record_members([member(
             "wire_image",
             "image",
-            ComponentValueShape::AssetRef,
+            ComponentValueShape::asset_ref(AssetReferenceDemand::Immediate),
         )])),
     )))
     .with_field_tombstones([id("gone")]);
@@ -406,7 +427,10 @@ fn schema_claim_scan_limits_include_selector_roots_tombstones_and_optional_map_w
             &mut budget,
         );
         if accepted {
-            assert_eq!(result.unwrap().shape, &ComponentValueShape::AssetRef);
+            assert_eq!(
+                result.unwrap().shape,
+                &ComponentValueShape::asset_ref(AssetReferenceDemand::Immediate)
+            );
             assert_eq!(budget.scanned_entries(), 9);
             assert_eq!(budget.scanned_logical_bytes(), 42);
             assert_eq!(
@@ -430,7 +454,7 @@ fn schema_claim_scan_limits_include_selector_roots_tombstones_and_optional_map_w
 
 #[test]
 fn schema_claim_path_and_selected_declaration_depth_have_inclusive_limits() {
-    let mut shape = ComponentValueShape::AssetRef;
+    let mut shape = ComponentValueShape::asset_ref(AssetReferenceDemand::Immediate);
     for _ in 0..ComponentPropertyPath::MAX_STEPS {
         shape = ComponentValueShape::map(shape);
     }
@@ -442,7 +466,7 @@ fn schema_claim_path_and_selected_declaration_depth_have_inclusive_limits() {
     ));
     assert_eq!(
         claim(&nested_schema, &exact).unwrap().shape,
-        &ComponentValueShape::AssetRef,
+        &ComponentValueShape::asset_ref(AssetReferenceDemand::Immediate),
     );
     let mut too_deep = exact.clone();
     too_deep
@@ -461,14 +485,16 @@ fn schema_claim_path_and_selected_declaration_depth_have_inclusive_limits() {
         ComponentPropertyError::PathDepthLimit,
     );
 
-    let map_schema = schema(ComponentValueShape::map(ComponentValueShape::AssetRef));
+    let map_schema = schema(ComponentValueShape::map(ComponentValueShape::asset_ref(
+        AssetReferenceDemand::Immediate,
+    )));
     let mut exact_bytes = path([ComponentPropertyStep::MapEntry(
         "x".repeat(4 * 1024 * 1024 - 4),
     )]);
     assert_eq!(exact_bytes.logical_bytes().unwrap(), 4 * 1024 * 1024);
     assert_eq!(
         claim(&map_schema, &exact_bytes).unwrap().shape,
-        &ComponentValueShape::AssetRef
+        &ComponentValueShape::asset_ref(AssetReferenceDemand::Immediate)
     );
     let ComponentPropertyStep::MapEntry(key) = &mut exact_bytes.steps[0] else {
         unreachable!()
@@ -485,7 +511,7 @@ fn scalar_asset_payload_limits_exclude_component_storage_and_include_returned_wo
     let schema = schema(ComponentValueShape::record_members([member(
         "wire_image",
         "image",
-        ComponentValueShape::AssetRef,
+        ComponentValueShape::asset_ref(AssetReferenceDemand::Immediate),
     )]));
     let selected = claim(&schema, &path([ComponentPropertyStep::Member(id("image"))])).unwrap();
     let payload = asset("a.png");
@@ -534,7 +560,9 @@ fn scalar_asset_payload_limits_exclude_component_storage_and_include_returned_wo
 
 #[test]
 fn payload_assets_keep_capabilities_null_and_parse_semantics_without_guessing_wire_dependencies() {
-    let mut schema = schema(ComponentValueShape::AssetRef);
+    let mut schema = schema(ComponentValueShape::asset_ref(
+        AssetReferenceDemand::Immediate,
+    ));
     schema.fields[0].default_value = Some(asset("default.png"));
     let field = &schema.fields()[0];
     assert_eq!(
@@ -554,7 +582,9 @@ fn payload_assets_keep_capabilities_null_and_parse_semantics_without_guessing_wi
         collect_declared_value_asset_references_with_limits(
             schema.id(),
             field,
-            &ComponentValueShape::optional(ComponentValueShape::AssetRef),
+            &ComponentValueShape::optional(ComponentValueShape::asset_ref(
+                AssetReferenceDemand::Immediate
+            )),
             &ComponentValue::Null,
             Default::default(),
         )
@@ -599,7 +629,11 @@ fn payload_assets_keep_capabilities_null_and_parse_semantics_without_guessing_wi
 #[test]
 fn mixed_payloads_inventory_assets_without_guessing_entity_targets_or_defaults() {
     let shape = ComponentValueShape::record_members([
-        member("wire_image", "image", ComponentValueShape::AssetRef),
+        member(
+            "wire_image",
+            "image",
+            ComponentValueShape::asset_ref(AssetReferenceDemand::Immediate),
+        ),
         member("wire_target", "target", ComponentValueShape::EntityRef),
     ]);
     let mut schema = schema(shape);
@@ -733,7 +767,7 @@ mod effective_collection_admission {
         .with_fields((0..fields).map(|index| {
             let name = format!("field_{index}");
             let shape = if with_assets {
-                ComponentValueShape::AssetRef
+                ComponentValueShape::asset_ref(AssetReferenceDemand::Immediate)
             } else {
                 ComponentValueShape::scalar(ComponentValueKind::U64)
             };
@@ -899,7 +933,9 @@ mod effective_collection_admission {
 
     #[test]
     fn dynamic_path_name_is_admitted_before_copying_it() {
-        let schema = schema(ComponentValueShape::map(ComponentValueShape::AssetRef));
+        let schema = schema(ComponentValueShape::map(ComponentValueShape::asset_ref(
+            AssetReferenceDemand::Immediate,
+        )));
         let name = "m".repeat(1003);
         let value = ComponentValue::map([(
             "settings",
@@ -941,7 +977,7 @@ mod effective_collection_admission {
                 id("missing"),
                 "Missing",
                 ComponentFieldPath::from_fields(["missing"]),
-                ComponentValueShape::AssetRef,
+                ComponentValueShape::asset_ref(AssetReferenceDemand::Immediate),
                 asset(&"d".repeat(1024 * 1024)),
             )
             .with_capabilities([ComponentCapability::Scene, ComponentCapability::AssetRef]),

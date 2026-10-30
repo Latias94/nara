@@ -70,7 +70,7 @@ fn reference_schema() -> ComponentSchema {
         "Images",
         ComponentFieldPath::from_fields(["images"]),
         ComponentValueShape::map(ComponentValueShape::list(ComponentValueShape::optional(
-            ComponentValueShape::AssetRef,
+            ComponentValueShape::from(ComponentValueKind::AssetRef),
         ))),
     )
     .with_capabilities(ComponentCapability::SCENE_AUTHORING)

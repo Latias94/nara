@@ -13,8 +13,8 @@ use nara_asset::{AssetDomain, AssetProductRef, AssetRuntimeLimits, RuntimeAssetC
 use nara_core::{FormatKind, FormatVersion};
 
 use super::{
-    RuntimeContentAsset, RuntimeContentBase, RuntimeContentBudgetKind, RuntimeContentError,
-    RuntimeContentMember, RuntimeContentMemberKind, checked_add,
+    DecodeLease, RuntimeContentAsset, RuntimeContentBase, RuntimeContentBudgetKind,
+    RuntimeContentError, RuntimeContentMember, RuntimeContentMemberKind, checked_add,
 };
 use crate::project_content::{
     ErasedCollection, ProjectAssetCollection, ProjectDomainAssets, runtime_collection,
@@ -118,6 +118,24 @@ impl CodecDefinition {
 pub(crate) struct RuntimeCodecs {
     definitions: Vec<CodecDefinition>,
     families: Vec<Arc<dyn RuntimeFamily>>,
+}
+
+/// One actual acquisition kept while its verified outgoing demand is discovered. The erased
+/// slot is preparation scratch; the typed acquisition retains its original output charge.
+pub(super) struct DecodedAsset {
+    pub(super) member: usize,
+    family: TypeId,
+    asset: Box<dyn Any + Send + Sync>,
+    _work: DecodeLease,
+}
+
+impl DecodedAsset {
+    pub(super) fn typed<D: AssetDomain>(&self) -> Option<&RuntimeContentAsset<D::Product>> {
+        if self.family != TypeId::of::<D>() {
+            return None;
+        }
+        self.asset.downcast_ref()
+    }
 }
 
 impl fmt::Debug for RuntimeCodecs {
@@ -335,21 +353,50 @@ impl RuntimeCodecs {
             .map(|definition| definition.role)
     }
 
-    pub(crate) fn prepare_collections(
+    pub(super) fn definition(
+        &self,
+        member: &RuntimeContentMember,
+    ) -> Result<RuntimeCodecDefinitionId, RuntimeContentError> {
+        self.definitions
+            .iter()
+            .find(|definition| definition.matches(member))
+            .map(|definition| definition.id)
+            .ok_or(RuntimeContentError::CodecNotSelected)
+    }
+
+    pub(super) fn acquire_member(
         &self,
         base: &RuntimeContentBase,
-        members: &[usize],
+        index: usize,
+    ) -> Result<DecodedAsset, RuntimeContentError> {
+        let member = &base.catalog().members()[index];
+        let definition = self
+            .definitions
+            .iter()
+            .find(|definition| definition.matches(member))
+            .ok_or(RuntimeContentError::CodecNotSelected)?;
+        self.families
+            .iter()
+            .find(|family| family.family_type() == definition.family)
+            .expect("an admitted definition retains its typed family")
+            .acquire_member(base, index)
+    }
+
+    pub(super) fn prepare_collections(
+        &self,
+        base: &RuntimeContentBase,
+        assets: &[DecodedAsset],
     ) -> Result<ProjectDomainAssets, RuntimeContentError> {
         let kind = RuntimeContentBudgetKind::RetainedBytes;
         let mut bytes = ProjectDomainAssets::runtime_metadata_bytes(self.families.len())
             .ok_or(RuntimeContentError::BudgetOverflow { kind })?;
         for family in &self.families {
-            bytes = checked_add(kind, bytes, family.metadata_bytes(base, members)?)?;
+            bytes = checked_add(kind, bytes, family.metadata_bytes(base, assets)?)?;
         }
         let lease = base.reserve_retained(bytes)?;
         let mut collections = Vec::with_capacity(self.families.len());
         for family in &self.families {
-            if let Some(collection) = family.prepare(base, members)? {
+            if let Some(collection) = family.collect(base, assets)? {
                 collections.push(collection);
             }
         }
@@ -364,15 +411,20 @@ impl RuntimeCodecs {
 trait RuntimeFamily: Send + Sync {
     fn family_type(&self) -> TypeId;
     fn as_any(&self) -> &dyn Any;
+    fn acquire_member(
+        &self,
+        base: &RuntimeContentBase,
+        index: usize,
+    ) -> Result<DecodedAsset, RuntimeContentError>;
     fn metadata_bytes(
         &self,
         base: &RuntimeContentBase,
-        members: &[usize],
+        assets: &[DecodedAsset],
     ) -> Result<usize, RuntimeContentError>;
-    fn prepare(
+    fn collect(
         &self,
         base: &RuntimeContentBase,
-        members: &[usize],
+        assets: &[DecodedAsset],
     ) -> Result<Option<Box<dyn ErasedCollection>>, RuntimeContentError>;
 }
 
@@ -420,13 +472,13 @@ impl<D: AssetDomain> TypedFamily<D> {
     fn counts(
         &self,
         base: &RuntimeContentBase,
-        members: &[usize],
+        assets: &[DecodedAsset],
     ) -> Result<(usize, usize), RuntimeContentError> {
         let mut count = 0;
         let mut mappings = 0;
-        for index in members {
-            let member = &base.catalog().members()[*index];
-            if self.codec(member).is_some() {
+        for asset in assets {
+            if asset.family == TypeId::of::<D>() {
+                let member = &base.catalog().members()[asset.member];
                 count += 1;
                 mappings = checked_add(
                     RuntimeContentBudgetKind::RetainedBytes,
@@ -447,12 +499,38 @@ impl<D: AssetDomain> RuntimeFamily for TypedFamily<D> {
         self
     }
 
+    fn acquire_member(
+        &self,
+        base: &RuntimeContentBase,
+        index: usize,
+    ) -> Result<DecodedAsset, RuntimeContentError> {
+        let member = &base.catalog().members()[index];
+        let codec = self
+            .codec(member)
+            .ok_or(RuntimeContentError::CodecNotSelected)?;
+        let product = *member
+            .products()
+            .first()
+            .ok_or(RuntimeContentError::ProductIdentityMismatch)?;
+        let work = base
+            .inner
+            .budget
+            .reserve(0, size_of::<RuntimeContentAsset<D::Product>>())?;
+        let asset = (codec.acquire)(base, product)?;
+        Ok(DecodedAsset {
+            member: index,
+            family: TypeId::of::<D>(),
+            asset: Box::new(asset),
+            _work: work,
+        })
+    }
+
     fn metadata_bytes(
         &self,
         base: &RuntimeContentBase,
-        members: &[usize],
+        assets: &[DecodedAsset],
     ) -> Result<usize, RuntimeContentError> {
-        let (count, mappings) = self.counts(base, members)?;
+        let (count, mappings) = self.counts(base, assets)?;
         if count == 0 {
             return Ok(0);
         }
@@ -467,27 +545,27 @@ impl<D: AssetDomain> RuntimeFamily for TypedFamily<D> {
             })
     }
 
-    fn prepare(
+    fn collect(
         &self,
         base: &RuntimeContentBase,
-        members: &[usize],
+        assets: &[DecodedAsset],
     ) -> Result<Option<Box<dyn ErasedCollection>>, RuntimeContentError> {
-        let (count, mapping_count) = self.counts(base, members)?;
+        let (count, mapping_count) = self.counts(base, assets)?;
         if count == 0 {
             return Ok(None);
         }
         let mut products = Vec::with_capacity(count);
         let mut mappings = Vec::with_capacity(mapping_count);
-        for index in members {
-            let member = &base.catalog().members()[*index];
-            let Some(codec) = self.codec(member) else {
+        for asset in assets {
+            if asset.family != TypeId::of::<D>() {
                 continue;
-            };
-            let product = *member
-                .products()
-                .first()
-                .ok_or(RuntimeContentError::ProductIdentityMismatch)?;
-            let acquisition = (codec.acquire)(base, product)?;
+            }
+            let member = &base.catalog().members()[asset.member];
+            let acquisition = asset
+                .asset
+                .downcast_ref::<RuntimeContentAsset<D::Product>>()
+                .expect("the typed family created this exact acquisition")
+                .clone();
             let index = products.len();
             products.push(acquisition);
             mappings.extend(member.products().iter().map(|product| (*product, index)));

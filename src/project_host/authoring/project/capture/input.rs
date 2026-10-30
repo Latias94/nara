@@ -75,7 +75,6 @@ pub(super) fn capture(
         path,
         AssetSourceKind::Other("input-action-map".to_owned()),
     );
-    charge_database_record(&record, budget)?;
     let metadata = read_metadata(&root, selected, &record, budget)?;
     acquisition.catalogue.admit_intrinsic_source(
         &record,
@@ -84,7 +83,8 @@ pub(super) fn capture(
             .map(|metadata| (metadata.candidate.identity(), metadata.source.as_ref())),
         budget,
     )?;
-    insert_asset_record(database, record)?;
+    admit_asset_record(database, &record, budget)?;
+    drop(record);
     acquisition
         .budget
         .reconcile_retained_reservation(record_storage, 0)?;

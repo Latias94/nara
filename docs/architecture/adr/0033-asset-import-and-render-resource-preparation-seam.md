@@ -96,8 +96,10 @@ separates a future valid target from current decoded/native preparation. Immedia
 dependencies still require actual values and the same typed publication owner; Deferred targets
 do not become native residency inputs merely because they are deliverable catalogue members.
 Check/Export and explicit deep validation retain real importer/codec membership checks. This is
-planned under [CP3](../../plans/2026-10-30-reference-validity-and-load-demand-plan.md), not new
-Image/TileSet qualification or a change to independent native validation and pixel custody.
+implemented under [CP3](../../plans/2026-10-30-reference-validity-and-load-demand-plan.md), with
+[qualified demand/native checks](../../knowledge/engineering/verification/2026-10/2026-10-30T172312Z-reference-validity-and-current-demand-production-replacement-qualification-b16511fa33a74c2b808270394b28bf62.md).
+Independent native validation and pixel custody remain required; encoded backing/residency policy
+is separate.
 
 `ImageAsset::new` accepts extent, format, color interpretation and pixel bytes without persistent
 identity. `from_product` explicitly associates content with a complete Product. `from_import`

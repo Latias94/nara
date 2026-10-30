@@ -1,0 +1,5 @@
+error: asset_demand must be `immediate` or `deferred`
+  --> tests/ui/asset_demand_unknown.rs:14:60
+   |
+14 |     #[nara(id = "target", alias = "Target", asset_demand = eager)]
+   |                                                            ^^^^^

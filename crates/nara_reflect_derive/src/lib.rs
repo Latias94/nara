@@ -18,6 +18,11 @@ use syn::{
 /// intentionally unsupported. Creation metadata never supplies missing decode fields.
 /// Float initial values and range bounds are checked for finiteness during `cargo check`,
 /// using the actual field type even through aliases and associated types.
+///
+/// Field-level `#[nara(asset_demand = deferred)]` or `immediate` overrides every recursive
+/// AssetRef leaf in that field's shape. Unannotated fields retain the codec's default demand.
+/// The sealed field codec checks asset-leaf presence during `cargo check`, including through
+/// aliases and supported containers, even when the component's schema is never constructed.
 #[proc_macro_derive(PersistentComponent, attributes(nara))]
 pub fn derive_persistent_component(input: TokenStream) -> TokenStream {
     let input = parse_macro_input!(input as DeriveInput);
@@ -85,6 +90,7 @@ struct FieldArgs {
     capabilities: Option<Vec<Capability>>,
     initial: Option<Expr>,
     range: Option<NumericRange>,
+    asset_demand: Option<(AssetDemand, Span)>,
 }
 
 struct PersistentField {
@@ -95,6 +101,34 @@ struct PersistentField {
     capabilities: Vec<Capability>,
     initial: Option<Expr>,
     range: Option<NumericRange>,
+    asset_demand: Option<(AssetDemand, Span)>,
+}
+
+#[derive(Clone, Copy)]
+enum AssetDemand {
+    Immediate,
+    Deferred,
+}
+
+impl AssetDemand {
+    fn parse(ident: &Ident) -> Result<Self> {
+        match ident.to_string().as_str() {
+            "immediate" => Ok(Self::Immediate),
+            "deferred" => Ok(Self::Deferred),
+            _ => Err(Error::new(
+                ident.span(),
+                "asset_demand must be `immediate` or `deferred`",
+            )),
+        }
+    }
+
+    fn tokens(self, support: &TokenStream2) -> TokenStream2 {
+        let variant = match self {
+            Self::Immediate => format_ident!("Immediate"),
+            Self::Deferred => format_ident!("Deferred"),
+        };
+        quote!(#support::AssetReferenceDemand::#variant)
+    }
 }
 
 #[derive(Default)]
@@ -208,6 +242,7 @@ fn expand_persistent_component(input: DeriveInput) -> Result<TokenStream2> {
     let support = support_path(args.crate_path)?;
     let name = input.ident;
     let finite_literal_checks = finite_literal_checks(&name, &persistent_fields);
+    let asset_demand_checks = asset_demand_checks(&name, &persistent_fields, &support);
     let primary_alias = &args.aliases[0];
     let additional_aliases = alias_extension(&args.aliases[1..]);
     let component_capability_tokens = component_capabilities
@@ -270,6 +305,7 @@ fn expand_persistent_component(input: DeriveInput) -> Result<TokenStream2> {
 
     Ok(quote! {
         #finite_literal_checks
+        #asset_demand_checks
 
         impl #support::PersistentComponentProvider for #name {
             fn persistent_component_schema() -> #support::ComponentSchema {
@@ -408,6 +444,15 @@ fn parse_field(
             } else if meta.path.is_ident("range") {
                 let range = parse_numeric_range(meta)?;
                 set_once(&mut args.range, range, attribute.span(), "range")
+            } else if meta.path.is_ident("asset_demand") {
+                let ident: Ident = meta.value()?.parse()?;
+                let demand = AssetDemand::parse(&ident)?;
+                set_once(
+                    &mut args.asset_demand,
+                    (demand, ident.span()),
+                    meta.path.span(),
+                    "asset_demand",
+                )
             } else {
                 Err(meta.error("unsupported persistent field attribute"))
             }
@@ -432,6 +477,7 @@ fn parse_field(
         capabilities,
         initial: args.initial,
         range: args.range,
+        asset_demand: args.asset_demand,
     })
 }
 
@@ -561,6 +607,37 @@ fn finite_literal_check(name: &Ident, field: &Ident, value: &Expr, message: &str
     }
 }
 
+fn asset_demand_checks(
+    name: &Ident,
+    fields: &[PersistentField],
+    support: &TokenStream2,
+) -> TokenStream2 {
+    let mut checks = TokenStream2::new();
+    for field in fields {
+        let Some((_, span)) = field.asset_demand else {
+            continue;
+        };
+        let ty = &field.ty;
+        // The local impl preserves Self in associated field types without inspecting type names.
+        // Forcing its constant from an item-level constant checks even unused schema providers.
+        checks.extend(quote_spanned! {span=>
+            const _: () = {
+                trait __NaraAssetDemandCheck {
+                    const VALID: ();
+                }
+                impl __NaraAssetDemandCheck for #name {
+                    const VALID: () = ::core::assert!(
+                        <#ty as #support::PersistentFieldCodec>::HAS_ASSET_REFERENCES,
+                        "asset_demand requires at least one AssetRef leaf in the field type"
+                    );
+                }
+                <#name as __NaraAssetDemandCheck>::VALID
+            };
+        });
+    }
+    checks
+}
+
 fn parse_capabilities(meta: syn::meta::ParseNestedMeta<'_>) -> Result<Vec<Capability>> {
     let mut capabilities = BTreeSet::new();
     meta.parse_nested_meta(|nested| {
@@ -604,6 +681,17 @@ fn validate_field_subset(field: &[Capability], component: &[Capability], span: S
 
 fn field_schema(field: &PersistentField, support: &TokenStream2) -> TokenStream2 {
     let ty = &field.ty;
+    let shape = quote!(<#ty as #support::PersistentFieldCodec>::value_shape());
+    let shape = match field.asset_demand {
+        Some((demand, span)) => {
+            let demand = demand.tokens(support);
+            quote_spanned! {span=>
+                #shape.with_asset_reference_demand(#demand)
+                    .expect("PersistentComponent's sealed field codec has asset leaves and a bounded shape")
+            }
+        }
+        None => shape,
+    };
     let id = &field.id;
     let primary_alias = &field.aliases[0];
     let additional_aliases = alias_extension(&field.aliases[1..]);
@@ -638,7 +726,7 @@ fn field_schema(field: &PersistentField, support: &TokenStream2) -> TokenStream2
             #support::ComponentFieldId::new(#id),
             #primary_alias,
             #support::ComponentFieldPath::from_fields([#id]),
-            <#ty as #support::PersistentFieldCodec>::value_shape(),
+            #shape,
         )
         #additional_aliases
         .with_capabilities([#(#capability_tokens),*])

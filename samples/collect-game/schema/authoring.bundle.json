@@ -510,7 +510,7 @@
         "owner": "nara.sprite.components",
         "current": {
           "generation": 2,
-          "predecessor": "c945db7ecde643bfed2496ae195c35810cf0adca83441b1ebdec4132bdee92ca",
+          "predecessor": "b8c5a4878c4214bb5c478e209482bb9e25c0a16bf56ace18fad7eafea8020623",
           "components": [
             {
               "id": "nara.sprite.Sprite",
@@ -670,7 +670,8 @@
                   "shape": {
                     "shape": "optional",
                     "value": {
-                      "shape": "asset_ref"
+                      "shape": "asset_ref",
+                      "demand": "immediate"
                     }
                   },
                   "required": false,
@@ -1396,7 +1397,8 @@
                   "shape": {
                     "shape": "optional",
                     "value": {
-                      "shape": "asset_ref"
+                      "shape": "asset_ref",
+                      "demand": "immediate"
                     }
                   },
                   "required": false,
@@ -2029,7 +2031,8 @@
                   "shape": {
                     "shape": "optional",
                     "value": {
-                      "shape": "asset_ref"
+                      "shape": "asset_ref",
+                      "demand": "immediate"
                     }
                   },
                   "required": false,

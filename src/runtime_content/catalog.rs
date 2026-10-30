@@ -1,8 +1,8 @@
 //! Bounded version-one metadata for one immutable local Runtime content base.
 //!
 //! Catalog membership describes complete logical products, not source files or residency.
-//! Several products may share one encoded member. Required edges are closed over this base;
-//! soft edges are declarations only. Cycles are finite graph data and never cause traversal here.
+//! Several products may share one encoded member. Required and Reference edges require membership
+//! in this base; Soft edges are optional metadata. Cycles never cause traversal here.
 //! Filesystem capture, trusted expected identity and concrete resource decoding belong to the Host.
 
 use std::{
@@ -111,7 +111,11 @@ pub enum RuntimeContentMemberKind {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum RuntimeContentDependencyRole {
+    /// A present target needed by the current decoded consumer.
     Required,
+    /// A present target whose decoded value is deferred until a later consumer requests it.
+    Reference,
+    /// Optional metadata which proves neither target validity nor current load demand.
     Soft,
 }
 
@@ -616,10 +620,10 @@ impl RuntimeContentCatalog {
                 }
             }
             for dependency in &member.dependencies {
-                if dependency.role == RuntimeContentDependencyRole::Required
+                if dependency.role != RuntimeContentDependencyRole::Soft
                     && self.member_for_product(dependency.product).is_none()
                 {
-                    return Err(RuntimeContentCatalogError::MissingRequiredProduct {
+                    return Err(RuntimeContentCatalogError::MissingDependencyProduct {
                         member: index,
                         product: dependency.product,
                     });
@@ -809,7 +813,7 @@ pub enum RuntimeContentCatalogError {
         member: usize,
         product: AssetProductRef,
     },
-    MissingRequiredProduct {
+    MissingDependencyProduct {
         member: usize,
         product: AssetProductRef,
     },
@@ -881,7 +885,7 @@ impl fmt::Display for RuntimeContentCatalogError {
                 formatter,
                 "Runtime catalog member {member} repeats dependency {product}"
             ),
-            Self::MissingRequiredProduct { member, product } => write!(
+            Self::MissingDependencyProduct { member, product } => write!(
                 formatter,
                 "Runtime catalog member {member} requires absent product {product}"
             ),

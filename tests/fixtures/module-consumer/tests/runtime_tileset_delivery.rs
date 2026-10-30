@@ -13,10 +13,10 @@ use std::{
 };
 
 use nara_asset::{
-    AssetError, AssetEvents, AssetProductRef, AssetRecord, AssetRef, AssetRuntimeError,
-    AssetRuntimeLimits, AssetServer, AssetSlotRevision, AssetSourceKind, AssetSourcePath,
-    AssetStateRevision, AssetStates, Assets, Handle, ImportedProductId, ProjectAssetDatabase,
-    RuntimeAssetCodec, StableAssetId,
+    AssetError, AssetEvents, AssetProductRef, AssetRecord, AssetRef, AssetReferenceDemand,
+    AssetRuntimeError, AssetRuntimeLimits, AssetServer, AssetSlotRevision, AssetSourceKind,
+    AssetSourcePath, AssetStateRevision, AssetStates, Assets, Handle, ImportedProductId,
+    ProjectAssetDatabase, RuntimeAssetCodec, StableAssetId,
 };
 use nara_core::{ByteLimit, Color, FormatKind, FormatVersion, ItemLimit, Vec2};
 use nara_ecs::{Component, Entity, Resource, World};
@@ -665,9 +665,9 @@ impl RuntimeAssetCodec<()> for RetentionProbeCodec {
         Ok(0)
     }
 
-    fn visit_required_runtime_products<E>(
+    fn visit_runtime_dependencies<E>(
         _: &(),
-        _: impl FnMut(AssetProductRef) -> Result<(), E>,
+        _: impl FnMut(AssetProductRef, AssetReferenceDemand) -> Result<(), E>,
     ) -> Result<(), E> {
         Ok(())
     }
@@ -1116,11 +1116,11 @@ impl RuntimeAssetCodec<ImageAsset> for LaxImageIdentityCodec {
         ImageRuntimeCodec::runtime_retained_bytes(value)
     }
 
-    fn visit_required_runtime_products<E>(
+    fn visit_runtime_dependencies<E>(
         value: &ImageAsset,
-        visitor: impl FnMut(AssetProductRef) -> Result<(), E>,
+        visitor: impl FnMut(AssetProductRef, AssetReferenceDemand) -> Result<(), E>,
     ) -> Result<(), E> {
-        ImageRuntimeCodec::visit_required_runtime_products(value, visitor)
+        ImageRuntimeCodec::visit_runtime_dependencies(value, visitor)
     }
 
     fn contains_runtime_product(value: &ImageAsset, reference: AssetProductRef) -> bool {
@@ -1130,7 +1130,7 @@ impl RuntimeAssetCodec<ImageAsset> for LaxImageIdentityCodec {
     }
 }
 
-/// Omits the actual Image demand and trusts aliases to exercise the independent native checks.
+/// Trusts file-local identity while reporting actual Image demand for native cardinality checks.
 struct LaxTileSetCodec;
 
 impl RuntimeAssetCodec<TileSetDescriptor> for LaxTileSetCodec {
@@ -1153,15 +1153,56 @@ impl RuntimeAssetCodec<TileSetDescriptor> for LaxTileSetCodec {
         TileSetRuntimeCodec::runtime_retained_bytes(value)
     }
 
-    fn visit_required_runtime_products<E>(
-        _: &TileSetDescriptor,
-        _: impl FnMut(AssetProductRef) -> Result<(), E>,
+    fn visit_runtime_dependencies<E>(
+        value: &TileSetDescriptor,
+        visitor: impl FnMut(AssetProductRef, AssetReferenceDemand) -> Result<(), E>,
     ) -> Result<(), E> {
-        Ok(())
+        TileSetRuntimeCodec::visit_runtime_dependencies(value, visitor)
     }
 
     fn contains_runtime_product(value: &TileSetDescriptor, reference: AssetProductRef) -> bool {
         value.product().product() == reference.product()
+    }
+}
+
+/// Underreports payload demand to challenge the separate native descriptor owner.
+struct SilentTileSetCodec;
+
+impl RuntimeAssetCodec<TileSetDescriptor> for SilentTileSetCodec {
+    const RUNTIME_KIND: &'static str = TileSetRuntimeCodec::RUNTIME_KIND;
+    const RUNTIME_VERSION: u32 = TileSetRuntimeCodec::RUNTIME_VERSION;
+
+    fn runtime_limits() -> AssetRuntimeLimits {
+        TileSetRuntimeCodec::runtime_limits()
+    }
+
+    fn encode_runtime(value: &TileSetDescriptor) -> Result<Box<[u8]>, AssetRuntimeError> {
+        TileSetRuntimeCodec::encode_runtime(value)
+    }
+
+    fn decode_runtime(bytes: &[u8]) -> Result<TileSetDescriptor, AssetRuntimeError> {
+        TileSetRuntimeCodec::decode_runtime(bytes)
+    }
+
+    fn runtime_retained_bytes(value: &TileSetDescriptor) -> Result<usize, AssetRuntimeError> {
+        TileSetRuntimeCodec::runtime_retained_bytes(value)
+    }
+
+    fn visit_runtime_dependencies<E>(
+        value: &TileSetDescriptor,
+        visitor: impl FnMut(AssetProductRef, AssetReferenceDemand) -> Result<(), E>,
+    ) -> Result<(), E> {
+        if value.product() == tileset_product(false) {
+            Ok(())
+        } else {
+            // Keep the independent later root valid so deep Check reaches the deliberately
+            // underreported primary descriptor, regardless of canonical Scene discovery order.
+            TileSetRuntimeCodec::visit_runtime_dependencies(value, visitor)
+        }
+    }
+
+    fn contains_runtime_product(value: &TileSetDescriptor, reference: AssetProductRef) -> bool {
+        LaxTileSetCodec::contains_runtime_product(value, reference)
     }
 }
 
@@ -1187,13 +1228,21 @@ impl Plugin for NativeAdmissionPlugin {
 }
 
 fn lax_native_recipe() -> ProductRecipe {
+    native_admission_recipe::<LaxTileSetCodec>()
+}
+
+fn silent_native_recipe() -> ProductRecipe {
+    native_admission_recipe::<SilentTileSetCodec>()
+}
+
+fn native_admission_recipe<C: RuntimeAssetCodec<TileSetDescriptor>>() -> ProductRecipe {
     ProductRecipe::new()
         .add_runtime_image_codec::<LaxImageIdentityCodec>(RuntimeCodecDefinitionId::new(
             "consumer.runtime-tileset.lax-image-identity",
             1,
         ))
         .unwrap()
-        .add_runtime_tileset_codec::<LaxTileSetCodec>(RuntimeCodecDefinitionId::new(
+        .add_runtime_tileset_codec::<C>(RuntimeCodecDefinitionId::new(
             "consumer.runtime-tileset.lax-tileset",
             1,
         ))
@@ -1258,7 +1307,7 @@ fn first_party_native_tileset_requires_its_own_image_edge_even_with_empty_codec_
         FixtureCase::NativeOmittedDependency,
         FixtureCase::NativeSoftDependency,
     ] {
-        let fixture = Fixture::with_recipe(case, lax_native_recipe(), false);
+        let fixture = Fixture::with_recipe(case, silent_native_recipe(), false);
         let base = fixture.capture();
         let startup = product(STARTUP_SOURCE, false);
         let scene = base.acquire_startup_scene().unwrap();
@@ -1296,7 +1345,7 @@ fn first_party_native_tileset_requires_its_own_image_edge_even_with_empty_codec_
         );
         // Both real values are generically decodable, and the Scene independently requires Image.
         let tileset = base
-            .acquire_asset::<TileSetDomain, LaxTileSetCodec>(tileset_product(false))
+            .acquire_asset::<TileSetDomain, SilentTileSetCodec>(tileset_product(false))
             .unwrap();
         let image = base
             .acquire_asset::<ImageDomain, LaxImageIdentityCodec>(image_product(false))
@@ -1307,7 +1356,12 @@ fn first_party_native_tileset_requires_its_own_image_edge_even_with_empty_codec_
             .unwrap();
         validate_cells(scene.candidate(), *tileset.product()).unwrap();
         drop((scene, tileset, image));
-        assert_first_party_native_admission(base, Some("undeclared-dependency"));
+        assert!(matches!(
+            base.validate_deep(),
+            Err(RuntimeContentError::DependencyMismatch { product, actual: Some(AssetReferenceDemand::Immediate), .. })
+                if product == image_product(false)
+        ));
+        assert_first_party_native_admission(base, Some("dependency-mismatch"));
     }
 }
 
@@ -1342,6 +1396,14 @@ fn first_party_native_cardinality_rejects_codec_approved_image_and_tileset_alias
             assert!(std::ptr::eq(base.member(alias).unwrap(), member));
         }
         drop((image, tileset));
+        if actual.is_some() {
+            assert!(matches!(
+                base.validate_deep(),
+                Err(RuntimeContentError::ProductIdentityMismatch)
+            ));
+        } else {
+            base.validate_deep().unwrap();
+        }
         assert_first_party_native_admission(base, actual.map(|_| "product-identity-mismatch"));
     }
 }
@@ -1900,17 +1962,10 @@ fn actual_descriptor_image_dependency_rejects_omitted_soft_wrong_and_absent_prod
         assert!(base.acquire_scene(product(LATER_SOURCE, false)).is_ok());
         let result =
             base.acquire_asset::<TileSetDomain, TileSetRuntimeCodec>(tileset_product(true));
-        if matches!(case, FixtureCase::MissingImageMember) {
-            assert!(matches!(
-                result,
-                Err(RuntimeContentError::UndeclaredProduct)
-            ));
-        } else {
-            assert!(matches!(
-                result,
-                Err(RuntimeContentError::UndeclaredDependency)
-            ));
-        }
+        assert!(matches!(
+            result,
+            Err(RuntimeContentError::DependencyMismatch { .. })
+        ));
         assert_current(&world, &current, old, primary, &baseline);
         assert_eq!(world.resource::<AssetServer>(), &server);
     }

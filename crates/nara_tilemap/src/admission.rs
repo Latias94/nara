@@ -7,12 +7,14 @@ use crate::{TileAtlasLayout, TileCoord, TileIndex, read_cell, read_optional_asse
 
 type CellSelection = (TileCoord, TileIndex, usize);
 
-/// Checked logical scratch reserved before atlas membership validation.
+/// Checked logical scratch reserved before preparing atlas membership requirements.
 ///
-/// The validator allocates one exact-capacity selection vector, then sorts it in place to check
+/// Preparation allocates one exact-capacity selection vector, then sorts it in place to check
 /// unique coordinates. The bound also covers resource-reference decoding, including an empty
-/// cell list. It allocates no typed cell vector or tree. Encoded values and error diagnostics
-/// remain under their existing owner bounds; this is not allocator/RSS accounting.
+/// cell list. It allocates no typed cell vector or tree. Callers retaining a returned requirement
+/// separately account for its storage and any owned asset-reference data. Encoded values and
+/// error diagnostics remain under their existing owner bounds; this is not allocator/RSS
+/// accounting. The direct validator uses the same preparation and scratch bound.
 #[must_use]
 pub fn tilemap_membership_work_bytes(value: &ComponentValue) -> Option<usize> {
     let Some(tileset) = value
@@ -73,14 +75,65 @@ impl Error for TilemapMembershipError {
     }
 }
 
-pub fn validate_persisted_tilemap_membership(
+/// A nonempty Tilemap's locally checked requirement for an actual TileSet atlas.
+///
+/// Preparation checks every cell and unique coordinate, then keeps only the highest tile and
+/// its actual coordinate. Equal highest tiles select the smallest coordinate. Tile indices in
+/// a valid atlas form a continuous prefix, so checking this witness proves membership of every
+/// prepared cell. This value owns no cell storage and borrows no input data. Its asset reference
+/// may own path data; it does not establish target existence or native publication authority.
+#[derive(Debug)]
+#[must_use = "the requirement must be checked against its actual tileset atlas"]
+pub struct TilemapMembershipRequirement {
+    tileset: AssetRef,
+    highest_tile: TileIndex,
+    coord: TileCoord,
+}
+
+impl TilemapMembershipRequirement {
+    /// The complete reference whose actual atlas must satisfy this requirement.
+    #[must_use]
+    pub const fn asset_ref(&self) -> &AssetRef {
+        &self.tileset
+    }
+
+    /// Checks actual atlas availability and membership without parsing the cells again.
+    ///
+    /// An unavailable atlas reports the original complete asset reference. An invalid atlas or
+    /// out-of-range tile reports the highest actual tile at its smallest coordinate, rather than
+    /// the first out-of-range cell in coordinate order.
+    pub fn validate_atlas(
+        &self,
+        atlas: Option<TileAtlasLayout>,
+    ) -> Result<(), TilemapMembershipError> {
+        let atlas = atlas.ok_or_else(|| TilemapMembershipError::TileSetUnavailable {
+            tileset: self.tileset.clone(),
+        })?;
+        if !atlas.contains_tile(self.highest_tile) {
+            return Err(TilemapMembershipError::TileOutsideAtlas {
+                tileset: self.tileset.clone(),
+                coord: self.coord,
+                tile: self.highest_tile,
+            });
+        }
+        Ok(())
+    }
+}
+
+/// Parses and checks local Tilemap cells without resolving or retaining an atlas.
+///
+/// Reserve [`tilemap_membership_work_bytes`] before calling. A missing TileSet reference or an
+/// empty cell list produces no requirement, preserving the direct validator's empty-map behavior.
+/// A present reference is decoded even for an empty cell list. All nonempty cells are parsed and
+/// checked for duplicate coordinates before the temporary selection vector is released. Callers
+/// retaining the compact result separately admit its storage and owned reference data.
+pub fn prepare_persisted_tilemap_membership(
     value: &ComponentValue,
-    resolve_atlas: impl FnOnce(&AssetRef) -> Option<TileAtlasLayout>,
-) -> Result<(), TilemapMembershipError> {
+) -> Result<Option<TilemapMembershipRequirement>, TilemapMembershipError> {
     let Some(tileset) = read_optional_asset_ref(value.get("tileset"), "tileset")
         .map_err(TilemapMembershipError::InvalidValue)?
     else {
-        return Ok(());
+        return Ok(None);
     };
     let entries = match value.get("cells") {
         None => &[][..],
@@ -92,7 +145,7 @@ pub fn validate_persisted_tilemap_membership(
         }
     };
     if entries.is_empty() {
-        return Ok(());
+        return Ok(None);
     }
     let mut cells = Vec::with_capacity(entries.len());
     for (index, entry) in entries.iter().enumerate() {
@@ -108,18 +161,33 @@ pub fn validate_persisted_tilemap_membership(
             ),
         ));
     }
-    let atlas =
-        resolve_atlas(&tileset).ok_or_else(|| TilemapMembershipError::TileSetUnavailable {
-            tileset: tileset.clone(),
-        })?;
-    for (coord, tile, _) in cells {
-        if !atlas.contains_tile(tile) {
-            return Err(TilemapMembershipError::TileOutsideAtlas {
-                tileset,
-                coord,
-                tile,
-            });
+    let &(mut coord, mut highest_tile, _) = cells
+        .first()
+        .expect("a nonempty cell list produces a nonempty selection");
+    // Coordinate order makes the first occurrence of a highest tile its smallest coordinate.
+    for &(candidate_coord, candidate_tile, _) in cells.iter().skip(1) {
+        if candidate_tile > highest_tile {
+            coord = candidate_coord;
+            highest_tile = candidate_tile;
         }
     }
-    Ok(())
+    Ok(Some(TilemapMembershipRequirement {
+        tileset,
+        highest_tile,
+        coord,
+    }))
+}
+
+/// Prepares local membership once, then checks the actual atlas supplied by the content owner.
+///
+/// The resolver is not called for an empty map or invalid local cells. Scratch admission uses
+/// [`tilemap_membership_work_bytes`], as for [`prepare_persisted_tilemap_membership`].
+pub fn validate_persisted_tilemap_membership(
+    value: &ComponentValue,
+    resolve_atlas: impl FnOnce(&AssetRef) -> Option<TileAtlasLayout>,
+) -> Result<(), TilemapMembershipError> {
+    let Some(requirement) = prepare_persisted_tilemap_membership(value)? else {
+        return Ok(());
+    };
+    requirement.validate_atlas(resolve_atlas(requirement.asset_ref()))
 }

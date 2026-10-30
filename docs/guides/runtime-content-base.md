@@ -11,6 +11,11 @@ cook a target, select Cargo artifacts or qualify a complete packaged Player. Fir
 residency supports the explicitly selected Image and TileSet facets; other families expose typed
 CPU collections and keep concrete native publication with their consuming owner.
 
+The reference-demand and deep-validation changes are being integrated under the
+[CP3 plan](../plans/2026-10-30-reference-validity-and-load-demand-plan.md). Complete consumer
+qualification remains in progress; this API description supplies no new native/platform or
+performance qualification.
+
 ## Authority And Identity
 
 | Value | Meaning |
@@ -23,6 +28,7 @@ CPU collections and keep concrete native publication with their consuming owner.
 | `RuntimeCodecDefinitionId` | Package author's versioned declaration of one compiled family/codec binding |
 | `RuntimeContentBase` | Shared immutable encoded snapshot plus its original configuration plan |
 | `RuntimeContentAsset<P>` / `RuntimeContentScene` | Admitted decoded output retaining its base and reservation |
+| `RuntimeContentValidationReport` | Catalog digest and counts from strict mandatory payload validation |
 | `RuntimeInputContent` | Global startup definition retaining its actual typed acquisition independently of Scene collections |
 | Native handle and residency | Separately admitted and published state in a receiving Runtime |
 
@@ -32,16 +38,26 @@ and treating those same values as the expectation would remove the independent c
 
 The catalog declares Runtime configuration, plugin/Schema/codec fingerprints, startup and later Scene
 roots, explicitly addressable roots, member formats and dependencies. Multiple compound products
-can map to one member. Duplicate product mappings, file aliases, invalid roots and missing required
-dependencies refuse admission. Soft dependencies may be absent; declaring one does not start a
-load or satisfy an actual required Scene reference.
+can map to one member. Duplicate product mappings, file aliases, invalid roots and absent mandatory
+targets refuse admission. A dependency's role distinguishes target validity from current demand:
+
+| Catalog role | Actual payload demand | Ordinary preparation |
+| --- | --- | --- |
+| `Required` | `AssetReferenceDemand::Immediate` | Prepare the target and follow its admitted Immediate dependencies |
+| `Reference` | `AssetReferenceDemand::Deferred` | Require catalog membership and executable format agreement; defer target decoding |
+| `Soft` | Optional missing-allowed metadata, outside the payload inventory | Trigger no preparation or deep mandatory traversal |
+
+Both Required and Reference are mandatory delivery declarations. Soft cannot satisfy a present
+Schema or codec reference. Optional/null field values describe presence separately from demand.
 
 A Required reference may name another Scene, including a finite back-edge. First-party preparation
-admits and retains those Scene documents as data; it instantiates only the selected root. A dependent
-Scene is not automatically a public travel root. The separate
+admits and retains those Immediate Scene documents as data; it instantiates only the selected root.
+A Deferred Scene target stays outside that preparation's decoded collection. Neither role makes
+a dependent Scene a public travel root. The separate
 [source-backed workflow](rust-product-recipes.md#strict-tools-use-the-compiled-project) resolves
-actual Scene sidecars and retains its own flat source-document closure. Its saved-source receipts
-and declared-root checks remain separate from this immutable processed base.
+actual Scene sidecars. Ordinary source preparation retains its Immediate document closure and
+resolved Deferred target facts; strict saved-source Check/Export validates both demands. Those
+source receipts and declared-root checks remain separate from this immutable processed base.
 
 ## Capture And Acquisition
 
@@ -88,10 +104,18 @@ Original base/plan identity remains distinct from equality of catalog bytes. Thi
 constraint, not an implemented provider, overlay precedence or package-resolution API.
 
 Scene acquisition uses the expected containing identity in the member description and the
-original plan's exact definitions. It also traverses actual Schema asset leaves and requires each
-complete Product to be present and declared as a required dependency of that Scene member. It
-does not treat arbitrary strings as references or trust the dependency table in place of payload
-inspection.
+original plan's exact definitions. It traverses actual recursive Schema asset leaves, including
+defaults, and preserves each leaf's Immediate/Deferred demand. Arbitrary strings do not become
+references. See [persistent components](persistent-components.md#asset-reference-demand) for
+`#[nara(asset_demand = deferred)]` and hand-authored mixed-demand shapes.
+
+For each decoded Scene or resource member, the Host aggregates occurrences by complete Product:
+any Immediate occurrence wins; otherwise the aggregate is Deferred. This complete actual set must
+equal the member's mandatory declarations, with Immediate mapped to Required and Deferred to
+Reference. Missing edges, extra mandatory edges and wrong roles reject before any outgoing edge
+can trigger work. Soft metadata is excluded from that equality. A mismatch returns
+`RuntimeContentError::DependencyMismatch { product, declared, actual }`; an omitted declaration
+has `declared: None`, and an extra mandatory declaration has `actual: None`.
 
 Resource acquisition requires the concrete Rust family and codec already selected by that base's
 original plan. Kind/version alone cannot authorize a same-format replacement implementation.
@@ -101,17 +125,51 @@ Different formats or versions may serve one family; ambiguous selectors refuse c
 The codec's complete-identity query and the family's membership query validate every
 Product mapped to the member. The compound text consumer checks the enclosing source as well as
 each auxiliary ID; valid bytes for a different source are rejected. The required
-`visit_required_runtime_products` query enumerates references from the decoded payload. The Host
-checks each against this base's membership and this member's Required declarations before
-returning the asset. Implement an explicit empty inventory when the format has no required
-references. The query borrows existing values, stops on the visitor's error and grants no I/O or
-dependency loading. Decoder/query panics return a rejected acquisition without publishing a product.
-This validates declarations, not the required asset's Rust family, decoded descriptor or residency;
-the concrete consuming owner still admits those facts.
+`visit_runtime_dependencies(product, visitor)` query enumerates every actual reference as
+`visitor(target_product, demand)`, where demand is `AssetReferenceDemand`. Implement an explicit
+empty inventory when the format has no references. The query borrows existing values, allocates
+no scratch, stops on the visitor's concrete error and grants no I/O or dependency loading.
+Forwarding codecs pass the visitor through without changing demand. Decoder/query panics return
+a rejected acquisition without publishing a product. Membership and dependency agreement alone
+do not decode a Deferred target or establish its semantic validity or native residency.
 
 The concrete [Runtime Image guide](runtime-images.md) describes `ImageDomain` and
 `ImageRuntimeCodec`, source-independent pixels and the original decode reservation retained by
 escaped CPU/native/prepared captures. Image membership is one complete Product per member.
+
+## Strict Payload Validation
+
+`open` proves immutable encoded capture and agreement. Use
+`RuntimeContentBase::validate_deep()` to validate the actual mandatory delivery payloads:
+
+```rust,ignore
+let validation: RuntimeContentValidationReport = base.validate_deep()?;
+assert_eq!(validation.catalog_digest(), base.catalog_digest());
+println!(
+    "Validated {} members and {} Product mappings",
+    validation.members(),
+    validation.products(),
+);
+```
+
+Validation starts from declared Scene roots, addressable roots and global Input, then follows both
+Required and Reference edges after exact payload dependency admission. Dependency-only Scenes
+participate without gaining travel authority. Soft metadata alone never causes a target decode.
+Each reachable member uses its original selected production parser/codec and complete Product
+membership checks, including the concrete first-party Image/TileSet/Tilemap CPU constraints.
+
+The returned `RuntimeContentValidationReport` identifies the checked catalog through
+`catalog_digest()`. `members()` counts unique validated encoded members; `products()` counts their
+admitted Product mappings, independently of repeated reference occurrences. These are counts for
+the mandatory reachable closure, rather than every unused catalog entry.
+
+Deep validation releases heavy decoded outputs between validation units and retains bounded
+cross-member facts. Finite index and native-fact capacity is admitted from catalogue membership
+before traversal, including currently unreachable members; this conservative scratch allowance
+does not decode those members. It publishes no native stores or receiving World state. The report retains
+no decoded resource closure; ordinary preparation and later acquisition still use their original
+owners and admission. Capture may succeed while deep validation refuses malformed Deferred
+content, invalid auxiliary membership or its own overlapping work budget.
 
 ## Global Startup Input
 
@@ -145,8 +203,9 @@ The [Input guide](input-actions.md) describes cooking, contexts and the distinct
 
 ## Materialization And Retention
 
-First-party runs prepare the complete Required resource closure through the original immutable
-base, then use the existing candidate startup, Scene request and residency lifecycle:
+First-party runs prepare only the verified Immediate resource/data closure through the original
+immutable base, then use the existing candidate startup, Scene request and residency lifecycle.
+Reference edges retain delivery obligations without preparing their target payloads for this run:
 
 ```rust,ignore
 let mut run = HeadlessRun::<GameOutcome>::from_runtime_content(
@@ -156,7 +215,7 @@ let mut run = HeadlessRun::<GameOutcome>::from_runtime_content(
     Vec::new(),
 );
 let report = run.execute_bounded();
-assert!(report.startup_content_closure().is_none()); // This receipt describes source Check only.
+assert!(report.startup_content_closure().is_none()); // Source startup attestation is separate.
 ```
 
 Desktop uses `DesktopRun::from_runtime_content(base, DesktopRunOptions::new())`. Execution options
@@ -170,6 +229,13 @@ available through `domain_assets()`. Inspect it, then explicitly commit or begin
 Live CPU collections, actual Image/TileSet stores and current-Scene ownership change only through
 the successful shared publication tail. Failed preparation or native retirement retains the same
 last-good and retry/discard owners as the source path. Cancellation waits for physical worker return.
+
+`prepared.scene_dependency(scene_product)` on a `PreparedProjectSceneView` returns a borrowed
+`Option<&SceneDocument>` for an Immediate Scene data dependency already prepared for that request.
+For example, an encounter/rule Scene can supply CPU data without being instantiated. The selected
+root, Deferred-only targets and unrelated members return `None`; the query performs no loading
+and grants no travel authority. The borrow is limited to the prepared view and its actual content
+owner. An independent declared-root check still governs `ProjectScenes::request`.
 
 `ProjectAssetCollection::get` requires an exact complete Product for processed auxiliary values;
 it never substitutes a primary product. `iter()` visits each stored decoded value once, even when

@@ -15,6 +15,115 @@ use crate::project_host::authoring::AuthoringProjectAdmissionLimits;
 static SEQUENCE: AtomicU64 = AtomicU64::new(0);
 
 #[test]
+fn repeated_asset_record_admission_reuses_exact_identity_without_recharging() {
+    let record = AssetRecord::new(
+        "9cefa463-fc82-46ad-b61b-77283280533f".parse().unwrap(),
+        AssetSourcePath::new("scenes/b.scene.json").unwrap(),
+        AssetSourceKind::Scene,
+    );
+    let mut database = ProjectAssetDatabase::default();
+    let mut budget =
+        AuthoringProjectAdmissionBudget::new(AuthoringProjectAdmissionLimits::default());
+    admit_asset_record(&mut database, &record, &mut budget).unwrap();
+    let admitted = std::ptr::from_ref(database.record_for_path(record.path()).unwrap());
+    let usage = budget.usage();
+    budget.limits.retained_candidate_bytes =
+        ByteLimit::new(usage.retained_candidate_bytes()).unwrap();
+    admit_asset_record(&mut database, &record, &mut budget).unwrap();
+    assert_eq!(budget.usage(), usage);
+    assert_eq!(database.len(), 1);
+    assert_eq!(database.record_for_path(record.path()), Some(&record));
+    assert_eq!(
+        database.record_for_stable_id(record.stable_id()),
+        Some(&record)
+    );
+    assert_eq!(
+        std::ptr::from_ref(database.record_for_path(record.path()).unwrap()),
+        admitted
+    );
+}
+
+#[test]
+fn repeated_record_admission_rejects_identity_kind_and_alias_conflicts_without_overwriting() {
+    let original_id = "9cefa463-fc82-46ad-b61b-77283280533f".parse().unwrap();
+    let other_id = "8f899409-fd2d-494b-93fb-8edbe012032b".parse().unwrap();
+    let original = AssetRecord::new(
+        original_id,
+        AssetSourcePath::new("scenes/b.scene.json").unwrap(),
+        AssetSourceKind::Scene,
+    );
+    let mut admitted = ProjectAssetDatabase::default();
+    let mut budget =
+        AuthoringProjectAdmissionBudget::new(AuthoringProjectAdmissionLimits::default());
+    admit_asset_record(&mut admitted, &original, &mut budget).unwrap();
+    for conflicting in [
+        AssetRecord::new(other_id, original.path().clone(), AssetSourceKind::Scene),
+        AssetRecord::new(
+            original_id,
+            original.path().clone(),
+            AssetSourceKind::Prefab,
+        ),
+        AssetRecord::new(
+            original_id,
+            AssetSourcePath::new("scenes/rebound.scene.json").unwrap(),
+            AssetSourceKind::Scene,
+        ),
+        AssetRecord::new(
+            other_id,
+            AssetSourcePath::new("Scenes/b.scene.json").unwrap(),
+            AssetSourceKind::Scene,
+        ),
+    ] {
+        let expected = admitted.validate_insert(&conflicting).unwrap_err();
+        let mut database = admitted.clone();
+        let AuthoringProjectSourceAdmissionError::AssetIdentity { path, source } =
+            admit_asset_record(&mut database, &conflicting, &mut budget).unwrap_err()
+        else {
+            panic!("conflicting identity must preserve its database refusal");
+        };
+        assert_eq!(&path, conflicting.path());
+        assert_eq!(source, expected);
+        assert_eq!(database, admitted);
+        assert_eq!(database.record_for_path(original.path()), Some(&original));
+        assert_eq!(database.record_for_stable_id(original_id), Some(&original));
+        assert!(database.record_for_stable_id(other_id).is_none());
+    }
+}
+
+#[test]
+fn new_record_admission_reserves_complete_storage_before_database_mutation() {
+    let record = AssetRecord::new(
+        "9cefa463-fc82-46ad-b61b-77283280533f".parse().unwrap(),
+        AssetSourcePath::new("scenes/b.scene.json").unwrap(),
+        AssetSourceKind::Scene,
+    );
+    let mut measured =
+        AuthoringProjectAdmissionBudget::new(AuthoringProjectAdmissionLimits::default());
+    admit_asset_record(&mut ProjectAssetDatabase::default(), &record, &mut measured).unwrap();
+    let bytes = measured.usage().retained_candidate_bytes();
+    assert!(bytes > 1);
+    for maximum in [bytes, bytes - 1] {
+        let mut budget = AuthoringProjectAdmissionBudget::new(AuthoringProjectAdmissionLimits {
+            retained_candidate_bytes: ByteLimit::new(maximum).unwrap(),
+            ..AuthoringProjectAdmissionLimits::default()
+        });
+        let mut database = ProjectAssetDatabase::default();
+        let result = admit_asset_record(&mut database, &record, &mut budget);
+        if maximum == bytes {
+            result.unwrap();
+            assert_eq!(database.record_for_path(record.path()), Some(&record));
+        } else {
+            assert!(matches!(result,
+                Err(AuthoringProjectSourceAdmissionError::Budget(
+                    AuthoringProjectAdmissionError::RetainedCandidateBytesExceeded { maximum: observed }
+                )) if observed == maximum
+            ));
+            assert_eq!(database, ProjectAssetDatabase::default());
+        }
+    }
+}
+
+#[test]
 fn configured_scopes_are_reserved_before_their_owned_prefixes_are_created() {
     let fixture = CatalogueFixture::new();
     let limits = AuthoringProjectAdmissionLimits {
@@ -213,7 +322,7 @@ fn unresolved_stable_resource_is_reobserved_across_actual_readers() {
             .unwrap()
             .is_none()
     );
-    let observations = catalogue.into_lookup_observations(&mut budget).unwrap();
+    let observations = catalogue.into_reference_observations(&mut budget).unwrap();
     assert_eq!(observations.len(), 1);
     fs::write(
         fixture.root.join("prefabs/recovered.png.meta"),
@@ -232,7 +341,7 @@ fn unresolved_stable_resource_is_reobserved_across_actual_readers() {
     let mut validation_budget =
         AuthoringProjectAdmissionBudget::new(AuthoringProjectAdmissionLimits::default());
     assert!(
-        matches!(ReferenceCatalogue::revalidate_lookups(&fixture.capability(),
+        matches!(ReferenceCatalogue::revalidate_observations(&fixture.capability(),
         fixture.directories(), &observations, &mut validation_budget),
         Err(AuthoringProjectSourceAdmissionError::AssetMetadataChanged { path })
             if path.as_str() == "prefabs/recovered.png")
@@ -374,9 +483,11 @@ fn stable_identity_observations_are_independent_of_query_scope_and_deduplicate_r
             .is_none()
     );
     assert_eq!(budget.retained_candidate_bytes, retained);
-    let observations = catalogue.into_lookup_observations(&mut budget).unwrap();
+    let observations = catalogue.into_reference_observations(&mut budget).unwrap();
     assert_eq!(observations.len(), 1);
-    let prefab = &observations[0];
+    let ReferenceObservation::StableLookup(prefab) = &observations[0] else {
+        panic!("a stable identity query must retain a stable lookup observation");
+    };
     assert_eq!(prefab.stable_id, fixture.id());
     assert_eq!(
         prefab.target,
@@ -384,7 +495,7 @@ fn stable_identity_observations_are_independent_of_query_scope_and_deduplicate_r
             .map(|path| AssetSourcePath::new(format!("prefabs/{path}")).unwrap()),
     );
     let directories = fixture.directories();
-    ReferenceCatalogue::revalidate_lookups(
+    ReferenceCatalogue::revalidate_observations(
         &fixture.capability(),
         directories,
         &observations,
@@ -434,7 +545,7 @@ fn stable_lookup_observation_transfer_is_admitted_before_allocating_the_shared_s
     let maximum = budget.retained_candidate_bytes;
     budget.limits.retained_candidate_bytes = ByteLimit::new(maximum).unwrap();
     assert!(matches!(
-        catalogue.into_lookup_observations(&mut budget),
+        catalogue.into_reference_observations(&mut budget),
         Err(AuthoringProjectSourceAdmissionError::Budget(
             AuthoringProjectAdmissionError::RetainedCandidateBytesExceeded { maximum: observed }
         )) if observed == maximum
@@ -469,7 +580,7 @@ fn path_lookup_and_empty_observation_revalidation_do_not_scan_metadata() {
     );
     assert!(!catalogue.is_indexed());
     assert!(catalogue.lookups.is_empty());
-    ReferenceCatalogue::revalidate_lookups(&root, directories, &[], &mut budget).unwrap();
+    ReferenceCatalogue::revalidate_observations(&root, directories, &[], &mut budget).unwrap();
     assert_eq!(budget.usage(), before);
 }
 
@@ -489,7 +600,7 @@ fn fresh_stable_lookup_revalidation_rejects_removed_and_rebound_targets() {
             &mut budget,
         )
         .unwrap();
-    let observations = catalogue.into_lookup_observations(&mut budget).unwrap();
+    let observations = catalogue.into_reference_observations(&mut budget).unwrap();
     fs::remove_file(fixture.metadata_path()).unwrap();
     for rebound in [false, true] {
         if rebound {
@@ -511,7 +622,7 @@ fn fresh_stable_lookup_revalidation_rejects_removed_and_rebound_targets() {
         let mut budget =
             AuthoringProjectAdmissionBudget::new(AuthoringProjectAdmissionLimits::default());
         assert!(matches!(
-            ReferenceCatalogue::revalidate_lookups(
+            ReferenceCatalogue::revalidate_observations(
                 &root,
                 directories.clone(),
                 &observations,

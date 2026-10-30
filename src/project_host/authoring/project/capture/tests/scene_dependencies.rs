@@ -17,6 +17,8 @@ use crate::project_host::authoring::{
     tests::TestAuthoringProject,
 };
 
+mod reference_demand;
+
 fn owner() -> PersistentComponentSchemaOwnerId {
     PersistentComponentSchemaOwnerId::try_new("nara.test.independent-capture").unwrap()
 }

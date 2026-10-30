@@ -324,7 +324,7 @@
         "owner": "nara.sprite.components",
         "current": {
           "generation": 2,
-          "predecessor": "c945db7ecde643bfed2496ae195c35810cf0adca83441b1ebdec4132bdee92ca",
+          "predecessor": "b8c5a4878c4214bb5c478e209482bb9e25c0a16bf56ace18fad7eafea8020623",
           "components": [
             {
               "id": "nara.sprite.Sprite",
@@ -484,7 +484,8 @@
                   "shape": {
                     "shape": "optional",
                     "value": {
-                      "shape": "asset_ref"
+                      "shape": "asset_ref",
+                      "demand": "immediate"
                     }
                   },
                   "required": false,
@@ -1210,7 +1211,8 @@
                   "shape": {
                     "shape": "optional",
                     "value": {
-                      "shape": "asset_ref"
+                      "shape": "asset_ref",
+                      "demand": "immediate"
                     }
                   },
                   "required": false,
@@ -1751,7 +1753,7 @@
                 {
                   "id": "sort_key",
                   "aliases": [
-                    "Sort key"
+                    "Sort group"
                   ],
                   "path": [
                     {
@@ -1843,7 +1845,8 @@
                   "shape": {
                     "shape": "optional",
                     "value": {
-                      "shape": "asset_ref"
+                      "shape": "asset_ref",
+                      "demand": "immediate"
                     }
                   },
                   "required": false,
@@ -1852,6 +1855,34 @@
                     "inspect",
                     "edit",
                     "asset_ref"
+                  ],
+                  "default_value": {
+                    "type": "null"
+                  }
+                },
+                {
+                  "id": "y_sort_anchor",
+                  "aliases": [
+                    "Y sort anchor"
+                  ],
+                  "path": [
+                    {
+                      "kind": "field",
+                      "value": "y_sort_anchor"
+                    }
+                  ],
+                  "shape": {
+                    "shape": "optional",
+                    "value": {
+                      "shape": "opaque",
+                      "kind": "map"
+                    }
+                  },
+                  "required": false,
+                  "capabilities": [
+                    "scene",
+                    "inspect",
+                    "edit"
                   ],
                   "default_value": {
                     "type": "null"
@@ -2201,7 +2232,7 @@
         "owner": "nara.ui.components",
         "current": {
           "generation": 3,
-          "predecessor": "454b28fafbb8319b554b164ecaf4a65d77c8501be9fd0af7754c8f54794bd518",
+          "predecessor": "7352339b91eb1089fa51776e5c63922b66a2319d06819df14b97fdba5691dbe6",
           "components": [
             {
               "id": "nara.ui.UiButton",
@@ -3582,7 +3613,8 @@
                   "shape": {
                     "shape": "optional",
                     "value": {
-                      "shape": "asset_ref"
+                      "shape": "asset_ref",
+                      "demand": "immediate"
                     }
                   },
                   "required": false,
@@ -5143,7 +5175,8 @@
                   "shape": {
                     "shape": "optional",
                     "value": {
-                      "shape": "asset_ref"
+                      "shape": "asset_ref",
+                      "demand": "immediate"
                     }
                   },
                   "required": false,
@@ -5328,7 +5361,8 @@
                   "shape": {
                     "shape": "optional",
                     "value": {
-                      "shape": "asset_ref"
+                      "shape": "asset_ref",
+                      "demand": "immediate"
                     }
                   },
                   "required": false,
@@ -6935,7 +6969,8 @@
                   "shape": {
                     "shape": "optional",
                     "value": {
-                      "shape": "asset_ref"
+                      "shape": "asset_ref",
+                      "demand": "immediate"
                     }
                   },
                   "required": false,
@@ -8484,7 +8519,8 @@
                   "shape": {
                     "shape": "optional",
                     "value": {
-                      "shape": "asset_ref"
+                      "shape": "asset_ref",
+                      "demand": "immediate"
                     }
                   },
                   "required": false,
@@ -8669,7 +8705,8 @@
                   "shape": {
                     "shape": "optional",
                     "value": {
-                      "shape": "asset_ref"
+                      "shape": "asset_ref",
+                      "demand": "immediate"
                     }
                   },
                   "required": false,

@@ -265,15 +265,17 @@ fn absent_soft_edges_are_retained_without_inventing_members() {
 }
 
 #[test]
-fn required_edges_must_resolve_to_complete_membership() {
-    let mut input = definition();
-    input.members[0].dependencies = vec![dependency(
-        product(3, None),
+fn mandatory_edges_must_resolve_to_complete_membership() {
+    for role in [
         RuntimeContentDependencyRole::Required,
-    )];
-    assert!(
-        matches!(RuntimeContentCatalog::new(input, RuntimeContentCatalogLimits::default()), Err(RuntimeContentCatalogError::MissingRequiredProduct { product: missing, .. }) if missing == product(3, None))
-    );
+        RuntimeContentDependencyRole::Reference,
+    ] {
+        let mut input = definition();
+        input.members[0].dependencies = vec![dependency(product(3, None), role)];
+        assert!(
+            matches!(RuntimeContentCatalog::new(input, RuntimeContentCatalogLimits::default()), Err(RuntimeContentCatalogError::MissingDependencyProduct { product: missing, .. }) if missing == product(3, None))
+        );
+    }
 }
 
 #[test]
@@ -317,6 +319,7 @@ fn duplicate_products_are_rejected_within_or_across_members() {
 fn repeated_dependency_is_rejected_even_when_its_roles_differ() {
     for role in [
         RuntimeContentDependencyRole::Required,
+        RuntimeContentDependencyRole::Reference,
         RuntimeContentDependencyRole::Soft,
     ] {
         let mut input = definition();

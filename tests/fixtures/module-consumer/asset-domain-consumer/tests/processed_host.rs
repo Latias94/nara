@@ -55,8 +55,8 @@ use nara::{
     },
 };
 use nara_asset::{
-    AssetImportSource, AssetProductRef, AssetRuntimeError, AssetRuntimeLimits, ImportedProductId,
-    RuntimeAssetCodec, SourceAssetImporter, StableAssetId,
+    AssetImportSource, AssetProductRef, AssetReferenceDemand, AssetRuntimeError,
+    AssetRuntimeLimits, ImportedProductId, RuntimeAssetCodec, SourceAssetImporter, StableAssetId,
 };
 use nara_asset_domain_consumer::{TextBundle, TextBundleDomain, TextBundleSettings};
 use nara_diagnostic::{Diagnostic, DiagnosticCode, SafeSummary};
@@ -263,7 +263,9 @@ fn travel(world: &mut World) {
                 assert!(scenes.acknowledge(request));
             });
             assert_last_good(world);
-            assert_counts([1, 1, 0]);
+            // The alternate C definition precedes B in the verified pending set. C is admitted
+            // before the deliberate B decoder refusal; it remains unpublished with the candidate.
+            assert_counts([1, 1, 1]);
             world.resource_mut::<Outcome>().acquisition_rejected = true;
             arm(DecodeAction::Hold);
             request_later(world, Stage::HeldWorker);
@@ -274,7 +276,7 @@ fn travel(world: &mut World) {
                 return;
             }
             let request = pending(world);
-            assert_counts([1, 2, 0]);
+            assert_counts([1, 2, 2]);
             assert_eq!(
                 request_state(world, request),
                 ProjectSceneRequestState::Preparing
@@ -314,7 +316,7 @@ fn travel(world: &mut World) {
             ProjectScenes::scope(world, |scenes| assert!(scenes.acknowledge(request)));
             assert_last_good(world);
             // The original worker finished the closure before cancellation released its slot.
-            assert_counts([1, 2, 1]);
+            assert_counts([1, 2, 2]);
             world.resource_mut::<Outcome>().cancellation_returned = true;
             request_later(world, Stage::RejectedCommit);
         }
@@ -324,7 +326,7 @@ fn travel(world: &mut World) {
                 return;
             }
             inspect_prepared(world, request);
-            assert_counts([1, 3, 2]);
+            assert_counts([1, 3, 3]);
             let report = commit_prepared_project_scene(world, request, limits(), &[], |overlay| {
                 overlay.replace_resource(CommitMarker::new(1));
                 overlay.insert_component(entity("absent"), RuntimeTag);
@@ -348,7 +350,7 @@ fn travel(world: &mut World) {
                 return;
             }
             let allocations = inspect_prepared(world, request);
-            assert_counts([1, 4, 3]);
+            assert_counts([1, 4, 4]);
             let mut outcome = world.resource_mut::<Outcome>();
             outcome.prepared_allocations = allocations;
             outcome.stage = Stage::HoldReady;
@@ -378,7 +380,7 @@ fn travel(world: &mut World) {
                 world.resource::<Outcome>().startup_receipt.as_ref(),
             );
             assert_eq!(world.resource::<CommitMarker>().level, 1);
-            assert_counts([1, 4, 3]);
+            assert_counts([1, 4, 4]);
             assert_source_free(world);
             ProjectScenes::scope(world, |scenes| {
                 assert_eq!(
@@ -673,11 +675,11 @@ impl<const ALTERNATE: bool> RuntimeAssetCodec<TextBundle> for ObservedCodec<ALTE
         TextBundleDomain::runtime_retained_bytes(product)
     }
 
-    fn visit_required_runtime_products<E>(
+    fn visit_runtime_dependencies<E>(
         product: &TextBundle,
-        visitor: impl FnMut(AssetProductRef) -> Result<(), E>,
+        visitor: impl FnMut(AssetProductRef, AssetReferenceDemand) -> Result<(), E>,
     ) -> Result<(), E> {
-        TextBundleDomain::visit_required_runtime_products(product, visitor)
+        TextBundleDomain::visit_runtime_dependencies(product, visitor)
     }
 
     fn contains_runtime_product(product: &TextBundle, reference: AssetProductRef) -> bool {
@@ -736,7 +738,7 @@ fn source_free_headless_host_keeps_last_good_and_commits_compound_collections() 
                 assert!(outcome.commit_rejected);
                 assert!(outcome.source_free_frames >= 7);
                 assert!(outcome.committed_receipt.is_some());
-                assert_counts([1, 4, 3]);
+                assert_counts([1, 4, 4]);
                 break;
             }
             HeadlessRunOutcome::Failed => {
@@ -835,20 +837,19 @@ impl Fixture {
         ] {
             let encoded = scene_bytes(&root, &plan, &database, reference, later);
             fs::write(root.join(path), &encoded).unwrap();
-            let sources: &[&str] = if later {
-                &[BUNDLE_B, BUNDLE_C]
+            let selections = if later {
+                vec![
+                    selected(BUNDLE_B, FIRST),
+                    selected(BUNDLE_B, SECOND),
+                    selected(BUNDLE_C, FIRST),
+                ]
             } else {
-                &[BUNDLE_A]
+                vec![selected(BUNDLE_A, FIRST), selected(BUNDLE_A, SECOND)]
             };
-            let dependencies = sources
-                .iter()
-                .flat_map(|source| {
-                    [FIRST, SECOND].map(|id| {
-                        RuntimeContentDependency::new(
-                            selected(source, id),
-                            RuntimeContentDependencyRole::Required,
-                        )
-                    })
+            let dependencies = selections
+                .into_iter()
+                .map(|product| {
+                    RuntimeContentDependency::new(product, RuntimeContentDependencyRole::Required)
                 })
                 .collect();
             members.push(

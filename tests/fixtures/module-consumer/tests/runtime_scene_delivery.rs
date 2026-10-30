@@ -154,7 +154,9 @@ impl Definition {
                             ComponentFieldId::new("images"),
                             "Images",
                             ComponentFieldPath::from_fields(["images"]),
-                            ComponentValueShape::list(ComponentValueShape::AssetRef),
+                            ComponentValueShape::list(ComponentValueShape::from(
+                                ComponentValueKind::AssetRef,
+                            )),
                         )
                         .with_capabilities(ComponentCapability::SCENE_AUTHORING)
                         .with_capability(ComponentCapability::AssetRef)]),

@@ -67,9 +67,14 @@ Seat/analog/replay, full editable text, target-build and packaged delivery remai
 The [reference-validity/current-demand design](../reference-validity-and-load-demand-design.md)
 and its [unit plan](../../plans/2026-10-30-reference-validity-and-load-demand-plan.md) select the
 next CP3 contract under ADRs0007/0011/0033/0047/0110/0122. Actual mandatory dependency equality,
-per-leaf demand and distinct strict validation replace the eager-reference assumption. This is
-design only; no demand-aware source/processed Runtime or deep-validation successor is qualified.
-The pinned reference study and prior finite closure evidence retain their separate scopes.
+per-leaf demand and distinct strict validation replace the eager-reference assumption. Its
+[production qualification](../../knowledge/engineering/verification/2026-10/2026-10-30T172312Z-reference-validity-and-current-demand-production-replacement-qualification-b16511fa33a74c2b808270394b28bf62.md)
+records recursive Schema/derive, exact mandatory admission, once-decoded current preparation,
+compact deep validation, saved-source delivery, dirty-working-copy boundaries and actual public
+source/processed A-B-C/D travel. It includes strict source Export/relocation, independent native
+defenses, root/owner regressions and two selected Windows/DX12 trajectories, with broad-run failure
+and correction history retained. The eager encoded base, target cooking and packaged Player
+remain separate. The pinned study and prior finite closure evidence keep their original scopes.
 
 The [October 29 rendering review](../../research/2026-10-29-render-architecture-and-refactor-plan-review.md)
 and long-horizon refinement prefer a finite explicit resource graph, typed contributions and

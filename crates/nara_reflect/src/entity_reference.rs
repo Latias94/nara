@@ -472,6 +472,8 @@ fn path_allocation_bytes(segments: &[ComponentFieldPathSegment]) -> Option<usize
 
 pub(crate) struct PresentReferenceLeaf<'schema, 'value> {
     pub(crate) field: &'schema ComponentFieldSchema,
+    // Preserve the actual leaf authority, including demand, even for selected subtrees.
+    pub(crate) shape: &'schema ComponentValueShape,
     pub(crate) path: ComponentFieldPath,
     pub(crate) value: &'value ComponentValue,
     required: bool,
@@ -626,7 +628,7 @@ pub(crate) fn collect_present_field_reference_leaves_with_admission<'schema, 'va
 /// Traverses an already selected payload without rebasing it onto component storage.
 pub(crate) fn collect_present_value_reference_leaves<'schema, 'value, R>(
     field: &'schema ComponentFieldSchema,
-    shape: &ComponentValueShape,
+    shape: &'schema ComponentValueShape,
     value: &'value ComponentValue,
     limits: EntityReferenceTraversalLimits,
     reference_kind: ComponentValueKind,
@@ -645,7 +647,7 @@ pub(crate) fn collect_present_value_reference_leaves<'schema, 'value, R>(
 /// Borrows the selected shape and shares the ordinary payload walker's allocation boundaries.
 pub(crate) fn collect_present_value_reference_leaves_with_admission<'schema, 'value, R, E>(
     field: &'schema ComponentFieldSchema,
-    shape: &ComponentValueShape,
+    shape: &'schema ComponentValueShape,
     value: &'value ComponentValue,
     limits: EntityReferenceTraversalLimits,
     reference_kind: ComponentValueKind,
@@ -805,7 +807,7 @@ impl<'schema, 'value, 'admission, E> PresentReferenceTraversal<'schema, 'value, 
     fn visit_field_shape<R>(
         &mut self,
         field: &'schema ComponentFieldSchema,
-        shape: &ComponentValueShape,
+        shape: &'schema ComponentValueShape,
         value: &'value ComponentValue,
         root: &ComponentFieldPath,
     ) -> Result<(), ReferenceTraversalError<R, E>> {
@@ -847,7 +849,7 @@ impl<'schema, 'value, 'admission, E> PresentReferenceTraversal<'schema, 'value, 
     fn visit<R>(
         &mut self,
         field: &'schema ComponentFieldSchema,
-        mut shape: &ComponentValueShape,
+        mut shape: &'schema ComponentValueShape,
         value: &'value ComponentValue,
         path: &mut Vec<ComponentFieldPathSegment>,
         depth: usize,
@@ -889,9 +891,9 @@ impl<'schema, 'value, 'admission, E> PresentReferenceTraversal<'schema, 'value, 
                     .is_none_or(|interval| interval.accepts_value(value, *numeric_domain)) => {}
             (ComponentValueShape::EntityRef, ComponentValue::EntityReference(_)) => {
                 self.check_capability(field, ComponentCapability::EntityRef)?;
-                self.record(field, path, ComponentValueKind::EntityRef, value)?;
+                self.record(field, shape, path, value)?;
             }
-            (ComponentValueShape::AssetRef, value) => {
+            (ComponentValueShape::AssetRef { .. }, value) => {
                 self.check_capability(field, ComponentCapability::AssetRef)?;
                 let asset_work = crate::asset_reference::asset_reference_value_work(value);
                 // Entity traversal also validates asset leaves. Admit the shared decoder's
@@ -926,7 +928,7 @@ impl<'schema, 'value, 'admission, E> PresentReferenceTraversal<'schema, 'value, 
                     |work| work.payload_bytes,
                 );
                 self.result_bytes = self.result_bytes.saturating_add(payload_bytes);
-                self.record(field, path, ComponentValueKind::AssetRef, value)?;
+                self.record(field, shape, path, value)?;
             }
             (ComponentValueShape::Record { members }, ComponentValue::Map(values)) => {
                 self.visit_record(field, members, values, path, depth)?;
@@ -975,7 +977,7 @@ impl<'schema, 'value, 'admission, E> PresentReferenceTraversal<'schema, 'value, 
     fn visit_record<R>(
         &mut self,
         field: &'schema ComponentFieldSchema,
-        members: &[ComponentShapeMember],
+        members: &'schema [ComponentShapeMember],
         values: &'value std::collections::BTreeMap<String, ComponentValue>,
         path: &mut Vec<ComponentFieldPathSegment>,
         depth: usize,
@@ -1028,10 +1030,11 @@ impl<'schema, 'value, 'admission, E> PresentReferenceTraversal<'schema, 'value, 
     fn record<R>(
         &mut self,
         field: &'schema ComponentFieldSchema,
+        shape: &'schema ComponentValueShape,
         path: &[ComponentFieldPathSegment],
-        kind: ComponentValueKind,
         value: &'value ComponentValue,
     ) -> Result<(), ReferenceTraversalError<R, E>> {
+        let kind = shape.value_kind();
         if kind != ComponentValueKind::EntityRef && kind != self.reference_kind {
             return Ok(());
         }
@@ -1102,6 +1105,7 @@ impl<'schema, 'value, 'admission, E> PresentReferenceTraversal<'schema, 'value, 
             self.admission.reserve(&mut self.references, 1)?;
             self.references.push(PresentReferenceLeaf {
                 field,
+                shape,
                 path,
                 value,
                 required: true,

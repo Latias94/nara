@@ -9,11 +9,11 @@ use nara_asset::{
 };
 
 use crate::{
-    ComponentCodecError, ComponentEntityReferenceRewriteError, ComponentFieldId,
-    ComponentFieldPath, ComponentFieldPathError, ComponentFieldSchema, ComponentRegistry,
-    ComponentSchema, ComponentSchemaVersion, ComponentTypeId, ComponentValue, ComponentValueKind,
-    ComponentValueMaterializationLimits, ComponentValueShape, EntityReferenceTraversalLimits,
-    effective_component_value,
+    AssetReferenceDemand, ComponentCodecError, ComponentEntityReferenceRewriteError,
+    ComponentFieldId, ComponentFieldPath, ComponentFieldPathError, ComponentFieldSchema,
+    ComponentRegistry, ComponentSchema, ComponentSchemaVersion, ComponentTypeId, ComponentValue,
+    ComponentValueKind, ComponentValueMaterializationLimits, ComponentValueShape,
+    EntityReferenceTraversalLimits, effective_component_value,
     entity_reference::{
         PresentReferenceLeaf, ReferenceTraversalError, collect_present_field_reference_leaves,
         collect_present_field_reference_leaves_with_admission, collect_present_reference_leaves,
@@ -34,6 +34,7 @@ pub struct DeclaredAssetReference {
     field_id: ComponentFieldId,
     path: ComponentFieldPath,
     asset_ref: AssetRef,
+    demand: AssetReferenceDemand,
 }
 
 impl DeclaredAssetReference {
@@ -51,6 +52,12 @@ impl DeclaredAssetReference {
     #[must_use]
     pub const fn asset_ref(&self) -> &AssetRef {
         &self.asset_ref
+    }
+
+    /// Returns the demand declared by this actual reference leaf, independently of its identity.
+    #[must_use]
+    pub const fn demand(&self) -> AssetReferenceDemand {
+        self.demand
     }
 }
 
@@ -251,6 +258,9 @@ fn materialize_asset_references_with_admission<E>(
     // Each slot, field ID and parsed path was admitted at the borrowed record boundary.
     let mut references = Vec::with_capacity(leaves.len());
     for leaf in leaves {
+        let ComponentValueShape::AssetRef { demand } = leaf.shape else {
+            unreachable!("asset reference collection only returns actual asset leaves");
+        };
         if matches!(leaf.value, ComponentValue::Null) {
             admit(0, 0, component.as_str().len())
                 .map_err(AssetReferenceCollectionError::Admission)?;
@@ -320,6 +330,7 @@ fn materialize_asset_references_with_admission<E>(
             field_id: leaf.field.id().clone(),
             path: leaf.path,
             asset_ref,
+            demand: *demand,
         });
     }
     Ok(references)
@@ -565,6 +576,9 @@ fn materialize_asset_references(
 ) -> Result<Vec<DeclaredAssetReference>, DeclaredAssetReferenceError> {
     let mut references = Vec::with_capacity(leaves.len());
     for leaf in leaves {
+        let ComponentValueShape::AssetRef { demand } = leaf.shape else {
+            unreachable!("asset reference collection only returns actual asset leaves");
+        };
         let relative =
             ComponentFieldPath::new(leaf.path.segments()[root_segments..].iter().cloned());
         let field_value =
@@ -586,6 +600,7 @@ fn materialize_asset_references(
             field_id: leaf.field.id().clone(),
             path: leaf.path,
             asset_ref,
+            demand: *demand,
         });
     }
     Ok(references)

@@ -3,9 +3,9 @@ use nara_core::{ByteLimit, DepthLimit, ItemLimit};
 use nara_identity::{EntityReference, SceneEntityId};
 use nara_reflect::__private::plan_declared_entity_references;
 use nara_reflect::{
-    ComponentCapability, ComponentEntityReferenceRewriteError, ComponentFieldId,
-    ComponentFieldPath, ComponentFieldPathSegment, ComponentFieldSchema, ComponentSchema,
-    ComponentSchemaVersion, ComponentShapeMember, ComponentTypeId, ComponentValue,
+    AssetReferenceDemand, ComponentCapability, ComponentEntityReferenceRewriteError,
+    ComponentFieldId, ComponentFieldPath, ComponentFieldPathSegment, ComponentFieldSchema,
+    ComponentSchema, ComponentSchemaVersion, ComponentShapeMember, ComponentTypeId, ComponentValue,
     ComponentValueKind, ComponentValueShape, DeclaredAssetReferenceError,
     EntityReferenceTraversalLimits, collect_declared_asset_references_from_schema,
     collect_declared_field_asset_references, rewrite_declared_entity_references,
@@ -46,7 +46,10 @@ fn keyed_record_rows_rewrite_entity_references_and_retain_asset_leaves() {
                     ComponentShapeMember::new("id", ComponentValueKind::String)
                         .with_id(ComponentFieldId::new("item-id")),
                     ComponentShapeMember::new("target", ComponentValueShape::EntityRef),
-                    ComponentShapeMember::new("portrait", ComponentValueShape::AssetRef),
+                    ComponentShapeMember::new(
+                        "portrait",
+                        ComponentValueShape::asset_ref(AssetReferenceDemand::Immediate),
+                    ),
                 ]),
                 ComponentFieldId::new("item-id"),
             ),
@@ -174,7 +177,7 @@ fn nested_asset_leaves_keep_distinct_paths_under_one_root_field() {
             "Assets",
             ComponentFieldPath::from_fields(["assets"]),
             ComponentValueShape::map(ComponentValueShape::list(ComponentValueShape::optional(
-                ComponentValueShape::AssetRef,
+                ComponentValueShape::asset_ref(AssetReferenceDemand::Immediate),
             ))),
         )
         .with_capability(ComponentCapability::AssetRef),
@@ -233,7 +236,9 @@ fn set_field_asset_traversal_keeps_nested_stable_ids_and_root_paths() {
         ComponentFieldId::new("stable-assets"),
         "Assets",
         ComponentFieldPath::from_fields(["settings", "assets"]),
-        ComponentValueShape::map(ComponentValueShape::list(ComponentValueShape::AssetRef)),
+        ComponentValueShape::map(ComponentValueShape::list(ComponentValueShape::asset_ref(
+            AssetReferenceDemand::Immediate,
+        ))),
     )
     .with_capability(ComponentCapability::AssetRef);
     let stable_id = "3c2d4005-63bd-4e2a-9792-bb2f48a12821";
@@ -282,7 +287,7 @@ fn reference_collection_leaves_unrelated_field_validation_to_the_component_owner
             ComponentFieldId::new("image"),
             "Image",
             ComponentFieldPath::from_fields(["image"]),
-            ComponentValueShape::AssetRef,
+            ComponentValueShape::asset_ref(AssetReferenceDemand::Immediate),
         )
         .with_capability(ComponentCapability::AssetRef),
     );

@@ -18,6 +18,11 @@ fingerprint. The [Runtime base guide](runtime-content-base.md) describes process
 later Scene requests. Collection reads are shared: `get` checks full Product membership, `iter`
 visits stored values once and `source_records` exposes only actual source metadata.
 
+Immediate/Deferred source preparation and processed dependency validation are being integrated
+under the [CP3 plan](../plans/2026-10-30-reference-validity-and-load-demand-plan.md). Complete
+consumer qualification remains in progress; this guide supplies no new native/platform or
+performance qualification for that change.
+
 Implement the pure source/import facet with `nara_asset` and its `serde` feature. Its settings,
 input, limits and error types require no root facade, Scene, 2D or Editor dependency. Product
 selection, typed collections and project workflows remain in the root Host and require
@@ -55,8 +60,9 @@ yet a cross-domain prepared-product dependency API.
 
 All required source reads must use this context. Repeated auxiliary reads share one immutable
 observation per source-domain load while each declared edge counts against the global limit.
-Check visits declared Scene roots sequentially and unions their exact members. Export reopens the
-receipt members and verifies their digests instead of rediscovering dependencies.
+Strict Check visits declared Scene roots and their complete mandatory delivery closure, then
+unions their exact members. Export reopens the receipt members and verifies their digests instead
+of rediscovering dependencies.
 
 Source limits bound reads. The Host reserves parser work and retained product allocations before
 calling the parser; collection and identity overhead are charged separately. Settings parsing,
@@ -99,6 +105,35 @@ Inspect the bounded diagnostics and loss facts described in the
 [tool failure guide](rust-product-recipes.md#inspect-compiled-tool-failures). General diagnostic
 fields are deliberately not transported. This does not change the domain's preparation contract
 or execute runtime plugin hooks during Check.
+
+## Current Demand And Strict Source Validation
+
+The recursive Schema AssetRef leaf owns `AssetReferenceDemand::{Immediate, Deferred}`. Ordinary
+Rust AssetRef fields default to Immediate; use
+[`#[nara(asset_demand = deferred)]`](persistent-components.md#asset-reference-demand) for a
+future-use field. A present Deferred reference still requires a readable source with admitted
+identity, source kind and actual canonical binding. Optional/null presence does not permit a
+present reference to name missing content.
+
+Ordinary `ProjectContentLoader` preparation decodes the Immediate closure. For Deferred targets,
+it retains resolved target and metadata/receipt facts without expanding a target Scene or running
+the target's importer and resource preparation. A resolved target is weaker than a validated
+decoded Product: generic metadata cannot prove an arbitrary compound auxiliary Product exists.
+A later actual request checks its selected importer and membership before publication.
+
+Strict saved-source Check/Export follows both demands, including dependency-only Scenes. It uses
+the production Scene compiler and selected source importers, then calls
+`AssetDomain::contains_product` on actual prepared values to establish compound membership.
+Malformed Deferred content or a missing auxiliary selection refuses strict validation even when
+ordinary preparation of the referring Scene only resolved the target. Validation-only products
+do not enter that Scene's current typed/native collections or become travel roots.
+
+`ProjectContentLoader::load_delivery` returns the separate `ProjectContentDeliveryReceipt` for
+that saved-source closure. Its `members()` includes mandatory Deferred targets; ordinary startup
+attestation continues to describe the startup Immediate preparation. Export consumes the strict
+delivery result. Editor preview uses the admitted dirty working copy for an Immediate Scene
+dependency; Deferred targets retain binding observations without adding their document body,
+revision or resources to the current preview. Saved-source Check does not certify a dirty copy.
 
 ## Runtime Access
 
@@ -156,10 +191,23 @@ decoded product's enclosing source and its selected product ID. The Runtime Host
 catalog mapping for a shared member. Accepting any source merely because a subproduct ID matches
 would let valid bytes for another resource inherit the catalog's identity.
 
-Implement `visit_required_runtime_products` over the actual decoded value, explicitly returning
-an empty inventory for a format without required references. The Host checks each visited Product
-against the same captured base and this member's Required declarations. Stop on the visitor's
-concrete error; the query allocates no scratch, loads nothing and performs no external effects.
+Implement `visit_runtime_dependencies(product, visitor)` over the actual decoded value. Invoke
+`visitor(target_product, demand)` for every present reference, using `AssetReferenceDemand` for
+that actual leaf. Existing unconditional dependencies use Immediate; the TileSet codec reports
+its actual Image leaf as Immediate. A format without references explicitly returns `Ok(())`
+without invoking the visitor. Forwarding codecs pass both arguments through unchanged. Stop on
+the visitor's concrete error; the query allocates no scratch, loads nothing and performs no
+external effects.
+
+The Host normalizes duplicate complete Products with Immediate precedence. This actual inventory
+must equal the member's mandatory catalog declarations: Immediate corresponds to Required and
+Deferred to Reference. Both roles require captured membership and executable format agreement.
+Missing, extra mandatory and wrong-role edges reject with `DependencyMismatch` before outgoing
+edges can trigger work. Soft metadata is missing-allowed, excluded from that equality and unable
+to satisfy a present payload reference. Ordinary preparation follows only admitted Immediate
+edges; [`base.validate_deep()`](runtime-content-base.md#strict-payload-validation) follows both
+mandatory roles through the selected production decoders without publishing native stores.
+
 `runtime_retained_bytes` reports the actual modeled inline/owned storage after decode, bounded
 by the pre-reserved maximum. Query failure or panic returns no usable candidate and releases
 the original reservation. These checks do not establish native residency or select another codec.
@@ -169,14 +217,14 @@ cooking, member integrity, Runtime catalog admission, IO and publication remain 
 The compound text package uses this facet with `AssetProductRef` and `ImportedProductId` to keep
 two text entries stable across explicitly authored rebinds. The whole bundle owns the immutable
 entry map. A persistent `AssetRef::Product(AssetProductRef)` uses the existing Schema asset leaf,
-collector and rewrite, including nested/default references. The project Host collects required
-targets during source discovery and calls `AssetDomain::contains_product` on the actual prepared
-value before publishing content. Its default accepts only `PRIMARY`; compound domains provide
-their bounded, pure membership query. Database source resolution alone does not prove product
-existence. Source-database Image/TileSet resolution and Prefab sources refuse auxiliary
-selection instead of silently loading the primary. Already admitted complete Runtime Products
-can resolve through their typed bindings without a source database. This does not install global
-subresource loading.
+collector and rewrite, including nested/default references and their exact leaf demand. The
+project Host checks currently prepared Immediate targets and all targets in strict delivery with
+`AssetDomain::contains_product` on the actual prepared value. Its default accepts only `PRIMARY`;
+compound domains provide their bounded, pure membership query. Ordinary Deferred source
+resolution alone does not prove Product existence. Source-database Image/TileSet resolution and
+Prefab sources refuse auxiliary selection instead of silently loading the primary. Already
+admitted complete Runtime Products can resolve through their typed bindings without a source
+database. This does not install global subresource loading.
 The [scoped identity decision](../architecture/adr/0122-scoped-imported-product-identity-and-authored-continuity.md)
 defines those limits. An encoded round trip alone is not source-free project delivery.
 

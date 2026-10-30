@@ -54,7 +54,9 @@ pub(crate) use schema_owner::{
 #[cfg(test)]
 mod tests;
 use super::native_source::{AdmittedNativeDocumentSource, NativeDocumentSourcePolicy};
-use catalogue::{ReferenceCatalogue, charge_database_record, insert_asset_record};
+#[cfg(feature = "presentation-2d")]
+use catalogue::charge_database_record;
+use catalogue::{ReferenceCatalogue, admit_asset_record};
 
 const SOURCE_OPEN_HANDLE_PEAK: usize = 7;
 const VALUE_NODE_RETAINED_BYTES: usize = 32;
@@ -405,7 +407,7 @@ struct AuthoringProjectSnapshotInner {
     prefab_scope: Arc<AssetPathScope>,
     unresolved_dependencies: Box<[AuthoringUnresolvedDependency]>,
     source_facts: Arc<[Arc<AuthoringSourceFact>]>,
-    stable_lookups: Arc<[catalogue::StableLookupObservation]>,
+    stable_lookups: Arc<[catalogue::ReferenceObservation]>,
     usage: AuthoringProjectAdmissionUsage,
 }
 
@@ -655,7 +657,7 @@ pub(crate) struct AuthoringProjectSessionSnapshot {
     prefab_scope: Arc<AssetPathScope>,
     unresolved_dependencies: Box<[AuthoringUnresolvedDependency]>,
     source_facts: Arc<[Arc<AuthoringSourceFact>]>,
-    stable_lookups: Arc<[catalogue::StableLookupObservation]>,
+    stable_lookups: Arc<[catalogue::ReferenceObservation]>,
     usage: AuthoringProjectAdmissionUsage,
     source_index: ProjectSourceIndexState,
 }

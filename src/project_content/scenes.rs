@@ -3,6 +3,197 @@
 use super::*;
 
 impl LoadContext<'_> {
+    /// Resolves a future target without interpreting its payload or claiming imported membership.
+    /// Metadata remains an exact source receipt; the target body deliberately does not.
+    pub(super) fn capture_resolved_source_target(
+        &mut self,
+        reference: &AssetRef,
+        source: AssetRecord,
+        source_work: WorkReservation,
+        sources: &mut SourceCandidates,
+    ) -> Result<(), ProjectContentError> {
+        if source.stable_id().as_uuid().is_nil() {
+            return Err(catalogue::identity_conflict(source.path()));
+        }
+        let kind = source.source_kind();
+        if kind != &AssetSourceKind::Scene
+            && kind != &AssetSourceKind::Image
+            && !matches!(kind, AssetSourceKind::Other(kind) if kind == "tileset")
+            && !self.domains.supports(kind)
+        {
+            return Err(ProjectContentError::with_identifier(
+                ProjectContentErrorKind::UnsupportedAssetKind,
+                "project.content.asset-kind-unsupported",
+                "Project Scene content references an unsupported asset kind",
+                "asset",
+                source.path().as_str(),
+            ));
+        }
+        if !self.domains.supports(kind) && !reference.is_primary() {
+            return Err(unsupported_product_selection(reference));
+        }
+        // Compiled asset-domain importers, Images and TileSets read through the actual Assets
+        // capability. Native Scene targets use the metadata's admitted reader instead.
+        if kind != &AssetSourceKind::Scene
+            && self.asset_scope.relative_path(source.path()).is_none()
+        {
+            return Err(ProjectContentError::with_identifier(
+                ProjectContentErrorKind::HostAuthorityRejected,
+                "project.content.asset-source-outside-scope",
+                "Asset source is outside the admitted resource directory",
+                "asset",
+                source.path().as_str(),
+            ));
+        }
+        if let Some(previous) = sources.resolved_sources.get(source.path()) {
+            if previous != &source {
+                return Err(catalogue::identity_conflict(source.path()));
+            }
+            drop(source);
+            self.subtract_budget(ProjectContentBudgetKind::WorkBytes, source_work.reserved);
+            return Ok(());
+        }
+        let reader = self
+            .catalogue
+            .as_ref()
+            .and_then(|catalogue| catalogue.metadata.get(source.path()))
+            .map(|observed| observed.reader)
+            .ok_or_else(|| catalogue::identity_conflict(source.path()))?;
+        let root = &self
+            .catalogue_roots
+            .as_ref()
+            .expect("reference discovery retains the actual source readers")[reader];
+        let alias = self
+            .catalogue_scope(reader)
+            .relative_path(source.path())
+            .ok_or_else(|| catalogue::identity_conflict(source.path()))?;
+        let path_work = self.reserve_work(checked_plan_sum(
+            ProjectContentBudgetKind::WorkBytes,
+            [
+                string_retained_bytes(root.as_str())?,
+                string_retained_bytes(alias)?,
+                string_retained_bytes(alias)?,
+                ".meta".len(),
+            ],
+        )?)?;
+        let root = self
+            .catalogue_roots
+            .as_ref()
+            .expect("reference discovery retains the actual source readers")[reader]
+            .clone();
+        let alias = self
+            .catalogue_scope(reader)
+            .relativize(source.path())
+            .expect("the actual reader relation was checked before allocation");
+        let meta_path = alias.meta_path();
+        let directory = self.open_directory(&root)?;
+        let result = (|| {
+            let (metadata, digest) = self.read_native_file(
+                &directory,
+                &meta_path,
+                AssetMetaFileLimits::default().encoded_bytes().get(),
+            )?;
+            // The catalogue used the production identity decoder. Exact byte equality retains
+            // that admitted binding without a second metadata interpretation.
+            self.verify_catalogued_metadata(source.path(), &root, digest)?;
+            self.record_member(
+                ProjectContentMemberKind::AssetMetadata,
+                &root,
+                &meta_path,
+                digest,
+            )?;
+            drop(metadata);
+            self.check_source_readable(&directory, alias.as_str())
+        })();
+        drop((directory, meta_path, alias, root));
+        self.subtract_budget(ProjectContentBudgetKind::OpenHandles, 1);
+        self.subtract_budget(ProjectContentBudgetKind::WorkBytes, path_work.reserved);
+        result?;
+
+        let entry_work = checked_plan_sum(
+            ProjectContentBudgetKind::WorkBytes,
+            [
+                size_of::<(AssetSourcePath, AssetRecord)>(),
+                BTREE_ENTRY_OVERHEAD,
+                string_retained_bytes(source.path().as_str())?,
+            ],
+        )?;
+        self.add_budget(ProjectContentBudgetKind::WorkBytes, entry_work)?;
+        checked_add_to(
+            &mut sources.resolved_source_work_bytes,
+            checked_plan_sum(
+                ProjectContentBudgetKind::WorkBytes,
+                [entry_work, source_work.reserved],
+            )?,
+            ProjectContentBudgetKind::WorkBytes,
+        )?;
+        sources
+            .resolved_sources
+            .insert(source.path().clone(), source);
+        Ok(())
+    }
+
+    fn check_source_readable(
+        &mut self,
+        directory: &DirectoryCapability,
+        alias: &str,
+    ) -> Result<(), ProjectContentError> {
+        let relative = self.observe_path(alias)?;
+        self.add_budget(ProjectContentBudgetKind::Files, 1)?;
+        self.add_budget(
+            ProjectContentBudgetKind::OpenHandles,
+            EXACT_RELATIVE_OPEN_HANDLE_PEAK,
+        )?;
+        let work = self.reserve_work(EXACT_RELATIVE_OPEN_WORK_BYTES)?;
+        let opened = directory.open_file_exact(&relative);
+        self.subtract_budget(ProjectContentBudgetKind::WorkBytes, work.reserved);
+        let result = opened.and_then(|file| {
+            let mut byte = [0];
+            let mut reader = file.reader()?;
+            // A successful bounded probe, including EOF for an empty file, proves readability.
+            // Its value is not interpreted, hashed or retained as a payload-validity claim.
+            io::Read::read(&mut reader, &mut byte)
+                .map(|_| ())
+                .map_err(|source| FsError::Io {
+                    operation: FsOperation::Read,
+                    source,
+                })
+        });
+        self.subtract_budget(
+            ProjectContentBudgetKind::OpenHandles,
+            EXACT_RELATIVE_OPEN_HANDLE_PEAK,
+        );
+        result.map_err(map_fs_error)
+    }
+
+    pub(super) fn retain_resolved_source_identities(
+        &mut self,
+        database: &mut ProjectAssetDatabase,
+        sources: BTreeMap<AssetSourcePath, AssetRecord>,
+        mut work_bytes: usize,
+    ) -> Result<(), ProjectContentError> {
+        for (path, source) in sources {
+            if let Some(previous) = database.record_for_path(&path) {
+                if previous != &source {
+                    return Err(catalogue::identity_conflict(&path));
+                }
+            } else {
+                // The discovery clone's reservation now takes custody of the actual database
+                // entry. A future target gains identity, never a decoded collection member.
+                let retained = asset_record_retained_bytes(&source)?;
+                self.commit_work_as_retained(WorkReservation { reserved: retained }, retained)?;
+                database
+                    .insert(source)
+                    .map_err(|_| catalogue::identity_conflict(&path))?;
+                work_bytes = work_bytes
+                    .checked_sub(retained)
+                    .ok_or_else(|| overflow_budget(ProjectContentBudgetKind::WorkBytes))?;
+            }
+        }
+        self.subtract_budget(ProjectContentBudgetKind::WorkBytes, work_bytes);
+        Ok(())
+    }
+
     pub(super) fn reconcile_native_metadata(
         &mut self,
         path: &AssetSourcePath,

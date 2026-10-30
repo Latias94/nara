@@ -18,8 +18,8 @@ use nara_reflect::{
     ComponentCapability, ComponentCodecError, ComponentFieldId, ComponentFieldPath,
     ComponentFieldPathSegment, ComponentFieldSchema, ComponentRegistry, ComponentRegistryPlugin,
     ComponentSchema, ComponentSchemaCatalog, ComponentSchemaOwnerSnapshot, ComponentSchemaVersion,
-    ComponentTypeId, ComponentValue, ComponentValueMaterializationLimits, ComponentValueShape,
-    PersistentComponentSchemaOwnerId, PreparedComponentCandidate,
+    ComponentTypeId, ComponentValue, ComponentValueKind, ComponentValueMaterializationLimits,
+    ComponentValueShape, PersistentComponentSchemaOwnerId, PreparedComponentCandidate,
 };
 use nara_scene::{
     ExpandedSceneCandidate, Name, SceneComponentBindings, SceneComponentBindingsPlugin,
@@ -76,7 +76,7 @@ fn data_owner() -> ComponentSchemaOwnerSnapshot {
                     field(
                         "images",
                         ComponentValueShape::list(ComponentValueShape::map(
-                            ComponentValueShape::AssetRef,
+                            ComponentValueShape::from(ComponentValueKind::AssetRef),
                         )),
                     )
                     .with_capability(ComponentCapability::AssetRef),
@@ -133,7 +133,7 @@ fn native_registry() -> ComponentRegistry {
                     ComponentFieldId::new("image"),
                     "Image",
                     ComponentFieldPath::from_fields(["nested", "image"]),
-                    ComponentValueShape::AssetRef,
+                    ComponentValueShape::from(ComponentValueKind::AssetRef),
                 )
                 .with_capability(ComponentCapability::AssetRef),
             ),
@@ -1480,7 +1480,7 @@ fn native_and_data_asset_defaults_use_the_same_metadata_policy() {
                     ComponentFieldId::new("image"),
                     "Image",
                     ComponentFieldPath::from_fields(["image"]),
-                    ComponentValueShape::AssetRef,
+                    ComponentValueShape::from(ComponentValueKind::AssetRef),
                     asset_value(default),
                 )
                 .with_capability(ComponentCapability::AssetRef),

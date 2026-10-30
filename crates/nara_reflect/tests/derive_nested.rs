@@ -5,8 +5,8 @@ use nara_core::Vec2;
 use nara_ecs::{Component, World};
 use nara_identity::{EntityReference, SceneEntityId};
 use nara_reflect::{
-    ComponentCapability, ComponentFieldPath, ComponentNumericDomain, ComponentRegistry,
-    ComponentRegistryError, ComponentTypeId, ComponentValue, ComponentValueKind,
+    AssetReferenceDemand, ComponentCapability, ComponentFieldPath, ComponentNumericDomain,
+    ComponentRegistry, ComponentRegistryError, ComponentTypeId, ComponentValue, ComponentValueKind,
     ComponentValueShape, PersistentComponent, PersistentComponentProvider,
     validate_component_value,
 };
@@ -104,7 +104,7 @@ fn generated_nested_reference_codecs_round_trip_through_native_registry() {
             .unwrap()
             .shape(),
         &ComponentValueShape::map(ComponentValueShape::list(ComponentValueShape::optional(
-            ComponentValueShape::AssetRef
+            ComponentValueShape::asset_ref(AssetReferenceDemand::Immediate)
         )))
     );
     assert_eq!(

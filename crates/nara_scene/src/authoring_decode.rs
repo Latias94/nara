@@ -1088,7 +1088,7 @@ fn supports_data_shape(shape: &ComponentValueShape) -> bool {
             }
             ComponentValueShape::Scalar { .. }
             | ComponentValueShape::EntityRef
-            | ComponentValueShape::AssetRef => {}
+            | ComponentValueShape::AssetRef { .. } => {}
         }
     }
     true

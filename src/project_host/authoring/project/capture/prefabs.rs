@@ -375,6 +375,7 @@ impl<'a> AuthoringPrefabAcquisition<'a> {
             }
             Err(error) => return Err(error),
         };
+        catalogue.check_resolved_target_identity(opened.identity, &opened.project_path)?;
         let native_source = source_policy.admit_budgeted(
             &schema.project_root,
             opened.project_path.as_str(),
@@ -549,7 +550,7 @@ impl<'a> AuthoringPrefabAcquisition<'a> {
             2 * size_of::<usize>(),
         ])?;
         self.budget.charge_source_bytes(0, 0, 0, index_bytes)?;
-        let stable_lookups = self.catalogue.into_lookup_observations(self.budget)?;
+        let stable_lookups = self.catalogue.into_reference_observations(self.budget)?;
         let sources = self.source_facts.into_values().collect::<Vec<_>>().into();
         let validation = AuthoringSourceValidation::new(
             Arc::clone(self.schema),
@@ -669,12 +670,14 @@ pub(super) fn revalidate_sources(
             .map_err(AuthoringProjectSourceAdmissionError::NativeSource)?;
     }
     for source in source_facts.values() {
+        catalogue.check_resolved_target_identity(source.identity(), source.project_path())?;
         revalidate_source_fact(&schema.project_root, source, budget)?;
     }
     for source in schema_source_facts(schema) {
         revalidate_source_fact(&schema.project_root, &source, budget)?;
     }
     for source in catalogue.lookup_sources() {
+        catalogue.check_resolved_target_identity(source.identity(), source.project_path())?;
         if let Some(existing) = source_facts.get(source.project_path().as_str()) {
             if !existing.same_file_observation(source) {
                 return Err(AuthoringProjectSourceAdmissionError::SourceChanged {
@@ -698,5 +701,6 @@ pub(super) fn revalidate_sources(
             );
         }
     }
+    catalogue.revalidate_resolved_targets(budget)?;
     Ok(())
 }

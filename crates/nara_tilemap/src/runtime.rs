@@ -192,7 +192,9 @@ mod codec {
         mem::size_of,
     };
 
-    use nara_asset::{AssetRuntimeError, AssetRuntimeLimits, RuntimeAssetCodec};
+    use nara_asset::{
+        AssetReferenceDemand, AssetRuntimeError, AssetRuntimeLimits, RuntimeAssetCodec,
+    };
     use nara_core::{
         ByteLimit, DepthLimit, EngineVersion, FormatGenerator, FormatKind, ItemLimit,
         PersistentFileContract, PersistentFileContractError, PersistentFileDecodeError,
@@ -296,11 +298,11 @@ mod codec {
             Ok(size_of::<TileSetDescriptor>())
         }
 
-        fn visit_required_runtime_products<E>(
+        fn visit_runtime_dependencies<E>(
             product: &TileSetDescriptor,
-            mut visitor: impl FnMut(AssetProductRef) -> Result<(), E>,
+            mut visitor: impl FnMut(AssetProductRef, AssetReferenceDemand) -> Result<(), E>,
         ) -> Result<(), E> {
-            visitor(product.image_product())
+            visitor(product.image_product(), AssetReferenceDemand::Immediate)
         }
 
         fn contains_runtime_product(

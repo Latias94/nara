@@ -75,6 +75,9 @@ impl ProjectContentMemberReceipt {
 /// member paths are relative to the exact project root retained privately by the receipt. The
 /// selected Scene path is relative to the project's configured Scenes directory. Neither this
 /// receipt nor its clonable source authority establishes runtime residency or delivery admission.
+/// These are frozen observations, not a live filesystem validity claim. Bodies needed only by
+/// Deferred references are excluded; a later target request resolves its own current inputs. Strict
+/// saved-source delivery independently validates the complete mandatory content closure.
 #[derive(Clone)]
 pub struct ProjectContentClosureReceipt {
     inner: Arc<ProjectContentClosureReceiptInner>,
@@ -130,8 +133,9 @@ impl ProjectContentClosureReceipt {
     ///
     /// Unlike [`Self::content_digest`], this digest includes the manifest, authoring schema bundle,
     /// runtime directory paths, and every member kind/path/digest tuple. Product and export
-    /// adapters use it to prove that an executable started from the same source-carrying closure
-    /// that the export transaction will publish.
+    /// adapters use it to compare the executable's admitted startup observations with the startup
+    /// portion of the independently validated delivery plan. It does not attest bodies needed
+    /// only by Deferred references or physical file incarnation across processes or copied exports.
     #[doc(hidden)]
     #[must_use]
     pub fn closure_plan_digest(&self) -> ContentDigest {

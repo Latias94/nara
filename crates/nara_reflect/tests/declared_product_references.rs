@@ -7,11 +7,11 @@ use nara_reflect::{
     __private::{
         AssetReferenceCollectionError, collect_declared_value_asset_references_with_admission,
     },
-    AssetReferenceRewriteError, ComponentCapability, ComponentCodecError, ComponentFieldId,
-    ComponentFieldPath, ComponentFieldSchema, ComponentPropertyPath, ComponentPropertyReadBudget,
-    ComponentPropertyStep, ComponentSchema, ComponentSchemaVersion, ComponentShapeMember,
-    ComponentTypeId, ComponentValue, ComponentValueKind, ComponentValueMaterializationLimits,
-    ComponentValueShape, DeclaredAssetReferenceError,
+    AssetReferenceDemand, AssetReferenceRewriteError, ComponentCapability, ComponentCodecError,
+    ComponentFieldId, ComponentFieldPath, ComponentFieldSchema, ComponentPropertyPath,
+    ComponentPropertyReadBudget, ComponentPropertyStep, ComponentSchema, ComponentSchemaVersion,
+    ComponentShapeMember, ComponentTypeId, ComponentValue, ComponentValueKind,
+    ComponentValueMaterializationLimits, ComponentValueShape, DeclaredAssetReferenceError,
     collect_declared_asset_references_from_schema, collect_declared_field_asset_references,
     collect_declared_value_asset_references_with_limits, effective_component_value,
     resolve_component_property_schema_claim, rewrite_declared_asset_references,
@@ -76,7 +76,9 @@ fn schema(field: ComponentFieldSchema) -> ComponentSchema {
 fn collect(
     value: &ComponentValue,
 ) -> Result<Vec<nara_reflect::DeclaredAssetReference>, DeclaredAssetReferenceError> {
-    let field = field(ComponentValueShape::AssetRef);
+    let field = field(ComponentValueShape::asset_ref(
+        AssetReferenceDemand::Immediate,
+    ));
     collect_declared_value_asset_references_with_limits(
         &ComponentTypeId::new("test.ProductReferences"),
         &field,
@@ -90,7 +92,7 @@ fn collect(
 fn product_asset_leaf_codec_preserves_primary_and_subproduct_wire() {
     assert_eq!(
         <AssetRef as PersistentFieldCodec>::value_shape(),
-        ComponentValueShape::AssetRef
+        ComponentValueShape::asset_ref(AssetReferenceDemand::Immediate)
     );
     for id in [None, Some(PRODUCT)] {
         let reference = product(SOURCE, id);
@@ -100,7 +102,10 @@ fn product_asset_leaf_codec_preserves_primary_and_subproduct_wire() {
             <AssetRef as PersistentFieldCodec>::decode(&expected, "caption").unwrap(),
             reference
         );
-        assert!(ComponentValueShape::AssetRef.accepts_value(&expected));
+        assert!(
+            ComponentValueShape::asset_ref(AssetReferenceDemand::Immediate)
+                .accepts_value(&expected)
+        );
         assert_eq!(collect(&expected).unwrap()[0].asset_ref(), &reference);
     }
     assert_ne!(product(SOURCE, None), AssetRef::stable_id(SOURCE).unwrap());
@@ -108,9 +113,10 @@ fn product_asset_leaf_codec_preserves_primary_and_subproduct_wire() {
 
 #[test]
 fn nested_products_share_field_and_property_payload_traversal() {
-    let selected_shape = ComponentValueShape::map(ComponentValueShape::list(
-        ComponentValueShape::optional(ComponentValueShape::AssetRef),
-    ));
+    let selected_shape =
+        ComponentValueShape::map(ComponentValueShape::list(ComponentValueShape::optional(
+            ComponentValueShape::asset_ref(AssetReferenceDemand::Immediate),
+        )));
     let schema = schema(field(ComponentValueShape::record_members([
         ComponentShapeMember::new("wire_captions", selected_shape)
             .with_id(ComponentFieldId::new("captions")),
@@ -181,7 +187,7 @@ fn product_default_materialization_and_source_rebind_keep_the_product_id() {
             ComponentFieldId::new("root"),
             "Root",
             ComponentFieldPath::from_fields(["root"]),
-            ComponentValueShape::AssetRef,
+            ComponentValueShape::asset_ref(AssetReferenceDemand::Immediate),
             wire(SOURCE, Some(PRODUCT)),
         )
         .with_capability(ComponentCapability::AssetRef),
@@ -338,10 +344,14 @@ fn product_references_reject_missing_null_wrong_shapes_and_unknown_fields() {
         .unwrap() = ComponentValue::String("primary".into());
     cases.push(primary_with_id);
     for value in cases {
-        assert!(!ComponentValueShape::AssetRef.accepts_value(&value));
+        assert!(
+            !ComponentValueShape::asset_ref(AssetReferenceDemand::Immediate).accepts_value(&value)
+        );
         assert!(<AssetRef as PersistentFieldCodec>::decode(&value, "caption").is_err());
         let expected = collect(&value).unwrap_err();
-        let field = field(ComponentValueShape::AssetRef);
+        let field = field(ComponentValueShape::asset_ref(
+            AssetReferenceDemand::Immediate,
+        ));
         assert_eq!(
             collect_declared_value_asset_references_with_admission(
                 &ComponentTypeId::new("test.ProductReferences"),
@@ -354,7 +364,9 @@ fn product_references_reject_missing_null_wrong_shapes_and_unknown_fields() {
             Err(AssetReferenceCollectionError::Reference(expected)),
         );
     }
-    let schema = schema(field(ComponentValueShape::AssetRef));
+    let schema = schema(field(ComponentValueShape::asset_ref(
+        AssetReferenceDemand::Immediate,
+    )));
     assert!(matches!(
         collect_declared_asset_references_from_schema(
             &schema,
@@ -384,7 +396,9 @@ fn product_identity_failures_are_typed_canonical_and_do_not_retain_asset_text() 
             }
         ));
         assert!(!format!("{error:?} {error}").contains(invalid));
-        assert!(!ComponentValueShape::AssetRef.accepts_value(&value));
+        assert!(
+            !ComponentValueShape::asset_ref(AssetReferenceDemand::Immediate).accepts_value(&value)
+        );
     }
     for invalid in [
         "private-invalid-source",

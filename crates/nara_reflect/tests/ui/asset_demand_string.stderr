@@ -1,0 +1,5 @@
+error: expected identifier
+  --> tests/ui/asset_demand_string.rs:14:60
+   |
+14 |     #[nara(id = "target", alias = "Target", asset_demand = "deferred")]
+   |                                                            ^^^^^^^^^^

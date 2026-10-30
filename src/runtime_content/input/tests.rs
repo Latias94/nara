@@ -13,8 +13,8 @@ use nara_app::{
     RuntimeControl, RuntimeControlRequestResult, RuntimeInstance,
 };
 use nara_asset::{
-    AssetDomain, AssetPathScope, AssetProductRef, AssetRuntimeError, AssetRuntimeLimits,
-    ImportedProductId, ProjectAssetDatabase, RuntimeAssetCodec, StableAssetId,
+    AssetDomain, AssetPathScope, AssetProductRef, AssetReferenceDemand, AssetRuntimeError,
+    AssetRuntimeLimits, ImportedProductId, ProjectAssetDatabase, RuntimeAssetCodec, StableAssetId,
 };
 use nara_core::{ByteLimit, FormatKind, FormatVersion};
 use nara_ecs::{Res, ResMut, Resource, schedule::IntoScheduleConfigs};
@@ -664,11 +664,11 @@ impl RuntimeAssetCodec<ActionMapAsset> for SelectedCodec {
         ActionMapRuntimeCodec::runtime_retained_bytes(product)
     }
 
-    fn visit_required_runtime_products<E>(
+    fn visit_runtime_dependencies<E>(
         product: &ActionMapAsset,
-        visitor: impl FnMut(AssetProductRef) -> Result<(), E>,
+        visitor: impl FnMut(AssetProductRef, AssetReferenceDemand) -> Result<(), E>,
     ) -> Result<(), E> {
-        ActionMapRuntimeCodec::visit_required_runtime_products(product, visitor)
+        ActionMapRuntimeCodec::visit_runtime_dependencies(product, visitor)
     }
 
     fn contains_runtime_product(product: &ActionMapAsset, reference: AssetProductRef) -> bool {

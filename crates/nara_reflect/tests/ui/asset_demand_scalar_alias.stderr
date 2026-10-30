@@ -1,0 +1,11 @@
+error[E0080]: evaluation panicked: asset_demand requires at least one AssetRef leaf in the field type
+  --> tests/ui/asset_demand_scalar_alias.rs:17:58
+   |
+17 |     #[nara(id = "value", alias = "Value", asset_demand = immediate)]
+   |                                                          ^^^^^^^^^ evaluation of `<AssetDemandScalarAlias as _::__NaraAssetDemandCheck>::VALID` failed here
+
+note: erroneous constant encountered
+  --> tests/ui/asset_demand_scalar_alias.rs:17:58
+   |
+17 |     #[nara(id = "value", alias = "Value", asset_demand = immediate)]
+   |                                                          ^^^^^^^^^

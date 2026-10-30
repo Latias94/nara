@@ -112,8 +112,9 @@ and [complete consumer plan](../plans/2026-10-30-reference-validity-and-load-dem
 Per-leaf Immediate/Deferred meaning, actual dependency equality and strict saved-source/deep
 validation separate target resolution from current resource preparation. The
 [pinned Bevy/Godot comparison](../research/2026-10-30-reference-validity-and-current-demand.md)
-supplies source constraints; implementation and qualification remain outstanding. Immutable
-encoded backing/residency is a separate CP4 comparison.
+supplies source constraints. The [production qualification](../knowledge/engineering/verification/2026-10/2026-10-30T172312Z-reference-validity-and-current-demand-production-replacement-qualification-b16511fa33a74c2b808270394b28bf62.md)
+records the owning replacement, public source/processed travel, strict source Export and selected
+native scope. Immutable encoded backing/residency is a separate CP4 comparison.
 
 ## Background Designs
 

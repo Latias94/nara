@@ -128,6 +128,16 @@ impl PreparedProjectSceneView<'_> {
         self.content.document()
     }
 
+    /// Borrows an Immediate Scene data dependency already prepared for this request.
+    ///
+    /// This performs no loading and grants no travel authority. Deferred targets, unrelated
+    /// catalogue members and the selected root return `None`. The borrow cannot outlive this
+    /// prepared view or its actual source/processed content owner.
+    #[must_use]
+    pub fn scene_dependency(&self, product: AssetProductRef) -> Option<&SceneDocument> {
+        self.content.scene_dependency(product)
+    }
+
     /// Borrows the exact selection captured by this request.
     #[must_use]
     pub fn selected_scene(&self) -> &ProjectSceneSelection {

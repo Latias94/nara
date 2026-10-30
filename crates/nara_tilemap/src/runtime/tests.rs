@@ -243,7 +243,7 @@ fn exact_image_extent_retains_subnormal_terms_lost_by_f32_and_f64_summation() {
 mod codec_tests {
     use std::mem::{needs_drop, size_of};
 
-    use nara_asset::RuntimeAssetCodec;
+    use nara_asset::{AssetReferenceDemand, RuntimeAssetCodec};
     use nara_material::{AddressMode, FilterMode};
     use serde_json::{Value, json};
 
@@ -357,23 +357,27 @@ mod codec_tests {
     }
 
     #[test]
-    fn required_product_inventory_visits_exactly_the_image_once_and_preserves_callback_failure() {
+    fn dependency_inventory_visits_the_immediate_image_once_and_preserves_callback_failure() {
         let descriptor = golden_descriptor();
         let mut seen = None;
-        TileSetRuntimeCodec::visit_required_runtime_products(&descriptor, |reference| {
+        TileSetRuntimeCodec::visit_runtime_dependencies(&descriptor, |reference, demand| {
             assert!(seen.is_none());
-            seen = Some(reference);
+            seen = Some((reference, demand));
             Ok::<(), ()>(())
         })
         .unwrap();
-        assert_eq!(seen, Some(descriptor.image_product()));
+        assert_eq!(
+            seen,
+            Some((descriptor.image_product(), AssetReferenceDemand::Immediate))
+        );
 
         let failure = String::from("concrete caller failure");
         let mut calls = 0;
         let result =
-            TileSetRuntimeCodec::visit_required_runtime_products(&descriptor, |reference| {
+            TileSetRuntimeCodec::visit_runtime_dependencies(&descriptor, |reference, demand| {
                 calls += 1;
                 assert_eq!(reference, descriptor.image_product());
+                assert_eq!(demand, AssetReferenceDemand::Immediate);
                 Err(&failure)
             });
         assert_eq!(calls, 1);

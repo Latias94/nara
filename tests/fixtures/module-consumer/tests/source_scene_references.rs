@@ -39,7 +39,7 @@ use nara_engine::{
         ComponentSchema, ComponentSchemaCatalog, ComponentSchemaOwnerId,
         ComponentSchemaOwnerSnapshot, ComponentSchemaProviderBindingId,
         ComponentSchemaProviderDefinition, ComponentSchemaVersion, ComponentTypeId, ComponentValue,
-        ComponentValueShape, PersistentComponent, PersistentComponentProvider,
+        ComponentValueKind, ComponentValueShape, PersistentComponent, PersistentComponentProvider,
         PersistentComponentSchemaOwnerId, decode_asset_reference_value,
         encode_asset_reference_value,
     },
@@ -166,7 +166,7 @@ fn recipe(case: Case) -> ProductRecipe {
                     ComponentFieldId::new("target"),
                     "Target Scene",
                     ComponentFieldPath::from_fields(["target"]),
-                    ComponentValueShape::AssetRef,
+                    ComponentValueShape::from(ComponentValueKind::AssetRef),
                     encode_asset_reference_value(&AssetRef::Product(product(B))),
                 )
                 .with_capabilities(ComponentCapability::SCENE_AUTHORING)
@@ -202,6 +202,10 @@ struct Fixture {
 
 impl Fixture {
     fn new(case: Case, graph: &[(u64, &[u64])], declared: &[u64]) -> Self {
+        Self::with_recipe(recipe(case), graph, declared)
+    }
+
+    fn with_recipe(recipe: ProductRecipe, graph: &[(u64, &[u64])], declared: &[u64]) -> Self {
         let directory = tempfile::tempdir().unwrap();
         let root = directory.path();
         for path in [ASSETS, SCENES, PREFABS, "schema"] {
@@ -237,7 +241,6 @@ impl Fixture {
             .unwrap();
         let candidate = ingest_project_manifest(&manifest, None).unwrap();
         drop(manifest);
-        let recipe = recipe(case);
         let plan = resolve_product_recipe(&candidate, recipe.clone()).unwrap();
         fs::write(
             root.join("schema/authoring.bundle.json"),
@@ -1025,10 +1028,23 @@ fn travel(world: &mut World) {
 }
 
 fn execute(fixture: &Fixture) -> Outcome {
+    let outcome = execute_until(fixture, |outcome: &Outcome| outcome.phase == Phase::Done);
+    assert!(
+        outcome
+            .source_view
+            .as_ref()
+            .unwrap()
+            .with_document(|_| ())
+            .is_none()
+    );
+    outcome
+}
+
+fn execute_until<O: Resource + Clone>(fixture: &Fixture, finished: fn(&O) -> bool) -> O {
     let intent = HeadlessRunIntent::frames(NonZeroU32::new(20_000).unwrap(), Duration::ZERO)
         .with_recipe(fixture.recipe.clone())
-        .stop_when(|outcome: &Outcome| outcome.phase == Phase::Done);
-    let mut run = HeadlessRun::<Outcome>::new(fixture.capability(), intent, Vec::new());
+        .stop_when(finished);
+    let mut run = HeadlessRun::<O>::new(fixture.capability(), intent, Vec::new());
     let mut cleanup_deadline = None;
     loop {
         let report = run.execute_bounded();
@@ -1051,15 +1067,7 @@ fn execute(fixture: &Fixture) -> Outcome {
         let HeadlessRunOutcome::Completed(outcome) = report.into_outcome() else {
             panic!("the bounded source Scene workflow must complete")
         };
-        assert_eq!(outcome.phase, Phase::Done);
-        assert!(
-            outcome
-                .source_view
-                .as_ref()
-                .unwrap()
-                .with_document(|_| ())
-                .is_none()
-        );
+        assert!(finished(&outcome));
         return outcome;
     }
 }
@@ -1129,5 +1137,759 @@ fn assert_idle(loader: &ProjectContentLoader) {
     assert_eq!(budget.active_reservations(), 0);
     for &kind in ProjectContentBudgetKind::ALL {
         assert_eq!(budget.active(kind), 0, "{kind:?}");
+    }
+}
+
+mod deferred {
+    use super::*;
+    use nara_engine::{
+        asset::Assets,
+        project_host::{PreparedProjectSceneView, ProjectContentMemberReceipt},
+    };
+    use nara_image::{ImageAsset, ImageExtent, ImageImportSettings};
+
+    const ATLAS: u64 = 10;
+    const HEAVY: u64 = 11;
+    const DOOR: &str = "consumer.source-scene.DeferredDoor";
+    const RULES: &str = "consumer.source-scene.EncounterRules";
+
+    #[derive(Component, Debug, PartialEq, Eq, PersistentComponent)]
+    #[nara(
+        id = "consumer.source-scene.DeferredDoor",
+        version = 1,
+        alias = "Deferred Door",
+        component_capabilities(scene, inspect, edit),
+        field_capabilities(scene, inspect, edit, asset_ref)
+    )]
+    struct DeferredDoor {
+        #[nara(id = "target", alias = "Target Scene", asset_demand = deferred)]
+        target: Option<AssetRef>,
+        #[nara(id = "atlas", alias = "Shared atlas")]
+        atlas: AssetRef,
+        #[nara(id = "rules", alias = "Encounter rules")]
+        rules: Option<AssetRef>,
+        #[nara(id = "heavy", alias = "Heavy Image")]
+        heavy: Option<AssetRef>,
+    }
+
+    #[derive(Component, PersistentComponent)]
+    #[nara(
+        id = "consumer.source-scene.EncounterRules",
+        version = 1,
+        alias = "Encounter rules",
+        component_capabilities(scene),
+        field_capabilities(scene)
+    )]
+    struct EncounterRules {
+        #[nara(id = "spawn_count", alias = "Spawn count")]
+        spawn_count: u32,
+    }
+
+    nara_engine::persistent_components! {
+        mod deferred_components = [DeferredDoor, EncounterRules];
+    }
+
+    const PROVIDER_ID: PluginSchemaProviderId =
+        PluginSchemaProviderId::new("consumer.source-scene.deferred-schema");
+    const PROVIDER: ComponentSchemaProviderDefinition = ComponentSchemaProviderDefinition::new(
+        ComponentSchemaOwnerId::new("consumer.source-scene.deferred"),
+        PROVIDER_ID,
+        ComponentSchemaProviderBindingId::new("consumer.source-scene.deferred-native", 1),
+        deferred_components::initial_catalog,
+        deferred_components::register,
+    );
+
+    #[derive(Clone, Copy, Debug, PartialEq, Eq, Resource)]
+    enum Case {
+        Travel,
+        MalformedB,
+    }
+
+    impl ProductConfiguration for Case {
+        fn write_canonical(&self, output: &mut Vec<u8>) {
+            output.push(match self {
+                Self::Travel => 0,
+                Self::MalformedB => 1,
+            });
+        }
+    }
+
+    struct DeferredDoorPlugin(Case);
+
+    impl Plugin for DeferredDoorPlugin {
+        fn declaration() -> &'static PluginDeclaration {
+            static DECLARATION: PluginDeclaration = PluginDeclaration::new(
+                PluginId::new("consumer.source-scene.deferred"),
+                PluginCategory::Runtime,
+            )
+            .requires_plugins(&[nara_engine::reflect::COMPONENT_REGISTRY_PLUGIN_ID])
+            .provides_schema(&[PROVIDER_ID]);
+            &DECLARATION
+        }
+
+        fn build(&self, app: &mut App) -> Result<(), PluginError> {
+            app.insert_resource(self.0)?.init_resource::<Outcome>()?;
+            add_startup_scene_activation_systems(app, inspect_startup)?;
+            app.add_systems(CoreStage::Update, travel)?;
+            Ok(())
+        }
+    }
+
+    fn fixture(case: Case, declared: &[u64]) -> Fixture {
+        let recipe = ProductRecipe::new()
+            .add_contribution(
+                SchemaContribution::<DeferredDoorPlugin>::configured(
+                    case,
+                    |case| DeferredDoorPlugin(*case),
+                    [PROVIDER],
+                )
+                .unwrap(),
+            )
+            .unwrap();
+        let fixture =
+            Fixture::with_recipe(recipe, &[(A, &[]), (B, &[]), (C, &[]), (D, &[])], declared);
+        for scene in [A, B, C, D] {
+            fixture.write_scene(scene, &document(scene));
+        }
+        for (member, encoded) in [
+            (
+                ATLAS,
+                include_bytes!("../../images/valid-rgba-1x1.png").as_slice(),
+            ),
+            (
+                HEAVY,
+                include_bytes!("../../../../reference-game/assets/textures/tiny-dungeon.png")
+                    .as_slice(),
+            ),
+        ] {
+            fs::write(fixture.root().join(image_path(member)), encoded).unwrap();
+            fs::write(
+                fixture.root().join(format!("{}.meta", image_path(member))),
+                AssetMeta::new(
+                    AssetMetaIdentity::new(
+                        product(member).source(),
+                        AssetPath::new(image_name(member)).unwrap(),
+                        AssetSourceKind::Image,
+                    ),
+                    ImageImportSettings::default(),
+                )
+                .to_json_string()
+                .unwrap(),
+            )
+            .unwrap();
+        }
+        fixture
+    }
+
+    fn image_name(member: u64) -> &'static str {
+        match member {
+            ATLAS => "shared.png",
+            HEAVY => "b-heavy.png",
+            _ => unreachable!(),
+        }
+    }
+
+    fn image_path(member: u64) -> String {
+        format!("{ASSETS}/{}", image_name(member))
+    }
+
+    fn document(scene: u64) -> SceneDocument {
+        if scene == D {
+            return SceneDocument::from_ordered_roots([SceneEntityRecord::new(marker(D))
+                .with_component(
+                    ComponentTypeId::new(RULES),
+                    SceneComponentRecord::new(
+                        ComponentSchemaVersion::ONE,
+                        EncounterRules { spawn_count: 17 }
+                            .__encode_persistent_component()
+                            .unwrap(),
+                    ),
+                )]);
+        }
+        let target = match scene {
+            A => Some(AssetRef::Product(product(B))),
+            B => Some(AssetRef::Product(product(C))),
+            C => None,
+            _ => unreachable!(),
+        };
+        let door = DeferredDoor {
+            target,
+            atlas: AssetRef::Product(product(ATLAS)),
+            rules: (scene == A).then(|| AssetRef::Product(product(D))),
+            heavy: (scene == B).then(|| AssetRef::Product(product(HEAVY))),
+        };
+        SceneDocument::from_ordered_roots([
+            SceneEntityRecord::new(marker(scene)),
+            SceneEntityRecord::new(door_id(scene, 0)).with_component(
+                ComponentTypeId::new(DOOR),
+                SceneComponentRecord::new(
+                    ComponentSchemaVersion::ONE,
+                    door.__encode_persistent_component().unwrap(),
+                ),
+            ),
+        ])
+    }
+
+    // Source Image importing has no consumer decode callback. Assert actual decoded/native
+    // membership and byte lengths instead of installing another importer or a synthetic counter.
+    fn assert_images<'a>(images: impl Iterator<Item = &'a ImageAsset>, scene: u64) -> [usize; 2] {
+        let mut pointers = [0; 2];
+        let mut count = 0;
+        for image in images {
+            let (member, index, extent) = if image.product() == Some(product(ATLAS)) {
+                (ATLAS, 0, ImageExtent::new(1, 1))
+            } else {
+                assert_eq!(scene, B, "only B prepares the heavy Image");
+                assert_eq!(image.product(), Some(product(HEAVY)));
+                (HEAVY, 1, ImageExtent::new(192, 176))
+            };
+            assert_eq!(image.extent(), extent);
+            assert_eq!(image.pixels().len() as u64, extent.pixel_count() * 4);
+            assert_eq!(image.source().unwrap().path().as_str(), image_path(member));
+            assert_eq!(pointers[index], 0, "one value per actual Image Product");
+            pointers[index] = image.pixels().as_ptr() as usize;
+            count += 1;
+        }
+        assert_eq!(count, if scene == B { 2 } else { 1 });
+        assert_ne!(pointers[0], 0);
+        assert_eq!(pointers[1] != 0, scene == B);
+        pointers
+    }
+
+    fn assert_member(
+        fixture: &Fixture,
+        members: &[ProjectContentMemberReceipt],
+        kind: ProjectContentMemberKind,
+        path: &str,
+    ) {
+        let matching: Vec<_> = members
+            .iter()
+            .filter(|member| member.kind() == kind && member.path().as_str() == path)
+            .collect();
+        assert_eq!(matching.len(), 1, "{kind:?}: {path}");
+        assert_eq!(
+            matching[0].digest(),
+            ContentDigest::of_bytes(&fs::read(fixture.root().join(path)).unwrap()),
+        );
+    }
+
+    fn assert_snapshot(fixture: &Fixture, snapshot: &ProjectContentSnapshot, scene: u64) {
+        assert_eq!(snapshot.selected_scene_path().as_str(), scene_name(scene));
+        assert_eq!(snapshot.selected_scene_product(), Some(product(scene)));
+        assert_eq!(snapshot.selected_scene_source_key(), &source_key(scene));
+        assert_eq!(snapshot.expanded_scene(), &document(scene));
+        assert_eq!(snapshot.scene_dependencies().len(), usize::from(scene == A));
+        if scene == A {
+            let rules = &snapshot.scene_dependencies()[0];
+            assert_eq!(rules.source_key(), &source_key(D));
+            assert_eq!(rules.path(), &canonical_scene_path(D));
+            assert_eq!(rules.expanded_scene(), &document(D));
+        }
+        assert_images(snapshot.images().iter().map(|image| image.image()), scene);
+        let closure = snapshot.content_closure();
+        if let Some(target) = match scene {
+            A => Some(B),
+            B => Some(C),
+            C => None,
+            _ => unreachable!(),
+        } {
+            let resolution = snapshot.asset_resolution();
+            let resolved = resolution
+                .resolve_ref(&AssetRef::Product(product(target)))
+                .unwrap();
+            assert_eq!(resolved.path(), &canonical_scene_path(target));
+            assert_eq!(resolved.source_kind(), &AssetSourceKind::Scene);
+            assert_member(
+                fixture,
+                closure.members(),
+                ProjectContentMemberKind::AssetMetadata,
+                &format!("{}.meta", canonical_scene_path(target).as_str()),
+            );
+        }
+        for deferred in [B, C] {
+            if deferred != scene {
+                assert!(!closure.members().iter().any(|member| {
+                    member.path().as_str() == canonical_scene_path(deferred).as_str()
+                }));
+            }
+        }
+        if scene != B {
+            for path in [image_path(HEAVY), format!("{}.meta", image_path(HEAVY))] {
+                assert!(
+                    !closure
+                        .members()
+                        .iter()
+                        .any(|member| member.path().as_str() == path)
+                );
+            }
+            assert!(
+                snapshot
+                    .asset_resolution()
+                    .resolve_ref(&AssetRef::Product(product(HEAVY)))
+                    .is_err()
+            );
+        }
+    }
+
+    fn assert_delivery(fixture: &Fixture, declared: &[u64]) {
+        let current = fixture.load();
+        assert_snapshot(fixture, &current, A);
+        let ordinary = current.content_closure();
+        drop(current);
+        let delivery = fixture
+            .loader
+            .load_delivery(&fixture.candidate, &fixture.plan)
+            .unwrap();
+        // Direct load carries no Runtime Schema agreement. Strict delivery's startup includes
+        // that separately checked proof while preserving the exact ordinary source observations.
+        let agreement: Vec<_> = delivery
+            .startup_content()
+            .members()
+            .iter()
+            .filter(|member| member.kind() == ProjectContentMemberKind::AuthoringSchemaBundle)
+            .collect();
+        assert_eq!(agreement.len(), 1);
+        assert_eq!(agreement[0].path().as_str(), "schema/authoring.bundle.json");
+        assert_eq!(
+            agreement[0].digest(),
+            ContentDigest::of_bytes(
+                &fs::read(fixture.root().join(agreement[0].path().as_str())).unwrap(),
+            )
+        );
+        let observed: Vec<_> = delivery
+            .startup_content()
+            .members()
+            .iter()
+            .filter(|member| member.kind() != ProjectContentMemberKind::AuthoringSchemaBundle)
+            .cloned()
+            .collect();
+        assert_eq!(observed, ordinary.members());
+        assert_eq!(
+            delivery.startup_content().content_digest(),
+            ordinary.content_digest(),
+        );
+        let mut expected_roots = vec![scene_name(A)];
+        expected_roots.extend(declared.iter().map(|scene| scene_name(*scene)));
+        expected_roots.sort();
+        assert_eq!(
+            delivery
+                .scene_roots()
+                .iter()
+                .map(|path| path.as_str())
+                .collect::<Vec<_>>(),
+            expected_roots,
+        );
+        for scene in [A, B, C, D] {
+            let path = canonical_scene_path(scene);
+            assert_member(
+                fixture,
+                delivery.members(),
+                ProjectContentMemberKind::Scene,
+                path.as_str(),
+            );
+            assert_member(
+                fixture,
+                delivery.members(),
+                ProjectContentMemberKind::AssetMetadata,
+                &format!("{}.meta", path.as_str()),
+            );
+        }
+        for image in [ATLAS, HEAVY] {
+            assert_member(
+                fixture,
+                delivery.members(),
+                ProjectContentMemberKind::AssetSource,
+                &image_path(image),
+            );
+            assert_member(
+                fixture,
+                delivery.members(),
+                ProjectContentMemberKind::AssetMetadata,
+                &format!("{}.meta", image_path(image)),
+            );
+        }
+        assert_eq!(fixture.loader.budget_snapshot().active_generations(), 0);
+        drop((ordinary, delivery));
+        assert_idle(&fixture.loader);
+    }
+
+    #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+    enum Phase {
+        #[default]
+        Request,
+        Preparing,
+        Ready,
+        Cancelling,
+        Done,
+    }
+
+    #[derive(Clone, Debug, Default, Resource)]
+    struct Outcome {
+        phase: Phase,
+        // Inspect/cancel A, reject data-only D, cancel/commit B, cancel/commit C.
+        leg: u8,
+        request: Option<ProjectSceneRequestId>,
+        started: Option<Instant>,
+        commits: u8,
+        cancellations: u8,
+        ready: Vec<u64>,
+        rejected_d: bool,
+        rejected_b: bool,
+        spawn_count: Option<u32>,
+        live_pixels: [usize; 2],
+        native_counts: Vec<usize>,
+        receipts: Vec<SpawnedSceneInstance>,
+        source_view: Option<SceneSourceView>,
+    }
+
+    fn native_images(world: &World, scene: u64) -> [usize; 2] {
+        let images = world.resource::<Assets<ImageAsset>>();
+        assert_eq!(images.len(), if scene == B { 2 } else { 1 });
+        assert_images(images.iter().map(|(_, image)| image), scene)
+    }
+
+    fn live_door(
+        world: &mut World,
+        scene: u64,
+    ) -> (Entity, Option<AssetProductRef>, SpawnedSceneInstance) {
+        let (current, receipt) = live_scene(world, scene);
+        assert_eq!(current, document(scene));
+        let EntityLookup::Resolved(entity) = receipt.resolve(world, &door_id(scene, 0)) else {
+            panic!("the current source Scene must instantiate its Deferred Door")
+        };
+        let record = &current
+            .entities
+            .iter()
+            .find(|record| record.id == door_id(scene, 0))
+            .unwrap()
+            .components[&ComponentTypeId::new(DOOR)];
+        let expected = DeferredDoor::__decode_persistent_component(&record.value).unwrap();
+        let door = world.get::<DeferredDoor>(entity).unwrap();
+        assert_eq!(door, &expected);
+        let target = door
+            .target
+            .as_ref()
+            .map(|target| target.as_product().unwrap());
+        assert_eq!(world.query::<&DeferredDoor>().iter(world).count(), 1);
+        assert_eq!(world.query::<&EncounterRules>().iter(world).count(), 0);
+        (entity, target, receipt)
+    }
+
+    fn inspect_startup(world: &mut World) {
+        let (_, _, receipt) = live_door(world, A);
+        let pixels = native_images(world, A);
+        let count = world.resource::<Assets<ImageAsset>>().len();
+        let source_view = CurrentScene::get(world).unwrap().source_view();
+        let mut outcome = world.resource_mut::<Outcome>();
+        outcome.receipts.push(receipt);
+        outcome.source_view = Some(source_view);
+        outcome.started = Some(Instant::now());
+        outcome.live_pixels = pixels;
+        outcome.native_counts.push(count);
+    }
+
+    fn inspect_prepared(
+        prepared: PreparedProjectSceneView<'_>,
+        scene: u64,
+        receipt: &SpawnedSceneInstance,
+    ) -> Option<u32> {
+        assert_eq!(
+            prepared.selected_scene(),
+            &ProjectSceneSelection::Product(product(scene)),
+        );
+        assert_eq!(prepared.selected_scene_product(), Some(product(scene)));
+        assert_eq!(
+            prepared.selected_scene_path().unwrap().as_str(),
+            scene_name(scene),
+        );
+        assert_eq!(prepared.expected_instance(), receipt);
+        assert_eq!(prepared.scene(), &document(scene));
+        for target in [A, B, C] {
+            assert!(prepared.scene_dependency(product(target)).is_none());
+        }
+        assert!(prepared.scene_dependency(auxiliary(D)).is_none());
+        if scene == A {
+            let rules = prepared.scene_dependency(product(D)).unwrap();
+            assert_eq!(rules, &document(D));
+            let record = &rules.entities[0].components[&ComponentTypeId::new(RULES)];
+            let rules = EncounterRules::__decode_persistent_component(&record.value).unwrap();
+            assert_eq!(rules.spawn_count, 17);
+            Some(rules.spawn_count)
+        } else {
+            assert!(prepared.scene_dependency(product(D)).is_none());
+            None
+        }
+    }
+
+    fn travel(world: &mut World) {
+        let (phase, leg, commits, case) = {
+            let outcome = world.resource::<Outcome>();
+            (
+                outcome.phase,
+                outcome.leg,
+                outcome.commits,
+                *world.resource::<Case>(),
+            )
+        };
+        if phase == Phase::Done {
+            return;
+        }
+        assert!(world.resource::<Outcome>().started.unwrap().elapsed() < Duration::from_secs(15));
+        let active = if commits == 0 { A } else { B };
+        let (old_door, door_target, receipt) = live_door(world, active);
+        assert_eq!(world.resource::<Outcome>().receipts.last(), Some(&receipt));
+        assert_eq!(
+            native_images(world, active),
+            world.resource::<Outcome>().live_pixels,
+        );
+        let target = match leg {
+            0 => A,
+            1 => D,
+            2 | 3 => B,
+            4 | 5 => C,
+            _ => unreachable!(),
+        };
+        match phase {
+            Phase::Request => {
+                let selection = match target {
+                    A | D => product(target),
+                    _ => door_target.unwrap(),
+                };
+                assert_eq!(selection, product(target));
+                let request = ProjectScenes::scope(world, |scenes| {
+                    let request = scenes.request(selection).unwrap();
+                    assert_eq!(
+                        scenes.state(request),
+                        Some(ProjectSceneRequestState::Preparing),
+                    );
+                    assert!(scenes.prepared(request).is_none());
+                    assert!(!scenes.acknowledge(request));
+                    request
+                });
+                let mut outcome = world.resource_mut::<Outcome>();
+                outcome.request = Some(request);
+                outcome.phase = Phase::Preparing;
+            }
+            Phase::Preparing => {
+                let request = world.resource::<Outcome>().request.unwrap();
+                let state = ProjectScenes::scope(world, |scenes| scenes.state(request)).unwrap();
+                if state == ProjectSceneRequestState::Preparing {
+                    std::thread::sleep(Duration::from_millis(1));
+                    return;
+                }
+                if target == D || case == Case::MalformedB && target == B {
+                    let error = if target == D {
+                        ProjectSceneRequestError::UndeclaredScene
+                    } else {
+                        ProjectSceneRequestError::Content(ProjectContentErrorKind::SceneFormat)
+                    };
+                    assert_eq!(state, ProjectSceneRequestState::Rejected(error));
+                    ProjectScenes::scope(world, |scenes| {
+                        assert!(scenes.prepared(request).is_none());
+                        assert!(scenes.diagnostics(request).unwrap().has_errors());
+                        assert!(scenes.acknowledge(request));
+                    });
+                    assert_eq!(live_door(world, A).2, receipt);
+                    assert_eq!(
+                        native_images(world, A),
+                        world.resource::<Outcome>().live_pixels,
+                    );
+                    let mut outcome = world.resource_mut::<Outcome>();
+                    outcome.request = None;
+                    if target == D {
+                        outcome.rejected_d = true;
+                        outcome.leg += 1;
+                        outcome.phase = Phase::Request;
+                    } else {
+                        outcome.rejected_b = true;
+                        outcome.phase = Phase::Done;
+                    }
+                    return;
+                }
+                assert_eq!(state, ProjectSceneRequestState::Ready);
+                let spawn_count = ProjectScenes::scope(world, |scenes| {
+                    inspect_prepared(scenes.prepared(request).unwrap(), target, &receipt)
+                });
+                assert_eq!(live_door(world, active).2, receipt);
+                assert_eq!(
+                    native_images(world, active),
+                    world.resource::<Outcome>().live_pixels,
+                );
+                let mut outcome = world.resource_mut::<Outcome>();
+                if let Some(spawn_count) = spawn_count {
+                    outcome.spawn_count = Some(spawn_count);
+                }
+                outcome.ready.push(target);
+                // Leave one full ordinary frame with the target Ready and the old root live.
+                outcome.phase = Phase::Ready;
+            }
+            Phase::Ready if matches!(leg, 0 | 2 | 4) => {
+                let request = world.resource::<Outcome>().request.unwrap();
+                ProjectScenes::scope(world, |scenes| assert!(scenes.cancel(request)));
+                world.resource_mut::<Outcome>().phase = Phase::Cancelling;
+            }
+            Phase::Cancelling => {
+                let request = world.resource::<Outcome>().request.unwrap();
+                let state = ProjectScenes::scope(world, |scenes| scenes.state(request)).unwrap();
+                if state == ProjectSceneRequestState::Cancelling {
+                    std::thread::sleep(Duration::from_millis(1));
+                    return;
+                }
+                assert_eq!(state, ProjectSceneRequestState::Cancelled);
+                ProjectScenes::scope(world, |scenes| {
+                    assert!(scenes.prepared(request).is_none());
+                    assert!(scenes.acknowledge(request));
+                });
+                let mut outcome = world.resource_mut::<Outcome>();
+                outcome.request = None;
+                outcome.cancellations += 1;
+                outcome.leg += 1;
+                outcome.phase = Phase::Request;
+            }
+            Phase::Ready => {
+                let request = world.resource::<Outcome>().request.unwrap();
+                let report = commit_prepared_project_scene(
+                    world,
+                    request,
+                    SceneProductTransactionLimits::new(ItemLimit::ONE, ItemLimit::ONE),
+                    &[],
+                    |_| {},
+                );
+                assert!(!report.diagnostics.has_errors(), "{:?}", report.diagnostics);
+                let published = report.instance.unwrap();
+                assert_eq!(live_door(world, target).2, published);
+                assert_ne!(published.instance_id(), receipt.instance_id());
+                assert!(world.get::<DeferredDoor>(old_door).is_none());
+                let pixels = native_images(world, target);
+                let count = world.resource::<Assets<ImageAsset>>().len();
+                ProjectScenes::scope(world, |scenes| {
+                    assert_eq!(
+                        scenes.state(request),
+                        Some(ProjectSceneRequestState::Committed),
+                    );
+                    assert!(scenes.acknowledge(request));
+                });
+                let mut outcome = world.resource_mut::<Outcome>();
+                outcome.receipts.push(published);
+                outcome.live_pixels = pixels;
+                outcome.native_counts.push(count);
+                outcome.request = None;
+                outcome.commits += 1;
+                outcome.leg += 1;
+                outcome.phase = if target == C {
+                    Phase::Done
+                } else {
+                    Phase::Request
+                };
+            }
+            Phase::Done => unreachable!(),
+        }
+    }
+
+    fn execute(fixture: &Fixture) -> Outcome {
+        let outcome = execute_until(fixture, |outcome: &Outcome| outcome.phase == Phase::Done);
+        assert_eq!(outcome.spawn_count, Some(17));
+        assert!(
+            outcome.rejected_d,
+            "Immediate data membership grants no travel authority",
+        );
+        assert!(
+            outcome
+                .source_view
+                .as_ref()
+                .unwrap()
+                .with_document(|_| ())
+                .is_none()
+        );
+        outcome
+    }
+
+    #[test]
+    fn source_deferred_doors_validate_delivery_and_travel_only_current_demand() {
+        let fixture = fixture(Case::Travel, &[B, C]);
+        assert_delivery(&fixture, &[B, C]);
+        for scene in [B, C] {
+            let selected = fixture
+                .loader
+                .load_scene(
+                    &fixture.candidate,
+                    &fixture.plan,
+                    &ProjectPath::new(scene_name(scene)).unwrap(),
+                )
+                .unwrap();
+            assert_snapshot(&fixture, &selected, scene);
+            drop(selected);
+            assert_idle(&fixture.loader);
+        }
+        let outcome = execute(&fixture);
+        assert_eq!(outcome.ready, [A, B, B, C, C]);
+        assert_eq!(outcome.cancellations, 3);
+        assert_eq!(outcome.commits, 2);
+        assert_eq!(outcome.native_counts, [1, 2, 1]);
+        assert!(!outcome.rejected_b);
+        assert_eq!(outcome.receipts.len(), 3);
+        for (left, right) in [(0, 1), (1, 2), (0, 2)] {
+            assert_ne!(
+                outcome.receipts[left].instance_id(),
+                outcome.receipts[right].instance_id(),
+            );
+        }
+    }
+
+    #[test]
+    fn source_deferred_delivery_validates_dependency_only_c_through_b() {
+        let fixture = fixture(Case::Travel, &[B]);
+        assert_delivery(&fixture, &[B]);
+        let before = fixture.load();
+        fixture.corrupt(C, Fault::Malformed);
+        let current = fixture.load();
+        assert_snapshot(&fixture, &current, A);
+        assert_eq!(current.content_digest(), before.content_digest());
+        let budget = fixture.loader.budget_snapshot();
+        assert_eq!(
+            fixture
+                .loader
+                .load_delivery(&fixture.candidate, &fixture.plan)
+                .unwrap_err()
+                .kind(),
+            ProjectContentErrorKind::SceneFormat,
+        );
+        assert_active_budget(fixture.loader.budget_snapshot(), budget);
+        drop((before, current));
+        assert_idle(&fixture.loader);
+    }
+
+    #[test]
+    fn source_deferred_malformed_b_rejects_delivery_and_request_but_preserves_a() {
+        let fixture = fixture(Case::MalformedB, &[B, C]);
+        let before = fixture.load();
+        assert_snapshot(&fixture, &before, A);
+        fixture.corrupt(B, Fault::Malformed);
+        let current = fixture.load();
+        assert_snapshot(&fixture, &current, A);
+        assert_eq!(current.scene(), before.scene());
+        assert_eq!(current.content_digest(), before.content_digest());
+        assert_eq!(current.revision(), before.revision());
+        let budget = fixture.loader.budget_snapshot();
+        assert_eq!(
+            fixture
+                .loader
+                .load_delivery(&fixture.candidate, &fixture.plan)
+                .unwrap_err()
+                .kind(),
+            ProjectContentErrorKind::SceneFormat,
+        );
+        assert_active_budget(fixture.loader.budget_snapshot(), budget);
+        let outcome = execute(&fixture);
+        assert!(outcome.rejected_b);
+        assert_eq!(outcome.ready, [A]);
+        assert_eq!(outcome.cancellations, 1);
+        assert_eq!(outcome.commits, 0);
+        assert_eq!(outcome.native_counts, [1]);
+        assert_eq!(outcome.receipts.len(), 1);
+        assert_eq!(current.content_digest(), before.content_digest());
+        assert_active_budget(fixture.loader.budget_snapshot(), budget);
+        drop((before, current));
+        assert_idle(&fixture.loader);
     }
 }

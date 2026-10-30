@@ -5,9 +5,9 @@ use nara_core::{ByteLimit, DepthLimit, ItemLimit};
 use super::*;
 use crate::authoring::PersistentFieldCodec;
 use crate::{
-    ComponentCapability, ComponentFieldId, ComponentFieldSchema, ComponentSchema,
-    ComponentSchemaVersion, ComponentShapeMember, ComponentTypeId, ComponentValueKind,
-    ComponentValueShape, collect_declared_asset_references_from_schema,
+    AssetReferenceDemand, ComponentCapability, ComponentFieldId, ComponentFieldSchema,
+    ComponentSchema, ComponentSchemaVersion, ComponentShapeMember, ComponentTypeId,
+    ComponentValueKind, ComponentValueShape, collect_declared_asset_references_from_schema,
     collect_declared_field_asset_references, collect_declared_value_asset_references_with_limits,
 };
 
@@ -54,7 +54,7 @@ fn rewrites_nested_list_map_and_optional_leaves_without_matching_ordinary_text()
         ComponentShapeMember::new(
             "images",
             ComponentValueShape::list(ComponentValueShape::map(ComponentValueShape::optional(
-                ComponentValueShape::AssetRef,
+                ComponentValueShape::asset_ref(AssetReferenceDemand::Immediate),
             ))),
         ),
         ComponentShapeMember::new("caption", ComponentValueKind::String),
@@ -120,7 +120,9 @@ fn rewrites_nested_list_map_and_optional_leaves_without_matching_ordinary_text()
 
 #[test]
 fn complete_and_selected_field_records_rewrite_the_complete_component() {
-    let field = field(ComponentValueShape::list(ComponentValueShape::AssetRef));
+    let field = field(ComponentValueShape::list(ComponentValueShape::asset_ref(
+        AssetReferenceDemand::Immediate,
+    )));
     let schema = ComponentSchema::new(
         ComponentTypeId::new("test.TemplateAssets"),
         "Template assets",
@@ -166,7 +168,10 @@ fn empty_payload_path_supports_longer_paths_and_both_wire_variants() {
         (stable, longer),
     ] {
         let mut value = original.encode().unwrap();
-        let references = collect_payload(ComponentValueShape::AssetRef, &value);
+        let references = collect_payload(
+            ComponentValueShape::asset_ref(AssetReferenceDemand::Immediate),
+            &value,
+        );
         assert_eq!(references.len(), 1);
         assert!(references[0].path().is_empty());
         let expected = replacement.encode().unwrap();
@@ -184,7 +189,10 @@ fn empty_payload_path_supports_longer_paths_and_both_wire_variants() {
 fn decoded_identity_is_compared_using_the_existing_canonical_decoder() {
     let stable = AssetRef::stable_id("12345678-1234-5678-90ab-123456789abc").unwrap();
     let mut value = stable.encode().unwrap();
-    let references = collect_payload(ComponentValueShape::AssetRef, &value);
+    let references = collect_payload(
+        ComponentValueShape::asset_ref(AssetReferenceDemand::Immediate),
+        &value,
+    );
     let ComponentValue::Map(fields) = &mut value else {
         unreachable!()
     };
@@ -204,7 +212,9 @@ fn decoded_identity_is_compared_using_the_existing_canonical_decoder() {
 fn stale_later_reference_refuses_before_any_callback_or_replacement() {
     let mut value = ComponentValue::List(vec![path_value("a.png"), path_value("b.png")]);
     let references = collect_payload(
-        ComponentValueShape::list(ComponentValueShape::AssetRef),
+        ComponentValueShape::list(ComponentValueShape::asset_ref(
+            AssetReferenceDemand::Immediate,
+        )),
         &value,
     );
     *value.get_path_mut(references[1].path()).unwrap() = path_value("changed.png");
@@ -228,7 +238,9 @@ fn stale_later_reference_refuses_before_any_callback_or_replacement() {
 fn missing_paths_and_invalid_later_values_refuse_before_any_callback() {
     let original = ComponentValue::List(vec![path_value("a.png"), path_value("b.png")]);
     let references = collect_payload(
-        ComponentValueShape::list(ComponentValueShape::AssetRef),
+        ComponentValueShape::list(ComponentValueShape::asset_ref(
+            AssetReferenceDemand::Immediate,
+        )),
         &original,
     );
     for invalid in [
@@ -283,7 +295,9 @@ fn missing_paths_and_invalid_later_values_refuse_before_any_callback() {
 fn nonadjacent_duplicates_and_overlapping_paths_refuse_before_callbacks() {
     let original = ComponentValue::List(vec![path_value("a.png"), path_value("b.png")]);
     let references = collect_payload(
-        ComponentValueShape::list(ComponentValueShape::AssetRef),
+        ComponentValueShape::list(ComponentValueShape::asset_ref(
+            AssetReferenceDemand::Immediate,
+        )),
         &original,
     );
     let mut descendant = references[0].clone();
@@ -310,7 +324,10 @@ fn nonadjacent_duplicates_and_overlapping_paths_refuse_before_callbacks() {
         assert_eq!(value, original);
     }
     let mut value = path_value("a.png");
-    let references = collect_payload(ComponentValueShape::AssetRef, &value);
+    let references = collect_payload(
+        ComponentValueShape::asset_ref(AssetReferenceDemand::Immediate),
+        &value,
+    );
     let mut descendant = references[0].clone();
     descendant.path = ComponentFieldPath::from_fields(["value"]);
     let result =
@@ -328,7 +345,9 @@ fn nonadjacent_duplicates_and_overlapping_paths_refuse_before_callbacks() {
 fn callback_failure_retains_actual_earlier_changes_in_supplied_order() {
     let mut value = ComponentValue::List(vec![path_value("a.png"), path_value("b.png")]);
     let mut references = collect_payload(
-        ComponentValueShape::list(ComponentValueShape::AssetRef),
+        ComponentValueShape::list(ComponentValueShape::asset_ref(
+            AssetReferenceDemand::Immediate,
+        )),
         &value,
     );
     references.reverse();
@@ -365,7 +384,9 @@ fn callback_failure_retains_actual_earlier_changes_in_supplied_order() {
 fn cumulative_allocation_refusal_precedes_the_next_replacement() {
     let mut value = ComponentValue::List(vec![path_value("a.png"), path_value("b.png")]);
     let references = collect_payload(
-        ComponentValueShape::list(ComponentValueShape::AssetRef),
+        ComponentValueShape::list(ComponentValueShape::asset_ref(
+            AssetReferenceDemand::Immediate,
+        )),
         &value,
     );
     let first = AssetRef::path(format!("copied/{}.png", "a".repeat(700))).unwrap();
@@ -414,7 +435,10 @@ fn admission_refusal_keeps_the_exact_borrowed_error_without_trait_bounds() {
     let token = 7;
     let mut value = path_value("a.png");
     let original = value.clone();
-    let references = collect_payload(ComponentValueShape::AssetRef, &value);
+    let references = collect_payload(
+        ComponentValueShape::asset_ref(AssetReferenceDemand::Immediate),
+        &value,
+    );
     let result = rewrite_declared_asset_references_with_admission(
         &mut value,
         &references,
@@ -434,7 +458,9 @@ fn work_refusal_before_error_path_copy_stays_distinct_from_rewrite_failure() {
     let mut value = ComponentValue::List(vec![path_value("a.png")]);
     let original = value.clone();
     let references = collect_payload(
-        ComponentValueShape::list(ComponentValueShape::AssetRef),
+        ComponentValueShape::list(ComponentValueShape::asset_ref(
+            AssetReferenceDemand::Immediate,
+        )),
         &value,
     );
     let called = Cell::new(false);
@@ -466,7 +492,10 @@ fn work_refusal_before_error_path_copy_stays_distinct_from_rewrite_failure() {
 #[test]
 fn invalid_stable_id_text_is_admitted_before_the_shared_decoder_can_own_it() {
     let mut value = path_value("a.png");
-    let references = collect_payload(ComponentValueShape::AssetRef, &value);
+    let references = collect_payload(
+        ComponentValueShape::asset_ref(AssetReferenceDemand::Immediate),
+        &value,
+    );
     let invalid = "x".repeat(64 * 1024);
     value = ComponentValue::map([
         ("kind", ComponentValue::String("stable_id".into())),
@@ -502,7 +531,9 @@ fn invalid_stable_id_text_is_admitted_before_the_shared_decoder_can_own_it() {
 fn node_byte_and_path_depth_limits_are_bounded_before_callbacks() {
     let original = ComponentValue::List(vec![path_value("a.png"), path_value("b.png")]);
     let references = collect_payload(
-        ComponentValueShape::list(ComponentValueShape::AssetRef),
+        ComponentValueShape::list(ComponentValueShape::asset_ref(
+            AssetReferenceDemand::Immediate,
+        )),
         &original,
     );
     for (limits, expected) in [
@@ -526,7 +557,9 @@ fn node_byte_and_path_depth_limits_are_bounded_before_callbacks() {
         assert_eq!(result, Err(expected));
         assert_eq!(value, original);
     }
-    let field = field(ComponentValueShape::AssetRef);
+    let field = field(ComponentValueShape::asset_ref(
+        AssetReferenceDemand::Immediate,
+    ));
     let selected = path_value("a.png");
     let references = collect_declared_field_asset_references(
         &ComponentTypeId::new("test.TemplateAssets"),
@@ -557,7 +590,7 @@ fn collected_effective_default_does_not_materialize_a_missing_candidate_leaf() {
         ComponentFieldId::new("image"),
         "Image",
         ComponentFieldPath::from_fields(["image"]),
-        ComponentValueShape::AssetRef,
+        ComponentValueShape::asset_ref(AssetReferenceDemand::Immediate),
         path_value("fallback.png"),
     )
     .with_capability(ComponentCapability::AssetRef);

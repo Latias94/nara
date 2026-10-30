@@ -13,9 +13,10 @@ use std::{
 };
 
 use nara_asset::{
-    AssetDomain, AssetEvents, AssetProductRef, AssetRecord, AssetRef, AssetRuntimeError,
-    AssetRuntimeLimits, AssetServer, AssetSourceKind, AssetSourcePath, AssetStates, Assets, Handle,
-    ImportedProductId, ProjectAssetDatabase, RuntimeAssetCodec, StableAssetId,
+    AssetDomain, AssetEvents, AssetProductRef, AssetRecord, AssetRef, AssetReferenceDemand,
+    AssetRuntimeError, AssetRuntimeLimits, AssetServer, AssetSourceKind, AssetSourcePath,
+    AssetStates, Assets, Handle, ImportedProductId, ProjectAssetDatabase, RuntimeAssetCodec,
+    StableAssetId,
 };
 use nara_core::{ByteLimit, FormatKind, FormatVersion, ItemLimit};
 use nara_ecs::{Component, Entity, Resource, World};
@@ -47,8 +48,8 @@ use nara_reflect::{
     ComponentFieldSchema, ComponentRegistry, ComponentRegistryError, ComponentSchema,
     ComponentSchemaCatalog, ComponentSchemaOwnerId, ComponentSchemaProviderBindingId,
     ComponentSchemaProviderDefinition, ComponentSchemaProviderSourceError, ComponentSchemaVersion,
-    ComponentTypeId, ComponentValueShape, PreparedComponentCandidate, decode_asset_reference_value,
-    encode_asset_reference_value,
+    ComponentTypeId, ComponentValueKind, ComponentValueShape, PreparedComponentCandidate,
+    decode_asset_reference_value, encode_asset_reference_value,
 };
 use nara_render::RenderResourceContentHash;
 use nara_scene::{
@@ -143,7 +144,7 @@ fn schema() -> ComponentSchema {
         ComponentFieldId::new("image"),
         "Image",
         ComponentFieldPath::empty(),
-        ComponentValueShape::AssetRef,
+        ComponentValueShape::from(ComponentValueKind::AssetRef),
     )
     .with_capabilities(ComponentCapability::SCENE_AUTHORING)
     .with_capability(ComponentCapability::AssetRef)])
@@ -659,11 +660,11 @@ impl RuntimeAssetCodec<ImageAsset> for ObservedImageCodec {
         ImageRuntimeCodec::runtime_retained_bytes(product)
     }
 
-    fn visit_required_runtime_products<E>(
+    fn visit_runtime_dependencies<E>(
         product: &ImageAsset,
-        visitor: impl FnMut(AssetProductRef) -> Result<(), E>,
+        visitor: impl FnMut(AssetProductRef, AssetReferenceDemand) -> Result<(), E>,
     ) -> Result<(), E> {
-        ImageRuntimeCodec::visit_required_runtime_products(product, visitor)
+        ImageRuntimeCodec::visit_runtime_dependencies(product, visitor)
     }
 
     fn contains_runtime_product(product: &ImageAsset, reference: AssetProductRef) -> bool {

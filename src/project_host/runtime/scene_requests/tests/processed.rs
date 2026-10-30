@@ -19,7 +19,7 @@ use crate::{
 };
 
 #[test]
-fn processed_graph_preparation_reuses_exact_scene_work_cap_without_leaking_work() {
+fn processed_graph_work_overlaps_the_scene_promise_and_refusal_returns_its_capacity() {
     let fixture = ProcessedFixture::new();
     let scene_limits = RuntimeSceneLimits::default();
     let work_limit = ByteLimit::new(scene_limits.working_bytes().get()).unwrap();
@@ -29,28 +29,25 @@ fn processed_graph_preparation_reuses_exact_scene_work_cap_without_leaking_work(
             .with_work_bytes(work_limit),
     );
 
-    // Scene decode and graph indexing are sequential; their work promises must not overlap.
-    // Repeating on the same base also catches graph work retained after preparation returns.
+    // Actual-first discovery keeps its pending indices and decoded-owner slots alive while the
+    // selected Scene decoder runs. A cap fitting only that decoder must reject the overlap.
+    // The standalone acquisition after each refusal proves those work owners returned capacity.
+    // Runtime prepared tests separately qualify exact/one-short complete overlapping costs.
     for _ in 0..2 {
+        assert!(matches!(
+            base.prepare_scene_content(startup_product()),
+            Err(crate::runtime_content::RuntimeContentError::Budget {
+                kind: crate::runtime_content::RuntimeContentBudgetKind::WorkBytes,
+                required,
+                limit,
+            }) if required > limit && limit == work_limit.get()
+        ));
         let scene = base
             .acquire_startup_scene()
             .expect("the Scene promise fits the exact shared work cap");
         assert_eq!(scene.product(), startup_product());
         assert_eq!(scene.candidate().document().roots, [entity("startup")]);
         drop(scene);
-
-        let content = base
-            .prepare_scene_content(startup_product())
-            .expect("graph preparation must reuse the released Scene work allowance");
-        assert!(content.base().same_base(&base));
-        assert_eq!(content.product(), startup_product());
-        assert_eq!(
-            content.scene.candidate().document().roots,
-            [entity("startup")]
-        );
-        assert!(content.images.is_empty());
-        assert!(content.tilesets.is_empty());
-        drop(content);
     }
 }
 

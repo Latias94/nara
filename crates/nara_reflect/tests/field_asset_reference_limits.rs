@@ -1,9 +1,9 @@
 use nara_asset::AssetRef;
 use nara_core::{ByteLimit, DepthLimit, ItemLimit};
 use nara_reflect::{
-    ComponentCapability, ComponentEntityReferenceRewriteError, ComponentFieldId,
-    ComponentFieldPath, ComponentFieldPathSegment, ComponentFieldSchema, ComponentTypeId,
-    ComponentValue, ComponentValueShape, DeclaredAssetReferenceError,
+    AssetReferenceDemand, ComponentCapability, ComponentEntityReferenceRewriteError,
+    ComponentFieldId, ComponentFieldPath, ComponentFieldPathSegment, ComponentFieldSchema,
+    ComponentTypeId, ComponentValue, ComponentValueShape, DeclaredAssetReferenceError,
     EntityReferenceTraversalLimits, collect_declared_field_asset_references,
     collect_declared_field_asset_references_with_limits,
 };
@@ -36,7 +36,9 @@ fn field(shape: ComponentValueShape) -> ComponentFieldSchema {
 #[test]
 fn field_asset_limits_include_input_and_returned_reference_work_at_the_exact_ceiling() {
     let component = ComponentTypeId::new("test.FieldAssets");
-    let field = field(ComponentValueShape::AssetRef);
+    let field = field(ComponentValueShape::asset_ref(
+        AssetReferenceDemand::Immediate,
+    ));
     let value = asset("path", "a.png");
     // Three input nodes plus one result; 18 input bytes plus 23 result bytes.
     // The two-segment component path places the asset payload strings at depth four.
@@ -83,7 +85,9 @@ fn field_asset_limits_include_input_and_returned_reference_work_at_the_exact_cei
 fn bounded_nested_map_list_assets_keep_component_paths_and_skip_optional_nulls() {
     let component = ComponentTypeId::new("test.FieldAssets");
     let field = field(ComponentValueShape::map(ComponentValueShape::list(
-        ComponentValueShape::optional(ComponentValueShape::AssetRef),
+        ComponentValueShape::optional(ComponentValueShape::asset_ref(
+            AssetReferenceDemand::Immediate,
+        )),
     )));
     let stable_id = "3c2d4005-63bd-4e2a-9792-bb2f48a12821";
     let value = ComponentValue::map([(
@@ -139,12 +143,14 @@ fn bounded_nested_map_list_assets_keep_component_paths_and_skip_optional_nulls()
 #[test]
 fn field_limits_preserve_required_optional_null_and_capability_semantics() {
     let component = ComponentTypeId::new("test.FieldAssets");
-    let required = field(ComponentValueShape::AssetRef);
+    let required = field(ComponentValueShape::asset_ref(
+        AssetReferenceDemand::Immediate,
+    ));
     let optional = ComponentFieldSchema::optional_with_default(
         required.id().clone(),
         "Image",
         required.path().clone(),
-        ComponentValueShape::AssetRef,
+        ComponentValueShape::asset_ref(AssetReferenceDemand::Immediate),
         asset("path", "default.png"),
     )
     .with_capability(ComponentCapability::AssetRef);

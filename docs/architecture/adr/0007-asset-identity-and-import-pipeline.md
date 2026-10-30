@@ -175,9 +175,10 @@ dependencies must exactly match mandatory declarations before outgoing traversal
 precedence for duplicate actual uses. Deep validation follows both mandatory roles through the
 production decoders without publishing native residency. Ordinary source Deferred resolution is
 a binding observation, not proof of arbitrary compound payload membership. This selected
-replacement is not yet implemented or qualified; eager-closure evidence below retains its
-original scope until the [owning plan](../../plans/2026-10-30-reference-validity-and-load-demand-plan.md)
-qualifies its successor. Immutable backing/capture guarantees remain separate.
+replacement is implemented under the [owning plan](../../plans/2026-10-30-reference-validity-and-load-demand-plan.md)
+and its [bounded qualification](../../knowledge/engineering/verification/2026-10/2026-10-30T172312Z-reference-validity-and-current-demand-production-replacement-qualification-b16511fa33a74c2b808270394b28bf62.md).
+Prior eager-closure evidence retains its original scope. Immutable backing/capture guarantees
+remain separate.
 
 The root content Host owns a concrete `runtime_content_catalog`, canonical version 1, and an
 immutable local encoded base. The Host supplies the expected catalog content digest and selected
@@ -212,18 +213,17 @@ views can share the same admitted acquisition. In one prepared generation, decod
 member once per exact family/definition and map all its complete Products to that retained owner.
 Several codecs serving one family aggregate into one typed collection. Independent public
 acquisitions remain independently charged; this does not introduce a global cache.
-The existing eager implementation follows canonical definition/member order. The selected
-actual-first demand successor replaces that global decode sequence with a private canonical
-pending-set priority over verified discovered work: pending Scenes by member order, then Assets
-by definition/member order. A dependency cannot be decoded before its parent's actual admission
+Current-demand preparation uses a private canonical pending-set priority over verified discovered
+work: pending Scenes by member order, then Assets by definition/member order. A dependency cannot
+be decoded before its parent's actual admission
 reveals it, even if its definition sorts earlier. Final collections remain canonically ordered.
 Equivalent recipe insertion order must preserve discovery/admission and shared-budget outcomes;
 the CP3 qualification includes this dependency-order/overlap control.
 
 Each complete `AssetProductRef` maps to exactly one bounded member and its declared Runtime
 format. Several products may share one compound member. Member paths, encoded digests, logical
-products, executable definitions and native handles remain separate identities. Required edges
-must close within the base; soft references do not implicitly acquire absent content. Startup,
+products, executable definitions and native handles remain separate identities. Required and
+Reference edges must close within the base; Soft metadata does not trigger acquisition. Startup,
 later Scene roots and explicitly addressable roots are declared, rather than inferred from file
 names. Duplicate mappings, incompatible path aliases and invalid roots reject admission.
 
@@ -245,9 +245,10 @@ bytes alone do not substitute the original base/plan instance. The first directo
 remains the only qualified provider. Provider transport, overlay precedence, patching and remote
 authenticity are separate work, with no new VFS, source resolver or package executor selected here.
 
-Required closure distinguishes data readiness from Scene instantiation. A persistent Door or
-similar reference can require another Scene member; that member is admitted against the original
-definitions and retained as data in the same finite closure. Only the requested root Scene is
+Immediate closure distinguishes data readiness from Scene instantiation. A persistent reference
+can require another Scene member as current CPU data; that member is admitted against the original
+definitions and retained in the same finite closure. Deferred Door targets retain membership
+without entering that decoded closure. Only the requested root Scene is
 materialized into ECS. Visit each member once, including Scene cycles, and retain dependency
 Scenes in a flat collection without mutually owning Scene objects. Required membership does not
 grant public travel authority: a Scene present only as a dependency remains unavailable to an
@@ -256,19 +257,28 @@ decoders reuse released work allowance; graph indices and admitted data retain t
 
 Scene acquisition admits the actual processed Scene against the catalog's containing identity
 and the original exact definitions. It traverses declared effective asset leaves through Reflect
-and checks complete Product membership and required dependency declarations. A claimed dependency
+and checks complete Product membership and exact dependency declarations. A claimed dependency
 table alone does not prove that the Scene payload is closed. Concrete resource acquisition checks
 the selected codec kind/version and the actual decoded products. `RuntimeAssetCodec` supplies
-required pure queries for complete identity, actual required Product references and retained cost.
+required pure queries for complete identity, actual Product references with demand and retained cost.
 The identity query includes the enclosing source; an equal auxiliary ID from another source cannot
-adopt the catalog's identity. The required-reference visitor borrows the actual decoded value,
-including nested compound products. The Host checks each visited Product against the same base's
-membership and this member's Required declarations before returning a candidate. A codec without
-required references implements an explicit empty inventory; Soft edges cannot satisfy this check.
+adopt the catalog's identity. The dependency visitor borrows the actual decoded value, including
+nested compound products. The Host normalizes duplicate Products with Immediate precedence and
+checks the complete result against this member's Required/Reference declarations before following
+any outgoing edge. Missing, extra mandatory and demand-mismatched edges reject the member. A
+codec without references implements an explicit empty inventory; Soft edges cannot satisfy it.
 These queries neither load dependencies nor select their Rust codecs, native values or residency.
 Concrete owners still admit the required resource's actual family, descriptor and publication.
 Failure or panic publishes no typed product or World
 mutation, and its reservations return through the same owner.
+
+Explicit deep validation follows both mandatory roles from Scene, addressable and global Input
+roots through the same selected decoders. It releases each heavy decoded output before the next
+member. Independently reserved compact facts retain exact Image extents, Copy TileSet descriptors
+and owner-parsed Tilemap atlas obligations for final CPU cross-member checks. The Tilemap parser
+still validates every cell and duplicate coordinate; its maximum actual tile is the sufficient
+membership witness. Summary and parser work overlap subsequent decoder promises under the shared
+limit. A deep report grants no native residency, GPU allocation or gameplay-success authority.
 
 The immutable base and decoded candidates retain explicit encoded, work and logical retained-byte
 bounds. Compiled recipe/Schema construction and domain codec promises keep their existing limits;

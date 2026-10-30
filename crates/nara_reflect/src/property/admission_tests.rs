@@ -1,5 +1,5 @@
 use super::*;
-use crate::{ComponentShapeMember, ComponentTypeId};
+use crate::{AssetReferenceDemand, ComponentShapeMember, ComponentTypeId};
 
 fn id(value: &str) -> ComponentFieldId {
     ComponentFieldId::new(value)
@@ -30,8 +30,11 @@ fn budget(entries: usize, bytes: usize) -> ComponentPropertyReadBudget {
 fn admission_counts_the_same_selector_walk_and_preserves_the_shared_budget() {
     let mut schema = schema(ComponentValueShape::optional(ComponentValueShape::map(
         ComponentValueShape::optional(ComponentValueShape::record_members([
-            ComponentShapeMember::new("wire_image", ComponentValueShape::AssetRef)
-                .with_id(id("image")),
+            ComponentShapeMember::new(
+                "wire_image",
+                ComponentValueShape::asset_ref(AssetReferenceDemand::Immediate),
+            )
+            .with_id(id("image")),
         ])),
     )))
     .with_field_tombstones([id("gone")]);

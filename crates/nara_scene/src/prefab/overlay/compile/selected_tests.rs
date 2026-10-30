@@ -122,7 +122,7 @@ fn schema() -> ComponentSchema {
             ComponentFieldId::new("image"),
             "Image",
             ComponentFieldPath::from_fields(["image"]),
-            ComponentValueShape::AssetRef,
+            ComponentValueShape::from(ComponentValueKind::AssetRef),
             image(),
         )
         .with_capabilities(capabilities)

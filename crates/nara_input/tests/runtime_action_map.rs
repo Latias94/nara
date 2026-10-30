@@ -249,7 +249,7 @@ fn complete_primary_identity_and_explicit_empty_required_inventory_are_independe
         &asset, auxiliary
     ));
     let mut visits = 0;
-    let result = ActionMapRuntimeCodec::visit_required_runtime_products(&asset, |_| {
+    let result = ActionMapRuntimeCodec::visit_runtime_dependencies(&asset, |_, _| {
         visits += 1;
         Err("a dependency must never be requested")
     });

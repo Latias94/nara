@@ -206,9 +206,10 @@ let report = prepared.commit(world);
 Cook materializes defaults, remaps hierarchy and declared Scene-local references, and converts
 declared `Path`/`StableId` asset leaves to complete primary Product references through the real
 catalogue and its explicitly bound alias scope. Existing Product references preserve their
-subproduct selection and require their enclosing source in that catalogue. Ordinary strings do
-not become references. Product
-existence and receiving-World resources still belong to the content owner.
+subproduct selection and require their enclosing source in that catalogue. Identity rewriting
+preserves every leaf's Immediate/Deferred demand, including defaults and overlay-effective values.
+Ordinary strings do not become references. Product existence and receiving-World resources still
+belong to the content owner.
 That owner can bind complete primary/auxiliary products with `AssetServer::reserve_product::<T>`
 and publish the actual typed values through its own resource transaction. Native Runtime codecs
 then resolve those existing bindings through the ordinary component context without a source
@@ -469,6 +470,89 @@ Capabilities are explicit eligibility gates, not behavior implementations:
 
 Save, animation, replication, scripting, diagnostics, and remote disclosure remain
 domain-owned contracts and are not inferred from these capabilities.
+
+## Asset Reference Demand
+
+The Immediate/Deferred workflow is being integrated under the
+[CP3 plan](../plans/2026-10-30-reference-validity-and-load-demand-plan.md). Complete consumer
+qualification remains in progress; these declarations supply no new native/platform or performance
+qualification.
+
+Each recursive Schema asset leaf is `ComponentValueShape::AssetRef { demand }`, with
+`AssetReferenceDemand::{Immediate, Deferred}`. Immediate requests the target's current decoded
+data/dependencies. Deferred declares a mandatory target for future acquisition without requesting
+that preparation now. Both demands require target resolution; neither grants Scene travel
+authority. `Option<T>` and `Null` describe reference presence independently: a present Deferred
+reference still cannot name missing content.
+
+An ordinary Rust `AssetRef` field defaults to Immediate. Mark a future Scene target explicitly:
+
+```rust
+use nara::{
+    asset::AssetRef,
+    prelude::{Component, PersistentComponent},
+};
+
+#[derive(Component, PersistentComponent)]
+#[nara(
+    id = "example.Door",
+    version = 1,
+    alias = "Door",
+    component_capabilities(scene, inspect, edit),
+    field_capabilities(scene, inspect, edit, asset_ref)
+)]
+pub struct Door {
+    #[nara(id = "target", alias = "Target Scene", asset_demand = deferred)]
+    pub target: AssetRef,
+}
+```
+
+`#[nara(asset_demand = immediate)]` makes the default explicit. A field annotation overrides every
+asset leaf in that field's supported recursive codec shape, including `Vec`, string-keyed
+`BTreeMap`, `Option`, aliases and qualified types. A field without any AssetRef leaf rejects the
+annotation at compile time. It does not infer reference meaning from strings or Rust type spelling.
+The `asset_ref` capability remains required independently of demand.
+
+Hand-authored shapes can mix both demands within one recursive value:
+
+```rust
+use nara::{
+    asset::AssetReferenceDemand,
+    reflect::ComponentValueShape,
+};
+
+let shape = ComponentValueShape::record([
+    (
+        "atlas".into(),
+        ComponentValueShape::asset_ref(AssetReferenceDemand::Immediate),
+    ),
+    (
+        "next_scene".into(),
+        ComponentValueShape::optional(ComponentValueShape::asset_ref(
+            AssetReferenceDemand::Deferred,
+        )),
+    ),
+]);
+```
+
+`ComponentValueShape::from(ComponentValueKind::AssetRef)` constructs an Immediate leaf. Demand is
+part of the canonical persisted shape and Schema fingerprint; the retired unit AssetRef shape has
+no compatibility reader. Generate current Schema artifacts through their producer.
+
+The bounded reference inventory exposes each actual leaf through `DeclaredAssetReference::demand()`.
+Nested paths, declared defaults and effective Prefab overlay values retain their Schema demand;
+reference rewriting changes identity without changing demand. A complete Product used by both
+roles aggregates to Immediate without creating a second resource identity.
+
+For processed content, Immediate maps to catalog Required and Deferred to Reference. The complete
+actual mandatory inventory must equal those declarations; missing, extra mandatory and wrong-role
+edges reject before traversal. Soft metadata cannot satisfy a present leaf. Ordinary source
+preparation resolves Deferred source identity/readability without certifying its decoded payload
+or arbitrary auxiliary membership. Strict saved-source Check/Export validates both demands through
+the actual compiler/importer; processed bases expose the separate
+[`validate_deep()` report](runtime-content-base.md#strict-payload-validation). See
+[source demand and validation](project-asset-domains.md#current-demand-and-strict-source-validation)
+for the saved-source and dirty-working-copy boundaries.
 
 ## Supported Field Types
 

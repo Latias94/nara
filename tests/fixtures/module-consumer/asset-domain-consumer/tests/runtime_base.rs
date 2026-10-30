@@ -55,8 +55,8 @@ use nara::{
     },
 };
 use nara_asset::{
-    AssetDomain, AssetImportSource, AssetProductRef, AssetRuntimeError, AssetRuntimeLimits,
-    ImportedProductId, RuntimeAssetCodec, SourceAssetImporter, StableAssetId,
+    AssetDomain, AssetImportSource, AssetProductRef, AssetReferenceDemand, AssetRuntimeError,
+    AssetRuntimeLimits, ImportedProductId, RuntimeAssetCodec, SourceAssetImporter, StableAssetId,
 };
 use nara_asset_domain_consumer::{TextBundle, TextBundleDomain, TextBundleSettings};
 use nara_diagnostic::{Diagnostic, DiagnosticCode, SafeSummary};
@@ -907,17 +907,14 @@ fn actual_scene_asset_leaves_require_membership_and_an_explicit_required_edge() 
         let base = fixture.open(RuntimeContentLimits::default()).unwrap();
         let initial = base.acquire_startup_scene().unwrap();
         let result = base.acquire_scene(later_product());
-        if absent_product {
-            assert!(matches!(
-                result,
-                Err(RuntimeContentError::UndeclaredProduct)
-            ));
-        } else {
-            assert!(matches!(
-                result,
-                Err(RuntimeContentError::UndeclaredDependency)
-            ));
-        }
+        assert!(matches!(
+            result,
+            Err(RuntimeContentError::DependencyMismatch {
+                product,
+                declared,
+                actual: Some(AssetReferenceDemand::Immediate),
+            }) if product == selected(SECOND) && declared == role
+        ));
         assert!(
             initial
                 .candidate()
@@ -969,11 +966,11 @@ impl RuntimeAssetCodec<TextBundle> for PanickingDecode {
         TextBundleDomain::runtime_retained_bytes(product)
     }
 
-    fn visit_required_runtime_products<E>(
+    fn visit_runtime_dependencies<E>(
         product: &TextBundle,
-        visitor: impl FnMut(AssetProductRef) -> Result<(), E>,
+        visitor: impl FnMut(AssetProductRef, AssetReferenceDemand) -> Result<(), E>,
     ) -> Result<(), E> {
-        TextBundleDomain::visit_required_runtime_products(product, visitor)
+        TextBundleDomain::visit_runtime_dependencies(product, visitor)
     }
 
     fn contains_runtime_product(product: &TextBundle, reference: AssetProductRef) -> bool {
@@ -1003,11 +1000,11 @@ impl RuntimeAssetCodec<TextBundle> for PanickingIdentity {
         TextBundleDomain::runtime_retained_bytes(product)
     }
 
-    fn visit_required_runtime_products<E>(
+    fn visit_runtime_dependencies<E>(
         product: &TextBundle,
-        visitor: impl FnMut(AssetProductRef) -> Result<(), E>,
+        visitor: impl FnMut(AssetProductRef, AssetReferenceDemand) -> Result<(), E>,
     ) -> Result<(), E> {
-        TextBundleDomain::visit_required_runtime_products(product, visitor)
+        TextBundleDomain::visit_runtime_dependencies(product, visitor)
     }
 
     fn contains_runtime_product(_: &TextBundle, _: AssetProductRef) -> bool {
@@ -1037,9 +1034,9 @@ impl RuntimeAssetCodec<TextBundle> for PanickingDependencyInventory {
         TextBundleDomain::runtime_retained_bytes(product)
     }
 
-    fn visit_required_runtime_products<E>(
+    fn visit_runtime_dependencies<E>(
         _: &TextBundle,
-        _: impl FnMut(AssetProductRef) -> Result<(), E>,
+        _: impl FnMut(AssetProductRef, AssetReferenceDemand) -> Result<(), E>,
     ) -> Result<(), E> {
         panic!("consumer Runtime dependency inventory failed");
     }
@@ -1071,9 +1068,9 @@ impl RuntimeAssetCodec<TextBundle> for WrongCodec {
         panic!("the wrong codec must not query retained output");
     }
 
-    fn visit_required_runtime_products<E>(
+    fn visit_runtime_dependencies<E>(
         _: &TextBundle,
-        _: impl FnMut(AssetProductRef) -> Result<(), E>,
+        _: impl FnMut(AssetProductRef, AssetReferenceDemand) -> Result<(), E>,
     ) -> Result<(), E> {
         panic!("the wrong codec must not inventory dependencies");
     }
@@ -1112,9 +1109,9 @@ impl RuntimeAssetCodec<TextBundle> for UnselectedCodec {
         unselected_codec_callback()
     }
 
-    fn visit_required_runtime_products<E>(
+    fn visit_runtime_dependencies<E>(
         _: &TextBundle,
-        _: impl FnMut(AssetProductRef) -> Result<(), E>,
+        _: impl FnMut(AssetProductRef, AssetReferenceDemand) -> Result<(), E>,
     ) -> Result<(), E> {
         unselected_codec_callback()
     }
@@ -1166,11 +1163,11 @@ impl<const MODE: u8> RuntimeAssetCodec<TextBundle> for InvalidRetainedCost<MODE>
         }
     }
 
-    fn visit_required_runtime_products<E>(
+    fn visit_runtime_dependencies<E>(
         product: &TextBundle,
-        visitor: impl FnMut(AssetProductRef) -> Result<(), E>,
+        visitor: impl FnMut(AssetProductRef, AssetReferenceDemand) -> Result<(), E>,
     ) -> Result<(), E> {
-        TextBundleDomain::visit_required_runtime_products(product, visitor)
+        TextBundleDomain::visit_runtime_dependencies(product, visitor)
     }
 
     fn contains_runtime_product(product: &TextBundle, reference: AssetProductRef) -> bool {
@@ -1456,7 +1453,7 @@ fn catalog_reference_inventory_uses_the_admitted_scene_value_limits() {
     let missing_edge = fixture.open(RuntimeContentLimits::default()).unwrap();
     assert!(matches!(
         missing_edge.acquire_startup_scene(),
-        Err(RuntimeContentError::UndeclaredDependency)
+        Err(RuntimeContentError::DependencyMismatch { .. })
     ));
 }
 
@@ -1485,11 +1482,11 @@ impl RuntimeAssetCodec<TextBundle> for HeldDecode {
     fn runtime_retained_bytes(product: &TextBundle) -> Result<usize, AssetRuntimeError> {
         TextBundleDomain::runtime_retained_bytes(product)
     }
-    fn visit_required_runtime_products<E>(
+    fn visit_runtime_dependencies<E>(
         product: &TextBundle,
-        visitor: impl FnMut(AssetProductRef) -> Result<(), E>,
+        visitor: impl FnMut(AssetProductRef, AssetReferenceDemand) -> Result<(), E>,
     ) -> Result<(), E> {
-        TextBundleDomain::visit_required_runtime_products(product, visitor)
+        TextBundleDomain::visit_runtime_dependencies(product, visitor)
     }
     fn contains_runtime_product(product: &TextBundle, reference: AssetProductRef) -> bool {
         TextBundleDomain::contains_runtime_product(product, reference)

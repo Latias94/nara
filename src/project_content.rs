@@ -19,8 +19,8 @@ use std::{
 
 use nara_asset::{
     AssetMetaCandidate, AssetMetaFileLimits, AssetMetaIdentityCandidate, AssetPath, AssetPathScope,
-    AssetProductRef, AssetRecord, AssetRef, AssetReferenceResolver, AssetSourceKind,
-    AssetSourcePath, ImportedProductId, ProjectAssetDatabase, StableAssetId,
+    AssetProductRef, AssetRecord, AssetRef, AssetReferenceDemand, AssetReferenceResolver,
+    AssetSourceKind, AssetSourcePath, ImportedProductId, ProjectAssetDatabase, StableAssetId,
 };
 use nara_core::ByteLimit;
 use nara_diagnostic::{
@@ -268,7 +268,10 @@ impl ProjectImageContent {
     }
 }
 
-/// One selected Scene and its exact expanded, decoded dependency closure.
+/// One selected Scene and its Immediate expanded, decoded dependency closure.
+///
+/// Deferred references retain resolved source identities and metadata receipts. Their target
+/// payloads and imported Product membership have not been validated by this preparation.
 ///
 /// Clones retain the same content generation. Source-only receipts obtained through
 /// [`Self::content_closure`] retain their own fact budget without retaining decoded content.
@@ -283,6 +286,7 @@ struct ProjectContentSnapshotInner {
     domain_authority: ProjectAssetDomains,
     content_closure: ProjectContentClosureReceipt,
     source_upgrade_required: bool,
+    deferred_source_targets: bool,
     input: Option<ProjectInputContent>,
     prefabs: Box<[ProjectPrefabContent]>,
     images: Box<[ProjectImageContent]>,
@@ -606,13 +610,51 @@ impl ProjectContentSnapshot {
                     })?;
                     budget.subtract(ProjectContentBudgetKind::WorkBytes, resolution_work);
                     if self.inner.domain_authority.supports(source.source_kind()) {
-                        require_asset_product(
-                            &mut required,
-                            &mut budget,
-                            required_product(reference.asset_ref(), source)?,
-                        )?;
+                        if reference.demand() == AssetReferenceDemand::Immediate {
+                            require_asset_product(
+                                &mut required,
+                                &mut budget,
+                                required_product(reference.asset_ref(), source)?,
+                            )?;
+                        }
+                        // Deferred identity does not claim membership in the current decoded
+                        // collection. Strict validation or the later request checks the actual
+                        // imported selection. Intrinsically primary-only owners still reject
+                        // auxiliary selections below.
                     } else if !reference.asset_ref().is_primary() {
                         return Err(unsupported_product_selection(reference.asset_ref()));
+                    }
+                    if reference.demand() == AssetReferenceDemand::Immediate {
+                        let prepared = match source.source_kind() {
+                            AssetSourceKind::Scene => {
+                                self.inner.sources.scenes.selected.path == *source.path()
+                                    || self
+                                        .scene_dependencies()
+                                        .iter()
+                                        .any(|scene| scene.path() == source.path())
+                            }
+                            AssetSourceKind::Image => self
+                                .images()
+                                .iter()
+                                .any(|image| image.path() == source.path()),
+                            AssetSourceKind::Other(kind) if kind == "tileset" => self
+                                .tilesets()
+                                .iter()
+                                .any(|tileset| tileset.path() == source.path()),
+                            // Concrete domain membership is checked below against the actual
+                            // selected collection, independently of mere source resolution.
+                            kind if self.inner.domain_authority.supports(kind) => true,
+                            _ => false,
+                        };
+                        if !prepared {
+                            return Err(ProjectContentError::with_identifier(
+                                ProjectContentErrorKind::AssetReference,
+                                "project.content.asset-not-prepared",
+                                "Editor Immediate reference requires a new content capture",
+                                "asset",
+                                source.path().as_str(),
+                            ));
+                        }
                     }
                 }
                 budget.subtract(ProjectContentBudgetKind::WorkBytes, work_bytes);
@@ -1002,7 +1044,11 @@ impl ProjectContentLoader {
         self.root.share()
     }
 
-    /// Loads the default startup Scene and its required dependency closure.
+    /// Loads the default startup Scene and its Immediate dependency closure.
+    ///
+    /// Present Deferred targets are resolved and checked for source readability, without
+    /// decoding their payloads or preparing their resource dependencies. Use [`Self::load_delivery`]
+    /// for strict validation of the complete saved-source delivery closure.
     pub fn load(
         &self,
         candidate: &ProjectSettingsCandidate,
@@ -1156,7 +1202,7 @@ impl ProjectContentLoader {
         catalogue: Option<&DeliveryCatalogue>,
         capture_catalogue: bool,
     ) -> Result<(ProjectContentSnapshot, Option<DeliveryCatalogue>), ProjectContentError> {
-        self.load_inner_with_delivery_catalogue(
+        self.load_inner_with_source_mode(
             candidate,
             plan,
             Some(SourceSceneSelection::Path(scene)),
@@ -1166,6 +1212,7 @@ impl ProjectContentLoader {
             catalogue,
             capture_catalogue,
             None,
+            SourceLoadMode::Strict,
         )
     }
 
@@ -1180,6 +1227,33 @@ impl ProjectContentLoader {
         delivery_catalogue: Option<&DeliveryCatalogue>,
         capture_delivery_catalogue: bool,
         input_reuse: Option<&ProjectInputContent>,
+    ) -> Result<(ProjectContentSnapshot, Option<DeliveryCatalogue>), ProjectContentError> {
+        self.load_inner_with_source_mode(
+            candidate,
+            plan,
+            selected_scene,
+            expected_startup_scene_digest,
+            expected_prefabs,
+            runtime_agreement,
+            delivery_catalogue,
+            capture_delivery_catalogue,
+            input_reuse,
+            SourceLoadMode::Current,
+        )
+    }
+
+    fn load_inner_with_source_mode(
+        &self,
+        candidate: &ProjectSettingsCandidate,
+        plan: &RuntimePlan,
+        selected_scene: Option<SourceSceneSelection<'_>>,
+        expected_startup_scene_digest: Option<ContentDigest>,
+        expected_prefabs: BTreeMap<AssetSourcePath, ContentDigest>,
+        runtime_agreement: Option<PreparedRuntimeSchemaAgreement>,
+        delivery_catalogue: Option<&DeliveryCatalogue>,
+        capture_delivery_catalogue: bool,
+        input_reuse: Option<&ProjectInputContent>,
+        source_mode: SourceLoadMode,
     ) -> Result<(ProjectContentSnapshot, Option<DeliveryCatalogue>), ProjectContentError> {
         self.validate_inputs(candidate, plan)?;
         let settings = candidate.settings();
@@ -1217,6 +1291,7 @@ impl ProjectContentLoader {
             delivery_catalogue,
             capture_delivery_catalogue,
         )?;
+        context.source_mode = source_mode;
         let snapshot = context.load(candidate, selected_scene, input_reuse)?;
         Ok((snapshot, context.take_delivery_catalogue()))
     }
@@ -1284,6 +1359,15 @@ struct SourceCandidates {
     scene_index_work_bytes: usize,
     products: RequiredAssetProducts,
     product_work_bytes: usize,
+    resolved_sources: BTreeMap<AssetSourcePath, AssetRecord>,
+    resolved_source_work_bytes: usize,
+}
+
+/// Strict delivery shares the production loader, but never publishes its decoded snapshots.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum SourceLoadMode {
+    Current,
+    Strict,
 }
 
 type RequiredAssetProducts = BTreeMap<StableAssetId, BTreeSet<AssetProductRef>>;
@@ -1327,6 +1411,7 @@ struct LoadContext<'a> {
     catalogue_roots: Option<Vec<nara_project::ProjectPath>>,
     capture_delivery_catalogue: bool,
     completed_delivery_catalogue: Option<DeliveryCatalogue>,
+    source_mode: SourceLoadMode,
 }
 
 struct LoadedPrefabContent {
@@ -1454,6 +1539,7 @@ impl<'a> LoadContext<'a> {
             catalogue_roots: None,
             capture_delivery_catalogue,
             completed_delivery_catalogue: None,
+            source_mode: SourceLoadMode::Current,
         })
     }
 
@@ -1775,7 +1861,7 @@ impl<'a> LoadContext<'a> {
             }
         }
         self.commit_work_as_retained(tileset_work, tileset_work.reserved)?;
-        let database = self.retain_loaded_asset_identities(
+        let mut database = self.retain_loaded_asset_identities(
             &selected_source_path,
             &dependent_scenes,
             &loaded_prefabs,
@@ -1783,6 +1869,12 @@ impl<'a> LoadContext<'a> {
             &tilesets,
             &domain_collections,
             input.as_ref(),
+        )?;
+        let deferred_source_targets = !sources.resolved_sources.is_empty();
+        self.retain_resolved_source_identities(
+            &mut database,
+            sources.resolved_sources,
+            sources.resolved_source_work_bytes,
         )?;
         self.release_catalogue_work();
         drop((scenes, prefabs, assets));
@@ -1954,6 +2046,7 @@ impl<'a> LoadContext<'a> {
                 domain_authority: self.domains.clone(),
                 content_closure,
                 source_upgrade_required: self.source_upgrade_required,
+                deferred_source_targets,
                 input,
                 prefabs,
                 images,
@@ -2354,6 +2447,17 @@ impl<'a> LoadContext<'a> {
                         self.discover_source_reference(assets, reference.asset_ref())?;
                     let path = source.path();
                     self.observe_path(path.as_str())?;
+                    if self.source_mode == SourceLoadMode::Current
+                        && reference.demand() == AssetReferenceDemand::Deferred
+                    {
+                        self.capture_resolved_source_target(
+                            reference.asset_ref(),
+                            source,
+                            source_work,
+                            sources,
+                        )?;
+                        continue;
+                    }
                     if source.source_kind() == &AssetSourceKind::Scene {
                         if !reference.asset_ref().is_primary() {
                             return Err(unsupported_product_selection(reference.asset_ref()));
@@ -3885,6 +3989,8 @@ fn single_report(diagnostic: Diagnostic) -> DiagnosticReport {
 
 #[cfg(test)]
 mod tests {
+    mod reference_demand;
+
     use std::{
         collections::BTreeMap,
         fs,

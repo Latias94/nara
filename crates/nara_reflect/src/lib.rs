@@ -58,6 +58,7 @@ pub use format::{
     ComponentCatalogFileError, ComponentCatalogFileLimits,
 };
 pub use migration::{ComponentMigrationError, MigratedComponentValue};
+pub use nara_asset::AssetReferenceDemand;
 pub use nara_identity::EntityReference;
 pub use nara_reflect_derive::PersistentComponent;
 pub use numeric_interval::{ComponentNumericBound, ComponentNumericInterval};
@@ -107,9 +108,10 @@ pub use value::{ComponentFloat, ComponentValue, ComponentValueCost, ComponentVal
 pub mod __macro_support {
     pub use crate::inventory::validate_inventory;
     pub use crate::{
-        ComponentCapability, ComponentCodecError, ComponentFieldId, ComponentFieldPath,
-        ComponentFieldSchema, ComponentNumericBound, ComponentSchema, ComponentSchemaVersion,
-        ComponentTypeId, ComponentValue, ComponentValueShape, PersistentComponentProvider,
+        AssetReferenceDemand, ComponentCapability, ComponentCodecError, ComponentFieldId,
+        ComponentFieldPath, ComponentFieldSchema, ComponentNumericBound, ComponentSchema,
+        ComponentSchemaVersion, ComponentTypeId, ComponentValue, ComponentValueShape,
+        PersistentComponentProvider,
         authoring::{
             PersistentFieldCodec, PersistentNumericField, decode_persistent_field,
             encode_persistent_field,
@@ -195,16 +197,16 @@ pub mod __private {
 
 pub mod prelude {
     pub use crate::{
-        ComponentApplyContext, ComponentCapability, ComponentCatalogGenerationError,
-        ComponentCodecError, ComponentDecodeContext, ComponentDomainError, ComponentEncodeContext,
-        ComponentEntityReferenceRewriteError, ComponentFieldId, ComponentFieldPath,
-        ComponentFieldPathError, ComponentFieldPathSegment, ComponentFieldSchema, ComponentFloat,
-        ComponentMemberPath, ComponentMemberPathError, ComponentMemberPathSegment,
-        ComponentMigrationError, ComponentNumericBound, ComponentNumericDomain,
-        ComponentNumericInterval, ComponentPropertyError, ComponentPropertyKey,
-        ComponentPropertyPath, ComponentPropertyReadBudget, ComponentPropertySchemaClaim,
-        ComponentPropertyStep, ComponentRegistry, ComponentRegistryError,
-        ComponentRegistrySnapshot, ComponentSchema, ComponentSchemaCatalog,
+        AssetReferenceDemand, ComponentApplyContext, ComponentCapability,
+        ComponentCatalogGenerationError, ComponentCodecError, ComponentDecodeContext,
+        ComponentDomainError, ComponentEncodeContext, ComponentEntityReferenceRewriteError,
+        ComponentFieldId, ComponentFieldPath, ComponentFieldPathError, ComponentFieldPathSegment,
+        ComponentFieldSchema, ComponentFloat, ComponentMemberPath, ComponentMemberPathError,
+        ComponentMemberPathSegment, ComponentMigrationError, ComponentNumericBound,
+        ComponentNumericDomain, ComponentNumericInterval, ComponentPropertyError,
+        ComponentPropertyKey, ComponentPropertyPath, ComponentPropertyReadBudget,
+        ComponentPropertySchemaClaim, ComponentPropertyStep, ComponentRegistry,
+        ComponentRegistryError, ComponentRegistrySnapshot, ComponentSchema, ComponentSchemaCatalog,
         ComponentSchemaOwnerSnapshot, ComponentSchemaVersion, ComponentShapeError,
         ComponentShapeErrorKind, ComponentShapeMember, ComponentTypeId, ComponentValue,
         ComponentValueError, ComponentValueKind, ComponentValueShape, DeclaredAssetReference,

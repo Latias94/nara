@@ -1,6 +1,7 @@
 # Reference Validity And Current Load Demand Plan
 
-Date: 2026-10-30. Status: selected design; implementation not started.
+Date: 2026-10-30. Status: owning replacement qualified on 2026-10-31 in the
+[recorded scope](../knowledge/engineering/verification/2026-10/2026-10-30T172312Z-reference-validity-and-current-demand-production-replacement-qualification-b16511fa33a74c2b808270394b28bf62.md).
 Parent: [foundation R6/R7](2026-10-23-foundation-architecture-rebaseline-plan.md#r7-target-build-and-base-source-free-delivery).
 Design: [reference validity and demand](../architecture/reference-validity-and-load-demand-design.md).
 Baseline: `8e175db`. Imported finding: CP3; CP4 backing/residency is separate.

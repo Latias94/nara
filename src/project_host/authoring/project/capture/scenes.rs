@@ -2,6 +2,8 @@
 
 use super::super::catalogue::ResolvedResourceSource;
 use super::*;
+use crate::project_host::authoring::AuthoringDocumentAdmissionError;
+use nara_asset::AssetReferenceDemand;
 
 type PendingResources = BTreeMap<AssetSourcePath, (ResolvedResourceSource, usize)>;
 
@@ -125,10 +127,11 @@ fn compile(
         .ok_or(AuthoringProjectSourceAdmissionError::AccountingOverflow)?;
     for declared in compiled.effective_asset_references() {
         let reference = declared.asset_ref();
-        if let Some(selection) = acquisition
+        if let Some(mut selection) = acquisition
             .catalogue
             .resolve_resource(reference, acquisition.budget)?
         {
+            selection.demand = declared.demand();
             acquisition
                 .budget
                 .charge_reference(selection.path.as_str().len(), next_depth, true)?;
@@ -148,7 +151,20 @@ fn compile(
                 ])?,
             )?;
             let canonical = selection.binding.scope.resolve(&selection.path);
-            pending.entry(canonical).or_insert((selection, next_depth));
+            match pending.entry(canonical) {
+                std::collections::btree_map::Entry::Vacant(entry) => {
+                    entry.insert((selection, next_depth));
+                }
+                std::collections::btree_map::Entry::Occupied(mut entry) => {
+                    // Demand is an aggregate over actual leaves; a Deferred occurrence cannot
+                    // erase another consumer's Immediate use of the same canonical source.
+                    let previous = entry.get_mut();
+                    if selection.demand == AssetReferenceDemand::Immediate {
+                        previous.0.demand = AssetReferenceDemand::Immediate;
+                    }
+                    previous.1 = previous.1.min(next_depth);
+                }
+            }
         } else {
             acquisition.budget.charge_reference(16, next_depth, true)?;
             acquisition.budget.charge_source_bytes(
@@ -327,6 +343,18 @@ pub(super) fn load_resource(
     } else {
         AuthoringSourceKind::AssetSource
     };
+    let deferred = selection.demand == AssetReferenceDemand::Deferred;
+    let source_scratch = if deferred {
+        checked_sum([
+            size_of::<OpenedAuthoringSource>(),
+            binding.directory.as_str().len(),
+            1,
+            path.as_str().len(),
+        ])?
+    } else {
+        0
+    };
+    budget.charge_source_bytes(0, 0, 0, source_scratch)?;
     let opened = open_source_file(
         &directory,
         join_project_path(&binding.directory, path.as_str())?,
@@ -336,7 +364,17 @@ pub(super) fn load_resource(
         budget,
     )?;
     ensure_unclaimed_source_identity(&acquisition.identities, &opened)?;
+    acquisition
+        .catalogue
+        .check_resolved_target_identity(opened.identity, &opened.project_path)?;
     if !scene {
+        if deferred {
+            acquisition
+                .catalogue
+                .observe_resolved_target(opened, &record, budget)?;
+            budget.reconcile_retained_reservation(source_scratch, 0)?;
+            return Ok(None);
+        }
         let read = read_unique_source(opened, budget.maximum(), budget)?;
         charge_asset_source(&read, budget)?;
         acquisition
@@ -371,6 +409,25 @@ pub(super) fn load_resource(
         if !observed.same_file_observation(&metadata_source) {
             return Err(changed(observed));
         }
+    }
+    native.key().validate_asset_source(&record).map_err(|_| {
+        AuthoringProjectSourceAdmissionError::NativeSource(
+            AuthoringDocumentAdmissionError::NativeSourceMetadataMismatch,
+        )
+    })?;
+    if deferred {
+        // The admitted key checks actual native source identity and metadata. It does not turn
+        // an open dirty Session or the saved body into an Immediate preview participant.
+        let native_retained = native
+            .retained_bytes()
+            .ok_or(AuthoringProjectSourceAdmissionError::AccountingOverflow)?;
+        drop(native);
+        budget.reconcile_retained_reservation(native_retained, 0)?;
+        acquisition
+            .catalogue
+            .observe_resolved_target(opened, &record, budget)?;
+        budget.reconcile_retained_reservation(source_scratch, 0)?;
+        return Ok(None);
     }
     let mut matches = open_scenes.iter().filter(|snapshot| {
         snapshot.project_path.as_ref() == opened.project_path.as_str()
@@ -535,6 +592,9 @@ pub(super) fn load_resource_metadata(
         depth,
         budget,
     )?;
+    acquisition
+        .catalogue
+        .check_resolved_target_identity(opened.identity, &opened.project_path)?;
     let read = read_unique_source(
         opened,
         AssetMetaFileLimits::default().encoded_bytes().get(),
@@ -590,8 +650,7 @@ pub(super) fn load_resource_metadata(
     }
     let record = metadata.identity().clone().into_record(&binding.scope);
     charge_asset_metadata(&read.source, encoded, &metadata, &record, budget)?;
-    charge_database_record(&record, budget)?;
-    insert_asset_record(database, record.clone())?;
+    admit_asset_record(database, &record, budget)?;
     let metadata_source = read.source;
     acquisition
         .identities

@@ -652,15 +652,19 @@ dependency required to materialize the requested Scene. Both participate in stri
 closure and target validation; only selected demand requires current preparation/residency. The
 present `Soft` edge permits absent membership and cannot implement validated lazy destinations by
 renaming `Required`. Qualify three Scenes linked by Door/menu components, a shared atlas and heavy
-later-level resources through both source and processed paths. Opening A resolves mandatory B/C
-target bindings without claiming deep payload validity or preparing their heavy resources.
+later-level resources through both source and processed paths. Opening A resolves the mandatory
+target bindings revealed by its actually demanded payloads, including B, without decoding B to
+discover C or claiming either destination's deep payload validity. Their heavy resources remain
+outside A's preparation.
 Strict validation checks that delivery closure; an explicit request acquires its selected
 destination under the original plan, cancellation owner and transactional publication tail.
 The [selected CP3 design](../architecture/reference-validity-and-load-demand-design.md) and
 [complete unit plan](2026-10-30-reference-validity-and-load-demand-plan.md) now define the
 per-leaf demand, exact actual/catalogue contract and source/Editor validation split. The
 [pinned source comparison](../research/2026-10-30-reference-validity-and-current-demand.md)
-does not establish implementation or performance qualification.
+supplies source constraints; the [production qualification](../knowledge/engineering/verification/2026-10/2026-10-30T172312Z-reference-validity-and-current-demand-production-replacement-qualification-b16511fa33a74c2b808270394b28bf62.md)
+records the implemented successor, actual source/processed travel, strict validation/Export,
+ownership budgets and selected native scope. It does not claim performance or CP4 backing results.
 
 Separately compare the qualified eager base with a concrete immutable retained-pack backing before
 claiming larger content-store suitability. Immutable catalogue/codec authority, encoded member

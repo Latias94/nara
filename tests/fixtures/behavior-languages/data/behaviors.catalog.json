@@ -140,7 +140,8 @@
             "shape": {
               "shape": "list",
               "item": {
-                "shape": "asset_ref"
+                "shape": "asset_ref",
+                "demand": "immediate"
               }
             },
             "required": true,

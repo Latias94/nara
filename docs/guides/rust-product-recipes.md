@@ -277,13 +277,18 @@ remains available through `selected_scene()` and `selected_scene_product()`;
 Processed content has no source path. Their typed collections and concrete Image/TileSet residency use that same publication tail.
 See the [processed Runtime entry](runtime-content-base.md#materialization-and-retention).
 
-Required Scene references retain dependency documents as data. `ProjectContentSnapshot::scene_dependencies()`
+Immediate Scene references retain dependency documents as data. `ProjectContentSnapshot::scene_dependencies()`
 borrows the flat captured collection, with canonical location, document identity, raw authored
 document and effective compiled Scene kept separately. Self-reference, back-edges and diamonds
 capture each source once. Only the requested root is instantiated, and a dependency that is not a
-declared root remains unavailable for public travel. File-backed Check and Export consume saved
-sources. Authoring preview can instead select a demanded open Scene working copy under the same
-exact Schema basis; Save of the containing Scene never implicitly saves that dependency.
+declared root remains unavailable for public travel. A prepared request's
+`scene_dependency(product)` borrows its actual Immediate data without granting loading or travel
+authority. Deferred references resolve target bindings while leaving their payloads and resource
+closure outside current preparation; strict saved-source Check/Export follows both demands.
+Authoring preview can instead select an Immediate open Scene working copy under the same exact
+Schema basis. A Deferred target's dirty document is not a current preview participant; Save of the
+containing Scene never implicitly saves either dependency. See [asset reference
+demand](persistent-components.md#asset-reference-demand).
 
 Exclusive callers use `ProjectScenes::scope(world, |scenes| ...)` for that same request interface.
 For example, the scope can turn `scenes.prepared(id)` into owned checkpoint validation data; call
@@ -452,6 +457,10 @@ of this data-only Open and explicit project-code execution policy. An engine int
 needs trusted in-process execution uses
 `TrustedCompiledEditorProjectIntent::new().with_recipe(recipe()?)` with the trusted compiled
 Editor entry. This is an advanced placement boundary, not the ordinary generic authoring path.
+An edited Immediate reference must belong to that compiled entry's actual captured Scene,
+Image/TileSet or domain collection. Resolving an identity previously observed only as Deferred
+does not prepare its data. Such an edit requires a fresh content capture; refusal preserves the
+original immutable snapshot and existing prepared content.
 
 `PluginDefinition`, raw slot edits, parallel provider lists, runtime candidates, and retirement
 ledgers remain first-party plumbing. Ordinary external runtime embedding uses

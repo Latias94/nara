@@ -129,7 +129,7 @@ impl ValueDraft {
             } => Self::Bool(source.and_then(ComponentValue::as_bool)),
             ComponentValueShape::Scalar { .. }
             | ComponentValueShape::EntityRef
-            | ComponentValueShape::AssetRef => Self::Text {
+            | ComponentValueShape::AssetRef { .. } => Self::Text {
                 text: source.map_or_else(String::new, |value| scalar_text(shape, value)),
                 entered: source.is_some(),
             },
@@ -296,7 +296,7 @@ pub(in crate::frontend::imgui) fn supported(shape: &ComponentValueShape) -> bool
     match shape {
         ComponentValueShape::Scalar { .. }
         | ComponentValueShape::EntityRef
-        | ComponentValueShape::AssetRef => true,
+        | ComponentValueShape::AssetRef { .. } => true,
         ComponentValueShape::Optional { value } => supported(value),
         ComponentValueShape::Record { members } => {
             members.iter().all(|member| supported(&member.shape))
@@ -312,14 +312,14 @@ fn scalar_item(shape: &ComponentValueShape) -> bool {
     match shape {
         ComponentValueShape::Scalar { .. }
         | ComponentValueShape::EntityRef
-        | ComponentValueShape::AssetRef => true,
+        | ComponentValueShape::AssetRef { .. } => true,
         ComponentValueShape::Optional { value } => scalar_item(value),
         _ => false,
     }
 }
 
 fn scalar_text(shape: &ComponentValueShape, value: &ComponentValue) -> String {
-    if matches!(shape, ComponentValueShape::AssetRef) {
+    if matches!(shape, ComponentValueShape::AssetRef { .. }) {
         return match nara::reflect::decode_asset_reference_value(value) {
             Ok(AssetRef::Path(path)) => path.to_string(),
             Ok(AssetRef::StableId(id)) => format!("stable_id:{id}"),
@@ -351,7 +351,7 @@ pub(in crate::frontend::imgui) fn parse_scalar(
     shape: &ComponentValueShape,
     text: &str,
 ) -> Result<ComponentValue, String> {
-    if matches!(shape, ComponentValueShape::AssetRef) {
+    if matches!(shape, ComponentValueShape::AssetRef { .. }) {
         let reference = if let Some(product) = text.strip_prefix("product:") {
             let (source, product) = product
                 .split_once('/')
@@ -488,7 +488,7 @@ mod tests {
     #[test]
     fn asset_reference_drafts_preserve_complete_product_selection() {
         let source = StableAssetId::parse_str("cc91a0c8-e2b4-42ae-9d78-3481b9f34d65").unwrap();
-        let shape = ComponentValueShape::AssetRef;
+        let shape = ComponentValueShape::from(ComponentValueKind::AssetRef);
         for reference in [
             AssetRef::path("bundle.json").unwrap(),
             AssetRef::StableId(source),

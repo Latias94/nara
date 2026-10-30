@@ -8,6 +8,7 @@ mod identity;
 #[cfg(feature = "serde")]
 mod import;
 mod product_identity;
+mod reference;
 mod reload;
 mod revision;
 mod runtime_codec;
@@ -42,6 +43,7 @@ pub use identity::{
 #[cfg(feature = "serde")]
 pub use import::{AssetImportError, AssetImportLimits, AssetImportSource, SourceAssetImporter};
 pub use product_identity::{AssetProductIdentityError, AssetProductRef, ImportedProductId};
+pub use reference::AssetReferenceDemand;
 pub use reload::{
     ASSET_PLUGIN_DECLARATION, ASSET_PLUGIN_ID, ASSET_SOURCE_PLUGIN_DECLARATION,
     ASSET_SOURCE_PLUGIN_ID, AssetLoadGeneration, AssetLoadGenerations, AssetPlugin,

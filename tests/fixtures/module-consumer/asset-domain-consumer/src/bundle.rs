@@ -14,8 +14,8 @@ use std::{
 
 use nara_asset::{
     AssetDomain, AssetImportError, AssetImportLimits, AssetImportSource, AssetPath,
-    AssetProductRef, AssetRuntimeError, AssetRuntimeLimits, ImportedProductId, RuntimeAssetCodec,
-    SourceAssetImporter, SourceHash, StableAssetId,
+    AssetProductRef, AssetReferenceDemand, AssetRuntimeError, AssetRuntimeLimits,
+    ImportedProductId, RuntimeAssetCodec, SourceAssetImporter, SourceHash, StableAssetId,
 };
 use nara_core::{
     ByteLimit, DepthLimit, EngineVersion, FormatGenerator, FormatKind, ItemLimit,
@@ -661,9 +661,9 @@ impl RuntimeAssetCodec<TextBundle> for TextBundleDomain {
         Ok(retained)
     }
 
-    fn visit_required_runtime_products<E>(
+    fn visit_runtime_dependencies<E>(
         _product: &TextBundle,
-        _visitor: impl FnMut(AssetProductRef) -> Result<(), E>,
+        _visitor: impl FnMut(AssetProductRef, AssetReferenceDemand) -> Result<(), E>,
     ) -> Result<(), E> {
         Ok(())
     }

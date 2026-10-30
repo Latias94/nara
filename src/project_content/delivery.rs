@@ -14,7 +14,7 @@ use super::{
     allocation_failed, append_frame, checked_plan_product, checked_plan_sum, string_retained_bytes,
 };
 
-/// Exact source delivery for startup and the project's explicitly declared Scene roots.
+/// Strict source delivery for the complete mandatory closure of the project's Scene roots.
 ///
 /// This receipt retains bounded source facts and read authority. It does not retain decoded
 /// Scenes, Images, running instances, or runtime residency. Startup attestation remains a
@@ -44,7 +44,10 @@ impl ProjectContentDeliveryReceipt {
         &self.inner.roots
     }
 
-    /// Sorted, deduplicated project-relative source members for all declared roots.
+    /// Sorted, deduplicated source members for all mandatory references of the declared roots.
+    ///
+    /// This includes dependency-only Scenes and Deferred targets. It does not grant those
+    /// dependency-only Scenes travel authority or runtime residency.
     #[must_use]
     pub fn members(&self) -> &[ProjectContentMemberReceipt] {
         &self.inner.members
@@ -98,11 +101,13 @@ impl fmt::Debug for ProjectContentDeliveryReceipt {
 }
 
 impl ProjectContentLoader {
-    /// Validates startup and every declared Scene using the same bounded content loader.
+    /// Strictly validates every mandatory reference using the same bounded content loader.
     ///
     /// Decoded snapshots retire between roots. The resulting source union is independently
     /// budgeted and grants no runtime residency. A missing or invalid declared root rejects the
-    /// complete delivery plan; undeclared files are not automatically included.
+    /// complete delivery plan. Dependency-only Scenes are included through actual mandatory
+    /// references, without becoming declared travel roots. Startup attestation separately describes
+    /// ordinary Immediate preparation and is never replaced with the strict validation closure.
     /// Stable identities use one lazily captured catalogue for this operation. Referenced
     /// metadata is revalidated on use; unrelated additions are discovered by the next operation.
     pub fn load_delivery(
@@ -192,9 +197,13 @@ impl ProjectContentLoader {
             startup.content_closure(),
             &mut budget,
         )?;
+        // Without Deferred leaves, the actual ordinary inventory already admitted every
+        // mandatory target through the production compiler/importers. Otherwise startup needs
+        // its own strict validation unit, independently of its Immediate attestation.
+        let validate_startup = snapshot.inner.deferred_source_targets;
         drop(snapshot);
         for root in &roots {
-            if root == startup.content_closure().selected_scene_path() {
+            if root == startup.content_closure().selected_scene_path() && !validate_startup {
                 continue;
             }
             let (snapshot, next_catalogue) = self.load_scene_for_delivery(

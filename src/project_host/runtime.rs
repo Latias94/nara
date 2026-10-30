@@ -1953,7 +1953,7 @@ fn processed_content_fault(error: &RuntimeContentError) -> HostFault {
         RuntimeContentError::MemberDigestMismatch => "member-digest-mismatch",
         RuntimeContentError::UndeclaredProduct => "undeclared-product",
         RuntimeContentError::UndeclaredScene => "undeclared-scene",
-        RuntimeContentError::UndeclaredDependency => "undeclared-dependency",
+        RuntimeContentError::DependencyMismatch { .. } => "dependency-mismatch",
         RuntimeContentError::NotScene => "not-scene",
         RuntimeContentError::NotAsset => "not-asset",
         RuntimeContentError::CodecNotSelected => "codec-not-selected",

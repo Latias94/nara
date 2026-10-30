@@ -1,7 +1,7 @@
 use nara_core::{ByteLimit, DepthLimit, ItemLimit};
 use nara_identity::SceneEntityId;
 use nara_reflect::{
-    __private::plan_declared_value_entity_references, ComponentCapability,
+    __private::plan_declared_value_entity_references, AssetReferenceDemand, ComponentCapability,
     ComponentEntityReferenceRewriteError, ComponentFieldId, ComponentFieldPath,
     ComponentFieldSchema, ComponentValue, ComponentValueShape, EntityReference,
     EntityReferenceTraversalLimits,
@@ -162,7 +162,10 @@ fn mixed_payload_plans_rewrite_relative_paths_and_preserve_admitted_asset_values
             "targets",
             ComponentValueShape::list(ComponentValueShape::EntityRef),
         ),
-        ComponentShapeMember::new("portrait", ComponentValueShape::AssetRef),
+        ComponentShapeMember::new(
+            "portrait",
+            ComponentValueShape::asset_ref(AssetReferenceDemand::Immediate),
+        ),
     ]);
     let asset = ComponentValue::map([
         ("kind", ComponentValue::String("path".into())),

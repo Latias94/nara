@@ -1,6 +1,6 @@
 use std::sync::atomic::{AtomicUsize, Ordering};
 
-use nara_asset::{AssetRuntimeError, ImportedProductId, StableAssetId};
+use nara_asset::{AssetReferenceDemand, AssetRuntimeError, ImportedProductId, StableAssetId};
 use nara_core::ByteLimit;
 use nara_fs::ContentDigest;
 
@@ -40,9 +40,9 @@ macro_rules! codec {
             fn runtime_retained_bytes(_: &u32) -> Result<usize, AssetRuntimeError> {
                 Ok(size_of::<u32>())
             }
-            fn visit_required_runtime_products<E>(
+            fn visit_runtime_dependencies<E>(
                 _: &u32,
-                _: impl FnMut(AssetProductRef) -> Result<(), E>,
+                _: impl FnMut(AssetProductRef, AssetReferenceDemand) -> Result<(), E>,
             ) -> Result<(), E> {
                 Ok(())
             }
@@ -199,11 +199,11 @@ impl RuntimeAssetCodec<u32> for Frozen {
     fn runtime_retained_bytes(value: &u32) -> Result<usize, AssetRuntimeError> {
         First::runtime_retained_bytes(value)
     }
-    fn visit_required_runtime_products<E>(
+    fn visit_runtime_dependencies<E>(
         value: &u32,
-        visitor: impl FnMut(AssetProductRef) -> Result<(), E>,
+        visitor: impl FnMut(AssetProductRef, AssetReferenceDemand) -> Result<(), E>,
     ) -> Result<(), E> {
-        First::visit_required_runtime_products(value, visitor)
+        First::visit_runtime_dependencies(value, visitor)
     }
     fn contains_runtime_product(value: &u32, product: AssetProductRef) -> bool {
         First::contains_runtime_product(value, product)

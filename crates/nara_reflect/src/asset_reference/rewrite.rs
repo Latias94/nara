@@ -122,6 +122,7 @@ impl<R: Error + 'static, A: Error + 'static> Error for AssetReferenceRewriteErro
 ///
 /// This uses the default reference-work limits and the canonical asset decoder/field encoder.
 /// It does not scan for other references, match ordinary strings, fill defaults or admit Schema.
+/// Callbacks receive the original leaf demand. Rewriting identity leaves that Schema demand intact.
 /// Callbacks run in the supplied record order. A callback or later work failure can leave
 /// earlier replacements changed; the caller must discard or otherwise own the unpublished
 /// candidate on failure. Work allocated by the rewrite callback remains the caller's concern.

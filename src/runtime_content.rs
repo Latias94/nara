@@ -9,11 +9,16 @@
 mod budget;
 mod catalog;
 mod codecs;
+mod deep;
+mod dependencies;
 mod input;
+mod native;
 mod prepared;
+mod traversal;
 
 pub use codecs::{RuntimeCodecDefinitionId, RuntimeCodecSelectionError, RuntimeCodecsFingerprint};
 pub(crate) use codecs::{RuntimeCodecRole, RuntimeCodecs};
+pub use deep::RuntimeContentValidationReport;
 pub use input::RuntimeInputContent;
 pub(crate) use input::RuntimeInputObservation;
 pub(crate) use prepared::ProcessedSceneContent;
@@ -26,7 +31,10 @@ use std::{
     sync::Arc,
 };
 
-use nara_asset::{AssetDomain, AssetProductRef, AssetRef, AssetRuntimeError, RuntimeAssetCodec};
+use nara_asset::{
+    AssetDomain, AssetProductRef, AssetRef, AssetReferenceDemand, AssetRuntimeError,
+    RuntimeAssetCodec,
+};
 use nara_core::ByteLimit;
 use nara_fs::{ContentDigest, DirectoryCapability, FsError, RelativePath};
 use nara_project::RuntimeConfigurationError;
@@ -48,6 +56,7 @@ use crate::{
     startup_scene::SceneSource,
 };
 use budget::{DecodeBudget, DecodeLease};
+use dependencies::DependencyInventory;
 
 pub use catalog::{
     RuntimeContentCatalog, RuntimeContentCatalogDefinition, RuntimeContentCatalogError,
@@ -198,7 +207,11 @@ pub enum RuntimeContentError {
     MemberDigestMismatch,
     UndeclaredProduct,
     UndeclaredScene,
-    UndeclaredDependency,
+    DependencyMismatch {
+        product: AssetProductRef,
+        declared: Option<RuntimeContentDependencyRole>,
+        actual: Option<AssetReferenceDemand>,
+    },
     NotScene,
     NotAsset,
     CodecNotSelected,
@@ -242,8 +255,8 @@ impl RuntimeContentError {
             Self::MemberDigestMismatch => "Runtime member differs from its admitted catalog digest",
             Self::UndeclaredProduct => "Runtime product is absent from the admitted catalog",
             Self::UndeclaredScene => "Runtime Scene is not a declared acquisition root",
-            Self::UndeclaredDependency => {
-                "Runtime payload requires a Product absent from its required dependency declarations"
+            Self::DependencyMismatch { .. } => {
+                "Runtime payload dependencies differ from their complete catalogue declarations"
             }
             Self::NotScene => "Runtime product is not a Scene",
             Self::NotAsset => "Runtime product is not an asset member",
@@ -586,8 +599,8 @@ impl RuntimeContentBase {
                 )
             })?;
         let retained = checked_add(RuntimeContentBudgetKind::RetainedBytes, retained, metadata)?;
-        lease.finish_decode(retained)?;
         self.validate_scene_dependencies(&candidate, member)?;
+        lease.finish_decode(retained)?;
         Ok(RuntimeContentScene {
             inner: Arc::new(RuntimeContentSceneInner {
                 candidate: Arc::new(candidate),
@@ -651,6 +664,7 @@ impl RuntimeContentBase {
                 .inner
                 .budget
                 .reserve(promised, limits.work_bytes().get())?;
+            let mut dependencies = DependencyInventory::new(self, member)?;
             let value = C::decode_runtime(&self.inner.members[index])
                 .map_err(RuntimeContentError::Asset)?;
             for reference in member.products() {
@@ -660,9 +674,10 @@ impl RuntimeContentBase {
                     return Err(RuntimeContentError::ProductIdentityMismatch);
                 }
             }
-            C::visit_required_runtime_products(&value, |dependency| {
-                self.validate_required_dependency(member, dependency)
+            C::visit_runtime_dependencies(&value, |product, demand| {
+                dependencies.observe(product, demand)
             })?;
+            dependencies.finish()?;
             let product_retained =
                 C::runtime_retained_bytes(&value).map_err(RuntimeContentError::Asset)?;
             check(
@@ -701,7 +716,7 @@ impl RuntimeContentBase {
             .ok_or(RuntimeContentError::UndeclaredProduct)
     }
 
-    fn validate_required_dependency(
+    fn validate_immediate_dependency(
         &self,
         member: &RuntimeContentMember,
         product: AssetProductRef,
@@ -714,7 +729,16 @@ impl RuntimeContentBase {
                 member.dependencies()[index].role() == RuntimeContentDependencyRole::Required
             })
         {
-            return Err(RuntimeContentError::UndeclaredDependency);
+            let declared = member
+                .dependencies()
+                .binary_search_by_key(&product, RuntimeContentDependency::product)
+                .ok()
+                .map(|index| member.dependencies()[index].role());
+            return Err(RuntimeContentError::DependencyMismatch {
+                product,
+                declared,
+                actual: Some(AssetReferenceDemand::Immediate),
+            });
         }
         Ok(())
     }
@@ -726,6 +750,7 @@ impl RuntimeContentBase {
     ) -> Result<(), RuntimeContentError> {
         let bindings = self.inner.plan.schema_validation().bindings();
         let mut work = self.inner.budget.reserve(0, 0)?;
+        let mut dependencies = DependencyInventory::new(self, member)?;
         for entity in &candidate.document().entities {
             for (component, record) in &entity.components {
                 // Runtime Scene admission has already proved this exact immutable selection.
@@ -749,11 +774,11 @@ impl RuntimeContentBase {
                     let AssetRef::Product(product) = reference.asset_ref() else {
                         return Err(RuntimeContentError::ProductIdentityMismatch);
                     };
-                    self.validate_required_dependency(member, *product)?;
+                    dependencies.observe(*product, reference.demand())?;
                 }
             }
         }
-        Ok(())
+        dependencies.finish()
     }
 }
 

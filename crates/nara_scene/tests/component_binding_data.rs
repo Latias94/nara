@@ -50,7 +50,7 @@ fn owner() -> ComponentSchemaOwnerSnapshot {
     let root = |name, shape| {
         let reference = match &shape {
             ComponentValueShape::EntityRef => Some(ComponentCapability::EntityRef),
-            ComponentValueShape::AssetRef => Some(ComponentCapability::AssetRef),
+            ComponentValueShape::AssetRef { .. } => Some(ComponentCapability::AssetRef),
             _ => None,
         };
         let mut field = ComponentFieldSchema::required(
@@ -80,7 +80,10 @@ fn owner() -> ComponentSchemaOwnerSnapshot {
                     ComponentValueShape::scalar(ComponentValueKind::Bool),
                 ),
                 root("game.Link", ComponentValueShape::EntityRef),
-                root("game.Image", ComponentValueShape::AssetRef),
+                root(
+                    "game.Image",
+                    ComponentValueShape::from(ComponentValueKind::AssetRef),
+                ),
                 ComponentSchema::new(
                     component("game.Defaults"),
                     "Defaults",

@@ -3,8 +3,8 @@
 use std::mem::size_of;
 
 use nara_asset::{
-    AssetDomain, AssetProductRef, AssetRuntimeError, AssetRuntimeLimits, ImportedProductId,
-    RuntimeAssetCodec,
+    AssetDomain, AssetProductRef, AssetReferenceDemand, AssetRuntimeError, AssetRuntimeLimits,
+    ImportedProductId, RuntimeAssetCodec,
 };
 use nara_core::{ByteLimit, PersistentFileContractError, SerdeShapeError};
 use nara_diagnostic::{
@@ -221,9 +221,9 @@ impl RuntimeAssetCodec<ActionMapAsset> for ActionMapRuntimeCodec {
         retained_bytes(cost.retained_bytes()).ok_or_else(|| budget_overflow("retained-bytes"))
     }
 
-    fn visit_required_runtime_products<E>(
+    fn visit_runtime_dependencies<E>(
         _product: &ActionMapAsset,
-        _visitor: impl FnMut(AssetProductRef) -> Result<(), E>,
+        _visitor: impl FnMut(AssetProductRef, AssetReferenceDemand) -> Result<(), E>,
     ) -> Result<(), E> {
         Ok(())
     }

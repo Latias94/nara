@@ -58,7 +58,10 @@ mod codec {
         io::{self, Write},
     };
 
-    use nara_asset::{AssetProductRef, AssetRuntimeError, AssetRuntimeLimits, RuntimeAssetCodec};
+    use nara_asset::{
+        AssetProductRef, AssetReferenceDemand, AssetRuntimeError, AssetRuntimeLimits,
+        RuntimeAssetCodec,
+    };
     use nara_core::{
         ByteLimit, DepthLimit, EngineVersion, FormatGenerator, FormatKind, ItemLimit,
         PersistentFileContract, PersistentFileContractError, PersistentFileDecodeError,
@@ -223,9 +226,9 @@ mod codec {
             product.product() == Some(reference)
         }
 
-        fn visit_required_runtime_products<E>(
+        fn visit_runtime_dependencies<E>(
             _product: &ImageAsset,
-            _visitor: impl FnMut(AssetProductRef) -> Result<(), E>,
+            _visitor: impl FnMut(AssetProductRef, AssetReferenceDemand) -> Result<(), E>,
         ) -> Result<(), E> {
             Ok(())
         }

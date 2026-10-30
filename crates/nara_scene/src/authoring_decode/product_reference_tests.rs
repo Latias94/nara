@@ -7,7 +7,7 @@ use nara_asset::{
 use nara_ecs::World;
 use nara_reflect::{
     AuthoringSchemaBundleOwner, ComponentFieldPath, ComponentFieldSchema, ComponentRegistry,
-    ComponentSchemaCatalog, ComponentSchemaOwnerSnapshot,
+    ComponentSchemaCatalog, ComponentSchemaOwnerSnapshot, ComponentValueKind,
 };
 
 use super::*;
@@ -59,7 +59,7 @@ fn definition() -> (
             "Products",
             ComponentFieldPath::from_fields(["products"]),
             ComponentValueShape::map(ComponentValueShape::list(ComponentValueShape::optional(
-                ComponentValueShape::AssetRef,
+                ComponentValueShape::from(ComponentValueKind::AssetRef),
             ))),
         )
         .with_capabilities(ComponentCapability::SCENE_AUTHORING)

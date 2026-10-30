@@ -6,8 +6,8 @@ use nara_asset::{
 use nara_reflect::{
     ComponentCapability, ComponentFieldId, ComponentFieldPath, ComponentFieldSchema,
     ComponentRegistry, ComponentSchema, ComponentSchemaCatalog, ComponentSchemaOwnerSnapshot,
-    ComponentSchemaVersion, ComponentTypeId, ComponentValue, ComponentValueShape,
-    PersistentComponentSchemaOwnerId,
+    ComponentSchemaVersion, ComponentTypeId, ComponentValue, ComponentValueKind,
+    ComponentValueShape, PersistentComponentSchemaOwnerId,
 };
 use nara_scene::{
     SceneComponentBindings, SceneComponentRecord, SceneDocument, SceneEntityId, SceneEntityRecord,
@@ -42,7 +42,7 @@ fn data_defaults_close_nested_asset_references_over_the_selected_metadata_withou
                 ComponentFieldId::new("icons"),
                 "Icons",
                 ComponentFieldPath::from_fields(["icons"]),
-                ComponentValueShape::list(ComponentValueShape::AssetRef),
+                ComponentValueShape::list(ComponentValueShape::from(ComponentValueKind::AssetRef)),
                 references.clone(),
             )
             .with_capabilities(ComponentCapability::SCENE_AUTHORING)

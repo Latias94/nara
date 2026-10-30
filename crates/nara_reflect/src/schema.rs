@@ -9,8 +9,8 @@ use std::{
 use nara_identity::EntityReference;
 
 use crate::{
-    ComponentFieldPath, ComponentFieldPathSegment, ComponentNumericInterval, ComponentPropertyKey,
-    ComponentValue,
+    AssetReferenceDemand, ComponentFieldPath, ComponentFieldPathSegment, ComponentNumericInterval,
+    ComponentPropertyKey, ComponentValue,
 };
 
 const MAX_ALIAS_BYTES: usize = 128;
@@ -632,7 +632,13 @@ pub enum ComponentValueShape {
         numeric_interval: Option<ComponentNumericInterval>,
     },
     EntityRef,
-    AssetRef,
+    AssetRef {
+        #[cfg_attr(
+            feature = "serde",
+            serde(serialize_with = "serialize_asset_reference_demand")
+        )]
+        demand: AssetReferenceDemand,
+    },
     Record {
         members: Vec<ComponentShapeMember>,
     },
@@ -653,6 +659,19 @@ pub enum ComponentValueShape {
     Opaque {
         kind: ComponentValueKind,
     },
+}
+
+// RON 0.8 buffers fields of internally tagged enums through deserialize_any, which discards
+// bare unit-variant names. Emit a string here; the shared demand enum remains the decoder.
+#[cfg(feature = "serde")]
+fn serialize_asset_reference_demand<S: serde::Serializer>(
+    demand: &AssetReferenceDemand,
+    serializer: S,
+) -> Result<S::Ok, S::Error> {
+    serializer.serialize_str(match demand {
+        AssetReferenceDemand::Immediate => "immediate",
+        AssetReferenceDemand::Deferred => "deferred",
+    })
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -717,6 +736,7 @@ pub enum ComponentShapeErrorKind {
     InvalidListKeyShape(ComponentFieldId),
     DuplicateListKey(ComponentPropertyKey),
     InvalidOptional,
+    MissingAssetReferenceLeaf,
     DepthLimit,
     NodeLimit,
     ByteLimit,
@@ -783,7 +803,7 @@ fn shape_error(
 impl From<ComponentValueKind> for ComponentValueShape {
     fn from(kind: ComponentValueKind) -> Self {
         match kind {
-            ComponentValueKind::AssetRef => Self::AssetRef,
+            ComponentValueKind::AssetRef => Self::asset_ref(AssetReferenceDemand::Immediate),
             ComponentValueKind::EntityRef => Self::EntityRef,
             ComponentValueKind::List | ComponentValueKind::Map => Self::Opaque { kind },
             _ => Self::scalar(kind),
@@ -792,6 +812,12 @@ impl From<ComponentValueKind> for ComponentValueShape {
 }
 
 impl ComponentValueShape {
+    /// Declares a logical asset reference and its current preparation demand.
+    #[must_use]
+    pub const fn asset_ref(demand: AssetReferenceDemand) -> Self {
+        Self::AssetRef { demand }
+    }
+
     #[must_use]
     pub const fn scalar(kind: ComponentValueKind) -> Self {
         Self::Scalar {
@@ -856,6 +882,48 @@ impl ComponentValueShape {
     #[must_use]
     pub const fn opaque(kind: ComponentValueKind) -> Self {
         Self::Opaque { kind }
+    }
+
+    /// Overrides every declared asset leaf, preserving containers and opaque data.
+    ///
+    /// Validates the complete shape with the ordinary shape limits before recursion. A shape
+    /// without an actual AssetRef leaf returns MissingAssetReferenceLeaf; opaque containers do
+    /// not declare reference leaves.
+    pub fn with_asset_reference_demand(
+        mut self,
+        demand: AssetReferenceDemand,
+    ) -> Result<Self, ComponentShapeError> {
+        self.validate()?;
+        if !self.replace_asset_reference_demand(demand) {
+            return Err(shape_error(
+                &[],
+                ComponentShapeErrorKind::MissingAssetReferenceLeaf,
+            ));
+        }
+        Ok(self)
+    }
+
+    fn replace_asset_reference_demand(&mut self, replacement: AssetReferenceDemand) -> bool {
+        match self {
+            Self::AssetRef { demand } => {
+                *demand = replacement;
+                true
+            }
+            Self::Record { members } => {
+                let mut replaced = false;
+                for member in members {
+                    replaced |= member.shape.replace_asset_reference_demand(replacement);
+                }
+                replaced
+            }
+            Self::List { item } | Self::KeyedList { item, .. } => {
+                item.replace_asset_reference_demand(replacement)
+            }
+            Self::Map { value } | Self::Optional { value } => {
+                value.replace_asset_reference_demand(replacement)
+            }
+            Self::Scalar { .. } | Self::EntityRef | Self::Opaque { .. } => false,
+        }
     }
 
     #[must_use]
@@ -929,7 +997,7 @@ impl ComponentValueShape {
             match current {
                 Self::Scalar { kind, .. } | Self::Opaque { kind } => return *kind,
                 Self::EntityRef => return ComponentValueKind::EntityRef,
-                Self::AssetRef => return ComponentValueKind::AssetRef,
+                Self::AssetRef { .. } => return ComponentValueKind::AssetRef,
                 Self::Record { .. } | Self::Map { .. } => return ComponentValueKind::Map,
                 Self::List { .. } | Self::KeyedList { .. } => return ComponentValueKind::List,
                 Self::Optional { value } => current = value,
@@ -1153,7 +1221,9 @@ impl ComponentValueShape {
                 Ok(())
             }
             (Self::EntityRef, ComponentValue::EntityReference(_)) => Ok(()),
-            (Self::AssetRef, value) if crate::asset_reference::is_asset_reference_value(value) => {
+            (Self::AssetRef { .. }, value)
+                if crate::asset_reference::is_asset_reference_value(value) =>
+            {
                 Ok(())
             }
             (Self::Opaque { kind }, value) if value.kind() == *kind => Ok(()),
@@ -1916,7 +1986,13 @@ fn feed_shape(hasher: &mut blake3::Hasher, shape: &ComponentValueShape) {
             }
         }
         ComponentValueShape::EntityRef => feed_bytes(hasher, &[1]),
-        ComponentValueShape::AssetRef => feed_bytes(hasher, &[2]),
+        ComponentValueShape::AssetRef { demand } => {
+            let demand = match demand {
+                AssetReferenceDemand::Immediate => 0,
+                AssetReferenceDemand::Deferred => 1,
+            };
+            feed_bytes(hasher, &[2, demand]);
+        }
         ComponentValueShape::Record { members } => {
             feed_bytes(hasher, &[3]);
             feed_len(hasher, members.len());

@@ -100,7 +100,7 @@ fn basis() -> AuthoringSchemaBasis {
             ComponentFieldPath::from_fields(["payload"]),
             ComponentValueShape::record_members([ComponentShapeMember::new(
                 "source",
-                ComponentValueShape::AssetRef,
+                ComponentValueShape::from(ComponentValueKind::AssetRef),
             )
             .with_id(ComponentFieldId::new("source-member"))]),
         )

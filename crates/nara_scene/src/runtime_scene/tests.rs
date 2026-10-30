@@ -101,7 +101,7 @@ fn bindings() -> SceneComponentBindings {
     let asset_shape = ComponentValueShape::record_members([ComponentShapeMember::new(
         "items",
         ComponentValueShape::list(ComponentValueShape::map(ComponentValueShape::optional(
-            ComponentValueShape::AssetRef,
+            ComponentValueShape::from(ComponentValueKind::AssetRef),
         ))),
     )
     .with_id(ComponentFieldId::new("items"))]);
@@ -143,7 +143,7 @@ fn bindings() -> SceneComponentBindings {
         ComponentFieldId::new("image"),
         "Image",
         ComponentFieldPath::from_fields(["image"]),
-        ComponentValueShape::AssetRef,
+        ComponentValueShape::from(ComponentValueKind::AssetRef),
         encode_asset_reference_value(&AssetRef::path("images/shared.png").unwrap()),
     )
     .with_capabilities(ComponentCapability::SCENE_AUTHORING)
@@ -162,7 +162,10 @@ fn bindings() -> SceneComponentBindings {
                         ComponentValueShape::optional(ComponentValueShape::EntityRef),
                     )),
                 ),
-                root_schema("game.Image", ComponentValueShape::AssetRef),
+                root_schema(
+                    "game.Image",
+                    ComponentValueShape::from(ComponentValueKind::AssetRef),
+                ),
                 root_schema(
                     "game.Text",
                     ComponentValueShape::scalar(ComponentValueKind::String),

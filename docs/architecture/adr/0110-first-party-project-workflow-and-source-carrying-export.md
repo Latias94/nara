@@ -246,8 +246,10 @@ Immediate and Deferred mandatory references participate in complete Check/Export
 dependency-only targets. A resolved Deferred source binding alone cannot certify its payload or
 auxiliary Products. Retain separate immediate startup and full delivery observations, actual
 production compiler/importer checks, bounded disposal and exact receipt revalidation. This is
-unqualified work under the [CP3 plan](../../plans/2026-10-30-reference-validity-and-load-demand-plan.md);
-the preceding finite eager-source evidence keeps its original scope.
+implemented under the [CP3 plan](../../plans/2026-10-30-reference-validity-and-load-demand-plan.md),
+with [strict delivery/publication qualification](../../knowledge/engineering/verification/2026-10/2026-10-30T172312Z-reference-validity-and-current-demand-production-replacement-qualification-b16511fa33a74c2b808270394b28bf62.md).
+The preceding finite eager-source evidence keeps its original scope; target cooking and packaged
+Player execution remain separate.
 
 Product validation uses one parent-owned machine-readable trajectory. The parent workflow issues
 one trajectory identity and predecessor-bound attempt identity for each child process, then accepts

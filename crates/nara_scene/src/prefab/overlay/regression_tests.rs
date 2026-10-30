@@ -965,7 +965,10 @@ mod reference_regressions {
                     "others",
                     ComponentValueShape::map(ComponentValueShape::EntityRef),
                 ),
-                ComponentShapeMember::new("portrait", ComponentValueShape::AssetRef),
+                ComponentShapeMember::new(
+                    "portrait",
+                    ComponentValueShape::from(ComponentValueKind::AssetRef),
+                ),
             ]),
             ComponentFieldId::new("row-id"),
         ));

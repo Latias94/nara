@@ -1926,28 +1926,32 @@ mod tests {
                         ComponentFieldId::new("image"),
                         "Image",
                         ComponentFieldPath::from_fields(["settings", "image"]),
-                        ComponentValueShape::AssetRef,
+                        ComponentValueShape::from(ComponentValueKind::AssetRef),
                     )
                     .with_capability(ComponentCapability::AssetRef),
                     ComponentFieldSchema::required(
                         ComponentFieldId::new("gallery"),
                         "Gallery",
                         ComponentFieldPath::from_fields(["gallery"]),
-                        ComponentValueShape::list(ComponentValueShape::AssetRef),
+                        ComponentValueShape::list(ComponentValueShape::from(
+                            ComponentValueKind::AssetRef,
+                        )),
                     )
                     .with_capability(ComponentCapability::AssetRef),
                     ComponentFieldSchema::required(
                         ComponentFieldId::new("palette"),
                         "Palette",
                         ComponentFieldPath::from_fields(["palette"]),
-                        ComponentValueShape::map(ComponentValueShape::AssetRef),
+                        ComponentValueShape::map(ComponentValueShape::from(
+                            ComponentValueKind::AssetRef,
+                        )),
                     )
                     .with_capability(ComponentCapability::AssetRef),
                     ComponentFieldSchema::optional_with_default(
                         ComponentFieldId::new("fallback"),
                         "Fallback",
                         ComponentFieldPath::from_fields(["defaults", "image"]),
-                        ComponentValueShape::AssetRef,
+                        ComponentValueShape::from(ComponentValueKind::AssetRef),
                         path_value("default"),
                     )
                     .with_capability(ComponentCapability::AssetRef),

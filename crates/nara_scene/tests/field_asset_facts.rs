@@ -9,7 +9,7 @@ use nara_reflect::{
     AuthoringSchemaBundle, AuthoringSchemaBundleOwner, ComponentCapability, ComponentFieldId,
     ComponentFieldPath, ComponentFieldSchema, ComponentPropertyPath, ComponentSchema,
     ComponentSchemaCatalog, ComponentSchemaVersion, ComponentTypeId, ComponentValue,
-    ComponentValueShape, PersistentComponentSchemaOwnerId,
+    ComponentValueKind, ComponentValueShape, PersistentComponentSchemaOwnerId,
 };
 use nara_scene::{
     AuthoringDocumentSource, AuthoringRecordReadiness, PrefabComponentIntent, PrefabDocument,
@@ -46,19 +46,23 @@ fn bundle() -> AuthoringSchemaBundle {
         .with_fields([
             field(
                 "images",
-                ComponentValueShape::list(ComponentValueShape::map(ComponentValueShape::AssetRef)),
+                ComponentValueShape::list(ComponentValueShape::map(ComponentValueShape::from(
+                    ComponentValueKind::AssetRef,
+                ))),
             ),
             ComponentFieldSchema::optional_with_default(
                 ComponentFieldId::new("image"),
                 "Image",
                 ComponentFieldPath::from_fields(["image"]),
-                ComponentValueShape::AssetRef,
+                ComponentValueShape::from(ComponentValueKind::AssetRef),
                 asset("default.png"),
             )
             .with_capabilities([ComponentCapability::Scene, ComponentCapability::AssetRef]),
             field(
                 "optional",
-                ComponentValueShape::optional(ComponentValueShape::AssetRef),
+                ComponentValueShape::optional(ComponentValueShape::from(
+                    ComponentValueKind::AssetRef,
+                )),
             ),
         ]);
     AuthoringSchemaBundle::new([AuthoringSchemaBundleOwner::new(
@@ -282,7 +286,7 @@ fn repeated_default_reference_facts_have_separate_traversal_and_retention_limits
                         ComponentFieldId::new("image"),
                         "Image",
                         ComponentFieldPath::from_fields(["image"]),
-                        ComponentValueShape::AssetRef,
+                        ComponentValueShape::from(ComponentValueKind::AssetRef),
                         asset(&default_path),
                     )
                     .with_capabilities([

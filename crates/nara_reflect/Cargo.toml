@@ -29,6 +29,7 @@ serde = [
     "dep:ron",
     "dep:serde",
     "dep:serde_json",
+    "nara_asset/serde",
     "nara_core/serde",
     "nara_identity/serde",
 ]

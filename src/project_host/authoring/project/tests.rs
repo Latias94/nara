@@ -1,8 +1,9 @@
 use super::*;
 use nara_reflect::{
     ComponentCapability, ComponentFieldId, ComponentFieldPath, ComponentFieldSchema,
-    ComponentSchema, ComponentSchemaVersion, ComponentTypeId, ComponentValue, ComponentValueShape,
-    PersistentComponentSchemaOwnerId, collect_declared_asset_references_from_schema,
+    ComponentSchema, ComponentSchemaVersion, ComponentTypeId, ComponentValue, ComponentValueKind,
+    ComponentValueShape, PersistentComponentSchemaOwnerId,
+    collect_declared_asset_references_from_schema,
 };
 use nara_scene::{
     PrefabAddition, PrefabComponentIntent, PrefabComponentSetMode, PrefabEntityTarget,
@@ -66,7 +67,9 @@ fn reference_projection_accounting_includes_defaults_paths_and_duplicate_storage
             ComponentFieldId::new(field),
             "Assets",
             ComponentFieldPath::from_fields([ancestor, "assets"]),
-            ComponentValueShape::map(ComponentValueShape::list(ComponentValueShape::AssetRef)),
+            ComponentValueShape::map(ComponentValueShape::list(ComponentValueShape::from(
+                ComponentValueKind::AssetRef,
+            ))),
             ComponentValue::map([(key, ComponentValue::List(vec![reference_value.clone()]))]),
         )
         .with_capability(ComponentCapability::AssetRef)]);
@@ -130,7 +133,7 @@ fn published_unbound_default_assets_charge_both_projection_copies_at_the_budget_
         ComponentFieldId::new("assets"),
         "Assets",
         ComponentFieldPath::from_fields(["settings", "assets"]),
-        ComponentValueShape::list(ComponentValueShape::AssetRef),
+        ComponentValueShape::list(ComponentValueShape::from(ComponentValueKind::AssetRef)),
         ComponentValue::List(vec![reference; 3]),
     )
     .with_capability(ComponentCapability::AssetRef)]);

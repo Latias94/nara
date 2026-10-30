@@ -3187,7 +3187,7 @@ fn preflight_validation_value<E>(
                 )?;
             }
         }
-        (Shape::AssetRef, value) => {
+        (Shape::AssetRef { .. }, value) => {
             // The same closed leaf grammar drives decoding and work admission. Product maps,
             // source/selector text and UUID parser scratch must precede semantic validation.
             if let Some(work) = crate::asset_reference::asset_reference_value_work(value) {
@@ -3745,7 +3745,9 @@ mod value_validation_admission_tests {
 
     #[test]
     fn asset_validation_parsing_scratch_is_admitted_from_actual_payload_length() {
-        let schema = schema(ComponentValueShape::AssetRef);
+        let schema = schema(ComponentValueShape::asset_ref(
+            crate::AssetReferenceDemand::Immediate,
+        ));
         let measure = |length| {
             let value = root(ComponentValue::map([
                 ("kind".to_owned(), ComponentValue::String("path".to_owned())),

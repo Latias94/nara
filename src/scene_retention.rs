@@ -280,7 +280,7 @@ fn schema_shape_dynamic_bytes(
         ]),
         ComponentValueShape::Scalar { .. }
         | ComponentValueShape::EntityRef
-        | ComponentValueShape::AssetRef
+        | ComponentValueShape::AssetRef { .. }
         | ComponentValueShape::Opaque { .. } => Ok(0),
     }
 }

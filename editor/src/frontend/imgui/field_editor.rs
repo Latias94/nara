@@ -117,7 +117,9 @@ impl Candidate {
             } => Self::Structured(RootDraft::default()),
             ComponentValueShape::Scalar { .. }
             | ComponentValueShape::EntityRef
-            | ComponentValueShape::AssetRef => Self::Text(authoring::field_source_text(field)),
+            | ComponentValueShape::AssetRef { .. } => {
+                Self::Text(authoring::field_source_text(field))
+            }
             _ => Self::Structured(RootDraft::default()),
         }
     }

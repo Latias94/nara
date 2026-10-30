@@ -39,8 +39,9 @@ Rules:
   derive override applies to its actual asset leaves; it cannot annotate a scalar or discover
   references inside Opaque data. Manual nested declarations can mix demand. The
   [selected demand design](../reference-validity-and-load-demand-design.md) and
-  [plan](../../plans/2026-10-30-reference-validity-and-load-demand-plan.md) own this unqualified
-  replacement; existing reference-addressing evidence does not prove demand-aware preparation.
+  [plan](../../plans/2026-10-30-reference-validity-and-load-demand-plan.md) own this replacement;
+  its [qualification](../../knowledge/engineering/verification/2026-10/2026-10-30T172312Z-reference-validity-and-current-demand-production-replacement-qualification-b16511fa33a74c2b808270394b28bf62.md)
+  records demand-aware source/processed preparation separately from earlier addressing evidence.
 - Root fields retain component-wide stable `ComponentFieldId` values. A nested Record member may
   opt into a sibling-scoped stable `ComponentFieldId`, addressed through its complete stable
   ancestor chain. Reusable nested shapes do not allocate different member IDs at every use site.

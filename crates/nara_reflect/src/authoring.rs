@@ -8,8 +8,8 @@ use nara_ecs::Component;
 use nara_identity::EntityReference;
 
 use crate::{
-    ComponentCodecError, ComponentNumericDomain, ComponentSchema, ComponentValue,
-    ComponentValueKind, ComponentValueShape,
+    AssetReferenceDemand, ComponentCodecError, ComponentNumericDomain, ComponentSchema,
+    ComponentValue, ComponentValueKind, ComponentValueShape,
 };
 
 pub trait PersistentComponentProvider: Component + Sized + 'static {
@@ -24,6 +24,9 @@ pub trait PersistentComponentProvider: Component + Sized + 'static {
 
 #[doc(hidden)]
 pub trait PersistentFieldCodec: private::Sealed + Sized + 'static {
+    /// Whether this codec's actual recursive shape declares any asset reference leaves.
+    const HAS_ASSET_REFERENCES: bool;
+
     fn value_shape() -> ComponentValueShape;
 
     fn decode(value: &ComponentValue, field: &str) -> Result<Self, ComponentCodecError>;
@@ -92,6 +95,8 @@ where
 }
 
 impl PersistentFieldCodec for bool {
+    const HAS_ASSET_REFERENCES: bool = false;
+
     fn value_shape() -> ComponentValueShape {
         ComponentValueShape::scalar(ComponentValueKind::Bool)
     }
@@ -108,6 +113,8 @@ impl PersistentFieldCodec for bool {
 }
 
 impl PersistentFieldCodec for String {
+    const HAS_ASSET_REFERENCES: bool = false;
+
     fn value_shape() -> ComponentValueShape {
         ComponentValueShape::scalar(ComponentValueKind::String)
     }
@@ -127,6 +134,8 @@ impl PersistentFieldCodec for String {
 macro_rules! narrow_integer_codec {
     ($ty:ty, $kind:ident, $getter:ident, $wire:ty, $domain:ident) => {
         impl PersistentFieldCodec for $ty {
+            const HAS_ASSET_REFERENCES: bool = false;
+
             fn value_shape() -> ComponentValueShape {
                 ComponentValueShape::scalar(ComponentValueKind::$kind)
                     .with_numeric_domain(ComponentNumericDomain::$domain)
@@ -154,6 +163,8 @@ narrow_integer_codec!(u16, U64, as_u64, u64, U16);
 narrow_integer_codec!(u32, U64, as_u64, u64, U32);
 
 impl PersistentFieldCodec for f32 {
+    const HAS_ASSET_REFERENCES: bool = false;
+
     fn value_shape() -> ComponentValueShape {
         ComponentValueShape::scalar(ComponentValueKind::F64)
             .with_numeric_domain(ComponentNumericDomain::F32)
@@ -175,6 +186,8 @@ impl PersistentFieldCodec for f32 {
 }
 
 impl PersistentFieldCodec for f64 {
+    const HAS_ASSET_REFERENCES: bool = false;
+
     fn value_shape() -> ComponentValueShape {
         ComponentValueShape::scalar(ComponentValueKind::F64)
     }
@@ -191,6 +204,8 @@ impl PersistentFieldCodec for f64 {
 }
 
 impl PersistentFieldCodec for i64 {
+    const HAS_ASSET_REFERENCES: bool = false;
+
     fn value_shape() -> ComponentValueShape {
         ComponentValueShape::scalar(ComponentValueKind::I64)
     }
@@ -207,6 +222,8 @@ impl PersistentFieldCodec for i64 {
 }
 
 impl PersistentFieldCodec for u64 {
+    const HAS_ASSET_REFERENCES: bool = false;
+
     fn value_shape() -> ComponentValueShape {
         ComponentValueShape::scalar(ComponentValueKind::U64)
     }
@@ -223,6 +240,8 @@ impl PersistentFieldCodec for u64 {
 }
 
 impl PersistentFieldCodec for Vec2 {
+    const HAS_ASSET_REFERENCES: bool = false;
+
     fn value_shape() -> ComponentValueShape {
         let axis = <f32 as PersistentFieldCodec>::value_shape();
         ComponentValueShape::record([("x".to_owned(), axis.clone()), ("y".to_owned(), axis)])
@@ -249,6 +268,8 @@ impl PersistentFieldCodec for Vec2 {
 }
 
 impl PersistentFieldCodec for EntityReference {
+    const HAS_ASSET_REFERENCES: bool = false;
+
     fn value_shape() -> ComponentValueShape {
         ComponentValueShape::EntityRef
     }
@@ -266,8 +287,10 @@ impl PersistentFieldCodec for EntityReference {
 }
 
 impl PersistentFieldCodec for AssetRef {
+    const HAS_ASSET_REFERENCES: bool = true;
+
     fn value_shape() -> ComponentValueShape {
-        ComponentValueShape::AssetRef
+        ComponentValueShape::asset_ref(AssetReferenceDemand::Immediate)
     }
 
     fn decode(value: &ComponentValue, field: &str) -> Result<Self, ComponentCodecError> {
@@ -281,6 +304,8 @@ impl PersistentFieldCodec for AssetRef {
 }
 
 impl<T: PersistentFieldCodec> PersistentFieldCodec for Vec<T> {
+    const HAS_ASSET_REFERENCES: bool = T::HAS_ASSET_REFERENCES;
+
     fn value_shape() -> ComponentValueShape {
         ComponentValueShape::list(T::value_shape())
     }
@@ -305,6 +330,8 @@ impl<T: PersistentFieldCodec> PersistentFieldCodec for Vec<T> {
 }
 
 impl<T: PersistentFieldCodec> PersistentFieldCodec for BTreeMap<String, T> {
+    const HAS_ASSET_REFERENCES: bool = T::HAS_ASSET_REFERENCES;
+
     fn value_shape() -> ComponentValueShape {
         ComponentValueShape::map(T::value_shape())
     }
@@ -330,6 +357,8 @@ impl<T: PersistentFieldCodec> PersistentFieldCodec for BTreeMap<String, T> {
 }
 
 impl<T: PersistentFieldCodec> PersistentFieldCodec for Option<T> {
+    const HAS_ASSET_REFERENCES: bool = T::HAS_ASSET_REFERENCES;
+
     fn value_shape() -> ComponentValueShape {
         ComponentValueShape::Optional {
             value: Box::new(T::value_shape()),

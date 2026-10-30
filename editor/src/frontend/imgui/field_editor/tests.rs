@@ -61,7 +61,7 @@ fn actual_candidate_conversion_admits_only_canonical_asset_references() {
     ] {
         assert_eq!(
             Candidate::Text(text.into())
-                .value(&ComponentValueShape::AssetRef)
+                .value(&ComponentValueShape::from(ComponentValueKind::AssetRef))
                 .unwrap(),
             ComponentValue::map([
                 ("kind", ComponentValue::String(kind.into())),
@@ -71,7 +71,7 @@ fn actual_candidate_conversion_admits_only_canonical_asset_references() {
     }
     assert!(
         Candidate::Text("stable_id:invalid".into())
-            .value(&ComponentValueShape::AssetRef)
+            .value(&ComponentValueShape::from(ComponentValueKind::AssetRef))
             .is_err()
     );
     assert!(value_draft::supported(&ComponentValueShape::EntityRef));

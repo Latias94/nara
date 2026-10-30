@@ -1,14 +1,23 @@
-//! Bounded stable lookup observations alongside physical source receipts.
+//! Bounded stable lookups and Deferred target bindings alongside physical source receipts.
 
-use std::{collections::VecDeque, io::ErrorKind};
+use std::{
+    collections::VecDeque,
+    io::{ErrorKind, Read},
+};
 
-use nara_asset::StableAssetId;
+use nara_asset::{AssetReferenceDemand, StableAssetId};
 use nara_fs::{DirectoryEnumerationLimits, FileKind};
 
 use super::*;
 
 #[cfg(test)]
 mod tests;
+
+/// Source binding observations do not certify decoded payload or compound Product membership.
+pub(super) enum ReferenceObservation {
+    StableLookup(StableLookupObservation),
+    ResolvedTarget(ResolvedTargetObservation),
+}
 
 /// One demanded global identity observation, separate from its reader and working-copy evidence.
 pub(super) struct StableLookupObservation {
@@ -18,6 +27,106 @@ pub(super) struct StableLookupObservation {
     // An intrinsic source participates in the same global identity universe even without a
     // sidecar. Revalidation must still reject newly conflicting, otherwise unrelated metadata.
     intrinsic: Option<AssetRecord>,
+}
+
+/// A Deferred target keeps its actual reader binding without observing its document body.
+pub(super) struct ResolvedTargetObservation {
+    kind: AuthoringSourceKind,
+    project_path: ProjectPath,
+    identity: FileIdentity,
+    parent_identity: Option<FileIdentity>,
+    dependency_depth: usize,
+}
+
+impl ResolvedTargetObservation {
+    fn revalidate(
+        &self,
+        root: &DirectoryCapability,
+        budget: &mut AuthoringProjectAdmissionBudget,
+    ) -> Result<(), AuthoringProjectSourceAdmissionError> {
+        budget.charge_reference(
+            self.project_path.as_str().len(),
+            self.dependency_depth,
+            false,
+        )?;
+        let scratch = checked_sum([
+            size_of::<OpenedAuthoringSource>(),
+            self.project_path.as_str().len(),
+        ])?;
+        budget.charge_source_bytes(0, 0, 0, scratch)?;
+        let opened = open_source_file(
+            root,
+            self.project_path.clone(),
+            self.project_path.as_str(),
+            self.kind,
+            self.dependency_depth,
+            budget,
+        )?;
+        if opened.identity != self.identity || opened.parent_identity != self.parent_identity {
+            return Err(AuthoringProjectSourceAdmissionError::SourceChanged {
+                kind: self.kind,
+                path: opened.project_path,
+            });
+        }
+        probe_target_readability(&opened, budget, false)?;
+        drop(opened);
+        budget.reconcile_retained_reservation(scratch, 0)?;
+        Ok(())
+    }
+}
+
+fn probe_target_readability(
+    opened: &OpenedAuthoringSource,
+    budget: &mut AuthoringProjectAdmissionBudget,
+    first_observation: bool,
+) -> Result<(), AuthoringProjectSourceAdmissionError> {
+    if first_observation {
+        budget.charge_open_file(SOURCE_OPEN_HANDLE_PEAK)?;
+    } else {
+        budget.admit_handle_peak(SOURCE_OPEN_HANDLE_PEAK)?;
+    }
+    // Read access is a source-binding fact. One stack byte proves access without making the
+    // complete body, its length, a digest, or decoded payload semantics part of the receipt.
+    budget.charge_source_bytes(usize::from(first_observation), 0, 1, 0)?;
+    let mut reader = opened.capability.reader().map_err(|source| {
+        AuthoringProjectSourceAdmissionError::SourceHost {
+            kind: opened.kind,
+            path: opened.project_path.clone(),
+            source,
+        }
+    })?;
+    reader.read(&mut [0_u8; 1]).map_err(|source| {
+        AuthoringProjectSourceAdmissionError::SourceHost {
+            kind: opened.kind,
+            path: opened.project_path.clone(),
+            source: FsError::Io {
+                operation: nara_fs::FsOperation::Read,
+                source,
+            },
+        }
+    })?;
+    Ok(())
+}
+
+impl ReferenceObservation {
+    pub(super) fn retained_bytes(&self) -> Result<usize, AuthoringProjectSourceAdmissionError> {
+        match self {
+            Self::StableLookup(observation) => checked_sum([
+                size_of::<Self>(),
+                observation
+                    .target
+                    .as_ref()
+                    .map_or(0, |path| path.as_str().len()),
+                observation
+                    .intrinsic
+                    .as_ref()
+                    .map_or(Ok(0), asset_record_retained_bytes)?,
+            ]),
+            Self::ResolvedTarget(observation) => {
+                checked_sum([size_of::<Self>(), observation.project_path.as_str().len()])
+            }
+        }
+    }
 }
 
 /// The actual directory capability binding and expected kind of a source query.
@@ -45,18 +154,7 @@ impl SourceDirectoryBinding {
 pub(super) struct ResolvedResourceSource {
     pub(super) path: AssetPath,
     pub(super) binding: SourceDirectoryBinding,
-}
-
-impl StableLookupObservation {
-    pub(super) fn retained_bytes(&self) -> Result<usize, AuthoringProjectSourceAdmissionError> {
-        checked_sum([
-            size_of::<Self>(),
-            self.target.as_ref().map_or(0, |path| path.as_str().len()),
-            self.intrinsic
-                .as_ref()
-                .map_or(Ok(0), asset_record_retained_bytes)?,
-        ])
-    }
+    pub(super) demand: AssetReferenceDemand,
 }
 
 pub(super) struct ReferenceCatalogue {
@@ -67,6 +165,8 @@ pub(super) struct ReferenceCatalogue {
     metadata: BTreeMap<AssetSourcePath, Arc<AuthoringSourceFact>>,
     source_bindings: BTreeMap<AssetSourcePath, SourceDirectoryBinding>,
     lookups: BTreeMap<StableAssetId, StableLookupObservation>,
+    resolved_targets: BTreeMap<AssetSourcePath, ResolvedTargetObservation>,
+    resolved_identities: HashMap<FileIdentity, AssetSourcePath>,
 }
 
 impl ReferenceCatalogue {
@@ -112,6 +212,8 @@ impl ReferenceCatalogue {
             metadata: BTreeMap::new(),
             source_bindings: BTreeMap::new(),
             lookups: BTreeMap::new(),
+            resolved_targets: BTreeMap::new(),
+            resolved_identities: HashMap::new(),
         })
     }
 
@@ -162,6 +264,7 @@ impl ReferenceCatalogue {
             return Ok(Some(ResolvedResourceSource {
                 path: path.clone(),
                 binding: self.assets(),
+                demand: AssetReferenceDemand::Immediate,
             }));
         }
         self.ensure_indexed(budget)?;
@@ -197,7 +300,11 @@ impl ReferenceCatalogue {
         let mut binding = binding.clone();
         binding.expected_kind = Some(record.source_kind().clone());
         let path = self.resolve(reference, &binding, budget)?;
-        Ok(path.map(|path| ResolvedResourceSource { path, binding }))
+        Ok(path.map(|path| ResolvedResourceSource {
+            path,
+            binding,
+            demand: AssetReferenceDemand::Immediate,
+        }))
     }
 
     pub(super) fn resolve_prefab(
@@ -218,6 +325,7 @@ impl ReferenceCatalogue {
             return Ok(Some(ResolvedResourceSource {
                 path: path.clone(),
                 binding: self.prefabs(),
+                demand: AssetReferenceDemand::Immediate,
             }));
         }
         let selected = self.resolve_resource(reference, budget)?;
@@ -351,10 +459,7 @@ impl ReferenceCatalogue {
                 },
             );
         }
-        if self.database.record_for_path(record.path()).is_none() {
-            charge_database_record(record, budget)?;
-            insert_asset_record(&mut self.database, record.clone())?;
-        }
+        admit_asset_record(&mut self.database, record, budget)?;
         Ok(())
     }
 
@@ -433,27 +538,119 @@ impl ReferenceCatalogue {
         Some(record.path())
     }
 
-    pub(super) fn into_lookup_observations(
-        self,
+    pub(super) fn check_resolved_target_identity(
+        &self,
+        identity: FileIdentity,
+        project_path: &ProjectPath,
+    ) -> Result<(), AuthoringProjectSourceAdmissionError> {
+        if self
+            .resolved_identities
+            .get(&identity)
+            .is_some_and(|path| path.as_str() != project_path.as_str())
+        {
+            return Err(
+                AuthoringProjectSourceAdmissionError::SourceIdentityKindConflict {
+                    path: project_path.clone(),
+                },
+            );
+        }
+        Ok(())
+    }
+
+    /// Keeps a Deferred source's binding and proves read access without decoding its body.
+    pub(super) fn observe_resolved_target(
+        &mut self,
+        opened: OpenedAuthoringSource,
+        record: &AssetRecord,
         budget: &mut AuthoringProjectAdmissionBudget,
-    ) -> Result<Arc<[StableLookupObservation]>, AuthoringProjectSourceAdmissionError> {
-        // Entries move their paths; the temporary vector and final Arc coexist during transfer.
+    ) -> Result<(), AuthoringProjectSourceAdmissionError> {
+        if opened.project_path.as_str() != record.path().as_str() {
+            return Err(AuthoringProjectSourceAdmissionError::DocumentSourceMismatch);
+        }
+        probe_target_readability(&opened, budget, true)?;
+        if let Some(previous) = self.resolved_targets.get(record.path()) {
+            if previous.identity != opened.identity
+                || previous.parent_identity != opened.parent_identity
+                || previous.kind != opened.kind
+            {
+                return Err(AuthoringProjectSourceAdmissionError::SourceChanged {
+                    kind: opened.kind,
+                    path: opened.project_path,
+                });
+            }
+            return Ok(());
+        }
+        self.check_resolved_target_identity(opened.identity, &opened.project_path)?;
         budget.charge_source_bytes(
             0,
             0,
             0,
             checked_sum([
-                checked_product(self.lookups.len(), 2 * size_of::<StableLookupObservation>())?,
+                size_of::<(AssetSourcePath, ResolvedTargetObservation)>(),
+                size_of::<(FileIdentity, AssetSourcePath)>(),
+                record.path().as_str().len(),
+                record.path().as_str().len(),
+                opened.project_path.as_str().len(),
+                128,
+            ])?,
+        )?;
+        self.resolved_identities
+            .insert(opened.identity, record.path().clone());
+        self.resolved_targets.insert(
+            record.path().clone(),
+            ResolvedTargetObservation {
+                kind: opened.kind,
+                project_path: opened.project_path,
+                identity: opened.identity,
+                parent_identity: opened.parent_identity,
+                dependency_depth: opened.dependency_depth,
+            },
+        );
+        Ok(())
+    }
+
+    pub(super) fn revalidate_resolved_targets(
+        &self,
+        budget: &mut AuthoringProjectAdmissionBudget,
+    ) -> Result<(), AuthoringProjectSourceAdmissionError> {
+        for target in self.resolved_targets.values() {
+            target.revalidate(&self.root, budget)?;
+        }
+        Ok(())
+    }
+
+    pub(super) fn into_reference_observations(
+        self,
+        budget: &mut AuthoringProjectAdmissionBudget,
+    ) -> Result<Arc<[ReferenceObservation]>, AuthoringProjectSourceAdmissionError> {
+        // Entries move their paths; the temporary vector and final Arc coexist during transfer.
+        let count = checked_sum([self.lookups.len(), self.resolved_targets.len()])?;
+        budget.charge_source_bytes(
+            0,
+            0,
+            0,
+            checked_sum([
+                checked_product(count, 2 * size_of::<ReferenceObservation>())?,
                 2 * size_of::<usize>(),
             ])?,
         )?;
-        Ok(self.lookups.into_values().collect::<Vec<_>>().into())
+        Ok(self
+            .lookups
+            .into_values()
+            .map(ReferenceObservation::StableLookup)
+            .chain(
+                self.resolved_targets
+                    .into_values()
+                    .map(ReferenceObservation::ResolvedTarget),
+            )
+            .collect::<Vec<_>>()
+            .into())
     }
 
-    pub(super) fn revalidate_lookups(
+    pub(super) fn revalidate_observations(
         root: &DirectoryCapability,
         bindings: Vec<SourceDirectoryBinding>,
-        observations: &[StableLookupObservation],
+        observations: &[ReferenceObservation],
         budget: &mut AuthoringProjectAdmissionBudget,
     ) -> Result<(), AuthoringProjectSourceAdmissionError> {
         if observations.is_empty() {
@@ -472,8 +669,20 @@ impl ReferenceCatalogue {
             ])?,
         )?;
         let mut current = Self::new(root.share(), bindings, budget)?;
-        current.ensure_indexed(budget)?;
+        if observations
+            .iter()
+            .any(|observation| matches!(observation, ReferenceObservation::StableLookup(_)))
+        {
+            current.ensure_indexed(budget)?;
+        }
         for observation in observations {
+            let observation = match observation {
+                ReferenceObservation::StableLookup(observation) => observation,
+                ReferenceObservation::ResolvedTarget(target) => {
+                    target.revalidate(root, budget)?;
+                    continue;
+                }
+            };
             if let Some(record) = &observation.intrinsic {
                 current.validate_intrinsic_record(record)?;
             }
@@ -668,7 +877,6 @@ impl ReferenceCatalogue {
             );
         }
         charge_asset_metadata(&read.source, encoded_bytes, &metadata, &record, budget)?;
-        charge_database_record(&record, budget)?;
         // Overlapping configured directories can observe the same canonical source twice.
         // Both the sidecar declaration and exact source observation must still agree.
         if self.database.record_for_path(record.path()) == Some(&record) {
@@ -683,12 +891,7 @@ impl ReferenceCatalogue {
                 path: record.path().clone(),
             });
         }
-        self.database.insert(record).map_err(|source| {
-            AuthoringProjectSourceAdmissionError::AssetIdentity {
-                path: canonical_path.clone(),
-                source,
-            }
-        })?;
+        admit_asset_record(&mut self.database, &record, budget)?;
         budget.charge_source_bytes(
             0,
             0,
@@ -730,8 +933,10 @@ impl ReferenceCatalogue {
         path: &AssetPath,
         binding: &SourceDirectoryBinding,
         budget: &mut AuthoringProjectAdmissionBudget,
-    ) -> Result<Option<(AssetRecord, Arc<AuthoringSourceFact>)>, AuthoringProjectSourceAdmissionError>
-    {
+    ) -> Result<
+        Option<(&AssetRecord, Arc<AuthoringSourceFact>)>,
+        AuthoringProjectSourceAdmissionError,
+    > {
         let canonical_path = binding.scope.resolve(path);
         let Some(indexed) = self.metadata.get(&canonical_path) else {
             return Ok(None);
@@ -753,9 +958,7 @@ impl ReferenceCatalogue {
         let record = self
             .database
             .record_for_path(&canonical_path)
-            .expect("indexed metadata has one record")
-            .clone();
-        charge_database_record(&record, budget)?;
+            .expect("indexed metadata has one record");
         budget.charge_source_bytes(0, 0, 0, source_fact_retained_bytes(&read.source)?)?;
         Ok(Some((record, read.source)))
     }
@@ -787,12 +990,22 @@ pub(super) fn charge_database_record(
     Ok(())
 }
 
-pub(super) fn insert_asset_record(
+/// Reuses an exact admitted identity while preserving all database conflict checks.
+/// Physical source and metadata observations remain the caller's independent admission.
+pub(super) fn admit_asset_record(
     database: &mut ProjectAssetDatabase,
-    record: AssetRecord,
+    record: &AssetRecord,
+    budget: &mut AuthoringProjectAdmissionBudget,
 ) -> Result<(), AuthoringProjectSourceAdmissionError> {
+    if database.record_for_path(record.path()) == Some(record) {
+        return Ok(());
+    }
+    // The original database owns UUID, path and case-collision validation. Reserve its complete
+    // insertion storage before cloning or building index keys; a rejected insert never replaces
+    // a previous record. Reusing a record needs neither another allocation nor a second charge.
+    charge_database_record(record, budget)?;
     let path = record.path().clone();
     database
-        .insert(record)
+        .insert(record.clone())
         .map_err(|source| AuthoringProjectSourceAdmissionError::AssetIdentity { path, source })
 }
