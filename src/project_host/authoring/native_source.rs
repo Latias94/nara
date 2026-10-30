@@ -1,6 +1,8 @@
 use std::sync::Arc;
 
-use nara_asset::{AssetMetaFileLimits, AssetMetaIdentityCandidate, AssetPath, AssetSourceKind};
+use nara_asset::{
+    AssetMetaFileLimits, AssetMetaIdentityCandidate, AssetSourceKind, AssetSourcePath,
+};
 use nara_fs::{ContentDigest, DirectoryCapability, FileIdentity, RelativePath};
 use nara_project::{
     EffectiveProjectPaths, EffectiveProjectSettings, NativeDocumentIdentity, ProjectPath,
@@ -186,7 +188,7 @@ impl NativeDocumentSourcePolicy {
         if file.identity() != expected_identity {
             return Err(AuthoringDocumentAdmissionError::SourceIdentityChanged);
         }
-        let project_path = AssetPath::new(path)
+        let project_path = AssetSourcePath::new(path)
             .map_err(|_| AuthoringDocumentAdmissionError::NativeSourceMetadataMismatch)?;
         if self.identity == NativeDocumentIdentity::ProjectLocation {
             return Ok(AdmittedNativeDocumentSource {

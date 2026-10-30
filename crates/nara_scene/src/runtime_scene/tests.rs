@@ -7,7 +7,7 @@ use std::{
 };
 
 use nara_asset::{
-    AssetPath, AssetProductRef, AssetRecord, AssetRef, AssetSourceKind, ImportedProductId,
+    AssetProductRef, AssetRecord, AssetRef, AssetSourceKind, AssetSourcePath, ImportedProductId,
     ProjectAssetDatabase, StableAssetId,
 };
 use nara_core::{ByteLimit, DepthLimit, ItemLimit, SerdeShapeLimits};
@@ -61,7 +61,7 @@ fn database() -> ProjectAssetDatabase {
     database
         .insert(AssetRecord::new(
             asset_id(),
-            AssetPath::new("images/shared.png").unwrap(),
+            AssetSourcePath::new("images/shared.png").unwrap(),
             AssetSourceKind::Image,
         ))
         .unwrap();
@@ -246,7 +246,7 @@ fn cooked_json(bindings: &SceneComponentBindings) -> serde_json::Value {
     let candidate = RuntimeSceneCandidate::cook(
         &fixture(bindings, "first"),
         bindings,
-        &database(),
+        database().resolver(&nara_asset::AssetPathScope::ROOT),
         RuntimeSceneLimits::default(),
     )
     .unwrap();
@@ -273,14 +273,14 @@ fn linked_nested_and_addition_cook_is_deterministic_and_round_trips_complete_pro
     let first = RuntimeSceneCandidate::cook(
         &expanded,
         &bindings,
-        &database(),
+        database().resolver(&nara_asset::AssetPathScope::ROOT),
         RuntimeSceneLimits::default(),
     )
     .unwrap();
     let second = RuntimeSceneCandidate::cook(
         &expanded,
         &bindings,
-        &database(),
+        database().resolver(&nara_asset::AssetPathScope::ROOT),
         RuntimeSceneLimits::default(),
     )
     .unwrap();
@@ -354,14 +354,14 @@ fn lookup_alias_spelling_does_not_select_runtime_ids_but_evidence_is_retained() 
     let first = RuntimeSceneCandidate::cook(
         &fixture(&bindings, "first"),
         &bindings,
-        &database(),
+        database().resolver(&nara_asset::AssetPathScope::ROOT),
         RuntimeSceneLimits::default(),
     )
     .unwrap();
     let second = RuntimeSceneCandidate::cook(
         &fixture(&bindings, "renamed"),
         &bindings,
-        &database(),
+        database().resolver(&nara_asset::AssetPathScope::ROOT),
         RuntimeSceneLimits::default(),
     )
     .unwrap();
@@ -385,7 +385,7 @@ fn generated_expansion_ids_never_select_persisted_identity_or_reference_targets(
     let first = RuntimeSceneCandidate::cook(
         &original,
         &bindings,
-        &database(),
+        database().resolver(&nara_asset::AssetPathScope::ROOT),
         RuntimeSceneLimits::default(),
     )
     .unwrap();
@@ -432,7 +432,7 @@ fn generated_expansion_ids_never_select_persisted_identity_or_reference_targets(
     let second = RuntimeSceneCandidate::cook(
         &renamed,
         &bindings,
-        &database(),
+        database().resolver(&nara_asset::AssetPathScope::ROOT),
         RuntimeSceneLimits::default(),
     )
     .unwrap();
@@ -492,7 +492,7 @@ fn nested_entity_references_remap_through_the_declared_plan_and_keep_persistent_
     let cooked = RuntimeSceneCandidate::cook(
         &input,
         &bindings,
-        &database(),
+        database().resolver(&nara_asset::AssetPathScope::ROOT),
         RuntimeSceneLimits::default(),
     )
     .unwrap();
@@ -542,7 +542,7 @@ fn complete_logical_identity_is_injective_and_refuses_preserved_local_collision(
     let first = RuntimeSceneCandidate::cook(
         &original,
         &bindings,
-        &database(),
+        database().resolver(&nara_asset::AssetPathScope::ROOT),
         RuntimeSceneLimits::default(),
     )
     .unwrap();
@@ -566,7 +566,7 @@ fn complete_logical_identity_is_injective_and_refuses_preserved_local_collision(
     let error = RuntimeSceneCandidate::cook(
         &input,
         &bindings,
-        &database(),
+        database().resolver(&nara_asset::AssetPathScope::ROOT),
         RuntimeSceneLimits::default(),
     )
     .unwrap_err();
@@ -597,7 +597,7 @@ fn complete_logical_identity_is_injective_and_refuses_preserved_local_collision(
         RuntimeSceneCandidate::cook(
             &input,
             &bindings,
-            &database(),
+            database().resolver(&nara_asset::AssetPathScope::ROOT),
             RuntimeSceneLimits::default()
         )
         .is_err()
@@ -655,7 +655,7 @@ fn cook_normalizes_defaults_and_all_declared_nested_assets_without_touching_stri
     let output = RuntimeSceneCandidate::cook(
         &input,
         &bindings,
-        &database(),
+        database().resolver(&nara_asset::AssetPathScope::ROOT),
         RuntimeSceneLimits::default(),
     )
     .unwrap();
@@ -689,7 +689,7 @@ fn cook_normalizes_defaults_and_all_declared_nested_assets_without_touching_stri
         RuntimeSceneCandidate::cook(
             &input,
             &bindings,
-            &ProjectAssetDatabase::default(),
+            ProjectAssetDatabase::default().resolver(&nara_asset::AssetPathScope::ROOT),
             RuntimeSceneLimits::default()
         )
         .is_err()
@@ -721,7 +721,13 @@ fn canonical_primary_and_subproduct_cook_at_the_exact_value_node_limit() {
                 .base()
                 .with_component_value_nodes(ItemLimit::new(nodes).unwrap()),
         );
-        let cooked = RuntimeSceneCandidate::cook(&input, &bindings, &database(), limits).unwrap();
+        let cooked = RuntimeSceneCandidate::cook(
+            &input,
+            &bindings,
+            database().resolver(&nara_asset::AssetPathScope::ROOT),
+            limits,
+        )
+        .unwrap();
         let bytes = cooked.to_json_bytes().unwrap();
         RuntimeSceneDocumentCandidate::from_json_bytes(&bytes, limits)
             .unwrap()
@@ -733,7 +739,15 @@ fn canonical_primary_and_subproduct_cook_at_the_exact_value_node_limit() {
                 .base()
                 .with_component_value_nodes(ItemLimit::new(nodes - 1).unwrap()),
         );
-        assert!(RuntimeSceneCandidate::cook(&input, &bindings, &database(), too_small).is_err());
+        assert!(
+            RuntimeSceneCandidate::cook(
+                &input,
+                &bindings,
+                database().resolver(&nara_asset::AssetPathScope::ROOT),
+                too_small
+            )
+            .is_err()
+        );
     }
     // Each leaf revisits its shared field/list prefix during path validation, decoding and
     // encoding. A graph-value node allowance is not the cumulative rewrite-work allowance.
@@ -761,7 +775,13 @@ fn canonical_primary_and_subproduct_cook_at_the_exact_value_node_limit() {
             .base()
             .with_component_value_nodes(ItemLimit::new(nodes).unwrap()),
     );
-    let cooked = RuntimeSceneCandidate::cook(&input, &bindings, &database(), limits).unwrap();
+    let cooked = RuntimeSceneCandidate::cook(
+        &input,
+        &bindings,
+        database().resolver(&nara_asset::AssetPathScope::ROOT),
+        limits,
+    )
+    .unwrap();
     assert_eq!(cooked.document(), input.document());
 }
 
@@ -921,7 +941,7 @@ fn admission_refuses_current_schema_owner_shape_defaults_and_surviving_reference
     let cooked = RuntimeSceneCandidate::cook(
         &input,
         &bindings,
-        &database(),
+        database().resolver(&nara_asset::AssetPathScope::ROOT),
         RuntimeSceneLimits::default(),
     )
     .unwrap();
@@ -979,7 +999,7 @@ fn exact_and_one_short_encoded_working_provenance_count_depth_and_value_budgets(
     let candidate = RuntimeSceneCandidate::cook(
         &fixture(&bindings, "first"),
         &bindings,
-        &database(),
+        database().resolver(&nara_asset::AssetPathScope::ROOT),
         RuntimeSceneLimits::default(),
     )
     .unwrap();
@@ -1098,7 +1118,13 @@ fn exact_and_one_short_encoded_working_provenance_count_depth_and_value_budgets(
                 .with_component_value_bytes(ByteLimit::new(bytes).unwrap()),
         );
         assert_eq!(
-            RuntimeSceneCandidate::cook(&input, &bindings, &database(), limits).is_ok(),
+            RuntimeSceneCandidate::cook(
+                &input,
+                &bindings,
+                database().resolver(&nara_asset::AssetPathScope::ROOT),
+                limits
+            )
+            .is_ok(),
             accepted
         );
     }
@@ -1118,7 +1144,7 @@ fn final_asset_collection_and_aggregate_inventory_join_runtime_working_admission
     let cooked = RuntimeSceneCandidate::cook(
         &input,
         &bindings,
-        &database(),
+        database().resolver(&nara_asset::AssetPathScope::ROOT),
         RuntimeSceneLimits::default(),
     )
     .unwrap();
@@ -1213,7 +1239,7 @@ fn raw_decode_and_admission_never_invoke_native_codecs() {
     let cooked = RuntimeSceneCandidate::cook(
         &input,
         &bindings,
-        &ProjectAssetDatabase::default(),
+        ProjectAssetDatabase::default().resolver(&nara_asset::AssetPathScope::ROOT),
         RuntimeSceneLimits::default(),
     )
     .unwrap();

@@ -1,5 +1,6 @@
 #[cfg(feature = "runtime-ui")]
 use std::collections::BTreeSet;
+use std::sync::Arc;
 use std::time::Duration;
 
 use nara_app::{
@@ -196,6 +197,7 @@ pub(super) struct EditorAuthoringConstructionFailure {
 /// reuse this owner instead of creating another `App`, task pool, or image store.
 pub(super) struct EditorAuthoringRuntime {
     runtime: RuntimeInstance,
+    asset_scope: EditorAssetScope,
     tileset_records: Vec<AssetRecord>,
     image_revocation_failure: Option<EditorImageRuntimeFailure>,
     #[cfg(feature = "presentation-2d")]
@@ -206,6 +208,56 @@ pub(super) struct EditorAuthoringRuntime {
     next_image_import_gate: Option<EditorImageImportTestGate>,
     #[cfg(test)]
     fault_after_next_image_publication: bool,
+}
+
+#[derive(Clone)]
+enum EditorAssetScope {
+    Authoring(Arc<nara_asset::AssetPathScope>),
+    Trusted(ProjectContentSnapshot),
+}
+
+impl EditorAssetScope {
+    fn get(&self) -> &nara_asset::AssetPathScope {
+        match self {
+            Self::Authoring(scope) => scope,
+            Self::Trusted(project) => project.asset_resolution().scope(),
+        }
+    }
+}
+
+#[cfg(feature = "presentation-ui")]
+#[derive(Clone, Copy)]
+pub(super) struct EditorCanvasImageSources<'a> {
+    server: &'a AssetServer,
+    resolution: nara_asset::AssetReferenceResolver<'a>,
+}
+
+#[cfg(feature = "presentation-ui")]
+impl<'a> EditorCanvasImageSources<'a> {
+    pub(super) fn new(
+        server: &'a AssetServer,
+        resolution: nara_asset::AssetReferenceResolver<'a>,
+    ) -> Self {
+        Self { server, resolution }
+    }
+
+    pub(super) fn with_decode_context<R>(
+        self,
+        prepare: impl FnOnce(&mut nara_reflect::ComponentDecodeContext<'_>) -> R,
+    ) -> Result<R, EditorImageRuntimeFailure> {
+        let mut server = self.server.clone();
+        let prepared = {
+            let mut context = nara_reflect::ComponentDecodeContext::with_asset_server(&mut server)
+                .with_asset_resolution(self.resolution);
+            prepare(&mut context)
+        };
+        // Canvas consumes existing Image publications. Only the Image owner may admit new
+        // live identities; a later import revises the image catalogue and retries compilation.
+        if server != *self.server {
+            return Err(EditorImageRuntimeFailure::AssetIdentity);
+        }
+        Ok(prepared)
+    }
 }
 
 impl std::fmt::Debug for EditorAuthoringRuntime {
@@ -255,6 +307,7 @@ impl EditorAuthoringRuntime {
         let runtime = start_authoring_app(app)?;
         Ok(Self {
             runtime,
+            asset_scope: EditorAssetScope::Trusted(project),
             tileset_records: Vec::new(),
             image_revocation_failure: None,
             #[cfg(feature = "presentation-2d")]
@@ -307,6 +360,7 @@ impl EditorAuthoringRuntime {
         let runtime = start_authoring_app(app)?;
         Ok(Self {
             runtime,
+            asset_scope: EditorAssetScope::Authoring(project.asset_scope()),
             tileset_records: project
                 .asset_records()
                 .filter(|record| {
@@ -598,7 +652,12 @@ impl EditorAuthoringRuntime {
         let states = world
             .get_resource::<AssetStates>()
             .ok_or(EditorAuthoringImageCatalogError::RuntimeUnavailable)?;
-        EditorAuthoringImageCatalogCandidate::capture(server, images, states)
+        EditorAuthoringImageCatalogCandidate::capture(
+            server,
+            images,
+            states,
+            self.asset_scope.get(),
+        )
     }
 
     #[cfg(feature = "runtime-ui")]
@@ -616,7 +675,35 @@ impl EditorAuthoringRuntime {
         let states = world
             .get_resource::<AssetStates>()
             .ok_or(EditorAuthoringImageCatalogError::RuntimeUnavailable)?;
-        EditorAuthoringImageCatalogCandidate::capture_selected(server, images, states, selected)
+        EditorAuthoringImageCatalogCandidate::capture_selected(
+            server,
+            images,
+            states,
+            self.asset_scope.get(),
+            selected,
+        )
+    }
+
+    #[cfg(feature = "presentation-ui")]
+    pub(super) fn canvas_image_sources(
+        &self,
+    ) -> Result<EditorCanvasImageSources<'_>, EditorImageRuntimeFailure> {
+        if let Some(failure) = self.image_revocation_failure {
+            return Err(failure);
+        }
+        let world = self.runtime.world();
+        let server = world
+            .get_resource::<AssetServer>()
+            .ok_or(EditorImageRuntimeFailure::RuntimeUnavailable)?;
+        let database = world
+            .get_resource::<nara_asset::ProjectAssetDatabase>()
+            .ok_or(EditorImageRuntimeFailure::RuntimeUnavailable)?;
+        // Borrow current identities, including later imports. A scratch catalogue is cloned
+        // only for an actual Canvas rebuild; cache hits do no asset preparation.
+        Ok(EditorCanvasImageSources::new(
+            server,
+            database.resolver(self.asset_scope.get()),
+        ))
     }
 
     pub(super) fn persistence_tasks(&self) -> &TaskPools {
@@ -1161,7 +1248,7 @@ mod preview_content_tests {
 
     use std::sync::Arc;
 
-    use nara_asset::{AssetPath, ProjectAssetDatabase, StableAssetId};
+    use nara_asset::{AssetPathScope, AssetSourcePath, ProjectAssetDatabase, StableAssetId};
     use nara_image::ImageBytesImportRequest;
     use nara_render::Extent2d;
     use nara_scene::{ExpandedSceneCandidate, SceneAuthoringSession, SceneDocument};
@@ -1173,6 +1260,13 @@ mod preview_content_tests {
 
     fn preview_database(runtime: &EditorAuthoringRuntime) -> Arc<ProjectAssetDatabase> {
         super::super::preview::test_authoring_asset_database(runtime.runtime.world())
+    }
+
+    fn preview_scope(runtime: &EditorAuthoringRuntime) -> Arc<AssetPathScope> {
+        let EditorAssetScope::Authoring(scope) = &runtime.asset_scope else {
+            panic!("the authoring fixture requires its admitted asset scope");
+        };
+        Arc::clone(scope)
     }
 
     fn preview_source_key() -> nara_scene::SourceDocumentKey {
@@ -1219,6 +1313,7 @@ mod preview_content_tests {
                             ),
                             EditorAuthoringPreviewOmissions::empty(document, revision),
                             preview_database(&runtime),
+                            preview_scope(&runtime),
                         )),
                     }))
                     .is_none()
@@ -1258,7 +1353,7 @@ mod preview_content_tests {
         .unwrap();
         let record = AssetRecord::new(
             StableAssetId::parse_str("0438d605-f4a0-4b18-a30a-6587413dd63e").unwrap(),
-            AssetPath::new("textures/player.png").unwrap(),
+            AssetSourcePath::new("assets/textures/player.png").unwrap(),
             AssetSourceKind::Image,
         );
         let mut database = ProjectAssetDatabase::default();
@@ -1277,6 +1372,9 @@ mod preview_content_tests {
             .unwrap();
             world.insert_resource(domain);
         }
+        let scope = Arc::new(AssetPathScope::under(
+            AssetSourcePath::new("assets").unwrap(),
+        ));
         let preview =
             EditorPreviewSession::install_authoring(&mut app, &registry, Arc::new(database))
                 .unwrap();
@@ -1289,6 +1387,7 @@ mod preview_content_tests {
         (
             EditorAuthoringRuntime {
                 runtime: RuntimeInstance::start(app).unwrap(),
+                asset_scope: EditorAssetScope::Authoring(scope),
                 tileset_records: Vec::new(),
                 image_revocation_failure: None,
                 preview,
@@ -1349,6 +1448,7 @@ mod preview_content_tests {
                     ),
                     EditorAuthoringPreviewOmissions::empty(document, revision),
                     preview_database(&runtime),
+                    preview_scope(&runtime),
                 )
             });
         assert!(

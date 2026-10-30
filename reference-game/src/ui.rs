@@ -4,7 +4,7 @@ use nara::{
         CoreStage, Plugin, PluginCategory, PluginDeclaration, PluginError, PluginId,
         PluginProductCapability,
     },
-    asset::{AssetServer, Handle},
+    asset::{AssetProductRef, AssetServer, Handle, ImportedProductId, StableAssetId},
     core::{Color, Vec2},
     ecs::{Commands, Component, Entity, Query, Res, World},
     hierarchy::{HierarchyOperation, HierarchyPlacement, HierarchyPlacementOwner, HierarchyWriter},
@@ -44,7 +44,7 @@ const REFERENCE_DESKTOP_PLUGIN_DECLARATION: PluginDeclaration =
         .requires_plugins(REFERENCE_DESKTOP_REQUIREMENTS)
         .requires_product_capabilities(REFERENCE_DESKTOP_PRODUCT_REQUIREMENTS);
 
-const REFERENCE_ATLAS_PATH: &str = "textures/tiny-dungeon.png";
+const REFERENCE_ATLAS_ID: &str = "f840a555-9fca-4ceb-ac1b-e03b55d2f492";
 const ATLAS_COLUMNS: u32 = 12;
 const ATLAS_ROWS: u32 = 11;
 const ATLAS_TILE_PIXELS: f32 = 16.0;
@@ -68,8 +68,12 @@ impl Plugin for ReferenceDesktopPlugin {
             let Some(mut server) = world.get_resource_mut::<AssetServer>() else {
                 return Err(setup_error("desktop asset server is unavailable"));
             };
+            let source = StableAssetId::parse_str(REFERENCE_ATLAS_ID)
+                .map_err(|_| setup_error("desktop atlas source identity was rejected"))?;
+            let product = AssetProductRef::new(source, ImportedProductId::PRIMARY)
+                .map_err(|_| setup_error("desktop atlas product identity was rejected"))?;
             server
-                .reserve::<ImageAsset>(REFERENCE_ATLAS_PATH)
+                .reserve_product::<ImageAsset>(product)
                 .map_err(|_| setup_error("desktop atlas texture identity was rejected"))?
         };
         spawn_desktop_view(app, atlas_texture)?;

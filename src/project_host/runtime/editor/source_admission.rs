@@ -85,18 +85,13 @@ impl EditorProjectSession {
                 (!matches_project_path(project_path, roots.scenes.as_str(), snapshot.selected_scene_path().as_str())
                     && snapshot.selected_scene_source_key().origin() == key.origin())
                     || snapshot.prefabs().iter().any(|prefab| {
-                        !matches_project_path(project_path, roots.prefabs.as_str(), prefab.path().as_str())
+                        project_path != prefab.path().as_str()
                             && prefab.source_key().origin() == key.origin()
                     })
                     || snapshot.asset_database().records().any(|asset| {
-                        let root = if asset.source_kind() == &nara_asset::AssetSourceKind::Prefab {
-                            &roots.prefabs
-                        } else {
-                            &roots.assets
-                        };
                         matches!(key.origin(), nara_scene::SourceDocumentOrigin::StableAsset { stable_id }
                             if *stable_id == asset.stable_id()
-                                && !matches_project_path(project_path, root.as_str(), asset.path().as_str()))
+                                && asset.path().as_str() != project_path)
                     })
             }
         };

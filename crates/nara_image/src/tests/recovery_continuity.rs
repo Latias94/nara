@@ -100,7 +100,7 @@ fn write_recreated_source(root: &Path, record: &AssetRecord) {
     let metadata = AssetMeta::new(
         AssetMetaIdentity::new(
             record.stable_id(),
-            record.path().clone(),
+            root_alias(&record),
             record.source_kind().clone(),
         ),
         ImageImportSettings::default(),
@@ -324,7 +324,7 @@ fn capacity_continuation_cannot_admit_wrong_stable_path_or_kind_metadata() {
             if mismatch == "path" {
                 AssetPath::new("textures/other.png").unwrap()
             } else {
-                record.path().clone()
+                root_alias(&record)
             },
             if mismatch == "kind" {
                 AssetSourceKind::Scene

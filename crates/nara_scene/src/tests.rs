@@ -4,7 +4,7 @@ mod asset_bindings;
 
 use super::*;
 use nara_asset::{
-    AssetPath, AssetRecord, AssetRef, AssetRefError, AssetServer, AssetSourceKind, Handle,
+    AssetRecord, AssetRef, AssetRefError, AssetServer, AssetSourceKind, AssetSourcePath, Handle,
     ProjectAssetDatabase, StableAssetId,
 };
 use nara_core::{ByteLimit, ItemLimit};
@@ -41,7 +41,7 @@ pub(crate) fn prefab_source_key(source: &AssetRef) -> SourceDocumentKey {
     match source {
         AssetRef::Path(path) => SourceDocumentKey::project_location(
             "5ce92973-f3a0-4f12-b619-3b67e38959af".parse().unwrap(),
-            path.clone(),
+            nara_asset::AssetPathScope::ROOT.resolve(path),
             SourceDocumentKind::Prefab,
         ),
         AssetRef::StableId(id) => SourceDocumentKey::stable_asset(*id, SourceDocumentKind::Prefab),
@@ -2308,7 +2308,9 @@ fn path_asset_ref_resolves_before_scene_spawn_without_database() {
     let link = world.get::<TestAssetLink>(entity).unwrap();
     let asset_server = world.resource::<AssetServer>();
     assert_eq!(
-        asset_server.path(link.handle.id()),
+        asset_server
+            .path(link.handle.id())
+            .map(|path| path.as_str()),
         Some("textures/player.png")
     );
 }
@@ -3041,7 +3043,7 @@ fn identity_claim_failure_preserves_world_assets_ticks_and_allocator() {
     assert_eq!(after_ticks.changed, before_ticks.changed);
     let asset_server = world.resource::<AssetServer>();
     assert_eq!(
-        asset_server.path(existing.id()),
+        asset_server.path(existing.id()).map(|path| path.as_str()),
         Some("textures/existing.png")
     );
     assert_eq!(asset_server, &before_asset_server);
@@ -4233,7 +4235,10 @@ fn stable_asset_ref_resolves_with_database_before_scene_spawn() {
         )]);
     let mut world = World::new();
 
-    let validation = document.validate_with_asset_database(&registry, &database);
+    let validation = document.validate_with_asset_resolution(
+        &registry,
+        database.resolver(&nara_asset::AssetPathScope::ROOT),
+    );
     let report = crate::spawn_scene(
         &mut world,
         &registry,
@@ -4242,7 +4247,7 @@ fn stable_asset_ref_resolves_with_database_before_scene_spawn() {
             std::sync::Arc::new((document).clone()),
         ),
         &scene_occurrence("stable_asset_ref_resolves_with_database_before_scene_spawn/report"),
-        Some(&database),
+        Some(database.resolver(&nara_asset::AssetPathScope::ROOT)),
     );
 
     assert!(!validation.has_errors());
@@ -4251,7 +4256,9 @@ fn stable_asset_ref_resolves_with_database_before_scene_spawn() {
     let link = world.get::<TestAssetLink>(entity).unwrap();
     let asset_server = world.resource::<AssetServer>();
     assert_eq!(
-        asset_server.path(link.handle.id()),
+        asset_server
+            .path(link.handle.id())
+            .map(|path| path.as_str()),
         Some("textures/player.png")
     );
     assert_eq!(asset_server.stable_id(link.handle.id()), Some(stable_id));
@@ -4277,7 +4284,7 @@ fn product_replacement_preserves_stable_asset_resolution() {
             std::sync::Arc::new((document).clone()),
         ),
         &scene_occurrence("product_replacement_preserves_stable_asset_resolution/initial"),
-        Some(&database),
+        Some(database.resolver(&nara_asset::AssetPathScope::ROOT)),
     );
     assert!(!initial.diagnostics.has_errors());
     let old_entity = spawned_entity(&world, &initial, &id);
@@ -4289,7 +4296,7 @@ fn product_replacement_preserves_stable_asset_resolution() {
             scene_source_key("product_replacement_preserves_stable_asset_resolution/replacement"),
             std::sync::Arc::new((document).clone()),
         ),
-        Some(&database),
+        Some(database.resolver(&nara_asset::AssetPathScope::ROOT)),
         initial.instance.as_ref().unwrap(),
         crate::advanced::SceneProductTransactionLimits::new(
             ItemLimit::new(1).unwrap(),
@@ -4308,7 +4315,10 @@ fn product_replacement_preserves_stable_asset_resolution() {
     let entity = spawned_entity(&world, &replacement, &id);
     let handle = world.get::<TestAssetLink>(entity).unwrap().handle;
     let asset_server = world.resource::<AssetServer>();
-    assert_eq!(asset_server.path(handle.id()), Some("textures/player.png"));
+    assert_eq!(
+        asset_server.path(handle.id()).map(|path| path.as_str()),
+        Some("textures/player.png")
+    );
     assert_eq!(asset_server.stable_id(handle.id()), Some(stable_id));
 }
 
@@ -4345,7 +4355,7 @@ fn unknown_stable_asset_ref_is_redacted_in_diagnostics_without_world_mutation() 
         &scene_occurrence(
             "unknown_stable_asset_ref_is_redacted_in_diagnostics_without_world_mutation/report",
         ),
-        Some(&database),
+        Some(database.resolver(&nara_asset::AssetPathScope::ROOT)),
     );
     assert!(report.diagnostics.has_errors());
     assert!(report.instance.is_none());
@@ -4353,7 +4363,9 @@ fn unknown_stable_asset_ref_is_redacted_in_diagnostics_without_world_mutation() 
     assert_eq!(world.iter_entities().count(), before_entities);
     let asset_server = world.resource::<AssetServer>();
     assert_eq!(
-        asset_server.path(existing_handle.id()),
+        asset_server
+            .path(existing_handle.id())
+            .map(|path| path.as_str()),
         Some("textures/existing.png")
     );
     assert_eq!(asset_server, &before_asset_server);
@@ -4514,7 +4526,9 @@ fn component_apply_failure_restores_original_asset_server() {
     assert_eq!(world.iter_entities().count(), before_entities);
     let asset_server = world.resource::<AssetServer>();
     assert_eq!(
-        asset_server.path(existing_handle.id()),
+        asset_server
+            .path(existing_handle.id())
+            .map(|path| path.as_str()),
         Some("textures/existing.png")
     );
     assert_eq!(asset_server, &before_asset_server);
@@ -4570,7 +4584,7 @@ fn later_component_apply_failure_does_not_publish_prior_asset_resolution() {
     assert_eq!(after_ticks.changed, before_ticks.changed);
     let asset_server = world.resource::<AssetServer>();
     assert_eq!(
-        asset_server.path(existing.id()),
+        asset_server.path(existing.id()).map(|path| path.as_str()),
         Some("textures/existing.png")
     );
     assert_eq!(asset_server, &before_asset_server);
@@ -6498,7 +6512,7 @@ fn prepare_test_asset_handle(
     }
 
     if let Some(stable_id) = asset_ref.as_stable_id() {
-        let Some(database) = context.project_asset_database() else {
+        let Some(database) = context.asset_resolution() else {
             return Err(ComponentCodecError::invalid_asset_ref(
                 field,
                 asset_ref.to_string(),
@@ -6560,7 +6574,7 @@ fn test_database(stable_id: StableAssetId, path: &str) -> ProjectAssetDatabase {
     database
         .insert(AssetRecord::new(
             stable_id,
-            AssetPath::new(path).unwrap(),
+            AssetSourcePath::new(path).unwrap(),
             AssetSourceKind::Image,
         ))
         .unwrap();

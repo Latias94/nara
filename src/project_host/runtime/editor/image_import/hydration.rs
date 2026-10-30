@@ -3,7 +3,7 @@ use std::{
     sync::Arc,
 };
 
-use nara_asset::{AssetPath, AssetRecord, AssetRef, AssetSourceKind, Handle, StableAssetId};
+use nara_asset::{AssetRecord, AssetRef, AssetSourceKind, AssetSourcePath, Handle, StableAssetId};
 use nara_fs::{
     ContentDigest, DirectoryCapability, FileCapability, FileIdentity, FsError, RelativePath,
 };
@@ -45,13 +45,13 @@ pub(crate) enum EditorImageHydrationFailureKind {
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) struct EditorImageHydrationFailure {
-    asset_path: AssetPath,
+    asset_path: AssetSourcePath,
     kind: EditorImageHydrationFailureKind,
 }
 
 impl EditorImageHydrationFailure {
     #[must_use]
-    pub(crate) const fn asset_path(&self) -> &AssetPath {
+    pub(crate) const fn asset_path(&self) -> &AssetSourcePath {
         &self.asset_path
     }
 
@@ -127,7 +127,12 @@ impl EditorImageHydrationSource {
         let record = source.record();
         if record.source_kind() != &AssetSourceKind::Image
             || metadata.identity().stable_id() != record.stable_id()
-            || metadata.identity().path() != record.path()
+            || project
+                .asset_resolution()
+                .scope()
+                .relative_path(record.path())
+                != Some(metadata.identity().path().as_str())
+            || source.source().project_path().as_str() != record.path().as_str()
             || metadata.identity().source_kind() != record.source_kind()
         {
             return Err(invalid());
@@ -149,7 +154,7 @@ impl EditorImageHydrationSource {
     }
 
     #[must_use]
-    fn asset_path(&self) -> &AssetPath {
+    fn asset_path(&self) -> &AssetSourcePath {
         self.record.path()
     }
 
@@ -598,7 +603,7 @@ impl EditorImageHydrationHost {
         }
     }
 
-    pub(super) fn surrender_source(&mut self, asset_path: &AssetPath) {
+    pub(super) fn surrender_source(&mut self, asset_path: &AssetSourcePath) {
         self.queued
             .retain(|source| source.asset_path() != asset_path);
         if self
@@ -617,7 +622,7 @@ impl EditorImageHydrationHost {
 
     pub(super) fn retain_catalog_eligible(
         &mut self,
-        mut retain: impl FnMut(&AssetPath, StableAssetId, FileIdentity) -> bool,
+        mut retain: impl FnMut(&AssetSourcePath, StableAssetId, FileIdentity) -> bool,
     ) {
         self.queued.retain(|source| {
             source.source_digest.is_some()
@@ -648,7 +653,7 @@ impl EditorImageHydrationHost {
         &mut self,
         catalog: Arc<EditorImageCatalogSnapshot>,
         store: &EditorImageLastGoodStore,
-    ) -> BTreeSet<AssetPath> {
+    ) -> BTreeSet<AssetSourcePath> {
         self.retain_catalog_eligible(|path, id, identity| {
             catalog.retains_imported_image(path, id, identity)
         });
@@ -1090,7 +1095,7 @@ impl EditorImageHydrationHost {
 }
 
 fn failure(
-    asset_path: AssetPath,
+    asset_path: AssetSourcePath,
     kind: EditorImageHydrationFailureKind,
 ) -> EditorImageHydrationFailure {
     EditorImageHydrationFailure { asset_path, kind }

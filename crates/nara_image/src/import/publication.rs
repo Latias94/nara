@@ -1,7 +1,7 @@
 use std::fmt::{self, Debug, Formatter};
 
 use nara_asset::{
-    AssetEvents, AssetMutationBaseline, AssetPath, AssetRecord, AssetServer, AssetStateError,
+    AssetEvents, AssetMutationBaseline, AssetRecord, AssetServer, AssetSourcePath, AssetStateError,
     AssetStates, AssetVersion, Assets, Handle, ImportArtifactRecord, StableAssetId,
 };
 use nara_fs::ContentDigest;
@@ -64,7 +64,7 @@ impl PreviousImageSlot {
 pub(crate) struct ImagePublicationSnapshot {
     handle: Handle<ImageAsset>,
     source_stable_id: StableAssetId,
-    source_path: AssetPath,
+    source_path: AssetSourcePath,
     expected_version: AssetVersion,
     previous_slot: PreviousImageSlot,
     baseline: AssetMutationBaseline<ImageAsset>,
@@ -188,7 +188,7 @@ impl ImagePublicationSnapshot {
         let bound_path = asset_server
             .path(self.handle.id())
             .ok_or(ImagePublicationFailureKind::UnknownAsset)?;
-        if bound_path != self.source_path.as_str() {
+        if bound_path != &self.source_path {
             return Err(ImagePublicationFailureKind::TargetMismatch);
         }
         if asset_server.get_handle::<ImageAsset>(self.handle.id()) != Some(self.handle) {

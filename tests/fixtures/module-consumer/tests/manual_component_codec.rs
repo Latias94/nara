@@ -8,21 +8,28 @@ use nara_reflect::{
 
 #[test]
 fn public_asset_claims_preserve_durable_refs_across_independent_runtimes() {
-    use nara_asset::{AssetRef, AssetServer, Assets};
+    use nara_asset::{AssetPathScope, AssetRef, AssetServer, Assets};
 
     let source = AssetRef::path("textures/player.png").unwrap();
     let mut first_server = AssetServer::new();
     let mut second_server = AssetServer::new();
-    let first = source.resolve::<String>(&mut first_server).unwrap();
-    let second = source.resolve::<String>(&mut second_server).unwrap();
+    let first = source
+        .resolve::<String>(&mut first_server, &AssetPathScope::ROOT)
+        .unwrap();
+    let second = source
+        .resolve::<String>(&mut second_server, &AssetPathScope::ROOT)
+        .unwrap();
     let mut assets = Assets::default();
     assets.insert(first, String::from("pixels"));
 
     assert_ne!(first.id(), second.id());
     assert!(assets.get(second).is_none());
-    assert_eq!(AssetRef::from_handle(&first_server, first).unwrap(), source);
     assert_eq!(
-        AssetRef::from_handle(&second_server, second).unwrap(),
+        AssetRef::from_handle(&first_server, first, &AssetPathScope::ROOT).unwrap(),
+        source
+    );
+    assert_eq!(
+        AssetRef::from_handle(&second_server, second, &AssetPathScope::ROOT).unwrap(),
         source
     );
     assert!(first_server.claim::<u32>(first.id()).is_err());
@@ -182,6 +189,7 @@ fn asset_codec_registry() -> ComponentRegistry {
                 let asset = AssetRef::from_handle_with_policy(
                     world.resource::<AssetServer>(),
                     portrait.0,
+                    context.asset_path_scope(),
                     context.asset_ref_export_policy(),
                 )
                 .map_err(|error| ComponentCodecError::Message(error.to_string()))?;
@@ -219,6 +227,7 @@ fn asset_codec_registry() -> ComponentRegistry {
                 let asset = AssetRef::from_handle_with_policy(
                     world.resource::<AssetServer>(),
                     dialogue.portrait,
+                    context.asset_path_scope(),
                     context.asset_ref_export_policy(),
                 )
                 .map_err(|error| ComponentCodecError::Message(error.to_string()))?;

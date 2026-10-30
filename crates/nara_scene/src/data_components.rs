@@ -1,6 +1,6 @@
 use std::collections::BTreeMap;
 
-use nara_asset::{AssetDatabaseError, ProjectAssetDatabase};
+use nara_asset::{AssetDatabaseError, AssetReferenceResolver};
 use nara_ecs::{
     __private::{
         PersistentComponentMetadataError, PersistentLifecycleEvent, PersistentObserverScope,
@@ -270,13 +270,13 @@ impl SceneComponentBindings {
         entity: Entity,
         component: &ComponentTypeId,
         value: ComponentValue,
-        database: Option<&ProjectAssetDatabase>,
+        asset_resolution: Option<AssetReferenceResolver<'_>>,
         limits: ComponentValueMaterializationLimits,
     ) -> Result<(), SceneDataComponentError> {
         let instance = self.validate_data_target(world, entity)?;
         let schema = self.data_schema(component)?;
         let retained =
-            self.validate_data_group(world, entity, database, limits, Some(component))?;
+            self.validate_data_group(world, entity, asset_resolution, limits, Some(component))?;
         let (effective, _) = effective_component_value_with_budget(
             schema,
             &value,
@@ -288,7 +288,14 @@ impl SceneComponentBindings {
             component: component.clone(),
             source,
         })?;
-        validate_data_value(world, instance, schema, &effective, database, limits)?;
+        validate_data_value(
+            world,
+            instance,
+            schema,
+            &effective,
+            asset_resolution,
+            limits,
+        )?;
         // A no-default candidate can be moved directly; only Reflect's admitted missing defaults
         // require an owning copy. No sibling record or source document is copied.
         let value = match effective {
@@ -341,12 +348,12 @@ impl SceneComponentBindings {
         world: &mut World,
         entity: Entity,
         component: &ComponentTypeId,
-        database: Option<&ProjectAssetDatabase>,
+        asset_resolution: Option<AssetReferenceResolver<'_>>,
         limits: ComponentValueMaterializationLimits,
     ) -> Result<bool, SceneDataComponentError> {
         self.validate_data_target(world, entity)?;
         self.data_schema(component)?;
-        self.validate_data_group(world, entity, database, limits, Some(component))?;
+        self.validate_data_group(world, entity, asset_resolution, limits, Some(component))?;
         if !world
             .get::<SceneDataComponents>(entity)
             .is_some_and(|group| group.entries.contains_key(component))
@@ -439,7 +446,7 @@ impl SceneComponentBindings {
         &self,
         world: &World,
         entity: Entity,
-        database: Option<&ProjectAssetDatabase>,
+        asset_resolution: Option<AssetReferenceResolver<'_>>,
         limits: ComponentValueMaterializationLimits,
         replaced: Option<&ComponentTypeId>,
     ) -> Result<ComponentValueCost, SceneDataComponentError> {
@@ -521,7 +528,7 @@ impl SceneComponentBindings {
                 instance,
                 self.data_schema(component)?,
                 &entry.record().value,
-                database,
+                asset_resolution,
                 admission,
             )?;
         }
@@ -534,7 +541,7 @@ fn validate_data_value(
     instance: SceneInstanceId,
     schema: &ComponentSchema,
     value: &ComponentValue,
-    database: Option<&ProjectAssetDatabase>,
+    asset_resolution: Option<AssetReferenceResolver<'_>>,
     limits: ComponentValueMaterializationLimits,
 ) -> Result<(), SceneDataComponentError> {
     let component = schema.id();
@@ -556,9 +563,19 @@ fn validate_data_value(
         component: component.clone(),
         source: Box::new(source),
     })?;
-    if let Some(database) = database {
+    if let Some(asset_resolution) = asset_resolution {
         for reference in assets {
-            database
+            let observed = asset_resolution
+                .resolution_work_bytes(reference.asset_ref())
+                .unwrap_or(usize::MAX);
+            let maximum = limits.bytes().get();
+            if observed > maximum {
+                return Err(SceneDataComponentError::InvalidValue {
+                    component: component.clone(),
+                    source: ComponentCodecError::MaterializationByteLimit { observed, maximum },
+                });
+            }
+            asset_resolution
                 .resolve_ref(reference.asset_ref())
                 .map_err(|source| SceneDataComponentError::AssetUnavailable {
                     component: component.clone(),

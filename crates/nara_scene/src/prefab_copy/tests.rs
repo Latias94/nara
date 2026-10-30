@@ -1,4 +1,4 @@
-use nara_asset::{AssetPath, AssetProductRef, ImportedProductId, StableAssetId};
+use nara_asset::{AssetProductRef, AssetSourcePath, ImportedProductId, StableAssetId};
 use nara_reflect::{
     AuthoringSchemaBundle, AuthoringSchemaBundleOwner, ComponentCapability, ComponentFieldId,
     ComponentFieldPath, ComponentFieldSchema, ComponentPropertyPath, ComponentPropertyStep,
@@ -548,12 +548,12 @@ fn admitted_stable_and_project_location_aliases_use_preferred_destination_refere
             (
                 SourceDocumentKey::project_location(
                     universe,
-                    AssetPath::new("old/leaf.prefab.json").unwrap(),
+                    AssetSourcePath::new("old/leaf.prefab.json").unwrap(),
                     SourceDocumentKind::Prefab,
                 ),
                 SourceDocumentKey::project_location(
                     universe,
-                    AssetPath::new("new/leaf.prefab.json").unwrap(),
+                    AssetSourcePath::new("new/leaf.prefab.json").unwrap(),
                     SourceDocumentKind::Prefab,
                 ),
                 reference("copied-leaf"),

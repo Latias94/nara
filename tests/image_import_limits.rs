@@ -226,7 +226,7 @@ fn root_facade_plugin_reload_preserves_last_good_after_budget_rejection() {
 fn image_record() -> AssetRecord {
     AssetRecord::new(
         StableAssetId::parse_str(TEXTURE_ID).unwrap(),
-        AssetPath::new("textures/player.png").unwrap(),
+        nara::asset::AssetSourcePath::new("textures/player.png").unwrap(),
         AssetSourceKind::Image,
     )
 }
@@ -279,7 +279,7 @@ fn import_request(record: &AssetRecord, bytes: &[u8]) -> ImageBytesImportRequest
 struct ReloadTestPort;
 
 impl nara::app::__RuntimeDriverPort for ReloadTestPort {
-    type Input = AssetPath;
+    type Input = nara::asset::AssetSourcePath;
     type Output = ();
 
     fn apply_driver_input(&mut self, _input: Self::Input) {}
@@ -288,8 +288,14 @@ impl nara::app::__RuntimeDriverPort for ReloadTestPort {
 impl ReloadTestPort {
     fn apply_driver_input_in_world(
         world: &mut World,
-        path: AssetPath,
-    ) -> Result<(), (nara::app::RuntimeWorldAccessError, AssetPath)> {
+        path: nara::asset::AssetSourcePath,
+    ) -> Result<
+        (),
+        (
+            nara::app::RuntimeWorldAccessError,
+            nara::asset::AssetSourcePath,
+        ),
+    > {
         world.resource_mut::<AssetReloadDiagnostics>().clear();
         world.resource_mut::<AssetEvents>().drain();
         world
@@ -349,7 +355,7 @@ fn source_directory(path: &Path) -> ImageSourceDirectory {
         HostCapabilityOptions::new(CapabilityRights::ReadOnly, TrustMode::TrustedLocal),
     )
     .unwrap();
-    ImageSourceDirectory::new(directory)
+    ImageSourceDirectory::new(directory, nara::asset::AssetPathScope::ROOT)
 }
 
 fn host_directory(path: &Path) -> File {

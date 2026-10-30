@@ -85,14 +85,12 @@ fn authored_components_register_and_round_trip_while_runtime_state_stays_out_of_
     let mut app = nara::prelude::App::new();
     app.add_plugins((
         nara::prelude::MinimalPlugins,
-        nara::advanced_prelude::StartupSceneActivationPlugin,
-    ))
-    .unwrap();
-    app.add_plugins(
         nara::ProductRecipe::new()
+            .add_plugin::<nara::advanced_prelude::StartupSceneActivationPlugin>()
+            .unwrap()
             .add_contribution(reference_game_contribution().unwrap())
             .unwrap(),
-    )
+    ))
     .unwrap();
     let app = app.seal().unwrap();
 

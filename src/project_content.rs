@@ -16,9 +16,9 @@ use std::{
 };
 
 use nara_asset::{
-    AssetMetaCandidate, AssetMetaFileLimits, AssetMetaIdentityCandidate, AssetPath,
-    AssetProductRef, AssetRecord, AssetRef, AssetSourceKind, ImportedProductId,
-    ProjectAssetDatabase, StableAssetId,
+    AssetMetaCandidate, AssetMetaFileLimits, AssetMetaIdentityCandidate, AssetPath, AssetPathScope,
+    AssetProductRef, AssetRecord, AssetRef, AssetReferenceResolver, AssetSourceKind,
+    AssetSourcePath, ImportedProductId, ProjectAssetDatabase, StableAssetId,
 };
 use nara_core::ByteLimit;
 use nara_diagnostic::{
@@ -140,14 +140,14 @@ impl fmt::Debug for ProjectContentRevision {
 
 #[derive(Debug)]
 pub struct ProjectPrefabContent {
-    path: AssetPath,
+    path: AssetSourcePath,
     document: Arc<PrefabDocument>,
     source: SourceDocumentKey,
 }
 
 impl ProjectPrefabContent {
     #[must_use]
-    pub const fn path(&self) -> &AssetPath {
+    pub const fn path(&self) -> &AssetSourcePath {
         &self.path
     }
 
@@ -171,7 +171,7 @@ pub struct ProjectImageContent {
 #[derive(Debug)]
 pub struct ProjectTileSetContent {
     stable_id: nara_asset::StableAssetId,
-    path: AssetPath,
+    path: AssetSourcePath,
     image_path: AssetPath,
     metadata_digest: ContentDigest,
     source_hash: ContentDigest,
@@ -185,7 +185,7 @@ impl ProjectTileSetContent {
     }
 
     #[must_use]
-    pub const fn path(&self) -> &AssetPath {
+    pub const fn path(&self) -> &AssetSourcePath {
         &self.path
     }
 
@@ -207,7 +207,7 @@ impl ProjectTileSetContent {
 
 impl ProjectImageContent {
     #[must_use]
-    pub fn path(&self) -> &AssetPath {
+    pub fn path(&self) -> &AssetSourcePath {
         self.source().path()
     }
 
@@ -262,12 +262,18 @@ struct ProjectImageRetention {
 /// Keeps a materializer's admitted identity context and its reservation together.
 pub(crate) struct ProjectContentAssets {
     database: ProjectAssetDatabase,
+    asset_scope: AssetPathScope,
+    prefab_scope: AssetPathScope,
     _lease: ProjectContentLease,
 }
 
 impl ProjectContentAssets {
     pub(crate) fn database(&self) -> &ProjectAssetDatabase {
         &self.database
+    }
+
+    pub(crate) fn resolution(&self) -> AssetReferenceResolver<'_> {
+        self.database.resolver(&self.asset_scope)
     }
 }
 
@@ -335,11 +341,14 @@ impl ProjectContentSnapshot {
         self.inner.source_upgrade_required
     }
 
+    /// Returns the captured source document before effective selection and component migration.
+    /// Use [`Self::expanded_scene`] for the admitted runtime data.
     #[must_use]
     pub fn scene(&self) -> &SceneDocument {
         &self.inner.scene
     }
 
+    /// Returns selected, expanded and migrated Scene data admitted for runtime preparation.
     #[must_use]
     pub fn expanded_scene(&self) -> &SceneDocument {
         self.inner.expanded_scene.document()
@@ -354,15 +363,6 @@ impl ProjectContentSnapshot {
     #[must_use]
     pub fn prefabs(&self) -> &[ProjectPrefabContent] {
         &self.inner.prefabs
-    }
-
-    pub(crate) fn resolved_asset_path(&self, reference: &AssetRef) -> Option<&AssetPath> {
-        self.inner
-            .assets
-            .database()
-            .resolve_ref(reference)
-            .ok()
-            .map(AssetRecord::path)
     }
 
     #[must_use]
@@ -382,6 +382,21 @@ impl ProjectContentSnapshot {
 
     pub(crate) fn asset_database(&self) -> &ProjectAssetDatabase {
         self.inner.assets.database()
+    }
+
+    /// Borrows the actual catalogue and authored asset-path scope admitted for this content.
+    #[must_use]
+    pub fn asset_resolution(&self) -> AssetReferenceResolver<'_> {
+        self.inner.assets.resolution()
+    }
+
+    /// Borrows the admitted declaration scope for Prefab source aliases.
+    #[must_use]
+    pub fn prefab_resolution(&self) -> AssetReferenceResolver<'_> {
+        self.inner
+            .assets
+            .database()
+            .resolver(&self.inner.assets.prefab_scope)
     }
 
     pub(crate) fn expanded_candidate(&self) -> &nara_scene::ExpandedSceneCandidate {
@@ -435,11 +450,12 @@ impl ProjectContentSnapshot {
         let resolver = SnapshotPrefabResolver {
             prefabs: self.prefabs(),
             database: self.inner.assets.database(),
+            scope: &self.inner.assets.prefab_scope,
         };
         let expansion = match bindings.try_expand_prefabs_with_loader(
             document,
             nara_scene::PrefabExpansionOptions::default(),
-            Some(self.inner.assets.database()),
+            Some(self.asset_resolution()),
             |source, _| Ok::<_, std::convert::Infallible>(resolver.resolve_prefab(source)),
         ) {
             Ok(report) => report,
@@ -458,7 +474,7 @@ impl ProjectContentSnapshot {
         let expanded = expanded_candidate.document();
         let diagnostics = bindings.validate_scene(
             expanded,
-            Some(self.inner.assets.database()),
+            Some(self.asset_resolution()),
             ComponentValueMaterializationLimits::default(),
         );
         if diagnostics.has_errors() {
@@ -506,18 +522,22 @@ impl ProjectContentSnapshot {
                     budget
                         .add(ProjectContentBudgetKind::DependencyEdges, 1)
                         .map_err(ProjectContentError::budget)?;
-                    let source = self
-                        .inner
-                        .assets
-                        .database()
-                        .resolve_ref(reference.asset_ref())
-                        .map_err(|_| {
-                            ProjectContentError::single(
-                                ProjectContentErrorKind::AssetReference,
-                                "project.content.asset-reference-unresolved",
-                                "Editor Scene asset source is outside the admitted content",
-                            )
-                        })?;
+                    let resolution = self.asset_resolution();
+                    let resolution_work =
+                        resolution
+                            .resolution_work_bytes(reference.asset_ref())
+                            .ok_or_else(|| overflow_budget(ProjectContentBudgetKind::WorkBytes))?;
+                    budget
+                        .add(ProjectContentBudgetKind::WorkBytes, resolution_work)
+                        .map_err(ProjectContentError::budget)?;
+                    let source = resolution.resolve_ref(reference.asset_ref()).map_err(|_| {
+                        ProjectContentError::single(
+                            ProjectContentErrorKind::AssetReference,
+                            "project.content.asset-reference-unresolved",
+                            "Editor Scene asset source is outside the admitted content",
+                        )
+                    })?;
+                    budget.subtract(ProjectContentBudgetKind::WorkBytes, resolution_work);
                     if self.inner.domain_authority.supports(source.source_kind()) {
                         require_asset_product(
                             &mut required,
@@ -548,12 +568,13 @@ impl ProjectContentSnapshot {
         let resolver = SnapshotPrefabResolver {
             prefabs: self.prefabs(),
             database: self.inner.assets.database(),
+            scope: &self.inner.assets.prefab_scope,
         };
-        let expansion = document.expand_prefabs_with_options_and_asset_database(
+        let expansion = document.expand_prefabs_with_options_and_asset_resolution(
             registry,
             &resolver,
             nara_scene::PrefabExpansionOptions::default(),
-            self.inner.assets.database(),
+            self.asset_resolution(),
         );
         let Some(candidate) = expansion.candidate else {
             let mut report = nara_scene::SceneSpawnReport::default();
@@ -564,7 +585,7 @@ impl ProjectContentSnapshot {
             world,
             registry,
             &candidate.bind_source(source_key.clone()),
-            self.inner.assets.database(),
+            self.asset_resolution(),
         )
     }
 }
@@ -572,6 +593,7 @@ impl ProjectContentSnapshot {
 struct SnapshotPrefabResolver<'a> {
     prefabs: &'a [ProjectPrefabContent],
     database: &'a ProjectAssetDatabase,
+    scope: &'a AssetPathScope,
 }
 
 impl PrefabSourceResolver for SnapshotPrefabResolver<'_> {
@@ -579,17 +601,37 @@ impl PrefabSourceResolver for SnapshotPrefabResolver<'_> {
         if !source.is_primary() {
             return None;
         }
-        let path = match source {
-            AssetRef::Path(path) => path,
-            AssetRef::StableId(_) | AssetRef::Product(_) => {
-                self.database.resolve_ref(source).ok()?.path()
-            }
-        };
         self.prefabs
             .iter()
-            .find(|prefab| prefab.path() == path)
-            .map(|prefab| {
-                ResolvedPrefabSource::bound(Arc::clone(&prefab.document), prefab.source.clone())
+            .find(|prefab| match source {
+                AssetRef::Path(path) => {
+                    self.scope.relative_path(prefab.path()) == Some(path.as_str())
+                }
+                AssetRef::StableId(id) => {
+                    self.database
+                        .record_for_stable_id(*id)
+                        .is_some_and(|record| {
+                            record.source_kind() == &AssetSourceKind::Prefab
+                                && record.path() == prefab.path()
+                        })
+                }
+                AssetRef::Product(product) => self
+                    .database
+                    .record_for_stable_id(product.source())
+                    .is_some_and(|record| {
+                        record.source_kind() == &AssetSourceKind::Prefab
+                            && record.path() == prefab.path()
+                    }),
+            })
+            .and_then(|prefab| {
+                let source = ResolvedPrefabSource::bound(
+                    Arc::clone(&prefab.document),
+                    prefab.source.clone(),
+                );
+                match self.database.record_for_path(prefab.path()) {
+                    Some(record) => source.with_source_asset(record).ok(),
+                    None => Some(source),
+                }
             })
     }
 }
@@ -1168,7 +1210,11 @@ struct LoadContext<'a> {
     runtime_agreement: Option<PreparedRuntimeSchemaAgreement>,
     content_closure: Option<ProjectContentClosureBuilder>,
     content_closure_work_bytes: usize,
+    native_source_work_bytes: usize,
     asset_database: ProjectAssetDatabase,
+    asset_scope: AssetPathScope,
+    prefab_scope: AssetPathScope,
+    path_scope_work_bytes: usize,
     asset_database_work_bytes: usize,
     catalogue: Option<ReferenceCatalogue>,
     catalogue_roots: Option<[nara_project::ProjectPath; 2]>,
@@ -1179,15 +1225,70 @@ struct LoadContext<'a> {
 struct LoadedPrefabContent {
     document: Arc<PrefabDocument>,
     source: SourceDocumentKey,
+    path: AssetSourcePath,
+}
+
+fn resolved_prefab_source(
+    loaded: &LoadedPrefabContent,
+    database: &ProjectAssetDatabase,
+) -> Result<ResolvedPrefabSource, ProjectContentError> {
+    let source = ResolvedPrefabSource::bound(Arc::clone(&loaded.document), loaded.source.clone());
+    match database.record_for_path(&loaded.path) {
+        Some(record) => source.with_source_asset(record).map_err(|_| {
+            ProjectContentError::with_identifier(
+                ProjectContentErrorKind::AssetMetaMismatch,
+                "project.content.prefab-source-association-invalid",
+                "Prefab metadata conflicts with its admitted document source",
+                "prefab",
+                loaded.path.as_str(),
+            )
+        }),
+        None => Ok(source),
+    }
 }
 
 #[derive(Debug, Clone, Copy)]
 struct WorkReservation {
-    previous: usize,
     reserved: usize,
 }
 
+fn source_scope(root: &nara_project::ProjectPath) -> Result<AssetPathScope, ProjectContentError> {
+    AssetSourcePath::new(root.as_str())
+        .map(AssetPathScope::under)
+        .map_err(|_| {
+            ProjectContentError::with_identifier(
+                ProjectContentErrorKind::InvalidLogicalPath,
+                "project.content.source-path-invalid",
+                "Configured source directory has an invalid logical location",
+                "source",
+                root.as_str(),
+            )
+        })
+}
+
 impl<'a> LoadContext<'a> {
+    fn asset_resolution(&self) -> AssetReferenceResolver<'_> {
+        self.asset_database.resolver(&self.asset_scope)
+    }
+
+    fn catalogue_scope(&self, index: usize) -> &AssetPathScope {
+        match index {
+            0 => &self.asset_scope,
+            1 => &self.prefab_scope,
+            _ => unreachable!("the source catalogue owns the configured source roots"),
+        }
+    }
+
+    fn scope_for_root(&self, root: &nara_project::ProjectPath) -> Option<&AssetPathScope> {
+        [&self.asset_scope, &self.prefab_scope]
+            .into_iter()
+            .find(|scope| {
+                scope
+                    .prefix()
+                    .is_some_and(|prefix| prefix.as_str() == root.as_str())
+            })
+    }
+
     fn new(
         loader: &'a ProjectContentLoader,
         validation: &'a SchemaValidationInput,
@@ -1231,11 +1332,15 @@ impl<'a> LoadContext<'a> {
             runtime_agreement,
             content_closure: Some(ProjectContentClosureBuilder::new(manifest_digest)?),
             content_closure_work_bytes,
+            native_source_work_bytes: 0,
             asset_database: delivery_catalogue
                 .map_or_else(ProjectAssetDatabase::default, |catalogue| {
                     catalogue.asset_database.clone()
                 }),
             asset_database_work_bytes,
+            asset_scope: AssetPathScope::ROOT,
+            prefab_scope: AssetPathScope::ROOT,
+            path_scope_work_bytes: 0,
             catalogue: delivery_catalogue.map(|catalogue| catalogue.catalogue.clone()),
             catalogue_roots: None,
             capture_delivery_catalogue,
@@ -1250,6 +1355,19 @@ impl<'a> LoadContext<'a> {
     ) -> Result<ProjectContentSnapshot, ProjectContentError> {
         self.add_budget(ProjectContentBudgetKind::OpenHandles, 1)?;
         let settings = candidate.settings();
+        let scope_work = checked_plan_sum(
+            ProjectContentBudgetKind::WorkBytes,
+            [
+                string_retained_bytes(settings.paths.assets.as_str())?,
+                string_retained_bytes(settings.paths.prefabs.as_str())?,
+                string_retained_bytes(settings.paths.assets.as_str())?,
+                string_retained_bytes(settings.paths.prefabs.as_str())?,
+            ],
+        )?;
+        self.add_budget(ProjectContentBudgetKind::WorkBytes, scope_work)?;
+        self.path_scope_work_bytes = scope_work;
+        self.asset_scope = source_scope(&settings.paths.assets)?;
+        self.prefab_scope = source_scope(&settings.paths.prefabs)?;
         self.catalogue_roots = Some([
             settings.paths.assets.clone(),
             settings.paths.prefabs.clone(),
@@ -1350,10 +1468,16 @@ impl<'a> LoadContext<'a> {
                     .ok_or_else(|| overflow_budget(ProjectContentBudgetKind::WorkBytes))?;
                 self.resize_work(&mut work_before, suspended_work)?;
                 self.add_budget(ProjectContentBudgetKind::DependencyEdges, 1)?;
-                let path = self.resolve_reference_path(reference, &AssetSourceKind::Prefab)?;
+                let (path, path_work) = self.resolve_reference_path(
+                    reference,
+                    &AssetSourceKind::Prefab,
+                    &settings.paths.prefabs,
+                )?;
                 self.observe_path(path.as_str())?;
                 let resolved = if let Some(loaded) = loaded_prefabs.get(&path) {
-                    ResolvedPrefabSource::bound(Arc::clone(&loaded.document), loaded.source.clone())
+                    let resolved = resolved_prefab_source(loaded, &self.asset_database)?;
+                    drop(path);
+                    resolved
                 } else {
                     let cache_work = checked_plan_sum(
                         ProjectContentBudgetKind::WorkBytes,
@@ -1361,6 +1485,8 @@ impl<'a> LoadContext<'a> {
                             size_of::<(AssetPath, LoadedPrefabContent)>(),
                             BTREE_ENTRY_OVERHEAD,
                             string_retained_bytes(path.as_str())?,
+                            string_retained_bytes(settings.paths.prefabs.as_str())?,
+                            1 + path.as_str().len(),
                         ],
                     )?;
                     self.add_budget(ProjectContentBudgetKind::WorkBytes, cache_work)?;
@@ -1379,13 +1505,12 @@ impl<'a> LoadContext<'a> {
                     );
                     self.subtract_budget(ProjectContentBudgetKind::InFlightJobs, 1);
                     let loaded = loaded?;
-                    let resolved = ResolvedPrefabSource::bound(
-                        Arc::clone(&loaded.document),
-                        loaded.source.clone(),
-                    );
+                    let resolved = resolved_prefab_source(&loaded, &self.asset_database)?;
                     loaded_prefabs.insert(path, loaded);
                     resolved
                 };
+                // A miss transferred the alias into the charged cache; a hit dropped it above.
+                self.subtract_budget(ProjectContentBudgetKind::WorkBytes, path_work.reserved);
                 // Cache, source receipts and stable-ID discovery can retain more Host work.
                 // Tighten both reservations together before the compiler can allocate again.
                 let resume_limit =
@@ -1461,8 +1586,13 @@ impl<'a> LoadContext<'a> {
             self.load_tilesets(&assets, &settings.paths.assets, sources.tilesets)?;
         let mut image_paths = sources.images;
         for tileset in &tilesets {
-            if image_paths.insert(tileset.image_path.clone()) {
+            if !image_paths.contains(&tileset.image_path) {
+                self.add_budget(
+                    ProjectContentBudgetKind::WorkBytes,
+                    queued_source_path_work_bytes(&tileset.image_path)?,
+                )?;
                 self.add_budget(ProjectContentBudgetKind::QueuedJobs, 1)?;
+                image_paths.insert(tileset.image_path.clone());
             }
         }
         let images = self.load_images(&assets, &settings.paths.assets, image_paths)?;
@@ -1471,8 +1601,14 @@ impl<'a> LoadContext<'a> {
         if settings.project.native_document_identity
             == nara_project::NativeDocumentIdentity::ProjectLocation
         {
-            for path in loaded_prefabs.keys() {
-                self.admit_catalogued_prefab_metadata(&prefabs, &settings.paths.prefabs, path)?;
+            for (path, loaded) in &loaded_prefabs {
+                self.admit_catalogued_prefab_metadata(
+                    &prefabs,
+                    &settings.paths.prefabs,
+                    path,
+                    &loaded.path,
+                    &loaded.source,
+                )?;
             }
         }
         self.validate_tileset_image_extents(&tilesets, &images)?;
@@ -1480,7 +1616,7 @@ impl<'a> LoadContext<'a> {
         self.commit_tileset_identities(&settings.paths.assets, &tilesets)?;
         let diagnostics = bindings.validate_scene(
             expanded,
-            Some(&self.asset_database),
+            Some(self.asset_resolution()),
             ComponentValueMaterializationLimits::default(),
         );
         if diagnostics.has_errors() {
@@ -1538,11 +1674,12 @@ impl<'a> LoadContext<'a> {
             tilesets.as_slice(),
         )?;
         let content_closure_retained = content_closure_retained_bytes(&content_closure)?;
-        let retained_bytes = self
-            .budget_value(ProjectContentBudgetKind::RetainedBytes)
-            .checked_add(snapshot_overhead)
-            .ok_or_else(|| overflow_budget(ProjectContentBudgetKind::RetainedBytes))?;
-        self.set_budget(ProjectContentBudgetKind::RetainedBytes, retained_bytes)?;
+        let mut snapshot_work = WorkReservation {
+            reserved: self.native_source_work_bytes,
+        };
+        self.resize_work(&mut snapshot_work, snapshot_overhead)?;
+        self.commit_work_as_retained(snapshot_work, snapshot_overhead)?;
+        self.native_source_work_bytes = 0;
 
         let scene = Arc::new(scene);
         let expanded_scene = Arc::new(expanded_candidate);
@@ -1550,13 +1687,15 @@ impl<'a> LoadContext<'a> {
         prefab_values
             .try_reserve_exact(loaded_prefabs.len())
             .map_err(|_| allocation_failed("project.content.prefab-list-allocation-failed"))?;
-        prefab_values.extend(loaded_prefabs.into_iter().map(|(path, loaded)| {
-            ProjectPrefabContent {
-                path,
-                document: loaded.document,
-                source: loaded.source,
-            }
-        }));
+        prefab_values.extend(
+            loaded_prefabs
+                .into_values()
+                .map(|loaded| ProjectPrefabContent {
+                    path: loaded.path,
+                    document: loaded.document,
+                    source: loaded.source,
+                }),
+        );
         self.subtract_budget(ProjectContentBudgetKind::WorkBytes, prefab_cache_work);
         let prefabs = prefab_values.into_boxed_slice();
         let mut images = images.into_boxed_slice();
@@ -1577,6 +1716,19 @@ impl<'a> LoadContext<'a> {
             self.content_closure_work_bytes,
         );
         self.content_closure_work_bytes = 0;
+        let retained_scopes = checked_plan_sum(
+            ProjectContentBudgetKind::RetainedBytes,
+            [
+                string_retained_bytes(settings.paths.assets.as_str())?,
+                string_retained_bytes(settings.paths.prefabs.as_str())?,
+            ],
+        )?;
+        drop(self.catalogue_roots.take());
+        let scope_reservation = WorkReservation {
+            reserved: self.path_scope_work_bytes,
+        };
+        self.commit_work_as_retained(scope_reservation, retained_scopes)?;
+        self.path_scope_work_bytes = 0;
         let budget = self
             .budget
             .take()
@@ -1612,6 +1764,8 @@ impl<'a> LoadContext<'a> {
             })?;
         let assets = Arc::new(ProjectContentAssets {
             database,
+            asset_scope: std::mem::replace(&mut self.asset_scope, AssetPathScope::ROOT),
+            prefab_scope: std::mem::replace(&mut self.prefab_scope, AssetPathScope::ROOT),
             _lease: runtime_lease.clone(),
         });
         if !images.is_empty() {
@@ -1850,6 +2004,7 @@ impl<'a> LoadContext<'a> {
         Ok(LoadedPrefabContent {
             document: Arc::new(self.decode_prefab(path.as_str(), &bytes)?),
             source,
+            path: self.prefab_scope.resolve(path),
         })
     }
 
@@ -1862,36 +2017,68 @@ impl<'a> LoadContext<'a> {
         identity_policy: nara_project::NativeDocumentIdentity,
         source_universe: nara_core::SourceUniverseId,
     ) -> Result<SourceDocumentKey, ProjectContentError> {
-        let project_path = format!("{}/{}", source_root.as_str(), logical_path);
-        let project_path = AssetPath::new(&project_path).map_err(|_| {
-            ProjectContentError::with_identifier(
-                ProjectContentErrorKind::InvalidLogicalPath,
-                "project.content.source-path-invalid",
-                "Native document source path is invalid",
-                "source",
-                &project_path,
+        let project_path_bytes = source_root
+            .as_str()
+            .len()
+            .checked_add(1)
+            .and_then(|length| length.checked_add(logical_path.len()))
+            .and_then(|length| length.checked_add(STRING_ALLOCATION_OVERHEAD))
+            .ok_or_else(|| overflow_budget(ProjectContentBudgetKind::WorkBytes))?;
+        let key_bytes = size_of::<SourceDocumentKey>()
+            .checked_add(match identity_policy {
+                nara_project::NativeDocumentIdentity::ProjectLocation => project_path_bytes,
+                nara_project::NativeDocumentIdentity::StableMetadata => 0,
+            })
+            .ok_or_else(|| overflow_budget(ProjectContentBudgetKind::WorkBytes))?;
+        let key_work = self.reserve_work(key_bytes)?;
+        let temporary_work = if identity_policy
+            == nara_project::NativeDocumentIdentity::StableMetadata
+        {
+            Some(
+                self.reserve_work(checked_plan_sum(
+                    ProjectContentBudgetKind::WorkBytes,
+                    [
+                        project_path_bytes,
+                        string_retained_bytes(logical_path)?,
+                        string_retained_bytes(logical_path)?
+                            .checked_add(".meta".len())
+                            .ok_or_else(|| overflow_budget(ProjectContentBudgetKind::WorkBytes))?,
+                    ],
+                )?)?,
             )
-        })?;
-        let relative_path = AssetPath::new(logical_path).map_err(|_| {
-            ProjectContentError::with_identifier(
-                ProjectContentErrorKind::InvalidLogicalPath,
-                "project.content.source-path-invalid",
-                "Native document source path is invalid",
-                "source",
-                logical_path,
-            )
-        })?;
-        match identity_policy {
-            nara_project::NativeDocumentIdentity::ProjectLocation => Ok(
-                SourceDocumentKey::project_location(source_universe, project_path, kind),
-            ),
+        } else {
+            None
+        };
+        let project_path =
+            AssetSourcePath::new(format!("{}/{}", source_root.as_str(), logical_path)).map_err(
+                |_| {
+                    ProjectContentError::with_identifier(
+                        ProjectContentErrorKind::InvalidLogicalPath,
+                        "project.content.source-path-invalid",
+                        "Native document source path is invalid",
+                        "source",
+                        logical_path,
+                    )
+                },
+            )?;
+        let key = match identity_policy {
+            nara_project::NativeDocumentIdentity::ProjectLocation => {
+                SourceDocumentKey::project_location(source_universe, project_path, kind)
+            }
             nara_project::NativeDocumentIdentity::StableMetadata => {
+                let relative_path = AssetPath::new(logical_path).map_err(|_| {
+                    ProjectContentError::single(
+                        ProjectContentErrorKind::InvalidLogicalPath,
+                        "project.content.source-path-invalid",
+                        "Native document source path is invalid",
+                    )
+                })?;
                 let metadata_path = format!("{logical_path}.meta");
                 let ceiling = AssetMetaFileLimits::default().encoded_bytes().get();
                 let (metadata_bytes, metadata_digest) =
                     self.read_native_file(directory, &metadata_path, ceiling)?;
                 if kind == SourceDocumentKind::Prefab {
-                    self.verify_catalogued_metadata(&relative_path, source_root, metadata_digest)?;
+                    self.verify_catalogued_metadata(&project_path, source_root, metadata_digest)?;
                 }
                 self.record_member(
                     ProjectContentMemberKind::AssetMetadata,
@@ -1930,10 +2117,24 @@ impl<'a> LoadContext<'a> {
                 let key = SourceDocumentKey::stable_asset(identity.stable_id(), kind);
                 if kind == SourceDocumentKind::Prefab {
                     self.index_metadata_identity(relative_path, 1, metadata_digest, identity)?;
+                } else {
+                    drop((relative_path, identity));
                 }
-                Ok(key)
+                drop((project_path, metadata_path));
+                self.subtract_budget(
+                    ProjectContentBudgetKind::WorkBytes,
+                    temporary_work
+                        .expect("stable source admission owns its path scratch")
+                        .reserved,
+                );
+                key
             }
-        }
+        };
+        self.native_source_work_bytes = self
+            .native_source_work_bytes
+            .checked_add(key_work.reserved)
+            .ok_or_else(|| overflow_budget(ProjectContentBudgetKind::WorkBytes))?;
+        Ok(key)
     }
 
     fn decode_scene(
@@ -1986,7 +2187,8 @@ impl<'a> LoadContext<'a> {
                     collect_effective_asset_references(schema, record, self.budget_mut())?;
                 for reference in references {
                     self.add_budget(ProjectContentBudgetKind::DependencyEdges, 1)?;
-                    let source = self.discover_source_reference(assets, reference.asset_ref())?;
+                    let (source, source_work) =
+                        self.discover_source_reference(assets, reference.asset_ref())?;
                     let path = source.path();
                     self.observe_path(path.as_str())?;
                     if self.domains.supports(source.source_kind()) {
@@ -2016,10 +2218,25 @@ impl<'a> LoadContext<'a> {
                             ));
                         }
                     };
-                    if !paths.contains(path) {
+                    let local = self.asset_scope.relativize(path).ok_or_else(|| {
+                        ProjectContentError::with_identifier(
+                            ProjectContentErrorKind::HostAuthorityRejected,
+                            "project.content.asset-source-outside-scope",
+                            "Asset source is outside the admitted resource directory",
+                            "asset",
+                            path.as_str(),
+                        )
+                    })?;
+                    if !paths.contains(&local) {
+                        self.add_budget(
+                            ProjectContentBudgetKind::WorkBytes,
+                            queued_source_path_work_bytes(&local)?,
+                        )?;
                         self.add_budget(ProjectContentBudgetKind::QueuedJobs, 1)?;
-                        paths.insert(path.clone());
+                        paths.insert(local);
                     }
+                    drop(source);
+                    self.subtract_budget(ProjectContentBudgetKind::WorkBytes, source_work.reserved);
                 }
                 self.subtract_budget(ProjectContentBudgetKind::WorkBytes, reference_work);
             }
@@ -2049,6 +2266,9 @@ impl<'a> LoadContext<'a> {
             let result = self.load_image(assets, asset_root, &path);
             self.subtract_budget(ProjectContentBudgetKind::InFlightJobs, 1);
             images.push(result?);
+            let queued_work = queued_source_path_work_bytes(&path)?;
+            drop(path);
+            self.subtract_budget(ProjectContentBudgetKind::WorkBytes, queued_work);
         }
         self.commit_work_as_retained(result_reservation, result_bytes)?;
         Ok(images)
@@ -2065,7 +2285,7 @@ impl<'a> LoadContext<'a> {
             paths.len(),
             size_of::<ProjectTileSetContent>(),
         )?;
-        let result_reservation = self.reserve_work(result_bytes)?;
+        let mut result_reservation = self.reserve_work(result_bytes)?;
         let mut tilesets = Vec::new();
         tilesets
             .try_reserve_exact(paths.len())
@@ -2075,7 +2295,15 @@ impl<'a> LoadContext<'a> {
             self.add_budget(ProjectContentBudgetKind::InFlightJobs, 1)?;
             let result = self.load_tileset(assets, asset_root, &path);
             self.subtract_budget(ProjectContentBudgetKind::InFlightJobs, 1);
-            tilesets.push(result?);
+            let (tileset, paths_work) = result?;
+            result_reservation.reserved = result_reservation
+                .reserved
+                .checked_add(paths_work.reserved)
+                .ok_or_else(|| overflow_budget(ProjectContentBudgetKind::WorkBytes))?;
+            tilesets.push(tileset);
+            let queued_work = queued_source_path_work_bytes(&path)?;
+            drop(path);
+            self.subtract_budget(ProjectContentBudgetKind::WorkBytes, queued_work);
         }
         Ok((tilesets, result_reservation))
     }
@@ -2088,7 +2316,10 @@ impl<'a> LoadContext<'a> {
         for tileset in tilesets {
             let image = images
                 .iter()
-                .find(|image| image.path() == &tileset.image_path)
+                .find(|image| {
+                    self.asset_scope.relative_path(image.path())
+                        == Some(tileset.image_path.as_str())
+                })
                 .ok_or_else(|| {
                     ProjectContentError::with_identifier(
                         ProjectContentErrorKind::AssetMetaMismatch,
@@ -2135,7 +2366,9 @@ impl<'a> LoadContext<'a> {
                 tilesets
                     .iter()
                     .find(|tileset| match reference {
-                        AssetRef::Path(path) => &tileset.path == path,
+                        AssetRef::Path(path) => {
+                            self.asset_scope.relative_path(&tileset.path) == Some(path.as_str())
+                        }
                         AssetRef::StableId(id) => &tileset.stable_id == id,
                         AssetRef::Product(product) => {
                             reference.is_primary() && tileset.stable_id == product.source()
@@ -2182,7 +2415,7 @@ impl<'a> LoadContext<'a> {
         assets: &DirectoryCapability,
         asset_root: &nara_project::ProjectPath,
         path: &AssetPath,
-    ) -> Result<ProjectTileSetContent, ProjectContentError> {
+    ) -> Result<(ProjectTileSetContent, WorkReservation), ProjectContentError> {
         let meta_path = path.meta_path();
         let (meta_bytes, meta_digest) = self.read_file(
             assets,
@@ -2191,7 +2424,6 @@ impl<'a> LoadContext<'a> {
                 .encoded_bytes()
                 .get(),
         )?;
-        self.verify_catalogued_metadata(path, asset_root, meta_digest)?;
         self.record_member(
             ProjectContentMemberKind::AssetMetadata,
             asset_root,
@@ -2228,7 +2460,12 @@ impl<'a> LoadContext<'a> {
                 path.as_str(),
             ));
         }
-        let record = AssetRecord::from(identity);
+        let record_path_bytes = catalogue::scoped_path_bytes(&self.asset_scope, identity.path())?
+            .checked_add(STRING_ALLOCATION_OVERHEAD)
+            .ok_or_else(|| overflow_budget(ProjectContentBudgetKind::WorkBytes))?;
+        let record_path_work = self.reserve_work(record_path_bytes)?;
+        let record = identity.into_record(&self.asset_scope);
+        self.verify_catalogued_metadata(record.path(), asset_root, meta_digest)?;
         let stable_id = record.stable_id();
         let source_ceiling = TileSetSourceFileLimits::default().encoded_bytes().get();
         let (source_bytes, source_digest) =
@@ -2244,23 +2481,40 @@ impl<'a> LoadContext<'a> {
                         path.as_str(),
                     )
                 })?;
-        let image_path = self.resolve_reference_path(&source.image, &AssetSourceKind::Image)?;
+        let (image_path, image_path_work) =
+            self.resolve_reference_path(&source.image, &AssetSourceKind::Image, asset_root)?;
         self.add_budget(ProjectContentBudgetKind::DependencyEdges, 1)?;
-        self.verify_catalogued_metadata(path, asset_root, meta_digest)?;
+        self.verify_catalogued_metadata(record.path(), asset_root, meta_digest)?;
         self.record_member(
             ProjectContentMemberKind::AssetSource,
             asset_root,
             path.as_str(),
             source_digest,
         )?;
-        Ok(ProjectTileSetContent {
-            stable_id,
-            path: path.clone(),
-            image_path,
-            metadata_digest: meta_digest,
-            source_hash: source_digest,
-            source,
-        })
+        let path_work = self.reserve_work(string_retained_bytes(record.path().as_str())?)?;
+        let path = record.path().clone();
+        drop(record);
+        self.subtract_budget(
+            ProjectContentBudgetKind::WorkBytes,
+            record_path_work.reserved,
+        );
+        let paths_work = WorkReservation {
+            reserved: image_path_work
+                .reserved
+                .checked_add(path_work.reserved)
+                .ok_or_else(|| overflow_budget(ProjectContentBudgetKind::WorkBytes))?,
+        };
+        Ok((
+            ProjectTileSetContent {
+                stable_id,
+                path,
+                image_path,
+                metadata_digest: meta_digest,
+                source_hash: source_digest,
+                source,
+            },
+            paths_work,
+        ))
     }
 
     fn load_image(
@@ -2277,7 +2531,6 @@ impl<'a> LoadContext<'a> {
                 .encoded_bytes()
                 .get(),
         )?;
-        self.verify_catalogued_metadata(path, asset_root, meta_digest)?;
         self.record_member(
             ProjectContentMemberKind::AssetMetadata,
             asset_root,
@@ -2314,8 +2567,13 @@ impl<'a> LoadContext<'a> {
             ));
         }
         let (identity, settings) = meta.into_parts();
-        let record = AssetRecord::from(identity);
-        if let Some(indexed) = self.asset_database.record_for_path(path) {
+        let record_path_bytes = catalogue::scoped_path_bytes(&self.asset_scope, identity.path())?
+            .checked_add(STRING_ALLOCATION_OVERHEAD)
+            .ok_or_else(|| overflow_budget(ProjectContentBudgetKind::WorkBytes))?;
+        let record_path_work = self.reserve_work(record_path_bytes)?;
+        let record = identity.into_record(&self.asset_scope);
+        self.verify_catalogued_metadata(record.path(), asset_root, meta_digest)?;
+        if let Some(indexed) = self.asset_database.record_for_path(record.path()) {
             if indexed != &record {
                 return Err(catalogue::identity_conflict(path));
             }
@@ -2338,6 +2596,7 @@ impl<'a> LoadContext<'a> {
             .max_encoded_bytes()
             .get();
         let (source_bytes, source_digest) = self.read_file(assets, path.as_str(), ceiling)?;
+        let source_path_bytes = record.path().as_str().len();
         let import = self
             .loader
             .image_importer
@@ -2348,7 +2607,7 @@ impl<'a> LoadContext<'a> {
             ))
             .map_err(map_image_import_error)?;
         let memory = import.memory_plan();
-        let work_before = self.reserve_image_memory(path, memory)?;
+        let work_before = self.reserve_image_memory(source_path_bytes, memory, record_path_work)?;
         let image = import.import().map_err(map_image_import_error)?;
         self.set_budget(ProjectContentBudgetKind::WorkBytes, work_before)?;
         self.record_member(
@@ -2362,10 +2621,16 @@ impl<'a> LoadContext<'a> {
 
     fn reserve_image_memory(
         &mut self,
-        path: &AssetPath,
+        path_bytes: usize,
         memory: ImageImportMemoryPlan,
+        source_path_work: WorkReservation,
     ) -> Result<usize, ProjectContentError> {
-        let work_before = self.budget_value(ProjectContentBudgetKind::WorkBytes);
+        // The import takes the same canonical path allocation. Transfer its existing work
+        // charge into the retained plan atomically with decoder and pixel admission.
+        let work_before = self
+            .budget_value(ProjectContentBudgetKind::WorkBytes)
+            .checked_sub(source_path_work.reserved)
+            .ok_or_else(|| overflow_budget(ProjectContentBudgetKind::WorkBytes))?;
         let work_bytes = work_before
             .checked_add(memory.decoder_work_bytes())
             .ok_or_else(|| overflow_budget(ProjectContentBudgetKind::WorkBytes))?;
@@ -2375,7 +2640,7 @@ impl<'a> LoadContext<'a> {
             .ok_or_else(|| overflow_budget(ProjectContentBudgetKind::ArtifactBytes))?;
         let retained_bytes = self
             .budget_value(ProjectContentBudgetKind::RetainedBytes)
-            .checked_add(image_retained_plan_bytes(path, memory.rgba_bytes())?)
+            .checked_add(image_retained_plan_bytes(path_bytes, memory.rgba_bytes())?)
             .ok_or_else(|| overflow_budget(ProjectContentBudgetKind::RetainedBytes))?;
         self.budget_mut()
             .set_many(&[
@@ -2420,10 +2685,7 @@ impl<'a> LoadContext<'a> {
             .checked_add(amount)
             .ok_or_else(|| overflow_budget(ProjectContentBudgetKind::WorkBytes))?;
         self.set_budget(ProjectContentBudgetKind::WorkBytes, next)?;
-        Ok(WorkReservation {
-            previous,
-            reserved: amount,
-        })
+        Ok(WorkReservation { reserved: amount })
     }
 
     fn remaining_expansion_work(
@@ -2468,7 +2730,6 @@ impl<'a> LoadContext<'a> {
             .budget_value(ProjectContentBudgetKind::WorkBytes)
             .checked_sub(reservation.reserved)
             .ok_or_else(|| overflow_budget(ProjectContentBudgetKind::WorkBytes))?;
-        debug_assert!(other_work >= reservation.previous);
         self.set_budget(
             ProjectContentBudgetKind::WorkBytes,
             other_work
@@ -2499,7 +2760,6 @@ impl<'a> LoadContext<'a> {
             .budget_value(ProjectContentBudgetKind::WorkBytes)
             .checked_sub(reservation.reserved)
             .ok_or_else(|| overflow_budget(ProjectContentBudgetKind::WorkBytes))?;
-        debug_assert!(remaining_work >= reservation.previous);
         self.budget_mut()
             .set_many(&[
                 (ProjectContentBudgetKind::WorkBytes, remaining_work),
@@ -3074,14 +3334,29 @@ fn checked_add_to(
 }
 
 fn image_retained_plan_bytes(
-    path: &AssetPath,
+    path_bytes: usize,
     rgba_bytes: usize,
 ) -> Result<usize, ProjectContentError> {
     rgba_bytes
-        .checked_add(string_retained_bytes(path.as_str())?)
+        .checked_add(
+            STRING_ALLOCATION_OVERHEAD
+                .checked_add(path_bytes)
+                .ok_or_else(|| overflow_budget(ProjectContentBudgetKind::RetainedBytes))?,
+        )
         .and_then(|bytes| bytes.checked_add(ARC_CONTROL_BLOCK_BYTES))
         .and_then(|bytes| bytes.checked_add(IMAGE_METADATA_OVERHEAD))
         .ok_or_else(|| overflow_budget(ProjectContentBudgetKind::RetainedBytes))
+}
+
+fn queued_source_path_work_bytes(path: &AssetPath) -> Result<usize, ProjectContentError> {
+    checked_plan_sum(
+        ProjectContentBudgetKind::WorkBytes,
+        [
+            size_of::<AssetPath>(),
+            BTREE_ENTRY_OVERHEAD,
+            string_retained_bytes(path.as_str())?,
+        ],
+    )
 }
 
 fn component_bindings_witness_retained_bytes(
@@ -3171,10 +3446,10 @@ fn snapshot_retained_overhead(
             )?,
         ],
     )?;
-    for path in prefabs.keys() {
+    for prefab in prefabs.values() {
         checked_add_to(
             &mut total,
-            string_retained_bytes(path.as_str())?,
+            string_retained_bytes(prefab.path.as_str())?,
             ProjectContentBudgetKind::RetainedBytes,
         )?;
     }
@@ -3191,21 +3466,14 @@ fn snapshot_retained_overhead(
         )?;
     }
     for tileset in tilesets {
-        checked_add_to(
-            &mut total,
-            string_retained_bytes(tileset.path.as_str())?,
-            ProjectContentBudgetKind::RetainedBytes,
-        )?;
-        checked_add_to(
-            &mut total,
-            string_retained_bytes(tileset.image_path.as_str())?,
-            ProjectContentBudgetKind::RetainedBytes,
-        )?;
-        checked_add_to(
-            &mut total,
-            string_retained_bytes(&tileset.source.image.to_string())?,
-            ProjectContentBudgetKind::RetainedBytes,
-        )?;
+        // Canonical and resolved Image paths transferred their work reservations above.
+        if let AssetRef::Path(path) = &tileset.source.image {
+            checked_add_to(
+                &mut total,
+                string_retained_bytes(path.as_str())?,
+                ProjectContentBudgetKind::RetainedBytes,
+            )?;
+        }
     }
     Ok(total)
 }
@@ -3847,7 +4115,7 @@ mod tests {
         let preserved = snapshot
             .prefabs()
             .iter()
-            .find(|prefab| prefab.path().as_str() == "p.prefab.json")
+            .find(|prefab| prefab.path().as_str() == "prefabs/p.prefab.json")
             .unwrap();
         let nested = preserved
             .document()
@@ -3978,6 +4246,115 @@ mod tests {
     }
 
     #[test]
+    fn runtime_content_resolved_alias_owns_exact_work_until_cache_or_retained_transfer() {
+        use nara_asset::{AssetPathScope, AssetProductRef, AssetSourcePath, ImportedProductId};
+
+        let project = LazyContentProject::new();
+        let (candidate, plan, default_loader) = project.inputs();
+        let root = nara_project::ProjectPath::new("resources/selected/images").unwrap();
+        let scope = AssetPathScope::under(AssetSourcePath::new(root.as_str()).unwrap());
+        let alias =
+            AssetPath::new(format!("textures/{}/image.png", "long-name".repeat(8))).unwrap();
+        let stable_id = StableAssetId::parse_str("f7f46abe-83ac-419d-8361-bd61ee4c2d47").unwrap();
+        let product = AssetProductRef::new(stable_id, ImportedProductId::PRIMARY).unwrap();
+        let path_work = super::string_retained_bytes(alias.as_str()).unwrap();
+        fs::create_dir_all(
+            project
+                .root
+                .join(root.as_str())
+                .join("textures")
+                .join("long-name".repeat(8)),
+        )
+        .unwrap();
+        fs::write(
+            project.root.join(root.as_str()).join(alias.meta_path()),
+            AssetMeta::new(
+                AssetMetaIdentity::new(stable_id, alias.clone(), AssetSourceKind::Image),
+                nara_image::ImageImportSettings::default(),
+            )
+            .to_json_string()
+            .unwrap(),
+        )
+        .unwrap();
+        let ceiling = 4 * 1024 * 1024;
+        let limits = ProjectContentLimits::default()
+            .with_limit(ProjectContentBudgetKind::WorkBytes, ceiling)
+            .unwrap();
+        let loader =
+            ProjectContentLoader::with_limits(default_loader.project_root(), limits).unwrap();
+
+        for reference in [
+            AssetRef::Path(alias.clone()),
+            AssetRef::StableId(stable_id),
+            AssetRef::Product(product),
+        ] {
+            for remaining in [path_work - 1, path_work] {
+                let mut context = LoadContext::new(
+                    &loader,
+                    plan.schema_validation(),
+                    &plan.asset_domains,
+                    None,
+                    Default::default(),
+                    candidate.manifest_digest(),
+                    None,
+                    None,
+                    false,
+                )
+                .unwrap();
+                context.asset_scope = scope.clone();
+                context.prefab_scope =
+                    super::source_scope(&candidate.settings().paths.prefabs).unwrap();
+                context.catalogue_roots =
+                    Some([root.clone(), candidate.settings().paths.prefabs.clone()]);
+                context.ensure_reference_catalogue().unwrap();
+                // The catalogue and scope are already admitted. Leave only the selected
+                // allowance for an alias much longer than its StableId/Product selector.
+                let baseline = ceiling - remaining;
+                context
+                    .set_budget(ProjectContentBudgetKind::WorkBytes, baseline)
+                    .unwrap();
+                let retained_before = context.budget_value(ProjectContentBudgetKind::RetainedBytes);
+                let result =
+                    context.resolve_reference_path(&reference, &AssetSourceKind::Image, &root);
+                if remaining < path_work {
+                    assert_eq!(
+                        result.unwrap_err().kind(),
+                        ProjectContentErrorKind::BudgetExceeded
+                    );
+                    assert_eq!(
+                        context.budget_value(ProjectContentBudgetKind::WorkBytes),
+                        baseline
+                    );
+                } else {
+                    let (resolved, reservation) = result.unwrap();
+                    assert_eq!(resolved, alias);
+                    assert_eq!(reservation.reserved, path_work);
+                    assert_eq!(
+                        context.budget_value(ProjectContentBudgetKind::WorkBytes),
+                        ceiling
+                    );
+                    // Unrelated queued work may retire while this alias is still live.
+                    context.subtract_budget(ProjectContentBudgetKind::WorkBytes, 1);
+                    drop(resolved);
+                    context
+                        .commit_work_as_retained(reservation, path_work)
+                        .unwrap();
+                    assert_eq!(
+                        context.budget_value(ProjectContentBudgetKind::WorkBytes),
+                        baseline - 1
+                    );
+                    assert_eq!(
+                        context.budget_value(ProjectContentBudgetKind::RetainedBytes),
+                        retained_before + path_work
+                    );
+                }
+                drop(context);
+                assert_eq!(loader.budget_snapshot().active_reservations(), 0);
+            }
+        }
+    }
+
+    #[test]
     fn runtime_content_rejects_invalid_active_native_components() {
         let project = LazyContentProject::new();
         let invalid = PrefabDocument::from_ordered_roots([SceneEntityRecord::new(
@@ -4019,7 +4396,7 @@ mod tests {
             .unwrap();
             let mut overlay = PrefabOverlay::new(SourceDocumentKey::project_location(
                 "39f9d09d-63e3-5fc4-8e3f-71e84893cb8d".parse().unwrap(),
-                nara_asset::AssetPath::new("prefabs/p.prefab.json").unwrap(),
+                nara_asset::AssetSourcePath::new("prefabs/p.prefab.json").unwrap(),
                 SourceDocumentKind::Prefab,
             ));
             match repair {
@@ -4134,7 +4511,8 @@ requested = ["runtime-2d"]
             let key = |name| {
                 SourceDocumentKey::project_location(
                     "39f9d09d-63e3-5fc4-8e3f-71e84893cb8d".parse().unwrap(),
-                    nara_asset::AssetPath::new(format!("prefabs/{name}.prefab.json")).unwrap(),
+                    nara_asset::AssetSourcePath::new(format!("prefabs/{name}.prefab.json"))
+                        .unwrap(),
                     SourceDocumentKind::Prefab,
                 )
             };

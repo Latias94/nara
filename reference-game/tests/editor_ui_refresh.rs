@@ -34,7 +34,7 @@ use nara::{
             UiAuthoringCanvasProjection, UiAuthoringDirectEdit, UiAuthoringFieldValue,
             UiAuthoringHierarchyKind, UiBrushAuthoringKind, UiCreateParameters, UiStructureIntent,
         },
-        UiColor, UiImageId, UiNode, UiVisual,
+        UiColor, UiNode, UiVisual,
     },
 };
 use nara_reference_game::{REFERENCE_RUNTIME_UI_PLUGIN_ID, ReferenceUiObservation, wave_recipe};
@@ -66,14 +66,14 @@ fn saved_ui_prefab_refreshes_project_content_and_explicit_restart() {
             .snapshot
             .images()
             .iter()
-            .any(|image| image.path().as_str() == "textures/player.png")
+            .any(|image| image.path().as_str() == "assets/textures/player.png")
     );
     assert!(migrated_content.snapshot.source_upgrade_required());
     let source_prefab = migrated_content
         .snapshot
         .prefabs()
         .iter()
-        .find(|prefab| prefab.path().as_str() == "reference-ui.prefab.json")
+        .find(|prefab| prefab.path().as_str() == "prefabs/reference-ui.prefab.json")
         .expect("the reference UI Prefab must remain in the source closure");
     let source_visual = source_prefab
         .document()
@@ -790,10 +790,17 @@ fn runtime_structure_is_current(world: &World, expected: &SceneEntityId) -> bool
     }) else {
         return false;
     };
-    let expected_visual = UiVisual::image(
-        UiImageId::new("textures/player.png").unwrap(),
-        UiColor::rgba(1.0, 1.0, 1.0, 1.0),
-    );
+    let Some(handle) = created.get::<UiVisual>().and_then(UiVisual::image_handle) else {
+        return false;
+    };
+    if !world
+        .resource::<nara::asset::AssetServer>()
+        .path(handle.id())
+        .is_some_and(|path| path.as_str() == "assets/textures/player.png")
+    {
+        return false;
+    }
+    let expected_visual = UiVisual::image_asset(handle, UiColor::rgba(1.0, 1.0, 1.0, 1.0));
     if created.get::<UiVisual>() != Some(&expected_visual) {
         return false;
     }
@@ -841,7 +848,7 @@ fn runtime_structure_is_current(world: &World, expected: &SceneEntityId) -> bool
             images.iter().any(|(_, image)| {
                 image
                     .source()
-                    .is_some_and(|source| source.path().as_str() == "textures/player.png")
+                    .is_some_and(|source| source.path().as_str() == "assets/textures/player.png")
             })
         })
 }
@@ -921,13 +928,13 @@ fn seed_legacy_modal_image(project: &ReferenceProjectCopy) {
             .snapshot
             .images()
             .iter()
-            .any(|image| image.path().as_str() == "textures/player.png")
+            .any(|image| image.path().as_str() == "assets/textures/player.png")
     );
     let source = loaded
         .snapshot
         .prefabs()
         .iter()
-        .find(|prefab| prefab.path().as_str() == "reference-ui.prefab.json")
+        .find(|prefab| prefab.path().as_str() == "prefabs/reference-ui.prefab.json")
         .expect("the reference UI Prefab must be available for the source edit");
     let mut prefab = source.document().clone();
     let visual_id = ComponentTypeId::new("nara.ui.UiVisual");

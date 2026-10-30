@@ -4,8 +4,9 @@ use std::{
 };
 
 use nara_asset::{
-    AssetId, AssetPath, AssetServer, AssetSlotRevision, AssetStates, AssetVersion, Assets, Handle,
-    ImportArtifactDigest, LoadState, SourceHash, StableAssetId,
+    AssetId, AssetPath, AssetPathScope, AssetServer, AssetSlotRevision, AssetSourcePath,
+    AssetStates, AssetVersion, Assets, Handle, ImportArtifactDigest, LoadState, SourceHash,
+    StableAssetId,
 };
 #[cfg(feature = "presentation-ui")]
 use nara_image::PreparedImageSnapshot;
@@ -28,7 +29,8 @@ const INITIAL_IMAGE_CATALOG_GENERATION: u64 = 1;
 pub(super) struct EditorAuthoringImageProduct {
     handle: Handle<ImageAsset>,
     stable_id: StableAssetId,
-    path: AssetPath,
+    path: AssetSourcePath,
+    authored_path: AssetPath,
     version: AssetVersion,
     slot_revision: AssetSlotRevision,
     source_hash: SourceHash,
@@ -44,8 +46,9 @@ impl EditorAuthoringImageProduct {
         self.stable_id
     }
 
+    #[cfg(test)]
     #[must_use]
-    pub(super) const fn path(&self) -> &AssetPath {
+    pub(super) const fn source_path(&self) -> &AssetSourcePath {
         &self.path
     }
 
@@ -205,28 +208,31 @@ impl EditorAuthoringImageCatalogCandidate {
         server: &AssetServer,
         images: &Assets<ImageAsset>,
         states: &AssetStates,
+        scope: &AssetPathScope,
     ) -> Result<Self, EditorAuthoringImageCatalogError> {
-        Self::capture_with_selection(server, images, states, None)
+        Self::capture_with_selection(server, images, states, scope, None)
     }
 
     pub(super) fn capture_selected(
         server: &AssetServer,
         images: &Assets<ImageAsset>,
         states: &AssetStates,
+        scope: &AssetPathScope,
         selected: &BTreeSet<AssetId>,
     ) -> Result<Self, EditorAuthoringImageCatalogError> {
-        Self::capture_with_selection(server, images, states, Some(selected))
+        Self::capture_with_selection(server, images, states, scope, Some(selected))
     }
 
     fn capture_with_selection(
         server: &AssetServer,
         images: &Assets<ImageAsset>,
         states: &AssetStates,
+        scope: &AssetPathScope,
         selected: Option<&BTreeSet<AssetId>>,
     ) -> Result<Self, EditorAuthoringImageCatalogError> {
         let mut paths_by_stable_id = BTreeMap::new();
         let mut stable_ids_by_path = BTreeMap::new();
-        let mut captured: BTreeMap<(StableAssetId, AssetPath), CapturedAuthoringImage> =
+        let mut captured: BTreeMap<(StableAssetId, AssetSourcePath), CapturedAuthoringImage> =
             BTreeMap::new();
         let mut captured_ids = BTreeSet::new();
 
@@ -244,7 +250,7 @@ impl EditorAuthoringImageCatalogCandidate {
             let source = image
                 .source()
                 .ok_or(EditorAuthoringImageCatalogError::SourceIdentityMismatch { id })?;
-            if source.stable_id() != stable_id || source.path().as_str() != path {
+            if source.stable_id() != stable_id || source.path() != path {
                 return Err(EditorAuthoringImageCatalogError::SourceIdentityMismatch { id });
             }
             let Some(state) = states.state(id) else {
@@ -258,10 +264,14 @@ impl EditorAuthoringImageCatalogCandidate {
             }
 
             let path = source.path().clone();
+            let authored_path = scope
+                .relativize(&path)
+                .ok_or(EditorAuthoringImageCatalogError::SourceIdentityMismatch { id })?;
             let product = EditorAuthoringImageProduct {
                 handle,
                 stable_id,
                 path: path.clone(),
+                authored_path,
                 version: state.version(),
                 slot_revision: images.slot_revision(handle),
                 source_hash: source.source_hash(),
@@ -313,7 +323,7 @@ impl EditorAuthoringImageCatalogCandidate {
         }
 
         #[cfg(feature = "presentation-ui")]
-        let prepared_images = prepare_image_aliases(captured.values());
+        let prepared_images = prepare_image_bindings(captured.values());
         let products = captured.into_values().map(|image| image.product).collect();
         Ok(Self {
             products,
@@ -329,7 +339,7 @@ impl EditorAuthoringImageCatalogCandidate {
         let choices = self
             .products
             .iter()
-            .map(|product| authoring_image_choice(product.stable_id(), product.path()))
+            .map(|product| authoring_image_choice(product.stable_id(), &product.authored_path))
             .collect::<Result<Vec<_>, _>>()?;
         let choices = Arc::new(UiImageChoiceSet::new(generation, choices)?);
         Ok(EditorAuthoringImageCatalogReceipt {
@@ -363,24 +373,15 @@ struct CapturedAuthoringImage {
 }
 
 #[cfg(feature = "presentation-ui")]
-fn prepare_image_aliases<'a>(
+fn prepare_image_bindings<'a>(
     images: impl IntoIterator<Item = &'a CapturedAuthoringImage>,
 ) -> UiPreparedImages {
     let mut prepared_images = UiPreparedImages::new();
     for image in images {
-        let path = image.product.path().as_str();
-        let stable_id = image.product.stable_id().to_string();
-        for alias in [
-            path.to_owned(),
-            format!("path:{path}"),
-            format!("project://{path}"),
-            stable_id.clone(),
-            format!("stable:{stable_id}"),
-        ] {
-            if let Ok(id) = UiImageId::new(alias) {
-                prepared_images.insert(id, image.prepared.clone());
-            }
-        }
+        prepared_images.insert(
+            UiImageId::external::<ImageAsset>(image.product.handle.id().raw()),
+            image.prepared.clone(),
+        );
     }
     prepared_images
 }
@@ -430,10 +431,17 @@ mod tests {
         use crate::product::AcceptedPrimaryUiSurfaceProfile;
         use crate::project_host::runtime::editor::ui_preview::EditorUiPreviewSession;
 
+        let server = AssetServer::new();
+        let database = nara_asset::ProjectAssetDatabase::default();
+        let sources = super::super::authoring_runtime::EditorCanvasImageSources::new(
+            &server,
+            database.resolver(&AssetPathScope::ROOT),
+        );
         let images = EditorAuthoringImageCatalogCandidate::capture(
-            &AssetServer::new(),
+            &server,
             &Assets::<ImageAsset>::default(),
             &AssetStates::default(),
+            &AssetPathScope::ROOT,
         )
         .unwrap()
         .into_receipt(UiImageChoiceGeneration::new(
@@ -495,6 +503,7 @@ mod tests {
             None,
             &valid_projection,
             &images,
+            sources,
             profile,
         ) else {
             panic!("the valid source must populate the Canvas cache");
@@ -510,6 +519,7 @@ mod tests {
             None,
             &invalid_projection,
             &images,
+            sources,
             profile,
         );
         assert_eq!(

@@ -1,6 +1,6 @@
 use std::collections::BTreeMap;
 
-use nara_asset::ProjectAssetDatabase;
+use nara_asset::AssetReferenceResolver;
 use nara_diagnostic::DiagnosticReport;
 use nara_identity::SceneEntityId;
 use nara_reflect::{
@@ -60,12 +60,12 @@ impl SceneDocument {
     }
 
     #[must_use]
-    pub fn validate_with_asset_database(
+    pub fn validate_with_asset_resolution(
         &self,
         registry: &ComponentRegistry,
-        database: &ProjectAssetDatabase,
+        asset_resolution: AssetReferenceResolver<'_>,
     ) -> DiagnosticReport {
-        let mut context = ComponentDecodeContext::new().with_project_asset_database(database);
+        let mut context = ComponentDecodeContext::new().with_asset_resolution(asset_resolution);
         preflight_scene_with_context(self, registry, &mut context).diagnostics
     }
 
@@ -81,22 +81,22 @@ impl SceneDocument {
         preflight_authoring_scene_for_patch(self, registry, operation_index).diagnostics
     }
 
-    pub(crate) fn validate_authoring_with_asset_database(
+    pub(crate) fn validate_authoring_with_asset_resolution(
         &self,
         registry: &ComponentRegistry,
-        database: &ProjectAssetDatabase,
+        asset_resolution: AssetReferenceResolver<'_>,
     ) -> DiagnosticReport {
-        let mut context = ComponentDecodeContext::new().with_project_asset_database(database);
+        let mut context = ComponentDecodeContext::new().with_asset_resolution(asset_resolution);
         preflight_authoring_scene_with_context(self, registry, &mut context).diagnostics
     }
 
-    pub(crate) fn validate_authoring_for_patch_with_asset_database(
+    pub(crate) fn validate_authoring_for_patch_with_asset_resolution(
         &self,
         registry: &ComponentRegistry,
-        database: &ProjectAssetDatabase,
+        asset_resolution: AssetReferenceResolver<'_>,
         operation_index: usize,
     ) -> DiagnosticReport {
-        let mut context = ComponentDecodeContext::new().with_project_asset_database(database);
+        let mut context = ComponentDecodeContext::new().with_asset_resolution(asset_resolution);
         preflight_authoring_scene_with_context_for_patch(
             self,
             registry,
@@ -112,19 +112,19 @@ impl SceneComponentBindings {
     ///
     /// Native records use the selected real codecs and migrations; data records require their
     /// admitted owner, current version, Schema and declared references. `limits` bounds aggregate
-    /// retained effective component values across both families. When supplied, `database`
+    /// retained effective component values across both families. When supplied, `asset_resolution`
     /// checks declared asset references against project metadata without loading assets.
     /// This does not access a `World`, mutate the source, expand Prefabs or publish runtime state.
     #[must_use]
     pub fn validate_scene(
         &self,
         document: &SceneDocument,
-        database: Option<&ProjectAssetDatabase>,
+        asset_resolution: Option<AssetReferenceResolver<'_>>,
         limits: ComponentValueMaterializationLimits,
     ) -> DiagnosticReport {
         let mut context = ComponentDecodeContext::new().with_materialization_limits(limits);
-        if let Some(database) = database {
-            context = context.with_project_asset_database(database);
+        if let Some(asset_resolution) = asset_resolution {
+            context = context.with_asset_resolution(asset_resolution);
         }
         preflight_scene_with_context_and_bindings(
             document,

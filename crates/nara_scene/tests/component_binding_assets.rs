@@ -1,6 +1,8 @@
 use std::convert::Infallible;
 
-use nara_asset::{AssetPath, AssetRecord, AssetSourceKind, ProjectAssetDatabase, StableAssetId};
+use nara_asset::{
+    AssetRecord, AssetSourceKind, AssetSourcePath, ProjectAssetDatabase, StableAssetId,
+};
 use nara_reflect::{
     ComponentCapability, ComponentFieldId, ComponentFieldPath, ComponentFieldSchema,
     ComponentRegistry, ComponentSchema, ComponentSchemaCatalog, ComponentSchemaOwnerSnapshot,
@@ -73,7 +75,7 @@ fn data_defaults_close_nested_asset_references_over_the_selected_metadata_withou
         complete
             .insert(AssetRecord::new(
                 asset,
-                AssetPath::new("textures/icon.png").unwrap(),
+                AssetSourcePath::new("textures/icon.png").unwrap(),
                 AssetSourceKind::Image,
             ))
             .unwrap();
@@ -83,7 +85,7 @@ fn data_defaults_close_nested_asset_references_over_the_selected_metadata_withou
                 .try_expand_prefabs_with_loader(
                     &document,
                     Default::default(),
-                    Some(database),
+                    Some(database.resolver(&nara_asset::AssetPathScope::ROOT)),
                     |_, _| -> Result<_, Infallible> {
                         panic!("a source-free document must not load a Prefab");
                     },

@@ -53,7 +53,7 @@ fn native_creation_keeps_project_database_codec_admission_for_both_source_kinds(
             )
             .with_capabilities(ComponentCapability::SCENE_AUTHORING)]),
             |_, context| {
-                context.project_asset_database().ok_or_else(|| {
+                context.asset_resolution().ok_or_else(|| {
                     ComponentCodecError::Message("project database required".into())
                 })?;
                 Ok(PreparedComponentCandidate::insert(DatabaseBound))
@@ -86,26 +86,40 @@ fn native_creation_keeps_project_database_codec_admission_for_both_source_kinds(
     );
     assert!(scene.document().entities.is_empty());
     let created = scene
-        .create_entity_with_asset_database(
+        .create_entity_with_asset_resolution(
             scene.revision(),
             &registry,
-            &database,
+            database.resolver(&nara_asset::AssetPathScope::ROOT),
             placement.clone(),
             components(),
         )
         .unwrap();
     let entity = created.entity().clone();
-    assert!(scene.undo_with_asset_database(&registry, &database).applied);
+    assert!(
+        scene
+            .undo_with_asset_resolution(
+                &registry,
+                database.resolver(&nara_asset::AssetPathScope::ROOT)
+            )
+            .applied
+    );
     assert!(scene.document().entities.is_empty());
-    assert!(scene.redo_with_asset_database(&registry, &database).applied);
+    assert!(
+        scene
+            .redo_with_asset_resolution(
+                &registry,
+                database.resolver(&nara_asset::AssetPathScope::ROOT)
+            )
+            .applied
+    );
     assert_eq!(scene.document().roots, [entity.clone()]);
     // Even empty creation must validate the database-bound records already in the source.
     assert!(
         scene
-            .create_entity_with_asset_database(
+            .create_entity_with_asset_resolution(
                 scene.revision(),
                 &registry,
-                &database,
+                database.resolver(&nara_asset::AssetPathScope::ROOT),
                 placement.clone(),
                 BTreeMap::new()
             )
@@ -124,10 +138,10 @@ fn native_creation_keeps_project_database_codec_admission_for_both_source_kinds(
             .is_err()
     );
     let created = prefab
-        .create_entity_with_asset_database(
+        .create_entity_with_asset_resolution(
             prefab.revision(),
             &registry,
-            &database,
+            database.resolver(&nara_asset::AssetPathScope::ROOT),
             placement,
             components(),
         )
@@ -135,13 +149,19 @@ fn native_creation_keeps_project_database_codec_admission_for_both_source_kinds(
     let prefab_entity = created.entity().clone();
     assert!(
         prefab
-            .undo_with_asset_database(&registry, &database)
+            .undo_with_asset_resolution(
+                &registry,
+                database.resolver(&nara_asset::AssetPathScope::ROOT)
+            )
             .applied
     );
     assert!(prefab.document().entities.is_empty());
     assert!(
         prefab
-            .redo_with_asset_database(&registry, &database)
+            .redo_with_asset_resolution(
+                &registry,
+                database.resolver(&nara_asset::AssetPathScope::ROOT)
+            )
             .applied
     );
     assert_eq!(prefab.document().roots, [prefab_entity]);

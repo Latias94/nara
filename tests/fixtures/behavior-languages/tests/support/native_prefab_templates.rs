@@ -13,7 +13,7 @@ use std::{
 
 use nara_asset::{
     AssetMeta, AssetMetaCandidate, AssetMetaIdentity, AssetPath, AssetRef, AssetSourceKind,
-    StableAssetId,
+    AssetSourcePath, StableAssetId,
 };
 use nara_engine::{
     fs::{
@@ -97,7 +97,7 @@ fn original_keys(stable_input: bool) -> [SourceDocumentKey; 3] {
         // Source keys use the original project coordinate; lookup paths are Prefab-root-relative.
         SourceDocumentKey::project_location(
             SOURCE_UNIVERSE.parse().unwrap(),
-            AssetPath::new(format!("{SOURCE_PREFABS_ROOT}/{}", DOCUMENTS[index])).unwrap(),
+            AssetSourcePath::new(format!("{SOURCE_PREFABS_ROOT}/{}", DOCUMENTS[index])).unwrap(),
             SourceDocumentKind::Prefab,
         )
     })

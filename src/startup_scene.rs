@@ -263,10 +263,10 @@ impl SceneSource {
         }
     }
 
-    pub(crate) fn asset_database(&self) -> Option<&nara_asset::ProjectAssetDatabase> {
+    pub(crate) fn asset_resolution(&self) -> Option<nara_asset::AssetReferenceResolver<'_>> {
         match &self.retention {
             #[cfg(all(feature = "runtime-2d", feature = "serde"))]
-            SceneRetention::Project { assets, .. } => Some(assets.database()),
+            SceneRetention::Project { assets, .. } => Some(assets.resolution()),
             #[cfg(all(feature = "runtime-2d", feature = "serde"))]
             SceneRetention::RuntimeContent { .. } => None,
             SceneRetention::Direct { .. } => None,
@@ -375,17 +375,20 @@ impl SceneSourceView {
             .map(|source| inspect(source.document()))
     }
 
-    /// Borrows the exact expanded candidate and admitted asset database together.
+    /// Borrows the exact expanded candidate and scoped source resolution together.
     ///
     /// Both values come from the same retained source owner. Direct expanded sources have no
     /// project database. Returns `None` for a processed Runtime Scene or after the root activation
     /// owner retires, even if another caller still retains the underlying document.
     pub fn with_expanded_scene<R>(
         &self,
-        inspect: impl FnOnce(&ExpandedSceneCandidate, Option<&nara_asset::ProjectAssetDatabase>) -> R,
+        inspect: impl FnOnce(
+            &ExpandedSceneCandidate,
+            Option<nara_asset::AssetReferenceResolver<'_>>,
+        ) -> R,
     ) -> Option<R> {
         let source = self.source.upgrade()?;
-        Some(inspect(source.expanded_scene()?, source.asset_database()))
+        Some(inspect(source.expanded_scene()?, source.asset_resolution()))
     }
 
     /// Borrows the exact admitted processed candidate while the current owner retains it.
@@ -772,7 +775,7 @@ pub fn materialize_startup_scene(
         .expect("the product declares a valid startup occurrence");
     let prepared = match &source.candidate {
         RetainedSceneCandidate::Expanded(candidate) => {
-            bindings.prepare_scene(world, candidate, &occurrence, source.asset_database())
+            bindings.prepare_scene(world, candidate, &occurrence, source.asset_resolution())
         }
         #[cfg(feature = "serde")]
         RetainedSceneCandidate::Runtime(candidate) => {

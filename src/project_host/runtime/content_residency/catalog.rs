@@ -1,6 +1,6 @@
 use std::collections::{BTreeMap, BTreeSet};
 
-use nara_asset::{AssetPath, AssetRecord, ProjectAssetDatabase};
+use nara_asset::{AssetRecord, AssetSourcePath, ProjectAssetDatabase};
 
 use super::super::{HostFault, single_error};
 
@@ -15,7 +15,7 @@ impl CatalogChange {
         owned: &[AssetRecord],
         target: impl IntoIterator<Item = AssetRecord>,
     ) -> Result<Self, HostFault> {
-        let mut target_by_path = BTreeMap::<AssetPath, AssetRecord>::new();
+        let mut target_by_path = BTreeMap::<AssetSourcePath, AssetRecord>::new();
         for record in target {
             if let Some(prior) = target_by_path.get(record.path()) {
                 if prior != &record {

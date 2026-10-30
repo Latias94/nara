@@ -216,7 +216,8 @@ impl EditorProjectSession {
             let original = match descriptor.native_document_identity {
                 NativeDocumentIdentity::ProjectLocation => SourceDocumentKey::project_location(
                     descriptor.source_universe,
-                    asset_path(&source.path)?,
+                    nara_asset::AssetSourcePath::new(source.path.as_str())
+                        .map_err(|_| Error::InvalidPath)?,
                     SourceDocumentKind::Prefab,
                 ),
                 NativeDocumentIdentity::StableMetadata => SourceDocumentKey::stable_asset(
@@ -266,7 +267,8 @@ impl EditorProjectSession {
                 NativeDocumentIdentity::ProjectLocation => (
                     SourceDocumentKey::project_location(
                         settings.project.source_universe,
-                        asset_path(&destination_path)?,
+                        nara_asset::AssetSourcePath::new(destination_path.as_str())
+                            .map_err(|_| Error::InvalidPath)?,
                         SourceDocumentKind::Prefab,
                     ),
                     AssetRef::Path(logical_path),

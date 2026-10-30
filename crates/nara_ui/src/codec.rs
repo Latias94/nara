@@ -1,16 +1,19 @@
-use nara_asset::AssetRef;
+use nara_asset::{AssetRecord, AssetRef, AssetServer, AssetSourceKind, AssetSourcePath, Handle};
+use nara_ecs::World;
+use nara_image::ImageAsset;
 use nara_reflect::{
-    ComponentCapability, ComponentCodecError, ComponentFieldId, ComponentFieldPath,
-    ComponentFieldSchema, ComponentFloat, ComponentNumericBound, ComponentNumericDomain,
-    ComponentNumericInterval, ComponentRegistry, ComponentRegistryError, ComponentSchema,
-    ComponentSchemaCatalog, ComponentSchemaVersion, ComponentTypeId, ComponentValue,
-    ComponentValueKind, ComponentValueShape, validate_component_value,
+    ComponentApplyContext, ComponentCapability, ComponentCodecError, ComponentDecodeContext,
+    ComponentEncodeContext, ComponentFieldId, ComponentFieldPath, ComponentFieldSchema,
+    ComponentFloat, ComponentNumericBound, ComponentNumericDomain, ComponentNumericInterval,
+    ComponentRegistry, ComponentRegistryError, ComponentSchema, ComponentSchemaCatalog,
+    ComponentSchemaVersion, ComponentTypeId, ComponentValue, ComponentValueKind,
+    ComponentValueShape, PreparedComponentCandidate, validate_component_value,
 };
 use nara_scene::PrefabDocument;
 use nara_ui_kernel::{
     UiActionId, UiAlign, UiBorder, UiBrush, UiColor, UiColorRole, UiCornerRadii, UiDimension,
-    UiEdges, UiFlexDirection, UiImageId, UiJustify, UiLayer, UiOverflow, UiPositionMode,
-    UiSemanticRole, UiStyle, UiTextAlignment, UiTextOverflow, UiThemePalette,
+    UiEdges, UiFlexDirection, UiJustify, UiLayer, UiOverflow, UiPositionMode, UiSemanticRole,
+    UiStyle, UiTextAlignment, UiTextOverflow, UiThemePalette,
 };
 
 use crate::{UiButton, UiButtonVisuals, UiNode, UiRoot, UiSemantics, UiText, UiTheme, UiVisual};
@@ -46,10 +49,10 @@ pub fn register_ui_components(
         decode_node,
         encode_node,
     )?;
-    registry.register_persistent_component_with_codec::<UiVisual, _, _>(
+    registry.register_persistent_component_codec_with_context::<UiVisual, _, _>(
         ui_visual_schema(),
-        decode_visual,
-        encode_visual,
+        prepare_visual,
+        encode_visual_with_context,
     )?;
     registry.register_persistent_component_with_codec::<UiText, _, _>(
         ui_text_schema(),
@@ -179,7 +182,7 @@ pub(crate) fn validate_ui_component_value(
     match id.as_str() {
         UI_ROOT_ID => decode_root(value).map(drop),
         UI_NODE_ID => decode_node(value).map(drop),
-        UI_VISUAL_ID => decode_visual(value).map(drop),
+        UI_VISUAL_ID => read_visual(value).map(drop),
         UI_TEXT_ID => decode_text(value).map(drop),
         UI_BUTTON_ID => decode_button(value).map(drop),
         UI_BUTTON_VISUALS_ID => decode_button_visuals(value).map(drop),
@@ -223,7 +226,7 @@ pub(crate) fn encode_node(node: &UiNode) -> Result<ComponentValue, ComponentCode
     Ok(ComponentValue::map([("style", style_value(node.style())?)]))
 }
 
-pub(crate) fn decode_visual(value: &ComponentValue) -> Result<UiVisual, ComponentCodecError> {
+fn read_visual(value: &ComponentValue) -> Result<AuthoredVisual, ComponentCodecError> {
     expect_fields(
         value,
         "UiVisual",
@@ -231,23 +234,220 @@ pub(crate) fn decode_visual(value: &ComponentValue) -> Result<UiVisual, Componen
     )?;
     let background = read_brush(value.field("background")?, "background")?;
     let border_width = read_non_negative(value.field("border_width")?, "border_width")?;
-    let border_brush = read_brush(value.field("border_brush")?, "border_brush")?;
-    let mut visual = match background {
-        UiBrush::Solid(color) => UiVisual::solid(color),
-        UiBrush::Role(role) => UiVisual::role(role),
-        UiBrush::Image { image, tint } => UiVisual::image(image, tint),
+    let border_brush = read_plain_brush(value.field("border_brush")?, "border_brush")?;
+    let border = (border_width > 0.0)
+        .then(|| UiBorder::new(border_width, border_brush))
+        .transpose()
+        .map_err(|error| codec_message(error.to_string()))?;
+    Ok(AuthoredVisual {
+        background,
+        border,
+        radii: read_radii(value.field("radii")?)?,
+    })
+}
+
+enum AuthoredBrush {
+    Plain(UiBrush),
+    Image { reference: AssetRef, tint: UiColor },
+}
+
+struct AuthoredVisual {
+    background: AuthoredBrush,
+    border: Option<UiBorder>,
+    radii: UiCornerRadii,
+}
+
+impl AuthoredVisual {
+    fn build(self, handle: Option<Handle<ImageAsset>>) -> Result<UiVisual, ComponentCodecError> {
+        let mut visual = match self.background {
+            AuthoredBrush::Plain(brush) => {
+                UiVisual::solid(UiColor::rgba(0.0, 0.0, 0.0, 0.0)).with_background(brush)
+            }
+            AuthoredBrush::Image { tint, .. } => UiVisual::image_asset(
+                handle
+                    .ok_or_else(|| codec_message("image materialization requires AssetServer"))?,
+                tint,
+            ),
+        }
+        .with_radii(self.radii);
+        if let Some(border) = self.border {
+            visual = visual.with_border(border);
+        }
+        Ok(visual)
     }
-    .with_radii(read_radii(value.field("radii")?)?);
-    if border_width > 0.0 {
-        visual = visual.with_border(
-            UiBorder::new(border_width, border_brush)
-                .map_err(|error| codec_message(error.to_string()))?,
-        );
+}
+
+enum PreparedUiImage {
+    Resolved(Handle<ImageAsset>),
+    Path(AssetSourcePath),
+    Record(AssetRecord),
+}
+
+fn prepare_image(
+    reference: &AssetRef,
+    context: &mut ComponentDecodeContext<'_>,
+) -> Result<PreparedUiImage, ComponentCodecError> {
+    let invalid = |message: String| {
+        ComponentCodecError::invalid_asset_ref("background.image", reference.to_string(), message)
+    };
+    let maximum = context.materialization_limits().bytes().get();
+    if let AssetRef::Path(path) = reference {
+        let observed = context
+            .asset_path_scope()
+            .prefix()
+            .map_or(0, |prefix| prefix.as_str().len().saturating_add(1))
+            .saturating_add(path.as_str().len());
+        if observed > maximum {
+            return Err(ComponentCodecError::MaterializationByteLimit { observed, maximum });
+        }
     }
-    Ok(visual)
+    if let Some(result) =
+        context.resolve_asset_ref_with_kind::<ImageAsset>(reference, &AssetSourceKind::Image)
+    {
+        return result
+            .map(PreparedUiImage::Resolved)
+            .map_err(|error| invalid(error.to_string()));
+    }
+    if let Some(resolver) = context.asset_resolution() {
+        let record = reference
+            .validate_with_database_as(resolver, &AssetSourceKind::Image)
+            .map_err(|error| invalid(error.to_string()))?;
+        let observed = record.path().as_str().len();
+        if observed > maximum {
+            return Err(ComponentCodecError::MaterializationByteLimit { observed, maximum });
+        }
+        return Ok(PreparedUiImage::Record(record.clone()));
+    }
+    match reference {
+        AssetRef::Path(path) => Ok(PreparedUiImage::Path(
+            context.asset_path_scope().resolve(path),
+        )),
+        AssetRef::StableId(_) => Err(invalid(
+            "stable source selection requires an asset resolver".to_owned(),
+        )),
+        AssetRef::Product(_) => Err(invalid(
+            "Product selection requires the receiving AssetServer".to_owned(),
+        )),
+    }
+}
+
+fn resolve_prepared_image(
+    image: PreparedUiImage,
+    context: &mut ComponentApplyContext,
+) -> Result<Handle<ImageAsset>, ComponentCodecError> {
+    match image {
+        PreparedUiImage::Resolved(handle) => Ok(handle),
+        PreparedUiImage::Path(path) => context.reserve_asset_path(&path).map_err(|error| {
+            ComponentCodecError::invalid_asset_ref(
+                "background.image",
+                path.as_str(),
+                error.to_string(),
+            )
+        }),
+        PreparedUiImage::Record(record) => context.reserve_asset_record(&record).map_err(|error| {
+            ComponentCodecError::invalid_asset_ref(
+                "background.image",
+                record.path().as_str(),
+                error.to_string(),
+            )
+        }),
+    }
+}
+
+fn prepare_visual(
+    value: &ComponentValue,
+    context: &mut ComponentDecodeContext<'_>,
+) -> Result<PreparedComponentCandidate<UiVisual>, ComponentCodecError> {
+    let visual = read_visual(value)?;
+    let image = match &visual.background {
+        AuthoredBrush::Plain(_) => None,
+        AuthoredBrush::Image { reference, .. } => Some(prepare_image(reference, context)?),
+    };
+    match image {
+        None => visual.build(None).map(PreparedComponentCandidate::insert),
+        Some(PreparedUiImage::Resolved(handle)) => visual
+            .build(Some(handle))
+            .map(PreparedComponentCandidate::insert),
+        Some(deferred) => Ok(PreparedComponentCandidate::with_asset_server(
+            move |context| visual.build(Some(resolve_prepared_image(deferred, context)?)),
+        )),
+    }
+}
+
+/// Canvas materialization uses its Host's actual server scratch and selected resolver.
+pub(crate) fn decode_visual_with_context(
+    value: &ComponentValue,
+    context: &mut ComponentDecodeContext<'_>,
+) -> Result<UiVisual, ComponentCodecError> {
+    let visual = read_visual(value)?;
+    let handle = match &visual.background {
+        AuthoredBrush::Plain(_) => None,
+        AuthoredBrush::Image { reference, .. } => match prepare_image(reference, context)? {
+            PreparedUiImage::Resolved(handle) => Some(handle),
+            _ => {
+                return Err(codec_message(
+                    "Canvas image decoding requires the Host's actual AssetServer scratch",
+                ));
+            }
+        },
+    };
+    visual.build(handle)
+}
+
+/// Reads authored source selection without constructing a runtime image identity.
+pub(crate) fn visual_image_reference(
+    value: &ComponentValue,
+) -> Result<Option<AssetRef>, ComponentCodecError> {
+    Ok(match read_visual(value)?.background {
+        AuthoredBrush::Plain(_) => None,
+        AuthoredBrush::Image { reference, .. } => Some(reference),
+    })
+}
+
+pub(crate) fn image_visual_value(
+    reference: &AssetRef,
+    tint: UiColor,
+) -> Result<ComponentValue, ComponentCodecError> {
+    let mut value = encode_visual(&UiVisual::solid(tint))?;
+    value
+        .set_path(
+            &ComponentFieldPath::from_fields(["background"]),
+            image_brush_value(reference, tint)?,
+        )
+        .map_err(|error| codec_message(error.to_string()))?;
+    Ok(value)
 }
 
 pub(crate) fn encode_visual(visual: &UiVisual) -> Result<ComponentValue, ComponentCodecError> {
+    visual_value(visual, None)
+}
+
+fn encode_visual_with_context(
+    visual: &UiVisual,
+    world: &World,
+    context: &ComponentEncodeContext<'_>,
+) -> Result<ComponentValue, ComponentCodecError> {
+    let reference = visual
+        .image_handle()
+        .map(|handle| {
+            AssetRef::from_handle_with_policy(
+                world
+                    .get_resource::<AssetServer>()
+                    .ok_or_else(|| codec_message("AssetServer resource is missing"))?,
+                handle,
+                context.asset_path_scope(),
+                context.asset_ref_export_policy(),
+            )
+            .map_err(|error| codec_message(error.to_string()))
+        })
+        .transpose()?;
+    visual_value(visual, reference.as_ref())
+}
+
+fn visual_value(
+    visual: &UiVisual,
+    reference: Option<&AssetRef>,
+) -> Result<ComponentValue, ComponentCodecError> {
     let visual = visual.kernel();
     let background = visual
         .background()
@@ -257,9 +457,9 @@ pub(crate) fn encode_visual(visual: &UiVisual) -> Result<ComponentValue, Compone
         |border| (border.width(), border.brush().clone()),
     );
     Ok(ComponentValue::map([
-        ("background", brush_value(background)?),
+        ("background", brush_value(background, reference)?),
         ("border_width", float_value(border_width)?),
-        ("border_brush", brush_value(&border_brush)?),
+        ("border_brush", brush_value(&border_brush, None)?),
         ("radii", radii_value(visual.radii())?),
     ]))
 }
@@ -283,7 +483,7 @@ pub(crate) fn decode_text(value: &ComponentValue) -> Result<UiText, ComponentCod
         read_positive(value.field("logical_size")?, "logical_size")?,
     )
     .map_err(|error| codec_message(error.to_string()))?
-    .with_brush(read_brush(value.field("brush")?, "brush")?)
+    .with_brush(read_plain_brush(value.field("brush")?, "brush")?)
     .with_alignment(read_text_alignment(value.field("alignment")?, "alignment")?)
     .with_overflow(read_text_overflow(value.field("overflow")?, "overflow")?);
     let has_semantic_text = read_bool(value.field("has_semantic_text")?, "has_semantic_text")?;
@@ -301,13 +501,19 @@ pub(crate) fn decode_text(value: &ComponentValue) -> Result<UiText, ComponentCod
 
 pub(crate) fn encode_text(text: &UiText) -> Result<ComponentValue, ComponentCodecError> {
     let text = text.kernel();
+    if matches!(text.brush(), UiBrush::Image { .. }) {
+        return Err(ComponentCodecError::invalid_field(
+            "brush",
+            "a solid or role text brush",
+        ));
+    }
     Ok(ComponentValue::map([
         (
             "content",
             ComponentValue::String(text.content().to_string()),
         ),
         ("logical_size", float_value(text.logical_size())?),
-        ("brush", brush_value(text.brush())?),
+        ("brush", brush_value(text.brush(), None)?),
         (
             "alignment",
             ComponentValue::String(text_alignment_name(text.alignment()).to_string()),
@@ -719,34 +925,26 @@ fn dimension_value(value: UiDimension) -> Result<ComponentValue, ComponentCodecE
     ]))
 }
 
-fn read_brush(value: &ComponentValue, field: &str) -> Result<UiBrush, ComponentCodecError> {
+fn read_brush(value: &ComponentValue, field: &str) -> Result<AuthoredBrush, ComponentCodecError> {
     expect_fields(value, field, BRUSH_FIELDS)?;
     let kind = read_string(value.field("kind")?, &format!("{field}.kind"))?;
     let color = read_flat_color(value, field)?;
     let role = read_string(value.field("role")?, &format!("{field}.role"))?;
     let image = read_optional_asset_ref(value.field("image").ok(), &format!("{field}.image"))?;
     match kind.as_str() {
-        "solid" if role.is_empty() && image.is_none() => Ok(UiBrush::Solid(color)),
-        "role" if image.is_none() => Ok(UiBrush::Role(read_color_role_name(
+        "solid" if role.is_empty() && image.is_none() => {
+            Ok(AuthoredBrush::Plain(UiBrush::Solid(color)))
+        }
+        "role" if image.is_none() => Ok(AuthoredBrush::Plain(UiBrush::Role(read_color_role_name(
             &role,
             &format!("{field}.role"),
-        )?)),
+        )?))),
         "image" if role.is_empty() => {
             let asset_ref = image.ok_or_else(|| {
-                ComponentCodecError::invalid_field(
-                    format!("{field}.image"),
-                    "a project-relative path asset reference",
-                )
+                ComponentCodecError::invalid_field(format!("{field}.image"), "an asset reference")
             })?;
-            let AssetRef::Path(path) = asset_ref else {
-                return Err(ComponentCodecError::invalid_field(
-                    format!("{field}.image.kind"),
-                    "path",
-                ));
-            };
-            Ok(UiBrush::Image {
-                image: UiImageId::new(path.as_str())
-                    .map_err(|error| codec_message(error.to_string()))?,
+            Ok(AuthoredBrush::Image {
+                reference: asset_ref,
                 tint: color,
             })
         }
@@ -769,7 +967,20 @@ fn read_brush(value: &ComponentValue, field: &str) -> Result<UiBrush, ComponentC
     }
 }
 
-fn brush_value(brush: &UiBrush) -> Result<ComponentValue, ComponentCodecError> {
+fn read_plain_brush(value: &ComponentValue, field: &str) -> Result<UiBrush, ComponentCodecError> {
+    match read_brush(value, field)? {
+        AuthoredBrush::Plain(brush) => Ok(brush),
+        AuthoredBrush::Image { .. } => Err(ComponentCodecError::invalid_field(
+            field,
+            "a solid or role brush; image text and borders are unsupported",
+        )),
+    }
+}
+
+fn brush_value(
+    brush: &UiBrush,
+    reference: Option<&AssetRef>,
+) -> Result<ComponentValue, ComponentCodecError> {
     let (kind, color, role, image) = match brush {
         UiBrush::Solid(color) => ("solid", *color, String::new(), ComponentValue::Null),
         UiBrush::Role(role) => (
@@ -779,21 +990,30 @@ fn brush_value(brush: &UiBrush) -> Result<ComponentValue, ComponentCodecError> {
             ComponentValue::Null,
         ),
         UiBrush::Image { image, tint } => {
-            let asset_ref = AssetRef::path(image.as_str()).map_err(|error| {
+            let asset_ref = reference.ok_or_else(|| {
                 ComponentCodecError::invalid_asset_ref(
-                    "image.value",
-                    image.as_str(),
-                    error.to_string(),
+                    "background.image",
+                    image.to_string(),
+                    "opaque image IDs have no persistent asset binding",
                 )
             })?;
             (
                 "image",
                 *tint,
                 String::new(),
-                nara_reflect::encode_asset_reference_value(&asset_ref),
+                nara_reflect::encode_asset_reference_value(asset_ref),
             )
         }
     };
+    brush_record(kind, color, role, image)
+}
+
+fn brush_record(
+    kind: &str,
+    color: UiColor,
+    role: String,
+    image: ComponentValue,
+) -> Result<ComponentValue, ComponentCodecError> {
     let [red, green, blue, alpha] = color.components();
     Ok(ComponentValue::map([
         ("kind", ComponentValue::String(kind.to_string())),
@@ -804,6 +1024,18 @@ fn brush_value(brush: &UiBrush) -> Result<ComponentValue, ComponentCodecError> {
         ("role", ComponentValue::String(role)),
         ("image", image),
     ]))
+}
+
+fn image_brush_value(
+    reference: &AssetRef,
+    tint: UiColor,
+) -> Result<ComponentValue, ComponentCodecError> {
+    brush_record(
+        "image",
+        tint,
+        String::new(),
+        nara_reflect::encode_asset_reference_value(reference),
+    )
 }
 
 fn read_optional_asset_ref(
@@ -826,7 +1058,7 @@ fn migrate_legacy_visual(mut value: ComponentValue) -> Result<ComponentValue, Co
     )?;
     migrate_legacy_brush_at(&mut value, "background")?;
     migrate_legacy_brush_at(&mut value, "border_brush")?;
-    decode_visual(&value)?;
+    read_visual(&value)?;
     Ok(value)
 }
 
@@ -889,24 +1121,14 @@ fn migrate_legacy_brush(
             &format!("{field}.reference"),
         )?),
         "image" => {
-            let AssetRef::Path(path) = AssetRef::path(reference.clone()).map_err(|error| {
+            let reference = AssetRef::path(reference.clone()).map_err(|error| {
                 ComponentCodecError::invalid_asset_ref(
                     format!("{field}.reference"),
                     reference.clone(),
                     error.to_string(),
                 )
-            })?
-            else {
-                return Err(ComponentCodecError::invalid_field(
-                    format!("{field}.reference"),
-                    "a project-relative path",
-                ));
-            };
-            UiBrush::Image {
-                image: UiImageId::new(path.as_str())
-                    .map_err(|error| codec_message(error.to_string()))?,
-                tint: color,
-            }
+            })?;
+            return image_brush_value(&reference, color);
         }
         "solid" => {
             return Err(ComponentCodecError::invalid_field(
@@ -921,7 +1143,7 @@ fn migrate_legacy_brush(
             ));
         }
     };
-    brush_value(&brush)
+    brush_value(&brush, None)
 }
 
 fn read_radii(value: &ComponentValue) -> Result<UiCornerRadii, ComponentCodecError> {
@@ -1117,8 +1339,8 @@ fn float_value(value: f32) -> Result<ComponentValue, ComponentCodecError> {
     ComponentValue::f64(f64::from(value)).map_err(|error| codec_message(error.to_string()))
 }
 
-fn codec_message(message: String) -> ComponentCodecError {
-    ComponentCodecError::Message(message)
+fn codec_message(message: impl Into<String>) -> ComponentCodecError {
+    ComponentCodecError::Message(message.into())
 }
 
 macro_rules! string_enum_reader {

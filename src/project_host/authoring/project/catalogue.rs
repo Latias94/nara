@@ -15,7 +15,7 @@ pub(super) struct StableLookupObservation {
     stable_id: StableAssetId,
     prefab: bool,
     // An unresolved result remains provisional; capture still requires recapture.
-    target: Option<AssetPath>,
+    target: Option<AssetSourcePath>,
 }
 
 impl StableLookupObservation {
@@ -30,22 +30,52 @@ impl StableLookupObservation {
 pub(super) struct ReferenceCatalogue {
     root: DirectoryCapability,
     directories: [ProjectPath; 2],
+    scopes: [Arc<AssetPathScope>; 2],
     indexed: bool,
     database: ProjectAssetDatabase,
-    metadata: BTreeMap<AssetPath, (bool, Arc<AuthoringSourceFact>)>,
+    metadata: BTreeMap<AssetSourcePath, Arc<AuthoringSourceFact>>,
     lookups: BTreeMap<(StableAssetId, bool), StableLookupObservation>,
 }
 
 impl ReferenceCatalogue {
-    pub(super) fn new(root: DirectoryCapability, directories: [ProjectPath; 2]) -> Self {
-        Self {
+    pub(super) fn new(
+        root: DirectoryCapability,
+        directories: [ProjectPath; 2],
+        budget: &mut AuthoringProjectAdmissionBudget,
+    ) -> Result<Self, AuthoringProjectSourceAdmissionError> {
+        let mut bind_scope = |directory: &ProjectPath| {
+            budget.charge_source_bytes(
+                0,
+                0,
+                0,
+                checked_sum([
+                    size_of::<AssetPathScope>(),
+                    2 * size_of::<usize>(),
+                    directory.as_str().len(),
+                ])?,
+            )?;
+            let prefix = AssetSourcePath::new(directory.as_str()).map_err(|source| {
+                AuthoringProjectSourceAdmissionError::DocumentSourcePath {
+                    path: directory.clone(),
+                    source,
+                }
+            })?;
+            Ok::<_, AuthoringProjectSourceAdmissionError>(Arc::new(AssetPathScope::under(prefix)))
+        };
+        let scopes = [bind_scope(&directories[0])?, bind_scope(&directories[1])?];
+        Ok(Self {
             root,
             directories,
+            scopes,
             indexed: false,
             database: ProjectAssetDatabase::default(),
             metadata: BTreeMap::new(),
             lookups: BTreeMap::new(),
-        }
+        })
+    }
+
+    pub(super) fn scope(&self, prefab: bool) -> &Arc<AssetPathScope> {
+        &self.scopes[usize::from(prefab)]
     }
 
     pub(super) const fn is_indexed(&self) -> bool {
@@ -53,7 +83,7 @@ impl ReferenceCatalogue {
     }
 
     pub(super) fn lookup_sources(&self) -> impl Iterator<Item = &Arc<AuthoringSourceFact>> {
-        self.metadata.values().map(|(_, source)| source)
+        self.metadata.values()
     }
 
     pub(super) fn resolve(
@@ -91,7 +121,9 @@ impl ReferenceCatalogue {
             };
             self.lookups.insert(key, observation);
         }
-        Ok(self.resolve_indexed(reference, prefab).cloned())
+        Ok(self
+            .resolve_indexed(reference, prefab)
+            .and_then(|path| self.scope(prefab).relativize(path)))
     }
 
     fn ensure_indexed(
@@ -107,16 +139,39 @@ impl ReferenceCatalogue {
         Ok(())
     }
 
-    fn resolve_indexed(&self, reference: &AssetRef, prefab: bool) -> Option<&AssetPath> {
+    /// Attaches actual metadata after a successful Prefab lookup, preserving source identity.
+    pub(super) fn bind_prefab_source(
+        &self,
+        reference: &AssetRef,
+        source: ResolvedPrefabSource,
+    ) -> Result<ResolvedPrefabSource, AuthoringProjectSourceAdmissionError> {
+        let stable_id = match reference {
+            AssetRef::Path(_) => return Ok(source),
+            AssetRef::StableId(stable_id) => *stable_id,
+            AssetRef::Product(product) => product.source(),
+        };
+        let record = self
+            .database
+            .record_for_stable_id(stable_id)
+            .expect("resolved stable Prefab lookup has admitted metadata");
+        source.with_source_asset(record).map_err(|_| {
+            AuthoringProjectSourceAdmissionError::AssetMetadataChanged {
+                path: record.path().clone(),
+            }
+        })
+    }
+
+    fn resolve_indexed(&self, reference: &AssetRef, prefab: bool) -> Option<&AssetSourcePath> {
         if prefab && !reference.is_primary() {
             return None;
         }
         self.database
+            .resolver(self.scope(prefab))
             .resolve_ref(reference)
             .ok()
             .and_then(|record| {
-                let (indexed_prefab, _) = self.metadata.get(record.path())?;
-                (*indexed_prefab == prefab
+                self.metadata.get(record.path())?;
+                (self.scope(prefab).relative_path(record.path()).is_some()
                     && (!prefab || record.source_kind() == &AssetSourceKind::Prefab))
                     .then(|| record.path())
             })
@@ -158,7 +213,7 @@ impl ReferenceCatalogue {
                 size_of::<Self>(),
             ])?,
         )?;
-        let mut current = Self::new(root.share(), directories.map(Clone::clone));
+        let mut current = Self::new(root.share(), directories.map(Clone::clone), budget)?;
         current.ensure_indexed(budget)?;
         for observation in observations {
             let target = current.resolve_indexed(
@@ -325,32 +380,67 @@ impl ReferenceCatalogue {
         )
         .map_err(
             |source| AuthoringProjectSourceAdmissionError::AssetMetadataFormat {
-                path: path.clone(),
+                path: self.scope(prefab).resolve(&path),
                 source,
             },
         )?;
-        let record = AssetRecord::from(metadata.identity().clone());
-        charge_asset_metadata(&read.source, encoded_bytes, &metadata, &record, budget)?;
-        charge_database_record(&record, budget)?;
-        self.database
-            .insert_identity(path.clone(), metadata.into_identity())
-            .map_err(
-                |source| AuthoringProjectSourceAdmissionError::AssetIdentity {
-                    path: path.clone(),
-                    source,
+        let canonical_path = self.scope(prefab).resolve(&path);
+        // A traversal root locates the observed file. The sidecar's local spelling binds
+        // through an actual configured scope, independently of its source kind or owner.
+        let scope = self
+            .scopes
+            .iter()
+            .find(|scope| {
+                scope.relative_path(&canonical_path) == Some(metadata.identity().path().as_str())
+            })
+            .ok_or_else(
+                || AuthoringProjectSourceAdmissionError::AssetMetadataPathMismatch {
+                    requested: path.clone(),
+                    declared: metadata.identity().path().clone(),
                 },
             )?;
+        let record = metadata.identity().clone().into_record(scope);
+        if record.path() != &canonical_path {
+            return Err(
+                AuthoringProjectSourceAdmissionError::AssetMetadataPathMismatch {
+                    requested: path,
+                    declared: metadata.identity().path().clone(),
+                },
+            );
+        }
+        charge_asset_metadata(&read.source, encoded_bytes, &metadata, &record, budget)?;
+        charge_database_record(&record, budget)?;
+        // Overlapping configured directories can observe the same canonical source twice.
+        // Both the sidecar declaration and exact source observation must still agree.
+        if self.database.record_for_path(record.path()) == Some(&record) {
+            if self
+                .metadata
+                .get(record.path())
+                .is_some_and(|indexed| indexed.same_file_observation(&read.source))
+            {
+                return Ok(());
+            }
+            return Err(AuthoringProjectSourceAdmissionError::AssetMetadataChanged {
+                path: record.path().clone(),
+            });
+        }
+        self.database.insert(record).map_err(|source| {
+            AuthoringProjectSourceAdmissionError::AssetIdentity {
+                path: canonical_path.clone(),
+                source,
+            }
+        })?;
         budget.charge_source_bytes(
             0,
             0,
             0,
             checked_sum([
-                size_of::<(AssetPath, (bool, Arc<AuthoringSourceFact>))>(),
-                path.as_str().len(),
+                size_of::<(AssetSourcePath, Arc<AuthoringSourceFact>)>(),
+                canonical_path.as_str().len(),
                 64,
             ])?,
         )?;
-        self.metadata.insert(path, (prefab, read.source));
+        self.metadata.insert(canonical_path, read.source);
         Ok(())
     }
 
@@ -360,13 +450,11 @@ impl ReferenceCatalogue {
         prefab: bool,
         source: &AuthoringSourceFact,
     ) -> Result<(), AuthoringProjectSourceAdmissionError> {
-        if let Some((indexed_prefab, indexed)) = self.metadata.get(path) {
-            if *indexed_prefab != prefab
-                || indexed.identity() != source.identity()
-                || indexed.digest() != source.digest()
-            {
+        let canonical_path = self.scope(prefab).resolve(path);
+        if let Some(indexed) = self.metadata.get(&canonical_path) {
+            if !indexed.same_file_observation(source) {
                 return Err(AuthoringProjectSourceAdmissionError::AssetMetadataChanged {
-                    path: path.clone(),
+                    path: canonical_path,
                 });
             }
         }
@@ -380,7 +468,8 @@ impl ReferenceCatalogue {
         budget: &mut AuthoringProjectAdmissionBudget,
     ) -> Result<Option<(AssetRecord, Arc<AuthoringSourceFact>)>, AuthoringProjectSourceAdmissionError>
     {
-        let Some((_, indexed)) = self.metadata.get(path) else {
+        let canonical_path = self.scope(true).resolve(path);
+        let Some(indexed) = self.metadata.get(&canonical_path) else {
             return Ok(None);
         };
         let metadata_path = path.meta_path();
@@ -399,7 +488,7 @@ impl ReferenceCatalogue {
         self.verify_metadata(path, true, &read.source)?;
         let record = self
             .database
-            .record_for_path(path)
+            .record_for_path(&canonical_path)
             .expect("indexed metadata has one record")
             .clone();
         charge_database_record(&record, budget)?;
@@ -428,7 +517,7 @@ pub(super) fn charge_database_record(
             .checked_mul(8)
             .ok_or(AuthoringProjectSourceAdmissionError::AccountingOverflow)?,
         asset_record_retained_bytes(record)?,
-        size_of::<AssetPath>() * 3 + 192,
+        size_of::<AssetSourcePath>() * 3 + 192,
     ])?;
     budget.charge_source_bytes(0, 0, 0, bytes)?;
     Ok(())

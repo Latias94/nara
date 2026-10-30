@@ -10,7 +10,7 @@ mod measurement_tests;
 
 #[derive(Default, Clone)]
 pub(super) struct ReferenceCatalogue {
-    metadata: BTreeMap<AssetPath, (usize, ContentDigest)>,
+    metadata: BTreeMap<AssetSourcePath, ContentDigest>,
     pub(super) work_bytes: usize,
     complete: bool,
 }
@@ -250,43 +250,72 @@ impl LoadContext<'_> {
         digest: ContentDigest,
         identity: nara_asset::AssetMetaIdentity,
     ) -> Result<(), ProjectContentError> {
-        if let Some((indexed_root, indexed_digest)) = self
-            .catalogue
-            .as_ref()
-            .and_then(|catalogue| catalogue.metadata.get(&path))
-        {
-            if *indexed_root != root_index {
-                return Err(identity_conflict(&path));
-            }
-            if *indexed_digest != digest {
-                return Err(ProjectContentError::with_identifier(
-                    ProjectContentErrorKind::HostAuthorityRejected,
-                    "project.content.asset-metadata-source-changed",
-                    "Asset metadata changed after reference discovery; retry content loading",
-                    "asset",
-                    path.as_str(),
-                ));
-            }
-            if self.asset_database.record_for_path(&path) == Some(&AssetRecord::from(identity)) {
-                return Ok(());
-            }
-            return Err(identity_conflict(&path));
-        }
-        self.reserve_asset_database_work(&AssetRecord::from(identity.clone()))?;
-        self.reserve_catalogue_work(
-            size_of::<(AssetPath, (usize, ContentDigest))>()
-                + path.as_str().len()
-                + BTREE_ENTRY_OVERHEAD,
+        // A nested configured root can enumerate the same actual metadata through two readers.
+        // Bind its authored local path against the location actually observed by this reader.
+        // Source kinds and installed owners do not select an identity namespace or activate data.
+        let observed_bytes = scoped_path_bytes(self.catalogue_scope(root_index), &path)?;
+        let scratch = checked_plan_sum(
+            ProjectContentBudgetKind::WorkBytes,
+            [
+                observed_bytes,
+                observed_bytes,
+                2 * size_of::<AssetSourcePath>(),
+            ],
         )?;
-        self.asset_database
-            .insert_identity(path.clone(), identity)
-            .map_err(|_| identity_conflict(&path))?;
-        self.catalogue
-            .as_mut()
-            .expect("indexing owns a catalogue")
-            .metadata
-            .insert(path, (root_index, digest));
-        Ok(())
+        let reservation = self.reserve_work(scratch)?;
+        let result = (|| {
+            let observed = self.catalogue_scope(root_index).resolve(&path);
+            let owner_index = (0..2)
+                .find(|index| {
+                    self.catalogue_scope(*index).relative_path(&observed)
+                        == Some(identity.path().as_str())
+                })
+                .ok_or_else(|| identity_conflict(&observed))?;
+            let record = identity.into_record(self.catalogue_scope(owner_index));
+            if record.path() != &observed {
+                return Err(identity_conflict(&observed));
+            }
+            if let Some(indexed_digest) = self
+                .catalogue
+                .as_ref()
+                .and_then(|catalogue| catalogue.metadata.get(&observed))
+            {
+                if *indexed_digest != digest {
+                    return Err(ProjectContentError::with_identifier(
+                        ProjectContentErrorKind::HostAuthorityRejected,
+                        "project.content.asset-metadata-source-changed",
+                        "Asset metadata changed after reference discovery; retry content loading",
+                        "asset",
+                        observed.as_str(),
+                    ));
+                }
+                return if self.asset_database.record_for_path(&observed) == Some(&record) {
+                    Ok(())
+                } else {
+                    Err(identity_conflict(&observed))
+                };
+            }
+            self.reserve_asset_database_work(&record)?;
+            self.reserve_catalogue_work(checked_plan_sum(
+                ProjectContentBudgetKind::WorkBytes,
+                [
+                    size_of::<(AssetSourcePath, ContentDigest)>(),
+                    observed.as_str().len(),
+                    BTREE_ENTRY_OVERHEAD,
+                ],
+            )?)?;
+            self.asset_database
+                .insert(record)
+                .map_err(|_| identity_conflict(&observed))?;
+            self.catalogue
+                .as_mut()
+                .expect("indexing owns a catalogue")
+                .metadata
+                .insert(observed, digest);
+            Ok(())
+        })();
+        self.subtract_budget(ProjectContentBudgetKind::WorkBytes, reservation.reserved);
+        result
     }
 
     fn reserve_catalogue_work(&mut self, bytes: usize) -> Result<(), ProjectContentError> {
@@ -329,7 +358,8 @@ impl LoadContext<'_> {
     ) -> Result<ProjectAssetDatabase, ProjectContentError> {
         let paths = || {
             prefabs
-                .keys()
+                .values()
+                .map(|prefab| &prefab.path)
                 .chain(images.iter().map(ProjectImageContent::path))
                 .chain(tilesets.iter().map(ProjectTileSetContent::path))
                 .chain(
@@ -369,31 +399,55 @@ impl LoadContext<'_> {
         &mut self,
         reference: &AssetRef,
         kind: &AssetSourceKind,
-    ) -> Result<AssetPath, ProjectContentError> {
+        root: &nara_project::ProjectPath,
+    ) -> Result<(AssetPath, WorkReservation), ProjectContentError> {
         if !reference.is_primary() {
             return Err(unsupported_product_selection(reference));
         }
         if let AssetRef::Path(path) = reference {
-            return Ok(path.clone());
+            let work = self.reserve_work(string_retained_bytes(path.as_str())?)?;
+            return Ok((path.clone(), work));
         }
         self.ensure_reference_catalogue()?;
-        reference.validate_with_database_as(&self.asset_database, kind)
-            .map(|record| record.path().clone())
-            .map_err(|_| ProjectContentError::single(
+        let unresolved = || {
+            ProjectContentError::single(
                 ProjectContentErrorKind::AssetMetaMismatch,
                 "project.content.stable-asset-reference-unresolved",
                 "Stable asset reference is missing from the admitted catalogue or has the wrong source kind",
-            ))
+            )
+        };
+        let local_bytes = {
+            let scope = self.scope_for_root(root).ok_or_else(unresolved)?;
+            let record = reference
+                .validate_with_database_as(self.asset_database.resolver(scope), kind)
+                .map_err(|_| unresolved())?;
+            let alias = scope.relative_path(record.path()).ok_or_else(unresolved)?;
+            string_retained_bytes(alias)?
+        };
+        let work = self.reserve_work(local_bytes)?;
+        let scope = self.scope_for_root(root).ok_or_else(unresolved)?;
+        let record = reference
+            .validate_with_database_as(self.asset_database.resolver(scope), kind)
+            .map_err(|_| unresolved())?;
+        let path = scope.relativize(record.path()).ok_or_else(unresolved)?;
+        Ok((path, work))
     }
 
     pub(super) fn discover_source_reference(
         &mut self,
         assets: &DirectoryCapability,
         reference: &AssetRef,
-    ) -> Result<AssetRecord, ProjectContentError> {
+    ) -> Result<(AssetRecord, WorkReservation), ProjectContentError> {
         match reference {
             AssetRef::Path(path) => {
-                if self.asset_database.record_for_path(path).is_none() {
+                let scratch = self
+                    .asset_resolution()
+                    .path_resolution_work_bytes(path)
+                    .ok_or_else(|| overflow_budget(ProjectContentBudgetKind::WorkBytes))?;
+                let reservation = self.reserve_work(scratch)?;
+                let present = self.asset_resolution().record_for_path(path).is_some();
+                self.subtract_budget(ProjectContentBudgetKind::WorkBytes, reservation.reserved);
+                if !present {
                     self.catalogue
                         .get_or_insert_with(ReferenceCatalogue::default);
                     let meta_path = path.meta_path();
@@ -402,36 +456,48 @@ impl LoadContext<'_> {
             }
             AssetRef::StableId(_) | AssetRef::Product(_) => self.ensure_reference_catalogue()?,
         }
-        self.asset_database
-            .resolve_ref(reference)
-            .cloned()
-            .map_err(|_| {
-                ProjectContentError::single(
-                    ProjectContentErrorKind::AssetMetaMismatch,
-                    "project.content.stable-asset-reference-unresolved",
-                    "Asset reference is missing from the admitted source identities",
-                )
-            })
+        let scratch = self
+            .asset_resolution()
+            .resolution_work_bytes(reference)
+            .ok_or_else(|| overflow_budget(ProjectContentBudgetKind::WorkBytes))?;
+        let reservation = self.reserve_work(scratch)?;
+        let result = (|| {
+            let record_bytes = self
+                .asset_resolution()
+                .resolve_ref(reference)
+                .map_err(|_| unresolved_source())
+                .and_then(asset_record_retained_bytes)?;
+            let record_work = self.reserve_work(record_bytes)?;
+            let record = self
+                .asset_resolution()
+                .resolve_ref(reference)
+                .map_err(|_| unresolved_source())?
+                .clone();
+            Ok((record, record_work))
+        })();
+        self.subtract_budget(ProjectContentBudgetKind::WorkBytes, reservation.reserved);
+        result
     }
 
     pub(super) fn verify_catalogued_metadata(
         &self,
-        path: &AssetPath,
+        path: &AssetSourcePath,
         root: &nara_project::ProjectPath,
         digest: ContentDigest,
     ) -> Result<(), ProjectContentError> {
-        if let Some((root_index, expected)) = self
+        if let Some(expected) = self
             .catalogue
             .as_ref()
             .and_then(|catalogue| catalogue.metadata.get(path))
         {
             #[cfg(all(test, feature = "project-workflow"))]
             measurement_tests::record(|counts| counts.metadata_revalidations += 1);
-            let roots = self
-                .catalogue_roots
-                .as_ref()
-                .expect("catalogue roots remain bound during admission");
-            if &roots[*root_index] != root || *expected != digest {
+            if self
+                .scope_for_root(root)
+                .and_then(|scope| scope.relative_path(path))
+                .is_none()
+                || *expected != digest
+            {
                 return Err(ProjectContentError::with_identifier(
                     ProjectContentErrorKind::HostAuthorityRejected,
                     "project.content.asset-metadata-source-changed",
@@ -449,21 +515,36 @@ impl LoadContext<'_> {
         directory: &DirectoryCapability,
         root: &nara_project::ProjectPath,
         path: &AssetPath,
+        source_path: &AssetSourcePath,
+        source_key: &SourceDocumentKey,
     ) -> Result<(), ProjectContentError> {
         if !self
             .catalogue
             .as_ref()
-            .is_some_and(|catalogue| catalogue.metadata.contains_key(path))
+            .is_some_and(|catalogue| catalogue.metadata.contains_key(source_path))
         {
             return Ok(());
         }
+        let record = self
+            .asset_database
+            .record_for_path(source_path)
+            .expect("indexed Prefab metadata has its actual source record");
+        source_key.validate_asset_source(record).map_err(|_| {
+            ProjectContentError::with_identifier(
+                ProjectContentErrorKind::AssetMetaMismatch,
+                "project.content.prefab-source-association-invalid",
+                "Prefab metadata conflicts with its admitted document source",
+                "prefab",
+                source_path.as_str(),
+            )
+        })?;
         let meta_path = path.meta_path();
         let (_, digest) = self.read_native_file(
             directory,
             &meta_path,
             AssetMetaFileLimits::default().encoded_bytes().get(),
         )?;
-        self.verify_catalogued_metadata(path, root, digest)?;
+        self.verify_catalogued_metadata(source_path, root, digest)?;
         self.record_member(
             ProjectContentMemberKind::AssetMetadata,
             root,
@@ -489,19 +570,33 @@ pub(crate) fn asset_record_retained_bytes(
         .and_then(|bytes| bytes.checked_add(kind_bytes))
         .and_then(|bytes| {
             bytes.checked_add(
-                size_of::<AssetRecord>() + 3 * (size_of::<AssetPath>() + BTREE_ENTRY_OVERHEAD),
+                size_of::<AssetRecord>()
+                    + 3 * (size_of::<AssetSourcePath>() + BTREE_ENTRY_OVERHEAD),
             )
         })
         .ok_or_else(|| overflow_budget(ProjectContentBudgetKind::RetainedBytes))
 }
 
-pub(super) fn identity_conflict(path: &AssetPath) -> ProjectContentError {
+pub(super) fn identity_conflict(path: &impl fmt::Display) -> ProjectContentError {
     ProjectContentError::with_identifier(
         ProjectContentErrorKind::AssetMetaMismatch,
         "project.content.asset-identity-conflict",
         "Asset identity conflicts within the admitted content sources",
         "asset",
-        path.as_str(),
+        &path.to_string(),
+    )
+}
+
+pub(super) fn scoped_path_bytes(
+    scope: &AssetPathScope,
+    alias: &AssetPath,
+) -> Result<usize, ProjectContentError> {
+    checked_plan_sum(
+        ProjectContentBudgetKind::WorkBytes,
+        [
+            scope.prefix().map_or(0, |prefix| prefix.as_str().len() + 1),
+            alias.as_str().len(),
+        ],
     )
 }
 
@@ -512,6 +607,14 @@ fn invalid_metadata(path: &AssetPath) -> ProjectContentError {
         "Asset catalogue metadata is invalid",
         "asset",
         path.as_str(),
+    )
+}
+
+fn unresolved_source() -> ProjectContentError {
+    ProjectContentError::single(
+        ProjectContentErrorKind::AssetMetaMismatch,
+        "project.content.stable-asset-reference-unresolved",
+        "Asset reference is missing from the admitted source identities",
     )
 }
 

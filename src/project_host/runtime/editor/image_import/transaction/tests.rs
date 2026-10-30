@@ -5,6 +5,7 @@ use std::{
     time::{Duration, Instant},
 };
 
+use nara_asset::AssetPath;
 use nara_fs::{CapabilityRights, DirectoryCapability, HostCapabilityOptions, TrustMode};
 use nara_image::ImageColorSpace;
 
@@ -245,10 +246,202 @@ fn pending_metadata_pins_the_accepted_leaf_after_rename_and_unlink_and_rejects_n
         ));
         assert!(
             editor
-                .editor_image_last_good(&AssetPath::new("textures/imported.png").unwrap())
+                .editor_image_last_good(&AssetSourcePath::new(SOURCE).unwrap())
                 .is_none()
         );
         assert_eq!(publication.try_with(|_| ()), None);
+        close_editor(&mut editor);
+    }
+}
+
+#[test]
+fn custom_overlapping_roots_use_canonical_image_records_and_local_sidecar_aliases() {
+    let fixture = Fixture::new(Some(ImageImportSettings::default()));
+    let manifest = fixture.root.join("nara.toml");
+    fs::write(
+        &manifest,
+        fs::read_to_string(&manifest)
+            .unwrap()
+            .replace("assets = \"assets\"", "assets = \"content/art\"")
+            .replace("prefabs = \"prefabs\"", "prefabs = \"content/art/prefabs\""),
+    )
+    .unwrap();
+    fs::create_dir_all(fixture.root.join("content")).unwrap();
+    fs::rename(
+        fixture.root.join("assets"),
+        fixture.root.join("content/art"),
+    )
+    .unwrap();
+    fs::rename(
+        fixture.root.join("prefabs"),
+        fixture.root.join("content/art/prefabs"),
+    )
+    .unwrap();
+    for (root, path, kind, id) in [
+        (
+            "content/art",
+            "shared.prefab.json",
+            AssetSourceKind::Other("text".into()),
+            "f8b7e28a-7bb8-4402-939d-7ce8e4e57978",
+        ),
+        (
+            "content/art/prefabs",
+            "shared.prefab.json",
+            AssetSourceKind::Prefab,
+            "b336525a-bc0d-4ae3-99d8-981a7c6dd6db",
+        ),
+        (
+            "content/art",
+            "unclassified.source",
+            AssetSourceKind::Unknown,
+            "fa5782c2-c75b-4c08-9bcd-e6288bb23815",
+        ),
+        (
+            "content/art/prefabs",
+            "unreferenced.scene.json",
+            AssetSourceKind::Scene,
+            "5fd40641-ab55-4b30-9e10-5ab5982b13ed",
+        ),
+        (
+            "content/art/prefabs",
+            "unregistered.source",
+            AssetSourceKind::Other("unregistered-domain".into()),
+            "ec139863-8eb0-4e34-b06a-0021618cb05b",
+        ),
+    ] {
+        fs::write(
+            fixture.root.join(root).join(format!("{path}.meta")),
+            AssetMeta::new(
+                AssetMetaIdentity::new(
+                    StableAssetId::parse_str(id).unwrap(),
+                    AssetPath::new(path).unwrap(),
+                    kind,
+                ),
+                (),
+            )
+            .to_json_string()
+            .unwrap(),
+        )
+        .unwrap();
+    }
+    let source = "content/art/textures/imported.png";
+    let source_path = AssetSourcePath::new(source).unwrap();
+    let mut editor = fixture.editor();
+    {
+        let catalog = editor.image_import.catalog.as_ref().unwrap();
+        let entry = catalog.entry(source).unwrap();
+        assert_eq!(entry.asset_path(), &source_path);
+        assert_eq!(entry.authored_path().as_str(), "textures/imported.png");
+        assert!(matches!(
+            entry.metadata(),
+            EditorImageMetadataStatus::Ready(_),
+        ));
+        for path in [
+            "content/art/shared.prefab.json",
+            "content/art/prefabs/shared.prefab.json",
+            "content/art/unclassified.source",
+            "content/art/prefabs/unreferenced.scene.json",
+            "content/art/prefabs/unregistered.source",
+        ] {
+            let path = AssetSourcePath::new(path).unwrap();
+            assert_eq!(catalog.asset_identity(&path).unwrap().0.path(), &path);
+        }
+    }
+    let frame = editor.current_frame();
+    assert!(matches!(
+        editor.request_editor_image_import(
+            frame.revision(),
+            source,
+            ImageImportSettings::new(ImageColorSpace::Linear),
+        ),
+        EditorImageImportRequestResult::Started(_)
+    ));
+    assert!(matches!(
+        drive_to_terminal(&mut editor),
+        EditorImageImportState::Succeeded { .. },
+    ));
+    let image = editor.editor_image_last_good(&source_path).unwrap();
+    assert_eq!(
+        editor
+            .authoring_runtime
+            .image_import_asset(image.handle(), image.version())
+            .unwrap()
+            .source()
+            .unwrap()
+            .path(),
+        &source_path,
+    );
+    assert!(
+        editor
+            .editor_image_last_good(&AssetSourcePath::new("textures/imported.png").unwrap())
+            .is_none()
+    );
+    let bytes = fs::read(fixture.root.join(format!("{source}.meta"))).unwrap();
+    let saved = AssetMetaCandidate::<ImageImportSettings>::decode_json_bytes(&bytes).unwrap();
+    assert_eq!(saved.identity().path().as_str(), "textures/imported.png");
+    #[cfg(feature = "runtime-ui")]
+    {
+        editor.drive_editor_frame(Duration::ZERO);
+        let choices = editor.authoring_images.receipt().share_choices();
+        assert!(
+            choices
+                .choices()
+                .iter()
+                .any(|choice| choice.project_path() == "textures/imported.png")
+        );
+        assert!(
+            !choices
+                .choices()
+                .iter()
+                .any(|choice| choice.project_path() == source)
+        );
+    }
+    close_editor(&mut editor);
+}
+
+#[test]
+fn unreferenced_metadata_kinds_preserve_global_identity_conflicts_without_activation() {
+    for kind in [AssetSourceKind::Unknown, AssetSourceKind::Scene] {
+        let fixture = Fixture::new(Some(ImageImportSettings::default()));
+        let stable_id = metadata(ImageImportSettings::default())
+            .identity()
+            .stable_id();
+        fs::write(
+            fixture.root.join("assets/unreferenced.source.meta"),
+            AssetMeta::new(
+                AssetMetaIdentity::new(
+                    stable_id,
+                    AssetPath::new("unreferenced.source").unwrap(),
+                    kind,
+                ),
+                (),
+            )
+            .to_json_string()
+            .unwrap(),
+        )
+        .unwrap();
+        let mut editor = fixture.editor();
+        {
+            let catalog = editor.image_import.catalog.as_ref().unwrap();
+            assert!(matches!(
+                catalog.entry(SOURCE).unwrap().metadata(),
+                EditorImageMetadataStatus::IdentityConflict { stable_id: id } if *id == stable_id
+            ));
+            assert!(
+                catalog
+                    .has_current_identity_conflict(
+                        &editor.source_project_root(),
+                        &AssetSourcePath::new(SOURCE).unwrap(),
+                        stable_id,
+                    )
+                    .unwrap()
+            );
+        }
+        assert!(
+            editor
+                .editor_image_last_good(&AssetSourcePath::new(SOURCE).unwrap())
+                .is_none()
+        );
         close_editor(&mut editor);
     }
 }
@@ -514,7 +707,7 @@ fn adopting_a_fresh_project_index_replaces_old_refresh_and_reconciliation_target
                 .require_reconciliation(generation, old_target.get());
         }
         let previous_state = editor.image_import.state();
-        let path = AssetPath::new("textures/imported.png").unwrap();
+        let path = AssetSourcePath::new(SOURCE).unwrap();
         let previous_image = editor.image_import.last_good(&path).unwrap().clone();
         let previous_detail = editor
             .image_import
@@ -671,7 +864,7 @@ fn successor_index_generation_collision_cannot_reverify_old_pixels_without_impor
     drive_until(&mut editor, |editor| {
         !editor.project_source_index_work_pending() && !editor.editor_image_import_work_pending()
     });
-    let path = AssetPath::new("textures/imported.png").unwrap();
+    let path = AssetSourcePath::new(SOURCE).unwrap();
     let previous = editor.image_import.last_good(&path).unwrap().clone();
     let EditorImageSourceProof::SourceIndex {
         generation: verified,

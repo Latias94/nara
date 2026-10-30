@@ -1141,7 +1141,10 @@ fn asset_server_drift_rejects_the_batch_without_overwriting_newer_state() {
     ));
     assert!(world.get::<Position>(entity).is_none());
     assert_eq!(
-        world.resource::<AssetServer>().path(live.id()),
+        world
+            .resource::<AssetServer>()
+            .path(live.id())
+            .map(nara_asset::AssetSourcePath::as_str),
         Some("textures/live.png")
     );
 }
@@ -1169,7 +1172,10 @@ fn component_batch_publishes_components_and_scratch_assets_together() {
 
     assert_eq!(world.get::<Position>(entity).unwrap().x, 1.0);
     assert_eq!(
-        world.resource::<AssetServer>().path(handle.id()),
+        world
+            .resource::<AssetServer>()
+            .path(handle.id())
+            .map(nara_asset::AssetSourcePath::as_str),
         Some("textures/staged.png")
     );
 }

@@ -8,7 +8,8 @@ use std::{
 
 use nara_asset::{
     AssetDatabaseError, AssetMetaFileLimits, AssetMetaFormatError, AssetMetaIdentityCandidate,
-    AssetPath, AssetPathError, AssetRecord, AssetRef, AssetSourceKind, ProjectAssetDatabase,
+    AssetPath, AssetPathError, AssetPathScope, AssetRecord, AssetRef, AssetReferenceResolver,
+    AssetSourceKind, AssetSourcePath, ProjectAssetDatabase,
 };
 use nara_core::ByteLimit;
 use nara_diagnostic::DiagnosticReport;
@@ -257,7 +258,7 @@ pub(crate) struct AuthoringAssetSource {
 
 impl AuthoringAssetSource {
     #[must_use]
-    pub(crate) const fn path(&self) -> &AssetPath {
+    pub(crate) const fn path(&self) -> &AssetSourcePath {
         self.record.path()
     }
 
@@ -395,6 +396,8 @@ struct AuthoringProjectSnapshotInner {
     prefabs: Box<[AuthoringPrefabSource]>,
     assets: Box<[AuthoringAssetSource]>,
     asset_database: Arc<ProjectAssetDatabase>,
+    asset_scope: Arc<AssetPathScope>,
+    prefab_scope: Arc<AssetPathScope>,
     unresolved_dependencies: Box<[AuthoringUnresolvedDependency]>,
     source_facts: Arc<[Arc<AuthoringSourceFact>]>,
     stable_lookups: Arc<[catalogue::StableLookupObservation]>,
@@ -590,6 +593,8 @@ impl AuthoringProjectReceipt {
             prefabs: inner.prefabs,
             assets: inner.assets,
             asset_database: inner.asset_database,
+            asset_scope: inner.asset_scope,
+            prefab_scope: inner.prefab_scope,
             unresolved_dependencies: inner.unresolved_dependencies,
             source_facts: inner.source_facts,
             stable_lookups: inner.stable_lookups,
@@ -639,6 +644,8 @@ pub(crate) struct AuthoringProjectSessionSnapshot {
     prefabs: Box<[AuthoringPrefabSource]>,
     assets: Box<[AuthoringAssetSource]>,
     asset_database: Arc<ProjectAssetDatabase>,
+    asset_scope: Arc<AssetPathScope>,
+    prefab_scope: Arc<AssetPathScope>,
     unresolved_dependencies: Box<[AuthoringUnresolvedDependency]>,
     source_facts: Arc<[Arc<AuthoringSourceFact>]>,
     stable_lookups: Arc<[catalogue::StableLookupObservation]>,
@@ -749,6 +756,22 @@ impl AuthoringProjectSessionSnapshot {
     #[must_use]
     pub(crate) fn asset_database(&self) -> Arc<ProjectAssetDatabase> {
         Arc::clone(&self.asset_database)
+    }
+
+    pub(crate) fn asset_scope(&self) -> Arc<AssetPathScope> {
+        Arc::clone(&self.asset_scope)
+    }
+
+    pub(crate) fn prefab_scope(&self) -> Arc<AssetPathScope> {
+        Arc::clone(&self.prefab_scope)
+    }
+
+    pub(crate) fn asset_resolution(&self) -> AssetReferenceResolver<'_> {
+        self.asset_database.resolver(&self.asset_scope)
+    }
+
+    pub(crate) fn prefab_resolution(&self) -> AssetReferenceResolver<'_> {
+        self.asset_database.resolver(&self.prefab_scope)
     }
 
     #[must_use]
@@ -1030,6 +1053,8 @@ impl CapturedSavedStartup {
             prefabs,
             assets,
             asset_database,
+            asset_scope,
+            prefab_scope,
             unresolved_dependencies,
             source_facts,
             stable_lookups,
@@ -1055,6 +1080,8 @@ impl CapturedSavedStartup {
                 prefabs,
                 assets,
                 asset_database,
+                asset_scope,
+                prefab_scope,
                 unresolved_dependencies,
                 source_facts,
                 stable_lookups,
@@ -1154,7 +1181,7 @@ fn reserve_preview_identity_store(
         charge_database_record(asset.record(), budget)?;
     }
     for prefab in &capture.prefabs {
-        if let Some(record) = capture.asset_database.record_for_path(prefab.path()) {
+        if let Some(record) = capture.prefab_resolution().record_for_path(prefab.path()) {
             charge_database_record(record, budget)?;
         }
     }
@@ -1168,7 +1195,7 @@ fn reserve_preview_identity_store(
         checked_product(super::MAX_AUTHORING_IMAGE_IDENTITY_PATH_BYTES, 9)?,
         checked_product(
             super::MAX_AUTHORING_IMAGE_IDENTITIES,
-            size_of::<AssetRecord>() + 3 * size_of::<AssetPath>() + 192,
+            size_of::<AssetRecord>() + 3 * size_of::<AssetSourcePath>() + 192,
         )?,
     ])?;
     budget.charge_source_bytes(0, 0, 0, growth)?;
@@ -2085,7 +2112,7 @@ pub(crate) enum AuthoringProjectSourceAdmissionError {
         source: AuthoringDocumentPublicationError,
     },
     AssetMetadataFormat {
-        path: AssetPath,
+        path: AssetSourcePath,
         source: AssetMetaFormatError,
     },
     AssetMetadataPathMismatch {
@@ -2093,12 +2120,12 @@ pub(crate) enum AuthoringProjectSourceAdmissionError {
         declared: AssetPath,
     },
     AssetIdentity {
-        path: AssetPath,
+        path: AssetSourcePath,
         source: AssetDatabaseError,
     },
     CatalogueNameInvalid,
     AssetMetadataChanged {
-        path: AssetPath,
+        path: AssetSourcePath,
     },
     AssetDirectoryAuthorityUnavailable,
     AccountingOverflow,

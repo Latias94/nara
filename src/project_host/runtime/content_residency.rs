@@ -188,7 +188,9 @@ impl PreparedResidency {
                 inputs,
                 &self.retirements,
                 &self.staged_server,
-                self.catalog.database(),
+                self.catalog
+                    .asset_resolution()
+                    .map(|resolver| resolver.database()),
                 world.resource::<Assets<TileSet>>(),
                 world.resource::<AssetStates>(),
             )
@@ -289,12 +291,21 @@ impl PreparedResidency {
                     let handle = bindings
                         .reserve::<TileSet>(
                             &AssetRef::StableId(content.stable_id()),
-                            snapshot.asset_database(),
+                            snapshot.asset_resolution(),
                             &tileset_kind(),
                         )
                         .map_err(|_| binding_changed())?;
+                    let image_record = snapshot
+                        .asset_resolution()
+                        .resolve_ref(&content.source().image)
+                        .map_err(|_| resources_missing())?;
+                    let image_product = nara_asset::AssetProductRef::new(
+                        image_record.stable_id(),
+                        nara_asset::ImportedProductId::PRIMARY,
+                    )
+                    .map_err(|_| resources_missing())?;
                     let (image_handle, image) = images
-                        .image_for_path(content.image_path())
+                        .image_for_product(image_product)
                         .ok_or_else(resources_missing)?;
                     let record = AssetRecord::new(
                         content.stable_id(),
@@ -310,7 +321,13 @@ impl PreparedResidency {
                             SourceHash::from_digest(*content.source_hash().as_bytes()),
                             image_handle,
                             image,
-                        ),
+                            snapshot.asset_resolution().scope(),
+                            world
+                                .resource::<TileSetAssets>()
+                                .limits()
+                                .source_reference_bytes(),
+                        )
+                        .map_err(tileset_failure)?,
                     )?;
                 }
             }
@@ -427,6 +444,9 @@ fn tileset_failure(error: TileSetAssetError) -> HostFault {
         TileSetAssetError::Capacity => "Prepared Scene exceeds TileSet source capacity",
         TileSetAssetError::RetentionCapacity => {
             "Prepared Scene exceeds retained TileSet Image capacity"
+        }
+        TileSetAssetError::SourceReferenceCapacity => {
+            "Prepared Scene exceeds TileSet source reference capacity"
         }
         TileSetAssetError::DependencyUnavailable => {
             "Prepared Scene TileSet Image dependency is unavailable"

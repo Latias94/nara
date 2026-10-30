@@ -6,8 +6,8 @@ use nara_app::{
     RuntimeClosePolicy, RuntimeInstance, RuntimeObligationLedger,
 };
 use nara_asset::{
-    ArtifactFormatVersion, ArtifactLabel, AssetEvents, AssetPath, AssetStates, Assets, Handle,
-    ImportArtifactKey, ImportArtifactRecord, ImportDependencyDigest, ImportProfile,
+    ArtifactFormatVersion, ArtifactLabel, AssetEvents, AssetSourcePath, AssetStates, Assets,
+    Handle, ImportArtifactKey, ImportArtifactRecord, ImportDependencyDigest, ImportProfile,
     ImportedAssetType, ImporterId, ImporterVersion, SourceHash, StableAssetId,
 };
 use nara_core::{Color, Vec2};
@@ -1593,7 +1593,7 @@ fn test_image_with_pixels(pixels: Vec<u8>) -> ImageAsset {
     );
     let artifact = ImportArtifactRecord::new(key).unwrap();
     let source = ImageSourceMetadata::new(
-        AssetPath::new("textures/test.png").unwrap(),
+        AssetSourcePath::new("textures/test.png").unwrap(),
         ImageImportSettings::default(),
         artifact,
     )

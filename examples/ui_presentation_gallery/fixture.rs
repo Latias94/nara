@@ -133,7 +133,7 @@ fn import_ui_texture(
 ) -> Handle<ImageAsset> {
     let record = AssetRecord::new(
         StableAssetId::parse_str(UI_TEXTURE_STABLE_ID).unwrap(),
-        AssetPath::new("textures/ui-presentation-gallery.png").unwrap(),
+        nara::asset::AssetSourcePath::new("textures/ui-presentation-gallery.png").unwrap(),
         AssetSourceKind::Image,
     );
     let mut database = ProjectAssetDatabase::default();
@@ -148,7 +148,10 @@ fn import_ui_texture(
     .unwrap();
     let image = AssetRef::stable_id(UI_TEXTURE_STABLE_ID)
         .unwrap()
-        .resolve_with_database::<ImageAsset>(asset_server, &database)
+        .resolve_with_database::<ImageAsset>(
+            asset_server,
+            database.resolver(&nara::asset::AssetPathScope::ROOT),
+        )
         .unwrap();
     let imported = ImageImporter::default()
         .import_image(

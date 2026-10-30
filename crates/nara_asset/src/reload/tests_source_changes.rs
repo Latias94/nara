@@ -3,7 +3,7 @@ use super::*;
 #[test]
 fn source_changes_coalesce_duplicate_frame_events() {
     let mut changes = AssetSourceChanges::new();
-    let path = AssetPath::new("textures/player.png").unwrap();
+    let path = AssetSourcePath::new("textures/player.png").unwrap();
     changes.meta_modified(path.clone()).unwrap();
     changes.modified(path.clone()).unwrap();
     changes.removed(path.clone()).unwrap();
@@ -20,7 +20,7 @@ fn source_changes_coalesce_duplicate_frame_events() {
 #[test]
 fn source_changes_keep_last_semantic_event_for_atomic_save_sequences() {
     let mut changes = AssetSourceChanges::new();
-    let path = AssetPath::new("textures/player.png").unwrap();
+    let path = AssetSourcePath::new("textures/player.png").unwrap();
     changes.removed(path.clone()).unwrap();
     changes.modified(path.clone()).unwrap();
 
@@ -34,7 +34,7 @@ fn source_changes_keep_last_semantic_event_for_atomic_save_sequences() {
 
 #[test]
 fn source_changes_preserve_metadata_dirtiness_across_source_events_and_batches() {
-    let path = AssetPath::new("textures/player.png").unwrap();
+    let path = AssetSourcePath::new("textures/player.png").unwrap();
     for kinds in [
         vec![
             AssetSourceChangeKind::MetaModified,
@@ -75,7 +75,7 @@ fn source_changes_preserve_metadata_dirtiness_across_source_events_and_batches()
 
 #[test]
 fn source_changes_metadata_does_not_resurrect_a_removed_source() {
-    let path = AssetPath::new("textures/player.png").unwrap();
+    let path = AssetSourcePath::new("textures/player.png").unwrap();
     for batch in [false, true] {
         let mut changes = AssetSourceChanges::new();
         changes.removed(path.clone()).unwrap();
@@ -95,7 +95,7 @@ fn source_changes_metadata_does_not_resurrect_a_removed_source() {
 
 #[test]
 fn source_changes_preserve_metadata_removal_order_across_batches_and_roundtrips() {
-    let path = AssetPath::new("textures/player.png").unwrap();
+    let path = AssetSourcePath::new("textures/player.png").unwrap();
     let kinds = [
         AssetSourceChangeKind::Modified,
         AssetSourceChangeKind::MetaModified,
@@ -179,13 +179,13 @@ fn source_changes_are_bounded_and_duplicate_paths_do_not_consume_capacity() {
         ItemLimit::ONE,
         ByteLimit::new(4 * 1024).unwrap(),
     ));
-    let path = AssetPath::new("textures/player.png").unwrap();
+    let path = AssetSourcePath::new("textures/player.png").unwrap();
     changes.modified(path.clone()).unwrap();
     let retained = changes.retained_payload_bytes();
     changes.removed(path.clone()).unwrap();
 
     let error = changes
-        .modified(AssetPath::new("textures/other.png").unwrap())
+        .modified(AssetSourcePath::new("textures/other.png").unwrap())
         .unwrap_err();
 
     assert_eq!(error.kind(), AssetSourceChangeLimitKind::Items);
@@ -206,7 +206,7 @@ fn source_changes_bound_atomic_input_before_coalescing() {
         ItemLimit::ONE,
         ByteLimit::new(4 * 1024).unwrap(),
     ));
-    let path = AssetPath::new("textures/player.png").unwrap();
+    let path = AssetSourcePath::new("textures/player.png").unwrap();
 
     let error = changes
         .try_extend([
@@ -230,7 +230,9 @@ fn source_changes_charge_owned_path_capacity_before_retention() {
     let mut path = String::with_capacity(4_096);
     path.push_str("textures/player.png");
 
-    let error = changes.modified(AssetPath::new(path).unwrap()).unwrap_err();
+    let error = changes
+        .modified(AssetSourcePath::new(path).unwrap())
+        .unwrap_err();
 
     assert_eq!(error.kind(), AssetSourceChangeLimitKind::RetainedBytes);
     assert_eq!(error.limit(), 64);

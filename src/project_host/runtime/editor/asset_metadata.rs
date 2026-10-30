@@ -3,7 +3,7 @@ use std::{
     sync::Arc,
 };
 
-use nara_asset::{AssetMetaIdentityCandidate, AssetPath, AssetRecord, StableAssetId};
+use nara_asset::{AssetMetaIdentityCandidate, AssetRecord, AssetSourcePath, StableAssetId};
 use nara_fs::{ContentDigest, FileIdentity};
 
 use crate::project_host::authoring::ProjectSourceIndexSnapshot;
@@ -16,9 +16,9 @@ pub(super) struct AdmittedAssetMetadata {
 
 pub(crate) struct EditorAssetMetadataSnapshot {
     source_index: Arc<ProjectSourceIndexSnapshot>,
-    admitted: BTreeMap<AssetPath, AdmittedAssetMetadata>,
+    admitted: BTreeMap<AssetSourcePath, AdmittedAssetMetadata>,
     known_stable_ids: BTreeSet<StableAssetId>,
-    conflicts: BTreeMap<AssetPath, StableAssetId>,
+    conflicts: BTreeMap<AssetSourcePath, StableAssetId>,
 }
 
 impl EditorAssetMetadataSnapshot {
@@ -29,9 +29,9 @@ impl EditorAssetMetadataSnapshot {
     }
     pub(super) fn new(
         source_index: Arc<ProjectSourceIndexSnapshot>,
-        admitted: BTreeMap<AssetPath, AdmittedAssetMetadata>,
+        admitted: BTreeMap<AssetSourcePath, AdmittedAssetMetadata>,
         known_stable_ids: BTreeSet<StableAssetId>,
-        conflicts: BTreeMap<AssetPath, StableAssetId>,
+        conflicts: BTreeMap<AssetSourcePath, StableAssetId>,
     ) -> Self {
         Self {
             source_index,
@@ -52,7 +52,7 @@ impl EditorAssetMetadataSnapshot {
     /// Returns an identity-admitted candidate, including conflicting identities.
     /// Callers must check `conflict` before admitting domain settings for publication.
     #[must_use]
-    pub(super) fn candidate(&self, path: &AssetPath) -> Option<&AssetMetaIdentityCandidate> {
+    pub(super) fn candidate(&self, path: &AssetSourcePath) -> Option<&AssetMetaIdentityCandidate> {
         self.admitted
             .get(path)
             .map(|entry| entry.candidate.as_ref())
@@ -61,7 +61,7 @@ impl EditorAssetMetadataSnapshot {
     /// Returns a historical content observation, including conflicting identities.
     /// Callers must check `conflict` and freshly admit a live leaf before publication.
     #[must_use]
-    pub(super) fn observed_digest(&self, path: &AssetPath) -> Option<ContentDigest> {
+    pub(super) fn observed_digest(&self, path: &AssetSourcePath) -> Option<ContentDigest> {
         self.admitted.get(path).map(|entry| entry.digest)
     }
 
@@ -71,14 +71,14 @@ impl EditorAssetMetadataSnapshot {
     }
 
     #[must_use]
-    pub(super) fn conflict(&self, path: &AssetPath) -> Option<StableAssetId> {
+    pub(super) fn conflict(&self, path: &AssetSourcePath) -> Option<StableAssetId> {
         self.conflicts.get(path).copied()
     }
 
     #[must_use]
     pub(super) fn asset_identity(
         &self,
-        path: &AssetPath,
+        path: &AssetSourcePath,
     ) -> Option<(AssetRecord, FileIdentity, ContentDigest)> {
         if self.conflict(path).is_some() {
             return None;

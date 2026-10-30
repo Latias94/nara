@@ -2,12 +2,11 @@ use std::{
     collections::BTreeMap,
     error::Error,
     fmt::{self, Display, Formatter},
-    path::{Component, Path},
 };
 
 use nara_ecs::Resource;
 
-use crate::{AssetPath, AssetRef, StableAssetId};
+use crate::{AssetPath, AssetPathScope, AssetRef, AssetSourcePath, StableAssetId};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
@@ -79,6 +78,15 @@ impl AssetMetaIdentity {
         &self.source_kind
     }
 
+    /// Binds this metadata's local alias to a canonical catalogue location.
+    ///
+    /// The caller must first check the metadata against the actual local source path. Use
+    /// [`ProjectAssetDatabase::insert_identity`] to check and insert in one operation.
+    #[must_use]
+    pub fn into_record(self, scope: &AssetPathScope) -> AssetRecord {
+        AssetRecord::new(self.stable_id, scope.resolve(&self.path), self.source_kind)
+    }
+
     #[cfg(feature = "serde")]
     pub(crate) fn retained_bytes(&self) -> Option<usize> {
         self.path
@@ -87,10 +95,11 @@ impl AssetMetaIdentity {
     }
 }
 
+/// One stable source at its canonical logical catalogue location.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct AssetRecord {
     stable_id: StableAssetId,
-    path: AssetPath,
+    path: AssetSourcePath,
     source_kind: AssetSourceKind,
 }
 
@@ -98,7 +107,7 @@ impl AssetRecord {
     #[must_use]
     pub const fn new(
         stable_id: StableAssetId,
-        path: AssetPath,
+        path: AssetSourcePath,
         source_kind: AssetSourceKind,
     ) -> Self {
         Self {
@@ -114,7 +123,7 @@ impl AssetRecord {
     }
 
     #[must_use]
-    pub const fn path(&self) -> &AssetPath {
+    pub const fn path(&self) -> &AssetSourcePath {
         &self.path
     }
 
@@ -160,31 +169,25 @@ impl<TSettings> AssetMeta<TSettings> {
     }
 }
 
-impl From<AssetMetaIdentity> for AssetRecord {
-    fn from(identity: AssetMetaIdentity) -> Self {
-        Self::new(identity.stable_id, identity.path, identity.source_kind)
-    }
-}
-
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum AssetDatabaseError {
     DuplicatePath {
-        path: AssetPath,
+        path: AssetSourcePath,
     },
     DuplicateStableId {
         stable_id: StableAssetId,
-        existing_path: AssetPath,
-        new_path: AssetPath,
+        existing_path: AssetSourcePath,
+        new_path: AssetSourcePath,
     },
     CaseInsensitivePathCollision {
-        existing_path: AssetPath,
-        new_path: AssetPath,
+        existing_path: AssetSourcePath,
+        new_path: AssetSourcePath,
     },
     MetaPathMismatch {
         source_path: AssetPath,
         meta_path: AssetPath,
     },
-    UnknownPath(AssetPath),
+    UnknownPath(AssetSourcePath),
     UnknownStableId(StableAssetId),
     NonUtf8Path,
     SourceOutsideRoot,
@@ -234,27 +237,29 @@ impl Display for AssetDatabaseError {
 
 impl Error for AssetDatabaseError {}
 
+/// A canonical source index without an implicit authored-reference scope.
 #[derive(Debug, Default, Clone, PartialEq, Eq, Resource)]
 pub struct ProjectAssetDatabase {
-    by_path: BTreeMap<AssetPath, AssetRecord>,
-    by_stable_id: BTreeMap<StableAssetId, AssetPath>,
-    case_folded_paths: BTreeMap<String, AssetPath>,
+    by_path: BTreeMap<AssetSourcePath, AssetRecord>,
+    by_stable_id: BTreeMap<StableAssetId, AssetSourcePath>,
+    case_folded_paths: BTreeMap<String, AssetSourcePath>,
 }
 
 impl ProjectAssetDatabase {
     pub fn insert_identity(
         &mut self,
-        source_path: AssetPath,
+        scope: &AssetPathScope,
+        local_source_path: AssetPath,
         identity: AssetMetaIdentity,
     ) -> Result<(), AssetDatabaseError> {
-        if source_path != identity.path {
+        if local_source_path != identity.path {
             return Err(AssetDatabaseError::MetaPathMismatch {
-                source_path,
+                source_path: local_source_path,
                 meta_path: identity.path,
             });
         }
 
-        self.insert(identity.into())
+        self.insert(identity.into_record(scope))
     }
 
     pub fn insert(&mut self, record: AssetRecord) -> Result<(), AssetDatabaseError> {
@@ -301,7 +306,7 @@ impl ProjectAssetDatabase {
     }
 
     #[must_use]
-    pub fn record_for_path(&self, path: &AssetPath) -> Option<&AssetRecord> {
+    pub fn record_for_path(&self, path: &AssetSourcePath) -> Option<&AssetRecord> {
         self.by_path.get(path)
     }
 
@@ -332,21 +337,12 @@ impl ProjectAssetDatabase {
         true
     }
 
-    /// Resolves only the enclosing source identity, including for an explicit product reference.
-    ///
-    /// A registered source does not prove that its selected product exists. The concrete asset
-    /// domain must check that selection against the admitted product value.
-    pub fn resolve_ref(&self, asset_ref: &AssetRef) -> Result<&AssetRecord, AssetDatabaseError> {
-        match asset_ref {
-            AssetRef::Path(path) => self
-                .record_for_path(path)
-                .ok_or_else(|| AssetDatabaseError::UnknownPath(path.clone())),
-            AssetRef::StableId(id) => self
-                .record_for_stable_id(*id)
-                .ok_or(AssetDatabaseError::UnknownStableId(*id)),
-            AssetRef::Product(reference) => self
-                .record_for_stable_id(reference.source())
-                .ok_or(AssetDatabaseError::UnknownStableId(reference.source())),
+    /// Borrows this canonical index with an explicit authored-reference scope.
+    #[must_use]
+    pub const fn resolver<'a>(&'a self, scope: &'a AssetPathScope) -> AssetReferenceResolver<'a> {
+        AssetReferenceResolver {
+            database: self,
+            scope,
         }
     }
 
@@ -359,41 +355,85 @@ impl ProjectAssetDatabase {
     pub fn is_empty(&self) -> bool {
         self.by_path.is_empty()
     }
+}
 
-    pub fn logical_path_from_source_path(
-        asset_root: impl AsRef<Path>,
-        source_path: impl AsRef<Path>,
-    ) -> Result<AssetPath, AssetDatabaseError> {
-        let asset_root = asset_root
-            .as_ref()
-            .canonicalize()
-            .map_err(|error| AssetDatabaseError::Filesystem(error.to_string()))?;
-        let source_path = source_path
-            .as_ref()
-            .canonicalize()
-            .map_err(|error| AssetDatabaseError::Filesystem(error.to_string()))?;
-        let relative = source_path
-            .strip_prefix(&asset_root)
-            .map_err(|_| AssetDatabaseError::SourceOutsideRoot)?;
+/// A borrowed canonical catalogue and its explicit authored-reference context.
+#[derive(Debug, Clone, Copy)]
+pub struct AssetReferenceResolver<'a> {
+    database: &'a ProjectAssetDatabase,
+    scope: &'a AssetPathScope,
+}
 
-        let mut segments = Vec::new();
-        for component in relative.components() {
-            match component {
-                Component::Normal(segment) => {
-                    let Some(segment) = segment.to_str() else {
-                        return Err(AssetDatabaseError::NonUtf8Path);
-                    };
-                    segments.push(segment);
-                }
-                Component::CurDir => {}
-                Component::ParentDir | Component::RootDir | Component::Prefix(_) => {
-                    return Err(AssetDatabaseError::SourceOutsideRoot);
-                }
-            }
+impl<'a> AssetReferenceResolver<'a> {
+    #[must_use]
+    pub const fn database(self) -> &'a ProjectAssetDatabase {
+        self.database
+    }
+
+    #[must_use]
+    pub const fn scope(self) -> &'a AssetPathScope {
+        self.scope
+    }
+
+    #[must_use]
+    pub fn record_for_path(self, path: &AssetPath) -> Option<&'a AssetRecord> {
+        if self.scope.prefix().is_none() {
+            return self.database.by_path.get(path.as_str());
         }
+        self.database.record_for_path(&self.scope.resolve(path))
+    }
 
-        AssetPath::new(segments.join("/"))
-            .map_err(|error| AssetDatabaseError::Filesystem(error.to_string()))
+    /// Returns the temporary path-text bytes needed by a successful [`Self::resolve_ref`].
+    ///
+    /// Root aliases and stable/Product lookups borrow existing keys. Scoped aliases allocate
+    /// one joined canonical spelling. Error diagnostic storage remains the caller's concern.
+    #[must_use]
+    pub fn resolution_work_bytes(self, asset_ref: &AssetRef) -> Option<usize> {
+        match asset_ref {
+            AssetRef::Path(path) => self.path_resolution_work_bytes(path),
+            AssetRef::StableId(_) | AssetRef::Product(_) => Some(0),
+        }
+    }
+
+    /// Returns temporary path-text bytes for a successful [`Self::record_for_path`].
+    #[must_use]
+    pub fn path_resolution_work_bytes(self, path: &AssetPath) -> Option<usize> {
+        match self.scope.prefix() {
+            Some(prefix) => prefix
+                .as_str()
+                .len()
+                .checked_add(1)?
+                .checked_add(path.as_str().len()),
+            None => Some(0),
+        }
+    }
+
+    /// Resolves only the enclosing source, including for an explicit product selection.
+    ///
+    /// A source record does not prove product membership. The concrete domain must validate
+    /// the selection against its admitted value.
+    pub fn resolve_ref(self, asset_ref: &AssetRef) -> Result<&'a AssetRecord, AssetDatabaseError> {
+        match asset_ref {
+            AssetRef::Path(path) if self.scope.prefix().is_none() => self
+                .database
+                .by_path
+                .get(path.as_str())
+                .ok_or_else(|| AssetDatabaseError::UnknownPath(self.scope.resolve(path))),
+            AssetRef::Path(path) => {
+                let source_path = self.scope.resolve(path);
+                self.database
+                    .record_for_path(&source_path)
+                    .ok_or(AssetDatabaseError::UnknownPath(source_path))
+            }
+            AssetRef::StableId(id) => self
+                .database
+                .record_for_stable_id(*id)
+                .ok_or(AssetDatabaseError::UnknownStableId(*id)),
+            AssetRef::Product(reference) => self
+                .database
+                .record_for_stable_id(reference.source())
+                .ok_or(AssetDatabaseError::UnknownStableId(reference.source())),
+        }
     }
 }
 
@@ -405,12 +445,12 @@ mod insertion_tests {
     fn exact_removal_preserves_foreign_records_and_releases_every_identity_index() {
         let own = AssetRecord::new(
             StableAssetId::parse_str("2f0d71c7-14fc-4ed4-b48b-1c61bba8b97f").unwrap(),
-            AssetPath::new("textures/Icon.png").unwrap(),
+            AssetSourcePath::new("textures/Icon.png").unwrap(),
             AssetSourceKind::Image,
         );
         let foreign = AssetRecord::new(
             StableAssetId::parse_str("4e438770-1757-44f0-bbeb-6237cd6768ab").unwrap(),
-            AssetPath::new("textures/foreign.png").unwrap(),
+            AssetSourcePath::new("textures/foreign.png").unwrap(),
             AssetSourceKind::Image,
         );
         let mut database = ProjectAssetDatabase::default();
@@ -432,7 +472,7 @@ mod insertion_tests {
 
         let renamed = AssetRecord::new(
             own.stable_id(),
-            AssetPath::new("textures/icon.png").unwrap(),
+            AssetSourcePath::new("textures/icon.png").unwrap(),
             AssetSourceKind::Image,
         );
         database.insert(renamed.clone()).unwrap();
@@ -445,7 +485,7 @@ mod insertion_tests {
         let second_id = StableAssetId::parse_str("4e438770-1757-44f0-bbeb-6237cd6768ab").unwrap();
         let first = AssetRecord::new(
             first_id,
-            AssetPath::new("textures/Icon.png").unwrap(),
+            AssetSourcePath::new("textures/Icon.png").unwrap(),
             AssetSourceKind::Image,
         );
         let mut database = ProjectAssetDatabase::default();
@@ -458,7 +498,7 @@ mod insertion_tests {
         assert!(matches!(
             database.validate_insert(&AssetRecord::new(
                 first_id,
-                AssetPath::new("textures/other.png").unwrap(),
+                AssetSourcePath::new("textures/other.png").unwrap(),
                 AssetSourceKind::Image
             )),
             Err(AssetDatabaseError::DuplicateStableId { .. })
@@ -466,7 +506,7 @@ mod insertion_tests {
         assert!(matches!(
             database.validate_insert(&AssetRecord::new(
                 second_id,
-                AssetPath::new("textures/icon.png").unwrap(),
+                AssetSourcePath::new("textures/icon.png").unwrap(),
                 AssetSourceKind::Image
             )),
             Err(AssetDatabaseError::CaseInsensitivePathCollision { .. })
@@ -474,7 +514,7 @@ mod insertion_tests {
         assert_eq!(database, original);
         let accepted = AssetRecord::new(
             second_id,
-            AssetPath::new("textures/new.png").unwrap(),
+            AssetSourcePath::new("textures/new.png").unwrap(),
             AssetSourceKind::Image,
         );
         assert_eq!(database.validate_insert(&accepted), Ok(()));

@@ -11,12 +11,12 @@ use std::{
 use nara_app::{App, CoreStage};
 use nara_asset::{
     ArtifactFormatVersion, ArtifactLabel, AssetEventKind, AssetEvents, AssetId,
-    AssetLoadGeneration, AssetLoadGenerations, AssetPath, AssetRecord, AssetReloadDiagnostics,
-    AssetReloadRequest, AssetReloadRequestId, AssetReloadRequestKind, AssetServer,
-    AssetSourceChangeKind, AssetSourceChanges, AssetSourceKind, AssetStates, AssetTaskUpdateSet,
-    AssetVersion, Assets, Handle, ImportArtifactKey, ImportArtifactPathError, ImportArtifactRecord,
-    ImportDependencyDigest, ImportProfile, ImportedAssetType, ImporterId, ImporterVersion,
-    LoadState, SourceHash, StableAssetId,
+    AssetLoadGeneration, AssetLoadGenerations, AssetPath, AssetPathScope, AssetRecord,
+    AssetReloadDiagnostics, AssetReloadRequest, AssetReloadRequestId, AssetReloadRequestKind,
+    AssetServer, AssetSourceChangeKind, AssetSourceChanges, AssetSourceKind, AssetSourcePath,
+    AssetStates, AssetTaskUpdateSet, AssetVersion, Assets, Handle, ImportArtifactKey,
+    ImportArtifactPathError, ImportArtifactRecord, ImportDependencyDigest, ImportProfile,
+    ImportedAssetType, ImporterId, ImporterVersion, LoadState, SourceHash, StableAssetId,
 };
 #[cfg(feature = "serde")]
 use nara_asset::{AssetMeta, AssetMetaIdentity};
@@ -49,9 +49,13 @@ mod activity_scopes;
 #[path = "tests/recovery_continuity.rs"]
 mod recovery_continuity;
 
+#[cfg(feature = "serde")]
+#[path = "tests/source_scopes.rs"]
+mod source_scopes;
+
 enum ImagePipelineEdit {
     SourceChange {
-        path: AssetPath,
+        path: AssetSourcePath,
         kind: AssetSourceChangeKind,
     },
     #[cfg(feature = "serde")]
@@ -298,9 +302,14 @@ fn image_record(path: &str) -> AssetRecord {
 fn image_record_with_id(path: &str, stable_id: StableAssetId) -> AssetRecord {
     AssetRecord::new(
         stable_id,
-        AssetPath::new(path).unwrap(),
+        AssetSourcePath::new(path).unwrap(),
         AssetSourceKind::Image,
     )
+}
+
+#[cfg(feature = "serde")]
+fn root_alias(record: &AssetRecord) -> AssetPath {
+    AssetPathScope::ROOT.relativize(record.path()).unwrap()
 }
 
 fn bounded_task_config(io_workers: usize, io_pending: usize) -> TaskPoolConfig {
@@ -459,7 +468,7 @@ struct ExpectedDiagnosticField {
 #[derive(Debug)]
 struct ImageDiagnosticCase {
     name: String,
-    path: AssetPath,
+    path: AssetSourcePath,
     error: ImageReloadError,
     code: &'static str,
     summary: &'static str,
@@ -479,7 +488,7 @@ impl ImageDiagnosticCase {
         expected.extend(fields);
         Self {
             name: name.into(),
-            path: AssetPath::new(SAFE_DIAGNOSTIC_ASSET_PATH).unwrap(),
+            path: AssetSourcePath::new(SAFE_DIAGNOSTIC_ASSET_PATH).unwrap(),
             error,
             code,
             summary,
@@ -548,7 +557,7 @@ fn image_reload_diagnostic_matrix_preserves_codes_and_typed_privacy_fields() {
         ImageDiagnosticCase::new(
             "missing-source-extension",
             ImageReloadError::Import(ImageImportError::MissingSourceExtension {
-                path: AssetPath::new("textures/player").unwrap(),
+                path: AssetSourcePath::new("textures/player").unwrap(),
             }),
             "image.import-source-extension-missing",
             "Image source extension is missing",
@@ -834,7 +843,7 @@ fn image_reload_diagnostic_matrix_preserves_codes_and_typed_privacy_fields() {
 
     cases.push(ImageDiagnosticCase {
         name: "sensitive-asset-path-falls-back-to-redaction".to_owned(),
-        path: AssetPath::new("textures/secret-token.png").unwrap(),
+        path: AssetSourcePath::new("textures/secret-token.png").unwrap(),
         error: ImageReloadError::MissingSourceDirectory,
         code: "image.reload-source-authority-missing",
         summary: "Image source authority is absent",
@@ -848,7 +857,7 @@ fn image_reload_diagnostic_matrix_preserves_codes_and_typed_privacy_fields() {
 
 #[test]
 fn image_reload_diagnostic_sinks_hide_upstream_host_and_decoder_detail_canaries() {
-    let path = AssetPath::new(SAFE_DIAGNOSTIC_ASSET_PATH).unwrap();
+    let path = AssetSourcePath::new(SAFE_DIAGNOSTIC_ASSET_PATH).unwrap();
     let host_path_error = ImageReloadError::Import(ImageImportError::ArtifactPath(
         ImportArtifactPathError::OutsideImportCache {
             path: HOST_PATH_DETAIL_CANARY.to_owned(),
@@ -2482,7 +2491,7 @@ fn image_plugin_coalesced_source_and_metadata_changes_use_the_latest_recipe() {
         let metadata = AssetMeta::new(
             AssetMetaIdentity::new(
                 record.stable_id(),
-                record.path().clone(),
+                root_alias(&record),
                 record.source_kind().clone(),
             ),
             settings,
@@ -2567,7 +2576,7 @@ fn desired_metadata_survives_cross_frame_supersession_failure_and_queue_rejectio
         let metadata = AssetMeta::new(
             AssetMetaIdentity::new(
                 record.stable_id(),
-                record.path().clone(),
+                root_alias(&record),
                 record.source_kind().clone(),
             ),
             settings,
@@ -2745,7 +2754,7 @@ fn public_reimport_supersedes_retained_reload_settings() {
             let metadata = AssetMeta::new(
                 AssetMetaIdentity::new(
                     record.stable_id(),
-                    record.path().clone(),
+                    root_alias(&record),
                     record.source_kind().clone(),
                 ),
                 ImageImportSettings::default(),
@@ -2940,7 +2949,7 @@ fn rejected_remove_revokes_retained_desired_before_request_admission() {
         let metadata = AssetMeta::new(
             AssetMetaIdentity::new(
                 record.stable_id(),
-                record.path().clone(),
+                root_alias(&record),
                 record.source_kind().clone(),
             ),
             settings,
@@ -3043,7 +3052,7 @@ fn rejected_remove_and_metadata_requests_preserve_ordered_readmission() {
             let identity = match trajectory {
                 "wrong-stable-id" => AssetMetaIdentity::new(
                     StableAssetId::parse_str("3f0d71c7-14fc-4ed4-b48b-1c61bba8b97f").unwrap(),
-                    record.path().clone(),
+                    root_alias(&record),
                     record.source_kind().clone(),
                 ),
                 "wrong-path" => AssetMetaIdentity::new(
@@ -3053,12 +3062,12 @@ fn rejected_remove_and_metadata_requests_preserve_ordered_readmission() {
                 ),
                 "wrong-kind" => AssetMetaIdentity::new(
                     record.stable_id(),
-                    record.path().clone(),
+                    root_alias(&record),
                     AssetSourceKind::Scene,
                 ),
                 _ => AssetMetaIdentity::new(
                     record.stable_id(),
-                    record.path().clone(),
+                    root_alias(&record),
                     record.source_kind().clone(),
                 ),
             };
@@ -3203,7 +3212,7 @@ fn rejected_remove_and_metadata_requests_preserve_ordered_readmission() {
                 let metadata = AssetMeta::new(
                     AssetMetaIdentity::new(
                         record.stable_id(),
-                        record.path().clone(),
+                        root_alias(&record),
                         record.source_kind().clone(),
                     ),
                     settings,
@@ -3284,7 +3293,7 @@ fn public_metadata_observation_invalidates_old_task_and_retained_recipe() {
     let initial_metadata = AssetMeta::new(
         AssetMetaIdentity::new(
             record.stable_id(),
-            record.path().clone(),
+            root_alias(&record),
             record.source_kind().clone(),
         ),
         ImageImportSettings::default(),
@@ -3320,7 +3329,7 @@ fn public_metadata_observation_invalidates_old_task_and_retained_recipe() {
     let metadata = AssetMeta::new(
         AssetMetaIdentity::new(
             record.stable_id(),
-            record.path().clone(),
+            root_alias(&record),
             record.source_kind().clone(),
         ),
         settings,
@@ -3436,7 +3445,7 @@ fn image_plugin_coalesced_removal_and_recreation_preserves_metadata_dirtiness() 
     let metadata = AssetMeta::new(
         AssetMetaIdentity::new(
             record.stable_id(),
-            record.path().clone(),
+            root_alias(&record),
             record.source_kind().clone(),
         ),
         settings,
@@ -3558,7 +3567,7 @@ fn removed_image_recovery_survives_repeated_capacity_rejection_with_or_without_a
             let metadata = AssetMeta::new(
                 AssetMetaIdentity::new(
                     record.stable_id(),
-                    record.path().clone(),
+                    root_alias(&record),
                     record.source_kind().clone(),
                 ),
                 settings,
@@ -3707,7 +3716,7 @@ fn image_plugin_recovers_a_removed_image_from_same_identity_metadata() {
     let metadata = AssetMeta::new(
         AssetMetaIdentity::new(
             record.stable_id(),
-            record.path().clone(),
+            root_alias(&record),
             record.source_kind().clone(),
         ),
         settings,
@@ -3848,7 +3857,7 @@ fn image_plugin_removed_image_recovery_rejects_a_post_resolution_state_write() {
     let metadata = AssetMeta::new(
         AssetMetaIdentity::new(
             record.stable_id(),
-            record.path().clone(),
+            root_alias(&record),
             record.source_kind().clone(),
         ),
         ImageImportSettings::new(ImageColorSpace::Linear),
@@ -3950,7 +3959,7 @@ fn image_plugin_removal_cannot_mint_recovery_after_a_post_resolution_state_write
     let metadata = AssetMeta::new(
         AssetMetaIdentity::new(
             record.stable_id(),
-            record.path().clone(),
+            root_alias(&record),
             record.source_kind().clone(),
         ),
         settings,
@@ -4034,7 +4043,7 @@ fn image_plugin_removal_does_not_authorize_an_unusable_or_empty_image() {
         let metadata = AssetMeta::new(
             AssetMetaIdentity::new(
                 record.stable_id(),
-                record.path().clone(),
+                root_alias(&record),
                 record.source_kind().clone(),
             ),
             ImageImportSettings::new(ImageColorSpace::Linear),
@@ -4109,7 +4118,7 @@ fn image_plugin_removed_image_recovery_cannot_bypass_metadata_identity() {
     let mismatched_metadata = AssetMeta::new(
         AssetMetaIdentity::new(
             StableAssetId::parse_str("3f0d71c7-14fc-4ed4-b48b-1c61bba8b97f").unwrap(),
-            record.path().clone(),
+            root_alias(&record),
             record.source_kind().clone(),
         ),
         ImageImportSettings::new(ImageColorSpace::Linear),
@@ -4150,7 +4159,7 @@ fn image_plugin_removed_image_recovery_cannot_bypass_metadata_identity() {
     let valid_metadata = AssetMeta::new(
         AssetMetaIdentity::new(
             record.stable_id(),
-            record.path().clone(),
+            root_alias(&record),
             record.source_kind().clone(),
         ),
         settings,
@@ -4299,7 +4308,7 @@ fn image_plugin_meta_reload_preserves_last_good_but_revokes_changed_identity() {
     let metadata = AssetMeta::new(
         AssetMetaIdentity::new(
             record.stable_id(),
-            record.path().clone(),
+            root_alias(&record),
             record.source_kind().clone(),
         ),
         linear,
@@ -6584,6 +6593,20 @@ fn app_with_image_plugin_configuration(
     task_pools: TaskPools,
     plugin: ImageSourcePlugin,
 ) -> App {
+    app_with_image_source_directory(
+        image_source_directory(asset_root),
+        records,
+        task_pools,
+        plugin,
+    )
+}
+
+fn app_with_image_source_directory(
+    source_directory: ImageSourceDirectory,
+    records: impl IntoIterator<Item = AssetRecord>,
+    task_pools: TaskPools,
+    plugin: ImageSourcePlugin,
+) -> App {
     let mut app = App::new();
     app.insert_resource(task_pools).unwrap();
     app.init_resource::<ImagePipelinePort>().unwrap();
@@ -6600,7 +6623,7 @@ fn app_with_image_plugin_configuration(
         (ImagePlugin, ImagePreparePlugin),
     ))
     .unwrap();
-    app.add_plugins(plugin.with_source_directory(image_source_directory(asset_root)))
+    app.add_plugins(plugin.with_source_directory(source_directory))
         .unwrap();
     {
         let mut database = app
@@ -6620,7 +6643,7 @@ fn image_source_directory(path: &Path) -> ImageSourceDirectory {
         HostCapabilityOptions::new(CapabilityRights::ReadOnly, TrustMode::TrustedLocal),
     )
     .unwrap();
-    ImageSourceDirectory::new(directory)
+    ImageSourceDirectory::new(directory, AssetPathScope::ROOT)
 }
 
 fn host_directory(path: &Path) -> fs::File {

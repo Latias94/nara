@@ -7,10 +7,10 @@ use std::{
 };
 
 use nara_asset::{
-    ArtifactFormatVersion, ArtifactLabel, AssetPath, AssetRecord, AssetServer, AssetStates,
-    AssetVersion, Assets, Handle, ImportArtifactKey, ImportArtifactPathError, ImportArtifactRecord,
-    ImportDependencyDigest, ImportProfile, ImportedAssetType, ImporterId, ImporterVersion,
-    SourceHash,
+    ArtifactFormatVersion, ArtifactLabel, AssetPath, AssetPathScope, AssetRecord, AssetServer,
+    AssetSourcePath, AssetStates, AssetVersion, Assets, Handle, ImportArtifactKey,
+    ImportArtifactPathError, ImportArtifactRecord, ImportDependencyDigest, ImportProfile,
+    ImportedAssetType, ImporterId, ImporterVersion, SourceHash,
 };
 use nara_ecs::Resource;
 use nara_fs::{
@@ -176,7 +176,7 @@ impl std::error::Error for ImageImporterCreateError {}
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ImageImportError {
     MissingSourceExtension {
-        path: AssetPath,
+        path: AssetSourcePath,
     },
     UnsupportedFormat {
         extension: String,
@@ -273,21 +273,37 @@ impl std::error::Error for ImageImportError {}
 
 pub struct ImageSourceDirectory {
     directory: DirectoryCapability,
+    scope: AssetPathScope,
 }
 
 impl ImageSourceDirectory {
+    /// Binds one narrow directory capability to its canonical logical source scope.
     #[must_use]
-    pub fn new(directory: DirectoryCapability) -> Self {
-        Self { directory }
+    pub fn new(directory: DirectoryCapability, scope: AssetPathScope) -> Self {
+        Self { directory, scope }
+    }
+
+    #[must_use]
+    pub const fn scope(&self) -> &AssetPathScope {
+        &self.scope
+    }
+
+    fn local_path(&self, record: &AssetRecord) -> Result<AssetPath, ImageImportError> {
+        self.scope
+            .relativize(record.path())
+            .ok_or(ImageImportError::Source {
+                stage: ImageImportStage::SourceOpen,
+                kind: ImageSourceFailureKind::AuthorityRejected,
+            })
     }
 
     pub fn open(&self, record: &AssetRecord) -> Result<FileCapability, ImageImportError> {
-        let path = RelativePath::new(record.path().as_str()).map_err(|error| {
-            ImageImportError::Source {
+        let local_path = self.local_path(record)?;
+        let path =
+            RelativePath::new(local_path.as_str()).map_err(|error| ImageImportError::Source {
                 stage: ImageImportStage::SourceOpen,
                 kind: map_path_error(error),
-            }
-        })?;
+            })?;
         self.directory
             .open_file(&path)
             .map_err(|error| map_fs_error(ImageImportStage::SourceOpen, error))
@@ -298,7 +314,8 @@ impl ImageSourceDirectory {
         &self,
         record: &AssetRecord,
     ) -> Result<Vec<u8>, ImageImportError> {
-        let path = RelativePath::new(record.path().meta_path()).map_err(|error| {
+        let local_path = self.local_path(record)?;
+        let path = RelativePath::new(local_path.meta_path()).map_err(|error| {
             ImageImportError::Source {
                 stage: ImageImportStage::SourceOpen,
                 kind: map_path_error(error),
@@ -321,6 +338,7 @@ impl Debug for ImageSourceDirectory {
         formatter
             .debug_struct("ImageSourceDirectory")
             .field("directory_identity", &self.directory.identity())
+            .field("scope", &self.scope)
             .finish_non_exhaustive()
     }
 }
@@ -854,7 +872,7 @@ static IMAGE_OUTPUT_ASSET_TYPE: LazyLock<ImportedAssetType> = LazyLock::new(|| {
 const IMAGE_IMPORTER_VERSION: ImporterVersion = ImporterVersion::new(3);
 const IMAGE_ARTIFACT_FORMAT_VERSION: ArtifactFormatVersion = ArtifactFormatVersion::new(1);
 
-fn validate_extension(path: &AssetPath) -> Result<(), ImageImportError> {
+fn validate_extension(path: &AssetSourcePath) -> Result<(), ImageImportError> {
     let file_name = path.as_str().rsplit('/').next().unwrap_or(path.as_str());
     let Some((_, extension)) = file_name.rsplit_once('.') else {
         return Err(ImageImportError::MissingSourceExtension { path: path.clone() });

@@ -41,14 +41,14 @@ impl SceneProjection {
         world: &mut World,
         registry: &ComponentRegistry,
         candidate: &ExpandedSceneCandidate,
-        database: &ProjectAssetDatabase,
+        asset_resolution: AssetReferenceResolver<'_>,
     ) -> SceneSpawnReport {
         let report = SceneSpawner::new().spawn_with_asset_context_and_product(
             world,
             registry,
             candidate,
             &self.occurrence,
-            Some(database),
+            Some(asset_resolution),
             SceneIdentityCommit::Projection(self.current.as_ref()),
             None,
         );

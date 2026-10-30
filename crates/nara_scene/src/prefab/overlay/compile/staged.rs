@@ -975,7 +975,7 @@ where
             self.context.diagnostics.push(with_asset_ref(
                 diagnostic_error(
                     "scene.prefab-source-identity-invalid",
-                    "Primary product selection requires a matching admitted stable Prefab source",
+                    "Primary product selection requires a matching admitted Prefab source association",
                 ),
                 "asset-ref",
                 &request,

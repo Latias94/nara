@@ -12,7 +12,8 @@ use std::{
 use std::fs::File;
 
 use nara_asset::{
-    AssetMeta, AssetMetaIdentity, AssetPath, AssetRef, AssetSourceKind, StableAssetId,
+    AssetMeta, AssetMetaIdentity, AssetPath, AssetRef, AssetSourceKind, AssetSourcePath,
+    StableAssetId,
 };
 use nara_fs::{
     CapabilityRights, DirectoryCapability, HostCapabilityOptions, RelativePath, TrustMode,
@@ -195,8 +196,14 @@ fn warmed_loader_rechecks_duplicate_identity_and_changed_delivery_source() {
         candidate.settings().paths.assets.clone(),
         candidate.settings().paths.prefabs.clone(),
     ]);
-    let path = context
-        .resolve_reference_path(&AssetRef::StableId(stable_id(0)), &AssetSourceKind::Prefab)
+    context.asset_scope = super::super::source_scope(&candidate.settings().paths.assets).unwrap();
+    context.prefab_scope = super::super::source_scope(&candidate.settings().paths.prefabs).unwrap();
+    let (path, _path_work) = context
+        .resolve_reference_path(
+            &AssetRef::StableId(stable_id(0)),
+            &AssetSourceKind::Prefab,
+            &candidate.settings().paths.prefabs,
+        )
         .unwrap();
     let metadata_path = project.root.join(format!("prefabs/{}.meta", path.as_str()));
     let mut metadata = fs::read(&metadata_path).unwrap();
@@ -204,7 +211,7 @@ fn warmed_loader_rechecks_duplicate_identity_and_changed_delivery_source() {
     fs::write(&metadata_path, &metadata).unwrap();
     let error = context
         .verify_catalogued_metadata(
-            &path,
+            &context.prefab_scope.resolve(&path),
             &candidate.settings().paths.prefabs,
             nara_fs::ContentDigest::of_bytes(&metadata),
         )
@@ -326,6 +333,8 @@ fn catalogue_capture_and_scene_copy_reject_budget_pressure_without_retaining_wor
         candidate.settings().paths.assets.clone(),
         candidate.settings().paths.prefabs.clone(),
     ]);
+    context.asset_scope = super::super::source_scope(&candidate.settings().paths.assets).unwrap();
+    context.prefab_scope = super::super::source_scope(&candidate.settings().paths.prefabs).unwrap();
     context.ensure_reference_catalogue().unwrap();
     let host = loader.budget_host();
     let mut pressure = host.reserve();
@@ -373,7 +382,7 @@ fn lazy_loader_measures_selected_prefabs_and_reuses_the_catalogue_for_repeated_e
     let key = |index| {
         SourceDocumentKey::project_location(
             "257bb27b-5c5f-559d-8283-f498450385be".parse().unwrap(),
-            AssetPath::new(format!("prefabs/{}", prefab_path(index))).unwrap(),
+            AssetSourcePath::new(format!("prefabs/{}", prefab_path(index))).unwrap(),
             SourceDocumentKind::Prefab,
         )
     };
@@ -452,7 +461,7 @@ fn lazy_loader_measures_selected_prefabs_and_reuses_the_catalogue_for_repeated_e
             .map(|prefab| prefab.path().clone())
             .collect::<Vec<_>>(),
         (0..2)
-            .map(|index| AssetPath::new(prefab_path(index)).unwrap())
+            .map(|index| AssetSourcePath::new(format!("prefabs/{}", prefab_path(index))).unwrap())
             .collect::<Vec<_>>()
     );
     assert_eq!(snapshot.expanded_scene().entities.len(), 6);

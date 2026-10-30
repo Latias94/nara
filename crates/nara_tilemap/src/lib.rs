@@ -4,7 +4,10 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use nara_app::{App, Plugin, PluginError, PluginPreflightContext};
-use nara_asset::{AssetRef, AssetRefError, AssetServer, AssetSourceKind, Assets, Handle};
+use nara_asset::{
+    AssetRecord, AssetRef, AssetRefError, AssetServer, AssetSourceKind, AssetSourcePath, Assets,
+    Handle,
+};
 use nara_core::{Color, Vec2};
 use nara_ecs::Component;
 #[cfg(test)]
@@ -641,6 +644,7 @@ pub fn register_tilemap_components(
                             )
                         })?,
                         handle,
+                        context.asset_path_scope(),
                         context.asset_ref_export_policy(),
                     )
                     .map(|reference| nara_reflect::encode_asset_reference_value(&reference))
@@ -754,11 +758,15 @@ fn tilemap_fields() -> [ComponentFieldSchema; 7] {
 
 enum PreparedTileset {
     Resolved(Handle<TileSet>),
-    Deferred(AssetRef),
+    DeferredPath(AssetSourcePath),
+    DeferredRecord(AssetRecord),
 }
 
 fn prepared_tileset_requires_asset_server(tileset: &Option<PreparedTileset>) -> bool {
-    matches!(tileset, Some(PreparedTileset::Deferred(_)))
+    matches!(
+        tileset,
+        Some(PreparedTileset::DeferredPath(_) | PreparedTileset::DeferredRecord(_))
+    )
 }
 
 fn resolve_prepared_tileset_without_asset_server(
@@ -767,9 +775,11 @@ fn resolve_prepared_tileset_without_asset_server(
     match tileset {
         None => Ok(None),
         Some(PreparedTileset::Resolved(handle)) => Ok(Some(handle)),
-        Some(PreparedTileset::Deferred(_)) => Err(ComponentCodecError::Message(
-            "prepared tilemap unexpectedly requires AssetServer".to_string(),
-        )),
+        Some(PreparedTileset::DeferredPath(_) | PreparedTileset::DeferredRecord(_)) => {
+            Err(ComponentCodecError::Message(
+                "prepared tilemap unexpectedly requires AssetServer".to_string(),
+            ))
+        }
     }
 }
 
@@ -809,7 +819,7 @@ fn prepare_tileset_handle(
     field: &str,
     asset_ref: AssetRef,
 ) -> Result<PreparedTileset, ComponentCodecError> {
-    if context.project_asset_database().is_some()
+    if context.asset_resolution().is_some()
         && let Some(reference) = asset_ref.as_product()
         && !asset_ref.is_primary()
     {
@@ -818,6 +828,17 @@ fn prepare_tileset_handle(
             &asset_ref,
             AssetRefError::UnsupportedProductSelection(reference),
         ));
+    }
+    if let AssetRef::Path(path) = &asset_ref {
+        let observed = context
+            .asset_path_scope()
+            .prefix()
+            .map_or(0, |prefix| prefix.as_str().len().saturating_add(1))
+            .saturating_add(path.as_str().len());
+        let maximum = context.materialization_limits().bytes().get();
+        if observed > maximum {
+            return Err(ComponentCodecError::MaterializationByteLimit { observed, maximum });
+        }
     }
     let expected_source_kind = tileset_asset_source_kind();
     if let Some(result) =
@@ -828,25 +849,33 @@ fn prepare_tileset_handle(
             .map_err(|error| invalid_asset_ref(field, &asset_ref, error));
     }
 
-    if let Some(result) = context.validate_asset_ref_with_kind(&asset_ref, &expected_source_kind) {
-        return match result {
-            Ok(()) => Ok(PreparedTileset::Deferred(asset_ref)),
-            Err(error) => Err(invalid_asset_ref(field, &asset_ref, error)),
-        };
+    if let Some(resolver) = context.asset_resolution() {
+        let record = asset_ref
+            .validate_with_database_as(resolver, &expected_source_kind)
+            .map_err(|error| invalid_asset_ref(field, &asset_ref, error))?;
+        let observed = record.path().as_str().len();
+        let maximum = context.materialization_limits().bytes().get();
+        if observed > maximum {
+            return Err(ComponentCodecError::MaterializationByteLimit { observed, maximum });
+        }
+        return Ok(PreparedTileset::DeferredRecord(record.clone()));
     }
 
-    if let Some(stable_id) = asset_ref
-        .as_stable_id()
-        .or_else(|| asset_ref.as_product().map(|reference| reference.source()))
-    {
-        return Err(invalid_asset_ref(
+    match &asset_ref {
+        AssetRef::Path(path) => Ok(PreparedTileset::DeferredPath(
+            context.asset_path_scope().resolve(path),
+        )),
+        AssetRef::StableId(id) => Err(invalid_asset_ref(
             field,
             &asset_ref,
-            AssetRefError::MissingProjectDatabase(stable_id),
-        ));
+            AssetRefError::MissingProjectDatabase(*id),
+        )),
+        AssetRef::Product(reference) => Err(invalid_asset_ref(
+            field,
+            &asset_ref,
+            AssetRefError::MissingProjectDatabase(reference.source()),
+        )),
     }
-
-    Ok(PreparedTileset::Deferred(asset_ref))
 }
 
 fn tileset_asset_source_kind() -> AssetSourceKind {
@@ -860,23 +889,27 @@ fn resolve_prepared_tileset(
     match tileset {
         None => Ok(None),
         Some(PreparedTileset::Resolved(handle)) => Ok(Some(handle)),
-        Some(PreparedTileset::Deferred(tileset_ref)) => {
-            resolve_optional_tileset(context, Some(&tileset_ref))
-        }
+        Some(PreparedTileset::DeferredPath(path)) => context
+            .reserve_asset_path(&path)
+            .map(Some)
+            .map_err(|error| {
+                ComponentCodecError::invalid_asset_ref(
+                    "tileset.value",
+                    path.as_str(),
+                    error.to_string(),
+                )
+            }),
+        Some(PreparedTileset::DeferredRecord(record)) => context
+            .reserve_asset_record(&record)
+            .map(Some)
+            .map_err(|error| {
+                ComponentCodecError::invalid_asset_ref(
+                    "tileset.value",
+                    record.path().as_str(),
+                    error.to_string(),
+                )
+            }),
     }
-}
-
-fn resolve_optional_tileset(
-    context: &mut ComponentApplyContext,
-    tileset_ref: Option<&AssetRef>,
-) -> Result<Option<Handle<TileSet>>, ComponentCodecError> {
-    let Some(tileset_ref) = tileset_ref else {
-        return Ok(None);
-    };
-    context
-        .resolve_asset_ref::<TileSet>(tileset_ref)
-        .map(Some)
-        .map_err(|error| invalid_asset_ref("tileset.value", tileset_ref, error))
 }
 
 fn invalid_asset_ref(
@@ -1064,7 +1097,7 @@ pub mod prelude {
 mod tests {
     use super::*;
     use nara_asset::{
-        AssetPath, AssetProductRef, AssetRecord, AssetSourceKind, ImportedProductId,
+        AssetProductRef, AssetRecord, AssetSourceKind, AssetSourcePath, ImportedProductId,
         ProjectAssetDatabase, StableAssetId,
     };
     use nara_reflect::ComponentDecodeContext;
@@ -1284,7 +1317,7 @@ mod tests {
             let mut asset_server = AssetServer::new();
             let prepared = {
                 let mut context = ComponentDecodeContext::with_asset_server(&mut asset_server)
-                    .with_project_asset_database(&database);
+                    .with_asset_resolution(database.resolver(&nara_asset::AssetPathScope::ROOT));
 
                 let prepared = snapshot
                     .preflight_component_with_context(
@@ -1304,10 +1337,70 @@ mod tests {
             let tilemap = world.get::<Tilemap>(entity).unwrap();
             let tileset = tilemap.tileset.unwrap();
             assert_eq!(
-                asset_server.path(tileset.id()),
+                asset_server.path(tileset.id()).map(|path| path.as_str()),
                 Some("tilesets/terrain.ron")
             );
             assert_eq!(asset_server.stable_id(tileset.id()), Some(stable_id));
+        }
+    }
+
+    #[test]
+    fn deferred_tilemap_decode_keeps_source_scope_and_exports_local_aliases() {
+        let scope = nara_asset::AssetPathScope::under(AssetSourcePath::new("game/art").unwrap());
+        let database = test_database(
+            stable_id("2f0d71c7-14fc-4ed4-b48b-1c61bba8b97f"),
+            "game/art/terrain.ron",
+        );
+        let registry = frozen_tilemap_registry();
+        let snapshot = registry.snapshot().unwrap();
+        for with_catalogue in [false, true] {
+            let mut context = ComponentDecodeContext::new().with_asset_path_scope(&scope);
+            if with_catalogue {
+                context = context.with_asset_resolution(database.resolver(&scope));
+            }
+            let prepared = snapshot
+                .preflight_component_with_context(
+                    &tilemap_type_id(),
+                    &tilemap_value(AssetRef::path("terrain.ron").unwrap()),
+                    &mut context,
+                )
+                .unwrap();
+            let mut world = World::new();
+            let entity = world.spawn_empty().id();
+            prepared.apply(&mut world, entity).unwrap();
+            let handle = world.get::<Tilemap>(entity).unwrap().tileset.unwrap();
+            assert_eq!(
+                world
+                    .resource::<AssetServer>()
+                    .path(handle.id())
+                    .unwrap()
+                    .as_str(),
+                "game/art/terrain.ron"
+            );
+            let encode = nara_reflect::ComponentEncodeContext::new().with_asset_path_scope(&scope);
+            let value = snapshot
+                .encode_component_with_context(&tilemap_type_id(), &world, entity, &encode)
+                .unwrap()
+                .unwrap();
+            assert_eq!(
+                value.field("tileset").unwrap(),
+                &nara_reflect::encode_asset_reference_value(
+                    &AssetRef::path("terrain.ron").unwrap()
+                )
+            );
+            let mut reopened = ComponentDecodeContext::with_asset_server(
+                world.resource_mut::<AssetServer>().into_inner(),
+            )
+            .with_asset_path_scope(&scope);
+            let prepared = snapshot
+                .preflight_component_with_context(&tilemap_type_id(), &value, &mut reopened)
+                .unwrap();
+            let restored = world.spawn_empty().id();
+            prepared.apply(&mut world, restored).unwrap();
+            assert_eq!(
+                world.get::<Tilemap>(restored).unwrap().tileset,
+                Some(handle)
+            );
         }
     }
 
@@ -1349,7 +1442,7 @@ mod tests {
             } else {
                 ComponentDecodeContext::new()
             }
-            .with_project_asset_database(&database);
+            .with_asset_resolution(database.resolver(&nara_asset::AssetPathScope::ROOT));
             let result = snapshot.preflight_component_with_context(
                 &tilemap_type_id(),
                 &tilemap_value(tileset.clone()),
@@ -1552,7 +1645,7 @@ mod tests {
         let database = test_database(known_stable_id, "tilesets/terrain.ron");
         let mut asset_server = AssetServer::new();
         let mut context = ComponentDecodeContext::with_asset_server(&mut asset_server)
-            .with_project_asset_database(&database);
+            .with_asset_resolution(database.resolver(&nara_asset::AssetPathScope::ROOT));
         let registry = frozen_tilemap_registry();
         let snapshot = registry.snapshot().unwrap();
 
@@ -1581,13 +1674,13 @@ mod tests {
         database
             .insert(AssetRecord::new(
                 stable_id,
-                AssetPath::new("textures/terrain.png").unwrap(),
+                AssetSourcePath::new("textures/terrain.png").unwrap(),
                 AssetSourceKind::Image,
             ))
             .unwrap();
         let mut asset_server = AssetServer::new();
         let mut context = ComponentDecodeContext::with_asset_server(&mut asset_server)
-            .with_project_asset_database(&database);
+            .with_asset_resolution(database.resolver(&nara_asset::AssetPathScope::ROOT));
         let registry = frozen_tilemap_registry();
         let snapshot = registry.snapshot().unwrap();
 
@@ -1608,7 +1701,8 @@ mod tests {
     fn tilemap_codec_validates_path_refs_when_database_is_present() {
         let stable_id = stable_id("2f0d71c7-14fc-4ed4-b48b-1c61bba8b97f");
         let database = test_database(stable_id, "tilesets/terrain.ron");
-        let mut context = ComponentDecodeContext::new().with_project_asset_database(&database);
+        let mut context = ComponentDecodeContext::new()
+            .with_asset_resolution(database.resolver(&nara_asset::AssetPathScope::ROOT));
         let registry = frozen_tilemap_registry();
         let snapshot = registry.snapshot().unwrap();
 
@@ -1704,7 +1798,7 @@ mod tests {
         database
             .insert(AssetRecord::new(
                 stable_id,
-                AssetPath::new(path).unwrap(),
+                AssetSourcePath::new(path).unwrap(),
                 AssetSourceKind::Other("tileset".to_string()),
             ))
             .unwrap();

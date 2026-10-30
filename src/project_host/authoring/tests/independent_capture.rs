@@ -262,7 +262,10 @@ fn assert_closure(capture: &AuthoringDocumentCapture, prefabs: &[&str], assets: 
             .iter()
             .map(|asset| asset.path().as_str())
             .collect::<Vec<_>>(),
-        assets,
+        assets
+            .iter()
+            .map(|path| format!("assets/{path}"))
+            .collect::<Vec<_>>(),
     );
     let database = capture.asset_database();
     assert_eq!(database.len(), assets.len());
@@ -334,7 +337,7 @@ fn indexed_scene_captures_its_nested_files_without_widening_startup_or_accumulat
     for asset in first.assets() {
         assert_eq!(
             asset.bytes(),
-            fs::read(project.root.join("assets").join(asset.path().as_str())).unwrap(),
+            fs::read(project.root.join(asset.path().as_str())).unwrap(),
         );
     }
     let preview = first
@@ -629,7 +632,7 @@ fn demanded_malformed_files_and_changed_root_or_schema_receipts_are_typed_refusa
             (
                 AuthoringSourceKind::AssetMetadata,
                 AuthoringProjectSourceAdmissionError::AssetMetadataFormat { path, .. },
-            ) => path.as_str() == "leaf.png",
+            ) => path.as_str() == "assets/leaf.png",
             (
                 kind @ (AuthoringSourceKind::Scene
                 | AuthoringSourceKind::ProjectManifest

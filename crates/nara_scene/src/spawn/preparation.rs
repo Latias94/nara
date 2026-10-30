@@ -232,14 +232,14 @@ pub fn prepare_scene(
     registry: &ComponentRegistry,
     candidate: &ExpandedSceneCandidate,
     occurrence: &SceneOccurrenceKey,
-    database: Option<&ProjectAssetDatabase>,
+    asset_resolution: Option<AssetReferenceResolver<'_>>,
 ) -> Result<PreparedScene, SceneSpawnReport> {
     prepare_ordinary_scene(
         world,
         registry,
         candidate,
         occurrence,
-        database,
+        asset_resolution,
         SceneIdentityCommit::Register,
     )
 }
@@ -250,7 +250,7 @@ pub fn prepare_scene_replacement(
     registry: &ComponentRegistry,
     candidate: &ExpandedSceneCandidate,
     current: &SpawnedSceneInstance,
-    database: Option<&ProjectAssetDatabase>,
+    asset_resolution: Option<AssetReferenceResolver<'_>>,
 ) -> Result<PreparedScene, SceneSpawnReport> {
     let occurrence = occurrence_for_instance(world, current)
         .map_err(|error| occurrence_rejection(DiagnosticReport::default(), error))?
@@ -260,7 +260,7 @@ pub fn prepare_scene_replacement(
         registry,
         candidate,
         &occurrence,
-        database,
+        asset_resolution,
         SceneIdentityCommit::Replace(current),
     )
 }
@@ -270,7 +270,7 @@ pub(super) fn prepare_ordinary_scene(
     registry: &ComponentRegistry,
     candidate: &ExpandedSceneCandidate,
     occurrence: &SceneOccurrenceKey,
-    database: Option<&ProjectAssetDatabase>,
+    asset_resolution: Option<AssetReferenceResolver<'_>>,
     target: SceneIdentityCommit<'_>,
 ) -> Result<PreparedScene, SceneSpawnReport> {
     let definition = ScenePreparationDefinition::capture(world, registry)?;
@@ -282,7 +282,7 @@ pub(super) fn prepare_ordinary_scene(
         definition,
         SceneMaterializationInput::Expanded(candidate),
         occurrence,
-        database,
+        asset_resolution,
         target,
         None,
         bindings,
@@ -301,13 +301,13 @@ impl SceneComponentBindings {
         world: &mut World,
         candidate: &ExpandedSceneCandidate,
         occurrence: &SceneOccurrenceKey,
-        database: Option<&ProjectAssetDatabase>,
+        asset_resolution: Option<AssetReferenceResolver<'_>>,
     ) -> Result<PreparedScene, SceneSpawnReport> {
         self.prepare_scene_with_limits(
             world,
             candidate,
             occurrence,
-            database,
+            asset_resolution,
             ComponentValueMaterializationLimits::default(),
         )
     }
@@ -318,14 +318,14 @@ impl SceneComponentBindings {
         world: &mut World,
         candidate: &ExpandedSceneCandidate,
         occurrence: &SceneOccurrenceKey,
-        database: Option<&ProjectAssetDatabase>,
+        asset_resolution: Option<AssetReferenceResolver<'_>>,
         limits: ComponentValueMaterializationLimits,
     ) -> Result<PreparedScene, SceneSpawnReport> {
         self.prepare_selected_scene(
             world,
             SceneMaterializationInput::Expanded(candidate),
             occurrence,
-            database,
+            asset_resolution,
             SceneIdentityCommit::Register,
             limits,
         )
@@ -337,13 +337,13 @@ impl SceneComponentBindings {
         world: &mut World,
         candidate: &ExpandedSceneCandidate,
         current: &SpawnedSceneInstance,
-        database: Option<&ProjectAssetDatabase>,
+        asset_resolution: Option<AssetReferenceResolver<'_>>,
     ) -> Result<PreparedScene, SceneSpawnReport> {
         self.prepare_scene_replacement_with_limits(
             world,
             candidate,
             current,
-            database,
+            asset_resolution,
             ComponentValueMaterializationLimits::default(),
         )
     }
@@ -354,7 +354,7 @@ impl SceneComponentBindings {
         world: &mut World,
         candidate: &ExpandedSceneCandidate,
         current: &SpawnedSceneInstance,
-        database: Option<&ProjectAssetDatabase>,
+        asset_resolution: Option<AssetReferenceResolver<'_>>,
         limits: ComponentValueMaterializationLimits,
     ) -> Result<PreparedScene, SceneSpawnReport> {
         let occurrence = occurrence_for_instance(world, current)
@@ -364,7 +364,7 @@ impl SceneComponentBindings {
             world,
             SceneMaterializationInput::Expanded(candidate),
             &occurrence,
-            database,
+            asset_resolution,
             SceneIdentityCommit::Replace(current),
             limits,
         )
@@ -420,7 +420,7 @@ impl SceneComponentBindings {
         world: &mut World,
         candidate: SceneMaterializationInput<'_>,
         occurrence: &SceneOccurrenceKey,
-        database: Option<&ProjectAssetDatabase>,
+        asset_resolution: Option<AssetReferenceResolver<'_>>,
         target: SceneIdentityCommit<'_>,
         limits: ComponentValueMaterializationLimits,
     ) -> Result<PreparedScene, SceneSpawnReport> {
@@ -433,7 +433,7 @@ impl SceneComponentBindings {
             definition,
             candidate,
             occurrence,
-            database,
+            asset_resolution,
             target,
             None,
             asset_bindings,

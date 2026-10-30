@@ -13,8 +13,8 @@ use std::{
 };
 
 use nara_asset::{
-    AssetDomain, AssetEvents, AssetPath, AssetProductRef, AssetRecord, AssetRef, AssetRuntimeError,
-    AssetRuntimeLimits, AssetServer, AssetSourceKind, AssetStates, Assets, Handle,
+    AssetDomain, AssetEvents, AssetProductRef, AssetRecord, AssetRef, AssetRuntimeError,
+    AssetRuntimeLimits, AssetServer, AssetSourceKind, AssetSourcePath, AssetStates, Assets, Handle,
     ImportedProductId, ProjectAssetDatabase, RuntimeAssetCodec, StableAssetId,
 };
 use nara_core::{ByteLimit, FormatKind, FormatVersion, ItemLimit};
@@ -174,6 +174,7 @@ fn register(registry: &mut ComponentRegistry) -> Result<(), ComponentRegistryErr
             let reference = AssetRef::from_handle_with_policy(
                 world.resource::<AssetServer>(),
                 portrait.0,
+                context.asset_path_scope(),
                 context.asset_ref_export_policy(),
             )
             .map_err(|error| ComponentCodecError::Message(error.to_string()))?;
@@ -359,7 +360,7 @@ impl Fixture {
             .preflight_unpublished_import(ImageBytesImportRequest::new(
                 AssetRecord::new(
                     stable(IMAGE_SOURCE),
-                    AssetPath::new(SOURCE_FILE).unwrap(),
+                    AssetSourcePath::new(SOURCE_FILE).unwrap(),
                     AssetSourceKind::Image,
                 ),
                 fs::read(directory.path().join(SOURCE_FILE)).unwrap(),

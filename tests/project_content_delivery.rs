@@ -98,7 +98,7 @@ fn selected_scene_content_is_truthful_without_granting_startup_or_delivery_autho
         second
             .images()
             .iter()
-            .any(|image| image.path().as_str() == SECOND_IMAGE)
+            .any(|image| image.path().as_str() == format!("assets/{SECOND_IMAGE}"))
     );
     assert_eq!(
         second.content_closure().selected_scene_path().as_str(),

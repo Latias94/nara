@@ -9,8 +9,8 @@ use std::{
 
 use nara_app::{App, CoreStage, Plugin, PluginError};
 use nara_asset::{
-    AssetPath, AssetPathError, AssetSourceChange, AssetSourceChangeKind, AssetSourceRoot,
-    AssetTaskUpdateSet,
+    AssetPath, AssetPathError, AssetPathScope, AssetSourceChange, AssetSourceChangeKind,
+    AssetSourceRoot, AssetTaskUpdateSet,
 };
 use nara_ecs::schedule::IntoScheduleConfigs;
 
@@ -27,7 +27,7 @@ pub use queue::{
 };
 
 use observability::drain_asset_watch_events;
-use path::{logical_path, same_lexical_path};
+use path::{local_path, same_lexical_path};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum AssetWatchEventKind {
@@ -226,11 +226,11 @@ impl AssetWatchTranslator {
         path: &Path,
         source_kind: AssetSourceChangeKind,
     ) -> Result<AssetSourceChange, AssetWatchError> {
-        let logical = logical_path(root.root(), path)?;
-        let logical = if let Some(source) = logical.as_str().strip_suffix(".meta") {
+        let local = local_path(root.root(), path)?;
+        let local = if let Some(source) = local.as_str().strip_suffix(".meta") {
             AssetPath::new(source).map_err(AssetWatchError::InvalidLogicalPath)?
         } else {
-            logical
+            local
         };
         let kind = if path
             .file_name()
@@ -244,7 +244,7 @@ impl AssetWatchTranslator {
         } else {
             source_kind
         };
-        Ok(AssetSourceChange::new(logical, kind))
+        Ok(AssetSourceChange::new(root.scope().resolve(&local), kind))
     }
 }
 
@@ -256,7 +256,7 @@ impl AssetWatchTranslator {
 #[must_use]
 pub struct AssetWatchRescan {
     world: nara_ecs::bevy_ecs::world::WorldId,
-    root: PathBuf,
+    root: AssetSourceRoot,
     session: Weak<Mutex<Option<PendingWatchRescan>>>,
 }
 
@@ -313,8 +313,7 @@ impl AssetWatchRescan {
         let root = world
             .get_resource::<AssetSourceRoot>()
             .ok_or(AssetWatchError::RescanRequired)?
-            .root()
-            .to_path_buf();
+            .clone();
         let queue = AssetWatchEventQueue::with_limits(limits);
         let watcher = AssetWatcher::watch_recursive(&root, queue.sender())?;
         let session = Arc::new(Mutex::new(Some(PendingWatchRescan { queue, watcher })));
@@ -331,7 +330,7 @@ impl AssetWatchRescan {
         if world.id() != self.world
             || !world
                 .get_resource::<AssetSourceRoot>()
-                .is_some_and(|root| root.root() == self.root)
+                .is_some_and(|root| root == &self.root)
             || !world
                 .get_resource::<AssetWatchRuntimeStatus>()
                 .is_some_and(|status| status.requires_rescan())
@@ -383,6 +382,7 @@ fn validate_watch_replacement(world: &mut nara_ecs::World) -> Result<(), AssetWa
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct AssetWatchPlugin {
     root: PathBuf,
+    scope: AssetPathScope,
     queue_limits: AssetWatchQueueLimits,
 }
 
@@ -401,10 +401,12 @@ pub const ASSET_WATCH_PLUGIN_DECLARATION: nara_app::PluginDeclaration =
         .shutdown_obligations(&[ASSET_WATCH_SHUTDOWN_OBLIGATION]);
 
 impl AssetWatchPlugin {
+    /// Selects a native watch root and its canonical logical source scope together.
     #[must_use]
-    pub fn new(root: impl Into<PathBuf>) -> Self {
+    pub fn new(root: impl Into<PathBuf>, scope: AssetPathScope) -> Self {
         Self {
             root: root.into(),
+            scope,
             queue_limits: AssetWatchQueueLimits::default(),
         }
     }
@@ -423,30 +425,30 @@ impl Plugin for AssetWatchPlugin {
 
     fn build(&self, app: &mut App) -> Result<(), PluginError> {
         let watch_root = if app.world().contains_resource::<AssetSourceRoot>() {
-            let existing_root = app
-                .world()
-                .resource::<AssetSourceRoot>()
-                .root()
-                .to_path_buf();
-            if !same_lexical_path(&existing_root, &self.root).map_err(|error| {
+            let existing = app.world().resource::<AssetSourceRoot>();
+            if !same_lexical_path(existing.root(), &self.root).map_err(|error| {
                 PluginError::SetupFailed {
                     plugin: ASSET_WATCH_PLUGIN_ID,
                     message: error.to_string(),
                 }
-            })? {
+            })? || existing.scope() != &self.scope
+            {
                 return Err(PluginError::SetupFailed {
                     plugin: ASSET_WATCH_PLUGIN_ID,
                     message: format!(
-                        "asset watch root '{}' does not match AssetSourceRoot '{}'",
+                        "asset watch root '{}' with scope {:?} does not match AssetSourceRoot '{}' with scope {:?}",
                         self.root.display(),
-                        existing_root.display()
+                        self.scope,
+                        existing.root().display(),
+                        existing.scope()
                     ),
                 });
             }
-            existing_root
+            existing.clone()
         } else {
-            app.insert_resource(AssetSourceRoot::new(self.root.clone()))?;
-            self.root.clone()
+            let root = AssetSourceRoot::new(self.root.clone(), self.scope.clone());
+            app.insert_resource(root.clone())?;
+            root
         };
 
         let queue = AssetWatchEventQueue::with_limits(self.queue_limits);

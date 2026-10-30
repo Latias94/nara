@@ -1,6 +1,8 @@
 use std::collections::{BTreeMap, BTreeSet};
 
-use nara_asset::{AssetId, AssetPath, AssetVersion, Handle, ImportSettingsHash, StableAssetId};
+use nara_asset::{
+    AssetId, AssetSourcePath, AssetVersion, Handle, ImportSettingsHash, StableAssetId,
+};
 use nara_fs::{ContentDigest, FileIdentity};
 use nara_image::ImageAsset;
 
@@ -113,7 +115,7 @@ impl EditorImageLastGood {
 
 #[derive(Default)]
 pub(super) struct EditorImageLastGoodStore {
-    images: BTreeMap<AssetPath, EditorImageLastGood>,
+    images: BTreeMap<AssetSourcePath, EditorImageLastGood>,
     changed: bool,
 }
 
@@ -131,21 +133,24 @@ impl EditorImageLastGoodStore {
     }
 
     #[must_use]
-    pub(super) fn get(&self, asset_path: &AssetPath) -> Option<&EditorImageLastGood> {
+    pub(super) fn get(&self, asset_path: &AssetSourcePath) -> Option<&EditorImageLastGood> {
         self.images.get(asset_path)
     }
 
-    pub(super) fn get_mut(&mut self, asset_path: &AssetPath) -> Option<&mut EditorImageLastGood> {
+    pub(super) fn get_mut(
+        &mut self,
+        asset_path: &AssetSourcePath,
+    ) -> Option<&mut EditorImageLastGood> {
         self.images.get_mut(asset_path)
     }
 
-    pub(super) fn iter(&self) -> impl Iterator<Item = (&AssetPath, &EditorImageLastGood)> {
+    pub(super) fn iter(&self) -> impl Iterator<Item = (&AssetSourcePath, &EditorImageLastGood)> {
         self.images.iter()
     }
 
     pub(super) fn remove_if_matches(
         &mut self,
-        asset_path: &AssetPath,
+        asset_path: &AssetSourcePath,
         expected: &EditorImageLastGood,
     ) {
         if self.images.get(asset_path) == Some(expected) {
@@ -155,11 +160,15 @@ impl EditorImageLastGoodStore {
     }
 
     #[must_use]
-    pub(super) fn can_insert(&self, asset_path: &AssetPath) -> bool {
+    pub(super) fn can_insert(&self, asset_path: &AssetSourcePath) -> bool {
         self.images.len() < MAX_LAST_GOOD_IMAGES || self.images.contains_key(asset_path)
     }
 
-    pub(super) fn insert(&mut self, asset_path: AssetPath, image: EditorImageLastGood) -> bool {
+    pub(super) fn insert(
+        &mut self,
+        asset_path: AssetSourcePath,
+        image: EditorImageLastGood,
+    ) -> bool {
         if !self.can_insert(&asset_path) {
             return false;
         }
@@ -179,7 +188,7 @@ impl EditorImageLastGoodStore {
 
     pub(super) fn ineligible_handles(
         &self,
-        mut retain: impl FnMut(&AssetPath, &EditorImageLastGood) -> bool,
+        mut retain: impl FnMut(&AssetSourcePath, &EditorImageLastGood) -> bool,
     ) -> Vec<Handle<ImageAsset>> {
         self.images
             .iter()
@@ -189,7 +198,7 @@ impl EditorImageLastGoodStore {
 
     pub(super) fn retain_catalog_eligible(
         &mut self,
-        mut retain: impl FnMut(&AssetPath, &EditorImageLastGood) -> bool,
+        mut retain: impl FnMut(&AssetSourcePath, &EditorImageLastGood) -> bool,
     ) {
         let previous_len = self.images.len();
         self.images

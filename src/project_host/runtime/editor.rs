@@ -1274,7 +1274,7 @@ impl EditorProjectSession {
     #[cfg(test)]
     pub(crate) fn editor_image_last_good(
         &self,
-        asset_path: &nara_asset::AssetPath,
+        asset_path: &nara_asset::AssetSourcePath,
     ) -> Option<&image_import::EditorImageLastGood> {
         self.image_import.last_good(asset_path)
     }
@@ -1287,7 +1287,12 @@ impl EditorProjectSession {
         let products = receipt
             .products()
             .iter()
-            .map(|product| (product.path().as_str().to_owned(), product.settings()))
+            .map(|product| {
+                (
+                    product.source_path().as_str().to_owned(),
+                    product.settings(),
+                )
+            })
             .collect();
         (receipt.generation().get(), products)
     }
@@ -2720,7 +2725,7 @@ impl EditorProjectSession {
     #[cfg(test)]
     pub(super) fn test_tile_set(
         &self,
-        path: &nara_asset::AssetPath,
+        path: &nara_asset::AssetSourcePath,
     ) -> Option<nara_tilemap::TileSet> {
         self.authoring_runtime.test_tile_set(path)
     }

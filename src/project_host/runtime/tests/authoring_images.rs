@@ -1,4 +1,5 @@
 use super::*;
+use nara_asset::AssetSourcePath;
 
 fn write_editor_tileset(project: &TestProject, image: AssetRef) {
     let source = nara_tilemap::TileSetSource::new(
@@ -172,6 +173,7 @@ fn editor_runtime_edit_keeps_accepted_request_pending_after_post_operation_fault
 fn generic_editor_image_transaction_records_v2_last_good_after_post_operation_fault() {
     let project = editor_tileset_project("image-transaction-post-operation-fault");
     let path = AssetPath::new("textures/a.png").unwrap();
+    let source_path = AssetSourcePath::new("assets/textures/a.png").unwrap();
     project.write_canonical_image(
         path.as_str(),
         "c58dfd3b-6f62-41c9-9d48-357159936609",
@@ -181,7 +183,7 @@ fn generic_editor_image_transaction_records_v2_last_good_after_post_operation_fa
     write_editor_tileset(&project, AssetRef::path(path.as_str()).unwrap());
     let mut editor = open_generic_editor_with_ready_index(&project);
     drive_image_import_host_until_idle(&mut editor);
-    let previous = editor.editor_image_last_good(&path).unwrap().clone();
+    let previous = editor.editor_image_last_good(&source_path).unwrap().clone();
     assert_eq!(previous.version().raw(), 1);
 
     let linear = ImageImportSettings::new(ImageColorSpace::Linear);
@@ -205,7 +207,12 @@ fn generic_editor_image_transaction_records_v2_last_good_after_post_operation_fa
         "{terminal:?}"
     );
     drive_image_import_host_until_idle(&mut editor);
-    assert_image_v2_last_good_after_post_operation_fault(&editor, &path, &previous, &reporter);
+    assert_image_v2_last_good_after_post_operation_fault(
+        &editor,
+        &source_path,
+        &previous,
+        &reporter,
+    );
     assert!(matches!(
         drive_editor_close_to_completion(&mut editor),
         super::super::editor::EditorProjectCloseProgress::Complete(_)
@@ -216,6 +223,7 @@ fn generic_editor_image_transaction_records_v2_last_good_after_post_operation_fa
 fn generic_editor_image_hydration_records_v2_last_good_after_post_operation_fault() {
     let project = editor_tileset_project("image-hydration-post-operation-fault");
     let path = AssetPath::new("textures/a.png").unwrap();
+    let source_path = AssetSourcePath::new("assets/textures/a.png").unwrap();
     project.write_canonical_image(
         path.as_str(),
         "c58dfd3b-6f62-41c9-9d48-357159936609",
@@ -225,7 +233,7 @@ fn generic_editor_image_hydration_records_v2_last_good_after_post_operation_faul
     write_editor_tileset(&project, AssetRef::path(path.as_str()).unwrap());
     let mut editor = open_generic_editor_with_ready_index(&project);
     drive_image_import_host_until_idle(&mut editor);
-    let previous = editor.editor_image_last_good(&path).unwrap().clone();
+    let previous = editor.editor_image_last_good(&source_path).unwrap().clone();
     assert_eq!(previous.version().raw(), 1);
 
     // Preserve the source identity: the refreshed TileSet demand must hydrate a new recipe.
@@ -249,7 +257,12 @@ fn generic_editor_image_hydration_records_v2_last_good_after_post_operation_faul
         ),
         "hydration must not be replaced by an explicit import transaction"
     );
-    assert_image_v2_last_good_after_post_operation_fault(&editor, &path, &previous, &reporter);
+    assert_image_v2_last_good_after_post_operation_fault(
+        &editor,
+        &source_path,
+        &previous,
+        &reporter,
+    );
     assert!(matches!(
         drive_editor_close_to_completion(&mut editor),
         super::super::editor::EditorProjectCloseProgress::Complete(_)
@@ -258,7 +271,7 @@ fn generic_editor_image_hydration_records_v2_last_good_after_post_operation_faul
 
 fn assert_image_v2_last_good_after_post_operation_fault(
     editor: &super::super::editor::EditorProjectSession,
-    path: &AssetPath,
+    path: &AssetSourcePath,
     previous: &super::super::editor::EditorImageLastGood,
     reporter: &RuntimeFaultReporter,
 ) {
@@ -315,14 +328,14 @@ fn generic_editor_reconciles_tileset_latest_dependency_and_revocation_without_a_
     write_editor_tileset(&project, AssetRef::path("textures/a.png").unwrap());
     let mut editor = open_generic_editor_with_ready_index(&project);
     drive_image_import_host_until_idle(&mut editor);
-    let path = AssetPath::new("tilesets/terrain.tileset.ron").unwrap();
+    let path = AssetSourcePath::new("assets/tilesets/terrain.tileset.ron").unwrap();
     let published = editor
         .test_tile_set(&path)
         .expect("TileSet publishes without a preview extent");
     let old_image = published.image_content().unwrap().clone();
     assert!(
         editor
-            .editor_image_last_good(&AssetPath::new("textures/a.png").unwrap())
+            .editor_image_last_good(&AssetSourcePath::new("assets/textures/a.png").unwrap())
             .is_some()
     );
 
@@ -389,7 +402,7 @@ fn generic_editor_reconciles_tileset_latest_dependency_and_revocation_without_a_
     );
     assert!(
         editor
-            .editor_image_last_good(&AssetPath::new("textures/b.png").unwrap())
+            .editor_image_last_good(&AssetSourcePath::new("assets/textures/b.png").unwrap())
             .is_some()
     );
 }
@@ -410,7 +423,7 @@ fn generic_editor_rejects_a_malformed_tileset_before_a_late_image_can_publish() 
     write_editor_tileset(&project, AssetRef::path("textures/a.png").unwrap());
     let mut editor = open_generic_editor_with_ready_index(&project);
     drive_image_import_host_until_idle(&mut editor);
-    let path = AssetPath::new("tilesets/terrain.tileset.ron").unwrap();
+    let path = AssetSourcePath::new("assets/tilesets/terrain.tileset.ron").unwrap();
     let old_image = editor
         .test_tile_set(&path)
         .unwrap()
@@ -515,22 +528,24 @@ fn generic_editor_hydrates_only_referenced_images_and_retains_a_complete_canvas_
     drive_image_import_host_until_idle(&mut editor);
     assert_eq!(
         editor.editor_authoring_image_catalog_facts(),
-        (2, vec![("textures/a-valid.png".to_owned(), linear)])
+        (2, vec![("assets/textures/a-valid.png".to_owned(), linear)])
     );
     assert!(
         editor
-            .editor_image_last_good(&AssetPath::new("textures/a-valid.png").unwrap())
+            .editor_image_last_good(&AssetSourcePath::new("assets/textures/a-valid.png").unwrap())
             .is_some()
     );
     assert!(
         editor
-            .editor_image_last_good(&AssetPath::new("textures/m-unreferenced.png").unwrap())
+            .editor_image_last_good(
+                &AssetSourcePath::new("assets/textures/m-unreferenced.png").unwrap(),
+            )
             .is_none(),
         "an unreferenced canonical image must remain lazy"
     );
     assert!(
         editor
-            .editor_image_last_good(&AssetPath::new("textures/z-invalid.png").unwrap())
+            .editor_image_last_good(&AssetSourcePath::new("assets/textures/z-invalid.png").unwrap())
             .is_none()
     );
     assert!(report_has_code(
@@ -573,9 +588,9 @@ fn generic_editor_hydrates_only_referenced_images_and_retains_a_complete_canvas_
         (
             3,
             vec![
-                ("textures/a-valid.png".to_owned(), linear),
+                ("assets/textures/a-valid.png".to_owned(), linear),
                 (
-                    "textures/m-unreferenced.png".to_owned(),
+                    "assets/textures/m-unreferenced.png".to_owned(),
                     ImageImportSettings::default(),
                 ),
             ],
@@ -606,7 +621,7 @@ fn generic_editor_retires_an_image_when_its_metadata_becomes_invalid() {
     drive_image_import_host_until_idle(&mut editor);
     assert_eq!(
         editor.editor_authoring_image_catalog_facts(),
-        (2, vec![(image_path.to_owned(), settings)])
+        (2, vec![(format!("assets/{image_path}"), settings)])
     );
     editor.set_editor_preview_extent(nara_render::Extent2d::new(320, 240));
     let deadline = Instant::now() + Duration::from_secs(10);
@@ -669,7 +684,7 @@ fn generic_editor_retires_an_image_when_its_metadata_becomes_invalid() {
     );
     assert!(
         editor
-            .editor_image_last_good(&AssetPath::new(image_path).unwrap())
+            .editor_image_last_good(&AssetSourcePath::new(format!("assets/{image_path}")).unwrap())
             .is_none(),
         "invalid metadata must retire the image from the authoring publication"
     );
@@ -710,7 +725,7 @@ fn generic_editor_failed_image_revocation_settles_catalog_and_blocks_metadata_wr
     editor.drive_editor_frame(Duration::ZERO);
     let (_, choices) = editor.editor_authoring_image_catalog_facts();
     let removed = editor
-        .editor_image_last_good(&AssetPath::new(revoked_path).unwrap())
+        .editor_image_last_good(&AssetSourcePath::new(format!("assets/{revoked_path}")).unwrap())
         .is_none();
     let preview_retired = editor.take_editor_preview_candidate().is_none();
     let warning = report_has_code(
@@ -733,7 +748,10 @@ fn generic_editor_failed_image_revocation_settles_catalog_and_blocks_metadata_wr
     assert!(removed);
     assert_eq!(
         choices,
-        vec![(valid_path.to_owned(), ImageImportSettings::default())]
+        vec![(
+            format!("assets/{valid_path}"),
+            ImageImportSettings::default()
+        )]
     );
     assert!(preview_retired);
     assert!(warning);
@@ -824,10 +842,10 @@ fn generic_editor_explicit_image_import_is_admitted_during_background_hydration(
         };
         drive_image_import_host_until_idle(&mut editor);
         let accepted = editor
-            .editor_image_last_good(&AssetPath::new(target).unwrap())
+            .editor_image_last_good(&AssetSourcePath::new(format!("assets/{target}")).unwrap())
             .cloned();
         let queued_restored = editor
-            .editor_image_last_good(&AssetPath::new("textures/z-queued.png").unwrap())
+            .editor_image_last_good(&AssetSourcePath::new("assets/textures/z-queued.png").unwrap())
             .is_some();
         let close = drive_editor_close_to_completion(&mut editor);
         assert!(matches!(
@@ -893,7 +911,7 @@ fn generic_editor_catalog_revocation_cancels_a_late_image_import_even_after_meta
     while Instant::now() < revocation_deadline {
         editor.drive_editor_frame(Duration::ZERO);
         if editor
-            .editor_image_last_good(&AssetPath::new(path).unwrap())
+            .editor_image_last_good(&AssetSourcePath::new(format!("assets/{path}")).unwrap())
             .is_none()
         {
             break;
@@ -901,13 +919,13 @@ fn generic_editor_catalog_revocation_cancels_a_late_image_import_even_after_meta
         std::thread::sleep(Duration::from_millis(1));
     }
     let revoked_before_release = editor
-        .editor_image_last_good(&AssetPath::new(path).unwrap())
+        .editor_image_last_good(&AssetSourcePath::new(format!("assets/{path}")).unwrap())
         .is_none();
     fs::write(&metadata_path, admitted_metadata).unwrap();
     let _ = held.release();
     drive_image_import_host_until_idle(&mut editor);
     let still_revoked = editor
-        .editor_image_last_good(&AssetPath::new(path).unwrap())
+        .editor_image_last_good(&AssetSourcePath::new(format!("assets/{path}")).unwrap())
         .is_none();
     let terminal = editor.editor_image_import_state();
     let close = drive_editor_close_to_completion(&mut editor);
@@ -1013,7 +1031,7 @@ fn generic_editor_saves_an_imported_asset_ref_and_hydrates_the_same_recipe_on_re
     drive_image_import_host_until_idle(&mut editor);
     assert_eq!(
         editor.editor_authoring_image_catalog_facts(),
-        (2, vec![("textures/imported.png".to_owned(), linear)])
+        (2, vec![("assets/textures/imported.png".to_owned(), linear)])
     );
 
     let image_value = UiAuthoringFieldValue::Brush {
@@ -1105,7 +1123,7 @@ fn generic_editor_saves_an_imported_asset_ref_and_hydrates_the_same_recipe_on_re
     drive_image_import_host_until_idle(&mut reopened);
     assert_eq!(
         reopened.editor_authoring_image_catalog_facts(),
-        (2, vec![("textures/imported.png".to_owned(), linear)])
+        (2, vec![("assets/textures/imported.png".to_owned(), linear)])
     );
     let index = reopened.project_source_index_snapshot().unwrap();
     let reopened_document = opened_document(reopened.open_indexed_authoring_document(
@@ -1173,6 +1191,8 @@ fn assert_current_ui_image_canvas(
     expected_path: &str,
     expected_color_space: ImageColorSpace,
 ) -> u64 {
+    let canonical = AssetSourcePath::new(format!("assets/{expected_path}")).unwrap();
+    let expected_handle = editor.editor_image_last_good(&canonical).unwrap().handle();
     let frame = editor.drive_editor_frame(Duration::ZERO);
     let ui_frame = editor.current_ui_authoring_frame().unwrap();
     assert_eq!(ui_frame.editor_frame(), frame.revision());
@@ -1192,7 +1212,18 @@ fn assert_current_ui_image_canvas(
     assert_eq!(candidate.document(), document);
     let (_, _, _, _, _, paint_packet, _) = candidate.into_parts();
     assert_eq!(paint_packet.images().len(), 1);
-    assert_eq!(paint_packet.images()[0].id().as_str(), expected_path);
+    assert_eq!(
+        paint_packet.images()[0].id(),
+        &nara_ui::UiImageId::external::<nara_image::ImageAsset>(expected_handle.id().raw())
+    );
+    assert_eq!(
+        paint_packet.images()[0]
+            .snapshot()
+            .identity()
+            .key()
+            .asset_id(),
+        expected_handle.id()
+    );
     assert_eq!(
         paint_packet.images()[0].snapshot().resource().color_space(),
         expected_color_space

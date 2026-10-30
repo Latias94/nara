@@ -6,7 +6,7 @@ use std::{
 
 use crate::{
     AssetDependencyGraph, AssetEventKind, AssetEventLimits, AssetEventPushOutcome, AssetEvents,
-    AssetId, AssetPath, AssetRecord, AssetServer, AssetSourceKind, AssetStates, AssetVersion,
+    AssetId, AssetRecord, AssetServer, AssetSourceKind, AssetSourcePath, AssetStates, AssetVersion,
     Assets, ImportArtifactDigest, LoadState, ProjectAssetDatabase, StableAssetId,
 };
 use nara_core::{ByteLimit, ItemLimit};
@@ -31,7 +31,7 @@ fn alternate_source_stable_id() -> StableAssetId {
 fn image_record(path: &str, stable_id: StableAssetId) -> AssetRecord {
     AssetRecord::new(
         stable_id,
-        AssetPath::new(path).unwrap(),
+        AssetSourcePath::new(path).unwrap(),
         AssetSourceKind::Image,
     )
 }

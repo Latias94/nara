@@ -17,6 +17,7 @@ pub(super) enum ResidencyAuthority {
     Source {
         lineage: ProjectSettingsLineage,
         catalog: Vec<AssetRecord>,
+        scope: nara_asset::AssetPathScope,
         _lease: ProjectContentLease,
     },
     Processed {
@@ -30,8 +31,9 @@ pub(super) enum ResidencyAuthority {
 impl ResidencyAuthority {
     pub(super) fn validate(&self, content: ResidencyInput<'_>) -> Result<(), HostFault> {
         match (self, content) {
-            (Self::Source { lineage, .. }, ResidencyInput::Source(snapshot))
-                if *lineage == snapshot.lineage() =>
+            (Self::Source { lineage, scope, .. }, ResidencyInput::Source(snapshot))
+                if *lineage == snapshot.lineage()
+                    && scope == snapshot.asset_resolution().scope() =>
             {
                 Ok(())
             }
@@ -57,6 +59,7 @@ pub(super) enum PreparedCatalog {
         original: Option<ProjectAssetDatabase>,
         change: CatalogChange,
         lineage: ProjectSettingsLineage,
+        scope: nara_asset::AssetPathScope,
         lease: ProjectContentLease,
     },
     Processed {
@@ -94,6 +97,7 @@ impl PreparedCatalog {
                     original,
                     change,
                     lineage: snapshot.lineage(),
+                    scope: snapshot.asset_resolution().scope().clone(),
                     lease,
                 })
             }
@@ -114,9 +118,9 @@ impl PreparedCatalog {
         }
     }
 
-    pub(super) fn database(&self) -> Option<&ProjectAssetDatabase> {
+    pub(super) fn asset_resolution(&self) -> Option<nara_asset::AssetReferenceResolver<'_>> {
         match self {
-            Self::Source { change, .. } => Some(&change.database),
+            Self::Source { change, scope, .. } => Some(change.database.resolver(scope)),
             Self::Processed { .. } => None,
         }
     }
@@ -146,12 +150,14 @@ impl PreparedCatalog {
                 original: _,
                 change,
                 lineage,
+                scope,
                 lease,
             } => {
                 world.insert_resource(change.database);
                 ResidencyAuthority::Source {
                     lineage,
                     catalog: change.owned,
+                    scope,
                     _lease: lease,
                 }
             }
@@ -251,6 +257,17 @@ fn metadata_bytes(
         )?;
     }
     if let ResidencyInput::Source(snapshot) = content {
+        if let Some(prefix) = snapshot.asset_resolution().scope().prefix() {
+            add_entries(
+                &mut bytes,
+                1,
+                prefix
+                    .as_str()
+                    .len()
+                    .checked_add(crate::scene_retention::STRING_ALLOCATION_OVERHEAD)
+                    .ok_or_else(metadata_overflow)?,
+            )?;
+        }
         // Existing database estimates include owned paths, case-folded keys and tree indices.
         // Four copies conservatively cover original/merged catalogs, target indexing, receipts
         // and real source aliases while those representations overlap during preparation.
@@ -263,6 +280,40 @@ fn metadata_bytes(
             let record_bytes = asset_record_retained_bytes(record)
                 .map_err(|error| HostFault::new(error.diagnostics().clone()))?;
             add_entries(&mut bytes, 4, record_bytes)?;
+        }
+        for tileset in snapshot.tilesets() {
+            if let nara_asset::AssetRef::Path(path) = &tileset.source().image {
+                // Inputs and their prepared copies retain authored aliases. Their bound
+                // canonical dependency is one shared allocation, independent of the Host scope.
+                let alias = path
+                    .as_str()
+                    .len()
+                    .checked_add(crate::scene_retention::STRING_ALLOCATION_OVERHEAD)
+                    .ok_or_else(metadata_overflow)?;
+                add_entries(&mut bytes, 3, alias)?;
+                let canonical = snapshot
+                    .asset_resolution()
+                    .resolution_work_bytes(&tileset.source().image)
+                    .ok_or_else(metadata_overflow)?;
+                let canonical_len = if canonical == 0 {
+                    path.as_str().len()
+                } else {
+                    canonical
+                };
+                add_entries(
+                    &mut bytes,
+                    1,
+                    canonical_len
+                        .checked_add(size_of::<nara_asset::AssetSourcePath>())
+                        .and_then(|value| value.checked_add(ARC_CONTROL_BLOCK_BYTES))
+                        .and_then(|value| {
+                            value.checked_add(crate::scene_retention::STRING_ALLOCATION_OVERHEAD)
+                        })
+                        .ok_or_else(metadata_overflow)?,
+                )?;
+                // The temporary catalogue lookup overlaps those retained inputs.
+                add_entries(&mut bytes, 1, canonical)?;
+            }
         }
     } else {
         let ResidencyInput::Processed(content) = content else {

@@ -34,7 +34,7 @@ fn source(path: &str, source_bytes: &[u8], color_space: ImageColorSpace) -> Imag
         ArtifactFormatVersion::new(1),
     ))
     .unwrap();
-    ImageSourceMetadata::new(AssetPath::new(path).unwrap(), settings, artifact).unwrap()
+    ImageSourceMetadata::new(AssetSourcePath::new(path).unwrap(), settings, artifact).unwrap()
 }
 
 fn processed(selection: ImportedProductId, color_space: ImageColorSpace) -> ImageAsset {
@@ -257,7 +257,7 @@ fn shared_owner_preserves_an_existing_import_budget_lease() {
 fn source_reload_requires_matching_real_provenance_before_reusing_settings() {
     let record = AssetRecord::new(
         product(ImportedProductId::PRIMARY).source(),
-        AssetPath::new("textures/source.png").unwrap(),
+        AssetSourcePath::new("textures/source.png").unwrap(),
         AssetSourceKind::Image,
     );
     for path in [

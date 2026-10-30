@@ -124,7 +124,7 @@ fn asset_plugin_resolves_manual_changes_into_generation_requests() {
     app.world_mut()
         .unwrap()
         .resource_mut::<AssetSourceChanges>()
-        .modified(AssetPath::new("textures/player.png").unwrap())
+        .modified(AssetSourcePath::new("textures/player.png").unwrap())
         .unwrap();
 
     let mut runtime = nara_app::RuntimeInstance::start(app).unwrap();
@@ -155,7 +155,7 @@ fn resolver_terminates_unknown_source_changes_instead_of_retaining_them() {
     app.world_mut()
         .unwrap()
         .resource_mut::<AssetSourceChanges>()
-        .modified(AssetPath::new("textures/missing.png").unwrap())
+        .modified(AssetSourcePath::new("textures/missing.png").unwrap())
         .unwrap();
 
     let mut runtime = nara_app::RuntimeInstance::start(app).unwrap();
@@ -179,7 +179,7 @@ fn resolver_terminates_unknown_source_changes_instead_of_retaining_them() {
 fn missing_record_invalidates_an_existing_runtime_identity() {
     let mut app = App::new();
     install_asset_plugin(&mut app);
-    let path = AssetPath::new("textures/missing.png").unwrap();
+    let path = AssetSourcePath::new("textures/missing.png").unwrap();
     let asset_id = app
         .world_mut()
         .unwrap()
@@ -424,7 +424,7 @@ fn resolver_rejects_a_known_source_without_a_reload_consumer() {
     app.world_mut()
         .unwrap()
         .resource_mut::<AssetSourceChanges>()
-        .modified(AssetPath::new("textures/player.png").unwrap())
+        .modified(AssetSourcePath::new("textures/player.png").unwrap())
         .unwrap();
 
     let mut runtime = nara_app::RuntimeInstance::start(app).unwrap();
@@ -459,7 +459,7 @@ fn resolver_rejects_unsupported_source_kinds_with_typed_diagnostics() {
     install_test_reload_consumer(&mut app);
     let record = AssetRecord::new(
         stable_id(),
-        AssetPath::new("scenes/level.scene").unwrap(),
+        AssetSourcePath::new("scenes/level.scene").unwrap(),
         AssetSourceKind::Scene,
     );
     app.world_mut()
@@ -546,7 +546,7 @@ fn resolver_errors_are_recorded_as_reload_diagnostics() {
     app.world_mut()
         .unwrap()
         .resource_mut::<AssetSourceChanges>()
-        .modified(AssetPath::new("textures/player.png").unwrap())
+        .modified(AssetSourcePath::new("textures/player.png").unwrap())
         .unwrap();
 
     let mut runtime = nara_app::RuntimeInstance::start(app).unwrap();
@@ -678,7 +678,7 @@ fn dependency_records_enqueue_dependent_assets() {
     app.world_mut()
         .unwrap()
         .resource_mut::<AssetSourceChanges>()
-        .modified(AssetPath::new("textures/source.png").unwrap())
+        .modified(AssetSourcePath::new("textures/source.png").unwrap())
         .unwrap();
 
     let mut runtime = nara_app::RuntimeInstance::start(app).unwrap();
@@ -733,7 +733,7 @@ fn dependency_records_enqueue_transitive_dependents_once() {
     app.world_mut()
         .unwrap()
         .resource_mut::<AssetSourceChanges>()
-        .modified(AssetPath::new("textures/source.png").unwrap())
+        .modified(AssetSourcePath::new("textures/source.png").unwrap())
         .unwrap();
 
     let mut runtime = nara_app::RuntimeInstance::start(app).unwrap();

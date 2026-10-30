@@ -9,8 +9,8 @@ use std::{
 
 use nara_app::{App, CoreStage, RuntimeInstance};
 use nara_asset::{
-    AssetPath, AssetPlugin, AssetRecord, AssetServer, AssetSourceChanges, AssetSourceKind,
-    AssetSourcePlugin, Assets, Handle, ProjectAssetDatabase, StableAssetId,
+    AssetPathScope, AssetPlugin, AssetRecord, AssetServer, AssetSourceChanges, AssetSourceKind,
+    AssetSourcePath, AssetSourcePlugin, Assets, Handle, ProjectAssetDatabase, StableAssetId,
 };
 use nara_core::{ItemLimit, TimeLimit};
 use nara_ecs::{Res, ResMut, Resource};
@@ -54,7 +54,7 @@ struct ImageControl(Arc<Mutex<Vec<SourceChange>>>);
 
 fn publish_source_changes(control: Res<ImageControl>, mut changes: ResMut<AssetSourceChanges>) {
     for change in std::mem::take(&mut *control.0.lock().unwrap()) {
-        let path = AssetPath::new(TEXTURE_PATH).unwrap();
+        let path = AssetSourcePath::new(TEXTURE_PATH).unwrap();
         match change {
             SourceChange::Initial => changes.meta_modified(path),
             SourceChange::Modified => changes.modified(path),
@@ -81,7 +81,7 @@ impl ImageFixture {
         fs::write(root.path.join("textures/player.png.meta"), IMAGE_METADATA).unwrap();
         let record = AssetRecord::new(
             StableAssetId::parse_str(TEXTURE_ID).unwrap(),
-            AssetPath::new(TEXTURE_PATH).unwrap(),
+            AssetSourcePath::new(TEXTURE_PATH).unwrap(),
             AssetSourceKind::Image,
         );
         let limits = ImageImportLimits::default();
@@ -359,7 +359,7 @@ fn image_source_directory(path: &Path) -> ImageSourceDirectory {
         HostCapabilityOptions::new(CapabilityRights::ReadOnly, TrustMode::TrustedLocal),
     )
     .unwrap();
-    ImageSourceDirectory::new(directory)
+    ImageSourceDirectory::new(directory, AssetPathScope::ROOT)
 }
 
 fn host_directory(path: &Path) -> File {

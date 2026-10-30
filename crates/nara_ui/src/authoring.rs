@@ -1,4 +1,6 @@
+use nara_asset::Handle;
 use nara_ecs::Component;
+use nara_image::ImageAsset;
 use nara_ui_kernel::{
     UiActionId, UiAuthoringError, UiBorder, UiBrush, UiColor, UiColorRole, UiCornerRadii,
     UiImageId, UiKeyError, UiLayer, UiSemanticRole, UiStyle, UiStyleError, UiTextAlignment,
@@ -56,44 +58,75 @@ impl Default for UiNode {
 
 /// Optional visual decoration for one authored node.
 #[derive(Debug, Clone, PartialEq, Component)]
-pub struct UiVisual(nara_ui_kernel::UiVisual);
+pub struct UiVisual {
+    visual: nara_ui_kernel::UiVisual,
+    image_asset: Option<Handle<ImageAsset>>,
+}
 
 impl UiVisual {
     #[must_use]
     pub fn solid(color: UiColor) -> Self {
-        Self(nara_ui_kernel::UiVisual::solid(color))
+        Self {
+            visual: nara_ui_kernel::UiVisual::solid(color),
+            image_asset: None,
+        }
     }
 
     #[must_use]
     pub fn role(role: UiColorRole) -> Self {
-        Self(nara_ui_kernel::UiVisual::role(role))
+        Self {
+            visual: nara_ui_kernel::UiVisual::role(role),
+            image_asset: None,
+        }
     }
 
     #[must_use]
     pub fn image(image: UiImageId, tint: UiColor) -> Self {
-        Self(nara_ui_kernel::UiVisual::image(image, tint))
+        Self {
+            visual: nara_ui_kernel::UiVisual::image(image, tint),
+            image_asset: None,
+        }
+    }
+
+    /// Binds a typed image for runtime projection and persistent asset-reference export.
+    /// Opaque IDs passed to [`Self::image`] never acquire this binding.
+    #[must_use]
+    pub fn image_asset(handle: Handle<ImageAsset>, tint: UiColor) -> Self {
+        Self {
+            visual: nara_ui_kernel::UiVisual::image(
+                UiImageId::external::<ImageAsset>(handle.id().raw()),
+                tint,
+            ),
+            image_asset: Some(handle),
+        }
+    }
+
+    #[must_use]
+    pub const fn image_handle(&self) -> Option<Handle<ImageAsset>> {
+        self.image_asset
     }
 
     #[must_use]
     pub fn with_background(mut self, brush: UiBrush) -> Self {
-        self.0 = self.0.with_background(brush);
+        self.visual = self.visual.with_background(brush);
+        self.image_asset = None;
         self
     }
 
     #[must_use]
     pub fn with_border(mut self, border: UiBorder) -> Self {
-        self.0 = self.0.with_border(border);
+        self.visual = self.visual.with_border(border);
         self
     }
 
     #[must_use]
     pub fn with_radii(mut self, radii: UiCornerRadii) -> Self {
-        self.0 = self.0.with_radii(radii);
+        self.visual = self.visual.with_radii(radii);
         self
     }
 
     pub(crate) fn kernel(&self) -> nara_ui_kernel::UiVisual {
-        self.0.clone()
+        self.visual.clone()
     }
 }
 

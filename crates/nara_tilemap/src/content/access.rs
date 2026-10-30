@@ -1,6 +1,6 @@
 use nara_asset::{
-    AssetEvents, AssetRecord, AssetServer, AssetSlotRevision, AssetStateRevision, AssetStates,
-    Assets, Handle, ProjectAssetDatabase, SourceHash,
+    AssetEvents, AssetPathScope, AssetRecord, AssetServer, AssetSlotRevision, AssetStateRevision,
+    AssetStates, Assets, Handle, ProjectAssetDatabase, SourceHash,
 };
 use nara_ecs::{Res, ResMut, system::SystemParam};
 use nara_image::ImageAsset;
@@ -27,16 +27,19 @@ pub struct TileSetContent<'w> {
 
 impl TileSetContent<'_> {
     /// Replaces the desired source while preserving an eligible last-good publication.
+    /// `scope` binds this declaration's authored Image alias before the owner retains it.
     pub fn request(
         &mut self,
         record: AssetRecord,
         source: TileSetSource,
         source_hash: SourceHash,
+        scope: &AssetPathScope,
     ) -> Result<Handle<TileSet>, TileSetAssetError> {
         self.owner.request(
             record,
             source,
             source_hash,
+            scope,
             &mut self.server,
             &self.tilesets,
             &mut self.states,
@@ -93,6 +96,8 @@ impl TileSetContent<'_> {
     }
 
     /// Reconciles current catalog and Image publications without performing source I/O.
+    /// Source declarations retain their canonical dependencies, so this operation applies
+    /// no reference policy and needs no World-wide alias scope.
     pub fn reconcile(&mut self) {
         self.owner.reconcile(
             &mut self.server,

@@ -10,9 +10,11 @@ use crate::{
     ComponentValueMaterializationLimits, persistent_apply::PersistentApplyRejection,
 };
 use nara_asset::{
-    AssetRef, AssetRefError, AssetRefExportPolicy, AssetServer, AssetSourceKind, Handle,
-    ProjectAssetDatabase,
+    AssetPathScope, AssetRef, AssetRefError, AssetRefExportPolicy, AssetReferenceResolver,
+    AssetServer, AssetSourceKind, Handle,
 };
+
+static ROOT_ASSET_PATH_SCOPE: AssetPathScope = AssetPathScope::ROOT;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ComponentCodecError {
@@ -195,7 +197,8 @@ impl From<ComponentValueError> for ComponentCodecError {
 #[derive(Default)]
 pub struct ComponentDecodeContext<'a> {
     asset_server: Option<&'a mut AssetServer>,
-    project_asset_database: Option<&'a ProjectAssetDatabase>,
+    asset_resolution: Option<AssetReferenceResolver<'a>>,
+    asset_path_scope: Option<&'a AssetPathScope>,
     asset_server_touched: bool,
     materialization_limits: ComponentValueMaterializationLimits,
 }
@@ -210,7 +213,8 @@ impl<'a> ComponentDecodeContext<'a> {
     pub fn with_asset_server(asset_server: &'a mut AssetServer) -> Self {
         Self {
             asset_server: Some(asset_server),
-            project_asset_database: None,
+            asset_resolution: None,
+            asset_path_scope: None,
             asset_server_touched: false,
             materialization_limits: ComponentValueMaterializationLimits::default(),
         }
@@ -235,14 +239,30 @@ impl<'a> ComponentDecodeContext<'a> {
     }
 
     #[must_use]
-    pub fn with_project_asset_database(mut self, database: &'a ProjectAssetDatabase) -> Self {
-        self.project_asset_database = Some(database);
+    pub const fn with_asset_resolution(mut self, resolver: AssetReferenceResolver<'a>) -> Self {
+        self.asset_resolution = Some(resolver);
         self
     }
 
     #[must_use]
-    pub const fn project_asset_database(&self) -> Option<&ProjectAssetDatabase> {
-        self.project_asset_database
+    pub const fn asset_resolution(&self) -> Option<AssetReferenceResolver<'a>> {
+        self.asset_resolution
+    }
+
+    /// Binds direct Path references when no source catalogue is selected.
+    #[must_use]
+    pub const fn with_asset_path_scope(mut self, scope: &'a AssetPathScope) -> Self {
+        self.asset_path_scope = Some(scope);
+        self
+    }
+
+    /// A catalogue's admitted scope always takes precedence over the standalone scope.
+    #[must_use]
+    pub fn asset_path_scope(&self) -> &'a AssetPathScope {
+        self.asset_resolution.map_or_else(
+            || self.asset_path_scope.unwrap_or(&ROOT_ASSET_PATH_SCOPE),
+            |resolver| resolver.scope(),
+        )
     }
 
     #[must_use]
@@ -270,10 +290,10 @@ impl<'a> ComponentDecodeContext<'a> {
         asset_ref: &AssetRef,
         expected_source_kind: &AssetSourceKind,
     ) -> Option<Result<(), AssetRefError>> {
-        let database = self.project_asset_database?;
+        let resolver = self.asset_resolution?;
         Some(
             asset_ref
-                .validate_with_database_as(database, expected_source_kind)
+                .validate_with_database_as(resolver, expected_source_kind)
                 .map(|_| ()),
         )
     }
@@ -283,25 +303,27 @@ impl<'a> ComponentDecodeContext<'a> {
         asset_ref: &AssetRef,
         expected_source_kind: Option<&AssetSourceKind>,
     ) -> Option<Result<Handle<T>, AssetRefError>> {
-        let database = self.project_asset_database;
+        let resolver = self.asset_resolution;
+        let scope = self.asset_path_scope();
         let asset_server = self.asset_server.as_deref_mut()?;
         self.asset_server_touched = true;
-        Some(match database {
-            Some(database) => match expected_source_kind {
+        Some(match resolver {
+            Some(resolver) => match expected_source_kind {
                 Some(expected_source_kind) => {
-                    asset_ref.resolve_with_database_as(asset_server, database, expected_source_kind)
+                    asset_ref.resolve_with_database_as(asset_server, resolver, expected_source_kind)
                 }
-                None => asset_ref.resolve_with_database(asset_server, database),
+                None => asset_ref.resolve_with_database(asset_server, resolver),
             },
-            None => asset_ref.resolve(asset_server),
+            None => asset_ref.resolve(asset_server, scope),
         })
     }
 }
 
-#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Default, Clone, Copy)]
 pub struct ComponentEncodeContext<'a> {
     asset_ref_export_policy: AssetRefExportPolicy,
-    project_asset_database: Option<&'a ProjectAssetDatabase>,
+    asset_resolution: Option<AssetReferenceResolver<'a>>,
+    asset_path_scope: Option<&'a AssetPathScope>,
 }
 
 impl<'a> ComponentEncodeContext<'a> {
@@ -322,13 +344,104 @@ impl<'a> ComponentEncodeContext<'a> {
     }
 
     #[must_use]
-    pub fn with_project_asset_database(mut self, database: &'a ProjectAssetDatabase) -> Self {
-        self.project_asset_database = Some(database);
+    pub const fn with_asset_resolution(mut self, resolver: AssetReferenceResolver<'a>) -> Self {
+        self.asset_resolution = Some(resolver);
         self
     }
 
     #[must_use]
-    pub const fn project_asset_database(&self) -> Option<&ProjectAssetDatabase> {
-        self.project_asset_database
+    pub const fn asset_resolution(&self) -> Option<AssetReferenceResolver<'a>> {
+        self.asset_resolution
+    }
+
+    /// Binds handle-to-Path export when no source catalogue is selected.
+    #[must_use]
+    pub const fn with_asset_path_scope(mut self, scope: &'a AssetPathScope) -> Self {
+        self.asset_path_scope = Some(scope);
+        self
+    }
+
+    #[must_use]
+    pub fn asset_path_scope(&self) -> &'a AssetPathScope {
+        self.asset_resolution.map_or_else(
+            || self.asset_path_scope.unwrap_or(&ROOT_ASSET_PATH_SCOPE),
+            |resolver| resolver.scope(),
+        )
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use nara_asset::{
+        AssetProductRef, AssetRecord, AssetSourcePath, ImportedProductId, ProjectAssetDatabase,
+        StableAssetId,
+    };
+
+    #[test]
+    fn contexts_use_the_admitted_scope_for_path_stable_and_product_selectors() {
+        let assets = AssetPathScope::under(AssetSourcePath::new("game/art").unwrap());
+        let other = AssetPathScope::under(AssetSourcePath::new("package/art").unwrap());
+        let source: StableAssetId = "11111111-1111-4111-8111-111111111111".parse().unwrap();
+        let foreign: StableAssetId = "22222222-2222-4222-8222-222222222222".parse().unwrap();
+        let mut database = ProjectAssetDatabase::default();
+        for (id, path) in [
+            (source, "game/art/shared.png"),
+            (foreign, "package/art/shared.png"),
+        ] {
+            database
+                .insert(AssetRecord::new(
+                    id,
+                    AssetSourcePath::new(path).unwrap(),
+                    AssetSourceKind::Image,
+                ))
+                .unwrap();
+        }
+        let path = AssetRef::path("shared.png").unwrap();
+        let product = AssetProductRef::new(source, ImportedProductId::PRIMARY).unwrap();
+        let mut server = AssetServer::new();
+        let handle = {
+            let mut context = ComponentDecodeContext::with_asset_server(&mut server)
+                .with_asset_path_scope(&other)
+                .with_asset_resolution(database.resolver(&assets));
+            assert!(std::ptr::eq(
+                context.asset_resolution().unwrap().database(),
+                &database
+            ));
+            assert_eq!(context.asset_path_scope(), &assets);
+            let handle = context.resolve_asset_ref::<String>(&path).unwrap().unwrap();
+            for reference in [AssetRef::StableId(source), AssetRef::Product(product)] {
+                assert_eq!(
+                    context
+                        .resolve_asset_ref::<String>(&reference)
+                        .unwrap()
+                        .unwrap(),
+                    handle
+                );
+            }
+            handle
+        };
+        let encode = ComponentEncodeContext::new()
+            .with_asset_resolution(database.resolver(&assets))
+            .with_asset_path_scope(&other);
+        assert_eq!(
+            AssetRef::from_handle(&server, handle, encode.asset_path_scope()).unwrap(),
+            path
+        );
+        let cross_root =
+            ComponentEncodeContext::new().with_asset_resolution(database.resolver(&other));
+        assert_eq!(
+            AssetRef::from_handle(&server, handle, cross_root.asset_path_scope()).unwrap(),
+            AssetRef::Product(product)
+        );
+        let mut foreign_context = ComponentDecodeContext::with_asset_server(&mut server)
+            .with_asset_resolution(database.resolver(&other));
+        assert_ne!(
+            foreign_context
+                .resolve_asset_ref::<String>(&path)
+                .unwrap()
+                .unwrap(),
+            handle
+        );
     }
 }

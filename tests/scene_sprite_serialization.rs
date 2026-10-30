@@ -1,5 +1,6 @@
 use nara::{
     advanced_prelude::*,
+    asset::{AssetPathScope, AssetSourcePath},
     diagnostic::DiagnosticValueRef,
     ecs::{bevy_ecs::lifecycle::Add, bevy_ecs::observer::On, system::ResMut},
     scene::{SceneExportOptions, SceneSpawnReport, export_scene_with_options},
@@ -42,7 +43,7 @@ fn sprite_stable_asset_id_resolves_before_world_spawn_and_exports_by_policy() {
         &scene_occurrence(
             "sprite_stable_asset_id_resolves_before_world_spawn_and_exports_by_policy/report",
         ),
-        Some(&database),
+        Some(database.resolver(&AssetPathScope::ROOT)),
     );
 
     assert!(!report.diagnostics.has_errors());
@@ -53,7 +54,10 @@ fn sprite_stable_asset_id_resolves_before_world_spawn_and_exports_by_policy() {
         .image
         .expect("sprite texture should resolve");
     let asset_server = world.resource::<AssetServer>();
-    assert_eq!(asset_server.path(texture.id()), Some("textures/player.png"));
+    assert_eq!(
+        asset_server.path(texture.id()),
+        Some(&AssetSourcePath::new("textures/player.png").unwrap()),
+    );
     assert_eq!(
         asset_server.stable_id(texture.id()),
         Some(stable_id(PLAYER_STABLE_ID))
@@ -111,7 +115,7 @@ fn unknown_sprite_stable_asset_id_fails_without_world_mutation() {
             std::sync::Arc::new((document).clone()),
         ),
         &scene_occurrence("unknown_sprite_stable_asset_id_fails_without_world_mutation/report"),
-        Some(&database),
+        Some(database.resolver(&AssetPathScope::ROOT)),
     );
     assert!(report.diagnostics.has_errors());
     assert_eq!(world.iter_entities().count(), before);
@@ -174,7 +178,7 @@ fn sprite_path_asset_ref_still_resolves_without_project_database() {
         .expect("sprite texture should resolve");
     assert_eq!(
         world.resource::<AssetServer>().path(texture.id()),
-        Some("textures/player.png")
+        Some(&AssetSourcePath::new("textures/player.png").unwrap())
     );
 }
 
@@ -254,7 +258,7 @@ fn unknown_sprite_path_asset_ref_fails_with_project_database_without_world_mutat
         &scene_occurrence(
             "unknown_sprite_path_asset_ref_fails_with_project_database_without_world_mutation/report",
         ),
-        Some(&database),
+        Some(database.resolver(&AssetPathScope::ROOT)),
     );
 
     assert!(report.diagnostics.has_errors());
@@ -312,7 +316,7 @@ fn prefab_stable_asset_id_uses_asset_database_preflight() {
             std::sync::Arc::new((prefab).instantiate()),
         ),
         &scene_occurrence("prefab_stable_asset_id_uses_asset_database_preflight/report"),
-        Some(&database),
+        Some(database.resolver(&AssetPathScope::ROOT)),
     );
 
     assert!(!report.diagnostics.has_errors());
@@ -395,7 +399,11 @@ fn prefab_patch_invalid_asset_ref_fails_before_world_mutation() {
     let world = World::new();
     let before = world.iter_entities().count();
 
-    let report = (prefab).instantiate_with_patch_and_asset_database(&registry, &patch, &database);
+    let report = (prefab).instantiate_with_patch_and_asset_resolution(
+        &registry,
+        &patch,
+        database.resolver(&AssetPathScope::ROOT),
+    );
     assert!(report.diagnostics.has_errors());
     assert_eq!(world.iter_entities().count(), before);
     assert!(world.get_resource::<AssetServer>().is_none());
@@ -461,7 +469,7 @@ fn tilemap_stable_tileset_id_resolves_before_world_spawn() {
             std::sync::Arc::new((document).clone()),
         ),
         &scene_occurrence("tilemap_stable_tileset_id_resolves_before_world_spawn/report"),
-        Some(&database),
+        Some(database.resolver(&AssetPathScope::ROOT)),
     );
 
     assert!(!report.diagnostics.has_errors());
@@ -510,7 +518,7 @@ fn asset_database_with_kind(
     database
         .insert(AssetRecord::new(
             stable_id(stable_id_value),
-            AssetPath::new(path).unwrap(),
+            AssetSourcePath::new(path).unwrap(),
             source_kind,
         ))
         .unwrap();

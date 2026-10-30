@@ -243,14 +243,14 @@ fn scene_bytes_with_samples(
     database
         .insert(AssetRecord::new(
             stable(BUNDLE_SOURCE),
-            AssetPath::new("authoring/bundle.json").unwrap(),
+            nara::asset::AssetSourcePath::new("authoring/bundle.json").unwrap(),
             AssetSourceKind::Other(TextBundleDomain::SOURCE_KIND.into()),
         ))
         .unwrap();
     RuntimeSceneCandidate::cook(
         &expanded,
         bindings,
-        &database,
+        database.resolver(&nara::asset::AssetPathScope::ROOT),
         RuntimeSceneLimits::default(),
     )
     .unwrap()

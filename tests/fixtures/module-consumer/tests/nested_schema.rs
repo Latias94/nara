@@ -3,7 +3,7 @@ mod support;
 
 use std::collections::BTreeSet;
 
-use nara_asset::{AssetRef, StableAssetId};
+use nara_asset::{AssetPathScope, AssetRef, AssetRefExportPolicy, StableAssetId};
 use nara_ecs::World;
 use nara_identity::{EntityLookup, EntityReference};
 use nara_reflect::{
@@ -13,7 +13,8 @@ use nara_reflect::{
 use nara_scene::{
     __private::AuthoringAdapterReceipt, AuthoringDocumentSource, InMemoryPrefabSourceResolver,
     PrefabDocument, PrefabInstance, SceneAuthoringSession, SceneDocument, SceneDocumentCandidate,
-    SceneEntityId, SceneEntityRecord, SourceDocumentKey, SourceDocumentKind, export_scene,
+    SceneEntityId, SceneEntityRecord, SceneExportOptions, SourceDocumentKey, SourceDocumentKind,
+    export_scene_with_options,
 };
 use nara_tooling::{SceneInspectorCommand, SceneInspectorState};
 use support::{COMPONENT_ID, IMAGE_ID, PREFAB_ID, PREFAB_PATH, Relationships};
@@ -116,7 +117,11 @@ fn nested_component_survives_inspector_save_prefab_remap_and_export() {
         anchor
     });
     let scene = SceneDocument::from_ordered_roots(anchors);
-    let expansion = scene.expand_prefabs_with_asset_database(&registry, &resolver, &database);
+    let expansion = scene.expand_prefabs_with_asset_resolution(
+        &registry,
+        &resolver,
+        database.resolver(&AssetPathScope::ROOT),
+    );
     assert!(
         !expansion.diagnostics.has_errors(),
         "{:?}",
@@ -179,7 +184,7 @@ fn nested_component_survives_inspector_save_prefab_remap_and_export() {
         &scene_occurrence(
             "nested_component_survives_inspector_save_prefab_remap_and_export/spawned",
         ),
-        Some(&database),
+        Some(database.resolver(&AssetPathScope::ROOT)),
     );
     assert!(
         !spawned.diagnostics.has_errors(),
@@ -193,7 +198,14 @@ fn nested_component_survives_inspector_save_prefab_remap_and_export() {
             EntityLookup::Resolved(_)
         ));
     }
-    let exported = export_scene(&world, &registry);
+    let exported = export_scene_with_options(
+        &world,
+        &registry,
+        SceneExportOptions {
+            asset_ref_export_policy: AssetRefExportPolicy::StableIdWhenKnown,
+            ..Default::default()
+        },
+    );
     assert!(
         !exported.diagnostics.has_errors(),
         "{:?}",
@@ -230,7 +242,7 @@ fn nested_component_survives_inspector_save_prefab_remap_and_export() {
             .unwrap()
             .canonicalize(&registry)
             .unwrap()
-            .publish_with_asset_database(&registry, &database)
+            .publish_with_asset_resolution(&registry, database.resolver(&AssetPathScope::ROOT))
             .unwrap();
     assert_eq!(reloaded.document(), &exported);
 }

@@ -304,7 +304,11 @@ fn cancelled_work_without_a_successor_is_idle_but_keeps_physical_custody() {
     wait_for_physical_return(&host);
     host.advance(&project, &mut runtime.0, &mut store);
     assert!(host.pending.is_none());
-    assert!(store.get(&AssetPath::new("image.png").unwrap()).is_none());
+    assert!(
+        store
+            .get(&AssetSourcePath::new("assets/image.png").unwrap())
+            .is_none()
+    );
 }
 
 #[cfg(all(feature = "runtime-2d", feature = "presentation-2d"))]
@@ -328,7 +332,7 @@ fn failed_recheck_revocation_retires_choices_and_latches_the_transaction_failure
         );
         thread::sleep(Duration::from_millis(1));
     }
-    let path = AssetPath::new("image.png").unwrap();
+    let path = AssetSourcePath::new("assets/image.png").unwrap();
     assert!(host.last_good(&path).is_some());
     runtime.0.test_exhaust_image_publication_revision();
     fs::write(

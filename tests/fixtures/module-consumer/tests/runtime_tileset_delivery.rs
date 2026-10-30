@@ -13,10 +13,10 @@ use std::{
 };
 
 use nara_asset::{
-    AssetError, AssetEvents, AssetPath, AssetProductRef, AssetRecord, AssetRef, AssetRuntimeError,
-    AssetRuntimeLimits, AssetServer, AssetSlotRevision, AssetSourceKind, AssetStateRevision,
-    AssetStates, Assets, Handle, ImportedProductId, ProjectAssetDatabase, RuntimeAssetCodec,
-    StableAssetId,
+    AssetError, AssetEvents, AssetProductRef, AssetRecord, AssetRef, AssetRuntimeError,
+    AssetRuntimeLimits, AssetServer, AssetSlotRevision, AssetSourceKind, AssetSourcePath,
+    AssetStateRevision, AssetStates, Assets, Handle, ImportedProductId, ProjectAssetDatabase,
+    RuntimeAssetCodec, StableAssetId,
 };
 use nara_core::{ByteLimit, Color, FormatKind, FormatVersion, ItemLimit, Vec2};
 use nara_ecs::{Component, Entity, Resource, World};
@@ -304,7 +304,7 @@ impl Fixture {
             .preflight_unpublished_import(ImageBytesImportRequest::new(
                 AssetRecord::new(
                     stable(IMAGE_SOURCE),
-                    AssetPath::new(SOURCE_FILE).unwrap(),
+                    AssetSourcePath::new(SOURCE_FILE).unwrap(),
                     AssetSourceKind::Image,
                 ),
                 fs::read(directory.path().join(SOURCE_FILE)).unwrap(),

@@ -4,7 +4,7 @@ use std::{
 };
 
 use nara_app::{App, CoreStage, RuntimeInstance};
-use nara_asset::{AssetRecord, Handle, ProjectAssetDatabase};
+use nara_asset::{AssetPathScope, AssetRecord, Handle, ProjectAssetDatabase};
 use nara_core::Vec2;
 use nara_diagnostic::DiagnosticReport;
 use nara_ecs::{Entity, Resource, With, World};
@@ -183,6 +183,7 @@ pub(super) enum EditorPreviewProjection {
         candidate: ExpandedSceneCandidate,
         omissions: EditorAuthoringPreviewOmissions,
         database: Arc<ProjectAssetDatabase>,
+        asset_scope: Arc<AssetPathScope>,
     },
     TrustedCompiled {
         source_key: SourceDocumentKey,
@@ -197,11 +198,13 @@ impl EditorPreviewProjection {
         candidate: ExpandedSceneCandidate,
         omissions: EditorAuthoringPreviewOmissions,
         database: Arc<ProjectAssetDatabase>,
+        asset_scope: Arc<AssetPathScope>,
     ) -> Self {
         Self::Authoring {
             candidate,
             omissions,
             database,
+            asset_scope,
         }
     }
 
@@ -761,11 +764,15 @@ fn apply_editor_preview_request(world: &mut World) {
                 EditorPreviewProjection::Authoring {
                     candidate,
                     database,
+                    asset_scope,
                     ..
                 },
-            ) => state
-                .materializer
-                .publish(world, &registry.0, candidate, database),
+            ) => state.materializer.publish(
+                world,
+                &registry.0,
+                candidate,
+                database.resolver(asset_scope),
+            ),
             (
                 EditorPreviewProject::TrustedCompiled(project),
                 EditorPreviewProjection::TrustedCompiled {
@@ -849,7 +856,7 @@ fn preview_error(code: &'static str) -> DiagnosticReport {
 
 #[cfg(test)]
 mod identity_tests {
-    use nara_asset::{AssetPath, AssetSourceKind, StableAssetId};
+    use nara_asset::{AssetSourceKind, AssetSourcePath, StableAssetId};
 
     use super::*;
 
@@ -922,7 +929,7 @@ mod identity_tests {
     fn image_record(index: usize, path: String) -> AssetRecord {
         AssetRecord::new(
             StableAssetId::parse_str(format!("00000000-0000-0000-0000-{index:012x}")).unwrap(),
-            AssetPath::new(path).unwrap(),
+            AssetSourcePath::new(path).unwrap(),
             AssetSourceKind::Image,
         )
     }

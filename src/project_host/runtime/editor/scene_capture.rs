@@ -241,6 +241,7 @@ impl EditorProjectSession {
         };
         let validation = project.startup_source_validation();
         let database = project.asset_database();
+        let asset_scope = project.asset_scope();
         let sources = project
             .prefab_sources()
             .map(|prefab| (prefab.native_source().key().clone(), None))
@@ -256,6 +257,7 @@ impl EditorProjectSession {
                     selection.root.revision,
                     preview,
                     database,
+                    asset_scope,
                 )),
                 dependencies,
                 selection,
@@ -397,6 +399,7 @@ impl EditorProjectSession {
                 selection.root.revision,
                 preview,
                 capture.asset_database(),
+                capture.asset_scope(),
             ),
             None => EditorPreviewProjection::rejected(capture.diagnostics().clone()),
         });
@@ -754,11 +757,13 @@ fn projection(
     revision: SceneAuthoringRevision,
     preview: CapturedAuthoringPreview,
     database: Arc<nara_asset::ProjectAssetDatabase>,
+    asset_scope: Arc<nara_asset::AssetPathScope>,
 ) -> EditorPreviewProjection {
     EditorPreviewProjection::authoring(
         preview.candidate,
         EditorAuthoringPreviewOmissions::new(document, revision, preview.omissions),
         database,
+        asset_scope,
     )
 }
 

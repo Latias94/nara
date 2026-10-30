@@ -40,6 +40,7 @@ pub struct ProjectAssetCollection<T> {
 
 enum CollectionStorage<T> {
     Source {
+        scope: AssetPathScope,
         records: Box<[AssetRecord]>,
         products: Box<[T]>,
         // Bound to the selected domain. This trusted query only inspects immutable values;
@@ -57,19 +58,23 @@ impl<T> ProjectAssetCollection<T> {
     ///
     /// Source values are checked through their domain's pure membership query after locating
     /// the actual enclosing record. Paths alias only real source primary products, and stable
-    /// IDs select only primary products. Processed values require an exact admitted Product
-    /// mapping; an auxiliary selection never falls back to its primary product.
+    /// IDs select only primary products. Path aliases are relative to the collection's admitted
+    /// source scope; source record paths remain canonical. Processed values require an exact
+    /// admitted Product mapping; an auxiliary selection never falls back to its primary product.
     /// This query performs no loading, importing, I/O or World mutation.
     #[must_use]
     pub fn get(&self, reference: &AssetRef) -> Option<&T> {
         match &self.storage {
             CollectionStorage::Source {
+                scope,
                 records,
                 products,
                 contains_product,
             } => {
                 let index = records.iter().position(|record| match reference {
-                    AssetRef::Path(path) => record.path() == path,
+                    AssetRef::Path(path) => {
+                        scope.relative_path(record.path()) == Some(path.as_str())
+                    }
                     AssetRef::StableId(id) => record.stable_id() == *id,
                     AssetRef::Product(product) => record.stable_id() == product.source(),
                 })?;
@@ -106,7 +111,8 @@ impl<T> ProjectAssetCollection<T> {
         }
     }
 
-    /// Visits real source records only. Processed collections have no source metadata or aliases.
+    /// Visits real source records with canonical locations, independently of local Path aliases.
+    /// Processed collections have no source metadata or aliases.
     pub fn source_records(&self) -> impl ExactSizeIterator<Item = &AssetRecord> {
         self.source_records_slice().iter()
     }
@@ -444,6 +450,10 @@ impl<D: SourceAssetImporter> DomainProvider for TypedDomain<D> {
                 ProjectContentBudgetKind::RetainedBytes,
                 [
                     size_of::<DomainCollection<D>>(),
+                    context
+                        .asset_scope
+                        .prefix()
+                        .map_or(Ok(0), |prefix| string_retained_bytes(prefix.as_str()))?,
                     checked_plan_product(
                         ProjectContentBudgetKind::RetainedBytes,
                         records.len(),
@@ -466,7 +476,26 @@ impl<D: SourceAssetImporter> DomainProvider for TypedDomain<D> {
         for record in &records {
             context.subtract_budget(ProjectContentBudgetKind::QueuedJobs, 1);
             context.add_budget(ProjectContentBudgetKind::InFlightJobs, 1)?;
-            let metadata_path = record.path().meta_path();
+            let local_path = context
+                .asset_scope
+                .relative_path(record.path())
+                .ok_or_else(|| source_scope_mismatch(record.path()))?;
+            // Cover the local source alias, sidecar spelling and temporary bound identity
+            // before allocating any of them. Concrete reads stay under the Assets capability.
+            let path_work = context.reserve_work(checked_plan_sum(
+                ProjectContentBudgetKind::WorkBytes,
+                [
+                    string_retained_bytes(local_path)?,
+                    string_retained_bytes(local_path)?,
+                    ".meta".len(),
+                    asset_record_retained_bytes(record)?,
+                ],
+            )?)?;
+            let path = context
+                .asset_scope
+                .relativize(record.path())
+                .ok_or_else(|| source_scope_mismatch(record.path()))?;
+            let metadata_path = path.meta_path();
             let (bytes, digest) = context.read_file(
                 assets,
                 &metadata_path,
@@ -489,7 +518,15 @@ impl<D: SourceAssetImporter> DomainProvider for TypedDomain<D> {
             let metadata =
                 AssetMetaIdentityCandidate::decode_json_bytes_owned(bytes.into_boxed_slice())
                     .map_err(|_| catalogue::identity_conflict(record.path()))?;
-            if AssetRecord::from(metadata.identity().clone()) != *record {
+            if metadata.identity().path() != &path {
+                return Err(catalogue::identity_conflict(record.path()));
+            }
+            if metadata
+                .identity()
+                .clone()
+                .into_record(&context.asset_scope)
+                != *record
+            {
                 return Err(catalogue::identity_conflict(record.path()));
             }
             context.add_budget(
@@ -503,7 +540,7 @@ impl<D: SourceAssetImporter> DomainProvider for TypedDomain<D> {
                 root,
                 cache,
             };
-            let bytes = reader.read_source(record.path(), limits.source_bytes())?;
+            let bytes = reader.read_source(&path, limits.source_bytes())?;
             let mut read_dependency = |path: &AssetPath, limit| reader.read_dependency(path, limit);
             let product = D::prepare(&mut AssetImportSource::new(
                 &metadata,
@@ -515,6 +552,9 @@ impl<D: SourceAssetImporter> DomainProvider for TypedDomain<D> {
                 validate_product_membership::<D>(&product, required).map_err(missing_product)?;
             }
             drop(metadata);
+            drop(metadata_path);
+            drop(path);
+            context.subtract_budget(ProjectContentBudgetKind::WorkBytes, path_work.reserved);
             context.subtract_budget(ProjectContentBudgetKind::WorkBytes, metadata_work.reserved);
             context.subtract_budget(ProjectContentBudgetKind::WorkBytes, work.reserved);
             context.subtract_budget(ProjectContentBudgetKind::InFlightJobs, 1);
@@ -522,12 +562,23 @@ impl<D: SourceAssetImporter> DomainProvider for TypedDomain<D> {
         }
         Ok(Box::new(DomainCollection::<D>(ProjectAssetCollection {
             storage: CollectionStorage::Source {
+                scope: context.asset_scope.clone(),
                 records: records.into_boxed_slice(),
                 products: products.into_boxed_slice(),
                 contains_product: D::contains_product,
             },
         })))
     }
+}
+
+fn source_scope_mismatch(path: &AssetSourcePath) -> ProjectContentError {
+    ProjectContentError::with_identifier(
+        ProjectContentErrorKind::AssetMetaMismatch,
+        "project.content.domain-source-scope-mismatch",
+        "Asset source is outside the admitted Assets scope",
+        "asset",
+        path.as_str(),
+    )
 }
 
 #[derive(Default)]
@@ -634,11 +685,21 @@ impl LoadContext<'_> {
         collections
             .try_reserve_exact(providers.providers.len())
             .map_err(|_| allocation_failed("project.content.domain-allocation"))?;
+        // Each lookup retains at most one joined spelling. Query the resolver without cloning
+        // an authored reference, and reuse its largest scratch allowance for both passes.
+        let lookup_work = paths.iter().try_fold(0usize, |maximum, path| {
+            self.asset_resolution()
+                .path_resolution_work_bytes(path)
+                .map(|bytes| maximum.max(bytes))
+                .ok_or_else(|| overflow_budget(ProjectContentBudgetKind::WorkBytes))
+        })?;
         let mut cache = SourceCache::default();
         for provider in &providers.providers {
+            let lookup_reservation = self.reserve_work(lookup_work)?;
+            let resolution = self.asset_resolution();
             let mut selected_records = paths
                 .iter()
-                .filter_map(|path| self.asset_database.record_for_path(path))
+                .filter_map(|path| resolution.record_for_path(path))
                 .filter(|record| {
                     matches!(record.source_kind(), AssetSourceKind::Other(kind) if kind == provider.source_kind())
                 });
@@ -653,6 +714,10 @@ impl LoadContext<'_> {
                     ))
                 })?;
             if count == 0 {
+                self.subtract_budget(
+                    ProjectContentBudgetKind::WorkBytes,
+                    lookup_reservation.reserved,
+                );
                 continue;
             }
             let records_reservation = self.reserve_work(records_work)?;
@@ -660,14 +725,19 @@ impl LoadContext<'_> {
             records
                 .try_reserve_exact(count)
                 .map_err(|_| allocation_failed("project.content.domain-allocation"))?;
+            let resolution = self.asset_resolution();
             records.extend(
                 paths
                     .iter()
-                    .filter_map(|path| self.asset_database.record_for_path(path))
+                    .filter_map(|path| resolution.record_for_path(path))
                     .filter(|record| {
                         matches!(record.source_kind(), AssetSourceKind::Other(kind) if kind == provider.source_kind())
                     })
                     .cloned(),
+            );
+            self.subtract_budget(
+                ProjectContentBudgetKind::WorkBytes,
+                lookup_reservation.reserved,
             );
             let collection = catch_unwind(AssertUnwindSafe(|| {
                 provider.load(self, assets, root, records, &mut cache, required_products)
@@ -691,6 +761,14 @@ impl LoadContext<'_> {
         {
             return Err(missing_product(*reference));
         }
+        let queued_path_work = paths.iter().try_fold(0usize, |total, path| {
+            checked_plan_sum(
+                ProjectContentBudgetKind::WorkBytes,
+                [total, queued_source_path_work_bytes(path)?],
+            )
+        })?;
+        drop(paths);
+        self.subtract_budget(ProjectContentBudgetKind::WorkBytes, queued_path_work);
         self.subtract_budget(ProjectContentBudgetKind::WorkBytes, cache.work_bytes);
         Ok(collections)
     }

@@ -2,7 +2,7 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 
-use nara_asset::{AssetRef, ProjectAssetDatabase};
+use nara_asset::{AssetRef, AssetReferenceResolver};
 use nara_reflect::{
     __private::{EntityReferencePlanError, plan_declared_entity_references_with_admission},
     ComponentEntityReferenceRewriteError, ComponentValueMaterializationLimits, EntityReference,
@@ -42,7 +42,7 @@ pub(super) fn prepare<F, E>(
     basis: &AuthoringSchemaBasis,
     history: SceneAuthoringHistoryLimits,
     options: PrefabExpansionOptions,
-    database: Option<&ProjectAssetDatabase>,
+    asset_resolution: Option<AssetReferenceResolver<'_>>,
     mut loader: F,
 ) -> Result<LocalizedConversion, PrefabConversionError<E>>
 where
@@ -82,7 +82,7 @@ where
         anchor,
         basis,
         options.with_limits(limits),
-        database,
+        asset_resolution,
         |request, working| {
             let mut loading = working
                 .including_retained_working_bytes(dependencies.retained_bytes())

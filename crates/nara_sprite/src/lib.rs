@@ -2,7 +2,9 @@
 
 // Bevy derives resolve this path; Nara's ECS facade remains the actual dependency.
 use nara_app::{App, Plugin, PluginError, PluginPreflightContext};
-use nara_asset::{AssetRef, AssetRefError, AssetServer, AssetSourceKind, Handle};
+use nara_asset::{
+    AssetRecord, AssetRef, AssetRefError, AssetServer, AssetSourceKind, AssetSourcePath, Handle,
+};
 use nara_core::{Color, Vec2};
 use nara_ecs::Component;
 #[cfg(test)]
@@ -340,6 +342,7 @@ pub fn register_sprite_components(
                             )
                         })?,
                         handle,
+                        context.asset_path_scope(),
                         context.asset_ref_export_policy(),
                     )
                     .map(|reference| nara_reflect::encode_asset_reference_value(&reference))
@@ -613,7 +616,8 @@ fn sprite_optional_asset_ref(
 #[derive(Debug, Clone)]
 enum PreparedTexture {
     Resolved(Handle<ImageAsset>),
-    Deferred(AssetRef),
+    DeferredPath(AssetSourcePath),
+    DeferredRecord(AssetRecord),
 }
 
 #[derive(Debug, Clone)]
@@ -626,14 +630,19 @@ struct PreparedSpriteMaterial {
 
 impl PreparedSpriteMaterial {
     fn requires_asset_server(&self) -> bool {
-        matches!(self.image, Some(PreparedTexture::Deferred(_)))
+        matches!(
+            self.image,
+            Some(PreparedTexture::DeferredPath(_) | PreparedTexture::DeferredRecord(_))
+        )
     }
 
     fn into_resolved(self) -> Option<SpriteMaterial> {
         let image = match self.image {
             None => None,
             Some(PreparedTexture::Resolved(handle)) => Some(handle),
-            Some(PreparedTexture::Deferred(_)) => return None,
+            Some(PreparedTexture::DeferredPath(_) | PreparedTexture::DeferredRecord(_)) => {
+                return None;
+            }
         };
         Some(SpriteMaterial {
             image,
@@ -678,7 +687,7 @@ fn prepare_texture_handle(
     field: &str,
     asset_ref: AssetRef,
 ) -> Result<PreparedTexture, ComponentCodecError> {
-    if context.project_asset_database().is_some()
+    if context.asset_resolution().is_some()
         && let Some(reference) = asset_ref.as_product()
         && !asset_ref.is_primary()
     {
@@ -687,6 +696,17 @@ fn prepare_texture_handle(
             &asset_ref,
             AssetRefError::UnsupportedProductSelection(reference),
         ));
+    }
+    if let AssetRef::Path(path) = &asset_ref {
+        let observed = context
+            .asset_path_scope()
+            .prefix()
+            .map_or(0, |prefix| prefix.as_str().len().saturating_add(1))
+            .saturating_add(path.as_str().len());
+        let maximum = context.materialization_limits().bytes().get();
+        if observed > maximum {
+            return Err(ComponentCodecError::MaterializationByteLimit { observed, maximum });
+        }
     }
     let expected_source_kind = AssetSourceKind::Image;
     if let Some(result) =
@@ -697,25 +717,33 @@ fn prepare_texture_handle(
             .map_err(|error| invalid_asset_ref(field, &asset_ref, error));
     }
 
-    if let Some(result) = context.validate_asset_ref_with_kind(&asset_ref, &expected_source_kind) {
-        return match result {
-            Ok(()) => Ok(PreparedTexture::Deferred(asset_ref)),
-            Err(error) => Err(invalid_asset_ref(field, &asset_ref, error)),
-        };
+    if let Some(resolver) = context.asset_resolution() {
+        let record = asset_ref
+            .validate_with_database_as(resolver, &expected_source_kind)
+            .map_err(|error| invalid_asset_ref(field, &asset_ref, error))?;
+        let observed = record.path().as_str().len();
+        let maximum = context.materialization_limits().bytes().get();
+        if observed > maximum {
+            return Err(ComponentCodecError::MaterializationByteLimit { observed, maximum });
+        }
+        return Ok(PreparedTexture::DeferredRecord(record.clone()));
     }
 
-    if let Some(stable_id) = asset_ref
-        .as_stable_id()
-        .or_else(|| asset_ref.as_product().map(|reference| reference.source()))
-    {
-        return Err(invalid_asset_ref(
+    match &asset_ref {
+        AssetRef::Path(path) => Ok(PreparedTexture::DeferredPath(
+            context.asset_path_scope().resolve(path),
+        )),
+        AssetRef::StableId(id) => Err(invalid_asset_ref(
             field,
             &asset_ref,
-            AssetRefError::MissingProjectDatabase(stable_id),
-        ));
+            AssetRefError::MissingProjectDatabase(*id),
+        )),
+        AssetRef::Product(reference) => Err(invalid_asset_ref(
+            field,
+            &asset_ref,
+            AssetRefError::MissingProjectDatabase(reference.source()),
+        )),
     }
-
-    Ok(PreparedTexture::Deferred(asset_ref))
 }
 
 fn resolve_prepared_texture(
@@ -725,9 +753,26 @@ fn resolve_prepared_texture(
     match texture {
         None => Ok(None),
         Some(PreparedTexture::Resolved(handle)) => Ok(Some(handle)),
-        Some(PreparedTexture::Deferred(texture_ref)) => {
-            resolve_optional_texture(context, Some(&texture_ref), "material.image.value")
-        }
+        Some(PreparedTexture::DeferredPath(path)) => context
+            .reserve_asset_path(&path)
+            .map(Some)
+            .map_err(|error| {
+                ComponentCodecError::invalid_asset_ref(
+                    "material.image.value",
+                    path.as_str(),
+                    error.to_string(),
+                )
+            }),
+        Some(PreparedTexture::DeferredRecord(record)) => context
+            .reserve_asset_record(&record)
+            .map(Some)
+            .map_err(|error| {
+                ComponentCodecError::invalid_asset_ref(
+                    "material.image.value",
+                    record.path().as_str(),
+                    error.to_string(),
+                )
+            }),
     }
 }
 
@@ -741,20 +786,6 @@ fn resolve_prepared_material(
         alpha_mode: material.alpha_mode,
         tint: material.tint,
     })
-}
-
-fn resolve_optional_texture(
-    context: &mut ComponentApplyContext,
-    texture_ref: Option<&AssetRef>,
-    field: &str,
-) -> Result<Option<Handle<ImageAsset>>, ComponentCodecError> {
-    let Some(texture_ref) = texture_ref else {
-        return Ok(None);
-    };
-    context
-        .resolve_asset_ref::<ImageAsset>(texture_ref)
-        .map(Some)
-        .map_err(|error| invalid_asset_ref(field, texture_ref, error))
 }
 
 fn invalid_asset_ref(
@@ -1045,7 +1076,7 @@ pub mod prelude {
 mod tests {
     use super::*;
     use nara_asset::{
-        AssetPath, AssetProductRef, AssetRecord, AssetSourceKind, ImportedProductId,
+        AssetProductRef, AssetRecord, AssetSourceKind, AssetSourcePath, ImportedProductId,
         ProjectAssetDatabase, StableAssetId,
     };
     use nara_reflect::ComponentDecodeContext;
@@ -1185,7 +1216,7 @@ mod tests {
             let mut asset_server = AssetServer::new();
             let prepared = {
                 let mut context = ComponentDecodeContext::with_asset_server(&mut asset_server)
-                    .with_project_asset_database(&database);
+                    .with_asset_resolution(database.resolver(&nara_asset::AssetPathScope::ROOT));
 
                 let prepared = snapshot
                     .preflight_component_with_context(
@@ -1204,8 +1235,69 @@ mod tests {
 
             let sprite = world.get::<Sprite>(entity).unwrap();
             let texture = sprite.material.image.unwrap();
-            assert_eq!(asset_server.path(texture.id()), Some("textures/player.png"));
+            assert_eq!(
+                asset_server.path(texture.id()).map(|path| path.as_str()),
+                Some("textures/player.png")
+            );
             assert_eq!(asset_server.stable_id(texture.id()), Some(stable_id));
+        }
+    }
+
+    #[test]
+    fn deferred_sprite_decode_keeps_source_scope_and_exports_local_material_aliases() {
+        let scope = nara_asset::AssetPathScope::under(AssetSourcePath::new("game/art").unwrap());
+        let database = test_database(
+            stable_id("2f0d71c7-14fc-4ed4-b48b-1c61bba8b97f"),
+            "game/art/player.png",
+        );
+        let registry = frozen_sprite_registry();
+        let snapshot = registry.snapshot().unwrap();
+        for with_catalogue in [false, true] {
+            let mut context = ComponentDecodeContext::new().with_asset_path_scope(&scope);
+            if with_catalogue {
+                context = context.with_asset_resolution(database.resolver(&scope));
+            }
+            let prepared = snapshot
+                .preflight_component_with_context(
+                    &sprite_type_id(),
+                    &sprite_value(AssetRef::path("player.png").unwrap()),
+                    &mut context,
+                )
+                .unwrap();
+            let mut world = World::new();
+            let entity = world.spawn_empty().id();
+            prepared.apply(&mut world, entity).unwrap();
+            let handle = world.get::<Sprite>(entity).unwrap().material.image.unwrap();
+            assert_eq!(
+                world
+                    .resource::<AssetServer>()
+                    .path(handle.id())
+                    .unwrap()
+                    .as_str(),
+                "game/art/player.png"
+            );
+            let encode = nara_reflect::ComponentEncodeContext::new().with_asset_path_scope(&scope);
+            let value = snapshot
+                .encode_component_with_context(&sprite_type_id(), &world, entity, &encode)
+                .unwrap()
+                .unwrap();
+            assert_eq!(
+                value.field("material").unwrap().field("image").unwrap(),
+                &nara_reflect::encode_asset_reference_value(&AssetRef::path("player.png").unwrap())
+            );
+            let mut reopened = ComponentDecodeContext::with_asset_server(
+                world.resource_mut::<AssetServer>().into_inner(),
+            )
+            .with_asset_path_scope(&scope);
+            let prepared = snapshot
+                .preflight_component_with_context(&sprite_type_id(), &value, &mut reopened)
+                .unwrap();
+            let restored = world.spawn_empty().id();
+            prepared.apply(&mut world, restored).unwrap();
+            assert_eq!(
+                world.get::<Sprite>(restored).unwrap().material.image,
+                Some(handle)
+            );
         }
     }
 
@@ -1246,7 +1338,8 @@ mod tests {
             } else {
                 ComponentDecodeContext::new()
             };
-            context = context.with_project_asset_database(&database);
+            context =
+                context.with_asset_resolution(database.resolver(&nara_asset::AssetPathScope::ROOT));
             let result = snapshot.preflight_component_with_context(
                 &sprite_type_id(),
                 &sprite_value(image.clone()),
@@ -1321,7 +1414,7 @@ mod tests {
         let database = test_database(known_stable_id, "textures/player.png");
         let mut asset_server = AssetServer::new();
         let mut context = ComponentDecodeContext::with_asset_server(&mut asset_server)
-            .with_project_asset_database(&database);
+            .with_asset_resolution(database.resolver(&nara_asset::AssetPathScope::ROOT));
         let registry = frozen_sprite_registry();
         let snapshot = registry.snapshot().unwrap();
 
@@ -1350,13 +1443,13 @@ mod tests {
         database
             .insert(AssetRecord::new(
                 stable_id,
-                AssetPath::new("scenes/player.scene.ron").unwrap(),
+                AssetSourcePath::new("scenes/player.scene.ron").unwrap(),
                 AssetSourceKind::Scene,
             ))
             .unwrap();
         let mut asset_server = AssetServer::new();
         let mut context = ComponentDecodeContext::with_asset_server(&mut asset_server)
-            .with_project_asset_database(&database);
+            .with_asset_resolution(database.resolver(&nara_asset::AssetPathScope::ROOT));
         let registry = frozen_sprite_registry();
         let snapshot = registry.snapshot().unwrap();
 
@@ -1377,7 +1470,8 @@ mod tests {
     fn sprite_codec_validates_path_refs_when_database_is_present() {
         let stable_id = stable_id("2f0d71c7-14fc-4ed4-b48b-1c61bba8b97f");
         let database = test_database(stable_id, "textures/player.png");
-        let mut context = ComponentDecodeContext::new().with_project_asset_database(&database);
+        let mut context = ComponentDecodeContext::new()
+            .with_asset_resolution(database.resolver(&nara_asset::AssetPathScope::ROOT));
         let registry = frozen_sprite_registry();
         let snapshot = registry.snapshot().unwrap();
 
@@ -1489,7 +1583,7 @@ mod tests {
         database
             .insert(AssetRecord::new(
                 stable_id,
-                AssetPath::new(path).unwrap(),
+                AssetSourcePath::new(path).unwrap(),
                 AssetSourceKind::Image,
             ))
             .unwrap();

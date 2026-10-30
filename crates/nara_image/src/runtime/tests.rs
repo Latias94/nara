@@ -2,7 +2,7 @@ use std::{collections::BTreeSet, sync::Arc};
 
 use image::ImageEncoder;
 use nara_asset::{
-    AssetDomain, AssetPath, AssetProductRef, AssetRecord, AssetSourceKind, ImportedProductId,
+    AssetDomain, AssetProductRef, AssetRecord, AssetSourceKind, AssetSourcePath, ImportedProductId,
     RuntimeAssetCodec, StableAssetId,
 };
 use serde_json::{Value, json};
@@ -169,7 +169,7 @@ fn png_import_cooks_to_identical_pixels_without_source_or_import_provenance() {
     for color_space in [ImageColorSpace::Srgb, ImageColorSpace::Linear] {
         let record = AssetRecord::new(
             primary().source(),
-            AssetPath::new("textures/runtime-import.png").unwrap(),
+            AssetSourcePath::new("textures/runtime-import.png").unwrap(),
             AssetSourceKind::Image,
         );
         let imported = ImageImporter::default()

@@ -48,6 +48,105 @@ fn publish_image(world: &mut World, record: &AssetRecord, byte: u8) {
 }
 
 #[test]
+fn native_plugin_refreshes_requested_source_when_only_image_content_changes() {
+    #[derive(Resource)]
+    struct ImageMutation {
+        frame: usize,
+        record: AssetRecord,
+    }
+
+    fn mutate_image_after_first_frame(world: &mut World) {
+        let record = {
+            let mut mutation = world.resource_mut::<ImageMutation>();
+            mutation.frame += 1;
+            (mutation.frame == 2).then(|| mutation.record.clone())
+        };
+        if let Some(record) = record {
+            publish_image(world, &record, 70);
+        }
+    }
+
+    let scope = AssetPathScope::under(AssetSourcePath::new("project/art").unwrap());
+    let image_record = record(
+        "11111111-1111-4111-8111-111111111111",
+        "project/art/a.png",
+        AssetSourceKind::Image,
+    );
+    let source_record = record(
+        "22222222-2222-4222-8222-222222222222",
+        "project/art/terrain.ron",
+        crate::tileset_asset_source_kind(),
+    );
+    let original_source = source("a.png");
+    // This is the only Source request. No Host reconcile system or source execution plugin
+    // is installed; the ordinary native plugin must observe the later Image publication.
+    let mut app = App::new();
+    app.add_plugins((nara_asset::AssetPlugin, TileSetAssetPlugin))
+        .unwrap();
+    app.init_resource::<ProjectAssetDatabase>().unwrap();
+    app.insert_resource(ImageMutation {
+        frame: 0,
+        record: image_record.clone(),
+    })
+    .unwrap();
+    let world = app.world_mut().unwrap();
+    for record in [&image_record, &source_record] {
+        world
+            .resource_mut::<ProjectAssetDatabase>()
+            .insert(record.clone())
+            .unwrap();
+    }
+    publish_image(world, &image_record, 10);
+    let mut access = SystemState::<TileSetContent>::new(world);
+    let handle = access
+        .get_mut(world)
+        .unwrap()
+        .request(
+            source_record.clone(),
+            original_source.clone(),
+            SourceHash::from_bytes(b"scoped"),
+            &scope,
+        )
+        .unwrap();
+    drop(scope);
+    app.add_systems(CoreStage::First, mutate_image_after_first_frame)
+        .unwrap();
+    let mut runtime = nara_app::RuntimeInstance::start(app).unwrap();
+    runtime.drive(std::time::Duration::ZERO).unwrap();
+    let first = runtime
+        .world()
+        .resource::<Assets<TileSet>>()
+        .get(handle)
+        .unwrap();
+    let image_handle = first.material().image;
+    let retained = first.image_content().unwrap().clone();
+    let slot = runtime
+        .world()
+        .resource::<Assets<TileSet>>()
+        .slot_revision(handle);
+    assert_eq!(retained.pixels(), &[10; 8]);
+
+    runtime.drive(std::time::Duration::ZERO).unwrap();
+
+    let world = runtime.world();
+    let current = world.resource::<Assets<TileSet>>().get(handle).unwrap();
+    assert_eq!(current.material().image, image_handle);
+    assert_eq!(current.image_content().unwrap().pixels(), &[70; 8]);
+    assert_eq!(retained.pixels(), &[10; 8]);
+    assert_ne!(
+        world.resource::<Assets<TileSet>>().slot_revision(handle),
+        slot
+    );
+    let owner = world.resource::<TileSetAssets>();
+    assert_eq!(owner.error(handle), None);
+    assert_eq!(owner.desired(handle), Some(&original_source));
+    assert_eq!(owner.sources().next().unwrap().1, &source_record);
+    assert!(!world.contains_resource::<nara_asset::AssetSourceChanges>());
+    drop(retained);
+    runtime.finish().unwrap();
+}
+
+#[test]
 fn concrete_access_recovers_a_retarget_and_retains_exact_content_until_its_final_holder() {
     let (mut world, record, image_b) = fixture_world();
     let mut access = SystemState::<TileSetContent>::new(&mut world);
@@ -58,6 +157,7 @@ fn concrete_access_recovers_a_retarget_and_retains_exact_content_until_its_final
                 record.clone(),
                 source("a.png"),
                 SourceHash::from_bytes(b"a"),
+                &nara_asset::AssetPathScope::ROOT,
             )
             .unwrap();
         content.reconcile();
@@ -74,7 +174,8 @@ fn concrete_access_recovers_a_retarget_and_retains_exact_content_until_its_final
                 .request(
                     record.clone(),
                     source("b.png"),
-                    SourceHash::from_bytes(b"b")
+                    SourceHash::from_bytes(b"b"),
+                    &nara_asset::AssetPathScope::ROOT,
                 )
                 .unwrap(),
             handle
@@ -129,6 +230,7 @@ fn concrete_access_rejection_stops_late_dependency_publication_and_allows_source
                 record.clone(),
                 source("a.png"),
                 SourceHash::from_bytes(b"a"),
+                &nara_asset::AssetPathScope::ROOT,
             )
             .unwrap();
         content.reconcile();
@@ -137,6 +239,7 @@ fn concrete_access_rejection_stops_late_dependency_publication_and_allows_source
                 record.clone(),
                 source("b.png"),
                 SourceHash::from_bytes(b"b"),
+                &nara_asset::AssetPathScope::ROOT,
             )
             .unwrap();
         content.reject_source(&record).unwrap();
@@ -167,6 +270,7 @@ fn concrete_access_rejection_stops_late_dependency_publication_and_allows_source
             record,
             source("b.png"),
             SourceHash::from_bytes(b"corrected"),
+            &nara_asset::AssetPathScope::ROOT,
         )
         .unwrap();
     content.reconcile();

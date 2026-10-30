@@ -281,15 +281,18 @@ fn validate_effective_values<E>(
             }
             // Scene checks the enclosing source record only. The selected product's actual
             // existence and typed domain admission belong to the root content owner.
-            if let Some(database) = context.project_asset_database()
-                && let Some(reference) = references
-                    .iter()
-                    .find(|reference| database.resolve_ref(reference.asset_ref()).is_err())
+            if let Some(asset_resolution) = context.asset_resolution()
+                && let Some(reference) = references.iter().find(|reference| {
+                    asset_resolution
+                        .resolution_work_bytes(reference.asset_ref())
+                        .is_none_or(|bytes| bytes > context.materialization_limits().bytes().get())
+                        || asset_resolution.resolve_ref(reference.asset_ref()).is_err()
+                })
             {
                 diagnostics.push(invalid(&ComponentCodecError::invalid_asset_ref(
                     reference.path().to_string(),
                     reference.asset_ref().to_string(),
-                    "Asset reference is not declared in the project asset database",
+                    "Asset reference is not declared in the project asset resolver",
                 )));
                 continue;
             }
@@ -825,11 +828,14 @@ fn preflight_scene_with_context_options(
                     continue;
                 }
             };
-            // This strict database gate proves source identity, not domain product existence.
-            if let Some(database) = context.project_asset_database()
-                && let Some(reference) = asset_references
-                    .iter()
-                    .find(|reference| database.resolve_ref(reference.asset_ref()).is_err())
+            // This strict source catalogue gate proves source identity, not domain product existence.
+            if let Some(asset_resolution) = context.asset_resolution()
+                && let Some(reference) = asset_references.iter().find(|reference| {
+                    asset_resolution
+                        .resolution_work_bytes(reference.asset_ref())
+                        .is_none_or(|bytes| bytes > context.materialization_limits().bytes().get())
+                        || asset_resolution.resolve_ref(reference.asset_ref()).is_err()
+                })
             {
                 push_with_operation_index(
                     &mut diagnostics,
@@ -839,7 +845,7 @@ fn preflight_scene_with_context_options(
                         &ComponentCodecError::invalid_asset_ref(
                             reference.path().to_string(),
                             reference.asset_ref().to_string(),
-                            "Asset reference is not declared in the project asset database",
+                            "Asset reference is not declared in the project asset resolver",
                         ),
                         authority,
                     ),
@@ -1597,8 +1603,9 @@ mod tests {
         .with_capability(ComponentCapability::AssetRef)]);
         let (registry, bindings) = definitions(schema);
         let document = mixed_document(ComponentValue::Map(BTreeMap::new()), false);
-        let database = nara_asset::ProjectAssetDatabase::default();
-        let mut context = ComponentDecodeContext::new().with_project_asset_database(&database);
+        let asset_resolution = nara_asset::ProjectAssetDatabase::default();
+        let mut context = ComponentDecodeContext::new()
+            .with_asset_resolution(asset_resolution.resolver(&nara_asset::AssetPathScope::ROOT));
         let prepared = preflight_scene_with_context_and_bindings(
             &document,
             &registry,

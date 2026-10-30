@@ -5,7 +5,7 @@ use std::{
     sync::Arc,
 };
 
-use nara_asset::{AssetRef, ProjectAssetDatabase};
+use nara_asset::{AssetRecord, AssetRef, AssetReferenceResolver, StableAssetId};
 use nara_core::{ByteLimit, ItemLimit};
 use nara_diagnostic::DiagnosticReport;
 use nara_reflect::{
@@ -15,7 +15,7 @@ use nara_reflect::{
 
 use crate::{
     ExpandedSceneDocument, SceneDocument, SceneEntityId, SceneEntityProvenance, SceneEntityRecord,
-    ScenePatchDocument, SourceDocumentKey,
+    ScenePatchDocument, SourceDocumentBindingError, SourceDocumentKey,
     diagnostics::{
         error as diagnostic_error, usize_to_u64, with_asset_ref,
         with_entity_reference_rewrite_error, with_public_locator, with_public_u64,
@@ -110,15 +110,15 @@ impl PrefabDocument {
     }
 
     #[must_use]
-    pub fn instantiate_with_patch_and_asset_database(
+    pub fn instantiate_with_patch_and_asset_resolution(
         &self,
         registry: &ComponentRegistry,
         patch: &ScenePatchDocument,
-        database: &ProjectAssetDatabase,
+        asset_resolution: AssetReferenceResolver<'_>,
     ) -> PrefabInstantiationReport {
         let mut document = self.instantiate();
         let patch_report =
-            patch.apply_to_scene_with_asset_database(&mut document, registry, database);
+            patch.apply_to_scene_with_asset_resolution(&mut document, registry, asset_resolution);
         PrefabInstantiationReport::from_patch_report(document, patch_report)
     }
 
@@ -128,13 +128,13 @@ impl PrefabDocument {
     }
 
     #[must_use]
-    pub fn validate_with_asset_database(
+    pub fn validate_with_asset_resolution(
         &self,
         registry: &ComponentRegistry,
-        database: &ProjectAssetDatabase,
+        asset_resolution: AssetReferenceResolver<'_>,
     ) -> DiagnosticReport {
         self.instantiate()
-            .validate_with_asset_database(registry, database)
+            .validate_with_asset_resolution(registry, asset_resolution)
     }
 
     #[must_use]
@@ -147,14 +147,17 @@ impl PrefabDocument {
     }
 
     #[must_use]
-    pub fn expand_prefabs_with_asset_database<R: PrefabSourceResolver + ?Sized>(
+    pub fn expand_prefabs_with_asset_resolution<R: PrefabSourceResolver + ?Sized>(
         &self,
         registry: &ComponentRegistry,
         resolver: &R,
-        database: &ProjectAssetDatabase,
+        asset_resolution: AssetReferenceResolver<'_>,
     ) -> PrefabExpansionReport {
-        self.instantiate()
-            .expand_prefabs_with_asset_database(registry, resolver, database)
+        self.instantiate().expand_prefabs_with_asset_resolution(
+            registry,
+            resolver,
+            asset_resolution,
+        )
     }
 }
 
@@ -229,7 +232,8 @@ impl<'de> serde::Deserialize<'de> for PrefabInstance {
 /// the same key and document; distinct sources must not share a key. This applies equally to
 /// code-authored and file-backed resolvers, including document-only expansion.
 /// Auxiliary products must be refused before opening a native Prefab source. An explicit
-/// primary product requires an admitted stable source key matching its enclosing source ID.
+/// primary product requires a matching admitted source-asset association. That association does
+/// not change a location-authored document's canonical identity.
 ///
 /// A bare document cannot satisfy the resolver contract:
 ///
@@ -250,6 +254,7 @@ pub trait PrefabSourceResolver {
 pub struct ResolvedPrefabSource {
     document: ResolvedPrefabDocument,
     key: SourceDocumentKey,
+    source_asset: Option<StableAssetId>,
 }
 
 #[derive(Debug, Clone)]
@@ -272,6 +277,7 @@ impl ResolvedPrefabSource {
     pub const fn bound(document: Arc<PrefabDocument>, key: SourceDocumentKey) -> Self {
         Self {
             document: ResolvedPrefabDocument::Raw(document),
+            source_asset: Self::key_source_asset(&key),
             key,
         }
     }
@@ -284,6 +290,7 @@ impl ResolvedPrefabSource {
     ) -> Self {
         Self {
             document: ResolvedPrefabDocument::Authoring(document),
+            source_asset: Self::key_source_asset(&key),
             key,
         }
     }
@@ -298,8 +305,35 @@ impl ResolvedPrefabSource {
     ) -> Self {
         Self {
             document: ResolvedPrefabDocument::AuthoringSource { document, basis },
+            source_asset: Self::key_source_asset(&key),
             key,
         }
+    }
+
+    const fn key_source_asset(key: &SourceDocumentKey) -> Option<StableAssetId> {
+        match key.origin() {
+            crate::SourceDocumentOrigin::StableAsset { stable_id } => Some(*stable_id),
+            _ => None,
+        }
+    }
+
+    /// Attaches the source owner's actually admitted metadata without changing document identity.
+    ///
+    /// The source owner still proves actual file/metadata admission and retains its receipts.
+    /// Named sources have no intrinsic path claim; their owner establishes the association.
+    pub fn with_source_asset(
+        mut self,
+        record: &AssetRecord,
+    ) -> Result<Self, SourceDocumentBindingError> {
+        if self.key.kind() != crate::SourceDocumentKind::Prefab {
+            return Err(SourceDocumentBindingError::DocumentKind);
+        }
+        self.key.validate_asset_source(record)?;
+        if self.source_asset.is_some_and(|id| id != record.stable_id()) {
+            return Err(SourceDocumentBindingError::SourceKeyMismatch);
+        }
+        self.source_asset = Some(record.stable_id());
+        Ok(self)
     }
 
     #[must_use]
@@ -354,13 +388,9 @@ impl ResolvedPrefabSource {
 
     pub(crate) fn matches_request(&self, request: &AssetRef) -> bool {
         request.is_primary()
-            && request.as_product().is_none_or(|reference| {
-                matches!(
-                    self.key.origin(),
-                    crate::SourceDocumentOrigin::StableAsset { stable_id }
-                        if *stable_id == reference.source()
-                )
-            })
+            && request
+                .as_product()
+                .is_none_or(|reference| self.source_asset == Some(reference.source()))
     }
 }
 
@@ -430,18 +460,18 @@ impl InMemoryPrefabSourceResolver {
     }
 
     #[cfg(feature = "serde")]
-    pub fn insert_file_candidate_with_asset_database(
+    pub fn insert_file_candidate_with_asset_resolution(
         &mut self,
         source: AssetRef,
         key: SourceDocumentKey,
         candidate: crate::PrefabDocumentCandidate,
         registry: &ComponentRegistry,
-        database: &ProjectAssetDatabase,
+        asset_resolution: AssetReferenceResolver<'_>,
     ) -> Result<Option<PrefabDocument>, crate::SceneFilePublicationError> {
         let (prefab, _) = candidate.into_canonical_document(registry)?;
         let diagnostics = prefab
             .instantiate()
-            .validate_authoring_with_asset_database(registry, database);
+            .validate_authoring_with_asset_resolution(registry, asset_resolution);
         if diagnostics.has_errors() {
             return Err(crate::SceneFilePublicationError::new(diagnostics));
         }
@@ -822,7 +852,7 @@ pub fn try_expand_authoring_prefabs_with_loader<F, E>(
     document: &SceneDocument,
     basis: &crate::AuthoringSchemaBasis,
     options: PrefabExpansionOptions,
-    database: Option<&ProjectAssetDatabase>,
+    asset_resolution: Option<AssetReferenceResolver<'_>>,
     mut loader: F,
 ) -> Result<AuthoringPrefabExpansionReport, E>
 where
@@ -832,7 +862,7 @@ where
         SchemaAuthority::Authoring(basis),
         &mut loader,
         options,
-        database,
+        asset_resolution,
     );
     let report = context.expand_scene_document(document);
     let work_bytes = PrefabExpansionContext::<F, E>::usage_work_bytes(context.usage);
@@ -888,7 +918,7 @@ pub(crate) fn try_compile_selected_authoring_instance_with_loader<F, E>(
     anchor: &SceneEntityId,
     basis: &crate::AuthoringSchemaBasis,
     options: PrefabExpansionOptions,
-    database: Option<&ProjectAssetDatabase>,
+    asset_resolution: Option<AssetReferenceResolver<'_>>,
     mut loader: F,
 ) -> Result<SelectedInstanceCompilation, E>
 where
@@ -898,7 +928,7 @@ where
         SchemaAuthority::Authoring(basis),
         &mut loader,
         options,
-        database,
+        asset_resolution,
     );
     let result: Result<SelectedInstanceFragment, PrefabExpansionFailure> = (|| {
         if !context.reserve_provenance_bytes(
@@ -1096,17 +1126,17 @@ impl SceneDocument {
     }
 
     #[must_use]
-    pub fn expand_prefabs_with_asset_database<R: PrefabSourceResolver + ?Sized>(
+    pub fn expand_prefabs_with_asset_resolution<R: PrefabSourceResolver + ?Sized>(
         &self,
         registry: &ComponentRegistry,
         resolver: &R,
-        database: &ProjectAssetDatabase,
+        asset_resolution: AssetReferenceResolver<'_>,
     ) -> PrefabExpansionReport {
-        self.expand_prefabs_with_options_and_asset_database(
+        self.expand_prefabs_with_options_and_asset_resolution(
             registry,
             resolver,
             PrefabExpansionOptions::default(),
-            database,
+            asset_resolution,
         )
     }
 
@@ -1126,16 +1156,19 @@ impl SceneDocument {
     }
 
     #[must_use]
-    pub fn expand_prefabs_with_options_and_asset_database<R: PrefabSourceResolver + ?Sized>(
+    pub fn expand_prefabs_with_options_and_asset_resolution<R: PrefabSourceResolver + ?Sized>(
         &self,
         registry: &ComponentRegistry,
         resolver: &R,
         options: PrefabExpansionOptions,
-        database: &ProjectAssetDatabase,
+        asset_resolution: AssetReferenceResolver<'_>,
     ) -> PrefabExpansionReport {
-        match self.try_expand_prefabs_with_loader(registry, options, Some(database), |source, _| {
-            Ok::<_, Infallible>(resolver.resolve_prefab(source))
-        }) {
+        match self.try_expand_prefabs_with_loader(
+            registry,
+            options,
+            Some(asset_resolution),
+            |source, _| Ok::<_, Infallible>(resolver.resolve_prefab(source)),
+        ) {
             Ok(report) => report,
             Err(error) => match error {},
         }
@@ -1152,7 +1185,7 @@ impl SceneDocument {
         &self,
         registry: &ComponentRegistry,
         options: PrefabExpansionOptions,
-        database: Option<&ProjectAssetDatabase>,
+        asset_resolution: Option<AssetReferenceResolver<'_>>,
         loader: F,
     ) -> Result<PrefabExpansionReport, E>
     where
@@ -1165,7 +1198,7 @@ impl SceneDocument {
             self,
             SchemaAuthority::Native(registry),
             options,
-            database,
+            asset_resolution,
             loader,
         )
     }
@@ -1199,7 +1232,7 @@ impl crate::SceneComponentBindings {
         &self,
         document: &SceneDocument,
         options: PrefabExpansionOptions,
-        database: Option<&ProjectAssetDatabase>,
+        asset_resolution: Option<AssetReferenceResolver<'_>>,
         loader: F,
     ) -> Result<PrefabExpansionReport, E>
     where
@@ -1212,7 +1245,7 @@ impl crate::SceneComponentBindings {
             document,
             SchemaAuthority::Mixed(self),
             options,
-            database,
+            asset_resolution,
             loader,
         )
     }
@@ -1222,13 +1255,14 @@ fn try_expand_with_authority<F, E>(
     document: &SceneDocument,
     authority: SchemaAuthority<'_>,
     options: PrefabExpansionOptions,
-    database: Option<&ProjectAssetDatabase>,
+    asset_resolution: Option<AssetReferenceResolver<'_>>,
     mut loader: F,
 ) -> Result<PrefabExpansionReport, E>
 where
     F: FnMut(&AssetRef, &mut PrefabExpansionWorkingSet) -> Result<Option<ResolvedPrefabSource>, E>,
 {
-    let mut context = PrefabExpansionContext::new(authority, &mut loader, options, database);
+    let mut context =
+        PrefabExpansionContext::new(authority, &mut loader, options, asset_resolution);
     let report = context.expand_scene_document(document);
     match context.load_error {
         Some(error) => Err(error),
@@ -1241,7 +1275,7 @@ struct PrefabExpansionContext<'a, F, E> {
     resolver: &'a mut F,
     load_error: Option<E>,
     options: PrefabExpansionOptions,
-    database: Option<&'a ProjectAssetDatabase>,
+    asset_resolution: Option<AssetReferenceResolver<'a>>,
     usage: PrefabExpansionUsage,
     budget_failed: bool,
     source_upgrade_required: bool,
@@ -1271,14 +1305,14 @@ where
         authority: SchemaAuthority<'a>,
         resolver: &'a mut F,
         options: PrefabExpansionOptions,
-        database: Option<&'a ProjectAssetDatabase>,
+        asset_resolution: Option<AssetReferenceResolver<'a>>,
     ) -> Self {
         Self {
             authority,
             resolver,
             load_error: None,
             options,
-            database,
+            asset_resolution,
             usage: PrefabExpansionUsage::default(),
             budget_failed: false,
             source_upgrade_required: false,
@@ -1816,8 +1850,8 @@ where
         }
         let mut context = ComponentDecodeContext::new()
             .with_materialization_limits(self.materialization_limits());
-        if let Some(database) = self.database {
-            context = context.with_project_asset_database(database);
+        if let Some(asset_resolution) = self.asset_resolution {
+            context = context.with_asset_resolution(asset_resolution);
         }
         let reference_node_limit = self.options.limits.reference_work_nodes().get();
         let reference_byte_limit = self.options.limits.reference_work_bytes().get();

@@ -167,7 +167,7 @@ impl ImagePublications {
                     let handle = bindings
                         .reserve::<ImageAsset>(
                             &AssetRef::Product(product),
-                            snapshot.asset_database(),
+                            snapshot.asset_resolution(),
                             &AssetSourceKind::Image,
                         )
                         .map_err(|_| identity_conflict())?;
@@ -211,24 +211,6 @@ impl ImagePublications {
             }
         }
         Ok(Self { publish, retire })
-    }
-
-    pub(super) fn image_for_path(
-        &self,
-        path: &nara_asset::AssetPath,
-    ) -> Option<(Handle<ImageAsset>, ImageAsset)> {
-        self.publish
-            .values()
-            .find(|item| {
-                item.record
-                    .as_ref()
-                    .is_some_and(|record| record.path() == path)
-            })
-            .and_then(|item| {
-                item.image
-                    .share_retained()
-                    .map(|image| (item.handle, image))
-            })
     }
 
     pub(super) fn image_for_product(
@@ -322,7 +304,7 @@ fn binding_matches(
         && record.is_none_or(|record| {
             product.source() == record.stable_id()
                 && product.product() == ImportedProductId::PRIMARY
-                && server.path(handle.id()) == Some(record.path().as_str())
+                && server.path(handle.id()) == Some(record.path())
         })
 }
 

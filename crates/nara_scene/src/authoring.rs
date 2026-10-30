@@ -5,7 +5,7 @@ use std::{
     sync::Arc,
 };
 
-use nara_asset::ProjectAssetDatabase;
+use nara_asset::AssetReferenceResolver;
 use nara_diagnostic::DiagnosticReport;
 use nara_ecs::World;
 use nara_identity::SpawnedSceneInstance;
@@ -954,14 +954,14 @@ impl PrefabAuthoringSession {
     }
 
     #[cfg(feature = "serde")]
-    pub fn try_from_file_candidate_with_asset_database(
+    pub fn try_from_file_candidate_with_asset_resolution(
         candidate: crate::PrefabDocumentCandidate,
         registry: &ComponentRegistry,
-        database: &ProjectAssetDatabase,
+        asset_resolution: AssetReferenceResolver<'_>,
     ) -> Result<Self, crate::SceneFilePublicationError> {
         let published = candidate
             .canonicalize(registry)?
-            .publish_with_asset_database(registry, database)?;
+            .publish_with_asset_resolution(registry, asset_resolution)?;
         let source_upgrade_required = published.source_upgrade_required();
         Ok(Self::new_with_source_state(
             published.into_document(),
@@ -1093,16 +1093,16 @@ impl PrefabAuthoringSession {
     }
 
     #[cfg(feature = "serde")]
-    pub fn try_replace_file_candidate_with_asset_database(
+    pub fn try_replace_file_candidate_with_asset_resolution(
         &mut self,
         candidate: crate::PrefabDocumentCandidate,
         registry: &ComponentRegistry,
-        database: &ProjectAssetDatabase,
+        asset_resolution: AssetReferenceResolver<'_>,
     ) -> Result<(), AuthoringSessionReplacementError> {
         self.authority.require_native()?;
         let published = candidate
             .canonicalize(registry)?
-            .publish_with_asset_database(registry, database)?;
+            .publish_with_asset_resolution(registry, asset_resolution)?;
         let source_upgrade_required = published.source_upgrade_required();
         self.replace_document_with_source_state(published.into_document(), source_upgrade_required);
         Ok(())
@@ -1126,18 +1126,18 @@ impl PrefabAuthoringSession {
     }
 
     /// Applies one failure-atomic patch with project asset validation.
-    pub fn apply_patch_with_asset_database(
+    pub fn apply_patch_with_asset_resolution(
         &mut self,
         patch: &ScenePatchDocument,
         registry: &ComponentRegistry,
-        database: &ProjectAssetDatabase,
+        asset_resolution: AssetReferenceResolver<'_>,
     ) -> ScenePatchReport {
         #[cfg(feature = "serde")]
         if self.authority.is_published() {
             return admitted_document_patch_rejection();
         }
         let prepared = patch
-            .prepare_to_prefab_with_asset_database(&self.document, registry, database)
+            .prepare_to_prefab_with_asset_resolution(&self.document, registry, asset_resolution)
             .map(crate::patch::PreparedPrefabPatch::into_parts);
         self.history
             .apply_forward(&mut self.document, patch, prepared)
@@ -1188,10 +1188,10 @@ impl PrefabAuthoringSession {
     }
 
     /// Applies one history step with project asset validation.
-    pub fn undo_with_asset_database(
+    pub fn undo_with_asset_resolution(
         &mut self,
         registry: &ComponentRegistry,
-        database: &ProjectAssetDatabase,
+        asset_resolution: AssetReferenceResolver<'_>,
     ) -> ScenePatchReport {
         #[cfg(feature = "serde")]
         if self.authority.is_published() {
@@ -1202,7 +1202,7 @@ impl PrefabAuthoringSession {
             HistoryDirection::Undo,
             |patch, document, _scope| {
                 patch
-                    .prepare_to_prefab_with_asset_database(document, registry, database)
+                    .prepare_to_prefab_with_asset_resolution(document, registry, asset_resolution)
                     .map(crate::patch::PreparedPrefabPatch::into_parts)
             },
         )
@@ -1235,10 +1235,10 @@ impl PrefabAuthoringSession {
     }
 
     /// Reapplies one history step with project asset validation.
-    pub fn redo_with_asset_database(
+    pub fn redo_with_asset_resolution(
         &mut self,
         registry: &ComponentRegistry,
-        database: &ProjectAssetDatabase,
+        asset_resolution: AssetReferenceResolver<'_>,
     ) -> ScenePatchReport {
         #[cfg(feature = "serde")]
         if self.authority.is_published() {
@@ -1249,7 +1249,7 @@ impl PrefabAuthoringSession {
             HistoryDirection::Redo,
             |patch, document, _scope| {
                 patch
-                    .prepare_to_prefab_with_asset_database(document, registry, database)
+                    .prepare_to_prefab_with_asset_resolution(document, registry, asset_resolution)
                     .map(crate::patch::PreparedPrefabPatch::into_parts)
             },
         )
@@ -1416,14 +1416,14 @@ impl SceneAuthoringSession {
     }
 
     #[cfg(feature = "serde")]
-    pub fn try_from_file_candidate_with_asset_database(
+    pub fn try_from_file_candidate_with_asset_resolution(
         candidate: crate::SceneDocumentCandidate,
         registry: &ComponentRegistry,
-        database: &ProjectAssetDatabase,
+        asset_resolution: AssetReferenceResolver<'_>,
     ) -> Result<Self, crate::SceneFilePublicationError> {
         let published = candidate
             .canonicalize(registry)?
-            .publish_with_asset_database(registry, database)?;
+            .publish_with_asset_resolution(registry, asset_resolution)?;
         let source_upgrade_required = published.source_upgrade_required();
         Ok(Self::new_with_source_state(
             published.into_document(),
@@ -1542,16 +1542,16 @@ impl SceneAuthoringSession {
     }
 
     #[cfg(feature = "serde")]
-    pub fn try_replace_file_candidate_with_asset_database(
+    pub fn try_replace_file_candidate_with_asset_resolution(
         &mut self,
         candidate: crate::SceneDocumentCandidate,
         registry: &ComponentRegistry,
-        database: &ProjectAssetDatabase,
+        asset_resolution: AssetReferenceResolver<'_>,
     ) -> Result<(), AuthoringSessionReplacementError> {
         self.authority.require_native()?;
         let published = candidate
             .canonicalize(registry)?
-            .publish_with_asset_database(registry, database)?;
+            .publish_with_asset_resolution(registry, asset_resolution)?;
         let source_upgrade_required = published.source_upgrade_required();
         self.replace_document_with_source_state(published.into_document(), source_upgrade_required);
         Ok(())
@@ -1630,11 +1630,11 @@ impl SceneAuthoringSession {
         self.apply_forward_patch_with(patch, patch.prepare_to_scene(&self.document, registry))
     }
 
-    pub fn apply_patch_with_asset_database(
+    pub fn apply_patch_with_asset_resolution(
         &mut self,
         patch: &ScenePatchDocument,
         registry: &ComponentRegistry,
-        database: &ProjectAssetDatabase,
+        asset_resolution: AssetReferenceResolver<'_>,
     ) -> ScenePatchReport {
         #[cfg(feature = "serde")]
         if self.authority.is_published() {
@@ -1642,7 +1642,11 @@ impl SceneAuthoringSession {
         }
         self.apply_forward_patch_with(
             patch,
-            patch.prepare_to_scene_with_asset_database(&self.document, registry, database),
+            patch.prepare_to_scene_with_asset_resolution(
+                &self.document,
+                registry,
+                asset_resolution,
+            ),
         )
     }
 
@@ -1680,17 +1684,19 @@ impl SceneAuthoringSession {
     }
 
     #[cfg(feature = "serde")]
-    pub fn apply_file_patch_candidate_with_asset_database(
+    pub fn apply_file_patch_candidate_with_asset_resolution(
         &mut self,
         candidate: crate::ScenePatchDocumentCandidate,
         registry: &ComponentRegistry,
-        database: &ProjectAssetDatabase,
+        asset_resolution: AssetReferenceResolver<'_>,
     ) -> ScenePatchReport {
         if self.authority.is_published() {
             return admitted_document_patch_rejection();
         }
         match candidate.into_canonical_document(registry) {
-            Ok((patch, _)) => self.apply_patch_with_asset_database(&patch, registry, database),
+            Ok((patch, _)) => {
+                self.apply_patch_with_asset_resolution(&patch, registry, asset_resolution)
+            }
             Err(error) => crate::format::publication_error_patch_report(error),
         }
     }
@@ -1714,17 +1720,17 @@ impl SceneAuthoringSession {
         self.apply_authoring_history(HistoryDirection::Undo)
     }
 
-    pub fn undo_with_asset_database(
+    pub fn undo_with_asset_resolution(
         &mut self,
         registry: &ComponentRegistry,
-        database: &ProjectAssetDatabase,
+        asset_resolution: AssetReferenceResolver<'_>,
     ) -> ScenePatchReport {
         #[cfg(feature = "serde")]
         if self.authority.is_published() {
             return self.apply_authoring_history(HistoryDirection::Undo);
         }
         self.apply_history_patch_with(HistoryDirection::Undo, |patch, document| {
-            patch.prepare_to_scene_with_asset_database(document, registry, database)
+            patch.prepare_to_scene_with_asset_resolution(document, registry, asset_resolution)
         })
     }
 
@@ -1747,17 +1753,17 @@ impl SceneAuthoringSession {
         self.apply_authoring_history(HistoryDirection::Redo)
     }
 
-    pub fn redo_with_asset_database(
+    pub fn redo_with_asset_resolution(
         &mut self,
         registry: &ComponentRegistry,
-        database: &ProjectAssetDatabase,
+        asset_resolution: AssetReferenceResolver<'_>,
     ) -> ScenePatchReport {
         #[cfg(feature = "serde")]
         if self.authority.is_published() {
             return self.apply_authoring_history(HistoryDirection::Redo);
         }
         self.apply_history_patch_with(HistoryDirection::Redo, |patch, document| {
-            patch.prepare_to_scene_with_asset_database(document, registry, database)
+            patch.prepare_to_scene_with_asset_resolution(document, registry, asset_resolution)
         })
     }
 
@@ -1775,17 +1781,23 @@ impl SceneAuthoringSession {
         Ok(self.sync_bound_candidate(world, registry, &candidate, occurrence, None))
     }
 
-    pub fn sync_world_with_asset_database(
+    pub fn sync_world_with_asset_resolution(
         &mut self,
         world: &mut World,
         registry: &ComponentRegistry,
         source: &SourceDocumentKey,
         occurrence: &SceneOccurrenceKey,
-        database: &ProjectAssetDatabase,
+        asset_resolution: AssetReferenceResolver<'_>,
     ) -> Result<SceneAuthoringSyncReport, AuthoringSessionAuthorityError> {
         self.authority.require_native()?;
         let candidate = ExpandedSceneCandidate::plain(source.clone(), Arc::clone(&self.document));
-        Ok(self.sync_bound_candidate(world, registry, &candidate, occurrence, Some(database)))
+        Ok(self.sync_bound_candidate(
+            world,
+            registry,
+            &candidate,
+            occurrence,
+            Some(asset_resolution),
+        ))
     }
 
     pub fn sync_world_with_prefab_resolver<R: PrefabSourceResolver + ?Sized>(
@@ -1801,20 +1813,31 @@ impl SceneAuthoringSession {
         Ok(self.sync_expansion(world, registry, source, occurrence, report, None))
     }
 
-    pub fn sync_world_with_prefab_resolver_and_asset_database<R: PrefabSourceResolver + ?Sized>(
+    pub fn sync_world_with_prefab_resolver_and_asset_resolution<
+        R: PrefabSourceResolver + ?Sized,
+    >(
         &mut self,
         world: &mut World,
         registry: &ComponentRegistry,
         source: &SourceDocumentKey,
         occurrence: &SceneOccurrenceKey,
         resolver: &R,
-        database: &ProjectAssetDatabase,
+        asset_resolution: AssetReferenceResolver<'_>,
     ) -> Result<SceneAuthoringSyncReport, AuthoringSessionAuthorityError> {
         self.authority.require_native()?;
-        let report = self
-            .document
-            .expand_prefabs_with_asset_database(registry, resolver, database);
-        Ok(self.sync_expansion(world, registry, source, occurrence, report, Some(database)))
+        let report = self.document.expand_prefabs_with_asset_resolution(
+            registry,
+            resolver,
+            asset_resolution,
+        );
+        Ok(self.sync_expansion(
+            world,
+            registry,
+            source,
+            occurrence,
+            report,
+            Some(asset_resolution),
+        ))
     }
 
     fn sync_expansion(
@@ -1824,7 +1847,7 @@ impl SceneAuthoringSession {
         source: &SourceDocumentKey,
         occurrence: &SceneOccurrenceKey,
         expansion: crate::PrefabExpansionReport,
-        database: Option<&ProjectAssetDatabase>,
+        asset_resolution: Option<AssetReferenceResolver<'_>>,
     ) -> SceneAuthoringSyncReport {
         let mut diagnostics = expansion.diagnostics;
         let mut report = match expansion.candidate {
@@ -1833,7 +1856,7 @@ impl SceneAuthoringSession {
                 registry,
                 &expanded.bind_source(source.clone()),
                 occurrence,
-                database,
+                asset_resolution,
                 self.live_instance.as_ref(),
             ),
             None => SceneSpawnReport::default(),
@@ -1849,14 +1872,14 @@ impl SceneAuthoringSession {
         registry: &ComponentRegistry,
         candidate: &ExpandedSceneCandidate,
         occurrence: &SceneOccurrenceKey,
-        database: Option<&ProjectAssetDatabase>,
+        asset_resolution: Option<AssetReferenceResolver<'_>>,
     ) -> SceneAuthoringSyncReport {
         let report = SceneSpawner::new().sync(
             world,
             registry,
             candidate,
             occurrence,
-            database,
+            asset_resolution,
             self.live_instance.as_ref(),
         );
         self.finish_world_sync(report)

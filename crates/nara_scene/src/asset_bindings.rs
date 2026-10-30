@@ -1,8 +1,8 @@
 use std::fmt;
 
 use nara_asset::{
-    AssetError, AssetProductRef, AssetRef, AssetRefError, AssetServer, AssetSourceKind, Handle,
-    ProjectAssetDatabase,
+    AssetError, AssetProductRef, AssetRef, AssetRefError, AssetReferenceResolver, AssetServer,
+    AssetSourceKind, Handle,
 };
 use nara_ecs::World;
 use nara_reflect::{ComponentApplyBatch, ComponentCodecError};
@@ -37,20 +37,21 @@ impl SceneAssetBindings {
 
     /// Reserves a typed identity through the same admitted decode context used by Scene codecs.
     ///
-    /// The source must resolve in `database` with `expected_kind`. The resulting handle does not
+    /// The source must resolve in `asset_resolution` with `expected_kind`. The resulting handle does not
     /// establish residency: a concrete content owner must prepare and commit its resources separately.
     /// No live AssetServer is changed, including when resolution fails.
     pub fn reserve<T: 'static>(
         &mut self,
         reference: &AssetRef,
-        database: &ProjectAssetDatabase,
+        asset_resolution: AssetReferenceResolver<'_>,
         expected_kind: &AssetSourceKind,
     ) -> Result<Handle<T>, AssetRefError> {
-        self.batch.with_decode_context(Some(database), |context| {
-            context
-                .resolve_asset_ref_with_kind(reference, expected_kind)
-                .expect("Scene asset bindings always install a scratch AssetServer")
-        })
+        self.batch
+            .with_decode_context(Some(asset_resolution), |context| {
+                context
+                    .resolve_asset_ref_with_kind(reference, expected_kind)
+                    .expect("Scene asset bindings always install a scratch AssetServer")
+            })
     }
 
     /// Reserves an admitted Runtime Product without source metadata or live World mutation.

@@ -358,7 +358,13 @@ fn rebuild_and_source_move_preserve_products_while_stale_continuity_refuses() {
         )
         .unwrap();
         for reference in [
-            AssetRef::Path(collection.source_records().next().unwrap().path().clone()),
+            AssetRef::Path(
+                snapshot
+                    .asset_resolution()
+                    .scope()
+                    .relativize(collection.source_records().next().unwrap().path())
+                    .unwrap(),
+            ),
             AssetRef::stable_id(SOURCE).unwrap(),
             AssetRef::Product(primary),
         ] {
@@ -530,7 +536,7 @@ fn copied_source_needs_a_new_enclosing_identity_before_catalogue_admission() {
             .unwrap()
             .path()
             .as_str(),
-        "copy.json"
+        "assets/copy.json"
     );
     assert_eq!(copied_bundle.get(&selected).unwrap().text, "Hello world");
     check_project(ProjectCheckRequest::new(fixture.capability(), recipe())).unwrap();

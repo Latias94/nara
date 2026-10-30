@@ -4,8 +4,8 @@ use std::{
 };
 
 use nara_asset::{
-    AssetId, AssetMeta, AssetMetaCandidate, AssetMetaIdentity, AssetPath, AssetRecord, AssetRef,
-    AssetSourceKind, AssetVersion, SourceHash, StableAssetId,
+    AssetId, AssetMeta, AssetMetaCandidate, AssetMetaIdentity, AssetRecord, AssetRef,
+    AssetSourceKind, AssetSourcePath, AssetVersion, SourceHash, StableAssetId,
 };
 use nara_fs::{
     ContentDigest, DirectoryCapability, FileCapability, FileIdentity, FsError, RelativePath,
@@ -112,7 +112,7 @@ struct PendingImageImport {
     generation: EditorImageImportGeneration,
     project_root_identity: FileIdentity,
     relative_path: Arc<str>,
-    asset_path: AssetPath,
+    asset_path: AssetSourcePath,
     stable_id: StableAssetId,
     source_identity: FileIdentity,
     metadata: RetainedHost<FilePublicationHost>,
@@ -140,7 +140,7 @@ pub(super) enum EditorImageImportLatestMetadata {
 pub(super) struct EditorImageImportLatestDetail {
     relative_path: Arc<str>,
     detail_revision: u64,
-    asset_path: AssetPath,
+    asset_path: AssetSourcePath,
     stable_id: StableAssetId,
     settings: ImageImportSettings,
     metadata: EditorImageImportLatestMetadata,
@@ -165,7 +165,7 @@ impl EditorImageImportLatestDetail {
     }
 
     #[must_use]
-    pub(super) const fn asset_path(&self) -> &AssetPath {
+    pub(super) const fn asset_path(&self) -> &AssetSourcePath {
         &self.asset_path
     }
 
@@ -305,8 +305,11 @@ impl EditorImageImportHost {
                 return Err(unavailable());
             }
             let entry = catalog
-                .image_entry(&AssetRef::Path(path.clone()))
+                .image_entry(&AssetRef::StableId(image.stable_id()))
                 .ok_or_else(unavailable)?;
+            if entry.asset_path() != path {
+                return Err(unavailable());
+            }
             let EditorImageMetadataStatus::Ready(receipt) = entry.metadata() else {
                 return Err(unavailable());
             };
@@ -396,7 +399,7 @@ impl EditorImageImportHost {
     }
 
     #[must_use]
-    pub(crate) fn last_good(&self, asset_path: &AssetPath) -> Option<&EditorImageLastGood> {
+    pub(crate) fn last_good(&self, asset_path: &AssetSourcePath) -> Option<&EditorImageLastGood> {
         self.last_good.get(asset_path)
     }
 
@@ -574,6 +577,8 @@ impl EditorImageImportHost {
                 self.runtime_revocation_failure = Some(failure);
             }
         }
+        // Driver publications can advance Images without a Runtime frame or visible preview.
+        // Reconcile already bound dependencies without reapplying any source alias scope.
         if let Err(failure) = runtime.reconcile_tile_sets(Vec::new()) {
             self.runtime_revocation_failure = Some(failure);
         }
@@ -743,7 +748,7 @@ impl EditorImageImportHost {
                 let admitted = AssetMetaCandidate::<ImageImportSettings>::decode_json_bytes(&bytes);
                 let admitted = match admitted {
                     Ok(admitted)
-                        if admitted.identity().path() == entry.asset_path()
+                        if admitted.identity().path() == entry.authored_path()
                             && admitted.identity().source_kind() == &AssetSourceKind::Image
                             && admitted.identity().stable_id() == receipt.stable_id()
                             && *admitted.settings() == receipt.settings() =>
@@ -790,7 +795,8 @@ impl EditorImageImportHost {
         };
 
         #[cfg(feature = "runtime-ui")]
-        if authoring_images::validate_authoring_image_choice(stable_id, entry.asset_path()).is_err()
+        if authoring_images::validate_authoring_image_choice(stable_id, entry.authored_path())
+            .is_err()
         {
             return self.fail_request(generation, EditorImageImportFailure::CatalogRejected);
         }
@@ -798,7 +804,7 @@ impl EditorImageImportHost {
         let metadata = AssetMeta::new(
             AssetMetaIdentity::new(
                 stable_id,
-                entry.asset_path().clone(),
+                entry.authored_path().clone(),
                 AssetSourceKind::Image,
             ),
             settings,
@@ -1389,11 +1395,7 @@ fn refresh_tile_set_source(
     if &current != record {
         return EditorTileSetSourceUpdate::Remove(record.clone());
     }
-    let project_path = format!(
-        "{}/{}",
-        project.settings().paths.assets.as_str(),
-        record.path().as_str()
-    );
+    let project_path = record.path().as_str();
     let Some(index) = project.source_index_snapshot() else {
         return EditorTileSetSourceUpdate::Remove(record.clone());
     };

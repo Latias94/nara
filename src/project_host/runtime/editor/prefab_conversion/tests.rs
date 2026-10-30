@@ -713,7 +713,7 @@ fn scene_and_prefab_conversion_publish_only_after_review_and_round_trip_one_hist
             selected.source_key,
             nara_scene::SourceDocumentKey::project_location(
                 UNIVERSE.parse().unwrap(),
-                AssetPath::new(path).unwrap(),
+                nara_asset::AssetSourcePath::new(path).unwrap(),
                 if path == SCENE {
                     SourceDocumentKind::Scene
                 } else {

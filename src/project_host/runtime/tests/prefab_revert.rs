@@ -1,6 +1,7 @@
 //! Dedicated source repair cannot be forged by an otherwise identical structural patch.
 
 use super::*;
+use nara_asset::AssetSourcePath;
 use nara_scene::{
     PrefabDeclarationLimits, PrefabEntityTarget, PrefabInstancePath, PrefabOverlay,
     PrefabOverlaySlot, PrefabRevert, SceneEntityId, SourceDocumentKey, SourceDocumentKind,
@@ -15,7 +16,7 @@ fn ui_prefab_revert_uses_source_owner_proof_and_keeps_one_undo() {
     let anchor = SceneEntityId::new("repair-root").unwrap();
     let mut overlay = PrefabOverlay::new(SourceDocumentKey::project_location(
         "c60a6da4-b6a7-5028-bc53-39111af1a2ba".parse().unwrap(),
-        AssetPath::new("prefabs/ui.prefab.json").unwrap(),
+        AssetSourcePath::new("prefabs/ui.prefab.json").unwrap(),
         SourceDocumentKind::Prefab,
     ));
     overlay.suppressions.push(PrefabEntityTarget::source(

@@ -9,7 +9,7 @@ pub use projection::SceneProjection;
 use publication::PreparedScenePublication;
 pub use publication::PreparedSceneReplacement;
 
-use nara_asset::ProjectAssetDatabase;
+use nara_asset::AssetReferenceResolver;
 use nara_diagnostic::DiagnosticReport;
 use nara_ecs::{
     __private::LifecycleFreeInsertionPlan, __private::prepare_lifecycle_free_despawn,
@@ -283,7 +283,7 @@ impl SceneSpawner {
         registry: &ComponentRegistry,
         candidate: &ExpandedSceneCandidate,
         occurrence: &SceneOccurrenceKey,
-        database: Option<&ProjectAssetDatabase>,
+        asset_resolution: Option<AssetReferenceResolver<'_>>,
         current: Option<&SpawnedSceneInstance>,
     ) -> SceneSpawnReport {
         match preparation::prepare_ordinary_scene(
@@ -291,7 +291,7 @@ impl SceneSpawner {
             registry,
             candidate,
             occurrence,
-            database,
+            asset_resolution,
             current.map_or(SceneIdentityCommit::Register, SceneIdentityCommit::Replace),
         ) {
             Ok(prepared) => prepared.commit(world),
@@ -305,13 +305,20 @@ impl SceneSpawner {
         registry: &ComponentRegistry,
         candidate: &ExpandedSceneCandidate,
         occurrence: &SceneOccurrenceKey,
-        database: Option<&ProjectAssetDatabase>,
+        asset_resolution: Option<AssetReferenceResolver<'_>>,
         commit: SceneIdentityCommit<'_>,
         product: Option<SceneProductTransactionInput<'_>>,
     ) -> SceneSpawnReport {
         let bindings = SceneAssetBindings::from_world(world);
         self.spawn_with_asset_context_and_product_bindings(
-            world, registry, candidate, occurrence, database, commit, product, bindings,
+            world,
+            registry,
+            candidate,
+            occurrence,
+            asset_resolution,
+            commit,
+            product,
+            bindings,
         )
     }
 
@@ -321,7 +328,7 @@ impl SceneSpawner {
         registry: &ComponentRegistry,
         candidate: &ExpandedSceneCandidate,
         occurrence: &SceneOccurrenceKey,
-        database: Option<&ProjectAssetDatabase>,
+        asset_resolution: Option<AssetReferenceResolver<'_>>,
         commit: SceneIdentityCommit<'_>,
         product: Option<SceneProductTransactionInput<'_>>,
         bindings: SceneAssetBindings,
@@ -331,7 +338,7 @@ impl SceneSpawner {
             registry,
             candidate,
             occurrence,
-            database,
+            asset_resolution,
             commit,
             product,
             bindings,
@@ -348,7 +355,7 @@ impl SceneSpawner {
         registry: &ComponentRegistry,
         candidate: &ExpandedSceneCandidate,
         occurrence: &SceneOccurrenceKey,
-        database: Option<&ProjectAssetDatabase>,
+        asset_resolution: Option<AssetReferenceResolver<'_>>,
         commit: SceneIdentityCommit<'_>,
         product: Option<SceneProductTransactionInput<'_>>,
         bindings: SceneAssetBindings,
@@ -364,7 +371,7 @@ impl SceneSpawner {
             definition,
             SceneMaterializationInput::Expanded(candidate),
             occurrence,
-            database,
+            asset_resolution,
             commit,
             product,
             bindings,
@@ -381,7 +388,7 @@ impl SceneSpawner {
         definition: preparation::ScenePreparationDefinition,
         candidate: SceneMaterializationInput<'_>,
         occurrence: &SceneOccurrenceKey,
-        database: Option<&ProjectAssetDatabase>,
+        asset_resolution: Option<AssetReferenceResolver<'_>>,
         commit: SceneIdentityCommit<'_>,
         product: Option<SceneProductTransactionInput<'_>>,
         bindings: SceneAssetBindings,
@@ -391,8 +398,8 @@ impl SceneSpawner {
         if !definition.matches_registry(registry) {
             return Err(preparation::definition_rejection());
         }
-        let (database, value_limits) = match candidate {
-            SceneMaterializationInput::Expanded(_) => (database, value_limits),
+        let (asset_resolution, value_limits) = match candidate {
+            SceneMaterializationInput::Expanded(_) => (asset_resolution, value_limits),
             #[cfg(feature = "serde")]
             SceneMaterializationInput::Runtime(candidate) => {
                 definition
@@ -445,7 +452,7 @@ impl SceneSpawner {
                 });
             }
         };
-        let mut preflight = component_batch.with_decode_context(database, |context| {
+        let mut preflight = component_batch.with_decode_context(asset_resolution, |context| {
             context.set_materialization_limits(value_limits);
             match definition.bindings() {
                 None => preflight_scene_with_context(document, registry, context),
@@ -662,7 +669,7 @@ impl SceneSpawner {
 /// authority for product-owned retirement. Receipt-owning product state can be held outside the
 /// World with `World::resource_scope` and updated from the successful report before the exclusive
 /// caller returns; a rejected replacement leaves that state unchanged.
-/// The asset database must come from the admitted source, as with initial spawning; `None` is
+/// The asset resolver must come from the admitted source, as with initial spawning; `None` is
 /// appropriate only for sources that do not require project stable-asset resolution.
 /// Replaces one active Scene Instance while preserving the source provenance of an already
 /// expanded document and its admitted asset-resolution context.
@@ -671,7 +678,7 @@ pub fn replace_expanded_scene_with_product<F>(
     world: &mut World,
     registry: &ComponentRegistry,
     candidate: &ExpandedSceneCandidate,
-    database: Option<&ProjectAssetDatabase>,
+    asset_resolution: Option<AssetReferenceResolver<'_>>,
     current: &SpawnedSceneInstance,
     limits: SceneProductTransactionLimits,
     additional_retirements: &[WorldEntityToken],
@@ -685,7 +692,7 @@ where
         world,
         registry,
         candidate,
-        database,
+        asset_resolution,
         current,
         bindings,
         limits,
@@ -703,13 +710,13 @@ where
 ///
 /// This is a data transaction, not asset residency publication. A concrete content owner must
 /// preflight its resource writes and retirement before calling, then perform only infallible commits
-/// after a successful report. The supplied database must be the candidate's admitted source context.
+/// after a successful report. The supplied asset_resolution must be the candidate's admitted source context.
 #[must_use]
 pub fn replace_expanded_scene_with_product_and_bindings<F>(
     world: &mut World,
     registry: &ComponentRegistry,
     candidate: &ExpandedSceneCandidate,
-    database: Option<&ProjectAssetDatabase>,
+    asset_resolution: Option<AssetReferenceResolver<'_>>,
     current: &SpawnedSceneInstance,
     bindings: SceneAssetBindings,
     limits: SceneProductTransactionLimits,
@@ -728,7 +735,7 @@ where
         registry,
         candidate,
         &occurrence,
-        database,
+        asset_resolution,
         SceneIdentityCommit::Replace(current),
         Some(SceneProductTransactionInput {
             limits,
@@ -746,7 +753,7 @@ pub fn prepare_expanded_scene_replacement_with_claims<F>(
     world: &mut World,
     registry: &ComponentRegistry,
     candidate: &ExpandedSceneCandidate,
-    database: Option<&ProjectAssetDatabase>,
+    asset_resolution: Option<AssetReferenceResolver<'_>>,
     current: &SpawnedSceneInstance,
     bindings: SceneAssetBindings,
     claims: &SceneNativeRetirementClaims,
@@ -767,7 +774,7 @@ where
             registry,
             candidate,
             &occurrence,
-            database,
+            asset_resolution,
             SceneIdentityCommit::Replace(current),
             Some(SceneProductTransactionInput {
                 limits,
@@ -791,7 +798,7 @@ impl SceneComponentBindings {
         &self,
         world: &mut World,
         candidate: &ExpandedSceneCandidate,
-        database: Option<&ProjectAssetDatabase>,
+        asset_resolution: Option<AssetReferenceResolver<'_>>,
         current: &SpawnedSceneInstance,
         assets: SceneAssetBindings,
         claims: &SceneNativeRetirementClaims,
@@ -805,7 +812,7 @@ impl SceneComponentBindings {
         self.prepare_selected_scene_replacement_with_claims(
             world,
             SceneMaterializationInput::Expanded(candidate),
-            database,
+            asset_resolution,
             current,
             assets,
             claims,
@@ -857,7 +864,7 @@ impl SceneComponentBindings {
         &self,
         world: &mut World,
         candidate: SceneMaterializationInput<'_>,
-        database: Option<&ProjectAssetDatabase>,
+        asset_resolution: Option<AssetReferenceResolver<'_>>,
         current: &SpawnedSceneInstance,
         assets: SceneAssetBindings,
         claims: &SceneNativeRetirementClaims,
@@ -878,7 +885,7 @@ impl SceneComponentBindings {
                 definition,
                 candidate,
                 &occurrence,
-                database,
+                asset_resolution,
                 SceneIdentityCommit::Replace(current),
                 Some(product),
                 assets,
@@ -1614,9 +1621,9 @@ pub fn spawn_scene(
     registry: &ComponentRegistry,
     candidate: &ExpandedSceneCandidate,
     occurrence: &SceneOccurrenceKey,
-    database: Option<&ProjectAssetDatabase>,
+    asset_resolution: Option<AssetReferenceResolver<'_>>,
 ) -> SceneSpawnReport {
-    match prepare_scene(world, registry, candidate, occurrence, database) {
+    match prepare_scene(world, registry, candidate, occurrence, asset_resolution) {
         Ok(prepared) => prepared.commit(world),
         Err(report) => report,
     }

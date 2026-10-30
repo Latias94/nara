@@ -4,9 +4,10 @@ use std::{
 };
 
 use nara_asset::{
-    Asset, AssetEvents, AssetMutationBaseline, AssetRecord, AssetServer, AssetStates, AssetVersion,
-    Assets, Handle, ProjectAssetDatabase, SourceHash,
+    Asset, AssetEvents, AssetMutationBaseline, AssetPathScope, AssetRecord, AssetServer,
+    AssetStates, AssetVersion, Assets, Handle, ProjectAssetDatabase, SourceHash,
 };
+use nara_core::ByteLimit;
 use nara_image::{ImageAsset, ImageContentSnapshot};
 
 use super::{
@@ -54,7 +55,9 @@ impl TileSetPublicationInput {
         })
     }
 
-    #[must_use]
+    /// Binds the source dependency before retaining an input. The caller admits this input's
+    /// canonical path allowance; preparation also checks the receiving owner's actual limit.
+    #[allow(clippy::too_many_arguments)]
     pub fn from_source(
         handle: Handle<TileSet>,
         record: AssetRecord,
@@ -62,18 +65,22 @@ impl TileSetPublicationInput {
         source_hash: SourceHash,
         image_handle: Handle<ImageAsset>,
         image: ImageAsset,
-    ) -> Self {
-        Self {
+        scope: &AssetPathScope,
+        source_reference_bytes: ByteLimit,
+    ) -> Result<Self, TileSetAssetError> {
+        Ok(Self {
             handle,
-            declaration: TileSetDeclaration::Source {
+            declaration: TileSetDeclaration::from_source(
                 record,
                 source,
                 source_hash,
-            },
+                scope,
+                source_reference_bytes,
+            )?,
             image_handle,
             image,
             receipt: None,
-        }
+        })
     }
 
     /// Supplies processed content and its actual Image without source records or import hashes.
@@ -218,6 +225,9 @@ impl TileSetAssets {
                 return Err(TileSetAssetError::InvalidPublicationBatch);
             }
             input.declaration.validate()?;
+            input
+                .declaration
+                .validate_source_reference_limit(self.limits.source_reference_bytes())?;
             if !input
                 .declaration
                 .is_admitted(input.handle, server, database)

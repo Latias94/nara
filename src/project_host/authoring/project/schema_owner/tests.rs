@@ -463,7 +463,7 @@ fn newly_known_asset_reference_captures_actual_asset_metadata_bytes_and_database
     assert_eq!(successor.fork_startup_scene().document(), &saved);
     assert_eq!(successor.asset_sources().count(), 1);
     let asset = successor.asset_sources().next().unwrap();
-    assert_eq!(asset.path().as_str(), "alternate.png");
+    assert_eq!(asset.path().as_str(), "assets/alternate.png");
     assert_eq!(
         asset.bytes(),
         fs::read(project.root.join("assets/alternate.png")).unwrap()

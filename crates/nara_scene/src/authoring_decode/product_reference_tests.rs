@@ -1,7 +1,7 @@
 use std::convert::Infallible;
 
 use nara_asset::{
-    AssetPath, AssetProductRef, AssetRecord, AssetSourceKind, ImportedProductId,
+    AssetProductRef, AssetRecord, AssetSourceKind, AssetSourcePath, ImportedProductId,
     ProjectAssetDatabase, StableAssetId,
 };
 use nara_ecs::World;
@@ -189,7 +189,7 @@ fn scene_product_source_check_and_both_export_policies_preserve_complete_selecti
     database
         .insert(AssetRecord::new(
             source_id(),
-            AssetPath::new("text/captions.bundle").unwrap(),
+            AssetSourcePath::new("text/captions.bundle").unwrap(),
             AssetSourceKind::Other("text_bundle".into()),
         ))
         .unwrap();
@@ -200,7 +200,7 @@ fn scene_product_source_check_and_both_export_policies_preserve_complete_selecti
         &mut world,
         &candidate,
         &SceneOccurrenceKey::new("products", "missing").unwrap(),
-        Some(&ProjectAssetDatabase::default()),
+        Some(ProjectAssetDatabase::default().resolver(&nara_asset::AssetPathScope::ROOT)),
     );
     assert!(missing.is_err());
     let report = bindings
@@ -208,7 +208,7 @@ fn scene_product_source_check_and_both_export_policies_preserve_complete_selecti
             &mut world,
             &candidate,
             &SceneOccurrenceKey::new("products", "admitted").unwrap(),
-            Some(&database),
+            Some(database.resolver(&nara_asset::AssetPathScope::ROOT)),
         )
         .unwrap()
         .commit(&mut world);

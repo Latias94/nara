@@ -1,5 +1,6 @@
 use nara::{
     advanced_prelude::{AssetRecord, AssetRefExportPolicy, AssetSourceKind, ProjectAssetDatabase},
+    asset::{AssetPathScope, AssetSourcePath},
     diagnostic::Diagnostic,
     prelude::*,
     render::register_render_components,
@@ -30,16 +31,16 @@ fn main() {
     let json = scene.to_json_string().unwrap();
     let ron = scene.to_ron_string().unwrap();
 
-    let from_json = SceneAuthoringSession::try_from_file_candidate_with_asset_database(
+    let from_json = SceneAuthoringSession::try_from_file_candidate_with_asset_resolution(
         SceneDocumentCandidate::decode_json_str(&json).unwrap(),
         &registry,
-        &asset_database,
+        asset_database.resolver(&AssetPathScope::ROOT),
     )
     .unwrap();
-    let from_ron = SceneAuthoringSession::try_from_file_candidate_with_asset_database(
+    let from_ron = SceneAuthoringSession::try_from_file_candidate_with_asset_resolution(
         SceneDocumentCandidate::decode_ron_str(&ron).unwrap(),
         &registry,
-        &asset_database,
+        asset_database.resolver(&AssetPathScope::ROOT),
     )
     .unwrap();
     assert_eq!(from_json.document(), &scene);
@@ -69,7 +70,8 @@ fn main() {
             ]),
         ),
     );
-    let invalid_report = invalid.validate_with_asset_database(&registry, &asset_database);
+    let invalid_report = invalid
+        .validate_with_asset_resolution(&registry, asset_database.resolver(&AssetPathScope::ROOT));
     let diagnostic = invalid_report
         .iter()
         .find(|diagnostic| diagnostic.code().as_str() == "scene.invalid-component-payload")
@@ -97,7 +99,7 @@ fn main() {
             std::sync::Arc::new((from_json.document()).clone()),
         ),
         &scene_occurrence("main/spawn_report"),
-        Some(&asset_database),
+        Some(asset_database.resolver(&AssetPathScope::ROOT)),
     );
     assert!(!spawn_report.diagnostics.has_errors());
     assert_eq!(spawn_report.instance.as_ref().unwrap().len(), 3);
@@ -108,10 +110,10 @@ fn main() {
     let canonical_json = export_document.to_json_string().unwrap();
     assert!(canonical_json.contains("\"path\""));
     assert!(!canonical_json.contains("AssetId"));
-    let canonical_session = SceneAuthoringSession::try_from_file_candidate_with_asset_database(
+    let canonical_session = SceneAuthoringSession::try_from_file_candidate_with_asset_resolution(
         SceneDocumentCandidate::decode_json_str(&canonical_json).unwrap(),
         &registry,
-        &asset_database,
+        asset_database.resolver(&AssetPathScope::ROOT),
     )
     .unwrap();
     assert_eq!(canonical_session.document(), export_document);
@@ -303,14 +305,14 @@ fn sample_asset_database() -> ProjectAssetDatabase {
     database
         .insert(AssetRecord::new(
             StableAssetId::parse_str(PLAYER_TEXTURE_ID).unwrap(),
-            AssetPath::new("textures/player.png").unwrap(),
+            AssetSourcePath::new("textures/player.png").unwrap(),
             AssetSourceKind::Image,
         ))
         .unwrap();
     database
         .insert(AssetRecord::new(
             StableAssetId::parse_str(TILESET_ID).unwrap(),
-            AssetPath::new("tilesets/basic.tileset.ron").unwrap(),
+            AssetSourcePath::new("tilesets/basic.tileset.ron").unwrap(),
             AssetSourceKind::Other("tileset".to_string()),
         ))
         .unwrap();

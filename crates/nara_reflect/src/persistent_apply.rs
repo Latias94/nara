@@ -6,7 +6,8 @@ use std::{
 };
 
 use nara_asset::{
-    AssetError, AssetProductRef, AssetRef, AssetRefError, AssetServer, Handle, ProjectAssetDatabase,
+    AssetError, AssetPathScope, AssetProductRef, AssetRecord, AssetRef, AssetRefError,
+    AssetReferenceResolver, AssetServer, AssetSourcePath, Handle,
 };
 use nara_ecs::{
     __private::{
@@ -120,12 +121,33 @@ impl ComponentApplyContext {
         }
     }
 
+    /// Resolves a standalone ROOT alias or an already bound Product.
+    /// Catalogue-aware deferred codecs capture a canonical path or admitted record at decode.
     pub fn resolve_asset_ref<T: 'static>(
         &mut self,
         asset_ref: &AssetRef,
     ) -> Result<Handle<T>, AssetRefError> {
         self.asset_server_touched = true;
-        asset_ref.resolve(&mut self.asset_server)
+        asset_ref.resolve(&mut self.asset_server, &AssetPathScope::ROOT)
+    }
+
+    /// Reserves a canonical location captured by standalone decoding before deferred apply.
+    pub fn reserve_asset_path<T: 'static>(
+        &mut self,
+        path: &AssetSourcePath,
+    ) -> Result<Handle<T>, AssetError> {
+        self.asset_server_touched = true;
+        let id = self.asset_server.reserve_path_id(path.clone())?;
+        self.asset_server.claim(id)
+    }
+
+    /// Reserves the actual source record admitted during deferred component decoding.
+    pub fn reserve_asset_record<T: 'static>(
+        &mut self,
+        record: &AssetRecord,
+    ) -> Result<Handle<T>, AssetError> {
+        self.asset_server_touched = true;
+        self.asset_server.reserve_record(record)
     }
 }
 
@@ -566,12 +588,12 @@ impl ComponentApplyBatch {
 
     pub fn with_decode_context<T>(
         &mut self,
-        database: Option<&ProjectAssetDatabase>,
+        asset_resolution: Option<AssetReferenceResolver<'_>>,
         decode: impl FnOnce(&mut ComponentDecodeContext<'_>) -> T,
     ) -> T {
         let mut context = ComponentDecodeContext::with_asset_server(&mut self.context.asset_server);
-        if let Some(database) = database {
-            context = context.with_project_asset_database(database);
+        if let Some(resolver) = asset_resolution {
+            context = context.with_asset_resolution(resolver);
         }
         let result = decode(&mut context);
         self.context.asset_server_touched |= context.asset_server_touched();
@@ -1200,7 +1222,10 @@ mod persistent_apply_contract_tests {
         assert_eq!(runs.load(Ordering::SeqCst), 1);
         let component = world.get::<PreparedAssetProbe>(target).unwrap();
         assert_eq!(
-            world.resource::<AssetServer>().path(component.0.id()),
+            world
+                .resource::<AssetServer>()
+                .path(component.0.id())
+                .map(nara_asset::AssetSourcePath::as_str),
             Some("textures/unbound.png")
         );
     }
@@ -1991,7 +2016,10 @@ mod persistent_apply_contract_tests {
 
         assert_eq!(world.get::<ReplaceProbe>(target), Some(&ReplaceProbe(7)));
         assert_eq!(
-            world.resource::<AssetServer>().path(handle.id()),
+            world
+                .resource::<AssetServer>()
+                .path(handle.id())
+                .map(nara_asset::AssetSourcePath::as_str),
             Some("textures/prepared-commit.png")
         );
         let runtime_component_id = world.component_id::<ReplaceProbe>().unwrap();

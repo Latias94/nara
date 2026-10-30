@@ -1,6 +1,6 @@
 use std::{error::Error, fmt, sync::Arc};
 
-use nara_asset::{AssetPath, StableAssetId};
+use nara_asset::{AssetRecord, AssetSourceKind, AssetSourcePath, StableAssetId};
 use nara_core::SourceUniverseId;
 
 #[cfg(feature = "serde")]
@@ -25,7 +25,7 @@ pub enum SourceDocumentOrigin {
     },
     ProjectLocation {
         universe: SourceUniverseId,
-        path: AssetPath,
+        path: AssetSourcePath,
     },
     StableAsset {
         stable_id: StableAssetId,
@@ -35,8 +35,8 @@ pub enum SourceDocumentOrigin {
 /// Canonical semantic identity for one admitted Scene or Prefab document.
 ///
 /// This identifies an entity-bearing source document, not an auxiliary imported product.
-/// An explicit primary product selector uses its admitted `StableAsset` origin; it does not
-/// introduce another source-key origin or establish that a selected domain product exists.
+/// A primary product selector requires its resolver's admitted source-asset association;
+/// it does not change this key's origin or establish arbitrary domain product membership.
 ///
 /// With the `serde` feature, the representation preserves the document kind and explicit
 /// origin. Deserialization validates an identity claim; it does not resolve a source or grant
@@ -47,6 +47,29 @@ pub struct SourceDocumentKey {
     origin: SourceDocumentOrigin,
     kind: SourceDocumentKind,
 }
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SourceDocumentBindingError {
+    DocumentKind,
+    SourceKind,
+    SourceIdentity,
+    SourceKeyMismatch,
+}
+
+impl fmt::Display for SourceDocumentBindingError {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter.write_str(match self {
+            Self::DocumentKind => "source binding has the wrong document kind",
+            Self::SourceKind => "asset metadata has the wrong document source kind",
+            Self::SourceIdentity => "document source metadata requires a non-nil stable asset ID",
+            Self::SourceKeyMismatch => {
+                "asset metadata conflicts with the canonical document source key"
+            }
+        })
+    }
+}
+
+impl Error for SourceDocumentBindingError {}
 
 impl SourceDocumentKey {
     /// Creates an explicit code-authored source identity.
@@ -75,7 +98,7 @@ impl SourceDocumentKey {
     #[must_use]
     pub const fn project_location(
         universe: SourceUniverseId,
-        path: AssetPath,
+        path: AssetSourcePath,
         kind: SourceDocumentKind,
     ) -> Self {
         Self {
@@ -101,6 +124,33 @@ impl SourceDocumentKey {
     #[must_use]
     pub const fn kind(&self) -> SourceDocumentKind {
         self.kind
+    }
+
+    /// Checks metadata compatibility without changing identity or proving file admission.
+    /// Named sources have no intrinsic path claim; their owner establishes the association.
+    pub fn validate_asset_source(
+        &self,
+        record: &AssetRecord,
+    ) -> Result<(), SourceDocumentBindingError> {
+        let expected = match self.kind {
+            SourceDocumentKind::Scene => AssetSourceKind::Scene,
+            SourceDocumentKind::Prefab => AssetSourceKind::Prefab,
+        };
+        if record.source_kind() != &expected {
+            return Err(SourceDocumentBindingError::SourceKind);
+        }
+        if record.stable_id().as_uuid().is_nil() {
+            return Err(SourceDocumentBindingError::SourceIdentity);
+        }
+        let matches_key = match &self.origin {
+            SourceDocumentOrigin::StableAsset { stable_id } => *stable_id == record.stable_id(),
+            SourceDocumentOrigin::ProjectLocation { path, .. } => path == record.path(),
+            SourceDocumentOrigin::Named { .. } => true,
+        };
+        if !matches_key {
+            return Err(SourceDocumentBindingError::SourceKeyMismatch);
+        }
+        Ok(())
     }
 
     /// Returns the modeled owned bytes charged by Scene retention accounting.
@@ -157,7 +207,7 @@ mod tests {
 
     #[test]
     fn source_key_keeps_origin_and_document_kind_as_distinct_axes() {
-        let path = AssetPath::new("scenes/startup.scene.json").unwrap();
+        let path = AssetSourcePath::new("scenes/startup.scene.json").unwrap();
         let scene = SourceDocumentKey::project_location(
             universe(),
             path.clone(),

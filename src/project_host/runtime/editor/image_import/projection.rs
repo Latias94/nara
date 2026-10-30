@@ -168,7 +168,7 @@ impl EditorImageImportHost {
 
     fn project_availability(
         &self,
-        asset_path: &nara_asset::AssetPath,
+        asset_path: &nara_asset::AssetSourcePath,
         current_source: Option<(nara_fs::FileIdentity, ProjectSourceIndexGeneration)>,
         source_conflict_observed: bool,
         desired: Option<(nara_asset::StableAssetId, ImageImportSettings)>,

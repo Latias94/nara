@@ -2,8 +2,8 @@ use super::*;
 use crate::backend::admit_notify_event;
 use nara_asset::{
     AssetPlugin, AssetRecord, AssetReloadRequest, AssetReloadRequestKind, AssetReloadRequests,
-    AssetSourceChangeLimits, AssetSourceChanges, AssetSourceKind, AssetSourcePlugin,
-    ProjectAssetDatabase, StableAssetId, register_image_reload_consumer,
+    AssetSourceChangeLimits, AssetSourceChanges, AssetSourceKind, AssetSourcePath,
+    AssetSourcePlugin, ProjectAssetDatabase, StableAssetId, register_image_reload_consumer,
 };
 use nara_core::{ByteLimit, ItemLimit};
 use nara_diagnostic::{
@@ -16,6 +16,9 @@ use std::{
     panic::{AssertUnwindSafe, catch_unwind},
     time::{Duration, Instant, SystemTime, UNIX_EPOCH},
 };
+
+#[path = "tests/source_scopes.rs"]
+mod source_scopes;
 
 fn temp_root() -> PathBuf {
     let stamp = SystemTime::now()
@@ -44,7 +47,10 @@ fn watcher_requires_explicit_asset_source_before_acquiring_filesystem_authority(
     let mut app = App::new();
     app.add_plugins((AssetPlugin, DiagnosticsPlugin::default()))
         .unwrap();
-    let Err(error) = app.add_plugin(AssetWatchPlugin::new("unadmitted-source-root")) else {
+    let Err(error) = app.add_plugin(AssetWatchPlugin::new(
+        "unadmitted-source-root",
+        AssetPathScope::ROOT,
+    )) else {
         panic!("watcher must require AssetSourcePlugin before build");
     };
     assert!(matches!(
@@ -132,7 +138,7 @@ fn source_modify_translates_to_modified_change() {
 
     let changes = translator
         .translate_event(
-            &AssetSourceRoot::new(&root),
+            &AssetSourceRoot::new(&root, AssetPathScope::ROOT),
             &AssetWatchEvent::modified(&source),
         )
         .unwrap();
@@ -140,7 +146,7 @@ fn source_modify_translates_to_modified_change() {
     assert_eq!(
         changes,
         vec![AssetSourceChange::new(
-            AssetPath::new("textures/player.png").unwrap(),
+            AssetSourcePath::new("textures/player.png").unwrap(),
             AssetSourceChangeKind::Modified
         )]
     );
@@ -157,7 +163,7 @@ fn meta_modify_maps_to_source_meta_change() {
 
     let changes = translator
         .translate_event(
-            &AssetSourceRoot::new(&root),
+            &AssetSourceRoot::new(&root, AssetPathScope::ROOT),
             &AssetWatchEvent::modified(&meta),
         )
         .unwrap();
@@ -165,7 +171,7 @@ fn meta_modify_maps_to_source_meta_change() {
     assert_eq!(
         changes,
         vec![AssetSourceChange::new(
-            AssetPath::new("textures/player.png").unwrap(),
+            AssetSourcePath::new("textures/player.png").unwrap(),
             AssetSourceChangeKind::MetaModified
         )]
     );
@@ -208,7 +214,7 @@ fn notify_directory_unknown_and_rename_scope_remains_sticky_until_host_reconcili
 fn root_and_explicit_subtree_observations_require_complete_coverage() {
     let root = temp_root();
     fs::create_dir_all(&root).unwrap();
-    let source_root = AssetSourceRoot::new(&root);
+    let source_root = AssetSourceRoot::new(&root, AssetPathScope::ROOT);
     for event in [
         AssetWatchEvent::modified(&root),
         AssetWatchEvent::subtree(root.join("already-removed")),
@@ -246,7 +252,7 @@ fn owned_rescan_keeps_old_obligation_until_completed_acknowledgement() {
     let root = temp_root();
     fs::create_dir_all(&root).unwrap();
     let mut world = nara_ecs::World::new();
-    world.insert_resource(AssetSourceRoot::new(&root));
+    world.insert_resource(AssetSourceRoot::new(&root, AssetPathScope::ROOT));
     let queue = AssetWatchEventQueue::new();
     queue.sender().record_backend_failure();
     world.insert_resource(queue.observer());
@@ -274,7 +280,7 @@ fn owned_rescan_keeps_old_obligation_until_completed_acknowledgement() {
             .requires_rescan()
     );
     let mut foreign = nara_ecs::World::new();
-    foreign.insert_resource(AssetSourceRoot::new(&root));
+    foreign.insert_resource(AssetSourceRoot::new(&root, AssetPathScope::ROOT));
     // A receipt cannot complete a different runtime, even if its source path is equal.
     let foreign_receipt =
         AssetWatchRescan::begin(&mut world, AssetWatchQueueLimits::default()).unwrap();
@@ -328,7 +334,8 @@ fn rescan_supersession_and_abandonment_retire_only_the_exact_native_watcher() {
     fs::create_dir_all(&root).unwrap();
     let mut app = App::new();
     install_asset_prerequisites(&mut app);
-    app.add_plugin(AssetWatchPlugin::new(&root)).unwrap();
+    app.add_plugin(AssetWatchPlugin::new(&root, AssetPathScope::ROOT))
+        .unwrap();
     let world = app.world_mut().unwrap();
     world
         .resource::<AssetWatchEventQueue>()
@@ -420,7 +427,8 @@ fn held_rescan_receipt_cannot_keep_native_watching_alive_after_runtime_stop() {
     fs::create_dir_all(&root).unwrap();
     let mut app = App::new();
     install_asset_prerequisites(&mut app);
-    app.add_plugin(AssetWatchPlugin::new(&root)).unwrap();
+    app.add_plugin(AssetWatchPlugin::new(&root, AssetPathScope::ROOT))
+        .unwrap();
     app.world()
         .resource::<AssetWatchEventQueue>()
         .sender()
@@ -484,7 +492,7 @@ fn meta_remove_maps_to_source_remove_change() {
 
     let changes = translator
         .translate_event(
-            &AssetSourceRoot::new(&root),
+            &AssetSourceRoot::new(&root, AssetPathScope::ROOT),
             &AssetWatchEvent::removed(&meta),
         )
         .unwrap();
@@ -492,7 +500,7 @@ fn meta_remove_maps_to_source_remove_change() {
     assert_eq!(
         changes,
         vec![AssetSourceChange::new(
-            AssetPath::new("textures/player.png").unwrap(),
+            AssetSourcePath::new("textures/player.png").unwrap(),
             AssetSourceChangeKind::Removed
         )]
     );
@@ -508,7 +516,7 @@ fn remove_translates_to_removed_change_without_file_existing() {
 
     let changes = translator
         .translate_event(
-            &AssetSourceRoot::new(&root),
+            &AssetSourceRoot::new(&root, AssetPathScope::ROOT),
             &AssetWatchEvent::removed(&source),
         )
         .unwrap();
@@ -516,7 +524,7 @@ fn remove_translates_to_removed_change_without_file_existing() {
     assert_eq!(
         changes,
         vec![AssetSourceChange::new(
-            AssetPath::new("textures/player.png").unwrap(),
+            AssetSourcePath::new("textures/player.png").unwrap(),
             AssetSourceChangeKind::Removed
         )]
     );
@@ -533,7 +541,7 @@ fn rename_translates_to_remove_and_modify() {
 
     let changes = translator
         .translate_event(
-            &AssetSourceRoot::new(&root),
+            &AssetSourceRoot::new(&root, AssetPathScope::ROOT),
             &AssetWatchEvent::renamed(&from, &to),
         )
         .unwrap();
@@ -542,11 +550,11 @@ fn rename_translates_to_remove_and_modify() {
         changes,
         vec![
             AssetSourceChange::new(
-                AssetPath::new("textures/old.png").unwrap(),
+                AssetSourcePath::new("textures/old.png").unwrap(),
                 AssetSourceChangeKind::Removed
             ),
             AssetSourceChange::new(
-                AssetPath::new("textures/new.png").unwrap(),
+                AssetSourcePath::new("textures/new.png").unwrap(),
                 AssetSourceChangeKind::Modified
             )
         ]
@@ -564,7 +572,7 @@ fn rename_from_root_to_outside_keeps_in_root_remove() {
 
     let changes = translator
         .translate_event(
-            &AssetSourceRoot::new(&root),
+            &AssetSourceRoot::new(&root, AssetPathScope::ROOT),
             &AssetWatchEvent::renamed(&from, &outside),
         )
         .unwrap();
@@ -572,7 +580,7 @@ fn rename_from_root_to_outside_keeps_in_root_remove() {
     assert_eq!(
         changes,
         vec![AssetSourceChange::new(
-            AssetPath::new("textures/old.png").unwrap(),
+            AssetSourcePath::new("textures/old.png").unwrap(),
             AssetSourceChangeKind::Removed
         )]
     );
@@ -589,7 +597,7 @@ fn rename_from_outside_to_root_keeps_in_root_modify() {
 
     let changes = translator
         .translate_event(
-            &AssetSourceRoot::new(&root),
+            &AssetSourceRoot::new(&root, AssetPathScope::ROOT),
             &AssetWatchEvent::renamed(&outside, &to),
         )
         .unwrap();
@@ -597,7 +605,7 @@ fn rename_from_outside_to_root_keeps_in_root_modify() {
     assert_eq!(
         changes,
         vec![AssetSourceChange::new(
-            AssetPath::new("textures/new.png").unwrap(),
+            AssetSourcePath::new("textures/new.png").unwrap(),
             AssetSourceChangeKind::Modified
         )]
     );
@@ -613,7 +621,7 @@ fn outside_root_path_is_rejected() {
 
     let error = translator
         .translate_event(
-            &AssetSourceRoot::new(&root),
+            &AssetSourceRoot::new(&root, AssetPathScope::ROOT),
             &AssetWatchEvent::modified(&outside),
         )
         .unwrap_err();
@@ -656,7 +664,8 @@ fn queue_overflow_rejects_the_whole_batch_and_requires_rescan() {
     let root = temp_root();
     fs::create_dir_all(&root).unwrap();
     let mut app = App::new();
-    app.insert_resource(AssetSourceRoot::new(&root)).unwrap();
+    app.insert_resource(AssetSourceRoot::new(&root, AssetPathScope::ROOT))
+        .unwrap();
     install_asset_prerequisites(&mut app);
     install_watch_runtime(&mut app, queue);
     let mut runtime = nara_app::RuntimeInstance::start(app).unwrap();
@@ -774,7 +783,8 @@ fn sender_reports_disconnection_after_the_receiver_is_dropped() {
     assert_eq!(sender.stats().discarded_events(), 1);
 
     let mut app = App::new();
-    app.insert_resource(AssetSourceRoot::new(&root)).unwrap();
+    app.insert_resource(AssetSourceRoot::new(&root, AssetPathScope::ROOT))
+        .unwrap();
     install_asset_prerequisites(&mut app);
     app.insert_resource(observer).unwrap();
     app.insert_resource(AssetWatchRuntimeStatus::default())
@@ -825,7 +835,8 @@ fn malformed_rename_marks_callback_translation_loss() {
     assert_eq!(sender.stats().discarded_events(), 1);
 
     let mut app = App::new();
-    app.insert_resource(AssetSourceRoot::new(&root)).unwrap();
+    app.insert_resource(AssetSourceRoot::new(&root, AssetPathScope::ROOT))
+        .unwrap();
     install_asset_prerequisites(&mut app);
     install_watch_runtime(&mut app, queue);
     let mut runtime = nara_app::RuntimeInstance::start(app).unwrap();
@@ -855,7 +866,11 @@ fn rescan_terminal_stops_the_live_watcher_backend() {
     );
     let queue = AssetWatchEventQueue::with_limits(limits);
     let sender = queue.sender();
-    let watcher = AssetWatcher::watch_recursive(&root, sender.clone()).unwrap();
+    let watcher = AssetWatcher::watch_recursive(
+        &AssetSourceRoot::new(&root, AssetPathScope::ROOT),
+        sender.clone(),
+    )
+    .unwrap();
     sender
         .try_send(AssetWatchEvent::modified("textures/accepted.png"))
         .unwrap();
@@ -865,7 +880,8 @@ fn rescan_terminal_stops_the_live_watcher_backend() {
     ));
 
     let mut app = App::new();
-    app.insert_resource(AssetSourceRoot::new(&root)).unwrap();
+    app.insert_resource(AssetSourceRoot::new(&root, AssetPathScope::ROOT))
+        .unwrap();
     install_asset_prerequisites(&mut app);
     app.insert_resource(watcher).unwrap();
     install_watch_runtime(&mut app, queue);
@@ -899,7 +915,7 @@ fn queue_drains_into_source_changes() {
     let translator = AssetWatchTranslator;
     for event in queue.drain().into_events() {
         for change in translator
-            .translate_event(&AssetSourceRoot::new(&root), &event)
+            .translate_event(&AssetSourceRoot::new(&root, AssetPathScope::ROOT), &event)
             .unwrap()
         {
             changes.push(change).unwrap();
@@ -939,7 +955,7 @@ fn queued_watch_events_are_resolved_in_the_same_task_update() {
     fs::write(&source, b"png").unwrap();
     let record = AssetRecord::new(
         stable_id(),
-        AssetPath::new("textures/player.png").unwrap(),
+        AssetSourcePath::new("textures/player.png").unwrap(),
         AssetSourceKind::Image,
     );
     let queue = AssetWatchEventQueue::new();
@@ -948,7 +964,8 @@ fn queued_watch_events_are_resolved_in_the_same_task_update() {
         .try_send(AssetWatchEvent::modified(&source))
         .unwrap();
     let mut app = App::new();
-    app.insert_resource(AssetSourceRoot::new(&root)).unwrap();
+    app.insert_resource(AssetSourceRoot::new(&root, AssetPathScope::ROOT))
+        .unwrap();
     install_asset_prerequisites(&mut app);
     app.world_mut()
         .unwrap()
@@ -976,7 +993,8 @@ fn notify_backend_error_is_visible_in_runtime_diagnostics_and_pressure() {
     let queue = AssetWatchEventQueue::new();
     queue.sender().record_backend_failure();
     let mut app = App::new();
-    app.insert_resource(AssetSourceRoot::new(&root)).unwrap();
+    app.insert_resource(AssetSourceRoot::new(&root, AssetPathScope::ROOT))
+        .unwrap();
     install_asset_prerequisites(&mut app);
     install_watch_runtime(&mut app, queue);
 
@@ -1021,7 +1039,8 @@ fn translation_failure_records_diagnostic_without_source_change() {
         .try_send(AssetWatchEvent::modified(&outside))
         .unwrap();
     let mut app = App::new();
-    app.insert_resource(AssetSourceRoot::new(&root)).unwrap();
+    app.insert_resource(AssetSourceRoot::new(&root, AssetPathScope::ROOT))
+        .unwrap();
     install_asset_prerequisites(&mut app);
     install_watch_runtime(&mut app, queue);
 
@@ -1073,7 +1092,8 @@ fn downstream_source_change_overflow_requires_a_rescan() {
         ])
         .unwrap();
     let mut app = App::new();
-    app.insert_resource(AssetSourceRoot::new(&root)).unwrap();
+    app.insert_resource(AssetSourceRoot::new(&root, AssetPathScope::ROOT))
+        .unwrap();
     install_asset_prerequisites(&mut app);
     app.insert_resource(AssetSourceChanges::with_limits(
         AssetSourceChangeLimits::new(ItemLimit::ONE, ByteLimit::new(4 * 1024).unwrap()),
@@ -1119,7 +1139,8 @@ fn repeated_backend_failures_are_counted_without_unbounded_diagnostics() {
     sender.record_backend_failure();
     sender.record_backend_failure();
     let mut app = App::new();
-    app.insert_resource(AssetSourceRoot::new(&root)).unwrap();
+    app.insert_resource(AssetSourceRoot::new(&root, AssetPathScope::ROOT))
+        .unwrap();
     install_asset_prerequisites(&mut app);
     install_watch_runtime(&mut app, queue);
 
@@ -1153,11 +1174,12 @@ fn plugin_rejects_root_that_differs_from_existing_asset_source_root() {
     let watch_root = configured_root.with_file_name("nara_asset_watch_other_root");
     fs::create_dir_all(&configured_root).unwrap();
     let mut app = App::new();
-    app.insert_resource(AssetSourceRoot::new(&configured_root))
+    app.insert_resource(AssetSourceRoot::new(&configured_root, AssetPathScope::ROOT))
         .unwrap();
     install_asset_prerequisites(&mut app);
 
-    let Err(error) = app.add_plugin(AssetWatchPlugin::new(&watch_root)) else {
+    let Err(error) = app.add_plugin(AssetWatchPlugin::new(&watch_root, AssetPathScope::ROOT))
+    else {
         panic!("watch plugin should reject a root that differs from AssetSourceRoot");
     };
 

@@ -15,7 +15,7 @@ use nara::{
         App, CoreStage, RuntimeAdmissionReservation, RuntimeCandidateRetirementState,
         RuntimeClosePolicy, RuntimeObligationLedger,
     },
-    asset::ProjectAssetDatabase,
+    asset::{AssetPathScope, ProjectAssetDatabase},
     core::{ByteLimit, ItemLimit},
     ecs::{
         Component, Entity, Resource, World,
@@ -154,7 +154,7 @@ fn runtime_source(
         RuntimeSceneCandidate::cook(
             &expanded,
             bindings,
-            &database,
+            database.resolver(&AssetPathScope::ROOT),
             RuntimeSceneLimits::default(),
         )
         .unwrap()
@@ -357,7 +357,7 @@ fn runtime_startup_replacement_restart_and_source_transition_share_one_owner() {
         let expanded_view = CurrentScene::get(world).unwrap().source_view();
         assert_eq!(expanded_view.with_runtime_scene(|_| ()), None);
         assert_eq!(
-            expanded_view.with_expanded_scene(|_, database| database.is_none()),
+            expanded_view.with_expanded_scene(|_, resolution| resolution.is_none()),
             Some(true)
         );
         assert_eq!(second_view.with_document(|_| ()), None);

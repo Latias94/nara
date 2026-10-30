@@ -927,7 +927,7 @@ fn concrete_access_reconciles_processed_content_without_a_database_and_filters_s
     let handle = fixture.handle;
     let source_record = AssetRecord::new(
         fixture.descriptor.product().source(),
-        AssetPath::new("terrain.tileset.ron").unwrap(),
+        AssetSourcePath::new("terrain.tileset.ron").unwrap(),
         crate::tileset_asset_source_kind(),
     );
     let mut world = World::new();
@@ -959,6 +959,7 @@ fn concrete_access_reconciles_processed_content_without_a_database_and_filters_s
                 source_record,
                 source("a.png"),
                 SourceHash::from_bytes(b"foreign source"),
+                &nara_asset::AssetPathScope::ROOT,
             ),
             Err(TileSetAssetError::Superseded)
         );

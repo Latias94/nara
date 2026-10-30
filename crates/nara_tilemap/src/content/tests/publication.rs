@@ -12,7 +12,11 @@ fn input(
     source: TileSetSource,
     image: &ImageAsset,
 ) -> (TileSetPublicationInput, Handle<TileSet>, Handle<ImageAsset>) {
-    let image_record = fixture.database.resolve_ref(&source.image).unwrap();
+    let image_record = fixture
+        .database
+        .resolver(&nara_asset::AssetPathScope::ROOT)
+        .resolve_ref(&source.image)
+        .unwrap();
     let image_handle = fixture
         .server
         .reserve_record::<ImageAsset>(image_record)
@@ -26,7 +30,10 @@ fn input(
             SourceHash::from_bytes(b"prepared"),
             image_handle,
             image.share_retained().unwrap(),
-        ),
+            &nara_asset::AssetPathScope::ROOT,
+            fixture.owner.limits().source_reference_bytes(),
+        )
+        .unwrap(),
         handle,
         image_handle,
     )
@@ -523,6 +530,173 @@ fn source_claim_survives_reconciliation_but_rejects_foreign_desired_or_raw_stora
     ));
     assert_eq!(fixture.tilesets.slot_revision(handle), slot);
     assert!(fixture.tilesets.get(handle).is_some());
+}
+
+#[test]
+fn identical_source_rebound_to_another_scope_rotates_claim_and_refuses_stale_publication() {
+    let mut fixture = Fixture::new(TileSetAssetLimits::default());
+    let first_scope = AssetPathScope::under(AssetSourcePath::new("first/art").unwrap());
+    let second_scope = AssetPathScope::under(AssetSourcePath::new("second/art").unwrap());
+    let first_image = record(
+        "11111111-1111-4111-8111-111111111111",
+        "first/art/shared.png",
+        AssetSourceKind::Image,
+    );
+    let second_image = record(
+        "22222222-2222-4222-8222-222222222222",
+        "second/art/shared.png",
+        AssetSourceKind::Image,
+    );
+    for record in [&first_image, &second_image] {
+        fixture.database.insert(record.clone()).unwrap();
+    }
+    let first_handle = fixture.publish_image(first_image.clone(), 2, 1, 30);
+    let authored = source("shared.png");
+    let hash = SourceHash::from_bytes(b"identical authored source");
+    let handle = fixture
+        .owner
+        .request(
+            fixture.tileset.clone(),
+            authored.clone(),
+            hash,
+            &first_scope,
+            &mut fixture.server,
+            &fixture.tilesets,
+            &mut fixture.states,
+        )
+        .unwrap();
+    fixture.reconcile();
+    let old = fixture.tilesets.get(handle).unwrap().clone();
+    let old_slot = fixture.tilesets.slot_revision(handle);
+    let old_state = fixture.states.state_revision(handle.id());
+    let old_claim = Arc::clone(&fixture.owner.entries[&handle.id()].claim);
+    let old_declaration = fixture.owner.entries[&handle.id()].declaration.clone();
+    let old_receipt = receipt(&fixture, handle);
+    let stale = TileSetPublicationInput::from_source(
+        handle,
+        fixture.tileset.clone(),
+        authored.clone(),
+        hash,
+        first_handle,
+        destination_image(&first_image, 90),
+        &first_scope,
+        fixture.owner.limits().source_reference_bytes(),
+    )
+    .unwrap()
+    .with_receipt(old_receipt.clone());
+
+    // Repeating the exact binding is a no-op. Changing only the scope changes the canonical
+    // dependency and its claim, even though every authored field and source hash is identical.
+    assert_eq!(
+        fixture
+            .owner
+            .request(
+                fixture.tileset.clone(),
+                authored.clone(),
+                hash,
+                &first_scope,
+                &mut fixture.server,
+                &fixture.tilesets,
+                &mut fixture.states,
+            )
+            .unwrap(),
+        handle
+    );
+    assert_eq!(fixture.states.state_revision(handle.id()), old_state);
+    assert!(Arc::ptr_eq(
+        &old_claim,
+        &fixture.owner.entries[&handle.id()].claim
+    ));
+    assert_eq!(
+        fixture
+            .owner
+            .request(
+                fixture.tileset.clone(),
+                authored.clone(),
+                hash,
+                &second_scope,
+                &mut fixture.server,
+                &fixture.tilesets,
+                &mut fixture.states,
+            )
+            .unwrap(),
+        handle
+    );
+    assert_ne!(
+        fixture.owner.entries[&handle.id()].declaration,
+        old_declaration
+    );
+    assert!(!Arc::ptr_eq(
+        &old_claim,
+        &fixture.owner.entries[&handle.id()].claim
+    ));
+    assert_ne!(fixture.states.state_revision(handle.id()), old_state);
+    assert_eq!(fixture.owner.desired(handle), Some(&authored));
+    assert_eq!(
+        fixture.owner.entries[&handle.id()]
+            .declaration
+            .source_hash(),
+        Some(hash)
+    );
+    assert_eq!(
+        fixture.owner.entries[&handle.id()]
+            .declaration
+            .image_record(Some(&fixture.database)),
+        Some(&second_image)
+    );
+    assert_eq!(fixture.tilesets.get(handle), Some(&old));
+
+    let state = fixture.states.state_revision(handle.id());
+    assert!(matches!(
+        fixture.owner.prepare_publications(
+            vec![stale],
+            &[],
+            &fixture.server,
+            Some(&fixture.database),
+            &fixture.tilesets,
+            &fixture.states,
+        ),
+        Err(TileSetAssetError::Superseded)
+    ));
+    assert_eq!(fixture.states.state_revision(handle.id()), state);
+    assert_eq!(fixture.tilesets.slot_revision(handle), old_slot);
+
+    fixture.reconcile();
+    assert_eq!(
+        fixture.owner.error(handle),
+        Some(&TileSetAssetError::DependencyUnavailable)
+    );
+    assert_eq!(fixture.tilesets.get(handle), Some(&old));
+    assert_eq!(
+        fixture.tilesets.get(handle).unwrap().material().image,
+        Some(first_handle)
+    );
+    assert!(old.image_content().unwrap().is_authorized(
+        &fixture.server,
+        &fixture.states,
+        &fixture.images
+    ));
+    let second_handle = fixture.publish_image(second_image, 2, 1, 70);
+    drop(first_scope);
+    drop(second_scope);
+    fixture.reconcile();
+    assert_eq!(fixture.owner.error(handle), None);
+    let current = fixture.tilesets.get(handle).unwrap();
+    assert_eq!(current.material().image, Some(second_handle));
+    assert_eq!(current.image_content().unwrap().pixels(), &[70; 8]);
+    assert_eq!(old.image_content().unwrap().pixels(), &[30; 8]);
+    assert_ne!(fixture.tilesets.slot_revision(handle), old_slot);
+    assert!(matches!(
+        fixture.owner.prepare_publications(
+            Vec::new(),
+            &[old_receipt],
+            &fixture.server,
+            Some(&fixture.database),
+            &fixture.tilesets,
+            &fixture.states,
+        ),
+        Err(TileSetAssetError::Superseded)
+    ));
 }
 
 #[test]

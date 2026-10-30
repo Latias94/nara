@@ -330,15 +330,25 @@ impl EditorProjectSession {
                             .and_then(|lane| lane.plan.settings().ui().primary_surface)
                     })
                     .map(crate::product::AcceptedPrimaryUiSurfaceProfile::from_effective);
-                let canvas = self.ui_preview.prepare(
-                    document,
-                    canvas_source,
-                    revision,
-                    gesture.as_ref().map(EditorGestureView::stamp),
-                    projection.as_ref(),
-                    image_catalog.as_ref(),
-                    primary_surface,
-                );
+                let canvas = match self.authoring_runtime.canvas_image_sources() {
+                    Ok(assets) => self.ui_preview.prepare(
+                        document,
+                        canvas_source,
+                        revision,
+                        gesture.as_ref().map(EditorGestureView::stamp),
+                        projection.as_ref(),
+                        image_catalog.as_ref(),
+                        assets,
+                        primary_surface,
+                    ),
+                    Err(_) => {
+                        self.ui_preview.retire();
+                        nara_ui::__private::UiAuthoringCanvasProjection::Rejected(vec![
+                            nara_ui::__private::UiAuthoringDiagnostic::canvas_compilation_rejected(
+                            ),
+                        ])
+                    }
+                };
                 let generation = self.ui_preview.geometry_generation();
                 (
                     Ok(Arc::new(projection.as_ref().clone().with_canvas(canvas))),

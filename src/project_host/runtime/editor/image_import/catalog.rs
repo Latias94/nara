@@ -5,8 +5,8 @@ use std::{
 };
 
 use nara_asset::{
-    AssetDatabaseError, AssetMetaFileLimits, AssetMetaIdentityCandidate, AssetPath, AssetRecord,
-    AssetRef, AssetSourceKind, ProjectAssetDatabase, StableAssetId,
+    AssetDatabaseError, AssetMetaFileLimits, AssetMetaIdentityCandidate, AssetPath, AssetPathScope,
+    AssetRecord, AssetRef, AssetSourceKind, AssetSourcePath, ProjectAssetDatabase, StableAssetId,
 };
 use nara_fs::{
     ContentDigest, DirectoryCapability, FileCapability, FileIdentity, FsError, RelativePath,
@@ -91,7 +91,8 @@ pub(super) enum EditorImageMetadataStatus {
 pub(super) struct EditorImageCatalogEntry {
     project_relative_path: Arc<str>,
     metadata_project_relative_path: Arc<str>,
-    asset_path: AssetPath,
+    asset_path: AssetSourcePath,
+    authored_path: AssetPath,
     source_identity: Option<FileIdentity>,
     metadata: EditorImageMetadataStatus,
 }
@@ -108,8 +109,12 @@ impl EditorImageCatalogEntry {
     }
 
     #[must_use]
-    pub(super) const fn asset_path(&self) -> &AssetPath {
+    pub(super) const fn asset_path(&self) -> &AssetSourcePath {
         &self.asset_path
+    }
+
+    pub(super) const fn authored_path(&self) -> &AssetPath {
+        &self.authored_path
     }
 
     #[must_use]
@@ -127,8 +132,9 @@ pub(super) struct EditorImageCatalogSnapshot {
     root_identity: FileIdentity,
     entries: Box<[EditorImageCatalogEntry]>,
     pub(super) metadata: Arc<EditorAssetMetadataSnapshot>,
-    assets_root: Arc<str>,
-    identity_members: BTreeMap<StableAssetId, Box<[AssetPath]>>,
+    asset_scope: Arc<AssetPathScope>,
+    prefab_scope: Arc<AssetPathScope>,
+    identity_members: BTreeMap<StableAssetId, Box<[AssetSourcePath]>>,
 }
 
 impl EditorImageCatalogSnapshot {
@@ -137,7 +143,7 @@ impl EditorImageCatalogSnapshot {
     }
     pub(super) fn asset_identity(
         &self,
-        path: &AssetPath,
+        path: &AssetSourcePath,
     ) -> Option<(AssetRecord, FileIdentity, ContentDigest)> {
         self.metadata.asset_identity(path)
     }
@@ -151,7 +157,7 @@ impl EditorImageCatalogSnapshot {
                 return false;
             };
             match reference {
-                AssetRef::Path(path) => entry.asset_path() == path,
+                AssetRef::Path(path) => entry.authored_path() == path,
                 AssetRef::StableId(stable_id) => metadata.stable_id() == *stable_id,
                 AssetRef::Product(product) => metadata.stable_id() == product.source(),
             }
@@ -187,7 +193,7 @@ impl EditorImageCatalogSnapshot {
     #[must_use]
     pub(super) fn retains_imported_image(
         &self,
-        asset_path: &AssetPath,
+        asset_path: &AssetSourcePath,
         stable_id: StableAssetId,
         source_identity: FileIdentity,
     ) -> bool {
@@ -207,7 +213,7 @@ impl EditorImageCatalogSnapshot {
     pub(super) fn has_current_identity_conflict(
         &self,
         root: &DirectoryCapability,
-        asset_path: &AssetPath,
+        asset_path: &AssetSourcePath,
         stable_id: StableAssetId,
     ) -> Result<bool, EditorImageMetadataInvalidity> {
         let Some(members) = self.identity_members.get(&stable_id) else {
@@ -215,9 +221,8 @@ impl EditorImageCatalogSnapshot {
         };
         let mut remaining = MAX_METADATA_BYTES;
         for path in members.iter().filter(|path| *path != asset_path) {
-            let relative =
-                RelativePath::new(format!("{}/{}.meta", self.assets_root, path.as_str()))
-                    .map_err(|_| EditorImageMetadataInvalidity::MetadataUnavailable)?;
+            let relative = RelativePath::new(path.meta_path())
+                .map_err(|_| EditorImageMetadataInvalidity::MetadataUnavailable)?;
             let file = match root.open_file_exact(&relative) {
                 Ok(file) => file,
                 Err(FsError::Io { source, .. })
@@ -235,7 +240,12 @@ impl EditorImageCatalogSnapshot {
                 .checked_sub(read.encoded_bytes)
                 .ok_or(EditorImageMetadataInvalidity::MetadataUnavailable)?;
             if read.candidate.is_ok_and(|candidate| {
-                candidate.identity().path() == path && candidate.identity().stable_id() == stable_id
+                [&self.asset_scope, &self.prefab_scope]
+                    .into_iter()
+                    .any(|scope| {
+                        scope.relative_path(path) == Some(candidate.identity().path().as_str())
+                    })
+                    && candidate.identity().stable_id() == stable_id
             }) {
                 return Ok(true);
             }
@@ -309,12 +319,12 @@ impl Default for EditorImageCatalogLimits {
 #[derive(Clone)]
 enum CatalogWork {
     VerifySource {
-        asset_path: AssetPath,
+        asset_path: AssetSourcePath,
         project_relative_path: Arc<str>,
         expected_identity: FileIdentity,
     },
     AdmitMetadata {
-        asset_path: AssetPath,
+        asset_path: AssetSourcePath,
         project_relative_path: Arc<str>,
         expected_identity: FileIdentity,
         image_candidate: bool,
@@ -344,12 +354,13 @@ struct AdmittedMetadataIdentity {
 pub(super) struct EditorImageCatalogAttempt {
     project_root: DirectoryCapability,
     source_index: Option<Arc<ProjectSourceIndexSnapshot>>,
-    assets_root: Arc<str>,
+    asset_scope: Arc<AssetPathScope>,
+    prefab_scope: Arc<AssetPathScope>,
     limits: EditorImageCatalogLimits,
-    sources: BTreeMap<AssetPath, IndexedImageSource>,
-    metadata_identities: BTreeMap<AssetPath, AdmittedAssetMetadata>,
-    metadata: BTreeMap<AssetPath, AdmittedMetadataIdentity>,
-    metadata_invalid: BTreeMap<AssetPath, EditorImageMetadataInvalidity>,
+    sources: BTreeMap<AssetSourcePath, IndexedImageSource>,
+    metadata_identities: BTreeMap<AssetSourcePath, AdmittedAssetMetadata>,
+    metadata: BTreeMap<AssetSourcePath, AdmittedMetadataIdentity>,
+    metadata_invalid: BTreeMap<AssetSourcePath, EditorImageMetadataInvalidity>,
     work: Vec<CatalogWork>,
     scan_cursor: usize,
     work_cursor: usize,
@@ -385,7 +396,8 @@ impl EditorImageCatalogAttempt {
         let attempt = Self {
             project_root,
             source_index: Some(source_index),
-            assets_root: Arc::from(project.settings().paths.assets.as_str()),
+            asset_scope: project.asset_scope(),
+            prefab_scope: project.prefab_scope(),
             limits,
             sources: BTreeMap::new(),
             metadata_identities: BTreeMap::new(),
@@ -414,13 +426,25 @@ impl EditorImageCatalogAttempt {
             let entry = self.source_entry(self.scan_cursor)?.clone();
             self.scan_cursor += 1;
             remaining -= 1;
-            let assets_root = Arc::clone(&self.assets_root);
+            let asset_scope = Arc::clone(&self.asset_scope);
             match entry.kind() {
                 ProjectSourceKind::AssetSource if is_png_project_path(entry.relative_path()) => {
-                    self.record_source(&entry, &assets_root)?;
+                    self.record_source(&entry, &asset_scope)?;
                 }
                 ProjectSourceKind::AssetMeta => {
-                    self.record_metadata(&entry, &assets_root)?;
+                    self.record_metadata(&entry, &asset_scope)?;
+                }
+                ProjectSourceKind::Unknown => {
+                    let source = entry
+                        .relative_path()
+                        .strip_suffix(".meta")
+                        .and_then(|path| AssetSourcePath::new(path).ok());
+                    if source
+                        .as_ref()
+                        .is_some_and(|path| self.prefab_scope.relative_path(path).is_some())
+                    {
+                        self.record_metadata(&entry, &asset_scope)?;
+                    }
                 }
                 _ => {}
             }
@@ -476,10 +500,17 @@ impl EditorImageCatalogAttempt {
     fn record_source(
         &mut self,
         entry: &ProjectSourceIndexEntry,
-        assets_root: &str,
+        asset_scope: &AssetPathScope,
     ) -> Result<(), EditorImageCatalogBuildError> {
-        let asset_path = project_path_to_asset_path(entry.relative_path(), assets_root)?;
+        let asset_path = project_path_to_source_path(entry.relative_path(), asset_scope)?;
         self.charge_member(entry.relative_path(), asset_path.as_str())?;
+        // Publication retains an authored alias alongside the canonical catalogue key.
+        self.charge_path_bytes(
+            asset_scope
+                .relative_path(&asset_path)
+                .expect("the admitted source is inside its Assets scope")
+                .len(),
+        )?;
         self.usage.image_sources = self.usage.image_sources.saturating_add(1);
 
         let metadata_project_relative_path: Arc<str> =
@@ -518,14 +549,16 @@ impl EditorImageCatalogAttempt {
     fn record_metadata(
         &mut self,
         entry: &ProjectSourceIndexEntry,
-        assets_root: &str,
+        asset_scope: &AssetPathScope,
     ) -> Result<(), EditorImageCatalogBuildError> {
         let source_project_path = entry
             .relative_path()
             .strip_suffix(".meta")
             .ok_or(EditorImageCatalogBuildError::InvalidIndexedAssetPath)?;
-        let asset_path = project_path_to_asset_path(source_project_path, assets_root)?;
-        let image_candidate = is_png_project_path(source_project_path);
+        let asset_path = project_path_to_source_path(source_project_path, asset_scope)
+            .or_else(|_| project_path_to_source_path(source_project_path, &self.prefab_scope))?;
+        let image_candidate = asset_scope.relative_path(&asset_path).is_some()
+            && is_png_project_path(source_project_path);
         self.charge_member(entry.relative_path(), asset_path.as_str())?;
         self.usage.sidecars = self.usage.sidecars.saturating_add(1);
 
@@ -643,7 +676,7 @@ impl EditorImageCatalogAttempt {
 
     fn admit_metadata(
         &mut self,
-        asset_path: AssetPath,
+        asset_path: AssetSourcePath,
         project_relative_path: &str,
         expected_identity: FileIdentity,
         image_candidate: bool,
@@ -658,7 +691,14 @@ impl EditorImageCatalogAttempt {
                 return Ok(());
             }
         };
-        if candidate.identity().path() != &asset_path {
+        let scope = [&self.asset_scope, &self.prefab_scope]
+            .into_iter()
+            .find(|scope| {
+                scope.relative_path(&asset_path) == Some(candidate.identity().path().as_str())
+            });
+        if !scope.is_some_and(|scope| {
+            candidate.identity().clone().into_record(scope).path() == &asset_path
+        }) {
             if image_candidate {
                 self.metadata_invalid.insert(
                     asset_path,
@@ -742,7 +782,7 @@ impl EditorImageCatalogAttempt {
                 (path, identity.stable_id(), identity.source_kind())
             }))?;
         let admitted_identities = mem::take(&mut self.metadata_identities);
-        let mut identity_members = BTreeMap::<StableAssetId, Vec<AssetPath>>::new();
+        let mut identity_members = BTreeMap::<StableAssetId, Vec<AssetSourcePath>>::new();
         for (path, metadata) in &admitted_identities {
             identity_members
                 .entry(metadata.candidate.identity().stable_id())
@@ -791,6 +831,10 @@ impl EditorImageCatalogAttempt {
             entries.push(EditorImageCatalogEntry {
                 project_relative_path: source.project_relative_path,
                 metadata_project_relative_path: source.metadata_project_relative_path,
+                authored_path: self
+                    .asset_scope
+                    .relativize(&asset_path)
+                    .ok_or(EditorImageCatalogBuildError::InvalidIndexedAssetPath)?,
                 asset_path,
                 source_identity,
                 metadata: metadata_status,
@@ -805,7 +849,8 @@ impl EditorImageCatalogAttempt {
         Ok(EditorImageCatalogSnapshot {
             root_identity: source_index.root_identity(),
             entries: entries.into_boxed_slice(),
-            assets_root: Arc::clone(&self.assets_root),
+            asset_scope: Arc::clone(&self.asset_scope),
+            prefab_scope: Arc::clone(&self.prefab_scope),
             identity_members: identity_members
                 .into_iter()
                 .map(|(id, members)| (id, members.into_boxed_slice()))
@@ -821,9 +866,12 @@ impl EditorImageCatalogAttempt {
 }
 
 fn find_identity_conflicts<'a>(
-    identities: impl Iterator<Item = (&'a AssetPath, StableAssetId, &'a AssetSourceKind)>,
+    identities: impl Iterator<Item = (&'a AssetSourcePath, StableAssetId, &'a AssetSourceKind)>,
 ) -> Result<
-    (BTreeMap<AssetPath, StableAssetId>, BTreeSet<StableAssetId>),
+    (
+        BTreeMap<AssetSourcePath, StableAssetId>,
+        BTreeSet<StableAssetId>,
+    ),
     EditorImageCatalogBuildError,
 > {
     let mut duplicate_probe = ProjectAssetDatabase::default();
@@ -848,16 +896,16 @@ fn find_identity_conflicts<'a>(
     Ok((conflicts, known_stable_ids))
 }
 
-fn project_path_to_asset_path(
+fn project_path_to_source_path(
     project_relative_path: &str,
-    assets_root: &str,
-) -> Result<AssetPath, EditorImageCatalogBuildError> {
-    let suffix = project_relative_path
-        .strip_prefix(assets_root)
-        .and_then(|suffix| suffix.strip_prefix('/'))
+    scope: &AssetPathScope,
+) -> Result<AssetSourcePath, EditorImageCatalogBuildError> {
+    let path = AssetSourcePath::new(project_relative_path)
+        .map_err(|_| EditorImageCatalogBuildError::InvalidIndexedAssetPath)?;
+    scope
+        .relative_path(&path)
         .ok_or(EditorImageCatalogBuildError::InvalidIndexedAssetPath)?;
-    AssetPath::new(suffix.to_owned())
-        .map_err(|_| EditorImageCatalogBuildError::InvalidIndexedAssetPath)
+    Ok(path)
 }
 
 fn is_png_project_path(path: &str) -> bool {
@@ -880,18 +928,19 @@ mod tests {
 
     #[test]
     fn asset_paths_require_the_exact_assets_root_boundary() {
+        let scope = AssetPathScope::under(AssetSourcePath::new("assets").unwrap());
         assert_eq!(
-            project_path_to_asset_path("assets/textures/player.png", "assets")
+            project_path_to_source_path("assets/textures/player.png", &scope)
                 .unwrap()
                 .as_str(),
-            "textures/player.png"
+            "assets/textures/player.png"
         );
         assert_eq!(
-            project_path_to_asset_path("assets2/player.png", "assets"),
+            project_path_to_source_path("assets2/player.png", &scope),
             Err(EditorImageCatalogBuildError::InvalidIndexedAssetPath)
         );
         assert_eq!(
-            project_path_to_asset_path("assets", "assets"),
+            project_path_to_source_path("assets", &scope),
             Err(EditorImageCatalogBuildError::InvalidIndexedAssetPath)
         );
     }
@@ -908,8 +957,8 @@ mod tests {
     #[test]
     fn duplicate_stable_ids_conflict_on_both_paths_and_remain_reserved() {
         let duplicate = stable_id("2f0d71c7-14fc-4ed4-b48b-1c61bba8b97f");
-        let first_path = AssetPath::new("first.png").unwrap();
-        let second_path = AssetPath::new("second.png").unwrap();
+        let first_path = AssetSourcePath::new("assets/first.png").unwrap();
+        let second_path = AssetSourcePath::new("assets/second.png").unwrap();
         let first = AssetSourceKind::Image;
         let second = AssetSourceKind::Other("audio".to_owned());
         let identities = [

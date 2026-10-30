@@ -77,7 +77,11 @@ fn assert_rejected_without_mutation(
     let expansion = document.expand_prefabs(&registry, resolver);
     assert!(expansion.candidate.is_none());
     assert_bounded_errors(&expansion.diagnostics, code);
-    let expansion = document.expand_prefabs_with_asset_database(&registry, resolver, &database);
+    let expansion = document.expand_prefabs_with_asset_resolution(
+        &registry,
+        resolver,
+        database.resolver(&nara_asset::AssetPathScope::ROOT),
+    );
     assert!(expansion.candidate.is_none());
     assert_bounded_errors(&expansion.diagnostics, code);
 
@@ -116,7 +120,11 @@ fn assert_rejected_without_mutation(
 
         for with_database in [false, true] {
             let report = if with_database {
-                (document).expand_prefabs_with_asset_database(&registry, resolver, &database)
+                (document).expand_prefabs_with_asset_resolution(
+                    &registry,
+                    resolver,
+                    database.resolver(&nara_asset::AssetPathScope::ROOT),
+                )
             } else {
                 (document).expand_prefabs(&registry, resolver)
             };

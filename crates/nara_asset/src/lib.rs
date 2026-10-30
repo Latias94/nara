@@ -28,16 +28,16 @@ pub use artifact::{
     ImporterVersion, SourceHash,
 };
 pub use database::{
-    AssetDatabaseError, AssetMeta, AssetMetaIdentity, AssetRecord, AssetSourceKind,
-    ProjectAssetDatabase,
+    AssetDatabaseError, AssetMeta, AssetMetaIdentity, AssetRecord, AssetReferenceResolver,
+    AssetSourceKind, ProjectAssetDatabase,
 };
 #[cfg(feature = "serde")]
 pub use format::{
     AssetMetaCandidate, AssetMetaFileLimits, AssetMetaFormatError, AssetMetaIdentityCandidate,
 };
 pub use identity::{
-    AssetId, AssetPath, AssetPathError, AssetRef, StableAssetId, StableAssetIdError,
-    StableAssetIdGenerationError,
+    AssetId, AssetPath, AssetPathError, AssetPathScope, AssetRef, AssetSourcePath, StableAssetId,
+    StableAssetIdError, StableAssetIdGenerationError,
 };
 #[cfg(feature = "serde")]
 pub use import::{AssetImportError, AssetImportLimits, AssetImportSource, SourceAssetImporter};
@@ -67,7 +67,8 @@ pub use storage::{
 /// Selects the export form for source-bound primary products.
 ///
 /// Auxiliary products and primary products without source paths always preserve their complete
-/// [`AssetRef::Product`] identity.
+/// [`AssetRef::Product`] identity. A preferred path outside the export scope also preserves the
+/// complete Product; a path-only identity outside that scope rejects.
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
 pub enum AssetRefExportPolicy {
     #[default]
@@ -86,6 +87,7 @@ pub enum AssetRefError {
         actual: AssetSourceKind,
     },
     UnknownHandle(AssetId),
+    SourceOutsideScope(AssetSourcePath),
     Database(AssetDatabaseError),
     Asset(AssetError),
 }
@@ -113,6 +115,10 @@ impl Display for AssetRefError {
                 "asset reference '{asset_ref}' expected source kind '{expected}', got '{actual}'"
             ),
             Self::UnknownHandle(id) => write!(formatter, "asset handle {:?} has no known path", id),
+            Self::SourceOutsideScope(path) => write!(
+                formatter,
+                "asset source '{path}' has no authored alias in the selected scope"
+            ),
             Self::Database(error) => Display::fmt(error, formatter),
             Self::Asset(error) => Display::fmt(error, formatter),
         }
@@ -148,9 +154,13 @@ impl AssetRef {
     pub fn resolve<T: 'static>(
         &self,
         asset_server: &mut AssetServer,
+        scope: &AssetPathScope,
     ) -> Result<Handle<T>, AssetRefError> {
         match self {
-            Self::Path(path) => asset_server.reserve::<T>(path.as_str()).map_err(Into::into),
+            Self::Path(path) => {
+                let id = asset_server.reserve_path_id(scope.resolve(path))?;
+                asset_server.claim(id).map_err(Into::into)
+            }
             Self::StableId(id) => Err(AssetRefError::MissingProjectDatabase(*id)),
             Self::Product(reference) => {
                 asset_server.resolve_product(*reference).map_err(Into::into)
@@ -165,10 +175,10 @@ impl AssetRef {
     pub fn resolve_with_database<T: 'static>(
         &self,
         asset_server: &mut AssetServer,
-        database: &ProjectAssetDatabase,
+        resolver: AssetReferenceResolver<'_>,
     ) -> Result<Handle<T>, AssetRefError> {
         self.validate_primary_selection()?;
-        let record = database.resolve_ref(self)?;
+        let record = resolver.resolve_ref(self)?;
         asset_server.reserve_record(record).map_err(Into::into)
     }
 
@@ -176,24 +186,24 @@ impl AssetRef {
     pub fn resolve_with_database_as<T: 'static>(
         &self,
         asset_server: &mut AssetServer,
-        database: &ProjectAssetDatabase,
+        resolver: AssetReferenceResolver<'_>,
         expected_source_kind: &AssetSourceKind,
     ) -> Result<Handle<T>, AssetRefError> {
-        let record = self.validate_with_database_as(database, expected_source_kind)?;
+        let record = self.validate_with_database_as(resolver, expected_source_kind)?;
         asset_server.reserve_record(record).map_err(Into::into)
     }
 
     /// Checks a primary selection's enclosing source identity and kind without reserving a handle.
     ///
-    /// Auxiliary selections are rejected. Use `ProjectAssetDatabase::resolve_ref` to look up
+    /// Auxiliary selections are rejected. Use [`AssetReferenceResolver::resolve_ref`] to look up
     /// their source, then let the concrete domain check membership in its admitted product.
     pub fn validate_with_database_as<'a>(
         &self,
-        database: &'a ProjectAssetDatabase,
+        resolver: AssetReferenceResolver<'a>,
         expected_source_kind: &AssetSourceKind,
     ) -> Result<&'a AssetRecord, AssetRefError> {
         self.validate_primary_selection()?;
-        let record = database.resolve_ref(self)?;
+        let record = resolver.resolve_ref(self)?;
         if record.source_kind() != expected_source_kind {
             return Err(AssetRefError::UnexpectedSourceKind {
                 asset_ref: self.to_string(),
@@ -216,16 +226,20 @@ impl AssetRef {
     pub fn from_handle<T: 'static>(
         asset_server: &AssetServer,
         handle: Handle<T>,
+        scope: &AssetPathScope,
     ) -> Result<Self, AssetRefError> {
-        Self::from_handle_with_policy(asset_server, handle, AssetRefExportPolicy::Path)
+        Self::from_handle_with_policy(asset_server, handle, scope, AssetRefExportPolicy::Path)
     }
 
     /// Exports a handle while preserving complete auxiliary and pathless primary product identity.
     ///
-    /// The policy selects a path or stable source ID only for a source-bound primary product.
+    /// The policy selects a scoped alias or stable source ID only for a source-bound primary
+    /// product. An unrepresentable preferred path preserves the complete Product, while a
+    /// path-only handle outside the scope returns [`AssetRefError::SourceOutsideScope`].
     pub fn from_handle_with_policy<T: 'static>(
         asset_server: &AssetServer,
         handle: Handle<T>,
+        scope: &AssetPathScope,
         policy: AssetRefExportPolicy,
     ) -> Result<Self, AssetRefError> {
         if let Err(error) = asset_server.validate_type_claim::<T>(handle.id()) {
@@ -242,10 +256,17 @@ impl AssetRef {
             if policy == AssetRefExportPolicy::StableIdWhenKnown {
                 return Ok(Self::StableId(product.source()));
             }
+            return Ok(match path.and_then(|path| scope.relativize(path)) {
+                Some(path) => Self::Path(path),
+                None => Self::Product(product),
+            });
         }
 
         let path = path.ok_or_else(|| AssetRefError::UnknownHandle(handle.id()))?;
-        Self::path(path).map_err(Into::into)
+        scope
+            .relativize(path)
+            .map(Self::Path)
+            .ok_or_else(|| AssetRefError::SourceOutsideScope(path.clone()))
     }
 }
 
@@ -269,7 +290,7 @@ mod tests {
     fn asset_record(path: &str) -> AssetRecord {
         AssetRecord::new(
             stable_id(),
-            AssetPath::new(path).unwrap(),
+            AssetSourcePath::new(path).unwrap(),
             AssetSourceKind::Image,
         )
     }
@@ -281,7 +302,10 @@ mod tests {
         let second = server.reserve::<String>("player.png").unwrap();
 
         assert_eq!(first, second);
-        assert_eq!(server.path(first.id()), Some("player.png"));
+        assert_eq!(
+            server.path(first.id()).map(AssetSourcePath::as_str),
+            Some("player.png")
+        );
     }
 
     #[test]
@@ -295,7 +319,10 @@ mod tests {
             server.reserve::<u32>("player.png"),
             Err(AssetError::AssetTypeMismatch { .. })
         ));
-        assert_eq!(server.path(first.id()), Some("player.png"));
+        assert_eq!(
+            server.path(first.id()).map(AssetSourcePath::as_str),
+            Some("player.png")
+        );
     }
 
     #[test]
@@ -369,7 +396,7 @@ mod tests {
         assert_ne!(first.id(), second.id());
         assert!(second_assets.get(first).is_none());
         assert_eq!(
-            AssetRef::from_handle(&second_server, first),
+            AssetRef::from_handle(&second_server, first, &AssetPathScope::ROOT),
             Err(AssetRefError::UnknownHandle(first.id()))
         );
     }
@@ -383,7 +410,10 @@ mod tests {
         let original_new = original.reserve::<String>("original.png").unwrap();
         let clone_new = clone.reserve::<String>("clone.png").unwrap();
 
-        assert_eq!(original.path(existing.id()), Some("existing.png"));
+        assert_eq!(
+            original.path(existing.id()).map(AssetSourcePath::as_str),
+            Some("existing.png")
+        );
         assert_ne!(original_new.id(), clone_new.id());
     }
 
@@ -440,11 +470,16 @@ mod tests {
         let mut server = AssetServer::new();
         let asset_ref = AssetRef::path("textures/player.png").unwrap();
 
-        let handle = asset_ref.resolve::<String>(&mut server).unwrap();
+        let handle = asset_ref
+            .resolve::<String>(&mut server, &AssetPathScope::ROOT)
+            .unwrap();
 
-        assert_eq!(server.path(handle.id()), Some("textures/player.png"));
         assert_eq!(
-            AssetRef::from_handle(&server, handle).unwrap(),
+            server.path(handle.id()).map(AssetSourcePath::as_str),
+            Some("textures/player.png")
+        );
+        assert_eq!(
+            AssetRef::from_handle(&server, handle, &AssetPathScope::ROOT).unwrap(),
             AssetRef::path("textures/player.png").unwrap()
         );
     }
@@ -464,22 +499,29 @@ mod tests {
         );
 
         let path_handle = path_ref
-            .resolve_with_database::<String>(&mut server, &database)
+            .resolve_with_database::<String>(&mut server, database.resolver(&AssetPathScope::ROOT))
             .unwrap();
         let stable_handle = stable_ref
-            .resolve_with_database::<String>(&mut server, &database)
+            .resolve_with_database::<String>(&mut server, database.resolver(&AssetPathScope::ROOT))
             .unwrap();
         let primary_handle = primary_ref
-            .resolve_with_database::<String>(&mut server, &database)
+            .resolve_with_database::<String>(&mut server, database.resolver(&AssetPathScope::ROOT))
             .unwrap();
         let checked_primary_handle = primary_ref
-            .resolve_with_database_as::<String>(&mut server, &database, &AssetSourceKind::Image)
+            .resolve_with_database_as::<String>(
+                &mut server,
+                database.resolver(&AssetPathScope::ROOT),
+                &AssetSourceKind::Image,
+            )
             .unwrap();
 
         assert_eq!(path_handle, stable_handle);
         assert_eq!(path_handle, primary_handle);
         assert_eq!(path_handle, checked_primary_handle);
-        assert_eq!(server.path(path_handle.id()), Some("textures/player.png"));
+        assert_eq!(
+            server.path(path_handle.id()).map(AssetSourcePath::as_str),
+            Some("textures/player.png")
+        );
         assert_eq!(server.stable_id(path_handle.id()), Some(stable_id()));
     }
 
@@ -495,9 +537,14 @@ mod tests {
             let known = AssetRef::product(AssetProductRef::new(stable_id(), product).unwrap());
             let unknown =
                 AssetRef::product(AssetProductRef::new(other_stable_id(), product).unwrap());
-            assert_eq!(database.resolve_ref(&known), Ok(&record));
             assert_eq!(
-                database.resolve_ref(&unknown),
+                database.resolver(&AssetPathScope::ROOT).resolve_ref(&known),
+                Ok(&record)
+            );
+            assert_eq!(
+                database
+                    .resolver(&AssetPathScope::ROOT)
+                    .resolve_ref(&unknown),
                 Err(AssetDatabaseError::UnknownStableId(other_stable_id()))
             );
         }
@@ -523,26 +570,39 @@ mod tests {
             }
             let baseline = server.clone();
             assert_eq!(
-                reference.resolve::<String>(&mut server),
+                reference.resolve::<String>(&mut server, &AssetPathScope::ROOT),
                 Err(AssetRefError::Asset(AssetError::UnknownProduct(product)))
             );
             assert_eq!(server, baseline);
             let auxiliary = server.reserve_product::<String>(product).unwrap();
-            assert_eq!(reference.resolve::<String>(&mut server), Ok(auxiliary));
+            assert_eq!(
+                reference.resolve::<String>(&mut server, &AssetPathScope::ROOT),
+                Ok(auxiliary)
+            );
             let baseline = server.clone();
             assert_eq!(
-                reference.resolve_with_database::<String>(&mut server, &database),
+                reference.resolve_with_database::<String>(
+                    &mut server,
+                    database.resolver(&AssetPathScope::ROOT),
+                ),
                 Err(expected.clone())
             );
             assert_eq!(server, baseline);
             for kind in [AssetSourceKind::Image, AssetSourceKind::Scene] {
                 assert_eq!(
-                    reference.resolve_with_database_as::<String>(&mut server, &database, &kind),
+                    reference.resolve_with_database_as::<String>(
+                        &mut server,
+                        database.resolver(&AssetPathScope::ROOT),
+                        &kind,
+                    ),
                     Err(expected.clone())
                 );
                 assert_eq!(server, baseline);
                 assert_eq!(
-                    reference.validate_with_database_as(&database, &kind),
+                    reference.validate_with_database_as(
+                        database.resolver(&AssetPathScope::ROOT),
+                        &kind,
+                    ),
                     Err(expected.clone())
                 );
             }
@@ -550,7 +610,7 @@ mod tests {
         }
         assert_eq!(
             reference.validate_with_database_as(
-                &ProjectAssetDatabase::default(),
+                ProjectAssetDatabase::default().resolver(&AssetPathScope::ROOT),
                 &AssetSourceKind::Image,
             ),
             Err(expected.clone())
@@ -568,12 +628,15 @@ mod tests {
         let mut server = AssetServer::new();
         let baseline = server.clone();
         assert_eq!(
-            reference.resolve::<String>(&mut server),
+            reference.resolve::<String>(&mut server, &AssetPathScope::ROOT),
             Err(AssetRefError::Asset(AssetError::UnknownProduct(product)))
         );
         let mut database = ProjectAssetDatabase::default();
         assert_eq!(
-            reference.resolve_with_database::<String>(&mut server, &database),
+            reference.resolve_with_database::<String>(
+                &mut server,
+                database.resolver(&AssetPathScope::ROOT),
+            ),
             Err(AssetRefError::Database(
                 AssetDatabaseError::UnknownStableId(stable_id())
             ))
@@ -586,33 +649,42 @@ mod tests {
             actual: AssetSourceKind::Image,
         };
         assert_eq!(
-            reference.validate_with_database_as(&database, &AssetSourceKind::Scene),
+            reference.validate_with_database_as(
+                database.resolver(&AssetPathScope::ROOT),
+                &AssetSourceKind::Scene,
+            ),
             Err(wrong_kind.clone())
         );
         assert_eq!(
             reference.resolve_with_database_as::<String>(
                 &mut server,
-                &database,
+                database.resolver(&AssetPathScope::ROOT),
                 &AssetSourceKind::Scene,
             ),
             Err(wrong_kind)
         );
         assert_eq!(server, baseline);
         assert_eq!(
-            reference.validate_with_database_as(&database, &AssetSourceKind::Image),
+            reference.validate_with_database_as(
+                database.resolver(&AssetPathScope::ROOT),
+                &AssetSourceKind::Image,
+            ),
             Ok(&record)
         );
 
         let handle = reference
-            .resolve_with_database::<String>(&mut server, &database)
+            .resolve_with_database::<String>(&mut server, database.resolver(&AssetPathScope::ROOT))
             .unwrap();
         let baseline = server.clone();
-        assert_eq!(reference.resolve::<String>(&mut server), Ok(handle));
+        assert_eq!(
+            reference.resolve::<String>(&mut server, &AssetPathScope::ROOT),
+            Ok(handle)
+        );
         assert_eq!(server, baseline);
         assert!(matches!(
             reference.resolve_with_database_as::<u32>(
                 &mut server,
-                &database,
+                database.resolver(&AssetPathScope::ROOT),
                 &AssetSourceKind::Image,
             ),
             Err(AssetRefError::Asset(AssetError::AssetTypeMismatch { .. }))
@@ -622,6 +694,7 @@ mod tests {
             AssetRef::from_handle_with_policy(
                 &server,
                 handle,
+                &AssetPathScope::ROOT,
                 AssetRefExportPolicy::StableIdWhenKnown,
             )
             .unwrap(),
@@ -638,7 +711,10 @@ mod tests {
             .unwrap();
         let baseline = conflict_server.clone();
         assert!(matches!(
-            reference.resolve_with_database::<String>(&mut conflict_server, &database),
+            reference.resolve_with_database::<String>(
+                &mut conflict_server,
+                database.resolver(&AssetPathScope::ROOT),
+            ),
             Err(AssetRefError::Asset(
                 AssetError::AssetIdAlreadyBoundToStableId { .. }
             ))
@@ -651,12 +727,12 @@ mod tests {
         let mut server = AssetServer::new();
         let first = AssetRecord::new(
             stable_id(),
-            AssetPath::new("textures/player.png").unwrap(),
+            AssetSourcePath::new("textures/player.png").unwrap(),
             AssetSourceKind::Image,
         );
         let second = AssetRecord::new(
             other_stable_id(),
-            AssetPath::new("textures/player.png").unwrap(),
+            AssetSourcePath::new("textures/player.png").unwrap(),
             AssetSourceKind::Image,
         );
 
@@ -678,7 +754,7 @@ mod tests {
         let first = asset_record("textures/player.png");
         let second = AssetRecord::new(
             stable_id(),
-            AssetPath::new("textures/player-v2.png").unwrap(),
+            AssetSourcePath::new("textures/player-v2.png").unwrap(),
             AssetSourceKind::Image,
         );
 
@@ -691,7 +767,10 @@ mod tests {
             AssetError::AssetIdAlreadyBoundToPath { .. }
         ));
         assert_eq!(server, baseline);
-        assert_eq!(server.path(handle.id()), Some("textures/player.png"));
+        assert_eq!(
+            server.path(handle.id()).map(AssetSourcePath::as_str),
+            Some("textures/player.png")
+        );
     }
 
     #[test]
@@ -700,7 +779,7 @@ mod tests {
         let asset_ref = AssetRef::stable_id(stable_id().to_string()).unwrap();
 
         assert_eq!(
-            asset_ref.resolve::<String>(&mut server),
+            asset_ref.resolve::<String>(&mut server, &AssetPathScope::ROOT),
             Err(AssetRefError::MissingProjectDatabase(stable_id()))
         );
     }
@@ -715,7 +794,7 @@ mod tests {
         let error = database
             .insert(AssetRecord::new(
                 stable_id(),
-                AssetPath::new("textures/other.png").unwrap(),
+                AssetSourcePath::new("textures/other.png").unwrap(),
                 AssetSourceKind::Image,
             ))
             .unwrap_err();
@@ -736,7 +815,7 @@ mod tests {
         let error = database
             .insert(AssetRecord::new(
                 StableAssetId::parse_str("b73f0f16-09e8-4265-b090-b689b41c197e").unwrap(),
-                AssetPath::new("Textures/Player.png").unwrap(),
+                AssetSourcePath::new("Textures/Player.png").unwrap(),
                 AssetSourceKind::Image,
             ))
             .unwrap_err();
@@ -757,14 +836,18 @@ mod tests {
         );
 
         let error = database
-            .insert_identity(AssetPath::new("textures/other.png").unwrap(), identity)
+            .insert_identity(
+                &AssetPathScope::ROOT,
+                AssetPath::new("textures/other.png").unwrap(),
+                identity,
+            )
             .unwrap_err();
 
         assert!(matches!(error, AssetDatabaseError::MetaPathMismatch { .. }));
     }
 
     #[test]
-    fn project_database_rejects_filesystem_paths_outside_asset_root() {
+    fn source_roots_bind_native_observations_and_reject_paths_outside_the_root() {
         let temp_root = unique_temp_root();
         let asset_root = temp_root.join("assets");
         let outside_root = temp_root.join("outside");
@@ -775,12 +858,16 @@ mod tests {
         fs::write(&source, b"png").unwrap();
         fs::write(&outside, b"png").unwrap();
 
-        let logical =
-            ProjectAssetDatabase::logical_path_from_source_path(&asset_root, &source).unwrap();
-        let outside_error =
-            ProjectAssetDatabase::logical_path_from_source_path(&asset_root, &outside).unwrap_err();
+        let root = AssetSourceRoot::new(
+            &asset_root,
+            AssetPathScope::under(AssetSourcePath::new("Content/Images").unwrap()),
+        );
+        let logical = root.logical_path_from_source_path(&source).unwrap();
+        let outside_error = root.logical_path_from_source_path(&outside).unwrap_err();
 
-        assert_eq!(logical.as_str(), "textures/player.png");
+        assert_eq!(logical.as_str(), "Content/Images/textures/player.png");
+        assert_eq!(root.source_path(&logical).unwrap(), source);
+        assert!(root.logical_path_from_source_path(&asset_root).is_err());
         assert!(matches!(
             outside_error,
             AssetDatabaseError::SourceOutsideRoot

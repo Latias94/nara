@@ -487,7 +487,10 @@ fn public_check_capture_startup_and_replacement_preserve_two_data_owners() {
     assert_eq!(snapshot.expanded_scene().entities.len(), 6);
     assert_eq!(snapshot.prefabs().len(), 1);
     assert_eq!(snapshot.images().len(), 1);
-    assert_eq!(snapshot.images()[0].path().as_str(), "textures/player.png");
+    assert_eq!(
+        snapshot.images()[0].path().as_str(),
+        "assets/textures/player.png"
+    );
     assert_eq!(
         snapshot.schema_fingerprint(),
         plan.schema_validation()

@@ -13,7 +13,7 @@ use std::{
     io::{self, Write},
 };
 
-use nara_asset::ProjectAssetDatabase;
+use nara_asset::AssetReferenceResolver;
 use nara_core::{
     ByteLimit, DepthLimit, EngineVersion, FormatGenerator, FormatKind, ItemLimit,
     PersistentFileContract, PersistentFileContractError, PersistentFileDecodeError,
@@ -556,27 +556,27 @@ impl CanonicalSceneDocumentCandidate {
         self,
         registry: &ComponentRegistry,
     ) -> Result<PublishedSceneDocument, SceneFilePublicationError> {
-        self.publish_with_optional_asset_database(registry, None)
+        self.publish_with_optional_asset_resolution(registry, None)
     }
 
     /// Publishes with the asset identities admitted by the content source owner.
-    pub fn publish_with_asset_database(
+    pub fn publish_with_asset_resolution(
         self,
         registry: &ComponentRegistry,
-        database: &ProjectAssetDatabase,
+        asset_resolution: AssetReferenceResolver<'_>,
     ) -> Result<PublishedSceneDocument, SceneFilePublicationError> {
-        self.publish_with_optional_asset_database(registry, Some(database))
+        self.publish_with_optional_asset_resolution(registry, Some(asset_resolution))
     }
 
-    fn publish_with_optional_asset_database(
+    fn publish_with_optional_asset_resolution(
         self,
         registry: &ComponentRegistry,
-        database: Option<&ProjectAssetDatabase>,
+        asset_resolution: Option<AssetReferenceResolver<'_>>,
     ) -> Result<PublishedSceneDocument, SceneFilePublicationError> {
         let mut context = ComponentDecodeContext::new()
             .with_materialization_limits(self.limits.component_materialization_limits());
-        if let Some(database) = database {
-            context = context.with_project_asset_database(database);
+        if let Some(asset_resolution) = asset_resolution {
+            context = context.with_asset_resolution(asset_resolution);
         }
         let diagnostics = crate::validation::preflight_authoring_scene_with_context(
             &self.document,
@@ -622,28 +622,28 @@ impl CanonicalPrefabDocumentCandidate {
         self,
         registry: &ComponentRegistry,
     ) -> Result<PublishedPrefabDocument, SceneFilePublicationError> {
-        self.publish_with_optional_asset_database(registry, None)
+        self.publish_with_optional_asset_resolution(registry, None)
     }
 
     /// Publishes with the asset identities admitted by the content source owner.
-    pub fn publish_with_asset_database(
+    pub fn publish_with_asset_resolution(
         self,
         registry: &ComponentRegistry,
-        database: &ProjectAssetDatabase,
+        asset_resolution: AssetReferenceResolver<'_>,
     ) -> Result<PublishedPrefabDocument, SceneFilePublicationError> {
-        self.publish_with_optional_asset_database(registry, Some(database))
+        self.publish_with_optional_asset_resolution(registry, Some(asset_resolution))
     }
 
-    fn publish_with_optional_asset_database(
+    fn publish_with_optional_asset_resolution(
         self,
         registry: &ComponentRegistry,
-        database: Option<&ProjectAssetDatabase>,
+        asset_resolution: Option<AssetReferenceResolver<'_>>,
     ) -> Result<PublishedPrefabDocument, SceneFilePublicationError> {
         let document = self.document.instantiate();
         let mut context = ComponentDecodeContext::new()
             .with_materialization_limits(self.limits.component_materialization_limits());
-        if let Some(database) = database {
-            context = context.with_project_asset_database(database);
+        if let Some(asset_resolution) = asset_resolution {
+            context = context.with_asset_resolution(asset_resolution);
         }
         let diagnostics = crate::validation::preflight_authoring_scene_with_context(
             &document,
@@ -1196,15 +1196,15 @@ impl ScenePatchDocumentCandidate {
         }
     }
 
-    pub fn apply_to_scene_with_asset_database(
+    pub fn apply_to_scene_with_asset_resolution(
         &self,
         document: &mut SceneDocument,
         registry: &ComponentRegistry,
-        database: &ProjectAssetDatabase,
+        asset_resolution: AssetReferenceResolver<'_>,
     ) -> ScenePatchReport {
         match self.clone().into_canonical_document(registry) {
             Ok((patch, _)) => {
-                patch.apply_to_scene_with_asset_database(document, registry, database)
+                patch.apply_to_scene_with_asset_resolution(document, registry, asset_resolution)
             }
             Err(error) => publication_error_patch_report(error),
         }

@@ -3,7 +3,10 @@ use std::{collections::BTreeMap, sync::Arc, time::Duration};
 use nara_app::{
     App, CoreStage, RuntimeControl, RuntimeControlRequestResult, RuntimeInstance, RuntimeState,
 };
-use nara_asset::{AssetProductRef, AssetRef, ImportedProductId, StableAssetId};
+use nara_asset::{
+    AssetPathScope, AssetProductRef, AssetRecord, AssetRef, AssetRefExportPolicy, AssetSourceKind,
+    AssetSourcePath, ImportedProductId, ProjectAssetDatabase, StableAssetId,
+};
 use nara_core::Vec2;
 use nara_ecs::{Entity, Res, ResMut, Resource, World};
 use nara_hierarchy::{
@@ -18,8 +21,8 @@ use nara_input::{
 };
 use nara_reflect::__macro_support::PersistentFieldCodec;
 use nara_reflect::{
-    ComponentFieldPath, ComponentRegistry, ComponentRegistryPlugin, ComponentSchemaVersion,
-    ComponentTypeId, ComponentValue,
+    ComponentDecodeContext, ComponentEncodeContext, ComponentFieldPath, ComponentRegistry,
+    ComponentRegistryPlugin, ComponentSchemaVersion, ComponentTypeId, ComponentValue,
 };
 use nara_scene::{
     InMemoryPrefabSourceResolver, PrefabDocument, PrefabInstance, SceneDocument, SceneEntityId,
@@ -539,21 +542,52 @@ fn legacy_brush_migrations_preserve_roles_and_expose_image_asset_references() {
 }
 
 #[test]
-fn image_brush_preserves_declared_product_identity_and_rejects_non_path_consumption() {
+fn image_brush_preserves_complete_products_without_source_database() {
     let registry = frozen_ui_registry();
     let snapshot = registry.snapshot().unwrap();
     let component_id = ComponentTypeId::new("nara.ui.UiVisual");
     let source = StableAssetId::parse_str("2f0d71c7-14fc-4ed4-b48b-1c61bba8b97f").unwrap();
     let auxiliary =
         ImportedProductId::parse_subproduct("011a8cc0-343a-4b95-8adb-3aa6d81977ed").unwrap();
-    let visual = UiVisual::image(
-        nara_ui_kernel::UiImageId::new("assets/ui/panel.png").unwrap(),
+    let encoded = crate::codec::image_visual_value(
+        &AssetRef::path("ui/panel.png").unwrap(),
         UiColor::rgba(1.0, 1.0, 1.0, 1.0),
-    );
-    let encoded = crate::codec::encode_visual(&visual).unwrap();
-    snapshot
-        .preflight_component(&component_id, &encoded)
+    )
+    .unwrap();
+    let scope = AssetPathScope::under(AssetSourcePath::new("custom/art").unwrap());
+    let mut database = ProjectAssetDatabase::default();
+    database
+        .insert(AssetRecord::new(
+            source,
+            AssetSourcePath::new("custom/art/ui/panel.png").unwrap(),
+            AssetSourceKind::Image,
+        ))
         .unwrap();
+    let document = SceneDocument::from_ordered_roots([SceneEntityRecord::new(scene_id("image"))
+        .with_component(
+            component_id.clone(),
+            nara_scene::SceneComponentRecord::new(ComponentSchemaVersion(2), encoded),
+        )]);
+    let expanded = nara_scene::ExpandedSceneDocument::plain(Arc::new(document))
+        .bind_source(scene_source_key("processed-ui-image"));
+    let bindings = nara_scene::SceneComponentBindings::new(snapshot.clone(), []).unwrap();
+    let cooked = nara_scene::RuntimeSceneCandidate::cook(
+        &expanded,
+        &bindings,
+        database.resolver(&scope),
+        nara_scene::RuntimeSceneLimits::default(),
+    )
+    .unwrap();
+    let encoded = cooked.document().entities[0].components[&component_id]
+        .value
+        .clone();
+    assert_eq!(
+        encoded.field("background").unwrap().field("image").unwrap(),
+        &nara_reflect::encode_asset_reference_value(&AssetRef::product(
+            AssetProductRef::new(source, ImportedProductId::PRIMARY).unwrap()
+        ))
+    );
+    drop(database);
 
     for product in [ImportedProductId::PRIMARY, auxiliary] {
         let reference = AssetRef::product(AssetProductRef::new(source, product).unwrap());
@@ -574,12 +608,398 @@ fn image_brush_preserves_declared_product_identity_and_rejects_non_path_consumpt
 
         assert_eq!(references.len(), 1);
         assert_eq!(references[0].asset_ref(), &reference);
+        let mut server = nara_asset::AssetServer::new();
+        let handle = server
+            .reserve_product::<nara_image::ImageAsset>(reference.as_product().unwrap())
+            .unwrap();
+        let mut context = ComponentDecodeContext::with_asset_server(&mut server);
+        let prepared = snapshot
+            .preflight_component_with_context(&component_id, &value, &mut context)
+            .unwrap();
+        let mut world = World::new();
+        world.insert_resource(server);
+        let entity = world.spawn_empty().id();
+        prepared.apply(&mut world, entity).unwrap();
+        assert_eq!(
+            world.get::<UiVisual>(entity).unwrap().kernel().background(),
+            Some(&UiBrush::Image {
+                image: nara_ui_kernel::UiImageId::external::<nara_image::ImageAsset>(
+                    handle.id().raw()
+                ),
+                tint: UiColor::rgba(1.0, 1.0, 1.0, 1.0),
+            })
+        );
+        // Neither the receiving World nor the export context has a source catalogue.
+        let output = snapshot
+            .encode_component(&component_id, &world, entity)
+            .unwrap()
+            .unwrap();
+        assert_eq!(
+            output.field("background").unwrap().field("image").unwrap(),
+            &nara_reflect::encode_asset_reference_value(&reference)
+        );
+    }
+}
+
+#[test]
+fn image_brush_binds_actual_scope_and_exports_local_alias_or_known_product() {
+    let registry = frozen_ui_registry();
+    let snapshot = registry.snapshot().unwrap();
+    let component_id = ComponentTypeId::new("nara.ui.UiVisual");
+    let scope = AssetPathScope::under(AssetSourcePath::new("game/art").unwrap());
+    let other = AssetPathScope::under(AssetSourcePath::new("package/art").unwrap());
+    let source = StableAssetId::parse_str("2f0d71c7-14fc-4ed4-b48b-1c61bba8b97f").unwrap();
+    let foreign = StableAssetId::parse_str("4e438770-1757-44f0-bbeb-6237cd6768ab").unwrap();
+    let mut database = ProjectAssetDatabase::default();
+    for (id, path) in [
+        (source, "game/art/panel.png"),
+        (foreign, "package/art/panel.png"),
+    ] {
+        database
+            .insert(AssetRecord::new(
+                id,
+                AssetSourcePath::new(path).unwrap(),
+                AssetSourceKind::Image,
+            ))
+            .unwrap();
+    }
+    let value = crate::codec::image_visual_value(
+        &AssetRef::path("panel.png").unwrap(),
+        UiColor::rgba(1.0, 1.0, 1.0, 1.0),
+    )
+    .unwrap();
+    let mut world = World::new();
+    world.insert_resource(nara_asset::AssetServer::new());
+    let entity = world.spawn_empty().id();
+    let mut context = ComponentDecodeContext::new()
+        .with_asset_path_scope(&other)
+        .with_asset_resolution(database.resolver(&scope));
+    snapshot
+        .preflight_component_with_context(&component_id, &value, &mut context)
+        .unwrap()
+        .apply(&mut world, entity)
+        .unwrap();
+    let handle = world
+        .get::<UiVisual>(entity)
+        .unwrap()
+        .image_handle()
+        .unwrap();
+    assert_eq!(
+        world
+            .resource::<nara_asset::AssetServer>()
+            .path(handle.id())
+            .unwrap()
+            .as_str(),
+        "game/art/panel.png"
+    );
+    let local = ComponentEncodeContext::new()
+        .with_asset_path_scope(&other)
+        .with_asset_resolution(database.resolver(&scope));
+    let output = snapshot
+        .encode_component_with_context(&component_id, &world, entity, &local)
+        .unwrap()
+        .unwrap();
+    assert_eq!(output, value);
+    let mut stable_value = value.clone();
+    stable_value
+        .set_path(
+            &ComponentFieldPath::from_fields(["background", "image"]),
+            nara_reflect::encode_asset_reference_value(&AssetRef::StableId(source)),
+        )
+        .unwrap();
+    let stable_entity = world.spawn_empty().id();
+    let mut context =
+        ComponentDecodeContext::new().with_asset_resolution(database.resolver(&other));
+    snapshot
+        .preflight_component_with_context(&component_id, &stable_value, &mut context)
+        .unwrap()
+        .apply(&mut world, stable_entity)
+        .unwrap();
+    assert_eq!(
+        world.get::<UiVisual>(entity),
+        world.get::<UiVisual>(stable_entity)
+    );
+    let auxiliary =
+        ImportedProductId::parse_subproduct("011a8cc0-343a-4b95-8adb-3aa6d81977ed").unwrap();
+    stable_value
+        .set_path(
+            &ComponentFieldPath::from_fields(["background", "image"]),
+            nara_reflect::encode_asset_reference_value(&AssetRef::product(
+                AssetProductRef::new(source, auxiliary).unwrap(),
+            )),
+        )
+        .unwrap();
+    // Source metadata proves only the primary; it cannot admit arbitrary auxiliary images.
+    assert!(matches!(
+        snapshot.preflight_component_with_context(&component_id, &stable_value, &mut context),
+        Err(nara_reflect::ComponentCodecError::InvalidAssetRef { .. })
+    ));
+    for (context, expected) in [
+        (
+            ComponentEncodeContext::new().with_asset_resolution(database.resolver(&other)),
+            AssetRef::product(AssetProductRef::new(source, ImportedProductId::PRIMARY).unwrap()),
+        ),
+        (
+            local.with_asset_ref_export_policy(AssetRefExportPolicy::StableIdWhenKnown),
+            AssetRef::StableId(source),
+        ),
+    ] {
+        let output = snapshot
+            .encode_component_with_context(&component_id, &world, entity, &context)
+            .unwrap()
+            .unwrap();
+        assert_eq!(
+            output.field("background").unwrap().field("image").unwrap(),
+            &nara_reflect::encode_asset_reference_value(&expected)
+        );
+    }
+    // Runtime binding retains the real Product even without an export source catalogue.
+    let context = ComponentEncodeContext::new().with_asset_path_scope(&other);
+    let output = snapshot
+        .encode_component_with_context(&component_id, &world, entity, &context)
+        .unwrap()
+        .unwrap();
+    assert_eq!(
+        output.field("background").unwrap().field("image").unwrap(),
+        &nara_reflect::encode_asset_reference_value(&AssetRef::product(
+            AssetProductRef::new(source, ImportedProductId::PRIMARY).unwrap()
+        ))
+    );
+    let foreign_entity = world.spawn_empty().id();
+    let mut context =
+        ComponentDecodeContext::new().with_asset_resolution(database.resolver(&other));
+    snapshot
+        .preflight_component_with_context(&component_id, &value, &mut context)
+        .unwrap()
+        .apply(&mut world, foreign_entity)
+        .unwrap();
+    let foreign_handle = world
+        .get::<UiVisual>(foreign_entity)
+        .unwrap()
+        .image_handle()
+        .unwrap();
+    assert_ne!(handle, foreign_handle);
+    assert_eq!(
+        world
+            .resource::<nara_asset::AssetServer>()
+            .path(foreign_handle.id())
+            .unwrap()
+            .as_str(),
+        "package/art/panel.png"
+    );
+}
+
+#[test]
+fn image_text_and_border_are_rejected_before_runtime_binding() {
+    let registry = frozen_ui_registry();
+    let snapshot = registry.snapshot().unwrap();
+    let image = crate::codec::image_visual_value(
+        &AssetRef::path("panel.png").unwrap(),
+        UiColor::rgba(1.0, 1.0, 1.0, 1.0),
+    )
+    .unwrap();
+    let brush = image.field("background").unwrap().clone();
+    for (id, mut value, brush_field) in [
+        (
+            "nara.ui.UiText",
+            crate::codec::encode_text(&UiText::new("Text", 16.0).unwrap()).unwrap(),
+            "brush",
+        ),
+        (
+            "nara.ui.UiVisual",
+            crate::codec::encode_visual(&UiVisual::solid(UiColor::rgba(0.0, 0.0, 0.0, 1.0)))
+                .unwrap(),
+            "border_brush",
+        ),
+    ] {
+        let id = ComponentTypeId::new(id);
+        value
+            .set_path(
+                &ComponentFieldPath::from_fields([brush_field]),
+                brush.clone(),
+            )
+            .unwrap();
+        assert!(matches!(snapshot.preflight_component(&id, &value),
+            Err(nara_reflect::ComponentCodecError::InvalidField { field, .. }) if field == brush_field));
+    }
+}
+
+#[test]
+fn opaque_named_and_external_image_ids_never_acquire_a_persistent_binding() {
+    let registry = frozen_ui_registry();
+    let snapshot = registry.snapshot().unwrap();
+    let id = ComponentTypeId::new("nara.ui.UiVisual");
+    let mut world = World::new();
+    let mut server = nara_asset::AssetServer::new();
+    let source = StableAssetId::parse_str("2f0d71c7-14fc-4ed4-b48b-1c61bba8b97f").unwrap();
+    let handle = server
+        .reserve_record::<nara_image::ImageAsset>(&AssetRecord::new(
+            source,
+            AssetSourcePath::new("textures/panel.png").unwrap(),
+            AssetSourceKind::Image,
+        ))
+        .unwrap();
+    world.insert_resource(server);
+    for image in [
+        nara_ui_kernel::UiImageId::new("textures/panel.png").unwrap(),
+        nara_ui_kernel::UiImageId::new("product:2f0d71c7-14fc-4ed4-b48b-1c61bba8b97f/primary")
+            .unwrap(),
+        nara_ui_kernel::UiImageId::external::<nara_image::ImageAsset>(handle.id().raw()),
+    ] {
+        let entity = world
+            .spawn(UiVisual::image(image, UiColor::rgba(1.0, 1.0, 1.0, 1.0)))
+            .id();
         assert!(matches!(
-            snapshot.preflight_component(&component_id, &value),
-            Err(nara_reflect::ComponentCodecError::InvalidField { field, expected })
-                if field == "background.image.kind" && expected == "path"
+            snapshot.encode_component(&id, &world, entity),
+            Err(nara_reflect::ComponentCodecError::InvalidAssetRef { .. })
         ));
     }
+}
+
+#[test]
+fn image_asset_binding_survives_shape_changes_and_clears_on_background_replacement() {
+    let registry = frozen_ui_registry();
+    let snapshot = registry.snapshot().unwrap();
+    let id = ComponentTypeId::new("nara.ui.UiVisual");
+    let mut server = nara_asset::AssetServer::new();
+    let handle = server
+        .reserve::<nara_image::ImageAsset>("game/art/panel.png")
+        .unwrap();
+    let scope = AssetPathScope::under(AssetSourcePath::new("game/art").unwrap());
+    let tint = UiColor::rgba(1.0, 1.0, 1.0, 1.0);
+    let bound = UiVisual::image_asset(handle, tint)
+        .with_radii(nara_ui_kernel::UiCornerRadii::all(2.0).unwrap())
+        .with_border(
+            nara_ui_kernel::UiBorder::new(1.0, UiBrush::Role(UiColorRole::Focus)).unwrap(),
+        );
+    assert_eq!(bound.image_handle(), Some(handle));
+    let mut world = World::new();
+    world.insert_resource(server);
+    let entity = world.spawn(bound.clone()).id();
+    let context = ComponentEncodeContext::new().with_asset_path_scope(&scope);
+    let value = snapshot
+        .encode_component_with_context(&id, &world, entity, &context)
+        .unwrap()
+        .unwrap();
+    assert_eq!(
+        crate::codec::visual_image_reference(&value).unwrap(),
+        Some(AssetRef::path("panel.png").unwrap())
+    );
+    let replaced = bound.clone().with_background(UiBrush::Image {
+        image: nara_ui_kernel::UiImageId::external::<nara_image::ImageAsset>(handle.id().raw()),
+        tint,
+    });
+    assert_eq!(replaced.image_handle(), None);
+    let entity = world.spawn(replaced).id();
+    assert!(
+        snapshot
+            .encode_component_with_context(&id, &world, entity, &context)
+            .is_err()
+    );
+    let solid = bound.with_background(UiBrush::Role(UiColorRole::Panel));
+    assert_eq!(solid.image_handle(), None);
+    let entity = world.spawn(solid).id();
+    assert!(
+        snapshot
+            .encode_component_with_context(&id, &world, entity, &context)
+            .is_ok()
+    );
+    let outside = ComponentEncodeContext::new().with_asset_path_scope(&AssetPathScope::ROOT);
+    let entity = world.spawn(UiVisual::image_asset(handle, tint)).id();
+    assert!(
+        snapshot
+            .encode_component_with_context(&id, &world, entity, &outside)
+            .is_ok()
+    );
+    let other_scope = AssetPathScope::under(AssetSourcePath::new("package/art").unwrap());
+    let outside = ComponentEncodeContext::new().with_asset_path_scope(&other_scope);
+    assert!(
+        snapshot
+            .encode_component_with_context(&id, &world, entity, &outside)
+            .is_err()
+    );
+}
+
+#[test]
+fn long_scoped_image_alias_is_not_limited_by_widget_keys_and_checks_source_kind() {
+    let registry = frozen_ui_registry();
+    let snapshot = registry.snapshot().unwrap();
+    let id = ComponentTypeId::new("nara.ui.UiVisual");
+    let local = format!("{}.png", "a".repeat(244));
+    assert_eq!(local.len(), 248);
+    let reference = AssetRef::path(local).unwrap();
+    let scope = AssetPathScope::under(AssetSourcePath::new("custom/assets/images").unwrap());
+    let canonical = scope.resolve(reference.as_path().unwrap());
+    assert!(canonical.as_str().len() > nara_ui_kernel::MAX_UI_KEY_BYTES);
+    let value =
+        crate::codec::image_visual_value(&reference, UiColor::rgba(1.0, 1.0, 1.0, 1.0)).unwrap();
+    let mut world = World::new();
+    world.insert_resource(nara_asset::AssetServer::new());
+    let entity = world.spawn_empty().id();
+    let mut context = ComponentDecodeContext::new().with_asset_path_scope(&scope);
+    snapshot
+        .preflight_component_with_context(&id, &value, &mut context)
+        .unwrap()
+        .apply(&mut world, entity)
+        .unwrap();
+    let handle = world
+        .get::<UiVisual>(entity)
+        .unwrap()
+        .image_handle()
+        .unwrap();
+    assert_eq!(
+        world
+            .resource::<nara_asset::AssetServer>()
+            .path(handle.id()),
+        Some(&canonical)
+    );
+    let context = ComponentEncodeContext::new().with_asset_path_scope(&scope);
+    assert_eq!(
+        snapshot
+            .encode_component_with_context(&id, &world, entity, &context)
+            .unwrap()
+            .unwrap(),
+        value
+    );
+    let mut database = ProjectAssetDatabase::default();
+    let source = StableAssetId::parse_str("2f0d71c7-14fc-4ed4-b48b-1c61bba8b97f").unwrap();
+    database
+        .insert(AssetRecord::new(source, canonical, AssetSourceKind::Scene))
+        .unwrap();
+    let mut context =
+        ComponentDecodeContext::new().with_asset_resolution(database.resolver(&scope));
+    assert!(matches!(
+        snapshot.preflight_component_with_context(&id, &value, &mut context),
+        Err(nara_reflect::ComponentCodecError::InvalidAssetRef { .. })
+    ));
+}
+
+#[test]
+fn runtime_image_product_requires_an_existing_correctly_typed_binding() {
+    let registry = frozen_ui_registry();
+    let snapshot = registry.snapshot().unwrap();
+    let id = ComponentTypeId::new("nara.ui.UiVisual");
+    let source = StableAssetId::parse_str("2f0d71c7-14fc-4ed4-b48b-1c61bba8b97f").unwrap();
+    let product = AssetProductRef::new(source, ImportedProductId::PRIMARY).unwrap();
+    let value = crate::codec::image_visual_value(
+        &AssetRef::product(product),
+        UiColor::rgba(1.0, 1.0, 1.0, 1.0),
+    )
+    .unwrap();
+    let mut server = nara_asset::AssetServer::new();
+    let mut context = ComponentDecodeContext::with_asset_server(&mut server);
+    assert!(
+        snapshot
+            .preflight_component_with_context(&id, &value, &mut context)
+            .is_err()
+    );
+    server.reserve_product::<String>(product).unwrap();
+    let mut context = ComponentDecodeContext::with_asset_server(&mut server);
+    assert!(
+        snapshot
+            .preflight_component_with_context(&id, &value, &mut context)
+            .is_err()
+    );
 }
 
 #[test]

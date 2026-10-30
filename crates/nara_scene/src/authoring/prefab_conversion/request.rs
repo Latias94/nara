@@ -2,7 +2,7 @@
 
 use std::{error::Error, fmt, sync::Arc};
 
-use nara_asset::{AssetRef, ProjectAssetDatabase};
+use nara_asset::{AssetRef, AssetReferenceResolver};
 
 use super::{
     localize::{self, CapturedPrefabSources},
@@ -156,7 +156,7 @@ macro_rules! conversion_owner {
             /// Only actually demanded sources are requested and retained.
             pub fn prepare_with_loader<F, E>(
                 self,
-                database: Option<&ProjectAssetDatabase>,
+                asset_resolution: Option<AssetReferenceResolver<'_>>,
                 loader: F,
             ) -> Result<$prepared, PrefabConversionError<E>>
             where
@@ -172,7 +172,7 @@ macro_rules! conversion_owner {
                     &basis,
                     self.history,
                     self.options,
-                    database,
+                    asset_resolution,
                     loader,
                 )?;
                 localized

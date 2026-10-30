@@ -61,7 +61,10 @@ fn stable_id_prefab_references_survive_source_rename() {
     let loader = ProjectContentLoader::new(root).unwrap();
 
     let before = loader.load(&candidate, &plan).unwrap();
-    assert_eq!(before.prefabs()[0].path().as_str(), "enemy.prefab.json");
+    assert_eq!(
+        before.prefabs()[0].path().as_str(),
+        "prefabs/enemy.prefab.json"
+    );
     std::fs::rename(
         project.path().join("prefabs/enemy.prefab.json"),
         project.path().join("prefabs/renamed.prefab.json"),
@@ -78,7 +81,10 @@ fn stable_id_prefab_references_survive_source_rename() {
     )
     .unwrap();
     let after = loader.load(&candidate, &plan).unwrap();
-    assert_eq!(after.prefabs()[0].path().as_str(), "renamed.prefab.json");
+    assert_eq!(
+        after.prefabs()[0].path().as_str(),
+        "prefabs/renamed.prefab.json"
+    );
     assert_eq!(before.scene(), after.scene());
     let members = after
         .startup_content_closure()
@@ -156,7 +162,10 @@ fn stable_id_component_asset_references_survive_source_rename() {
     )
     .unwrap();
     let after = loader.load(&candidate, &plan).unwrap();
-    assert_eq!(after.images()[0].path().as_str(), "textures/renamed.png");
+    assert_eq!(
+        after.images()[0].path().as_str(),
+        "assets/textures/renamed.png"
+    );
     assert_eq!(after.images()[0].image().pixels(), original_pixels);
     assert_eq!(before.scene(), after.scene());
     assert_eq!(

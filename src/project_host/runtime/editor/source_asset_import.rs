@@ -2,7 +2,7 @@ use std::{marker::PhantomData, sync::Arc};
 
 use nara_asset::{
     AssetMeta, AssetMetaFileLimits, AssetMetaIdentity, AssetMetaIdentityCandidate, AssetPath,
-    AssetSourceKind, SourceAssetImporter,
+    AssetSourceKind, AssetSourcePath, SourceAssetImporter,
 };
 use nara_fs::{ContentDigest, FileIdentity, RelativePath};
 use nara_tooling::{
@@ -208,7 +208,7 @@ pub(super) struct EditorSourceAssetImportHost {
     budget: ProjectContentBudgetHost,
     projection: Option<(
         Arc<EditorAssetMetadataSnapshot>,
-        AssetPath,
+        AssetSourcePath,
         EditorSourceAssetMetadataView,
     )>,
 }
@@ -261,7 +261,10 @@ impl EditorSourceAssetImportHost {
         metadata: &Arc<EditorAssetMetadataSnapshot>,
         path: &str,
     ) -> Option<EditorSourceAssetImportView> {
-        let asset_path = asset_path(project, index, path)?;
+        let asset_path = project
+            .asset_resolution()
+            .scope()
+            .resolve(&asset_path(project, index, path)?);
         if self.importers.providers.is_empty() || !metadata.matches_source_index(index) {
             return None;
         }
@@ -371,7 +374,8 @@ impl EditorProjectSession {
             .ok_or(Rejection::Unavailable)?;
         let path =
             asset_path(project, index, &action.relative_path).ok_or(Rejection::Unavailable)?;
-        if catalog.conflict(&path).is_some() {
+        let source_path = project.asset_resolution().scope().resolve(&path);
+        if catalog.conflict(&source_path).is_some() {
             return Err(Rejection::InvalidMetadata);
         }
         let provider = self
@@ -385,7 +389,7 @@ impl EditorProjectSession {
         if action.settings.len() > byte_limit {
             return Err(Rejection::InvalidSettings);
         }
-        let (stable_id, publication, previous) = match catalog.candidate(&path) {
+        let (stable_id, publication, previous) = match catalog.candidate(&source_path) {
             Some(candidate) => {
                 if candidate.identity().source_kind()
                     != &AssetSourceKind::Other(provider.kind().to_owned())
@@ -393,7 +397,7 @@ impl EditorProjectSession {
                     return Err(Rejection::InvalidMetadata);
                 }
                 let digest = catalog
-                    .observed_digest(&path)
+                    .observed_digest(&source_path)
                     .ok_or(Rejection::InvalidMetadata)?;
                 // The catalog is discovery data. Establish a new admission from a live leaf;
                 // its historical native identity cannot prove continuous object custody.

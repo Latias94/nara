@@ -1,6 +1,6 @@
 use std::{collections::BTreeMap, fmt, mem::size_of, sync::Arc};
 
-use nara_asset::{AssetSourceKind, StableAssetId};
+use nara_asset::StableAssetId;
 use nara_fs::{ContentDigest, DirectoryCapability, FileIdentity};
 use nara_project::ProjectPath;
 use nara_reflect::SchemaCompositionFingerprint;
@@ -10,9 +10,10 @@ use super::catalogue::DeliveryCatalogue;
 use super::{
     ARC_CONTROL_BLOCK_BYTES, BTREE_ENTRY_OVERHEAD, ProjectContentBudgetKind,
     ProjectContentClosureReceipt, ProjectContentError, ProjectContentErrorKind,
-    ProjectContentLease, ProjectContentLoader, ProjectContentMemberReceipt, ProjectContentSnapshot,
-    ProjectSettingsCandidate, ProjectSettingsLineage, RuntimePlan, StartupContentClosureReceipt,
-    allocation_failed, append_frame, checked_plan_product, checked_plan_sum, string_retained_bytes,
+    ProjectContentLease, ProjectContentLoader, ProjectContentMemberKind,
+    ProjectContentMemberReceipt, ProjectContentSnapshot, ProjectSettingsCandidate,
+    ProjectSettingsLineage, RuntimePlan, StartupContentClosureReceipt, allocation_failed,
+    append_frame, checked_plan_product, checked_plan_sum, string_retained_bytes,
 };
 
 /// Exact source delivery for startup and the project's explicitly declared Scene roots.
@@ -352,23 +353,31 @@ fn merge_delivery_source_identities(
     if let SourceDocumentOrigin::StableAsset { stable_id } =
         snapshot.selected_scene_source_key().origin()
     {
-        admit_delivery_source_identity(
-            identities,
-            *stable_id,
-            &paths.scenes,
-            snapshot.selected_scene_path().as_str(),
-            budget,
-        )?;
+        let closure = snapshot.content_closure();
+        let selected = closure
+            .members()
+            .iter()
+            .find(|member| {
+                member.kind() == ProjectContentMemberKind::Scene
+                    && member
+                        .path()
+                        .as_str()
+                        .strip_prefix(paths.scenes.as_str())
+                        .and_then(|suffix| suffix.strip_prefix('/'))
+                        == Some(snapshot.selected_scene_path().as_str())
+            })
+            .ok_or_else(|| {
+                delivery_error(
+                    "project.delivery.scene-source-unavailable",
+                    "Selected Scene has no exact source receipt",
+                )
+            })?;
+        admit_delivery_source_identity(identities, *stable_id, selected.path().as_str(), budget)?;
     }
     for record in snapshot.asset_database().records() {
-        let root = match record.source_kind() {
-            AssetSourceKind::Prefab => &paths.prefabs,
-            _ => &paths.assets,
-        };
         admit_delivery_source_identity(
             identities,
             record.stable_id(),
-            root,
             record.path().as_str(),
             budget,
         )?;
@@ -379,17 +388,11 @@ fn merge_delivery_source_identities(
 fn admit_delivery_source_identity(
     identities: &mut BTreeMap<StableAssetId, ProjectPath>,
     stable_id: StableAssetId,
-    root: &ProjectPath,
-    relative_path: &str,
+    source_path: &str,
     budget: &mut super::BudgetTicket,
 ) -> Result<(), ProjectContentError> {
     if let Some(existing) = identities.get(&stable_id) {
-        if existing
-            .as_str()
-            .strip_prefix(root.as_str())
-            .and_then(|suffix| suffix.strip_prefix('/'))
-            == Some(relative_path)
-        {
+        if existing.as_str() == source_path {
             return Ok(());
         }
         return Err(ProjectContentError::single(
@@ -403,15 +406,13 @@ fn admit_delivery_source_identity(
         [
             size_of::<(StableAssetId, ProjectPath)>(),
             BTREE_ENTRY_OVERHEAD,
-            root.as_str().len(),
-            1,
-            relative_path.len(),
+            source_path.len(),
         ],
     )?;
     budget
         .add(ProjectContentBudgetKind::WorkBytes, work)
         .map_err(ProjectContentError::budget)?;
-    let path = ProjectPath::new(format!("{}/{relative_path}", root.as_str())).map_err(|_| {
+    let path = ProjectPath::new(source_path).map_err(|_| {
         delivery_error(
             "project.delivery.source-path-invalid",
             "Delivery source has an invalid project-relative path",

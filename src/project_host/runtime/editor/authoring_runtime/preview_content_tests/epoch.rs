@@ -706,6 +706,7 @@ fn rejected_dependencies_keep_last_good_without_authorizing_the_unchanged_root_r
             &rejected_dependencies,
         ));
         let database = preview_database(&runtime);
+        let scope = preview_scope(&runtime);
         let report = runtime
             .drive_preview(Some(EditorPreviewSource {
                 document: DOCUMENT,
@@ -715,6 +716,7 @@ fn rejected_dependencies_keep_last_good_without_authorizing_the_unchanged_root_r
                     ExpandedSceneCandidate::plain(preview_source_key(), Arc::new(invalid.clone())),
                     EditorAuthoringPreviewOmissions::empty(DOCUMENT, root_revision),
                     database,
+                    scope,
                 )),
             }))
             .expect("dependency changes must not reuse an accepted root-only stamp");
@@ -801,6 +803,7 @@ fn rejected_projection_keeps_last_good_without_authorizing_the_rejected_revision
             .is_none()
     );
     let database = preview_database(&runtime);
+    let scope = preview_scope(&runtime);
     let report = runtime
         .drive_preview(Some(EditorPreviewSource {
             document: DOCUMENT,
@@ -813,6 +816,7 @@ fn rejected_projection_keeps_last_good_without_authorizing_the_rejected_revision
                 ),
                 EditorAuthoringPreviewOmissions::empty(DOCUMENT, rejected.revision()),
                 database,
+                scope,
             )),
         }))
         .expect("the invalid projection must be reported");
@@ -903,6 +907,7 @@ fn foreign_unregistered_identity_rejects_preview_epoch_without_erasing_last_good
     .unwrap();
     let mut runtime = EpochRuntime(EditorAuthoringRuntime {
         runtime: RuntimeInstance::start(app).unwrap(),
+        asset_scope: EditorAssetScope::Authoring(Arc::new(AssetPathScope::ROOT)),
         tileset_records: Vec::new(),
         image_revocation_failure: None,
         preview,
@@ -937,6 +942,7 @@ fn foreign_unregistered_identity_rejects_preview_epoch_without_erasing_last_good
     );
     edit_rotation(&mut source, &registry, 0.75);
     let database = preview_database(&runtime);
+    let scope = preview_scope(&runtime);
     let report = runtime
         .drive_preview(Some(EditorPreviewSource {
             document: DOCUMENT,
@@ -949,6 +955,7 @@ fn foreign_unregistered_identity_rejects_preview_epoch_without_erasing_last_good
                 ),
                 EditorAuthoringPreviewOmissions::empty(DOCUMENT, source.revision()),
                 database,
+                scope,
             )),
         }))
         .expect("foreign identity responsibility must reject the epoch");
@@ -1216,6 +1223,8 @@ fn nonempty_omissions_follow_only_the_accepted_epoch_and_preserve_unknown_source
 
     let publish =
         |runtime: &mut EditorAuthoringRuntime, source: &SceneAuthoringSession, scene, omissions| {
+            let database = preview_database(runtime);
+            let scope = preview_scope(runtime);
             runtime.drive_preview(Some(EditorPreviewSource {
                 document: DOCUMENT,
                 revision: source.revision(),
@@ -1223,7 +1232,8 @@ fn nonempty_omissions_follow_only_the_accepted_epoch_and_preserve_unknown_source
                 projection: Some(EditorPreviewProjection::authoring(
                     ExpandedSceneCandidate::plain(preview_source_key(), Arc::new(scene)),
                     omissions,
-                    preview_database(&runtime),
+                    database,
+                    scope,
                 )),
             }))
         };

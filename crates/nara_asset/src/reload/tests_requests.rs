@@ -684,7 +684,7 @@ fn reload_request_charges_the_actual_owned_spare_capacity() {
     path.push_str("textures/capacity.png");
     let record = AssetRecord::new(
         stable_id(),
-        AssetPath::new(path).unwrap(),
+        AssetSourcePath::new(path).unwrap(),
         AssetSourceKind::Image,
     );
     let mut artifacts = Vec::with_capacity(8);

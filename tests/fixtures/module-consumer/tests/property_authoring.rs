@@ -6,7 +6,7 @@ use std::{
     time::{Duration, Instant, SystemTime, UNIX_EPOCH},
 };
 
-use nara_asset::{AssetPath, AssetRef};
+use nara_asset::{AssetRef, AssetSourcePath};
 use nara_engine::{
     fs::{CapabilityRights, DirectoryCapability, HostCapabilityOptions, TrustMode},
     project_host::{
@@ -266,7 +266,7 @@ fn base_prefab_resolver() -> InMemoryPrefabSourceResolver {
     // supplied separately; callers obtain an overlay base only from this actual resolver.
     let key = SourceDocumentKey::project_location(
         "2b67ec37-1dd4-550f-8956-6424db6ffd3b".parse().unwrap(),
-        AssetPath::new(BASE_PREFAB).unwrap(),
+        AssetSourcePath::new(BASE_PREFAB).unwrap(),
         SourceDocumentKind::Prefab,
     );
     let prefab = PrefabDocument::from_ordered_roots([

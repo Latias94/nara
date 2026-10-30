@@ -3,6 +3,7 @@ use crate::{
     Name, SceneComponentRecord, SceneDocument, SceneEntityRecord, SceneOccurrenceKey,
     SourceDocumentKey, SourceDocumentKind, register_scene_components, spawn_scene,
 };
+use nara_asset::ProjectAssetDatabase;
 use nara_core::ItemLimit;
 use nara_ecs::{Resource, bevy_ecs::lifecycle::HookContext, bevy_ecs::world::DeferredWorld};
 use nara_identity::{
@@ -108,7 +109,7 @@ impl ProjectionFixture {
             &mut world,
             &registry,
             &bound_scene(named_scene("last-good")),
-            &database,
+            database.resolver(&nara_asset::AssetPathScope::ROOT),
         );
         assert!(!report.diagnostics.has_errors(), "{:?}", report.diagnostics);
         let id = scene_id("root");
@@ -131,7 +132,7 @@ impl ProjectionFixture {
                 &self.registry,
                 candidate,
                 &self.projection.occurrence,
-                Some(&self.database),
+                Some(self.database.resolver(&nara_asset::AssetPathScope::ROOT)),
                 SceneIdentityCommit::Projection(self.projection.instance()),
                 None,
                 bindings,
@@ -189,7 +190,7 @@ fn repeated_epochs_bound_claims_without_replacing_the_world_or_unmanaged_state()
             &mut world,
             &registry,
             &bound_scene(named_scene(&name)),
-            &database,
+            database.resolver(&nara_asset::AssetPathScope::ROOT),
         );
         assert!(!report.diagnostics.has_errors(), "{:?}", report.diagnostics);
         assert_eq!(report.retired_entities(), usize::from(epoch != 0));
@@ -243,7 +244,7 @@ fn empty_projection_is_an_owned_epoch_that_can_be_replaced_cleared_and_republish
         &mut fixture.world,
         &fixture.registry,
         &empty,
-        &fixture.database,
+        fixture.database.resolver(&nara_asset::AssetPathScope::ROOT),
     );
     assert!(!report.diagnostics.has_errors(), "{:?}", report.diagnostics);
     assert_eq!(report.retired_entities(), 1);
@@ -256,7 +257,7 @@ fn empty_projection_is_an_owned_epoch_that_can_be_replaced_cleared_and_republish
         &mut fixture.world,
         &fixture.registry,
         &empty,
-        &fixture.database,
+        fixture.database.resolver(&nara_asset::AssetPathScope::ROOT),
     );
     assert!(!report.diagnostics.has_errors(), "{:?}", report.diagnostics);
     assert_eq!(report.retired_entities(), 0);
@@ -277,7 +278,7 @@ fn empty_projection_is_an_owned_epoch_that_can_be_replaced_cleared_and_republish
         &mut fixture.world,
         &fixture.registry,
         &empty,
-        &fixture.database,
+        fixture.database.resolver(&nara_asset::AssetPathScope::ROOT),
     );
     assert!(!report.diagnostics.has_errors(), "{:?}", report.diagnostics);
     let fresh = report.instance.unwrap();
@@ -289,7 +290,7 @@ fn empty_projection_is_an_owned_epoch_that_can_be_replaced_cleared_and_republish
         &mut fixture.world,
         &fixture.registry,
         &bound_scene(named_scene("nonempty")),
-        &fixture.database,
+        fixture.database.resolver(&nara_asset::AssetPathScope::ROOT),
     );
     assert!(!report.diagnostics.has_errors(), "{:?}", report.diagnostics);
     assert_eq!(report.retired_entities(), 0);
@@ -334,7 +335,7 @@ fn invalid_final_component_preserves_the_receipt_domain_and_old_lookups() {
         &mut fixture.world,
         &fixture.registry,
         &bound_scene(invalid),
-        &fixture.database,
+        fixture.database.resolver(&nara_asset::AssetPathScope::ROOT),
     );
 
     assert!(report.instance.is_none());
@@ -389,7 +390,7 @@ fn foreign_active_and_retired_scene_claims_reject_projection_replacement() {
             &mut fixture.world,
             &fixture.registry,
             &bound_scene(named_scene("candidate")),
-            &fixture.database,
+            fixture.database.resolver(&nara_asset::AssetPathScope::ROOT),
         );
 
         assert_rejected(
@@ -417,7 +418,12 @@ fn fresh_owner_cannot_take_another_owners_empty_projection() {
     let database = ProjectAssetDatabase::default();
     let mut owner = SceneProjection::new(occurrence("owner"));
     let empty = bound_scene(SceneDocument::default());
-    let report = owner.publish(&mut world, &registry, &empty, &database);
+    let report = owner.publish(
+        &mut world,
+        &registry,
+        &empty,
+        database.resolver(&nara_asset::AssetPathScope::ROOT),
+    );
     assert!(!report.diagnostics.has_errors(), "{:?}", report.diagnostics);
     let current = report.instance.unwrap();
     assert!(current.is_empty());
@@ -430,7 +436,12 @@ fn fresh_owner_cannot_take_another_owners_empty_projection() {
         "an unbound owner must not replace another owner's empty epoch"
     );
 
-    let report = other.publish(&mut world, &registry, &empty, &database);
+    let report = other.publish(
+        &mut world,
+        &registry,
+        &empty,
+        database.resolver(&nara_asset::AssetPathScope::ROOT),
+    );
 
     assert_rejected(&report, "scene.occurrence-association-changed");
     assert!(other.instance().is_none());
@@ -489,7 +500,7 @@ fn persistent_active_unloaded_and_deleted_responsibilities_are_not_discarded() {
             &mut fixture.world,
             &fixture.registry,
             &bound_scene(named_scene("candidate")),
-            &fixture.database,
+            fixture.database.resolver(&nara_asset::AssetPathScope::ROOT),
         );
 
         assert_rejected(&report, "scene.projection-epoch-ineligible");
@@ -519,7 +530,7 @@ fn unregistered_identity_refuses_publish_and_clear_until_its_owner_retires_it() 
         &mut fixture.world,
         &fixture.registry,
         &bound_scene(named_scene("candidate")),
-        &fixture.database,
+        fixture.database.resolver(&nara_asset::AssetPathScope::ROOT),
     );
 
     assert_rejected(&report, "scene.projection-epoch-ineligible");
@@ -674,7 +685,7 @@ fn initial_detached_candidate_rejects_empty_installed_domain_replacement_or_remo
                 &registry,
                 &bound_scene(named_scene("candidate")),
                 &projection.occurrence,
-                Some(&database),
+                Some(database.resolver(&nara_asset::AssetPathScope::ROOT)),
                 SceneIdentityCommit::Projection(projection.instance()),
                 None,
                 bindings,

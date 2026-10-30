@@ -1,4 +1,4 @@
-use nara_asset::{ImportedProductId, ProjectAssetDatabase, StableAssetId};
+use nara_asset::{AssetPathScope, ImportedProductId, ProjectAssetDatabase, StableAssetId};
 use nara_core::ByteLimit;
 use nara_fs::ContentDigest;
 use nara_project::{ProductCapability, RuntimeConfiguration, RuntimePreset};
@@ -442,7 +442,7 @@ impl ProcessedFixture {
             let encoded = RuntimeSceneCandidate::cook(
                 &expanded,
                 plan.schema_validation().bindings(),
-                &ProjectAssetDatabase::default(),
+                ProjectAssetDatabase::default().resolver(&AssetPathScope::ROOT),
                 RuntimeSceneLimits::default(),
             )
             .unwrap()

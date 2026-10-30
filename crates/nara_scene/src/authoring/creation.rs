@@ -1,7 +1,7 @@
 use std::collections::BTreeMap;
 
 use base64::{Engine as _, engine::general_purpose::URL_SAFE_NO_PAD};
-use nara_asset::ProjectAssetDatabase;
+use nara_asset::AssetReferenceResolver;
 use nara_reflect::{ComponentRegistry, ComponentTypeId};
 
 use super::{
@@ -57,22 +57,22 @@ macro_rules! source_creation {
                 self.create_native_entity(base_revision, registry, None, placement, components)
             }
 
-            /// Creates through native codecs with this project's exact asset database.
+            /// Creates through native codecs with this project's exact asset resolver.
             ///
-            /// The database validates both retained source records and the new component records,
+            /// The resolver validates both retained source records and the new component records,
             /// just as it does for ordinary native patches and history replay.
-            pub fn create_entity_with_asset_database(
+            pub fn create_entity_with_asset_resolution(
                 &mut self,
                 base_revision: SceneAuthoringRevision,
                 registry: &ComponentRegistry,
-                database: &ProjectAssetDatabase,
+                asset_resolution: AssetReferenceResolver<'_>,
                 placement: ScenePlacement,
                 components: BTreeMap<ComponentTypeId, SceneComponentRecord>,
             ) -> Result<CreatedSourceEntity, ScenePatchReport> {
                 self.create_native_entity(
                     base_revision,
                     registry,
-                    Some(database),
+                    Some(asset_resolution),
                     placement,
                     components,
                 )
@@ -82,7 +82,7 @@ macro_rules! source_creation {
                 &mut self,
                 base_revision: SceneAuthoringRevision,
                 registry: &ComponentRegistry,
-                database: Option<&ProjectAssetDatabase>,
+                asset_resolution: Option<AssetReferenceResolver<'_>>,
                 placement: ScenePlacement,
                 components: BTreeMap<ComponentTypeId, SceneComponentRecord>,
             ) -> Result<CreatedSourceEntity, ScenePatchReport> {
@@ -104,9 +104,9 @@ macro_rules! source_creation {
                     entity: record,
                     placement,
                 }]);
-                let report = match database {
-                    Some(database) => {
-                        self.apply_patch_with_asset_database(&patch, registry, database)
+                let report = match asset_resolution {
+                    Some(asset_resolution) => {
+                        self.apply_patch_with_asset_resolution(&patch, registry, asset_resolution)
                     }
                     None => self.apply_patch(&patch, registry),
                 };

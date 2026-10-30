@@ -1,6 +1,6 @@
 #![cfg(feature = "serde")]
 
-use nara_asset::{AssetPath, StableAssetId};
+use nara_asset::{AssetSourcePath, StableAssetId};
 use nara_core::SourceUniverseId;
 use nara_scene::{SourceDocumentKey, SourceDocumentKind};
 
@@ -33,7 +33,7 @@ fn json_and_ron_roundtrip_every_origin_and_document_kind() {
             (
                 SourceDocumentKey::project_location(
                     universe(),
-                    AssetPath::new("prefabs/base.prefab.json").unwrap(),
+                    AssetSourcePath::new("prefabs/base.prefab.json").unwrap(),
                     kind,
                 ),
                 serde_json::json!({
@@ -98,7 +98,7 @@ fn uuid_spelling_aliases_decode_to_the_same_canonical_identity() {
         (
             SourceDocumentKey::project_location(
                 universe(),
-                AssetPath::new("base.prefab.json").unwrap(),
+                AssetSourcePath::new("base.prefab.json").unwrap(),
                 kind,
             ),
             serde_json::json!({
@@ -161,12 +161,12 @@ fn codec_preserves_identity_axes_and_exact_name_and_path_spelling() {
             .unwrap(),
         SourceDocumentKey::project_location(
             universe(),
-            AssetPath::new("base.prefab.json").unwrap(),
+            AssetSourcePath::new("base.prefab.json").unwrap(),
             SourceDocumentKind::Prefab,
         ),
         SourceDocumentKey::project_location(
             universe(),
-            AssetPath::new("Base.prefab.json").unwrap(),
+            AssetSourcePath::new("Base.prefab.json").unwrap(),
             SourceDocumentKind::Prefab,
         ),
         SourceDocumentKey::stable_asset(stable_id(), SourceDocumentKind::Prefab),

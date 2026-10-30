@@ -10,7 +10,7 @@ use std::fs::OpenOptions;
 
 use nara::{
     app::PluginDefinition,
-    asset::{AssetPath, AssetRef, AssetSourceKind, StableAssetId},
+    asset::{AssetRef, AssetSourceKind, AssetSourcePath, StableAssetId},
     fs::{CapabilityRights, DirectoryCapability, HostCapabilityOptions, RelativePath, TrustMode},
     prelude::{Component, ComponentRegistry, Transform2d, Vec2, World},
     project_host::advanced::{RuntimeProbe, resolve_product_recipe_with_probe},
@@ -321,7 +321,7 @@ fn enemy_anchor(
     let overrides = override_values.map(|(x, spawn_tick)| {
         let mut overlay = PrefabOverlay::new(SourceDocumentKey::project_location(
             "ee6d3cbc-9b11-5dc8-96fa-94299e28c369".parse().unwrap(),
-            AssetPath::new("prefabs/enemy.prefab.json").unwrap(),
+            AssetSourcePath::new("prefabs/enemy.prefab.json").unwrap(),
             SourceDocumentKind::Prefab,
         ));
         overlay.components = vec![

@@ -13,7 +13,7 @@ use nara_scene::{
 };
 use nara_ui_kernel::{
     UiActionId, UiAlign, UiBrush, UiColor, UiColorRole, UiDimension, UiEdges, UiFlexDirection,
-    UiImageId, UiJustify, UiOverflow, UiPositionMode, UiStyle, UiTextAlignment, UiTextOverflow,
+    UiJustify, UiOverflow, UiPositionMode, UiStyle, UiTextAlignment, UiTextOverflow,
 };
 use thiserror::Error;
 
@@ -132,8 +132,6 @@ impl UiImageChoice {
         validate_image_fact(&source_identity)?;
         validate_image_fact(&project_path)?;
         AssetRef::path(project_path.clone())
-            .map_err(|_| UiStructureRejection::InvalidImageChoiceFact)?;
-        UiImageId::new(project_path.clone())
             .map_err(|_| UiStructureRejection::InvalidImageChoiceFact)?;
         Ok(Self {
             source_identity,
@@ -746,13 +744,13 @@ fn build_recipe(
             let choice = image_choices
                 .ok_or(UiStructureRejection::ImageChoiceRequired)?
                 .resolve(selection)?;
-            let image = UiImageId::new(choice.project_path.clone())
+            let reference = AssetRef::path(choice.project_path.clone())
                 .map_err(|_| UiStructureRejection::InvalidRecipe)?;
-            let visual = UiVisual::image(image, UiColor::rgba(1.0, 1.0, 1.0, 1.0));
             insert_component(
                 &mut components,
                 UiAuthoringComponentKind::Visual,
-                codec::encode_visual(&visual).map_err(|_| UiStructureRejection::InvalidRecipe)?,
+                codec::image_visual_value(&reference, UiColor::rgba(1.0, 1.0, 1.0, 1.0))
+                    .map_err(|_| UiStructureRejection::InvalidRecipe)?,
             )?;
         }
         UiCreateParameters::Button { label, action } => {
@@ -812,13 +810,12 @@ fn create_parameters_from_recipe(
             })
         }
         UiCatalogNodeKind::Image => {
-            let visual = components
+            let reference = components
                 .get(&UiAuthoringComponentKind::Visual.component_type())
-                .and_then(|record| codec::decode_visual(&record.value).ok())
+                .and_then(|record| codec::visual_image_reference(&record.value).ok().flatten())
                 .ok_or(UiStructureRejection::InvalidRecipe)?;
-            let visual = visual.kernel();
-            let image_path = match visual.background() {
-                Some(UiBrush::Image { image, .. }) => image.as_str(),
+            let image_path = match &reference {
+                AssetRef::Path(path) => path.as_str(),
                 _ => return Err(UiStructureRejection::InvalidRecipe),
             };
             let selection = image_choices
@@ -960,11 +957,11 @@ pub(crate) fn hierarchy_kind(entity: &SceneEntityRecord) -> UiAuthoringHierarchy
     if has(UiAuthoringComponentKind::Text) {
         return UiAuthoringHierarchyKind::Text;
     }
-    if let Some(visual) = entity
+    if entity
         .components
         .get(&UiAuthoringComponentKind::Visual.component_type())
-        .and_then(|record| codec::decode_visual(&record.value).ok())
-        && matches!(visual.kernel().background(), Some(UiBrush::Image { .. }))
+        .and_then(|record| codec::visual_image_reference(&record.value).ok().flatten())
+        .is_some()
     {
         return UiAuthoringHierarchyKind::Image;
     }

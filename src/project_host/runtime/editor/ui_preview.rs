@@ -23,6 +23,7 @@ use thiserror::Error;
 use crate::product::AcceptedPrimaryUiSurfaceProfile;
 
 use super::authoring_images::EditorAuthoringImageCatalogReceipt;
+use super::authoring_runtime::EditorCanvasImageSources;
 
 /// One exact authoring-only UI image candidate owned by the Editor Host.
 ///
@@ -157,6 +158,7 @@ impl EditorUiPreviewSession {
         gesture: Option<EditorGestureStamp>,
         projection: &UiAuthoringProjection,
         images: &EditorAuthoringImageCatalogReceipt,
+        assets: EditorCanvasImageSources<'_>,
         profile: Option<AcceptedPrimaryUiSurfaceProfile>,
     ) -> UiAuthoringCanvasProjection {
         let image_generation = images.generation();
@@ -195,7 +197,7 @@ impl EditorUiPreviewSession {
         let candidate = if unchanged_source {
             self.try_rebuild(key, profile)
         } else {
-            self.try_prepare(key, projection, images, profile)
+            self.try_prepare(key, projection, images, assets, profile)
         };
         match candidate {
             Ok(candidate) => {
@@ -220,6 +222,7 @@ impl EditorUiPreviewSession {
         key: EditorUiPreviewKey,
         projection: &UiAuthoringProjection,
         images: &EditorAuthoringImageCatalogReceipt,
+        assets: EditorCanvasImageSources<'_>,
         profile: AcceptedPrimaryUiSurfaceProfile,
     ) -> Result<EditorUiPreviewCandidate, UiPreviewError> {
         let transform = profile
@@ -231,15 +234,18 @@ impl EditorUiPreviewSession {
             .ok_or(UiPreviewError::CompileGenerationExhausted)?;
         self.next_compile_generation = compile_generation;
         let request = UiAuthoringCanvasCompileRequest::new(transform, compile_generation);
-        let canvas_candidate = self
-            .compiler
-            .compile(
-                projection,
-                &key.source,
-                &key.occurrence,
-                compile_generation,
-                request,
-            )
+        let canvas_candidate = assets
+            .with_decode_context(|context| {
+                self.compiler.compile(
+                    projection,
+                    &key.source,
+                    &key.occurrence,
+                    compile_generation,
+                    request,
+                    context,
+                )
+            })
+            .map_err(|_| UiPreviewError::ImageContextChanged)?
             .map_err(UiPreviewError::Compile)?;
 
         let target = RenderTarget::Image(self.target);
@@ -361,6 +367,8 @@ impl EditorUiPreviewSession {
 
 #[derive(Debug, Error)]
 pub(super) enum UiPreviewError {
+    #[error("the Editor Canvas requested an Image identity not yet published by its owner")]
+    ImageContextChanged,
     #[error(transparent)]
     TargetIdentity(#[from] nara_asset::AssetError),
     #[error(transparent)]

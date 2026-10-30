@@ -820,8 +820,11 @@ impl Fixture {
             database
                 .insert(AssetRecord::new(
                     stable(source),
-                    AssetPath::new(format!("authoring/{}.bundle.json", label.to_lowercase()))
-                        .unwrap(),
+                    nara::asset::AssetSourcePath::new(format!(
+                        "authoring/{}.bundle.json",
+                        label.to_lowercase()
+                    ))
+                    .unwrap(),
                     AssetSourceKind::Other(TextBundleDomain::SOURCE_KIND.into()),
                 ))
                 .unwrap();
@@ -1000,7 +1003,7 @@ fn scene_bytes(
     RuntimeSceneCandidate::cook(
         &expanded,
         plan.schema_validation().bindings(),
-        database,
+        database.resolver(&nara::asset::AssetPathScope::ROOT),
         RuntimeSceneLimits::default(),
     )
     .unwrap()

@@ -127,6 +127,9 @@ impl EditorSourceReader<'_> {
     }
 }
 
+/// Prepares an import candidate using metadata paths local to the actual Assets capability.
+/// The publication owner validates its actual source location before binding a canonical record;
+/// an unpublished import candidate supplies no catalogue scope to this reader.
 pub(crate) fn validate_editor_source<D: SourceAssetImporter>(
     assets: &DirectoryCapability,
     metadata: &AssetMetaIdentityCandidate,

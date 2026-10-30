@@ -6,7 +6,7 @@ use std::{
 };
 
 use nara_asset::{
-    AssetPath, AssetProductIdentityError, AssetProductRef, ImportArtifactRecord,
+    AssetProductIdentityError, AssetProductRef, AssetSourcePath, ImportArtifactRecord,
     ImportSettingsHash, ImportedProductId, SourceHash, StableAssetId,
 };
 
@@ -86,14 +86,14 @@ impl ImageContentHash {
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize))]
 pub struct ImageSourceMetadata {
-    path: AssetPath,
+    path: AssetSourcePath,
     settings: ImageImportSettings,
     artifact: ImportArtifactRecord,
 }
 
 impl ImageSourceMetadata {
     pub fn new(
-        path: AssetPath,
+        path: AssetSourcePath,
         settings: ImageImportSettings,
         artifact: ImportArtifactRecord,
     ) -> Result<Self, ImageSourceMetadataCreateError> {
@@ -116,7 +116,7 @@ impl ImageSourceMetadata {
     }
 
     #[must_use]
-    pub const fn path(&self) -> &AssetPath {
+    pub const fn path(&self) -> &AssetSourcePath {
         &self.path
     }
 
@@ -166,7 +166,7 @@ impl<'de> serde::Deserialize<'de> for ImageSourceMetadata {
         #[derive(serde::Deserialize)]
         #[serde(deny_unknown_fields)]
         struct ImageSourceMetadataWire {
-            path: AssetPath,
+            path: AssetSourcePath,
             settings: ImageImportSettings,
             artifact: ImportArtifactRecord,
         }

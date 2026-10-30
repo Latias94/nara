@@ -201,11 +201,21 @@ fn projection_epochs_replace_exact_occupancy_and_stale_end_cannot_release_succes
     let database = ProjectAssetDatabase::default();
     let mut projection = SceneProjection::new(occurrence("preview"));
     let old = projection
-        .publish(&mut world, &registry, &candidate("old", true), &database)
+        .publish(
+            &mut world,
+            &registry,
+            &candidate("old", true),
+            database.resolver(&nara_asset::AssetPathScope::ROOT),
+        )
         .instance
         .unwrap();
     let new = projection
-        .publish(&mut world, &registry, &candidate("new", true), &database)
+        .publish(
+            &mut world,
+            &registry,
+            &candidate("new", true),
+            database.resolver(&nara_asset::AssetPathScope::ROOT),
+        )
         .instance
         .unwrap();
     assert_eq!(old.instance_id(), new.instance_id());

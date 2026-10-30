@@ -163,7 +163,7 @@ requested = ["runtime-2d"]
     fn key(&self, path: &str, kind: SourceDocumentKind) -> SourceDocumentKey {
         SourceDocumentKey::project_location(
             "6d57f8c5-867c-5463-b74a-057a8cabe2bc".parse().unwrap(),
-            AssetPath::new(path).unwrap(),
+            nara_asset::AssetSourcePath::new(path).unwrap(),
             kind,
         )
     }
@@ -536,7 +536,7 @@ fn second_scene_hydrates_its_image_and_renders_from_the_captured_asset_database(
             {
                 let image = editor
                     .image_import
-                    .last_good(&path)
+                    .last_good(&nara_asset::AssetSourcePath::new("assets/second.png").unwrap())
                     .expect("the captured Image is hydrated");
                 assert_eq!(image.stable_id(), stable_id);
                 let sprite = editor

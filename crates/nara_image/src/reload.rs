@@ -18,12 +18,12 @@ use nara_app::{App, CoreStage, Plugin, PluginError, RealTime};
 #[cfg(feature = "serde")]
 use nara_asset::AssetMetaIdentityCandidate;
 use nara_asset::{
-    AssetEvents, AssetId, AssetLoadGeneration, AssetLoadGenerations, AssetPath,
-    AssetPublicationRevision, AssetRecord, AssetReloadDiagnostics, AssetReloadRequest,
-    AssetReloadRequestKind, AssetReloadRequests, AssetServer, AssetSlotRevision,
-    AssetSourceChangeKind, AssetStateError, AssetStateRevision, AssetStates, AssetTaskUpdateSet,
-    AssetVersion, Assets, Handle, ImageRecoveryContinuity, ImageReloadConsumer,
-    ImageReloadDrainError, ImageReloadRegistrationError, register_image_reload_consumer,
+    AssetEvents, AssetId, AssetLoadGeneration, AssetLoadGenerations, AssetPublicationRevision,
+    AssetRecord, AssetReloadDiagnostics, AssetReloadRequest, AssetReloadRequestKind,
+    AssetReloadRequests, AssetServer, AssetSlotRevision, AssetSourceChangeKind, AssetSourcePath,
+    AssetStateError, AssetStateRevision, AssetStates, AssetTaskUpdateSet, AssetVersion, Assets,
+    Handle, ImageRecoveryContinuity, ImageReloadConsumer, ImageReloadDrainError,
+    ImageReloadRegistrationError, register_image_reload_consumer,
 };
 use nara_diagnostic::{
     Diagnostic, DiagnosticCode, DiagnosticField, DiagnosticFieldKey, PublicDiagnosticIdentifier,
@@ -436,7 +436,7 @@ impl RemovedImageRecovery {
             && self.record.source_kind() == &nara_asset::AssetSourceKind::Image
             && server.get_handle::<ImageAsset>(self.handle.id()) == Some(self.handle)
             && server.stable_id(self.handle.id()) == Some(self.record.stable_id())
-            && server.path(self.handle.id()) == Some(self.record.path().as_str())
+            && server.path(self.handle.id()) == Some(self.record.path())
     }
 }
 
@@ -917,7 +917,7 @@ fn accepted_reload_settings(
 }
 
 #[cfg(feature = "serde")]
-fn admit_metadata_reload_settings(
+pub(super) fn admit_metadata_reload_settings(
     source_directory: Option<&ImageSourceDirectory>,
     record: &nara_asset::AssetRecord,
 ) -> Result<ImageImportSettings, ImageReloadError> {
@@ -929,7 +929,7 @@ fn admit_metadata_reload_settings(
         .map_err(|_| ImageReloadError::MetadataInvalid)?;
     let identity = candidate.identity();
     if identity.stable_id() != record.stable_id()
-        || identity.path() != record.path()
+        || source_directory.scope().resolve(identity.path()) != *record.path()
         || identity.source_kind() != record.source_kind()
     {
         return Err(ImageReloadError::MetadataIdentityMismatch);
@@ -1194,7 +1194,10 @@ pub(super) fn record_image_reload_failure(
     }
 }
 
-pub(super) fn image_reload_diagnostic(path: &AssetPath, error: &ImageReloadError) -> Diagnostic {
+pub(super) fn image_reload_diagnostic(
+    path: &AssetSourcePath,
+    error: &ImageReloadError,
+) -> Diagnostic {
     let mut diagnostic = Diagnostic::error(
         DiagnosticCode::new(error.stable_code())
             .expect("image diagnostic code literals must be valid"),

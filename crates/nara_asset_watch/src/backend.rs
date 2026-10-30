@@ -1,8 +1,6 @@
-use std::{
-    fmt::{self, Debug, Formatter},
-    path::Path,
-};
+use std::fmt::{self, Debug, Formatter};
 
+use nara_asset::AssetSourceRoot;
 use nara_ecs::Resource;
 use notify::{
     Event, EventKind, RecommendedWatcher, RecursiveMode, Watcher,
@@ -15,13 +13,15 @@ use crate::{AssetWatchError, AssetWatchEvent, queue::AssetWatchEventSender};
 #[derive(Resource)]
 pub struct AssetWatcher {
     watcher: Option<RecommendedWatcher>,
+    source_root: AssetSourceRoot,
     #[cfg(test)]
     callback_lifetime: std::sync::Weak<()>,
 }
 
 impl AssetWatcher {
+    /// Starts native watching with an immutable native-root and logical-scope binding.
     pub fn watch_recursive(
-        root: impl AsRef<Path>,
+        root: &AssetSourceRoot,
         sender: AssetWatchEventSender,
     ) -> Result<Self, AssetWatchError> {
         #[cfg(test)]
@@ -38,10 +38,11 @@ impl AssetWatcher {
         })
         .map_err(|error| AssetWatchError::Notify(error.to_string()))?;
         watcher
-            .watch(root.as_ref(), RecursiveMode::Recursive)
+            .watch(root.root(), RecursiveMode::Recursive)
             .map_err(|error| AssetWatchError::Notify(error.to_string()))?;
         Ok(Self {
             watcher: Some(watcher),
+            source_root: root.clone(),
             #[cfg(test)]
             callback_lifetime: callback_observer,
         })
@@ -49,6 +50,10 @@ impl AssetWatcher {
 
     pub(crate) fn stop_for_rescan(&mut self) {
         self.watcher.take();
+    }
+
+    pub(crate) fn source_root(&self) -> &AssetSourceRoot {
+        &self.source_root
     }
 
     #[must_use]

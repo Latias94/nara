@@ -1,6 +1,6 @@
 use super::*;
 
-use nara_asset::{AssetPath, StableAssetId};
+use nara_asset::{AssetSourcePath, StableAssetId};
 use nara_image::{ImageColorSpace, ImageExtent, ImageFormat};
 
 const SOURCE: &str = "aed61cf0-6e45-4078-8793-1fa45c794fd3";
@@ -110,11 +110,10 @@ fn product_index_preserves_primary_auxiliary_and_enclosing_source() {
 }
 
 #[test]
-fn path_lookup_uses_only_an_actual_source_alias() {
+fn source_publication_keeps_its_actual_canonical_record() {
     let mut values = Publications::default();
     let mut prepared = values.prepare(image(product(SOURCE, true), 1), None);
-    let path = AssetPath::new("source.png").unwrap();
-    assert!(prepared.image_for_path(&path).is_none());
+    let path = AssetSourcePath::new("game/art/source.png").unwrap();
     let record = AssetRecord::new(
         product(FOREIGN, false).source(),
         path.clone(),
@@ -122,19 +121,18 @@ fn path_lookup_uses_only_an_actual_source_alias() {
     );
     let source = values.prepare(image(product(FOREIGN, false), 2), Some(record));
     prepared.publish.extend(source.publish);
-    let (handle, image) = prepared.image_for_path(&path).unwrap();
+    let (handle, image) = prepared.image_for_product(product(FOREIGN, false)).unwrap();
     assert_eq!(image.product(), Some(product(FOREIGN, false)));
-    assert_eq!(values.server.path(handle.id()), Some("source.png"));
-    assert!(
-        prepared
-            .image_for_path(&AssetPath::new(SOURCE).unwrap())
-            .is_none()
+    assert_eq!(values.server.path(handle.id()), Some(&path));
+    assert_eq!(
+        prepared.publish[&product(FOREIGN, false)]
+            .record
+            .as_ref()
+            .unwrap()
+            .path(),
+        &path
     );
-    assert!(
-        prepared
-            .image_for_path(&AssetPath::new(AUXILIARY).unwrap())
-            .is_none()
-    );
+    assert!(prepared.image_for_product(product(FOREIGN, true)).is_none());
 }
 
 #[test]

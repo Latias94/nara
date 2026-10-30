@@ -1,7 +1,7 @@
 use std::collections::BTreeMap;
 
 use nara_asset::{
-    AssetPath, AssetRecord, AssetRef, AssetSourceKind, ProjectAssetDatabase, StableAssetId,
+    AssetRecord, AssetRef, AssetSourceKind, AssetSourcePath, ProjectAssetDatabase, StableAssetId,
 };
 use nara_ecs::Component;
 use nara_identity::EntityReference;
@@ -108,7 +108,7 @@ pub fn database() -> ProjectAssetDatabase {
         database
             .insert(AssetRecord::new(
                 StableAssetId::parse_str(id).unwrap(),
-                AssetPath::new(path).unwrap(),
+                AssetSourcePath::new(path).unwrap(),
                 kind,
             ))
             .unwrap();

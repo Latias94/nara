@@ -400,7 +400,7 @@ fn effective_and_default_assets_are_captured_with_data_adapters_without_native_a
         assert_eq!(snapshot.prefabs().len(), 2);
         assert_eq!(snapshot.assets().len(), 1);
         let asset = &snapshot.assets()[0];
-        assert_eq!(asset.path().as_str(), format!("{name}.png"));
+        assert_eq!(asset.path().as_str(), format!("assets/{name}.png"));
         assert_eq!(asset.bytes(), name.as_bytes());
         assert_eq!(snapshot.source_facts().len(), 5);
         for fact in [asset.source(), asset.metadata_source()] {

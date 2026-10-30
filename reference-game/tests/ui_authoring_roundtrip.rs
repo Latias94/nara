@@ -42,7 +42,7 @@ fn canonical_prefab_edit_reaches_reloaded_runtime_adapter_without_rust_changes()
             .snapshot
             .prefabs()
             .iter()
-            .find(|prefab| prefab.path().as_str() == "reference-ui.prefab.json")
+            .find(|prefab| prefab.path().as_str() == "prefabs/reference-ui.prefab.json")
             .expect("reference UI prefab must be present");
         let mut document = prefab.document().instantiate();
         let patch = ScenePatchDocument::new([
@@ -83,7 +83,7 @@ fn canonical_prefab_edit_reaches_reloaded_runtime_adapter_without_rust_changes()
         .snapshot
         .prefabs()
         .iter()
-        .find(|prefab| prefab.path().as_str() == "reference-ui.prefab.json")
+        .find(|prefab| prefab.path().as_str() == "prefabs/reference-ui.prefab.json")
         .expect("edited reference UI prefab must remain present");
     assert_eq!(
         retry_width(&source_prefab.document().entities, RETRY_BUTTON),

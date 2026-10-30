@@ -2,7 +2,10 @@
 
 use std::{collections::BTreeMap, sync::Arc};
 
-use nara_reflect::{ComponentCodecError, ComponentSchemaVersion, ComponentTypeId, ComponentValue};
+use nara_reflect::{
+    ComponentCodecError, ComponentDecodeContext, ComponentSchemaVersion, ComponentTypeId,
+    ComponentValue,
+};
 use nara_scene::{SceneComponentRecord, SceneEntityId, SceneOccurrenceKey, SourceDocumentKey};
 use nara_text::bundled_font_face;
 use nara_ui_kernel::{
@@ -81,6 +84,7 @@ impl UiAuthoringCanvasCompiler {
         occurrence: &SceneOccurrenceKey,
         source_revision: u64,
         request: UiAuthoringCanvasCompileRequest,
+        assets: &mut ComponentDecodeContext<'_>,
     ) -> Result<UiAuthoringCanvasCandidate, UiAuthoringCanvasCompileError> {
         let context = source_context(source, occurrence)?;
         let roots = projection
@@ -111,8 +115,13 @@ impl UiAuthoringCanvasCompiler {
         let mut source_by_key = BTreeMap::new();
         let mut builder = UiAuthoringSnapshotBuilder::new(source_revision);
         for root in roots {
-            builder =
-                builder.with_root(build_root(root, &context, projection, &mut source_by_key)?);
+            builder = builder.with_root(build_root(
+                root,
+                &context,
+                projection,
+                &mut source_by_key,
+                assets,
+            )?);
         }
         let snapshot = builder.build()?;
         let frame = self.compiler.compile(&snapshot, environment, theme)?;
@@ -177,6 +186,7 @@ fn build_root(
     context: &UiOpaqueId,
     projection: &UiAuthoringProjection,
     source_by_key: &mut BTreeMap<UiKey, SceneEntityId>,
+    assets: &mut ComponentDecodeContext<'_>,
 ) -> Result<nara_ui_kernel::UiRoot, UiAuthoringCanvasCompileError> {
     let entity = node.entity();
     if component(projection, entity, UiAuthoringComponentKind::Button).is_some() {
@@ -206,7 +216,7 @@ fn build_root(
         projection,
         entity,
         UiAuthoringComponentKind::Visual,
-        codec::decode_visual,
+        |value| codec::decode_visual_with_context(value, assets),
     )? {
         authored = authored.with_visual(visual.kernel());
     }
@@ -226,7 +236,14 @@ fn build_root(
     )? {
         authored = authored.with_semantics(semantics.kernel());
     }
-    let children = build_children(entity, context, projection, &root_key, source_by_key)?;
+    let children = build_children(
+        entity,
+        context,
+        projection,
+        &root_key,
+        source_by_key,
+        assets,
+    )?;
     Ok(authored.with_children(children))
 }
 
@@ -236,6 +253,7 @@ fn build_children(
     projection: &UiAuthoringProjection,
     root_key: &UiRootKey,
     source_by_key: &mut BTreeMap<UiKey, SceneEntityId>,
+    assets: &mut ComponentDecodeContext<'_>,
 ) -> Result<Vec<nara_ui_kernel::UiNode>, UiAuthoringCanvasCompileError> {
     let mut children = Vec::new();
     for child in projection
@@ -249,6 +267,7 @@ fn build_children(
             projection,
             root_key,
             source_by_key,
+            assets,
         )?);
     }
     Ok(children)
@@ -260,6 +279,7 @@ fn build_node(
     projection: &UiAuthoringProjection,
     root_key: &UiRootKey,
     source_by_key: &mut BTreeMap<UiKey, SceneEntityId>,
+    assets: &mut ComponentDecodeContext<'_>,
 ) -> Result<nara_ui_kernel::UiNode, UiAuthoringCanvasCompileError> {
     let entity = hierarchy_node.entity();
     let node = decode_required(
@@ -271,7 +291,7 @@ fn build_node(
     let local_key = UiLocalKey::persistent(local_identity(context, entity)?)?;
     let source_key = UiKey::scoped(root_key.clone(), local_key.clone())?;
     insert_source_key(source_by_key, source_key.clone(), entity)?;
-    let children = build_children(entity, context, projection, root_key, source_by_key)?;
+    let children = build_children(entity, context, projection, root_key, source_by_key, assets)?;
 
     let Some(button) = decode_optional(
         projection,
@@ -285,7 +305,7 @@ fn build_node(
             projection,
             entity,
             UiAuthoringComponentKind::Visual,
-            codec::decode_visual,
+            |value| codec::decode_visual_with_context(value, assets),
         )? {
             authored = authored.with_visual(visual.kernel());
         }
@@ -319,7 +339,7 @@ fn build_node(
         projection,
         entity,
         UiAuthoringComponentKind::Visual,
-        codec::decode_visual,
+        |value| codec::decode_visual_with_context(value, assets),
     )?;
     let visuals = decode_optional(
         projection,
@@ -368,7 +388,7 @@ fn decode_required<T>(
     projection: &UiAuthoringProjection,
     entity: &SceneEntityId,
     kind: UiAuthoringComponentKind,
-    decode: fn(&ComponentValue) -> Result<T, ComponentCodecError>,
+    decode: impl FnOnce(&ComponentValue) -> Result<T, ComponentCodecError>,
 ) -> Result<T, UiAuthoringCanvasCompileError> {
     let component = kind.component_type();
     let record = projection.component_record(entity, kind).ok_or_else(|| {
@@ -384,7 +404,7 @@ fn decode_optional<T>(
     projection: &UiAuthoringProjection,
     entity: &SceneEntityId,
     kind: UiAuthoringComponentKind,
-    decode: fn(&ComponentValue) -> Result<T, ComponentCodecError>,
+    decode: impl FnOnce(&ComponentValue) -> Result<T, ComponentCodecError>,
 ) -> Result<Option<T>, UiAuthoringCanvasCompileError> {
     let component = kind.component_type();
     projection
@@ -397,7 +417,7 @@ fn decode_record<T>(
     entity: &SceneEntityId,
     component: ComponentTypeId,
     record: &SceneComponentRecord,
-    decode: fn(&ComponentValue) -> Result<T, ComponentCodecError>,
+    decode: impl FnOnce(&ComponentValue) -> Result<T, ComponentCodecError>,
 ) -> Result<T, UiAuthoringCanvasCompileError> {
     let expected = codec::ui_component_schema_version(&component).ok_or_else(|| {
         UiAuthoringCanvasCompileError::MissingComponentSchema {
@@ -547,8 +567,10 @@ mod tests {
         .unwrap();
         let occurrence = SceneOccurrenceKey::new("tests", "canvas").unwrap();
         let mut compiler = UiAuthoringCanvasCompiler::new().unwrap();
+        let mut assets =
+            ComponentDecodeContext::new().with_asset_path_scope(&nara_asset::AssetPathScope::ROOT);
         let candidate = compiler
-            .compile(&projection, &source, &occurrence, 9, request)
+            .compile(&projection, &source, &occurrence, 9, request, &mut assets)
             .unwrap();
 
         assert_eq!(candidate.frame().source_revision().get(), 9);
@@ -564,12 +586,12 @@ mod tests {
 
         let first_root = candidate.frame().root_outcomes()[0].key();
         let rebuilt = compiler
-            .compile(&projection, &source, &occurrence, 10, request)
+            .compile(&projection, &source, &occurrence, 10, request, &mut assets)
             .unwrap();
         assert_eq!(first_root, rebuilt.frame().root_outcomes()[0].key());
         let other_slot = SceneOccurrenceKey::new("tests", "other").unwrap();
         let other = compiler
-            .compile(&projection, &source, &other_slot, 10, request)
+            .compile(&projection, &source, &other_slot, 10, request, &mut assets)
             .unwrap();
         assert_ne!(first_root, other.frame().root_outcomes()[0].key());
         let other_source = SourceDocumentKey::named(
@@ -579,7 +601,14 @@ mod tests {
         )
         .unwrap();
         let switched = compiler
-            .compile(&projection, &other_source, &occurrence, 10, request)
+            .compile(
+                &projection,
+                &other_source,
+                &occurrence,
+                10,
+                request,
+                &mut assets,
+            )
             .unwrap();
         assert_ne!(first_root, switched.frame().root_outcomes()[0].key());
 
@@ -637,6 +666,164 @@ mod tests {
                 .collect::<std::collections::BTreeSet<_>>()
         };
         assert_eq!(keys(candidate.frame()), keys(&frame));
+    }
+
+    #[test]
+    fn canvas_binds_root_node_and_button_images_through_actual_context() {
+        use nara_asset::{
+            AssetEvents, AssetPathScope, AssetProductRef, AssetRecord, AssetRef, AssetServer,
+            AssetSourceKind, AssetSourcePath, AssetStates, Assets, ImportedProductId,
+            ProjectAssetDatabase, StableAssetId,
+        };
+        use nara_image::{
+            ImageAsset, ImageColorSpace, ImageExtent, ImageFormat, PreparedImageSnapshot,
+        };
+        use nara_ui_kernel::{UiActionId, UiImageId, UiLayer, UiPaintPrimitive, UiResolvedBrush};
+        let scope = AssetPathScope::under(AssetSourcePath::new("custom/assets/images").unwrap());
+        let local = AssetRef::path(format!("{}.png", "a".repeat(244))).unwrap();
+        let source: StableAssetId = "2f0d71c7-14fc-4ed4-b48b-1c61bba8b97f".parse().unwrap();
+        let primary = AssetProductRef::new(source, ImportedProductId::PRIMARY).unwrap();
+        let auxiliary = AssetProductRef::new(
+            source,
+            ImportedProductId::parse_subproduct("011a8cc0-343a-4b95-8adb-3aa6d81977ed").unwrap(),
+        )
+        .unwrap();
+        let record = AssetRecord::new(
+            source,
+            scope.resolve(local.as_path().unwrap()),
+            AssetSourceKind::Image,
+        );
+        assert!(record.path().as_str().len() > nara_ui_kernel::MAX_UI_KEY_BYTES);
+        let mut database = ProjectAssetDatabase::default();
+        database.insert(record.clone()).unwrap();
+        let mut server = AssetServer::new();
+        let primary_handle = server.reserve_record::<ImageAsset>(&record).unwrap();
+        let auxiliary_handle = server.reserve_product::<ImageAsset>(auxiliary).unwrap();
+        let mut images = Assets::default();
+        let mut states = AssetStates::default();
+        let mut events = AssetEvents::default();
+        let mut snapshots = Vec::new();
+        for (handle, product, pixels) in [
+            (primary_handle, primary, [240, 0, 0, 255]),
+            (auxiliary_handle, auxiliary, [0, 240, 0, 255]),
+        ] {
+            images
+                .commit_loaded(
+                    handle,
+                    ImageAsset::from_product(
+                        product,
+                        ImageExtent::new(1, 1),
+                        ImageFormat::Rgba8,
+                        ImageColorSpace::Srgb,
+                        pixels.to_vec(),
+                    )
+                    .unwrap(),
+                    &mut states,
+                    &mut events,
+                    None,
+                    None,
+                )
+                .unwrap();
+            snapshots.push(PreparedImageSnapshot::capture(handle, &images, &states).unwrap());
+        }
+        let mut database = Some(database);
+        let source_key = SourceDocumentKey::named(
+            "72011426-37e2-48ba-bc06-78841468889a".parse().unwrap(),
+            "images",
+            nara_scene::SourceDocumentKind::Prefab,
+        )
+        .unwrap();
+        let occurrence = SceneOccurrenceKey::new("tests", "canvas-images").unwrap();
+        let request = UiAuthoringCanvasCompileRequest::new(
+            UiSurfaceContentTransform::direct(UiSize::new(320.0, 180.0).unwrap(), 1.0).unwrap(),
+            1,
+        );
+        let mut compiler = UiAuthoringCanvasCompiler::new().unwrap();
+        for (index, reference) in [local, AssetRef::product(auxiliary)]
+            .into_iter()
+            .enumerate()
+        {
+            if index == 1 {
+                drop(database.take());
+            }
+            let visual =
+                codec::image_visual_value(&reference, UiColor::rgba(1.0, 1.0, 1.0, 1.0)).unwrap();
+            let node = |name: &str, style| {
+                insert(
+                    insert(
+                        SceneEntityRecord::new(id(name)),
+                        UiAuthoringComponentKind::Node,
+                        codec::encode_node(&crate::UiNode::new(style)),
+                    ),
+                    UiAuthoringComponentKind::Visual,
+                    Ok(visual.clone()),
+                )
+            };
+            let root = insert(
+                node("root", UiStyle::fill()).with_children([id("node"), id("button")]),
+                UiAuthoringComponentKind::Root,
+                codec::encode_root(&crate::UiRoot::new(UiLayer::Base)),
+            );
+            let child = node("node", UiStyle::absolute(0.0, 0.0, 32.0, 32.0));
+            let button = insert(
+                node("button", UiStyle::absolute(40.0, 0.0, 120.0, 32.0)),
+                UiAuthoringComponentKind::Button,
+                codec::encode_button(
+                    &crate::UiButton::new(
+                        "Button",
+                        UiActionId::new("test.activate").unwrap(),
+                        16.0,
+                    )
+                    .unwrap(),
+                ),
+            );
+            let projection = crate::authoring_model::project_prefab_authoring(
+                &PrefabDocument::new([id("root")], [root, child, button]),
+            )
+            .unwrap();
+            let mut scratch = server.clone();
+            let mut assets = ComponentDecodeContext::with_asset_server(&mut scratch);
+            if let Some(database) = &database {
+                assets = assets.with_asset_resolution(database.resolver(&scope));
+            }
+            let candidate = compiler
+                .compile(
+                    &projection,
+                    &source_key,
+                    &occurrence,
+                    index as u64 + 1,
+                    request,
+                    &mut assets,
+                )
+                .unwrap();
+            let snapshot = &snapshots[index];
+            let expected =
+                UiImageId::external::<ImageAsset>(snapshot.identity().key().asset_id().raw());
+            let image_ids = candidate
+                .frame()
+                .paint()
+                .iter()
+                .filter_map(|paint| match paint {
+                    UiPaintPrimitive::Rect {
+                        brush: Some(UiResolvedBrush::Image { image, .. }),
+                        ..
+                    } => Some(image),
+                    _ => None,
+                })
+                .collect::<Vec<_>>();
+            assert_eq!(image_ids, vec![&expected, &expected, &expected]);
+            let mut prepared = nara_ui_render::UiPreparedImages::new();
+            prepared.insert(expected, snapshot.clone());
+            let packet = nara_ui_render::UiPresentationPlanner::default()
+                .plan(
+                    Arc::clone(candidate.frame()),
+                    nara_render::RenderTarget::Window(nara_window::WindowId::PRIMARY),
+                    &prepared,
+                )
+                .unwrap();
+            assert_eq!(packet.images().len(), 1);
+            assert_eq!(packet.images()[0].snapshot(), snapshot);
+        }
     }
 
     #[test]

@@ -1086,7 +1086,8 @@ mod tests {
             RuntimeSceneCandidate::cook(
                 &ExpandedSceneCandidate::plain(key.clone(), std::sync::Arc::clone(&document)),
                 &bindings,
-                &nara_asset::ProjectAssetDatabase::default(),
+                nara_asset::ProjectAssetDatabase::default()
+                    .resolver(&nara_asset::AssetPathScope::ROOT),
                 RuntimeSceneLimits::default(),
             )
             .unwrap()
@@ -1117,7 +1118,7 @@ mod tests {
         .unwrap();
         assert_eq!(source.retained_bytes(), required);
         assert!(!source.is_project_backed());
-        assert!(source.asset_database().is_none());
+        assert!(source.asset_resolution().is_none());
         assert_eq!(
             crate::startup_scene::SceneSource::runtime(
                 cook("Short", initial),

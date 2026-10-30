@@ -73,12 +73,15 @@ fn assert_committed_content() {
             .iter()
             .map(|prefab| prefab.path().as_str())
             .collect::<Vec<_>>(),
-        ["enemy.prefab.json", "reference-ui.prefab.json"],
+        [
+            "prefabs/enemy.prefab.json",
+            "prefabs/reference-ui.prefab.json"
+        ],
     );
     assert_eq!(snapshot.images().len(), 1);
     assert_eq!(
         snapshot.images()[0].path().as_str(),
-        "textures/tiny-dungeon.png"
+        "assets/textures/tiny-dungeon.png"
     );
     assert_eq!(
         snapshot.images()[0].source().stable_id(),

@@ -7,9 +7,10 @@ use std::{
 
 use nara_app::{App, CoreStage, Plugin, PluginError};
 use nara_asset::{
-    AssetError, AssetEvents, AssetId, AssetProductRef, AssetRecord, AssetServer, AssetSlotRevision,
-    AssetSourceKind, AssetStateError, AssetStateRevision, AssetStates, AssetTaskUpdateSet, Assets,
-    Handle, ImportedProductId, LoadState, ProjectAssetDatabase, SourceHash,
+    AssetError, AssetEvents, AssetId, AssetPathScope, AssetProductRef, AssetRecord, AssetRef,
+    AssetServer, AssetSlotRevision, AssetSourceKind, AssetSourcePath, AssetStateError,
+    AssetStateRevision, AssetStates, AssetTaskUpdateSet, Assets, Handle, ImportedProductId,
+    LoadState, ProjectAssetDatabase, SourceHash, StableAssetId,
 };
 use nara_core::{ByteLimit, ItemLimit};
 use nara_ecs::{Resource, schedule::IntoScheduleConfigs};
@@ -27,11 +28,14 @@ pub use publication::{
     PreparedTileSetPublications, TileSetContentReceipt, TileSetPublicationInput,
 };
 
+/// Bounds entry count, each captured source dependency path, and retained Image storage.
+/// Original source records and authored metadata remain admitted by the source Host.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct TileSetAssetLimits {
     entries: ItemLimit,
     retained_images: ItemLimit,
     retained_bytes: ByteLimit,
+    source_reference_bytes: ByteLimit,
 }
 
 impl TileSetAssetLimits {
@@ -45,6 +49,8 @@ impl TileSetAssetLimits {
             entries,
             retained_images,
             retained_bytes,
+            source_reference_bytes: ByteLimit::new(64 * 1024)
+                .expect("nonzero source reference limit"),
         }
     }
 
@@ -61,6 +67,18 @@ impl TileSetAssetLimits {
     #[must_use]
     pub const fn retained_bytes(self) -> ByteLimit {
         self.retained_bytes
+    }
+
+    /// Maximum canonical path bytes admitted before binding one source Image dependency.
+    #[must_use]
+    pub const fn source_reference_bytes(self) -> ByteLimit {
+        self.source_reference_bytes
+    }
+
+    #[must_use]
+    pub const fn with_source_reference_bytes(mut self, maximum: ByteLimit) -> Self {
+        self.source_reference_bytes = maximum;
+        self
     }
 }
 
@@ -115,11 +133,90 @@ enum TileSetDeclaration {
         record: AssetRecord,
         source: TileSetSource,
         source_hash: SourceHash,
+        // Part of declaration equality: an equal authored source under another scope can
+        // select a different dependency and must rotate the declaration/publication claim.
+        image: SourceImageReference,
     },
     Product(TileSetDescriptor),
 }
 
+/// An immutable source dependency bound once through the requesting Host's actual scope.
+/// Cloned declarations share the canonical spelling instead of copying its prefix on refresh.
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum SourceImageReference {
+    Path(Arc<AssetSourcePath>),
+    StableId(StableAssetId),
+    Product(AssetProductRef),
+}
+
+impl SourceImageReference {
+    fn bind(
+        reference: &AssetRef,
+        scope: &AssetPathScope,
+        maximum: ByteLimit,
+    ) -> Result<Self, TileSetAssetError> {
+        match reference {
+            AssetRef::Path(path) => {
+                let bytes = scope
+                    .prefix()
+                    .map_or(Some(0), |prefix| prefix.as_str().len().checked_add(1))
+                    .and_then(|bytes| bytes.checked_add(path.as_str().len()));
+                if bytes.is_none_or(|bytes| bytes > maximum.get()) {
+                    return Err(TileSetAssetError::SourceReferenceCapacity);
+                }
+                Ok(Self::Path(Arc::new(scope.resolve(path))))
+            }
+            AssetRef::StableId(id) => Ok(Self::StableId(*id)),
+            AssetRef::Product(product) => Ok(Self::Product(*product)),
+        }
+    }
+
+    fn validate_limit(&self, maximum: ByteLimit) -> Result<(), TileSetAssetError> {
+        if matches!(self, Self::Path(path) if path.as_str().len() > maximum.get()) {
+            return Err(TileSetAssetError::SourceReferenceCapacity);
+        }
+        Ok(())
+    }
+
+    fn record<'a>(&self, database: &'a ProjectAssetDatabase) -> Option<&'a AssetRecord> {
+        match self {
+            Self::Path(path) => database.record_for_path(path),
+            Self::StableId(id) => database.record_for_stable_id(*id),
+            Self::Product(product) => database.record_for_stable_id(product.source()),
+        }
+    }
+}
+
 impl TileSetDeclaration {
+    fn from_source(
+        record: AssetRecord,
+        source: TileSetSource,
+        source_hash: SourceHash,
+        scope: &AssetPathScope,
+        maximum: ByteLimit,
+    ) -> Result<Self, TileSetAssetError> {
+        source
+            .validate()
+            .map_err(|_| TileSetAssetError::InvalidSource)?;
+        if record.source_kind() != &crate::tileset_asset_source_kind() {
+            return Err(TileSetAssetError::InvalidSourceKind);
+        }
+        let image = SourceImageReference::bind(&source.image, scope, maximum)?;
+        Ok(Self::Source {
+            record,
+            source,
+            source_hash,
+            image,
+        })
+    }
+
+    fn validate_source_reference_limit(&self, maximum: ByteLimit) -> Result<(), TileSetAssetError> {
+        if let Self::Source { image, .. } = self {
+            image.validate_limit(maximum)?;
+        }
+        Ok(())
+    }
+
     fn source(&self) -> Option<(&AssetRecord, &TileSetSource)> {
         match self {
             Self::Source { record, source, .. } => Some((record, source)),
@@ -180,12 +277,14 @@ impl TileSetDeclaration {
             }
     }
 
-    fn image_record<'database>(
+    fn image_record<'a>(
         &self,
-        database: Option<&'database ProjectAssetDatabase>,
-    ) -> Option<&'database AssetRecord> {
-        let (_, source) = self.source()?;
-        database?.resolve_ref(&source.image).ok()
+        database: Option<&'a ProjectAssetDatabase>,
+    ) -> Option<&'a AssetRecord> {
+        let Self::Source { image, .. } = self else {
+            return None;
+        };
+        image.record(database?)
     }
 
     fn published_image_is_admitted(
@@ -265,7 +364,7 @@ fn record_matches<T: 'static>(
     server: &AssetServer,
 ) -> bool {
     server.get_handle::<T>(handle.id()) == Some(handle)
-        && server.path(handle.id()) == Some(record.path().as_str())
+        && server.path(handle.id()) == Some(record.path())
         && server.stable_id(handle.id()) == Some(record.stable_id())
 }
 
@@ -383,21 +482,25 @@ impl TileSetAssets {
     }
 
     /// Replaces the latest desired source without giving up an eligible published dependency.
+    /// Binds authored Image aliases once, before reserving any runtime identity or state.
+    #[allow(clippy::too_many_arguments)]
     pub fn request(
         &mut self,
         record: AssetRecord,
         source: TileSetSource,
         source_hash: SourceHash,
+        scope: &AssetPathScope,
         server: &mut AssetServer,
         tilesets: &Assets<TileSet>,
         states: &mut AssetStates,
     ) -> Result<Handle<TileSet>, TileSetAssetError> {
-        let declaration = TileSetDeclaration::Source {
+        let declaration = TileSetDeclaration::from_source(
             record,
             source,
             source_hash,
-        };
-        declaration.validate()?;
+            scope,
+            self.limits.source_reference_bytes,
+        )?;
         let (record, _) = declaration
             .source()
             .expect("source request has a source record");
@@ -818,6 +921,7 @@ pub enum TileSetAssetError {
     InvalidSource,
     InvalidDescriptor,
     Capacity,
+    SourceReferenceCapacity,
     RetentionCapacity,
     DependencyUnavailable,
     ImageExtentMismatch,
@@ -839,6 +943,9 @@ impl fmt::Display for TileSetAssetError {
                 Self::InvalidSource => "TileSet source is invalid",
                 Self::InvalidDescriptor => "TileSet product descriptor is invalid",
                 Self::Capacity => "TileSet content capacity is exhausted",
+                Self::SourceReferenceCapacity => {
+                    "TileSet source Image reference capacity is exhausted"
+                }
                 Self::RetentionCapacity => "TileSet retained Image capacity is exhausted",
                 Self::DependencyUnavailable => "TileSet Image dependency is unavailable",
                 Self::ImageExtentMismatch => {
@@ -860,6 +967,8 @@ impl fmt::Display for TileSetAssetError {
 
 impl Error for TileSetAssetError {}
 
+/// Maintains native TileSet storage and automatic Source/Product Image reconciliation.
+/// Source dependency scopes are bound explicitly when their declarations are requested.
 #[derive(Debug, Default, Clone, Copy)]
 pub struct TileSetAssetPlugin;
 
@@ -893,8 +1002,9 @@ fn reconcile_tilesets(mut content: TileSetContent) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use nara_asset::ProjectAssetDatabase;
     use nara_asset::{
-        ArtifactFormatVersion, ArtifactLabel, AssetPath, AssetRef, ImportArtifactKey,
+        ArtifactFormatVersion, ArtifactLabel, AssetRef, AssetSourcePath, ImportArtifactKey,
         ImportArtifactRecord, ImportDependencyDigest, ImportProfile, ImportedAssetType, ImporterId,
         ImporterVersion, StableAssetId,
     };
@@ -984,6 +1094,7 @@ mod tests {
                     self.tileset.clone(),
                     source(image),
                     SourceHash::from_bytes(image.as_bytes()),
+                    &nara_asset::AssetPathScope::ROOT,
                     &mut self.server,
                     &self.tilesets,
                     &mut self.states,
@@ -1006,7 +1117,7 @@ mod tests {
     fn record(id: &str, path: &str, kind: AssetSourceKind) -> AssetRecord {
         AssetRecord::new(
             StableAssetId::parse_str(id).unwrap(),
-            AssetPath::new(path).unwrap(),
+            AssetSourcePath::new(path).unwrap(),
             kind,
         )
     }
@@ -1016,6 +1127,114 @@ mod tests {
             AssetRef::path(path).unwrap(),
             TileAtlasLayout::grid(Vec2::new(1.0, 1.0), 2, 1),
         )
+    }
+
+    #[test]
+    fn one_owner_retains_two_source_scopes_bound_by_request_and_publication() {
+        let assets = AssetPathScope::under(AssetSourcePath::new("game/art").unwrap());
+        let packages = AssetPathScope::under(AssetSourcePath::new("package/art").unwrap());
+        let image_a = record(
+            "11111111-1111-4111-8111-111111111111",
+            "game/art/shared.png",
+            AssetSourceKind::Image,
+        );
+        let image_b = record(
+            "22222222-2222-4222-8222-222222222222",
+            "package/art/shared.png",
+            AssetSourceKind::Image,
+        );
+        let tileset_a = record(
+            "33333333-3333-4333-8333-333333333333",
+            "game/art/terrain.ron",
+            crate::tileset_asset_source_kind(),
+        );
+        let tileset_b = record(
+            "44444444-4444-4444-8444-444444444444",
+            "package/art/terrain.ron",
+            crate::tileset_asset_source_kind(),
+        );
+        let mut database = ProjectAssetDatabase::default();
+        for record in [&image_a, &image_b, &tileset_a, &tileset_b] {
+            database.insert(record.clone()).unwrap();
+        }
+        let mut server = AssetServer::new();
+        let mut images = Assets::<ImageAsset>::default();
+        let mut tilesets = Assets::<TileSet>::default();
+        let mut states = AssetStates::default();
+        let mut events = AssetEvents::default();
+        let mut retained = Vec::new();
+        for (record, byte) in [(&image_a, 10), (&image_b, 20)] {
+            let handle = server.reserve_record::<ImageAsset>(record).unwrap();
+            let mut image = image(record, 2, 1, byte);
+            assert!(image.try_attach_retention_owner(Arc::new(())));
+            retained.push(image.share_retained().unwrap());
+            images
+                .commit_loaded(handle, image, &mut states, &mut events, None, None)
+                .unwrap();
+        }
+        let image_a_handle = server.reserve_record::<ImageAsset>(&image_a).unwrap();
+        let image_b_handle = server.reserve_record::<ImageAsset>(&image_b).unwrap();
+        let mut owner = TileSetAssets::default();
+        let hash = SourceHash::from_bytes(b"scoped");
+        let handle_a = owner
+            .request(
+                tileset_a.clone(),
+                source("shared.png"),
+                hash,
+                &assets,
+                &mut server,
+                &tilesets,
+                &mut states,
+            )
+            .unwrap();
+        let handle_b = server.reserve_record::<TileSet>(&tileset_b).unwrap();
+        let input = TileSetPublicationInput::from_source(
+            handle_b,
+            tileset_b.clone(),
+            source("shared.png"),
+            hash,
+            image_b_handle,
+            retained.pop().unwrap(),
+            &packages,
+            owner.limits().source_reference_bytes(),
+        )
+        .unwrap();
+        owner
+            .prepare_publications(
+                vec![input],
+                &[],
+                &server,
+                Some(&database),
+                &tilesets,
+                &states,
+            )
+            .unwrap()
+            .commit(&server, &images, &mut tilesets, &mut states, &mut events);
+        drop(assets);
+        drop(packages);
+        owner.reconcile(
+            &mut server,
+            Some(&database),
+            &images,
+            &mut tilesets,
+            &mut states,
+            &mut events,
+        );
+        for (handle, expected) in [(handle_a, image_a_handle), (handle_b, image_b_handle)] {
+            assert_eq!(owner.error(handle), None);
+            assert_eq!(
+                tilesets.get(handle).unwrap().material().image,
+                Some(expected)
+            );
+            assert_eq!(owner.desired(handle), Some(&source("shared.png")));
+            assert_eq!(states.state(handle.id()).unwrap().source_hash(), Some(hash));
+        }
+        let sources = owner
+            .sources()
+            .map(|(_, record, _)| record.clone())
+            .collect::<Vec<_>>();
+        assert!(sources.contains(&tileset_a));
+        assert!(sources.contains(&tileset_b));
     }
 
     fn image(record: &AssetRecord, width: u32, height: u32, byte: u8) -> ImageAsset {
@@ -1396,6 +1615,7 @@ mod tests {
                 second_record,
                 source("a.png"),
                 SourceHash::from_bytes(b"second"),
+                &nara_asset::AssetPathScope::ROOT,
                 &mut fixture.server,
                 &fixture.tilesets,
                 &mut fixture.states,
@@ -1498,6 +1718,7 @@ mod tests {
                 fixture.tileset.clone(),
                 invalid,
                 SourceHash::from_bytes(b"invalid"),
+                &nara_asset::AssetPathScope::ROOT,
                 &mut fixture.server,
                 &fixture.tilesets,
                 &mut fixture.states
@@ -1630,6 +1851,7 @@ mod tests {
                 fixture.tileset.clone(),
                 altered,
                 SourceHash::from_bytes(b"layout-change"),
+                &nara_asset::AssetPathScope::ROOT,
                 &mut fixture.server,
                 &fixture.tilesets,
                 &mut fixture.states,
@@ -1717,6 +1939,7 @@ mod tests {
                 fixture.tileset.clone(),
                 changed_layout,
                 SourceHash::from_bytes(b"restored-with-changed-layout"),
+                &nara_asset::AssetPathScope::ROOT,
                 &mut fixture.server,
                 &fixture.tilesets,
                 &mut fixture.states,

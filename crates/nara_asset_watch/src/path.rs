@@ -4,7 +4,7 @@ use nara_asset::AssetPath;
 
 use crate::AssetWatchError;
 
-pub(crate) fn logical_path(root: &Path, path: &Path) -> Result<AssetPath, AssetWatchError> {
+pub(crate) fn local_path(root: &Path, path: &Path) -> Result<AssetPath, AssetWatchError> {
     let root = absolute_lexical(root)?;
     let path = if path.is_absolute() {
         normalize_lexical(path)

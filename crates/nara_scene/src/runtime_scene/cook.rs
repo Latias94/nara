@@ -1,6 +1,6 @@
 use std::{borrow::Cow, collections::BTreeMap, mem::size_of};
 
-use nara_asset::{AssetProductRef, AssetRef, ImportedProductId, ProjectAssetDatabase};
+use nara_asset::{AssetProductRef, AssetRef, AssetReferenceResolver, ImportedProductId};
 use nara_core::{ByteLimit, ItemLimit};
 use nara_reflect::{
     __private::{
@@ -27,7 +27,7 @@ use crate::{
 pub(super) fn cook(
     expanded: &ExpandedSceneCandidate,
     bindings: &SceneComponentBindings,
-    database: &ProjectAssetDatabase,
+    asset_resolution: AssetReferenceResolver<'_>,
     limits: RuntimeSceneLimits,
 ) -> Result<RuntimeSceneCandidate, RuntimeSceneError> {
     require_scene_source(expanded.source_key())?;
@@ -89,11 +89,16 @@ pub(super) fn cook(
                 AssetReferenceCollectionError::Admission(error) => error,
                 AssetReferenceCollectionError::Reference(_) => reference_error(),
             })?;
+            // Scoped Path lookup joins a canonical spelling. Admit each lookup's temporary
+            // bytes before the rewrite callback allocates it; ROOT and Product lookups borrow.
+            for reference in &references {
+                work.reserve(asset_resolution.resolution_work_bytes(reference.asset_ref()))?;
+            }
             rewrite_declared_asset_references_with_admission(
                 &mut record.value,
                 &references,
                 asset_rewrite_limits(limits.value_limits(), &references),
-                |reference| canonical_product(reference.asset_ref(), database),
+                |reference| canonical_product(reference.asset_ref(), asset_resolution),
                 |nodes, bytes, allocated| work.admit(nodes, bytes, allocated),
             )
             .map_err(|failure| match failure {
@@ -248,18 +253,20 @@ fn copy_id(
 
 fn canonical_product(
     reference: &AssetRef,
-    database: &ProjectAssetDatabase,
+    asset_resolution: AssetReferenceResolver<'_>,
 ) -> Result<AssetRef, RuntimeSceneError> {
     // Borrowed lookups avoid copying a rejected path into an AssetDatabaseError.
     let source = match reference {
-        AssetRef::Path(path) => database.record_for_path(path),
-        AssetRef::StableId(source) => database.record_for_stable_id(*source),
-        AssetRef::Product(product) => database.record_for_stable_id(product.source()),
+        AssetRef::Path(path) => asset_resolution.record_for_path(path),
+        AssetRef::StableId(source) => asset_resolution.database().record_for_stable_id(*source),
+        AssetRef::Product(product) => asset_resolution
+            .database()
+            .record_for_stable_id(product.source()),
     }
     .ok_or_else(|| {
         RuntimeSceneError::refused(
             "scene.runtime-asset-source-unavailable",
-            "Runtime cook requires every declared asset source in the actual project database",
+            "Runtime cook requires every declared asset source in the admitted source catalogue",
         )
     })?;
     match reference {

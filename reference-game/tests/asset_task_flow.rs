@@ -7,7 +7,7 @@ use std::{
 
 use nara::{
     advanced_prelude::*,
-    asset::{AssetPlugin, AssetSourcePlugin},
+    asset::{AssetPathScope, AssetPlugin, AssetSourcePath, AssetSourcePlugin},
     hierarchy::HierarchyPlugin,
     image::ImageSourcePlugin,
     reflect::ComponentRegistryPlugin,
@@ -25,7 +25,7 @@ fn public_asset_task_flow_preserves_last_good_after_failed_reload() {
     fs::write(&texture_path, TEXTURE_BYTES).unwrap();
     let record = AssetRecord::new(
         StableAssetId::parse_str(TEXTURE_ID).unwrap(),
-        AssetPath::new("textures/player.png").unwrap(),
+        AssetSourcePath::new("textures/player.png").unwrap(),
         AssetSourceKind::Image,
     );
     let limits = ImageImportLimits::default()
@@ -150,7 +150,7 @@ fn public_asset_task_flow_preserves_last_good_after_failed_reload() {
 struct ReloadTestPort;
 
 impl nara::app::__RuntimeDriverPort for ReloadTestPort {
-    type Input = AssetPath;
+    type Input = AssetSourcePath;
     type Output = ();
     fn apply_driver_input(&mut self, _input: Self::Input) {}
 }
@@ -158,8 +158,8 @@ impl nara::app::__RuntimeDriverPort for ReloadTestPort {
 impl ReloadTestPort {
     fn apply_driver_input_in_world(
         world: &mut World,
-        path: AssetPath,
-    ) -> Result<(), (nara::app::RuntimeWorldAccessError, AssetPath)> {
+        path: AssetSourcePath,
+    ) -> Result<(), (nara::app::RuntimeWorldAccessError, AssetSourcePath)> {
         world
             .resource_mut::<AssetSourceChanges>()
             .modified(path)
@@ -168,7 +168,7 @@ impl ReloadTestPort {
     }
 }
 
-fn request_reload(runtime: &mut RuntimeInstance, path: AssetPath) {
+fn request_reload(runtime: &mut RuntimeInstance, path: AssetSourcePath) {
     runtime
         .with_driver_scope(|scope| scope.__apply_port::<ReloadTestPort>(path))
         .map(|outcome| {
@@ -194,7 +194,7 @@ fn image_source_directory(path: &Path) -> ImageSourceDirectory {
         HostCapabilityOptions::new(CapabilityRights::ReadOnly, TrustMode::TrustedLocal),
     )
     .unwrap();
-    ImageSourceDirectory::new(directory)
+    ImageSourceDirectory::new(directory, AssetPathScope::ROOT)
 }
 
 fn host_directory(path: &Path) -> File {

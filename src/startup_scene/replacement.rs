@@ -124,7 +124,7 @@ where
                 .prepare_scene_replacement_with_claims(
                     world,
                     candidate,
-                    source.asset_database(),
+                    source.asset_resolution(),
                     &owner.receipt,
                     assets,
                     &SceneNativeRetirementClaims::default(),

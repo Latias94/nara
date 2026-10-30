@@ -56,7 +56,7 @@ impl Fixture {
     fn replace(
         &mut self,
         candidate: &ExpandedSceneCandidate,
-        database: &ProjectAssetDatabase,
+        database: nara_asset::AssetReferenceResolver<'_>,
         bindings: SceneAssetBindings,
         configure: impl FnOnce(&mut crate::advanced::SceneProductOverlayWriter<'_>),
     ) -> SceneSpawnReport {
@@ -138,7 +138,7 @@ fn prebound_asset_identity_is_shared_by_decode_apply_and_the_committed_server() 
     database
         .insert(AssetRecord::new(
             dependency_id,
-            AssetPath::new("textures/dependency.png").unwrap(),
+            AssetSourcePath::new("textures/dependency.png").unwrap(),
             AssetSourceKind::Image,
         ))
         .unwrap();
@@ -156,14 +156,14 @@ fn prebound_asset_identity_is_shared_by_decode_apply_and_the_committed_server() 
         let expected = bindings
             .reserve::<TestAsset>(
                 &AssetRef::StableId(asset_id),
-                &database,
+                database.resolver(&nara_asset::AssetPathScope::ROOT),
                 &AssetSourceKind::Image,
             )
             .unwrap();
         let dependency = bindings
             .reserve::<TestAsset>(
                 &AssetRef::StableId(dependency_id),
-                &database,
+                database.resolver(&nara_asset::AssetPathScope::ROOT),
                 &AssetSourceKind::Image,
             )
             .unwrap();
@@ -180,7 +180,12 @@ fn prebound_asset_identity_is_shared_by_decode_apply_and_the_committed_server() 
         assert_eq!(fixture.world.resource::<AssetServer>(), &before);
         bindings.validate(&fixture.world).unwrap();
 
-        let report = fixture.replace(&next_source(reference), &database, bindings, |_| {});
+        let report = fixture.replace(
+            &next_source(reference),
+            database.resolver(&nara_asset::AssetPathScope::ROOT),
+            bindings,
+            |_| {},
+        );
         assert!(!report.diagnostics.has_errors(), "{:?}", report.diagnostics);
         let entity = spawned_entity(&fixture.world, &report, &scene_id("next"));
         assert_eq!(
@@ -192,7 +197,10 @@ fn prebound_asset_identity_is_shared_by_decode_apply_and_the_committed_server() 
             server.get_handle::<TestAsset>(expected.id()),
             Some(expected)
         );
-        assert_eq!(server.path(expected.id()), Some("textures/new.png"));
+        assert_eq!(
+            server.path(expected.id()).map(AssetSourcePath::as_str),
+            Some("textures/new.png")
+        );
         assert_eq!(server.stable_id(expected.id()), Some(asset_id));
         assert_eq!(
             server.get_handle::<TestAsset>(dependency.id()),
@@ -230,7 +238,7 @@ fn untouched_bindings_from_another_world_reject_before_overlay_or_scene_mutation
     );
     let report = fixture.replace(
         &candidate,
-        &ProjectAssetDatabase::default(),
+        ProjectAssetDatabase::default().resolver(&nara_asset::AssetPathScope::ROOT),
         bindings,
         |_| {
             panic!("foreign bindings must reject before product configuration");
@@ -257,7 +265,7 @@ fn captured_asset_server_changes_reject_even_when_bindings_are_untouched() {
             bindings
                 .reserve::<TestAsset>(
                     &AssetRef::StableId(asset_id),
-                    &database,
+                    database.resolver(&nara_asset::AssetPathScope::ROOT),
                     &AssetSourceKind::Image,
                 )
                 .unwrap();
@@ -280,7 +288,7 @@ fn captured_asset_server_changes_reject_even_when_bindings_are_untouched() {
         ));
         let report = fixture.replace(
             &next_source(AssetRef::StableId(asset_id)),
-            &database,
+            database.resolver(&nara_asset::AssetPathScope::ROOT),
             bindings,
             |_| {
                 panic!("stale bindings must reject before product configuration");
@@ -312,7 +320,7 @@ fn apply_rejection_discards_prebound_catalogue_scratch_entities_and_owned_overla
     let planned = bindings
         .reserve::<TestAsset>(
             &AssetRef::StableId(asset_id),
-            &database,
+            database.resolver(&nara_asset::AssetPathScope::ROOT),
             &AssetSourceKind::Image,
         )
         .unwrap();
@@ -337,10 +345,15 @@ fn apply_rejection_discards_prebound_catalogue_scratch_entities_and_owned_overla
         .collect::<BTreeSet<_>>();
     let stats = fixture.world.resource::<WorldIdentityDomain>().stats();
     let mut configured = false;
-    let report = fixture.replace(&candidate, &database, bindings, |writer| {
-        configured = true;
-        writer.replace_resource(RetainedProduct(replacement));
-    });
+    let report = fixture.replace(
+        &candidate,
+        database.resolver(&nara_asset::AssetPathScope::ROOT),
+        bindings,
+        |writer| {
+            configured = true;
+            writer.replace_resource(RetainedProduct(replacement));
+        },
+    );
     assert!(report.instance.is_none());
     assert!(configured, "{:?}", report.diagnostics);
     assert!(
@@ -381,14 +394,26 @@ fn reservation_respects_source_kind_type_claims_and_dropping_bindings_publishes_
     let mut bindings = SceneAssetBindings::from_world(&fixture.world);
     let reference = AssetRef::StableId(asset_id);
     assert!(matches!(
-        bindings.reserve::<TestAsset>(&reference, &database, &AssetSourceKind::Prefab),
+        bindings.reserve::<TestAsset>(
+            &reference,
+            database.resolver(&nara_asset::AssetPathScope::ROOT),
+            &AssetSourceKind::Prefab
+        ),
         Err(AssetRefError::UnexpectedSourceKind { .. })
     ));
     let planned = bindings
-        .reserve::<TestAsset>(&reference, &database, &AssetSourceKind::Image)
+        .reserve::<TestAsset>(
+            &reference,
+            database.resolver(&nara_asset::AssetPathScope::ROOT),
+            &AssetSourceKind::Image,
+        )
         .unwrap();
     assert!(matches!(
-        bindings.reserve::<OtherAsset>(&reference, &database, &AssetSourceKind::Image),
+        bindings.reserve::<OtherAsset>(
+            &reference,
+            database.resolver(&nara_asset::AssetPathScope::ROOT),
+            &AssetSourceKind::Image
+        ),
         Err(AssetRefError::Asset(
             nara_asset::AssetError::AssetTypeMismatch { .. }
         ))

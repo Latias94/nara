@@ -2,7 +2,8 @@ use std::collections::HashSet;
 
 use super::*;
 use crate::{
-    AssetRef, AssetRefError, AssetRefExportPolicy, AssetSourceKind, Assets, ProjectAssetDatabase,
+    AssetPathScope, AssetRef, AssetRefError, AssetRefExportPolicy, AssetSourceKind, Assets,
+    ProjectAssetDatabase,
 };
 
 fn product(source: u128, selection: ImportedProductId) -> AssetProductRef {
@@ -20,7 +21,7 @@ fn auxiliary() -> ImportedProductId {
 fn source_record() -> AssetRecord {
     AssetRecord::new(
         product(1, ImportedProductId::PRIMARY).source(),
-        AssetPath::new("textures/player.png").unwrap(),
+        AssetSourcePath::new("textures/player.png").unwrap(),
         AssetSourceKind::Image,
     )
 }
@@ -60,7 +61,7 @@ fn retained_cost_counts_product_indices_type_claims_and_both_owned_path_strings(
     );
     let long_record = AssetRecord::new(
         record.stable_id(),
-        AssetPath::new("textures/a-much-longer-player-name.png").unwrap(),
+        AssetSourcePath::new("textures/a-much-longer-player-name.png").unwrap(),
         AssetSourceKind::Image,
     );
     let mut long = AssetServer::new();
@@ -95,7 +96,7 @@ fn primary_product_and_source_record_share_handles_in_both_orders() {
         let baseline = server.clone();
         assert_eq!(server.resolve_product::<String>(reference), Ok(first));
         assert_eq!(server.product(first.id()), Some(reference));
-        assert_eq!(server.path(first.id()), Some(record.path().as_str()));
+        assert_eq!(server.path(first.id()), Some(record.path()));
         assert_eq!(server.stable_id(first.id()), Some(reference.source()));
         assert_eq!(
             server.id_for_stable_id(reference.source()),
@@ -189,7 +190,7 @@ fn unknown_products_and_wrong_types_leave_the_catalogue_unchanged() {
         );
         assert_eq!(server, baseline);
         assert_eq!(
-            AssetRef::Product(unknown).resolve::<u32>(&mut server),
+            AssetRef::Product(unknown).resolve::<u32>(&mut server, &AssetPathScope::ROOT),
             Err(AssetRefError::Asset(AssetError::UnknownProduct(unknown)))
         );
         assert_eq!(server, baseline);
@@ -211,12 +212,16 @@ fn unknown_products_and_wrong_types_leave_the_catalogue_unchanged() {
         );
         assert_eq!(server, baseline);
         assert_eq!(
-            AssetRef::Product(reference).resolve::<u32>(&mut server),
+            AssetRef::Product(reference).resolve::<u32>(&mut server, &AssetPathScope::ROOT),
             Err(AssetRefError::Asset(mismatch.clone()))
         );
         assert_eq!(server, baseline);
         assert_eq!(
-            AssetRef::from_handle(&server, Handle::<u32>::new(handle.id())),
+            AssetRef::from_handle(
+                &server,
+                Handle::<u32>::new(handle.id()),
+                &AssetPathScope::ROOT,
+            ),
             Err(AssetRefError::Asset(mismatch))
         );
         assert_eq!(server, baseline);
@@ -287,7 +292,7 @@ fn nil_source_records_reject_before_any_alias_or_type_mutation() {
     let nil = StableAssetId::from_uuid(uuid::Uuid::nil());
     let record = AssetRecord::new(
         nil,
-        AssetPath::new("textures/nil.png").unwrap(),
+        AssetSourcePath::new("textures/nil.png").unwrap(),
         AssetSourceKind::Image,
     );
     let invalid = AssetError::InvalidProductIdentity(AssetProductIdentityError::NilSource);
@@ -317,16 +322,21 @@ fn reverse_export_preserves_auxiliary_and_pathless_primary_product_identity() {
         let handle = server.reserve_product::<String>(reference).unwrap();
         let baseline = server.clone();
         assert_eq!(
-            AssetRef::from_handle(&server, handle),
+            AssetRef::from_handle(&server, handle, &AssetPathScope::ROOT),
             Ok(AssetRef::Product(reference))
         );
         for policy in [
             AssetRefExportPolicy::Path,
             AssetRefExportPolicy::StableIdWhenKnown,
         ] {
-            let exported = AssetRef::from_handle_with_policy(&server, handle, policy).unwrap();
+            let exported =
+                AssetRef::from_handle_with_policy(&server, handle, &AssetPathScope::ROOT, policy)
+                    .unwrap();
             assert_eq!(exported, AssetRef::Product(reference));
-            assert_eq!(exported.resolve::<String>(&mut server), Ok(handle));
+            assert_eq!(
+                exported.resolve::<String>(&mut server, &AssetPathScope::ROOT),
+                Ok(handle)
+            );
             assert_eq!(server, baseline);
         }
         assert_eq!(server.product(handle.id()), Some(reference));
@@ -342,11 +352,16 @@ fn source_bound_primary_exports_keep_the_source_policy_and_database_requirement(
     let handle = server.reserve_product::<String>(reference).unwrap();
     assert_eq!(server.reserve_record::<String>(&record), Ok(handle));
     assert_eq!(
-        AssetRef::from_handle(&server, handle),
-        Ok(AssetRef::Path(record.path().clone()))
+        AssetRef::from_handle(&server, handle, &AssetPathScope::ROOT),
+        Ok(AssetRef::path(record.path().as_str()).unwrap())
     );
     assert_eq!(
-        AssetRef::from_handle_with_policy(&server, handle, AssetRefExportPolicy::StableIdWhenKnown),
+        AssetRef::from_handle_with_policy(
+            &server,
+            handle,
+            &AssetPathScope::ROOT,
+            AssetRefExportPolicy::StableIdWhenKnown,
+        ),
         Ok(AssetRef::StableId(reference.source()))
     );
     let selected = product(1, auxiliary());
@@ -356,19 +371,27 @@ fn source_bound_primary_exports_keep_the_source_policy_and_database_requirement(
         AssetRefExportPolicy::StableIdWhenKnown,
     ] {
         assert_eq!(
-            AssetRef::from_handle_with_policy(&server, auxiliary_handle, policy),
+            AssetRef::from_handle_with_policy(
+                &server,
+                auxiliary_handle,
+                &AssetPathScope::ROOT,
+                policy,
+            ),
             Ok(AssetRef::Product(selected))
         );
     }
     assert_eq!(server.path(auxiliary_handle.id()), None);
     let baseline = server.clone();
     assert_eq!(
-        AssetRef::StableId(reference.source()).resolve::<String>(&mut server),
+        AssetRef::StableId(reference.source())
+            .resolve::<String>(&mut server, &AssetPathScope::ROOT),
         Err(AssetRefError::MissingProjectDatabase(reference.source()))
     );
     assert_eq!(
-        AssetRef::Product(reference)
-            .resolve_with_database::<String>(&mut server, &ProjectAssetDatabase::default()),
+        AssetRef::Product(reference).resolve_with_database::<String>(
+            &mut server,
+            ProjectAssetDatabase::default().resolver(&AssetPathScope::ROOT),
+        ),
         Err(AssetRefError::Database(
             crate::AssetDatabaseError::UnknownStableId(reference.source())
         ))
@@ -407,7 +430,7 @@ fn cloned_catalogues_keep_product_indices_path_aliases_and_type_claims_independe
     let untyped = original
         .reserve_record_id(&AssetRecord::new(
             product(2, ImportedProductId::PRIMARY).source(),
-            AssetPath::new("textures/untyped.png").unwrap(),
+            AssetSourcePath::new("textures/untyped.png").unwrap(),
             AssetSourceKind::Image,
         ))
         .unwrap();

@@ -280,7 +280,10 @@ fn declared_nested_and_default_tilesets_are_loaded_by_metadata_kind() {
     let snapshot = loader.load(&candidate, &plan).unwrap();
     assert_eq!(snapshot.tilesets().len(), 1);
     assert_eq!(snapshot.images().len(), 1);
-    assert_eq!(snapshot.tilesets()[0].path().as_str(), path);
+    assert_eq!(
+        snapshot.tilesets()[0].path().as_str(),
+        format!("assets/{path}")
+    );
 }
 
 #[test]
@@ -522,7 +525,7 @@ fn file_backed_tileset_enters_the_startup_closure_with_its_image_dependency() {
     assert_eq!(snapshot.tilesets().len(), 1);
     assert_eq!(
         snapshot.tilesets()[0].path().as_str(),
-        "tilesets/terrain.tileset.ron"
+        "assets/tilesets/terrain.tileset.ron"
     );
     assert_eq!(
         snapshot.tilesets()[0].image_path().as_str(),
@@ -808,7 +811,10 @@ fn authorized_startup_closure_publishes_an_immutable_snapshot() {
                 && !universe.as_uuid().is_nil()
     ));
     assert_eq!(snapshot.images().len(), 1);
-    assert_eq!(snapshot.images()[0].path().as_str(), "textures/player.png");
+    assert_eq!(
+        snapshot.images()[0].path().as_str(),
+        "assets/textures/player.png"
+    );
     assert_eq!(snapshot.images()[0].image().extent().width, 1);
     assert_eq!(snapshot.images()[0].image().extent().height, 1);
     assert_eq!(snapshot.images()[0].image().pixels(), &[24, 120, 220, 255]);
@@ -1122,9 +1128,11 @@ fn ui_visual_asset_reference_alone_enters_the_startup_content_closure() {
     use std::fs;
 
     use nara::{
+        asset::{AssetPathScope, AssetServer, AssetSourcePath},
         ecs::World,
-        reflect::{ComponentRegistry, ComponentTypeId},
-        ui::{UiColor, UiImageId, UiLayer, UiNode, UiRoot, UiStyle, UiVisual},
+        image::ImageAsset,
+        reflect::{ComponentEncodeContext, ComponentRegistry, ComponentTypeId},
+        ui::{UiColor, UiLayer, UiNode, UiRoot, UiStyle, UiVisual},
     };
 
     let project = TestProject::with_prefab_startup();
@@ -1153,16 +1161,18 @@ requested = ["runtime-2d", "runtime-ui"]
     let (candidate, plan, root) = project.candidate_plan_and_root();
     let registry = plan.schema_validation().registry();
     let mut world = World::new();
+    let mut server = AssetServer::new();
+    let handle = server
+        .reserve::<ImageAsset>("assets/textures/player.png")
+        .unwrap();
+    world.insert_resource(server);
     let root_source = world
         .spawn((UiRoot::new(UiLayer::Base), UiNode::new(UiStyle::fill())))
         .id();
     let image_source = world
         .spawn((
             UiNode::new(UiStyle::absolute(24.0, 16.0, 128.0, 128.0)),
-            UiVisual::image(
-                UiImageId::new("textures/player.png").unwrap(),
-                UiColor::rgba(1.0, 1.0, 1.0, 1.0),
-            ),
+            UiVisual::image_asset(handle, UiColor::rgba(1.0, 1.0, 1.0, 1.0)),
         ))
         .id();
     let root_id = scene_id("ui-root");
@@ -1193,7 +1203,10 @@ requested = ["runtime-2d", "runtime-ui"]
         .load(&candidate, &plan)
         .unwrap();
     assert_eq!(snapshot.images().len(), 1);
-    assert_eq!(snapshot.images()[0].path().as_str(), "textures/player.png");
+    assert_eq!(
+        snapshot.images()[0].path().as_str(),
+        "assets/textures/player.png"
+    );
     let members = snapshot
         .startup_content_closure()
         .expect("the loader selected the manifest's startup Scene");
@@ -1211,8 +1224,10 @@ requested = ["runtime-2d", "runtime-ui"]
         let component = ComponentTypeId::new(component);
         let schema = registry.schema(&component).unwrap();
         let snapshot = registry.snapshot().unwrap();
+        let scope = AssetPathScope::under(AssetSourcePath::new("assets").unwrap());
+        let context = ComponentEncodeContext::new().with_asset_path_scope(&scope);
         let value = snapshot
-            .encode_component(&component, world, entity)
+            .encode_component_with_context(&component, world, entity, &context)
             .expect("the first-party UI component must encode")
             .expect("the fixture entity contains the selected UI component");
         SceneComponentRecord::new(schema.version, value)

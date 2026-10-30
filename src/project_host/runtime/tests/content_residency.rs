@@ -2,10 +2,10 @@ use super::*;
 
 use nara_app::CoreStage;
 use nara_asset::{
-    ArtifactFormatVersion, ArtifactLabel, AssetEvent, AssetRecord, AssetSlotRevision, AssetState,
-    AssetStateRevision, Handle, ImportArtifactKey, ImportArtifactRecord, ImportDependencyDigest,
-    ImportProfile, ImportedAssetType, ImporterId, ImporterVersion, ProjectAssetDatabase,
-    SourceHash,
+    ArtifactFormatVersion, ArtifactLabel, AssetEvent, AssetPathScope, AssetRecord,
+    AssetSlotRevision, AssetSourcePath, AssetState, AssetStateRevision, Handle, ImportArtifactKey,
+    ImportArtifactRecord, ImportDependencyDigest, ImportProfile, ImportedAssetType, ImporterId,
+    ImporterVersion, ProjectAssetDatabase, SourceHash,
 };
 use nara_core::{ByteLimit, ItemLimit, Vec2};
 use nara_ecs::{
@@ -351,14 +351,15 @@ fn foreign_image(record: &AssetRecord) -> ImageAsset {
 }
 
 fn install_foreign_publication(world: &mut World) {
+    let scope = AssetPathScope::under(AssetSourcePath::new("assets").unwrap());
     let image_record = AssetRecord::new(
         StableAssetId::parse_str(FOREIGN_IMAGE_ID).unwrap(),
-        AssetPath::new("foreign.png").unwrap(),
+        scope.resolve(&AssetPath::new("foreign.png").unwrap()),
         AssetSourceKind::Image,
     );
     let tileset_record = AssetRecord::new(
         StableAssetId::parse_str(FOREIGN_TILESET_ID).unwrap(),
-        AssetPath::new("foreign.tileset.ron").unwrap(),
+        scope.resolve(&AssetPath::new("foreign.tileset.ron").unwrap()),
         AssetSourceKind::Other(String::from("tileset")),
     );
     world.init_resource::<ProjectAssetDatabase>();
@@ -399,6 +400,7 @@ fn install_foreign_publication(world: &mut World) {
                     TileAtlasLayout::grid(Vec2::ONE, 1, 1),
                 ),
                 SourceHash::from_bytes(b"foreign"),
+                &scope,
             )
             .unwrap();
         content.reconcile();
@@ -828,8 +830,8 @@ fn hosted_residency_rejects_atlas_retention_stale_and_foreign_image_authority_be
     let b = fixture.load("b.scene.json");
     fixture.step(move |world| {
         let record = b
-            .asset_database()
-            .record_for_path(&AssetPath::new("new.png").unwrap())
+            .asset_resolution()
+            .resolve_ref(&AssetRef::path("new.png").unwrap())
             .unwrap();
         let handle = world
             .resource_mut::<AssetServer>()

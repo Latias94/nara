@@ -4,7 +4,7 @@ use std::{
 };
 
 use nara_asset::{
-    AssetProductRef, AssetRef, AssetRefExportPolicy, ProjectAssetDatabase, StableAssetId,
+    AssetProductRef, AssetRef, AssetRefExportPolicy, AssetReferenceResolver, StableAssetId,
 };
 use nara_diagnostic::{Diagnostic, DiagnosticReport};
 use nara_ecs::{Entity, World};
@@ -159,13 +159,13 @@ pub fn export_scene_with_options(
 /// Exports native values using explicit immutable project metadata for asset policy lowering,
 /// including references introduced by omitted-field defaults after native encoding.
 #[must_use]
-pub fn export_scene_with_asset_database(
+pub fn export_scene_with_asset_resolution(
     world: &World,
     registry: &ComponentRegistry,
     options: SceneExportOptions,
-    database: &ProjectAssetDatabase,
+    asset_resolution: AssetReferenceResolver<'_>,
 ) -> SceneExportReport {
-    export_scene_selected(world, registry, None, options, Some(database))
+    export_scene_selected(world, registry, None, options, Some(asset_resolution))
 }
 
 impl SceneComponentBindings {
@@ -182,9 +182,15 @@ impl SceneComponentBindings {
         &self,
         world: &World,
         options: SceneExportOptions,
-        database: Option<&ProjectAssetDatabase>,
+        asset_resolution: Option<AssetReferenceResolver<'_>>,
     ) -> SceneExportReport {
-        export_scene_selected(world, self.native_registry(), Some(self), options, database)
+        export_scene_selected(
+            world,
+            self.native_registry(),
+            Some(self),
+            options,
+            asset_resolution,
+        )
     }
 }
 
@@ -193,7 +199,7 @@ fn export_scene_selected(
     registry: &ComponentRegistry,
     bindings: Option<&SceneComponentBindings>,
     options: SceneExportOptions,
-    database: Option<&ProjectAssetDatabase>,
+    asset_resolution: Option<AssetReferenceResolver<'_>>,
 ) -> SceneExportReport {
     let mut diagnostics = DiagnosticReport::default();
     let mut exported_value_nodes = 0_usize;
@@ -420,8 +426,8 @@ fn export_scene_selected(
 
     let mut encode_context =
         ComponentEncodeContext::new().with_asset_ref_export_policy(options.asset_ref_export_policy);
-    if let Some(database) = database {
-        encode_context = encode_context.with_project_asset_database(database);
+    if let Some(asset_resolution) = asset_resolution {
+        encode_context = encode_context.with_asset_resolution(asset_resolution);
     }
     let mut records = Vec::with_capacity(export_entities.len());
     for (export_entity, id) in export_entities.iter().zip(assigned_ids) {
@@ -508,7 +514,7 @@ fn export_scene_selected(
                         instance: export_entity.instance,
                         remap: &remap_entries,
                         options,
-                        database,
+                        asset_resolution,
                         retained_nodes: exported_value_nodes,
                         retained_bytes: exported_value_bytes,
                     };
@@ -626,7 +632,7 @@ fn export_scene_selected(
                     instance: export_entity.instance,
                     remap: &remap_entries,
                     options,
-                    database,
+                    asset_resolution,
                     retained_nodes: exported_value_nodes,
                     retained_bytes: exported_value_bytes,
                 };
@@ -680,7 +686,7 @@ struct ExportValueContext<'a> {
     instance: SceneInstanceId,
     remap: &'a BTreeMap<WorldEntityLocator, SceneEntityId>,
     options: SceneExportOptions,
-    database: Option<&'a ProjectAssetDatabase>,
+    asset_resolution: Option<AssetReferenceResolver<'a>>,
     retained_nodes: usize,
     retained_bytes: usize,
 }
@@ -776,10 +782,18 @@ impl ExportValueContext<'_> {
         // Asset policy is metadata lowering, independent of entity identity rewriting. Both
         // operations admit their replacement bytes before constructing any owning payload.
         for reference in assets {
+            if let Some(resolver) = self.asset_resolution {
+                let observed = resolver
+                    .resolution_work_bytes(reference.asset_ref())
+                    .unwrap_or(usize::MAX);
+                if observed > limits.bytes().get() {
+                    return Err(budget(observed, limits.bytes().get()));
+                }
+            }
             let lowered = lower_data_asset_reference(
                 reference.asset_ref(),
                 self.options.asset_ref_export_policy,
-                self.database,
+                self.asset_resolution,
             )
             .ok_or_else(|| {
                 locate(diagnostic_error(
@@ -928,7 +942,7 @@ impl LoweredDataAssetReference<'_> {
 fn lower_data_asset_reference<'a>(
     reference: &'a AssetRef,
     policy: AssetRefExportPolicy,
-    database: Option<&'a ProjectAssetDatabase>,
+    asset_resolution: Option<AssetReferenceResolver<'a>>,
 ) -> Option<LoweredDataAssetReference<'a>> {
     match (policy, reference) {
         // Export policy chooses the spelling of primary source selectors only. An explicit
@@ -937,15 +951,25 @@ fn lower_data_asset_reference<'a>(
         (AssetRefExportPolicy::Path, AssetRef::Path(path)) => {
             Some(LoweredDataAssetReference::Path(path.as_str()))
         }
-        (AssetRefExportPolicy::Path, AssetRef::StableId(id)) => database
-            .and_then(|database| database.record_for_stable_id(*id))
-            .map(|record| LoweredDataAssetReference::Path(record.path().as_str())),
+        (AssetRefExportPolicy::Path, AssetRef::StableId(id)) => {
+            let resolver = asset_resolution?;
+            let record = resolver.database().record_for_stable_id(*id)?;
+            // Borrow the alias after checking the explicit scope relation. The output budget
+            // admits the owning copy later, before into_value allocates its payload.
+            let local = resolver.scope().relative_path(record.path());
+            Some(match local {
+                Some(path) => LoweredDataAssetReference::Path(path),
+                None => LoweredDataAssetReference::Product(
+                    AssetProductRef::new(*id, nara_asset::ImportedProductId::PRIMARY).ok()?,
+                ),
+            })
+        }
         (AssetRefExportPolicy::StableIdWhenKnown, AssetRef::StableId(id)) => {
             Some(LoweredDataAssetReference::StableId(*id))
         }
         (AssetRefExportPolicy::StableIdWhenKnown, AssetRef::Path(path)) => Some(
-            database
-                .and_then(|database| database.record_for_path(path))
+            asset_resolution
+                .and_then(|asset_resolution| asset_resolution.record_for_path(path))
                 .map_or(LoweredDataAssetReference::Path(path.as_str()), |record| {
                     LoweredDataAssetReference::StableId(record.stable_id())
                 }),

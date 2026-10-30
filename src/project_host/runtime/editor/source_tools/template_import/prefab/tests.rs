@@ -59,7 +59,7 @@ fn key(index: usize, stable_source: bool) -> SourceDocumentKey {
     } else {
         SourceDocumentKey::project_location(
             UNIVERSE.parse().unwrap(),
-            AssetPath::new(format!(
+            nara_asset::AssetSourcePath::new(format!(
                 "prefabs/{}.prefab.json",
                 ["main", "child", "leaf"][index]
             ))

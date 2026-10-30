@@ -1,6 +1,6 @@
 use std::{mem::size_of, sync::Arc};
 
-use nara_asset::{AssetPath, AssetRef, StableAssetId};
+use nara_asset::{AssetRef, AssetSourcePath, StableAssetId};
 use nara_core::{ByteLimit, SourceUniverseId};
 use nara_diagnostic::{DiagnosticReport, DiagnosticValueRef};
 use nara_ecs::World;
@@ -281,12 +281,12 @@ fn rejected_file_publication_preserves_all_aliases_and_canonical_documents() {
             let mut candidate_resolver = resolver.clone();
             let candidate = PrefabDocumentCandidate::decode_json_bytes(invalid.as_bytes()).unwrap();
             let result = if with_database {
-                candidate_resolver.insert_file_candidate_with_asset_database(
+                candidate_resolver.insert_file_candidate_with_asset_resolution(
                     path.clone(),
                     key.clone(),
                     candidate,
                     &registry,
-                    &database,
+                    database.resolver(&nara_asset::AssetPathScope::ROOT),
                 )
             } else {
                 candidate_resolver.insert_file_candidate(
@@ -540,7 +540,7 @@ fn long_source_keys_are_admitted_before_stack_clones_and_source_materialization(
     for key in [
         SourceDocumentKey::project_location(
             universe(),
-            AssetPath::new(&long_path).unwrap(),
+            AssetSourcePath::new(&long_path).unwrap(),
             SourceDocumentKind::Prefab,
         ),
         SourceDocumentKey::named(universe(), &long_path, SourceDocumentKind::Prefab).unwrap(),
@@ -613,9 +613,10 @@ impl SourceChain {
                 .map(|(index, request)| {
                     let key = SourceDocumentKey::project_location(
                         universe(),
-                        AssetPath::new(
-                            format!("prefabs/{index}/{}.prefab.json", "x".repeat(2048),),
-                        )
+                        AssetSourcePath::new(format!(
+                            "prefabs/{index}/{}.prefab.json",
+                            "x".repeat(2048),
+                        ))
                         .unwrap(),
                         SourceDocumentKind::Prefab,
                     );

@@ -34,7 +34,7 @@ impl RecoveryFixture {
             .unwrap();
         let record = AssetRecord::new(
             StableAssetId::parse_str("2f0d71c7-14fc-4ed4-b48b-1c61bba8b97f").unwrap(),
-            AssetPath::new("textures/recovery.png").unwrap(),
+            AssetSourcePath::new("textures/recovery.png").unwrap(),
             AssetSourceKind::Image,
         );
         let mut database = ProjectAssetDatabase::default();
@@ -119,7 +119,7 @@ impl RecoveryFixture {
                 ));
                 let blocker = AssetRecord::new(
                     StableAssetId::parse_str("b73f0f16-09e8-4265-b090-b689b41c197e").unwrap(),
-                    AssetPath::new("textures/blocker.png").unwrap(),
+                    AssetSourcePath::new("textures/blocker.png").unwrap(),
                     AssetSourceKind::Image,
                 );
                 self.resolver()

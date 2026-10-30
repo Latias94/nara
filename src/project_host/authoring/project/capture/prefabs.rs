@@ -183,6 +183,14 @@ impl<'a> AuthoringPrefabAcquisition<'a> {
             &mut identities,
             &mut source_facts,
         )?;
+        let catalogue = ReferenceCatalogue::new(
+            schema.project_root.share(),
+            [
+                schema.settings.paths.assets.clone(),
+                schema.settings.paths.prefabs.clone(),
+            ],
+            budget,
+        )?;
         let compiler_limit = remaining_compiler_work(
             budget,
             0,
@@ -200,13 +208,7 @@ impl<'a> AuthoringPrefabAcquisition<'a> {
             identities,
             source_facts,
             unresolved_dependencies: Vec::new(),
-            catalogue: ReferenceCatalogue::new(
-                schema.project_root.share(),
-                [
-                    schema.settings.paths.assets.clone(),
-                    schema.settings.paths.prefabs.clone(),
-                ],
-            ),
+            catalogue,
             prefabs_directory: None,
             prefabs: BTreeMap::new(),
             compiler_limit,
@@ -309,7 +311,9 @@ impl<'a> AuthoringPrefabAcquisition<'a> {
         budget.charge_reference(path.as_str().len(), depth, true)?;
         if let Some(prefab) = prefabs.get(&path) {
             let prefab: &AuthoringPrefabSource = prefab;
-            return Ok(Some(prefab.resolved_source()));
+            return catalogue
+                .bind_prefab_source(reference, prefab.resolved_source())
+                .map(Some);
         }
         if prefabs_directory.is_none() {
             match open_source_directory(
@@ -509,7 +513,7 @@ impl<'a> AuthoringPrefabAcquisition<'a> {
             basis: basis.clone(),
             limits,
         };
-        let resolved = prefab.resolved_source();
+        let resolved = catalogue.bind_prefab_source(reference, prefab.resolved_source())?;
         prefabs.insert(path, prefab);
         Ok(Some(resolved))
     }

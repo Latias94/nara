@@ -5,8 +5,9 @@ use nara_core::{ByteLimit, ItemLimit};
 use nara_ecs::Resource;
 
 use crate::{
-    AssetError, AssetId, AssetPath, AssetRecord, AssetServer, AssetSourceKind, AssetStateRevision,
-    AssetStates, AssetVersion, ImageRecoveryContinuity, ImportArtifactDigest, StableAssetId,
+    AssetError, AssetId, AssetRecord, AssetServer, AssetSourceKind, AssetSourcePath,
+    AssetStateRevision, AssetStates, AssetVersion, ImageRecoveryContinuity, ImportArtifactDigest,
+    StableAssetId,
 };
 
 use super::AssetSourceChangeKind;
@@ -369,7 +370,7 @@ impl AssetReloadRequest {
     }
 
     #[must_use]
-    pub const fn path(&self) -> &AssetPath {
+    pub const fn path(&self) -> &AssetSourcePath {
         self.record.path()
     }
 

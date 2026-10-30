@@ -9,7 +9,7 @@ use std::{
 };
 
 use nara_app::{App, CoreStage, RuntimeInstance, StartupStage};
-use nara_asset::{AssetPath, AssetRecord, AssetSourceKind, ProjectAssetDatabase};
+use nara_asset::{AssetRecord, AssetSourceKind, AssetSourcePath, ProjectAssetDatabase};
 use nara_core::{ByteLimit, DepthLimit, ItemLimit};
 use nara_ecs::{
     Component, Entity, Resource, World,
@@ -455,7 +455,7 @@ fn declared_asset_metadata_is_checked_without_native_handles() {
                 entity,
                 &component("game.Image"),
                 value.clone(),
-                Some(&database),
+                Some(database.resolver(&nara_asset::AssetPathScope::ROOT)),
                 limits(100, 4096),
             )
             .is_err()
@@ -463,7 +463,7 @@ fn declared_asset_metadata_is_checked_without_native_handles() {
     database
         .insert(AssetRecord::new(
             "b69d5990-ef57-478a-92f3-94557862ec56".parse().unwrap(),
-            AssetPath::new("images/fixture.png").unwrap(),
+            AssetSourcePath::new("images/fixture.png").unwrap(),
             AssetSourceKind::Image,
         ))
         .unwrap();
@@ -473,7 +473,7 @@ fn declared_asset_metadata_is_checked_without_native_handles() {
             entity,
             &component("game.Image"),
             value,
-            Some(&database),
+            Some(database.resolver(&nara_asset::AssetPathScope::ROOT)),
             limits(100, 4096),
         )
         .unwrap();
@@ -485,7 +485,7 @@ fn declared_asset_metadata_is_checked_without_native_handles() {
                 entity,
                 &component("game.Score"),
                 ComponentValue::U64(8),
-                Some(&ProjectAssetDatabase::default()),
+                Some(ProjectAssetDatabase::default().resolver(&nara_asset::AssetPathScope::ROOT)),
                 limits(100, 4096),
             )
             .is_err()

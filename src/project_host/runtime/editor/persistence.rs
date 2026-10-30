@@ -203,17 +203,15 @@ impl EditorProjectSession {
 
     pub(super) fn prefab_source_key(&self, document: EditorDocumentId) -> Option<AssetPath> {
         let lane = self.prefab_lanes.get(&document)?;
-        let directory = match &self.execution {
-            EditorExecutionLane::Authoring(snapshot) => snapshot.settings().paths.prefabs.as_str(),
-            EditorExecutionLane::TrustedCompiled(lane) => {
-                lane.content_candidate.settings().paths.prefabs.as_str()
+        let path = nara_asset::AssetSourcePath::new(lane.project_path.as_ref()).ok()?;
+        match &self.execution {
+            EditorExecutionLane::Authoring(snapshot) => {
+                snapshot.prefab_resolution().scope().relativize(&path)
             }
-        };
-        let source = lane
-            .project_path
-            .strip_prefix(directory)?
-            .strip_prefix('/')?;
-        AssetPath::new(source.to_owned()).ok()
+            EditorExecutionLane::TrustedCompiled(lane) => {
+                lane.snapshot.prefab_resolution().scope().relativize(&path)
+            }
+        }
     }
     #[doc(hidden)]
     pub(super) fn open_prefab_source(
@@ -289,7 +287,13 @@ impl EditorProjectSession {
             .snapshot
             .prefabs()
             .iter()
-            .find(|prefab| prefab.path().as_str() == source_binding.locator())
+            .find(|prefab| {
+                lane.snapshot
+                    .prefab_resolution()
+                    .scope()
+                    .relative_path(prefab.path())
+                    == Some(source_binding.locator())
+            })
             .map(|prefab| prefab.source_key().clone())
         else {
             return editor_workspace_command_rejected(
@@ -704,13 +708,19 @@ impl EditorProjectSession {
             AssetRef::Path(source) => source,
             reference @ (AssetRef::StableId(_) | AssetRef::Product(_)) => {
                 resolved_source = match &self.execution {
-                    EditorExecutionLane::Authoring(snapshot) => snapshot
-                        .asset_database()
-                        .resolve_ref(reference)
-                        .ok()
-                        .map(|record| record.path().clone()),
+                    EditorExecutionLane::Authoring(snapshot) => {
+                        let resolver = snapshot.prefab_resolution();
+                        resolver
+                            .resolve_ref(reference)
+                            .ok()
+                            .and_then(|record| resolver.scope().relativize(record.path()))
+                    }
                     EditorExecutionLane::TrustedCompiled(lane) => {
-                        lane.snapshot.resolved_asset_path(reference).cloned()
+                        let resolver = lane.snapshot.prefab_resolution();
+                        resolver
+                            .resolve_ref(reference)
+                            .ok()
+                            .and_then(|record| resolver.scope().relativize(record.path()))
                     }
                 }
                 .ok_or("project.editor.prefab-source-stable-id-unresolved")?;
@@ -719,11 +729,15 @@ impl EditorProjectSession {
         };
         let source_is_admitted = match &self.execution {
             EditorExecutionLane::Authoring(snapshot) => snapshot.prefab(source).is_some(),
-            EditorExecutionLane::TrustedCompiled(lane) => lane
-                .snapshot
-                .prefabs()
-                .iter()
-                .any(|prefab| prefab.path() == source),
+            EditorExecutionLane::TrustedCompiled(lane) => {
+                lane.snapshot.prefabs().iter().any(|prefab| {
+                    lane.snapshot
+                        .prefab_resolution()
+                        .scope()
+                        .relative_path(prefab.path())
+                        == Some(source.as_str())
+                })
+            }
         };
         if !source_is_admitted {
             return Err("project.editor.prefab-source-outside-content-closure");

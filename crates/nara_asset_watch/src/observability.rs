@@ -55,6 +55,13 @@ pub(crate) fn drain_asset_watch_events(
     mut status: ResMut<AssetWatchRuntimeStatus>,
     mut watcher: Option<ResMut<AssetWatcher>>,
 ) {
+    if watcher
+        .as_ref()
+        .is_some_and(|watcher| watcher.is_running() && watcher.source_root() != &*root)
+    {
+        // Old native observations cannot acquire the meaning of a replacement logical scope.
+        observer.record_translation_failure(0);
+    }
     if let Some(queue) = queue.as_mut() {
         let drained = queue.drain();
         if !drained.rescan_required() {

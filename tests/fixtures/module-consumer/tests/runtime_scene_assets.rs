@@ -6,8 +6,8 @@ use std::sync::{
 };
 
 use nara_asset::{
-    AssetPath, AssetProductRef, AssetRecord, AssetRef, AssetServer, AssetSourceKind, Assets,
-    Handle, ImportedProductId, ProjectAssetDatabase, StableAssetId,
+    AssetPathScope, AssetProductRef, AssetRecord, AssetRef, AssetServer, AssetSourceKind,
+    AssetSourcePath, Assets, Handle, ImportedProductId, ProjectAssetDatabase, StableAssetId,
 };
 use nara_core::ItemLimit;
 use nara_ecs::{Component, Entity, Resource, World};
@@ -123,6 +123,7 @@ fn bindings(calls: &Arc<AtomicUsize>) -> SceneComponentBindings {
                 let reference = AssetRef::from_handle_with_policy(
                     world.resource::<AssetServer>(),
                     sample.0,
+                    context.asset_path_scope(),
                     context.asset_ref_export_policy(),
                 )
                 .map_err(|error| ComponentCodecError::Message(error.to_string()))?;
@@ -154,14 +155,14 @@ fn cooked(
     database
         .insert(AssetRecord::new(
             source_id(),
-            AssetPath::new("source/bundle.txt").unwrap(),
+            AssetSourcePath::new("source/bundle.txt").unwrap(),
             AssetSourceKind::Other("consumer.text".into()),
         ))
         .unwrap();
     let cooked = RuntimeSceneCandidate::cook(
         &expanded,
         bindings,
-        &database,
+        database.resolver(&AssetPathScope::ROOT),
         RuntimeSceneLimits::default(),
     )
     .unwrap();

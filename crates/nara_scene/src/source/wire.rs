@@ -1,4 +1,4 @@
-use nara_asset::{AssetPath, StableAssetId};
+use nara_asset::{AssetSourcePath, StableAssetId};
 use nara_core::SourceUniverseId;
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
@@ -80,7 +80,7 @@ impl<'de> Deserialize<'de> for SourceDocumentKey {
                 Self::named(universe, name, kind).map_err(serde::de::Error::custom)
             }
             OriginWire::ProjectLocation { universe, path } => {
-                let path = AssetPath::new(path).map_err(serde::de::Error::custom)?;
+                let path = AssetSourcePath::new(path).map_err(serde::de::Error::custom)?;
                 Ok(Self::project_location(universe, path, kind))
             }
             OriginWire::StableAsset { stable_id } => Ok(Self::stable_asset(stable_id, kind)),

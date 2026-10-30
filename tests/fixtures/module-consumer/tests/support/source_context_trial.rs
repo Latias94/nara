@@ -3,7 +3,7 @@
 use std::{collections::BTreeMap, fs, path::Path, sync::Arc};
 
 use nara_asset::{
-    AssetMetaIdentityCandidate, AssetPath, AssetRecord, AssetRef, AssetSourceKind,
+    AssetMetaIdentityCandidate, AssetPathScope, AssetRef, AssetSourceKind, AssetSourcePath,
     ProjectAssetDatabase, StableAssetId,
 };
 use nara_core::ItemLimit;
@@ -69,7 +69,7 @@ impl Atom {
 pub enum Origin {
     Named(Universe, Atom),
     Asset(StableAssetId),
-    Location(Universe, AssetPath),
+    Location(Universe, AssetSourcePath),
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
@@ -223,7 +223,12 @@ impl<'root> FileSources<'root> {
                     }
                     result
                         .database
-                        .insert(metadata.identity().clone().into())
+                        .insert(
+                            metadata
+                                .identity()
+                                .clone()
+                                .into_record(&AssetPathScope::ROOT),
+                        )
                         .map_err(|_| Error::Metadata)?;
                 }
             }
@@ -249,17 +254,24 @@ impl<'root> FileSources<'root> {
                     Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
                     _ => return Err(Error::PolicyConflict),
                 }
-                (path.clone(), Origin::Location(self.universe, path.clone()))
+                (
+                    path.clone(),
+                    Origin::Location(self.universe, AssetPathScope::ROOT.resolve(path)),
+                )
             }
             NativePolicy::StableMetadata => {
                 let path = match request {
                     AssetRef::Path(path) => path.clone(),
-                    AssetRef::StableId(_) | AssetRef::Product(_) => self
-                        .database
-                        .resolve_ref(request)
-                        .map_err(|_| Error::Metadata)?
-                        .path()
-                        .clone(),
+                    AssetRef::StableId(_) | AssetRef::Product(_) => {
+                        let record = self
+                            .database
+                            .resolver(&AssetPathScope::ROOT)
+                            .resolve_ref(request)
+                            .map_err(|_| Error::Metadata)?;
+                        AssetPathScope::ROOT
+                            .relativize(record.path())
+                            .ok_or(Error::Metadata)?
+                    }
                 };
                 let bytes =
                     fs::read(self.root.join(path.meta_path())).map_err(|_| Error::Metadata)?;
@@ -270,10 +282,13 @@ impl<'root> FileSources<'root> {
                 {
                     return Err(Error::Metadata);
                 }
-                let record: AssetRecord = metadata.identity().clone().into();
+                let record = metadata
+                    .identity()
+                    .clone()
+                    .into_record(&AssetPathScope::ROOT);
                 if self
                     .database
-                    .record_for_path(&path)
+                    .record_for_path(record.path())
                     .is_some_and(|old| old != &record)
                     || self
                         .database

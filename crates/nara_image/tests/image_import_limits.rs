@@ -8,8 +8,8 @@ use std::{
 };
 
 use nara_asset::{
-    AssetPath, AssetRecord, AssetServer, AssetSourceKind, AssetStates, AssetVersion, Assets,
-    StableAssetId,
+    AssetPathScope, AssetRecord, AssetServer, AssetSourceKind, AssetSourcePath, AssetStates,
+    AssetVersion, Assets, StableAssetId,
 };
 use nara_core::ByteLimit;
 use nara_fs::{CapabilityRights, DirectoryCapability, HostCapabilityOptions, TrustMode};
@@ -501,7 +501,7 @@ fn wait_for_budget_release(importer: &ImageImporter) {
 fn image_record() -> AssetRecord {
     AssetRecord::new(
         StableAssetId::parse_str(TEXTURE_ID).unwrap(),
-        AssetPath::new("textures/player.png").unwrap(),
+        AssetSourcePath::new("textures/player.png").unwrap(),
         AssetSourceKind::Image,
     )
 }
@@ -709,7 +709,7 @@ fn source_directory(path: &Path) -> ImageSourceDirectory {
         HostCapabilityOptions::new(CapabilityRights::ReadOnly, TrustMode::TrustedLocal),
     )
     .unwrap();
-    ImageSourceDirectory::new(directory)
+    ImageSourceDirectory::new(directory, AssetPathScope::ROOT)
 }
 
 fn host_directory(path: &Path) -> File {

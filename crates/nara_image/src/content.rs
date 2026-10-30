@@ -207,10 +207,10 @@ impl Error for ImageContentError {}
 mod tests {
     use super::*;
     use nara_asset::{
-        ArtifactFormatVersion, ArtifactLabel, AssetEvents, AssetPath, AssetRecord, AssetSourceKind,
-        ImportArtifactKey, ImportArtifactRecord, ImportDependencyDigest, ImportProfile,
-        ImportedAssetType, ImportedProductId, ImporterId, ImporterVersion, SourceHash,
-        StableAssetId,
+        ArtifactFormatVersion, ArtifactLabel, AssetEvents, AssetRecord, AssetSourceKind,
+        AssetSourcePath, ImportArtifactKey, ImportArtifactRecord, ImportDependencyDigest,
+        ImportProfile, ImportedAssetType, ImportedProductId, ImporterId, ImporterVersion,
+        SourceHash, StableAssetId,
     };
 
     use crate::ImageImportSettings;
@@ -224,7 +224,7 @@ mod tests {
     ) {
         let record = AssetRecord::new(
             StableAssetId::parse_str("20000000-0000-4000-8000-000000000001").unwrap(),
-            AssetPath::new("image.png").unwrap(),
+            AssetSourcePath::new("image.png").unwrap(),
             AssetSourceKind::Image,
         );
         let settings = ImageImportSettings::default();
@@ -554,7 +554,7 @@ mod tests {
         let source = image.source().unwrap();
         let alternate_path = ImageAsset::from_import(
             ImageSourceMetadata::new(
-                AssetPath::new("other/source.png").unwrap(),
+                AssetSourcePath::new("other/source.png").unwrap(),
                 source.settings(),
                 source.artifact().clone(),
             )
@@ -572,7 +572,7 @@ mod tests {
             snapshot.source().unwrap().path().as_str(),
             "other/source.png"
         );
-        assert_eq!(server.path(handle.id()), Some("image.png"));
+        assert_eq!(server.path(handle.id()).unwrap().as_str(), "image.png");
         assert!(snapshot.is_current(&server, &states, &images));
     }
 }

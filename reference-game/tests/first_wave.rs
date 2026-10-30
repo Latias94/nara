@@ -1201,7 +1201,7 @@ fn invalid_authored_weapon_configuration_rejects_startup_before_runtime_publicat
     };
     fields.insert("damage".to_owned(), ComponentValue::I64(0));
 
-    let source = reexpand_modified_authored_scene(scene, &snapshot, &plan);
+    let source = reexpand_modified_authored_scene(scene, &snapshot, &project, &plan);
     assert_startup_rejected(plan, source);
 }
 
@@ -1228,26 +1228,34 @@ fn missing_authored_weapon_sprite_rejects_startup_before_runtime_publication() {
         "the authored weapon fixture should carry its Sprite"
     );
 
-    let source = reexpand_modified_authored_scene(scene, &snapshot, &plan);
+    let source = reexpand_modified_authored_scene(scene, &snapshot, &project, &plan);
     assert_startup_rejected(plan, source);
 }
 
 fn reexpand_modified_authored_scene(
     scene: nara::scene::SceneDocument,
     snapshot: &nara::project_host::ProjectContentSnapshot,
+    project: &nara::project_host::ProjectSettingsCandidate,
     plan: &nara::project_host::RuntimePlan,
 ) -> SceneSource {
+    let prefab_scope = nara::asset::AssetPathScope::under(
+        nara::asset::AssetSourcePath::new(project.settings().paths.prefabs.as_str()).unwrap(),
+    );
     let resolver = snapshot.prefabs().iter().fold(
         nara::scene::InMemoryPrefabSourceResolver::new(),
         |resolver, prefab| {
             resolver.with_prefab(
-                nara::asset::AssetRef::Path(prefab.path().clone()),
+                nara::asset::AssetRef::Path(prefab_scope.relativize(prefab.path()).unwrap()),
                 prefab.source_key().clone(),
                 prefab.document().clone(),
             )
         },
     );
-    let expansion = scene.expand_prefabs(plan.schema_validation().registry(), &resolver);
+    let expansion = scene.expand_prefabs_with_asset_resolution(
+        plan.schema_validation().registry(),
+        &resolver,
+        snapshot.asset_resolution(),
+    );
     assert!(
         !expansion.diagnostics.has_errors(),
         "{:#?}",

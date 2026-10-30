@@ -139,6 +139,8 @@ pub(crate) struct AuthoringDocumentCapture {
     pub(super) prefabs: Box<[AuthoringPrefabSource]>,
     pub(super) assets: Box<[AuthoringAssetSource]>,
     pub(super) asset_database: Arc<ProjectAssetDatabase>,
+    pub(super) asset_scope: Arc<AssetPathScope>,
+    pub(super) prefab_scope: Arc<AssetPathScope>,
     pub(super) unresolved_dependencies: Box<[AuthoringUnresolvedDependency]>,
     pub(super) source_facts: Arc<[Arc<AuthoringSourceFact>]>,
     pub(super) stable_lookups: Arc<[catalogue::StableLookupObservation]>,
@@ -290,6 +292,18 @@ impl AuthoringDocumentCapture {
     pub(crate) fn asset_database(&self) -> Arc<ProjectAssetDatabase> {
         Arc::clone(&self.asset_database)
     }
+    pub(crate) fn asset_scope(&self) -> Arc<AssetPathScope> {
+        Arc::clone(&self.asset_scope)
+    }
+    pub(crate) fn prefab_scope(&self) -> Arc<AssetPathScope> {
+        Arc::clone(&self.prefab_scope)
+    }
+    pub(crate) fn asset_resolution(&self) -> AssetReferenceResolver<'_> {
+        self.asset_database.resolver(&self.asset_scope)
+    }
+    pub(crate) fn prefab_resolution(&self) -> AssetReferenceResolver<'_> {
+        self.asset_database.resolver(&self.prefab_scope)
+    }
     pub(crate) const fn usage(&self) -> AuthoringProjectAdmissionUsage {
         self.usage
     }
@@ -436,6 +450,8 @@ pub(super) fn capture_scene(
     }
     drop(prefabs_directory);
 
+    let asset_scope = Arc::clone(catalogue.scope(false));
+    let prefab_scope = Arc::clone(catalogue.scope(true));
     let mut asset_database = ProjectAssetDatabase::default();
     if catalogue.is_indexed() && !prefabs.is_empty() {
         let directory = open_source_directory(
@@ -452,7 +468,11 @@ pub(super) fn capture_scene(
                 // Native admission already owns this exact observation and its byte charge.
                 // Compare the catalogue evidence without reopening or retaining another fact.
                 catalogue.verify_metadata(path, true, source)?;
-                let record = AssetRecord::new(*stable_id, path.clone(), AssetSourceKind::Prefab);
+                let record = AssetRecord::new(
+                    *stable_id,
+                    prefab_scope.resolve(path),
+                    AssetSourceKind::Prefab,
+                );
                 charge_database_record(&record, budget)?;
                 insert_asset_record(&mut asset_database, record)?;
                 continue;
@@ -518,12 +538,12 @@ pub(super) fn capture_scene(
         )
         .map_err(
             |source| AuthoringProjectSourceAdmissionError::AssetMetadataFormat {
-                path: path.clone(),
+                path: asset_scope.resolve(&path),
                 source,
             },
         )?;
         asset_database
-            .insert_identity(path.clone(), metadata.identity().clone())
+            .insert_identity(&asset_scope, path.clone(), metadata.identity().clone())
             .map_err(|source| match source {
                 AssetDatabaseError::MetaPathMismatch {
                     source_path,
@@ -533,11 +553,11 @@ pub(super) fn capture_scene(
                     declared: meta_path,
                 },
                 source => AuthoringProjectSourceAdmissionError::AssetIdentity {
-                    path: path.clone(),
+                    path: asset_scope.resolve(&path),
                     source,
                 },
             })?;
-        let record = AssetRecord::from(metadata.identity().clone());
+        let record = metadata.identity().clone().into_record(&asset_scope);
         charge_database_record(&record, budget)?;
         charge_asset_metadata(
             &metadata_source,
@@ -552,11 +572,11 @@ pub(super) fn capture_scene(
             Arc::clone(&metadata_source),
         );
 
-        let source_project_path = join_project_path(&asset_root, record.path().as_str())?;
+        let source_project_path = join_project_path(&asset_root, path.as_str())?;
         let source_opened = open_source_file(
             directory,
             source_project_path,
-            record.path().as_str(),
+            path.as_str(),
             AuthoringSourceKind::AssetSource,
             depth,
             budget,
@@ -596,7 +616,7 @@ pub(super) fn capture_scene(
             && asset_database
                 .record_for_stable_id(*stable_id)
                 .is_some_and(|record| {
-                    record.path() != prefab.path()
+                    record.path().as_str() != prefab.source().project_path().as_str()
                         || record.source_kind() != &AssetSourceKind::Prefab
                 })
         {
@@ -649,6 +669,8 @@ pub(super) fn capture_scene(
         prefabs: prefabs.into_values().collect::<Vec<_>>().into_boxed_slice(),
         assets: assets.into_values().collect::<Vec<_>>().into_boxed_slice(),
         asset_database: Arc::new(asset_database),
+        asset_scope,
+        prefab_scope,
         unresolved_dependencies: unresolved_dependencies.into_boxed_slice(),
         source_facts: source_facts.into(),
         stable_lookups,

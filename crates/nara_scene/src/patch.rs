@@ -2,7 +2,7 @@
 use std::collections::BTreeMap;
 use std::collections::BTreeSet;
 
-use nara_asset::{AssetRef, ProjectAssetDatabase};
+use nara_asset::{AssetRef, AssetReferenceResolver};
 use nara_core::{ByteLimit, ItemLimit};
 use nara_diagnostic::{Diagnostic, DiagnosticReport};
 use nara_reflect::{
@@ -106,25 +106,25 @@ impl ScenePatchDocument {
         )
     }
 
-    pub fn apply_to_scene_with_asset_database(
+    pub fn apply_to_scene_with_asset_resolution(
         &self,
         document: &mut SceneDocument,
         registry: &ComponentRegistry,
-        database: &ProjectAssetDatabase,
+        asset_resolution: AssetReferenceResolver<'_>,
     ) -> ScenePatchReport {
-        self.apply_to_scene_with_asset_database_and_limits(
+        self.apply_to_scene_with_asset_resolution_and_limits(
             document,
             registry,
-            database,
+            asset_resolution,
             ScenePatchApplyLimits::default(),
         )
     }
 
-    pub fn apply_to_scene_with_asset_database_and_limits(
+    pub fn apply_to_scene_with_asset_resolution_and_limits(
         &self,
         document: &mut SceneDocument,
         registry: &ComponentRegistry,
-        database: &ProjectAssetDatabase,
+        asset_resolution: AssetReferenceResolver<'_>,
         limits: ScenePatchApplyLimits,
     ) -> ScenePatchReport {
         self.apply_to_scene_with_validator(
@@ -135,7 +135,7 @@ impl ScenePatchDocument {
                 validate_patch_candidate(
                     document,
                     registry,
-                    Some(database),
+                    Some(asset_resolution),
                     operation_index,
                     limits,
                 )
@@ -161,23 +161,26 @@ impl ScenePatchDocument {
         )
     }
 
-    pub(crate) fn prepare_to_scene_with_asset_database(
+    pub(crate) fn prepare_to_scene_with_asset_resolution(
         &self,
         document: &SceneDocument,
         registry: &ComponentRegistry,
-        database: &ProjectAssetDatabase,
+        asset_resolution: AssetReferenceResolver<'_>,
     ) -> Result<PreparedScenePatch, ScenePatchReport> {
         self.prepare_to_scene_with_validator(
             document,
             registry,
             ScenePatchApplyLimits::default(),
             |document, registry, operation_index| match operation_index {
-                Some(operation_index) => document.validate_authoring_for_patch_with_asset_database(
-                    registry,
-                    database,
-                    operation_index,
-                ),
-                None => document.validate_authoring_with_asset_database(registry, database),
+                Some(operation_index) => document
+                    .validate_authoring_for_patch_with_asset_resolution(
+                        registry,
+                        asset_resolution,
+                        operation_index,
+                    ),
+                None => {
+                    document.validate_authoring_with_asset_resolution(registry, asset_resolution)
+                }
             },
         )
     }
@@ -197,20 +200,24 @@ impl ScenePatchDocument {
         })
     }
 
-    pub(crate) fn prepare_to_prefab_with_asset_database(
+    pub(crate) fn prepare_to_prefab_with_asset_resolution(
         &self,
         document: &PrefabDocument,
         registry: &ComponentRegistry,
-        database: &ProjectAssetDatabase,
+        asset_resolution: AssetReferenceResolver<'_>,
     ) -> Result<PreparedPrefabPatch, ScenePatchReport> {
         self.prepare_to_prefab_with_validator(document, registry, |document, registry, index| {
             match index {
                 Some(index) => document
                     .instantiate()
-                    .validate_authoring_for_patch_with_asset_database(registry, database, index),
+                    .validate_authoring_for_patch_with_asset_resolution(
+                        registry,
+                        asset_resolution,
+                        index,
+                    ),
                 None => document
                     .instantiate()
-                    .validate_authoring_with_asset_database(registry, database),
+                    .validate_authoring_with_asset_resolution(registry, asset_resolution),
             }
         })
     }
@@ -1900,14 +1907,14 @@ fn apply_operation_for_patch(
 fn validate_patch_candidate(
     document: &SceneDocument,
     registry: &ComponentRegistry,
-    database: Option<&ProjectAssetDatabase>,
+    asset_resolution: Option<AssetReferenceResolver<'_>>,
     operation_index: Option<usize>,
     limits: ScenePatchApplyLimits,
 ) -> DiagnosticReport {
     let mut context =
         ComponentDecodeContext::new().with_materialization_limits(limits.materialization_limits());
-    if let Some(database) = database {
-        context = context.with_project_asset_database(database);
+    if let Some(asset_resolution) = asset_resolution {
+        context = context.with_asset_resolution(asset_resolution);
     }
     preflight_authoring_scene_with_context_at_operation(
         document,

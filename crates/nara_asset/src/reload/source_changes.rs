@@ -2,26 +2,31 @@ use std::{
     collections::{BTreeMap, btree_map::Entry},
     error::Error,
     fmt::{self, Display, Formatter},
-    path::{Path, PathBuf},
+    path::{Component, Path, PathBuf},
 };
 
 use nara_core::{ByteLimit, ItemLimit};
 use nara_ecs::Resource;
 
-use crate::{AssetDatabaseError, AssetPath, ProjectAssetDatabase};
+use crate::{AssetDatabaseError, AssetPath, AssetPathScope, AssetSourcePath};
 
 const DEFAULT_MAX_SOURCE_CHANGES: usize = 4_096;
 const DEFAULT_MAX_SOURCE_CHANGE_BYTES: usize = 4 * 1024 * 1024;
 
+/// A native directory paired with its owned logical source scope.
 #[derive(Debug, Clone, PartialEq, Eq, Resource)]
 pub struct AssetSourceRoot {
     root: PathBuf,
+    scope: AssetPathScope,
 }
 
 impl AssetSourceRoot {
     #[must_use]
-    pub fn new(root: impl Into<PathBuf>) -> Self {
-        Self { root: root.into() }
+    pub fn new(root: impl Into<PathBuf>, scope: AssetPathScope) -> Self {
+        Self {
+            root: root.into(),
+            scope,
+        }
     }
 
     #[must_use]
@@ -30,17 +35,53 @@ impl AssetSourceRoot {
     }
 
     #[must_use]
-    pub fn source_path(&self, path: &AssetPath) -> PathBuf {
-        path.as_str()
-            .split('/')
-            .fold(self.root.clone(), |path, segment| path.join(segment))
+    pub const fn scope(&self) -> &AssetPathScope {
+        &self.scope
     }
 
+    /// Derives a path relative to this native root, refusing locations outside its exact scope.
+    pub fn source_path(&self, path: &AssetSourcePath) -> Result<PathBuf, AssetDatabaseError> {
+        let local = self
+            .scope
+            .relative_path(path)
+            .ok_or(AssetDatabaseError::SourceOutsideRoot)?;
+        Ok(local
+            .split('/')
+            .fold(self.root.clone(), |path, segment| path.join(segment)))
+    }
+
+    /// Observes an existing native source within this root and returns its canonical location.
     pub fn logical_path_from_source_path(
         &self,
         source_path: impl AsRef<Path>,
-    ) -> Result<AssetPath, AssetDatabaseError> {
-        ProjectAssetDatabase::logical_path_from_source_path(&self.root, source_path)
+    ) -> Result<AssetSourcePath, AssetDatabaseError> {
+        let root = self
+            .root
+            .canonicalize()
+            .map_err(|error| AssetDatabaseError::Filesystem(error.to_string()))?;
+        let source = source_path
+            .as_ref()
+            .canonicalize()
+            .map_err(|error| AssetDatabaseError::Filesystem(error.to_string()))?;
+        let relative = source
+            .strip_prefix(root)
+            .map_err(|_| AssetDatabaseError::SourceOutsideRoot)?;
+
+        let mut segments = Vec::new();
+        for component in relative.components() {
+            match component {
+                Component::Normal(segment) => {
+                    segments.push(segment.to_str().ok_or(AssetDatabaseError::NonUtf8Path)?);
+                }
+                Component::CurDir => {}
+                Component::ParentDir | Component::RootDir | Component::Prefix(_) => {
+                    return Err(AssetDatabaseError::SourceOutsideRoot);
+                }
+            }
+        }
+        let local = AssetPath::new(segments.join("/"))
+            .map_err(|error| AssetDatabaseError::Filesystem(error.to_string()))?;
+        Ok(self.scope.resolve(&local))
     }
 }
 
@@ -53,13 +94,13 @@ pub enum AssetSourceChangeKind {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct AssetSourceChange {
-    path: AssetPath,
+    path: AssetSourcePath,
     observation: PendingSourceChange,
 }
 
 impl AssetSourceChange {
     #[must_use]
-    pub const fn new(path: AssetPath, kind: AssetSourceChangeKind) -> Self {
+    pub const fn new(path: AssetSourcePath, kind: AssetSourceChangeKind) -> Self {
         Self {
             path,
             observation: PendingSourceChange::new(kind),
@@ -67,7 +108,7 @@ impl AssetSourceChange {
     }
 
     #[must_use]
-    pub const fn path(&self) -> &AssetPath {
+    pub const fn path(&self) -> &AssetSourcePath {
         &self.path
     }
 
@@ -210,7 +251,7 @@ fn checked_source_change_limit(
 pub struct AssetSourceChanges {
     limits: AssetSourceChangeLimits,
     retained_payload_bytes: usize,
-    changes: BTreeMap<AssetPath, PendingSourceChange>,
+    changes: BTreeMap<AssetSourcePath, PendingSourceChange>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -319,7 +360,10 @@ impl AssetSourceChanges {
         Ok(())
     }
 
-    pub fn modified(&mut self, path: AssetPath) -> Result<(), AssetSourceChangeAdmissionError> {
+    pub fn modified(
+        &mut self,
+        path: AssetSourcePath,
+    ) -> Result<(), AssetSourceChangeAdmissionError> {
         self.push(AssetSourceChange::new(
             path,
             AssetSourceChangeKind::Modified,
@@ -328,7 +372,7 @@ impl AssetSourceChanges {
 
     pub fn meta_modified(
         &mut self,
-        path: AssetPath,
+        path: AssetSourcePath,
     ) -> Result<(), AssetSourceChangeAdmissionError> {
         self.push(AssetSourceChange::new(
             path,
@@ -336,7 +380,10 @@ impl AssetSourceChanges {
         ))
     }
 
-    pub fn removed(&mut self, path: AssetPath) -> Result<(), AssetSourceChangeAdmissionError> {
+    pub fn removed(
+        &mut self,
+        path: AssetSourcePath,
+    ) -> Result<(), AssetSourceChangeAdmissionError> {
         self.push(AssetSourceChange::new(path, AssetSourceChangeKind::Removed))
     }
 
@@ -344,7 +391,7 @@ impl AssetSourceChanges {
         &mut self,
         changes: impl IntoIterator<Item = AssetSourceChange>,
     ) -> Result<(), AssetSourceChangeAdmissionError> {
-        let mut incoming: BTreeMap<AssetPath, PendingSourceChange> = BTreeMap::new();
+        let mut incoming: BTreeMap<AssetSourcePath, PendingSourceChange> = BTreeMap::new();
         let mut input_items = 0_usize;
         let mut input_payload_bytes = 0_usize;
         let mut retained_items = self.changes.len();

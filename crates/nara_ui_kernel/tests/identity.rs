@@ -17,6 +17,27 @@ fn identity(context: impl AsRef<[u8]>, placement: impl AsRef<[u8]>) -> UiPersist
 }
 
 #[test]
+fn external_image_identity_is_provider_scoped_and_disjoint_from_names() {
+    struct ImageProvider;
+    struct OtherProvider;
+    let image = UiImageId::external::<ImageProvider>(17);
+    assert_eq!(image, UiImageId::external::<ImageProvider>(17));
+    assert_ne!(image, UiImageId::external::<OtherProvider>(17));
+    assert_ne!(image, UiImageId::external::<ImageProvider>(18));
+    assert_ne!(image, UiImageId::new(image.to_string()).unwrap());
+    assert!(image.as_name().is_none());
+    assert_eq!(
+        UiImageId::new("product:opaque/primary").unwrap().as_name(),
+        Some("product:opaque/primary")
+    );
+    let mut values = BTreeSet::new();
+    values.insert(image.clone());
+    values.insert(UiImageId::external::<OtherProvider>(17));
+    values.insert(UiImageId::new(image.to_string()).unwrap());
+    assert_eq!(values.len(), 3);
+}
+
+#[test]
 fn complete_root_cost_is_admitted_before_ready_or_rejected_body_validation() {
     let root = UiRootKey::runtime("a", "b").unwrap();
     assert_eq!(UiKey::root(root.clone()).unwrap().encoded_len(), 10);

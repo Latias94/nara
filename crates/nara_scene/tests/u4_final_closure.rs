@@ -4,7 +4,9 @@ mod prefab_source;
 
 #[cfg(feature = "serde")]
 use nara_asset::AssetRef;
-use nara_asset::{AssetPath, AssetRecord, AssetSourceKind, ProjectAssetDatabase, StableAssetId};
+use nara_asset::{
+    AssetRecord, AssetSourceKind, AssetSourcePath, ProjectAssetDatabase, StableAssetId,
+};
 use nara_core::ItemLimit;
 use nara_ecs::Component;
 use nara_identity::EntityReference;
@@ -122,7 +124,7 @@ fn database(include_default: bool) -> ProjectAssetDatabase {
     database
         .insert(AssetRecord::new(
             StableAssetId::parse_str("11111111-1111-4111-8111-111111111111").unwrap(),
-            AssetPath::new("textures/present.png").unwrap(),
+            AssetSourcePath::new("textures/present.png").unwrap(),
             AssetSourceKind::Image,
         ))
         .unwrap();
@@ -130,7 +132,7 @@ fn database(include_default: bool) -> ProjectAssetDatabase {
         database
             .insert(AssetRecord::new(
                 StableAssetId::parse_str("22222222-2222-4222-8222-222222222222").unwrap(),
-                AssetPath::new("textures/default.png").unwrap(),
+                AssetSourcePath::new("textures/default.png").unwrap(),
                 AssetSourceKind::Image,
             ))
             .unwrap();
@@ -167,44 +169,80 @@ fn nested_multi_operation_closure_commits_one_inverse_and_revision_across_native
     let original = document();
     let patch = final_closure_patch();
     let mut direct = original.clone();
-    let report = patch.apply_to_scene_with_asset_database(&mut direct, &registry, &database);
+    let report = patch.apply_to_scene_with_asset_resolution(
+        &mut direct,
+        &registry,
+        database.resolver(&nara_asset::AssetPathScope::ROOT),
+    );
     assert!(report.applied, "{:?}", report.diagnostics);
     let inverse = report.inverse.unwrap();
     assert!(
         inverse
-            .apply_to_scene_with_asset_database(&mut direct, &registry, &database)
+            .apply_to_scene_with_asset_resolution(
+                &mut direct,
+                &registry,
+                database.resolver(&nara_asset::AssetPathScope::ROOT)
+            )
             .applied
     );
     assert_eq!(direct, original);
 
     let mut scene = SceneAuthoringSession::new(original.clone());
     let before = scene.revision();
-    let report = scene.apply_patch_with_asset_database(&patch, &registry, &database);
+    let report = scene.apply_patch_with_asset_resolution(
+        &patch,
+        &registry,
+        database.resolver(&nara_asset::AssetPathScope::ROOT),
+    );
     assert!(report.applied, "{:?}", report.diagnostics);
     assert!(report.inverse.is_some());
     assert_eq!(scene.revision().generation(), before.generation() + 1);
     assert_eq!(scene.history_status().undo_depth, 1);
-    assert!(scene.undo_with_asset_database(&registry, &database).applied);
+    assert!(
+        scene
+            .undo_with_asset_resolution(
+                &registry,
+                database.resolver(&nara_asset::AssetPathScope::ROOT)
+            )
+            .applied
+    );
     assert_eq!(scene.document(), &original);
-    assert!(scene.redo_with_asset_database(&registry, &database).applied);
+    assert!(
+        scene
+            .redo_with_asset_resolution(
+                &registry,
+                database.resolver(&nara_asset::AssetPathScope::ROOT)
+            )
+            .applied
+    );
 
     let original_prefab = PrefabDocument::new(original.roots.clone(), original.entities.clone());
     let mut prefab = PrefabAuthoringSession::new(original_prefab.clone());
     let before = prefab.revision();
-    let report = prefab.apply_patch_with_asset_database(&patch, &registry, &database);
+    let report = prefab.apply_patch_with_asset_resolution(
+        &patch,
+        &registry,
+        database.resolver(&nara_asset::AssetPathScope::ROOT),
+    );
     assert!(report.applied, "{:?}", report.diagnostics);
     assert!(report.inverse.is_some());
     assert_eq!(prefab.revision().generation(), before.generation() + 1);
     assert_eq!(prefab.history_status().undo_depth, 1);
     assert!(
         prefab
-            .undo_with_asset_database(&registry, &database)
+            .undo_with_asset_resolution(
+                &registry,
+                database.resolver(&nara_asset::AssetPathScope::ROOT)
+            )
             .applied
     );
     assert_eq!(prefab.document(), &original_prefab);
     assert!(
         prefab
-            .redo_with_asset_database(&registry, &database)
+            .redo_with_asset_resolution(
+                &registry,
+                database.resolver(&nara_asset::AssetPathScope::ROOT)
+            )
             .applied
     );
 }
@@ -228,7 +266,11 @@ fn final_nested_asset_or_local_dangling_rejects_without_history_publication() {
         let original = scene.document().clone();
         let revision = scene.revision();
         let history = scene.history_status();
-        let report = scene.apply_patch_with_asset_database(&patch, &registry, &database);
+        let report = scene.apply_patch_with_asset_resolution(
+            &patch,
+            &registry,
+            database.resolver(&nara_asset::AssetPathScope::ROOT),
+        );
         assert!(!report.applied, "final dangling closure was published");
         assert!(report.inverse.is_none());
         assert_eq!(scene.document(), &original);
@@ -239,7 +281,11 @@ fn final_nested_asset_or_local_dangling_rejects_without_history_publication() {
         let mut prefab = PrefabAuthoringSession::new(original.clone());
         let revision = prefab.revision();
         let history = prefab.history_status();
-        let report = prefab.apply_patch_with_asset_database(&patch, &registry, &database);
+        let report = prefab.apply_patch_with_asset_resolution(
+            &patch,
+            &registry,
+            database.resolver(&nara_asset::AssetPathScope::ROOT),
+        );
         assert!(
             !report.applied,
             "final dangling Prefab closure was published"
@@ -275,8 +321,11 @@ fn effective_asset_defaults_require_catalogue_membership_only_when_database_is_s
     );
     let mut unresolved = document();
     let original = unresolved.clone();
-    let rejected =
-        patch.apply_to_scene_with_asset_database(&mut unresolved, &registry, &database(false));
+    let rejected = patch.apply_to_scene_with_asset_resolution(
+        &mut unresolved,
+        &registry,
+        database(false).resolver(&nara_asset::AssetPathScope::ROOT),
+    );
     assert!(
         !rejected.applied,
         "an omitted default asset bypassed the selected catalogue"
@@ -284,8 +333,11 @@ fn effective_asset_defaults_require_catalogue_membership_only_when_database_is_s
     assert!(rejected.inverse.is_none());
     assert_eq!(unresolved, original);
     let mut catalogued = document();
-    let report =
-        patch.apply_to_scene_with_asset_database(&mut catalogued, &registry, &database(true));
+    let report = patch.apply_to_scene_with_asset_resolution(
+        &mut catalogued,
+        &registry,
+        database(true).resolver(&nara_asset::AssetPathScope::ROOT),
+    );
     assert!(report.applied, "{:?}", report.diagnostics);
     assert_eq!(logical, catalogued);
 }
@@ -363,7 +415,7 @@ fn public_patch_selected_value_limits_bound_default_interpretation() {
 
 #[cfg(feature = "serde")]
 #[test]
-fn authoring_asset_database_file_entries_preserve_selected_canonical_value_limits() {
+fn authoring_asset_resolution_file_entries_preserve_selected_canonical_value_limits() {
     use nara_scene::{PrefabDocumentCandidate, SceneDocumentCandidate, SceneFileLimits};
     let registry = budget_registry();
     let database = ProjectAssetDatabase::default();
@@ -375,10 +427,10 @@ fn authoring_asset_database_file_entries_preserve_selected_canonical_value_limit
             .unwrap()
     };
     assert!(
-        SceneAuthoringSession::try_from_file_candidate_with_asset_database(
+        SceneAuthoringSession::try_from_file_candidate_with_asset_resolution(
             scene_candidate(),
             &registry,
-            &database,
+            database.resolver(&nara_asset::AssetPathScope::ROOT),
         )
         .is_err()
     );
@@ -386,7 +438,11 @@ fn authoring_asset_database_file_entries_preserve_selected_canonical_value_limit
     let revision = session.revision();
     assert!(
         session
-            .try_replace_file_candidate_with_asset_database(scene_candidate(), &registry, &database)
+            .try_replace_file_candidate_with_asset_resolution(
+                scene_candidate(),
+                &registry,
+                database.resolver(&nara_asset::AssetPathScope::ROOT)
+            )
             .is_err()
     );
     assert_eq!(session.document(), &SceneDocument::default());
@@ -399,10 +455,10 @@ fn authoring_asset_database_file_entries_preserve_selected_canonical_value_limit
             .unwrap()
     };
     assert!(
-        PrefabAuthoringSession::try_from_file_candidate_with_asset_database(
+        PrefabAuthoringSession::try_from_file_candidate_with_asset_resolution(
             prefab_candidate(),
             &registry,
-            &database,
+            database.resolver(&nara_asset::AssetPathScope::ROOT),
         )
         .is_err()
     );
@@ -410,10 +466,10 @@ fn authoring_asset_database_file_entries_preserve_selected_canonical_value_limit
     let revision = session.revision();
     assert!(
         session
-            .try_replace_file_candidate_with_asset_database(
+            .try_replace_file_candidate_with_asset_resolution(
                 prefab_candidate(),
                 &registry,
-                &database
+                database.resolver(&nara_asset::AssetPathScope::ROOT)
             )
             .is_err()
     );

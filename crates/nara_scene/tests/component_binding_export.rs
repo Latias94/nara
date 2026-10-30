@@ -4,8 +4,8 @@ use std::{collections::BTreeSet, sync::Arc};
 
 use nara_app::{App, Plugin, PluginCategory, PluginDeclaration, PluginError, PluginId};
 use nara_asset::{
-    AssetPath, AssetRecord, AssetRef, AssetRefExportPolicy, AssetServer, AssetSourceKind, Handle,
-    ProjectAssetDatabase, StableAssetId,
+    AssetRecord, AssetRef, AssetRefExportPolicy, AssetServer, AssetSourceKind, AssetSourcePath,
+    Handle, ProjectAssetDatabase, StableAssetId,
 };
 use nara_core::{ByteLimit, DepthLimit, ItemLimit};
 use nara_ecs::{Component, Entity, World};
@@ -139,14 +139,33 @@ fn native_registry() -> ComponentRegistry {
             ),
             |value, context| {
                 let reference = read_asset(value.field("nested")?.field("image")?)?;
-                let handle = context
-                    .resolve_asset_ref_with_kind::<FixtureImage>(
-                        &reference,
-                        &AssetSourceKind::Image,
-                    )
-                    .ok_or_else(|| ComponentCodecError::missing_field("AssetServer"))?
-                    .map_err(|_| ComponentCodecError::invalid_field("image", "admitted image"))?;
-                Ok(PreparedComponentCandidate::insert(NativeImage(handle)))
+                if let Some(handle) = context.resolve_asset_ref_with_kind::<FixtureImage>(
+                    &reference,
+                    &AssetSourceKind::Image,
+                ) {
+                    return handle
+                        .map(|handle| PreparedComponentCandidate::insert(NativeImage(handle)))
+                        .map_err(|_| {
+                            ComponentCodecError::invalid_field("image", "admitted image")
+                        });
+                }
+                let resolver = context
+                    .asset_resolution()
+                    .ok_or_else(|| ComponentCodecError::missing_field("asset resolution"))?;
+                let record = reference
+                    .validate_with_database_as(resolver, &AssetSourceKind::Image)
+                    .map_err(|_| ComponentCodecError::invalid_field("image", "admitted image"))?
+                    .clone();
+                Ok(PreparedComponentCandidate::with_asset_server(
+                    move |context| {
+                        context
+                            .reserve_asset_record(&record)
+                            .map(NativeImage)
+                            .map_err(|_| {
+                                ComponentCodecError::invalid_field("image", "admitted image")
+                            })
+                    },
+                ))
             },
             |image, world, context| {
                 let server = world
@@ -155,6 +174,7 @@ fn native_registry() -> ComponentRegistry {
                 let reference = AssetRef::from_handle_with_policy(
                     server,
                     image.0,
+                    context.asset_path_scope(),
                     context.asset_ref_export_policy(),
                 )
                 .map_err(|_| ComponentCodecError::invalid_field("image", "known native handle"))?;
@@ -193,7 +213,7 @@ fn spawn(
     world: &mut World,
     document: SceneDocument,
     slot: &str,
-    database: Option<&ProjectAssetDatabase>,
+    database: Option<nara_asset::AssetReferenceResolver<'_>>,
 ) -> SpawnedSceneInstance {
     let candidate = ExpandedSceneCandidate::plain(source_key(slot), Arc::new(document));
     let occurrence = SceneOccurrenceKey::new("game.export-tests", slot).unwrap();
@@ -720,7 +740,7 @@ fn database(path: &str) -> (ProjectAssetDatabase, AssetRef) {
     database
         .insert(AssetRecord::new(
             stable,
-            AssetPath::new(path).unwrap(),
+            AssetSourcePath::new(path).unwrap(),
             AssetSourceKind::Image,
         ))
         .unwrap();
@@ -743,6 +763,223 @@ fn options(policy: AssetRefExportPolicy) -> SceneExportOptions {
         asset_ref_export_policy: policy,
         ..Default::default()
     }
+}
+
+#[test]
+fn scoped_scene_prepare_cook_and_export_preserve_identity_without_canonical_prefixes() {
+    use nara_asset::{AssetPathScope, AssetProductRef, ImportedProductId};
+    use nara_scene::{RuntimeSceneCandidate, RuntimeSceneLimits};
+
+    let assets = AssetPathScope::under(AssetSourcePath::new("game/art").unwrap());
+    let foreign = AssetPathScope::under(AssetSourcePath::new("package/art").unwrap());
+    let registry = native_registry();
+    let bindings =
+        SceneComponentBindings::new(registry.snapshot().unwrap(), [data_owner()]).unwrap();
+    let (mut database, stable) = database("game/art/shared.png");
+    let source = stable.as_stable_id().unwrap();
+    database
+        .insert(AssetRecord::new(
+            "22222222-2222-4222-8222-222222222222".parse().unwrap(),
+            AssetSourcePath::new("package/art/shared.png").unwrap(),
+            AssetSourceKind::Image,
+        ))
+        .unwrap();
+    let path = AssetRef::path("shared.png").unwrap();
+    let product =
+        AssetRef::Product(AssetProductRef::new(source, ImportedProductId::PRIMARY).unwrap());
+    let document = SceneDocument::from_ordered_roots([SceneEntityRecord::new(id("image"))
+        .with_component(
+            component("game.Images"),
+            data_record(images_value([("stable", stable)])),
+        )
+        .with_component(
+            component("game.NativeImage"),
+            SceneComponentRecord::new(
+                ComponentSchemaVersion::ONE,
+                ComponentValue::map([(
+                    "nested",
+                    ComponentValue::map([("image", asset_value(&path))]),
+                )]),
+            ),
+        )]);
+    let resolver = database.resolver(&assets);
+    let diagnostics = bindings.validate_scene(&document, Some(resolver), Default::default());
+    assert!(!diagnostics.has_errors(), "{diagnostics:?}");
+    let candidate = ExpandedSceneCandidate::plain(source_key("scoped"), Arc::new(document.clone()));
+    let cooked = RuntimeSceneCandidate::cook(
+        &candidate,
+        &bindings,
+        resolver,
+        RuntimeSceneLimits::default(),
+    )
+    .unwrap();
+    let cooked_native =
+        &cooked.document().entities[0].components[&component("game.NativeImage")].value;
+    assert_eq!(
+        cooked_native
+            .field("nested")
+            .unwrap()
+            .field("image")
+            .unwrap(),
+        &asset_value(&product)
+    );
+
+    let mut world = World::new();
+    let instance = spawn(&bindings, &mut world, document, "scoped", Some(resolver));
+    let saved = output(bindings.export_scene_with_options(
+        &world,
+        options(AssetRefExportPolicy::Path),
+        Some(resolver),
+    ));
+    let saved_record = exported(&saved, &instance, "image");
+    assert_eq!(
+        saved_record.components[&component("game.Images")].value,
+        images_value([("stable", path.clone())])
+    );
+    assert_eq!(
+        saved_record.components[&component("game.NativeImage")]
+            .value
+            .field("nested")
+            .unwrap()
+            .field("image")
+            .unwrap(),
+        &asset_value(&path)
+    );
+    let saved_entity_id = saved_record.id.clone();
+    let mut reopened = World::new();
+    let reopened_instance = spawn(
+        &bindings,
+        &mut reopened,
+        saved.document,
+        "reopened",
+        Some(resolver),
+    );
+    let reopened_entity = live_entity(&reopened, &reopened_instance, saved_entity_id.as_str());
+    let reopened_handle = reopened.get::<NativeImage>(reopened_entity).unwrap().0;
+    let reopened_server = reopened.resource::<AssetServer>();
+    assert_eq!(
+        reopened_server.path(reopened_handle.id()).unwrap().as_str(),
+        "game/art/shared.png"
+    );
+    assert_eq!(
+        reopened_server.stable_id(reopened_handle.id()),
+        Some(source)
+    );
+
+    let cross_root = output(bindings.export_scene_with_options(
+        &world,
+        options(AssetRefExportPolicy::Path),
+        Some(database.resolver(&foreign)),
+    ));
+    let cross_record = exported(&cross_root, &instance, "image");
+    assert_eq!(
+        cross_record.components[&component("game.Images")].value,
+        images_value([("stable", product.clone())])
+    );
+    assert_eq!(
+        cross_record.components[&component("game.NativeImage")]
+            .value
+            .field("nested")
+            .unwrap()
+            .field("image")
+            .unwrap(),
+        &asset_value(&product)
+    );
+}
+
+#[test]
+fn prefab_lookup_scope_is_separate_from_component_resolution_and_keeps_owner_source_keys() {
+    use nara_asset::{AssetPathScope, AssetReferenceResolver};
+    use nara_scene::{
+        InMemoryPrefabSourceResolver, PrefabDocument, PrefabInstance, PrefabSourceResolver,
+        ResolvedPrefabSource,
+    };
+
+    struct Prefabs<'a> {
+        database: &'a ProjectAssetDatabase,
+        declarations: AssetPathScope,
+        path: AssetSourcePath,
+        source: ResolvedPrefabSource,
+    }
+    impl PrefabSourceResolver for Prefabs<'_> {
+        fn resolve_prefab(&self, reference: &AssetRef) -> Option<ResolvedPrefabSource> {
+            if !reference.is_primary() {
+                return None;
+            }
+            let resolver: AssetReferenceResolver<'_> = self.database.resolver(&self.declarations);
+            let record = resolver.resolve_ref(reference).ok()?;
+            (record.path() == &self.path).then(|| self.source.clone())
+        }
+    }
+
+    let registry = native_registry();
+    let bindings =
+        SceneComponentBindings::new(registry.snapshot().unwrap(), [data_owner()]).unwrap();
+    let assets = AssetPathScope::under(AssetSourcePath::new("game/art").unwrap());
+    let declarations = AssetPathScope::under(AssetSourcePath::new("game/prefabs").unwrap());
+    let (mut database, _) = database("game/art/shared.png");
+    let canonical = AssetSourcePath::new("game/prefabs/shared.png").unwrap();
+    database
+        .insert(AssetRecord::new(
+            "44444444-4444-4444-8444-444444444444".parse().unwrap(),
+            canonical.clone(),
+            AssetSourceKind::Prefab,
+        ))
+        .unwrap();
+    let request = AssetRef::path("shared.png").unwrap();
+    let key = SourceDocumentKey::project_location(
+        "e758bd18-2f06-4736-9752-dcfe038c3289".parse().unwrap(),
+        canonical.clone(),
+        SourceDocumentKind::Prefab,
+    );
+    let prefab = PrefabDocument::from_ordered_roots([SceneEntityRecord::new(id("leaf"))
+        .with_component(
+            component("game.NativeImage"),
+            SceneComponentRecord::new(
+                ComponentSchemaVersion::ONE,
+                ComponentValue::map([(
+                    "nested",
+                    ComponentValue::map([("image", asset_value(&request))]),
+                )]),
+            ),
+        )]);
+    let direct = Prefabs {
+        database: &database,
+        declarations,
+        path: canonical,
+        source: ResolvedPrefabSource::bound(Arc::new(prefab.clone()), key.clone()),
+    };
+    assert_eq!(direct.resolve_prefab(&request).unwrap().key(), &key);
+    let snapshot = InMemoryPrefabSourceResolver::new().with_prefab(request.clone(), key, prefab);
+    let mut anchor = SceneEntityRecord::new(id("anchor"));
+    anchor.prefab = Some(PrefabInstance {
+        source: request,
+        overrides: None,
+    });
+    let document = SceneDocument::from_ordered_roots([anchor]);
+    let expand = |lookup: &dyn PrefabSourceResolver| {
+        bindings
+            .try_expand_prefabs_with_loader(
+                &document,
+                Default::default(),
+                Some(database.resolver(&assets)),
+                |reference, _| Ok::<_, std::convert::Infallible>(lookup.resolve_prefab(reference)),
+            )
+            .unwrap()
+    };
+    let direct = expand(&direct);
+    let snapshot = expand(&snapshot);
+    assert!(!direct.diagnostics.has_errors(), "{:?}", direct.diagnostics);
+    assert!(
+        !snapshot.diagnostics.has_errors(),
+        "{:?}",
+        snapshot.diagnostics
+    );
+    assert_eq!(direct.document(), snapshot.document());
+    assert_eq!(
+        direct.candidate.unwrap().provenance(),
+        snapshot.candidate.unwrap().provenance()
+    );
 }
 
 #[test]
@@ -776,15 +1013,18 @@ fn mixed_nested_assets_obey_both_policies_and_missing_conversion_has_no_output()
         &mut world,
         document,
         "mixed-assets",
-        Some(&database),
+        Some(database.resolver(&nara_asset::AssetPathScope::ROOT)),
     );
     let server = world.resource::<AssetServer>().clone();
     for (policy, expected) in [
         (AssetRefExportPolicy::Path, &path),
         (AssetRefExportPolicy::StableIdWhenKnown, &stable),
     ] {
-        let result =
-            output(bindings.export_scene_with_options(&world, options(policy), Some(&database)));
+        let result = output(bindings.export_scene_with_options(
+            &world,
+            options(policy),
+            Some(database.resolver(&nara_asset::AssetPathScope::ROOT)),
+        ));
         let record = exported(&result, &instance, "images");
         let native = &record.components[&component("game.NativeImage")].value;
         assert_eq!(
@@ -799,7 +1039,10 @@ fn mixed_nested_assets_obey_both_policies_and_missing_conversion_has_no_output()
         );
     }
     let missing = ProjectAssetDatabase::default();
-    for metadata in [None, Some(&missing)] {
+    for metadata in [
+        None,
+        Some(missing.resolver(&nara_asset::AssetPathScope::ROOT)),
+    ] {
         rejected(
             bindings.export_scene_with_options(
                 &world,
@@ -845,8 +1088,11 @@ fn unknown_data_paths_remain_paths_without_native_handles_or_loading() {
         AssetRefExportPolicy::Path,
         AssetRefExportPolicy::StableIdWhenKnown,
     ] {
-        let result =
-            output(bindings.export_scene_with_options(&world, options(policy), Some(&metadata)));
+        let result = output(bindings.export_scene_with_options(
+            &world,
+            options(policy),
+            Some(metadata.resolver(&nara_asset::AssetPathScope::ROOT)),
+        ));
         assert_eq!(
             exported(&result, &instance, "data").components[&component("game.Images")].value,
             value,
@@ -1064,26 +1310,37 @@ fn asset_policy_growth_is_admitted_before_owning_replacement() {
             data_record(images_value([("image", stable)])),
         )]),
         "growth",
-        Some(&database),
+        Some(database.resolver(&nara_asset::AssetPathScope::ROOT)),
     );
     let expected = images_value([("image", AssetRef::path(&path).unwrap())]);
     let cost = expected.cost();
     let mut export_options = options(AssetRefExportPolicy::Path);
     export_options.value_limits = limits(cost.nodes(), cost.logical_bytes(), 5);
-    let result =
-        output(bindings.export_scene_with_options(&world, export_options, Some(&database)));
+    let result = output(bindings.export_scene_with_options(
+        &world,
+        export_options,
+        Some(database.resolver(&nara_asset::AssetPathScope::ROOT)),
+    ));
     assert_eq!(
         exported(&result, &instance, "data").components[&component("game.Images")].value,
         expected,
     );
     export_options.value_limits = limits(cost.nodes(), cost.logical_bytes() - 1, 5);
     rejected(
-        bindings.export_scene_with_options(&world, export_options, Some(&database)),
+        bindings.export_scene_with_options(
+            &world,
+            export_options,
+            Some(database.resolver(&nara_asset::AssetPathScope::ROOT)),
+        ),
         "scene.export-value-budget-exceeded",
     );
     export_options.value_limits = limits(cost.nodes(), cost.logical_bytes(), 4);
     rejected(
-        bindings.export_scene_with_options(&world, export_options, Some(&database)),
+        bindings.export_scene_with_options(
+            &world,
+            export_options,
+            Some(database.resolver(&nara_asset::AssetPathScope::ROOT)),
+        ),
         "scene.export-value-budget-exceeded",
     );
 }
@@ -1265,7 +1522,7 @@ fn native_and_data_asset_defaults_use_the_same_metadata_policy() {
                     ),
                 )]),
             "default-assets",
-            Some(&database),
+            Some(database.resolver(&nara_asset::AssetPathScope::ROOT)),
         );
         let native_only = SceneComponentBindings::new(native.snapshot().unwrap(), []).unwrap();
         let mut native_world = World::new();
@@ -1281,7 +1538,7 @@ fn native_and_data_asset_defaults_use_the_same_metadata_policy() {
                     ),
                 )]),
             "native-default-assets",
-            Some(&database),
+            Some(database.resolver(&nara_asset::AssetPathScope::ROOT)),
         );
         let server = world.get_resource::<AssetServer>().cloned();
         for (policy, expected) in [
@@ -1291,7 +1548,7 @@ fn native_and_data_asset_defaults_use_the_same_metadata_policy() {
             let result = output(bindings.export_scene_with_options(
                 &world,
                 options(policy),
-                Some(&database),
+                Some(database.resolver(&nara_asset::AssetPathScope::ROOT)),
             ));
             let record = exported(&result, &instance, "defaulted");
             for name in ["game.NativeDefault", "game.DataDefault"] {
@@ -1300,11 +1557,11 @@ fn native_and_data_asset_defaults_use_the_same_metadata_policy() {
                     ComponentValue::map([("image", asset_value(expected))])
                 );
             }
-            let native_result = output(nara_scene::export_scene_with_asset_database(
+            let native_result = output(nara_scene::export_scene_with_asset_resolution(
                 &native_world,
                 &native,
                 options(policy),
-                &database,
+                database.resolver(&nara_asset::AssetPathScope::ROOT),
             ));
             assert_eq!(
                 native_result.document.entities[0].components[&component("game.NativeDefault")]

@@ -9,8 +9,8 @@ use std::{
 use nara_ecs::Resource;
 
 use crate::{
-    AssetId, AssetPath, AssetPathError, AssetProductIdentityError, AssetProductRef, AssetRecord,
-    Handle, ImportedProductId, StableAssetId,
+    AssetId, AssetPathError, AssetProductIdentityError, AssetProductRef, AssetRecord,
+    AssetSourcePath, Handle, ImportedProductId, StableAssetId,
 };
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -19,11 +19,11 @@ pub enum AssetError {
     InvalidPath(AssetPathError),
     InvalidProductIdentity(AssetProductIdentityError),
     ConflictingAssetIdentity {
-        path: AssetPath,
+        path: AssetSourcePath,
         stable_id: StableAssetId,
     },
     PathAlreadyBound {
-        path: AssetPath,
+        path: AssetSourcePath,
         existing_id: AssetId,
         requested_id: AssetId,
     },
@@ -34,8 +34,8 @@ pub enum AssetError {
     },
     AssetIdAlreadyBoundToPath {
         id: AssetId,
-        existing_path: AssetPath,
-        requested_path: AssetPath,
+        existing_path: AssetSourcePath,
+        requested_path: AssetSourcePath,
     },
     AssetIdAlreadyBoundToStableId {
         id: AssetId,
@@ -128,8 +128,8 @@ impl Error for AssetError {}
 /// existence, codec compatibility nor residency; those remain the content owner's responsibility.
 #[derive(Debug, Clone, PartialEq, Eq, Resource)]
 pub struct AssetServer {
-    paths: HashMap<AssetPath, AssetId>,
-    reverse_paths: HashMap<AssetId, AssetPath>,
+    paths: HashMap<AssetSourcePath, AssetId>,
+    reverse_paths: HashMap<AssetId, AssetSourcePath>,
     products: HashMap<AssetProductRef, AssetId>,
     reverse_products: HashMap<AssetId, AssetProductRef>,
     type_claims: HashMap<AssetId, (TypeId, &'static str)>,
@@ -164,8 +164,8 @@ impl AssetServer {
     pub fn checked_retained_bytes(&self) -> Option<usize> {
         let mut bytes = size_of::<Self>();
         for entries in [
-            checked_map_bytes::<AssetPath, AssetId>(self.paths.len())?,
-            checked_map_bytes::<AssetId, AssetPath>(self.reverse_paths.len())?,
+            checked_map_bytes::<AssetSourcePath, AssetId>(self.paths.len())?,
+            checked_map_bytes::<AssetId, AssetSourcePath>(self.reverse_paths.len())?,
             checked_map_bytes::<AssetProductRef, AssetId>(self.products.len())?,
             checked_map_bytes::<AssetId, AssetProductRef>(self.reverse_products.len())?,
             checked_map_bytes::<AssetId, (TypeId, &'static str)>(self.type_claims.len())?,
@@ -184,29 +184,30 @@ impl AssetServer {
     /// owner itself. It is a conservative admission bound when some of the binding already
     /// exists; it neither allocates a runtime identity nor changes this or another catalogue.
     #[must_use]
-    pub fn checked_product_binding_retained_bytes(path: Option<&AssetPath>) -> Option<usize> {
+    pub fn checked_product_binding_retained_bytes(path: Option<&AssetSourcePath>) -> Option<usize> {
         let mut bytes = checked_map_bytes::<AssetProductRef, AssetId>(1)?
             .checked_add(checked_map_bytes::<AssetId, AssetProductRef>(1)?)?
             .checked_add(checked_map_bytes::<AssetId, (TypeId, &'static str)>(1)?)?;
         if let Some(path) = path {
             bytes = bytes
-                .checked_add(checked_map_bytes::<AssetPath, AssetId>(1)?)?
-                .checked_add(checked_map_bytes::<AssetId, AssetPath>(1)?)?
+                .checked_add(checked_map_bytes::<AssetSourcePath, AssetId>(1)?)?
+                .checked_add(checked_map_bytes::<AssetId, AssetSourcePath>(1)?)?
                 .checked_add(path.as_str().len().checked_mul(2)?)?;
         }
         Some(bytes)
     }
 
+    /// Reserves a canonical source location, independently of authored alias scopes.
     pub fn reserve<T: 'static>(
         &mut self,
         path: impl Into<String>,
     ) -> Result<Handle<T>, AssetError> {
-        let path = AssetPath::new(path.into()).map_err(AssetError::InvalidPath)?;
+        let path = AssetSourcePath::new(path.into()).map_err(AssetError::InvalidPath)?;
         let id = self.reserve_path_id(path)?;
         self.claim(id)
     }
 
-    pub fn reserve_path_id(&mut self, path: AssetPath) -> Result<AssetId, AssetError> {
+    pub fn reserve_path_id(&mut self, path: AssetSourcePath) -> Result<AssetId, AssetError> {
         if let Some(id) = self.paths.get(&path).copied() {
             return Ok(id);
         }
@@ -322,7 +323,7 @@ impl AssetServer {
     }
 
     #[must_use]
-    pub(crate) fn id_for_path(&self, path: &AssetPath) -> Option<AssetId> {
+    pub(crate) fn id_for_path(&self, path: &AssetSourcePath) -> Option<AssetId> {
         self.paths.get(path).copied()
     }
 
@@ -333,8 +334,8 @@ impl AssetServer {
     }
 
     #[must_use]
-    pub fn path(&self, id: AssetId) -> Option<&str> {
-        self.reverse_paths.get(&id).map(AssetPath::as_str)
+    pub fn path(&self, id: AssetId) -> Option<&AssetSourcePath> {
+        self.reverse_paths.get(&id)
     }
 
     /// Returns the complete product identity, including any auxiliary selection.
@@ -373,14 +374,14 @@ impl AssetServer {
         Ok(())
     }
 
-    fn bind_path(&mut self, id: AssetId, path: AssetPath) -> Result<(), AssetError> {
+    fn bind_path(&mut self, id: AssetId, path: AssetSourcePath) -> Result<(), AssetError> {
         self.validate_path_binding(id, &path)?;
         self.paths.insert(path.clone(), id);
         self.reverse_paths.insert(id, path);
         Ok(())
     }
 
-    fn validate_path_binding(&self, id: AssetId, path: &AssetPath) -> Result<(), AssetError> {
+    fn validate_path_binding(&self, id: AssetId, path: &AssetSourcePath) -> Result<(), AssetError> {
         if let Some(existing_id) = self.paths.get(path).copied()
             && existing_id != id
         {

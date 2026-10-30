@@ -1651,14 +1651,6 @@ fn publish_snapshot_assets(
     world: &mut World,
     snapshot: &ProjectContentSnapshot,
 ) -> Result<(), HostFault> {
-    publish_snapshot_assets_with_database(world, snapshot, snapshot.asset_database())
-}
-
-fn publish_snapshot_assets_with_database(
-    world: &mut World,
-    snapshot: &ProjectContentSnapshot,
-    database: &nara_asset::ProjectAssetDatabase,
-) -> Result<(), HostFault> {
     if snapshot.images().is_empty() && snapshot.tilesets().is_empty() {
         return Ok(());
     }
@@ -1737,7 +1729,7 @@ fn publish_snapshot_assets_with_database(
             )
         },
     )?;
-    world.insert_resource(database.clone());
+    world.insert_resource(snapshot.asset_database().clone());
     publish_snapshot_tilesets(world, snapshot)?;
     Ok(())
 }
@@ -1775,6 +1767,7 @@ fn publish_snapshot_tilesets(
                 record,
                 content.source().clone(),
                 SourceHash::from_digest(*content.source_hash().as_bytes()),
+                snapshot.asset_resolution().scope(),
             )
             .map_err(|_| {
                 HostFault::new(single_error(

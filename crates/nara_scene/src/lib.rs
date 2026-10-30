@@ -86,7 +86,7 @@ pub use data_components::{SceneDataComponentError, SceneDataComponents};
 pub use document::{SceneComponentRecord, SceneDocument, SceneEntityRecord};
 pub use export::{
     SceneExportOptions, SceneExportOutput, SceneExportRemap, SceneExportReport, export_scene,
-    export_scene_with_asset_database, export_scene_with_options,
+    export_scene_with_asset_resolution, export_scene_with_options,
 };
 #[cfg(feature = "serde")]
 pub use format::{
@@ -146,7 +146,8 @@ pub use scene_components::{
     register_scene_components,
 };
 pub use source::{
-    SourceDocumentKey, SourceDocumentKeyError, SourceDocumentKind, SourceDocumentOrigin,
+    SourceDocumentBindingError, SourceDocumentKey, SourceDocumentKeyError, SourceDocumentKind,
+    SourceDocumentOrigin,
 };
 pub use spawn::{
     PreparedScene, SceneEntityRetirementError, SceneEntitySource, SceneProjection,

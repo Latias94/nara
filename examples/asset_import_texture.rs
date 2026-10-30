@@ -1,5 +1,6 @@
 use image::ImageEncoder;
 use nara::advanced_prelude::*;
+use nara::asset::{AssetPathScope, AssetSourcePath};
 use nara::hierarchy::{HierarchyPlacement, HierarchyPlacementOwner, HierarchyWriter};
 
 const TEXTURE_STABLE_ID: &str = "2f0d71c7-14fc-4ed4-b48b-1c61bba8b97f";
@@ -7,7 +8,7 @@ const TEXTURE_STABLE_ID: &str = "2f0d71c7-14fc-4ed4-b48b-1c61bba8b97f";
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let record = AssetRecord::new(
         StableAssetId::parse_str(TEXTURE_STABLE_ID)?,
-        AssetPath::new("textures/generated.png")?,
+        AssetSourcePath::new("textures/generated.png")?,
         AssetSourceKind::Image,
     );
     let mut database = ProjectAssetDatabase::default();
@@ -24,8 +25,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         ],
     )?;
     let mut asset_server = AssetServer::new();
-    let texture = AssetRef::stable_id(TEXTURE_STABLE_ID)?
-        .resolve_with_database::<ImageAsset>(&mut asset_server, &database)?;
+    let texture = AssetRef::stable_id(TEXTURE_STABLE_ID)?.resolve_with_database::<ImageAsset>(
+        &mut asset_server,
+        database.resolver(&AssetPathScope::ROOT),
+    )?;
 
     let mut images = Assets::<ImageAsset>::default();
     let mut states = AssetStates::default();

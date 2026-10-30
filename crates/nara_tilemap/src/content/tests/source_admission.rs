@@ -1,4 +1,95 @@
 use super::*;
+
+#[test]
+fn source_binding_refuses_oversized_prefix_before_request_mutates_the_owner() {
+    let scope = AssetPathScope::under(AssetSourcePath::new("custom/art").unwrap());
+    let required = "custom/art/a.png".len();
+    let limits = TileSetAssetLimits::default()
+        .with_source_reference_bytes(ByteLimit::new(required - 1).unwrap());
+    let mut fixture = Fixture::new(limits);
+    let server = fixture.server.clone();
+    let events = fixture.events.len();
+    let result = fixture.owner.request(
+        fixture.tileset.clone(),
+        source("a.png"),
+        SourceHash::from_bytes(b"bounded"),
+        &scope,
+        &mut fixture.server,
+        &fixture.tilesets,
+        &mut fixture.states,
+    );
+    assert_eq!(result, Err(TileSetAssetError::SourceReferenceCapacity));
+    assert_eq!(fixture.server, server);
+    assert!(fixture.owner.is_empty());
+    assert_eq!(fixture.events.len(), events);
+
+    fixture.owner = TileSetAssets::with_limits(
+        limits.with_source_reference_bytes(ByteLimit::new(required).unwrap()),
+    );
+    let handle = fixture
+        .owner
+        .request(
+            fixture.tileset.clone(),
+            source("a.png"),
+            SourceHash::from_bytes(b"bounded"),
+            &scope,
+            &mut fixture.server,
+            &fixture.tilesets,
+            &mut fixture.states,
+        )
+        .unwrap();
+    assert_eq!(fixture.owner.desired(handle), Some(&source("a.png")));
+}
+
+#[test]
+fn publication_binding_checks_caller_and_receiving_owner_path_allowances() {
+    let limits = TileSetAssetLimits::default().with_source_reference_bytes(ByteLimit::ONE);
+    let mut fixture = Fixture::new(limits);
+    let handle = fixture
+        .server
+        .reserve_record::<TileSet>(&fixture.tileset)
+        .unwrap();
+    let image_handle = fixture
+        .server
+        .reserve_record::<ImageAsset>(&fixture.image_a)
+        .unwrap();
+    let input = |maximum| {
+        TileSetPublicationInput::from_source(
+            handle,
+            fixture.tileset.clone(),
+            source("a.png"),
+            SourceHash::from_bytes(b"bounded"),
+            image_handle,
+            image(&fixture.image_a, 2, 1, 40),
+            &AssetPathScope::ROOT,
+            maximum,
+        )
+    };
+    assert!(matches!(
+        input(ByteLimit::ONE),
+        Err(TileSetAssetError::SourceReferenceCapacity)
+    ));
+    let input = input(ByteLimit::new("a.png".len()).unwrap()).unwrap();
+    let state = fixture.states.state_revision(handle.id());
+    let slot = fixture.tilesets.slot_revision(handle);
+    let events = fixture.events.len();
+    let result = fixture.owner.prepare_publications(
+        vec![input],
+        &[],
+        &fixture.server,
+        Some(&fixture.database),
+        &fixture.tilesets,
+        &fixture.states,
+    );
+    assert_eq!(
+        result.err(),
+        Some(TileSetAssetError::SourceReferenceCapacity)
+    );
+    assert!(fixture.owner.is_empty());
+    assert_eq!(fixture.states.state_revision(handle.id()), state);
+    assert_eq!(fixture.tilesets.slot_revision(handle), slot);
+    assert_eq!(fixture.events.len(), events);
+}
 use nara_asset::{AssetProductRef, ImportedProductId};
 use nara_image::ImageColorSpace;
 
@@ -22,7 +113,7 @@ fn publish_unmatched_image(fixture: &mut Fixture, wrong_path: bool) -> Handle<Im
         image(
             &AssetRecord::new(
                 fixture.image_a.stable_id(),
-                AssetPath::new("other.png").unwrap(),
+                AssetSourcePath::new("other.png").unwrap(),
                 AssetSourceKind::Image,
             ),
             2,
@@ -282,6 +373,7 @@ fn source_appearance_hash_edits_and_rejection_recovery_publish_with_unchanged_im
                 fixture.tileset.clone(),
                 desired.clone(),
                 source_hash,
+                &nara_asset::AssetPathScope::ROOT,
                 &mut fixture.server,
                 &fixture.tilesets,
                 &mut fixture.states,
@@ -325,6 +417,7 @@ fn source_appearance_hash_edits_and_rejection_recovery_publish_with_unchanged_im
             fixture.tileset.clone(),
             changed,
             changed_hash,
+            &nara_asset::AssetPathScope::ROOT,
             &mut fixture.server,
             &fixture.tilesets,
             &mut fixture.states,
@@ -422,7 +515,7 @@ fn source_preflight_rejects_missing_database_and_missing_or_wrong_provenance() {
             image(
                 &AssetRecord::new(
                     fixture.image_a.stable_id(),
-                    AssetPath::new("other.png").unwrap(),
+                    AssetSourcePath::new("other.png").unwrap(),
                     AssetSourceKind::Image,
                 ),
                 2,
@@ -439,7 +532,10 @@ fn source_preflight_rejects_missing_database_and_missing_or_wrong_provenance() {
             SourceHash::from_bytes(b"prepared"),
             image_handle,
             image,
-        );
+            &nara_asset::AssetPathScope::ROOT,
+            fixture.owner.limits().source_reference_bytes(),
+        )
+        .unwrap();
         let state = fixture.states.state_revision(handle.id());
         let slot = fixture.tilesets.slot_revision(handle);
         let events = fixture.events.len();

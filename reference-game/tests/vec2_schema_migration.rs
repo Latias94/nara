@@ -122,7 +122,16 @@ fn strict_check_admits_saved_vec2_predecessor_without_rewriting_source() {
         .iter()
         .find(|entity| entity.id.as_str() == "player")
         .unwrap();
-    let migrated = &player.components[&id];
+    // Captured source remains exact; only the selected effective component is migrated.
+    assert_eq!(player.components[&id].version, ComponentSchemaVersion::ONE);
+    let migrated = &loaded
+        .snapshot
+        .expanded_scene()
+        .entities
+        .iter()
+        .find(|entity| entity.id.as_str() == "player")
+        .unwrap()
+        .components[&id];
     assert_eq!(migrated.version, ComponentSchemaVersion::new(2).unwrap());
     assert_eq!(
         InitialVelocity2d::__decode_persistent_component(&migrated.value)

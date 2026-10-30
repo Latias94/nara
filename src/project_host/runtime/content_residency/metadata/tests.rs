@@ -58,7 +58,7 @@ impl Fixture {
         let scene = RuntimeSceneCandidate::cook(
             &expanded,
             plan.schema_validation().bindings(),
-            &ProjectAssetDatabase::default(),
+            ProjectAssetDatabase::default().resolver(&nara_asset::AssetPathScope::ROOT),
             RuntimeSceneLimits::default(),
         )
         .unwrap()

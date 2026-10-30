@@ -1,4 +1,5 @@
 use std::{
+    borrow::Borrow,
     error::Error,
     fmt::{self, Debug, Display, Formatter},
     str::FromStr,
@@ -181,6 +182,7 @@ impl Display for StableAssetIdError {
 
 impl Error for StableAssetIdError {}
 
+/// An authored relative alias interpreted through an explicit [`AssetPathScope`].
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct AssetPath(String);
 
@@ -196,6 +198,7 @@ impl AssetPath {
         &self.0
     }
 
+    #[cfg(feature = "serde")]
     pub(crate) fn retained_bytes(&self) -> usize {
         self.0.capacity()
     }
@@ -204,16 +207,143 @@ impl AssetPath {
     pub fn meta_path(&self) -> String {
         format!("{}.meta", self.0)
     }
-
-    #[must_use]
-    pub(crate) fn case_fold_key(&self) -> String {
-        self.0.to_lowercase()
-    }
 }
 
 impl Display for AssetPath {
     fn fmt(&self, formatter: &mut Formatter<'_>) -> fmt::Result {
         formatter.write_str(self.as_str())
+    }
+}
+
+/// A canonical logical source location in one admitted catalogue.
+///
+/// This lexical value grants no filesystem access and cannot be used as an authored alias
+/// without an explicit [`AssetPathScope`].
+///
+/// ```compile_fail,E0308
+/// let source = nara_asset::AssetSourcePath::new("assets/player.png").unwrap();
+/// let _: &nara_asset::AssetPath = &source;
+/// ```
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct AssetSourcePath(String);
+
+impl AssetSourcePath {
+    pub fn new(path: impl Into<String>) -> Result<Self, AssetPathError> {
+        let path = path.into();
+        validate_asset_path(&path)?;
+        Ok(Self(path))
+    }
+
+    #[must_use]
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+
+    #[must_use]
+    pub fn meta_path(&self) -> String {
+        format!("{}.meta", self.0)
+    }
+
+    pub(crate) fn retained_bytes(&self) -> usize {
+        self.0.capacity()
+    }
+
+    pub(crate) fn case_fold_key(&self) -> String {
+        self.0.to_lowercase()
+    }
+}
+
+impl Display for AssetSourcePath {
+    fn fmt(&self, formatter: &mut Formatter<'_>) -> fmt::Result {
+        formatter.write_str(self.as_str())
+    }
+}
+
+impl Borrow<str> for AssetSourcePath {
+    fn borrow(&self) -> &str {
+        self.as_str()
+    }
+}
+
+#[cfg(feature = "serde")]
+impl serde::Serialize for AssetSourcePath {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        serializer.serialize_str(self.as_str())
+    }
+}
+
+#[cfg(feature = "serde")]
+impl<'de> serde::Deserialize<'de> for AssetSourcePath {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        let path = <String as serde::Deserialize>::deserialize(deserializer)?;
+        Self::new(path).map_err(serde::de::Error::custom)
+    }
+}
+
+/// An owned binding from authored aliases to canonical source locations.
+///
+/// Scopes compare exact case and complete path segments. They neither grant file access nor
+/// install a default reference root in a catalogue.
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct AssetPathScope {
+    prefix: Option<AssetSourcePath>,
+}
+
+impl AssetPathScope {
+    pub const ROOT: Self = Self { prefix: None };
+
+    #[must_use]
+    pub const fn under(prefix: AssetSourcePath) -> Self {
+        Self {
+            prefix: Some(prefix),
+        }
+    }
+
+    #[must_use]
+    pub const fn prefix(&self) -> Option<&AssetSourcePath> {
+        self.prefix.as_ref()
+    }
+
+    #[must_use]
+    pub fn resolve(&self, path: &AssetPath) -> AssetSourcePath {
+        match &self.prefix {
+            Some(prefix) => {
+                let mut source = String::with_capacity(prefix.0.len() + 1 + path.0.len());
+                source.push_str(prefix.as_str());
+                source.push('/');
+                source.push_str(path.as_str());
+                AssetSourcePath(source)
+            }
+            None => AssetSourcePath(path.0.clone()),
+        }
+    }
+
+    /// Borrows the local spelling without allocating an authored alias.
+    #[must_use]
+    pub fn relative_path<'a>(&self, path: &'a AssetSourcePath) -> Option<&'a str> {
+        let local = match &self.prefix {
+            Some(prefix) => path
+                .as_str()
+                .strip_prefix(prefix.as_str())?
+                .strip_prefix('/')?,
+            None => path.as_str(),
+        };
+        if local.is_empty() {
+            return None;
+        }
+        Some(local)
+    }
+
+    #[must_use]
+    pub fn relativize(&self, path: &AssetSourcePath) -> Option<AssetPath> {
+        self.relative_path(path)
+            .map(|local| AssetPath(local.to_owned()))
     }
 }
 
@@ -254,7 +384,7 @@ impl Display for AssetPathError {
     fn fmt(&self, formatter: &mut Formatter<'_>) -> fmt::Result {
         match self {
             Self::Empty => formatter.write_str("asset path is empty"),
-            Self::Absolute => formatter.write_str("asset path must be project-relative"),
+            Self::Absolute => formatter.write_str("asset path must be relative"),
             Self::ContainsBackslash => formatter.write_str("asset path must use '/' separators"),
             Self::ContainsDrivePrefix => {
                 formatter.write_str("asset path must not contain a drive prefix")

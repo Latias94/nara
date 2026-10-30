@@ -974,7 +974,8 @@ mod tests {
     use std::fs::OpenOptions;
 
     use nara_asset::{
-        AssetMeta, AssetMetaIdentity, AssetPath, AssetRef, AssetSourceKind, StableAssetId,
+        AssetMeta, AssetMetaIdentity, AssetPath, AssetRef, AssetSourceKind, AssetSourcePath,
+        StableAssetId,
     };
     use nara_fs::{CapabilityRights, HostCapabilityOptions, TrustMode};
     use nara_reflect::{
@@ -1002,7 +1003,7 @@ mod tests {
     fn inventory_overlay(name: &str) -> PrefabOverlay {
         PrefabOverlay::new(SourceDocumentKey::project_location(
             "bb46c078-85b1-5823-8b1d-647b3b9e1f22".parse().unwrap(),
-            AssetPath::new(format!("prefabs/{name}.prefab.json")).unwrap(),
+            AssetSourcePath::new(format!("prefabs/{name}.prefab.json")).unwrap(),
             SourceDocumentKind::Prefab,
         ))
     }
@@ -1356,7 +1357,7 @@ mod tests {
         assert!(!snapshot.startup_compilation_diagnostics().has_errors());
         assert_eq!(snapshot.assets().len(), 1);
         let asset = &snapshot.assets()[0];
-        assert_eq!(asset.path(), &asset_path);
+        assert_eq!(asset.path().as_str(), format!("assets/{asset_path}"));
         assert_eq!(asset.record().source_kind(), &AssetSourceKind::Image);
         assert_eq!(asset.bytes(), source_bytes);
         assert_eq!(
@@ -1513,7 +1514,10 @@ mod tests {
             let loaded = admit();
             let snapshot = loaded.snapshot();
             assert!(snapshot.unresolved_dependencies().is_empty());
-            assert_eq!(snapshot.assets()[0].path().as_str(), path);
+            assert_eq!(
+                snapshot.assets()[0].path().as_str(),
+                format!("assets/{path}")
+            );
             assert_eq!(snapshot.assets()[0].bytes(), source);
             assert_eq!(snapshot.startup_scene().document(), &scene);
             assert_eq!(snapshot.readiness(), AuthoringProjectReadiness::Complete);

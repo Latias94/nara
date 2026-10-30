@@ -10,7 +10,7 @@ mod tests;
 
 use std::{error::Error, fmt};
 
-use nara_asset::ProjectAssetDatabase;
+use nara_asset::AssetReferenceResolver;
 use nara_core::{ByteLimit, DepthLimit, ItemLimit};
 use nara_diagnostic::DiagnosticReport;
 use nara_reflect::ComponentValueMaterializationLimits;
@@ -193,10 +193,10 @@ impl RuntimeSceneCandidate {
     pub fn cook(
         expanded: &ExpandedSceneCandidate,
         bindings: &SceneComponentBindings,
-        database: &ProjectAssetDatabase,
+        asset_resolution: AssetReferenceResolver<'_>,
         limits: RuntimeSceneLimits,
     ) -> Result<Self, RuntimeSceneError> {
-        cook::cook(expanded, bindings, database, limits)
+        cook::cook(expanded, bindings, asset_resolution, limits)
     }
 
     #[must_use]

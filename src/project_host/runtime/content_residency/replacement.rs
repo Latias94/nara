@@ -55,7 +55,9 @@ impl PreparedProjectSceneReplacement {
             &inputs,
             &retirements,
             &staged_server,
-            catalog.database(),
+            catalog
+                .asset_resolution()
+                .map(|resolver| resolver.database()),
         )
         .map_err(rejected)?;
         let scene = match content {
@@ -63,7 +65,7 @@ impl PreparedProjectSceneReplacement {
                 .prepare_scene_replacement_with_claims(
                     world,
                     snapshot.expanded_candidate(),
-                    Some(snapshot.asset_database()),
+                    Some(snapshot.asset_resolution()),
                     expected,
                     bindings,
                     claims,
@@ -108,7 +110,9 @@ impl PreparedProjectSceneReplacement {
             &self.inputs,
             &self.retirements,
             &self.staged_server,
-            self.catalog.database(),
+            self.catalog
+                .asset_resolution()
+                .map(|resolver| resolver.database()),
         )
         .map_err(rejected)
     }
@@ -173,7 +177,9 @@ impl PreparedProjectSceneReplacement {
                 inputs,
                 &self.retirements,
                 &self.staged_server,
-                self.catalog.database(),
+                self.catalog
+                    .asset_resolution()
+                    .map(|resolver| resolver.database()),
                 world.resource::<Assets<TileSet>>(),
                 world.resource::<AssetStates>(),
             ) {

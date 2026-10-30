@@ -22,6 +22,70 @@ const WAIT: Duration = Duration::from_secs(5);
 const FAILURE_CODE: &str = "project.editor.preview-plugin-install-failed";
 const BUILD_REJECTION: &str = "injected authoring configuration failure";
 
+#[cfg(feature = "presentation-ui")]
+#[test]
+fn canvas_decode_rejects_scratch_identity_and_type_claim_until_the_image_owner_binds_them() {
+    use nara_asset::{
+        AssetPathScope, AssetProductRef, AssetRef, AssetSourcePath, ImportedProductId,
+        ProjectAssetDatabase, StableAssetId,
+    };
+
+    let scope = AssetPathScope::under(AssetSourcePath::new("content/art").unwrap());
+    let source: StableAssetId = "86db6196-0386-4dbe-a5cd-a7c521ed6b27".parse().unwrap();
+    let record = AssetRecord::new(
+        source,
+        AssetSourcePath::new("content/art/icon.png").unwrap(),
+        AssetSourceKind::Image,
+    );
+    let mut database = ProjectAssetDatabase::default();
+    database.insert(record.clone()).unwrap();
+    let references = [
+        AssetRef::path("icon.png").unwrap(),
+        AssetRef::StableId(source),
+        AssetRef::Product(AssetProductRef::new(source, ImportedProductId::PRIMARY).unwrap()),
+    ];
+
+    for reserve_untyped_identity in [false, true] {
+        let mut server = AssetServer::new();
+        if reserve_untyped_identity {
+            server.reserve_record_id(&record).unwrap();
+        }
+        let before = server.clone();
+        for reference in &references {
+            let result = EditorCanvasImageSources::new(&server, database.resolver(&scope))
+                .with_decode_context(|context| {
+                    context
+                        .resolve_asset_ref_with_kind::<ImageAsset>(
+                            reference,
+                            &AssetSourceKind::Image,
+                        )
+                        .unwrap()
+                });
+            assert_eq!(result, Err(EditorImageRuntimeFailure::AssetIdentity));
+            assert_eq!(server, before);
+        }
+
+        // A later real Image publication supplies the binding used by a Canvas retry.
+        let handle = server.reserve_record::<ImageAsset>(&record).unwrap();
+        let published = server.clone();
+        for reference in &references {
+            let decoded = EditorCanvasImageSources::new(&server, database.resolver(&scope))
+                .with_decode_context(|context| {
+                    context
+                        .resolve_asset_ref_with_kind::<ImageAsset>(
+                            reference,
+                            &AssetSourceKind::Image,
+                        )
+                        .unwrap()
+                })
+                .unwrap()
+                .unwrap();
+            assert_eq!(decoded, handle);
+            assert_eq!(server, published);
+        }
+    }
+}
+
 struct RejectPlugin {
     finishes: Arc<AtomicUsize>,
 }

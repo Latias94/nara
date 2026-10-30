@@ -3,7 +3,7 @@ use nara_diagnostic::{
     SafeSummary,
 };
 
-use crate::{AssetError, AssetPath, AssetSourceKind};
+use crate::{AssetError, AssetSourceKind, AssetSourcePath};
 
 use super::AssetSourceChangeKind;
 use super::requests::AssetReloadRequest;
@@ -63,7 +63,7 @@ pub(super) fn unclaimed_reload_request_diagnostic(request: &AssetReloadRequest) 
 fn reload_failure_diagnostic(
     code: &'static str,
     summary: &'static str,
-    path: &AssetPath,
+    path: &AssetSourcePath,
     change_kind: AssetSourceChangeKind,
     source_kind: Option<&AssetSourceKind>,
     reason: &'static str,

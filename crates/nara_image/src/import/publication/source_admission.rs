@@ -6,8 +6,8 @@ use std::{
 
 use image::ImageEncoder;
 use nara_asset::{
-    AssetEvents, AssetPath, AssetProductRef, AssetRecord, AssetServer, AssetSlotRevision,
-    AssetSourceKind, AssetStateRevision, AssetStates, AssetVersion, Assets, Handle,
+    AssetEvents, AssetProductRef, AssetRecord, AssetServer, AssetSlotRevision, AssetSourceKind,
+    AssetSourcePath, AssetStateRevision, AssetStates, AssetVersion, Assets, Handle,
     ImportedProductId, StableAssetId,
 };
 use nara_fs::{FileCapability, TrustMode};
@@ -24,7 +24,7 @@ const PIXELS: [u8; 4] = [24, 120, 220, 255];
 fn record(id: &str, path: &str) -> AssetRecord {
     AssetRecord::new(
         StableAssetId::parse_str(id).unwrap(),
-        AssetPath::new(path).unwrap(),
+        AssetSourcePath::new(path).unwrap(),
         AssetSourceKind::Image,
     )
 }

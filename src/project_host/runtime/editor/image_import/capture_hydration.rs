@@ -11,7 +11,9 @@ use std::fs::File;
 #[cfg(windows)]
 use std::fs::OpenOptions;
 
-use nara_asset::{AssetMeta, AssetMetaIdentity, AssetServer, AssetStates, AssetVersion, Assets};
+use nara_asset::{
+    AssetMeta, AssetMetaIdentity, AssetPath, AssetServer, AssetStates, AssetVersion, Assets,
+};
 use nara_fs::{CapabilityRights, HostCapabilityOptions, TrustMode};
 use nara_image::{
     ImageAsset, ImageColorSpace, ImageFileImportRequest, ImageImportLimits, ImageImporter,
@@ -160,7 +162,10 @@ preset = "local-headless"
             project_root_identity: root.identity(),
             record: AssetRecord::new(
                 candidate.identity().stable_id(),
-                candidate.identity().path().clone(),
+                project
+                    .asset_resolution()
+                    .scope()
+                    .resolve(candidate.identity().path()),
                 AssetSourceKind::Image,
             ),
             source_path,
@@ -318,7 +323,7 @@ fn exact_last_good_reuses_pixels_and_removes_a_queued_superseded_receipt() {
     host.enqueue_source(source, &mut store);
     assert!(!host.has_pending_work());
     assert_eq!(
-        store.get(&AssetPath::new("image.png").unwrap()),
+        store.get(&AssetSourcePath::new("assets/image.png").unwrap()),
         Some(&accepted)
     );
 }
@@ -571,7 +576,7 @@ fn missing_catalogue_entry_defers_to_capture_but_later_real_deletion_revokes_it(
     )
     .unwrap();
     let source = fixture.source(&project);
-    let retain = |path: &AssetPath, stable_id, identity| {
+    let retain = |path: &AssetSourcePath, stable_id, identity| {
         catalogue.retains_imported_image(path, stable_id, identity)
     };
     assert!(!retain(
@@ -622,7 +627,7 @@ fn late_metadata_change_rejects_hydration_without_overwriting_last_good() {
     host.initialize(&project, &mut store);
     host.enqueue_source(fixture.source(&project), &mut store);
     settle(&mut host, &project, &mut runtime, &mut store);
-    let path = AssetPath::new("image.png").unwrap();
+    let path = AssetSourcePath::new("assets/image.png").unwrap();
     let accepted = store.get(&path).unwrap().clone();
 
     fixture.write_metadata(ImageImportSettings::new(ImageColorSpace::Linear));
@@ -674,7 +679,7 @@ fn queued_receipt_replacement_does_not_consume_a_second_capacity_slot() {
         let mut queued = source.clone();
         queued.record = AssetRecord::new(
             source.stable_id(),
-            AssetPath::new(format!("image-{index}.png")).unwrap(),
+            AssetSourcePath::new(format!("assets/image-{index}.png")).unwrap(),
             AssetSourceKind::Image,
         );
         host.enqueue_source(queued, &mut store);
@@ -860,7 +865,7 @@ fn catalogue_finishing_after_actual_capture_enqueue_does_not_erase_the_import() 
     }
     assert!(host.take_hydration_failure().is_none());
     let accepted = host
-        .last_good(&AssetPath::new("image.png").unwrap())
+        .last_good(&AssetSourcePath::new("assets/image.png").unwrap())
         .unwrap();
     assert_eq!(
         accepted.source_identity(),

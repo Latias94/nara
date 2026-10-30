@@ -16,8 +16,16 @@ pub(in crate::project_host::runtime::editor) enum EditorTileSetSourceUpdate {
 #[derive(Resource)]
 struct EditorTileSetPort;
 
+enum EditorTileSetInput {
+    Sources {
+        updates: Vec<EditorTileSetSourceUpdate>,
+        asset_scope: EditorAssetScope,
+    },
+    Reconcile,
+}
+
 impl __RuntimeDriverPort for EditorTileSetPort {
-    type Input = Vec<EditorTileSetSourceUpdate>;
+    type Input = EditorTileSetInput;
     type Output = Result<(bool, Vec<AssetRef>), EditorImageRuntimeFailure>;
 
     fn apply_driver_input(&mut self, _input: Self::Input) -> Self::Output {
@@ -36,7 +44,7 @@ impl EditorAuthoringRuntime {
     #[cfg(test)]
     pub(in crate::project_host::runtime::editor) fn test_tile_set(
         &self,
-        path: &nara_asset::AssetPath,
+        path: &nara_asset::AssetSourcePath,
     ) -> Option<TileSet> {
         let world = self.runtime.world();
         let handle = world
@@ -66,9 +74,17 @@ impl EditorAuthoringRuntime {
             .image_publication_revision
             .checked_add(1)
             .ok_or(EditorImageRuntimeFailure::Publication)?;
+        let input = if updates.is_empty() {
+            EditorTileSetInput::Reconcile
+        } else {
+            EditorTileSetInput::Sources {
+                updates,
+                asset_scope: self.asset_scope.clone(),
+            }
+        };
         let outcome = self
             .runtime
-            .with_driver_scope(|scope| scope.__apply_port::<EditorTileSetPort>(updates))
+            .with_driver_scope(|scope| scope.__apply_port::<EditorTileSetPort>(input))
             .map_err(|_| EditorImageRuntimeFailure::RuntimeUnavailable)?;
         let (changed, demands) = outcome
             .output
@@ -106,18 +122,24 @@ pub(super) fn publish_initial(
             },
         );
     }
-    apply_in_world(world, updates)
-        .map_err(|_| runtime_error("project.editor.preview-tileset-world-failed"))?
-        .map_err(|_| runtime_error("project.editor.preview-tileset-publication-failed"))?;
+    apply_in_world(
+        world,
+        EditorTileSetInput::Sources {
+            updates,
+            asset_scope: EditorAssetScope::Authoring(snapshot.asset_scope()),
+        },
+    )
+    .map_err(|_| runtime_error("project.editor.preview-tileset-world-failed"))?
+    .map_err(|_| runtime_error("project.editor.preview-tileset-publication-failed"))?;
     Ok(())
 }
 
 fn apply_in_world(
     world: &mut World,
-    updates: Vec<EditorTileSetSourceUpdate>,
+    input: EditorTileSetInput,
 ) -> Result<
     Result<(bool, Vec<AssetRef>), EditorImageRuntimeFailure>,
-    (RuntimeWorldAccessError, Vec<EditorTileSetSourceUpdate>),
+    (RuntimeWorldAccessError, EditorTileSetInput),
 > {
     let mut access = nara_ecs::bevy_ecs::system::SystemState::<TileSetContent>::new(world);
     let mut content = match access.get_mut(world) {
@@ -127,41 +149,52 @@ fn apply_in_world(
                 RuntimeWorldAccessError::MissingResource {
                     type_name: std::any::type_name::<TileSetContent>(),
                 },
-                updates,
+                input,
             ));
         }
     };
     let result = (|| {
         let before = content.source_revisions().collect::<Vec<_>>();
-        for update in updates {
-            let result = match update {
-                EditorTileSetSourceUpdate::Request(record, source, hash) => {
-                    content.request(record, source, hash).map(|_| ())
-                }
-                EditorTileSetSourceUpdate::Reject(record) => content.reject_source(&record),
-                EditorTileSetSourceUpdate::Remove(record) => {
-                    content.revoke_source(&record).map(|_| ())
-                }
-            };
-            result.map_err(|_| EditorImageRuntimeFailure::Publication)?;
+        let refresh_demands = matches!(&input, EditorTileSetInput::Sources { .. });
+        if let EditorTileSetInput::Sources {
+            updates,
+            asset_scope,
+        } = input
+        {
+            for update in updates {
+                let result = match update {
+                    EditorTileSetSourceUpdate::Request(record, source, hash) => content
+                        .request(record, source, hash, asset_scope.get())
+                        .map(|_| ()),
+                    EditorTileSetSourceUpdate::Reject(record) => content.reject_source(&record),
+                    EditorTileSetSourceUpdate::Remove(record) => {
+                        content.revoke_source(&record).map(|_| ())
+                    }
+                };
+                result.map_err(|_| EditorImageRuntimeFailure::Publication)?;
+            }
         }
         content.reconcile();
         let after = content.source_revisions().collect::<Vec<_>>();
-        let demands = content
-            .sources()
-            .filter(|(handle, _, _)| {
-                !matches!(
-                    content.error(*handle),
-                    Some(
-                        TileSetAssetError::InvalidSource
-                            | TileSetAssetError::Superseded
-                            | TileSetAssetError::AtlasLayoutChangeRequiresRebuild
-                            | TileSetAssetError::IdentityMismatch
+        let demands = if refresh_demands {
+            content
+                .sources()
+                .filter(|(handle, _, _)| {
+                    !matches!(
+                        content.error(*handle),
+                        Some(
+                            TileSetAssetError::InvalidSource
+                                | TileSetAssetError::Superseded
+                                | TileSetAssetError::AtlasLayoutChangeRequiresRebuild
+                                | TileSetAssetError::IdentityMismatch
+                        )
                     )
-                )
-            })
-            .map(|(_, _, source)| source.image.clone())
-            .collect();
+                })
+                .map(|(_, _, source)| source.image.clone())
+                .collect()
+        } else {
+            Vec::new()
+        };
         Ok((before != after, demands))
     })();
     Ok(result)

@@ -2,7 +2,7 @@
 
 use std::collections::BTreeSet;
 
-use nara_asset::{AssetRefExportPolicy, ProjectAssetDatabase};
+use nara_asset::{AssetRefExportPolicy, AssetReferenceResolver};
 use nara_diagnostic::{Diagnostic, DiagnosticReport};
 use nara_ecs::{Entity, World};
 use nara_reflect::{
@@ -411,15 +411,19 @@ impl SceneEditorState {
         self.inspector.apply_command(session, registry, command)
     }
 
-    pub fn apply_inspector_command_with_asset_database(
+    pub fn apply_inspector_command_with_asset_resolution(
         &self,
         session: &mut SceneAuthoringSession,
         registry: &ComponentRegistry,
-        database: &ProjectAssetDatabase,
+        asset_resolution: AssetReferenceResolver<'_>,
         command: SceneInspectorCommand,
     ) -> SceneInspectorCommandReport {
-        self.inspector
-            .apply_command_with_asset_database(session, registry, database, command)
+        self.inspector.apply_command_with_asset_resolution(
+            session,
+            registry,
+            asset_resolution,
+            command,
+        )
     }
 }
 

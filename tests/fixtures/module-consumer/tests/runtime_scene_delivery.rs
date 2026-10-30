@@ -11,8 +11,8 @@ use std::{
 
 use nara_app::{App, RuntimeInstance, StartupStage};
 use nara_asset::{
-    AssetPath, AssetProductRef, AssetRecord, AssetRef, AssetSourceKind, ImportedProductId,
-    ProjectAssetDatabase, StableAssetId,
+    AssetPathScope, AssetProductRef, AssetRecord, AssetRef, AssetSourceKind, AssetSourcePath,
+    ImportedProductId, ProjectAssetDatabase, StableAssetId,
 };
 use nara_core::ItemLimit;
 use nara_ecs::{
@@ -260,14 +260,14 @@ impl Definition {
         database
             .insert(AssetRecord::new(
                 asset_id(),
-                AssetPath::new("images/shared.png").unwrap(),
+                AssetSourcePath::new("images/shared.png").unwrap(),
                 AssetSourceKind::Image,
             ))
             .unwrap();
         let cooked = RuntimeSceneCandidate::cook(
             &expanded,
             &self.bindings,
-            &database,
+            database.resolver(&AssetPathScope::ROOT),
             RuntimeSceneLimits::default(),
         )
         .unwrap();
@@ -672,7 +672,7 @@ fn exercise_managed_runtime_scene(world: &mut World) {
     let candidate = RuntimeSceneCandidate::cook(
         &input,
         &selected,
-        &ProjectAssetDatabase::default(),
+        ProjectAssetDatabase::default().resolver(&AssetPathScope::ROOT),
         RuntimeSceneLimits::default(),
     )
     .unwrap();

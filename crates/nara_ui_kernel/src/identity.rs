@@ -1,4 +1,4 @@
-use std::sync::Arc;
+use std::{any::TypeId, fmt, sync::Arc};
 
 use thiserror::Error;
 
@@ -287,18 +287,52 @@ impl UiActionId {
     }
 }
 
-/// Opaque image identity retained by the kernel without importing an asset or renderer handle.
+/// Opaque image identity retained without importing an asset or renderer handle.
+///
+/// Named IDs and provider-scoped external tokens are disjoint. External identity is strictly
+/// process-local: neither its provider TypeId nor its token is a persistent reference.
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
-pub struct UiImageId(UiKeyAtom);
+pub struct UiImageId(UiImageIdentity);
+
+#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
+enum UiImageIdentity {
+    Named(UiKeyAtom),
+    External { provider: TypeId, token: u64 },
+}
 
 impl UiImageId {
+    /// Creates a name without interpreting path, UUID or Product-like text.
     pub fn new(value: impl Into<String>) -> Result<Self, UiKeyError> {
-        Ok(Self(UiKeyAtom::new(value)?))
+        Ok(Self(UiImageIdentity::Named(UiKeyAtom::new(value)?)))
+    }
+
+    /// Selects an exact external resource in the provider's process-local identity domain.
+    #[must_use]
+    pub fn external<T: 'static>(token: u64) -> Self {
+        Self(UiImageIdentity::External {
+            provider: TypeId::of::<T>(),
+            token,
+        })
     }
 
     #[must_use]
-    pub fn as_str(&self) -> &str {
-        self.0.as_str()
+    /// Returns text only for a Named identity. This is never binding or persistence evidence.
+    pub fn as_name(&self) -> Option<&str> {
+        match &self.0 {
+            UiImageIdentity::Named(name) => Some(name.as_str()),
+            UiImageIdentity::External { .. } => None,
+        }
+    }
+}
+
+impl fmt::Display for UiImageId {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match &self.0 {
+            UiImageIdentity::Named(name) => formatter.write_str(name.as_str()),
+            UiImageIdentity::External { provider, token } => {
+                write!(formatter, "external:{provider:?}/{token}")
+            }
+        }
     }
 }
 

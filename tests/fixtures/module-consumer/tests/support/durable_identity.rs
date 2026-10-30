@@ -1,8 +1,8 @@
 use std::{collections::BTreeMap, error::Error, fmt, fs, path::PathBuf};
 
 use nara_asset::{
-    AssetDatabaseError, AssetMetaIdentityCandidate, AssetPath, AssetRecord, AssetRef,
-    ProjectAssetDatabase, StableAssetId,
+    AssetDatabaseError, AssetMetaIdentityCandidate, AssetPath, AssetPathScope, AssetRecord,
+    AssetRef, AssetSourcePath, ProjectAssetDatabase, StableAssetId,
 };
 use nara_ecs::Component;
 use nara_identity::EntityReference;
@@ -116,9 +116,9 @@ pub fn resolve_source(paths: &[&str]) -> ResolvedSource {
             AssetMetaIdentityCandidate::decode_json_bytes(&fixture_bytes(&format!("{path}.meta")))
                 .expect("fixture metadata must pass the real bounded decoder")
                 .into_identity();
-        records.push(AssetRecord::from(meta.clone()));
+        records.push(meta.clone().into_record(&AssetPathScope::ROOT));
         database
-            .insert_identity(AssetPath::new(*path).unwrap(), meta)
+            .insert_identity(&AssetPathScope::ROOT, AssetPath::new(*path).unwrap(), meta)
             .expect("each independently resolved source must have unique identities");
     }
     ResolvedSource { database, records }
@@ -149,12 +149,15 @@ pub fn load_prefab(
     registry: &ComponentRegistry,
     id: StableAssetId,
 ) -> PrefabDocument {
-    let record = database.resolve_ref(&AssetRef::StableId(id)).unwrap();
+    let record = database
+        .resolver(&AssetPathScope::ROOT)
+        .resolve_ref(&AssetRef::StableId(id))
+        .unwrap();
     PrefabDocumentCandidate::decode_ron_bytes(&fixture_bytes(record.path().as_str()))
         .unwrap()
         .canonicalize(registry)
         .unwrap()
-        .publish_with_asset_database(registry, database)
+        .publish_with_asset_resolution(registry, database.resolver(&AssetPathScope::ROOT))
         .unwrap()
         .into_document()
 }
@@ -222,13 +225,14 @@ pub fn stabilize_v1_scene_bytes(
         .into_document();
     for entity in &mut document.entities {
         if let Some(prefab) = &mut entity.prefab {
-            let record = database.resolve_ref(&prefab.source).map_err(|cause| {
-                ConversionError::UnresolvedPrefab {
+            let record = database
+                .resolver(&AssetPathScope::ROOT)
+                .resolve_ref(&prefab.source)
+                .map_err(|cause| ConversionError::UnresolvedPrefab {
                     entity: entity.id.clone(),
                     source: prefab.source.clone(),
                     cause,
-                }
-            })?;
+                })?;
             prefab.source = AssetRef::StableId(record.stable_id());
         }
     }
@@ -240,7 +244,7 @@ pub fn stabilize_v1_scene_bytes(
         .map_err(|error| invalid(&error))?
         .canonicalize(registry)
         .map_err(|error| invalid(&error))?
-        .publish_with_asset_database(registry, database)
+        .publish_with_asset_resolution(registry, database.resolver(&AssetPathScope::ROOT))
         .map_err(|error| invalid(&error))?;
     *encoded = candidate_bytes;
     Ok(())
@@ -256,7 +260,7 @@ pub fn stable_scene(
         .unwrap()
         .canonicalize(registry)
         .unwrap()
-        .publish_with_asset_database(registry, database)
+        .publish_with_asset_resolution(registry, database.resolver(&AssetPathScope::ROOT))
         .unwrap()
         .into_document()
 }
@@ -287,7 +291,7 @@ pub fn copy_as_new(
         copied_database
             .insert(AssetRecord::new(
                 stable_ids[&old],
-                AssetPath::new(path).unwrap(),
+                AssetSourcePath::new(path).unwrap(),
                 record.source_kind().clone(),
             ))
             .unwrap();

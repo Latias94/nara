@@ -316,7 +316,7 @@ impl ManagedSceneDomainAttempt for Attempt {
                             "77777777-7777-4777-8777-777777777777",
                         )
                         .unwrap(),
-                        nara_engine::asset::AssetPath::new("deferred.png").unwrap(),
+                        nara_engine::asset::AssetSourcePath::new("deferred.png").unwrap(),
                         nara_engine::asset::AssetSourceKind::Image,
                     ))
                     .unwrap();

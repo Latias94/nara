@@ -2,8 +2,8 @@ use std::{collections::VecDeque, time::Duration};
 
 use nara_app::{App, CoreStage};
 use nara_asset::{
-    ArtifactFormatVersion, ArtifactLabel, AssetEvents, AssetPath, AssetPlugin, AssetRecord,
-    AssetRef, AssetServer, AssetSourceKind, AssetStates, Assets, Handle, ImportArtifactKey,
+    ArtifactFormatVersion, ArtifactLabel, AssetEvents, AssetPlugin, AssetRecord, AssetRef,
+    AssetServer, AssetSourceKind, AssetSourcePath, AssetStates, Assets, Handle, ImportArtifactKey,
     ImportArtifactRecord, ImportDependencyDigest, ImportProfile, ImportedAssetType, ImporterId,
     ImporterVersion, ProjectAssetDatabase, SourceHash, StableAssetId,
 };
@@ -108,7 +108,7 @@ fn apply_edit(world: &mut World) {
 fn record(id: &str, path: &str, kind: AssetSourceKind) -> AssetRecord {
     AssetRecord::new(
         StableAssetId::parse_str(id).unwrap(),
-        AssetPath::new(path).unwrap(),
+        AssetSourcePath::new(path).unwrap(),
         kind,
     )
 }
@@ -154,6 +154,7 @@ fn request(world: &mut World, record: AssetRecord, width: u32) -> Handle<TileSet
                             TileAtlasLayout::grid(Vec2::ONE, width, 1),
                         ),
                         SourceHash::from_bytes(width.to_le_bytes()),
+                        &nara_asset::AssetPathScope::ROOT,
                         &mut server,
                         &tilesets,
                         &mut world.resource_mut::<AssetStates>(),

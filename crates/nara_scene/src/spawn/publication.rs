@@ -601,6 +601,7 @@ mod tests {
                     let asset = AssetRef::from_handle_with_policy(
                         world.resource::<AssetServer>(),
                         value.handle,
+                        context.asset_path_scope(),
                         context.asset_ref_export_policy(),
                     )
                     .map_err(|error| ComponentCodecError::Message(error.to_string()))?;
@@ -1044,7 +1045,10 @@ mod tests {
             handle
         );
         assert_eq!(
-            world.resource::<AssetServer>().path(handle.id()),
+            world
+                .resource::<AssetServer>()
+                .path(handle.id())
+                .map(nara_asset::AssetSourcePath::as_str),
             Some("textures/retained-native.png")
         );
         assert_eq!(probe.runs.load(Ordering::Relaxed), 1);

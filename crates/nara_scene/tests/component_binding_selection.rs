@@ -6,7 +6,7 @@ use std::sync::{
 };
 
 use nara_app::PluginSchemaProviderId;
-use nara_asset::{AssetPath, AssetRecord, AssetSourceKind, ProjectAssetDatabase};
+use nara_asset::{AssetRecord, AssetSourceKind, AssetSourcePath, ProjectAssetDatabase};
 use nara_core::{ByteLimit, DepthLimit, ItemLimit};
 use nara_diagnostic::DiagnosticReport;
 use nara_ecs::Component;
@@ -422,7 +422,7 @@ fn validation_requires_explicit_data_owner_current_version_and_one_aggregate_all
 
 #[test]
 fn validation_closes_default_references_over_scene_entities_and_optional_asset_metadata() {
-    let asset_path = AssetPath::new("textures/selection.png").unwrap();
+    let asset_path = AssetSourcePath::new("textures/selection.png").unwrap();
     let owner = ComponentSchemaOwnerSnapshot::admit(
         owner_id("game.references"),
         ComponentSchemaCatalog {
@@ -481,14 +481,18 @@ fn validation_closes_default_references_over_scene_entities_and_optional_asset_m
             AssetSourceKind::Image,
         ))
         .unwrap();
-    let report = bindings.validate_scene(&document, Some(&database), Default::default());
+    let report = bindings.validate_scene(
+        &document,
+        Some(database.resolver(&nara_asset::AssetPathScope::ROOT)),
+        Default::default(),
+    );
     assert!(!report.has_errors(), "{report:?}");
     let report = bindings.validate_scene(&document, None, Default::default());
     assert!(!report.has_errors(), "{report:?}");
     assert_code(
         &bindings.validate_scene(
             &document,
-            Some(&ProjectAssetDatabase::default()),
+            Some(ProjectAssetDatabase::default().resolver(&nara_asset::AssetPathScope::ROOT)),
             Default::default(),
         ),
         "scene.invalid-component-payload",
@@ -496,7 +500,7 @@ fn validation_closes_default_references_over_scene_entities_and_optional_asset_m
     assert_code(
         &bindings.validate_scene(
             &SceneDocument::from_ordered_roots([root]),
-            Some(&database),
+            Some(database.resolver(&nara_asset::AssetPathScope::ROOT)),
             Default::default(),
         ),
         "scene.local-reference-invalid",

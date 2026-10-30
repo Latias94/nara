@@ -2,7 +2,7 @@
 mod support;
 
 use bevy_ecs::{component::Component, entity::Entity, world::World};
-use nara_asset::{AssetDatabaseError, AssetRef};
+use nara_asset::{AssetDatabaseError, AssetPathScope, AssetRef};
 use nara_core::SourceUniverseId;
 use nara_identity::{
     EntityLookup, EntityReference, IdentityDomainError, PersistentRetirementDisposition,
@@ -36,7 +36,11 @@ fn two_resolved_sources_merge_and_spawn_through_the_public_scene_module() {
     let mut world = World::new();
 
     let spawned = {
-        let expansion = (scene).expand_prefabs_with_asset_database(&registry, &resolver, &database);
+        let expansion = (scene).expand_prefabs_with_asset_resolution(
+            &registry,
+            &resolver,
+            database.resolver(&AssetPathScope::ROOT),
+        );
         assert!(
             !expansion.diagnostics.has_errors(),
             "{:?}",
@@ -56,7 +60,7 @@ fn two_resolved_sources_merge_and_spawn_through_the_public_scene_module() {
             &scene_occurrence(
                 "two_resolved_sources_merge_and_spawn_through_the_public_scene_module/spawned",
             ),
-            Some(&database),
+            Some(database.resolver(&AssetPathScope::ROOT)),
         )
     };
 
@@ -107,7 +111,11 @@ fn disposable_projection_keeps_repeated_prefab_provenance_in_bounded_epochs() {
     world.insert_resource(domain);
     let occurrence = scene_occurrence("durable-identity/disposable-projection");
     let mut projection = nara_scene::SceneProjection::new(occurrence.clone());
-    let expansion = scene.expand_prefabs_with_asset_database(&registry, &resolver, &database);
+    let expansion = scene.expand_prefabs_with_asset_resolution(
+        &registry,
+        &resolver,
+        database.resolver(&AssetPathScope::ROOT),
+    );
     assert!(
         !expansion.diagnostics.has_errors(),
         "{:?}",
@@ -118,7 +126,12 @@ fn disposable_projection_keeps_repeated_prefab_provenance_in_bounded_epochs() {
     let candidate = expansion.candidate.unwrap().bind_source(source_key.clone());
     let mut previous: Option<SpawnedSceneInstance> = None;
     for _ in 0..16 {
-        let report = projection.publish(&mut world, &registry, &candidate, &database);
+        let report = projection.publish(
+            &mut world,
+            &registry,
+            &candidate,
+            database.resolver(&AssetPathScope::ROOT),
+        );
         assert!(!report.diagnostics.has_errors(), "{:?}", report.diagnostics);
         let instance = report.instance.unwrap();
         assert_eq!(projection.instance(), Some(&instance));
@@ -225,10 +238,10 @@ fn copy_as_new_changes_only_references_inside_the_explicit_copied_closure() {
         );
     let mut world = World::new();
     let spawned = {
-        let expansion = (copied.scene).expand_prefabs_with_asset_database(
+        let expansion = (copied.scene).expand_prefabs_with_asset_resolution(
             &registry,
             &resolver,
-            &copied.database,
+            copied.database.resolver(&AssetPathScope::ROOT),
         );
         assert!(
             !expansion.diagnostics.has_errors(),
@@ -249,7 +262,7 @@ fn copy_as_new_changes_only_references_inside_the_explicit_copied_closure() {
             &scene_occurrence(
                 "copy_as_new_changes_only_references_inside_the_explicit_copied_closure/spawned",
             ),
-            Some(&copied.database),
+            Some(copied.database.resolver(&AssetPathScope::ROOT)),
         )
     };
     assert!(
@@ -274,13 +287,13 @@ fn explicit_v1_conversion_publishes_a_real_candidate_and_preserves_unresolved_by
         .unwrap()
         .canonicalize(&registry)
         .unwrap()
-        .publish_with_asset_database(&registry, &database)
+        .publish_with_asset_resolution(&registry, database.resolver(&AssetPathScope::ROOT))
         .unwrap();
     let after = SceneDocumentCandidate::decode_ron_bytes(&fixture_bytes("after/startup.scene.ron"))
         .unwrap()
         .canonicalize(&registry)
         .unwrap()
-        .publish_with_asset_database(&registry, &database)
+        .publish_with_asset_resolution(&registry, database.resolver(&AssetPathScope::ROOT))
         .unwrap();
     assert_eq!(converted.document(), after.document());
 
@@ -782,7 +795,11 @@ fn spawn_owned_instance(
     occurrence: &nara_scene::SceneOccurrenceKey,
 ) -> SpawnedSceneInstance {
     let report = {
-        let expansion = (scene).expand_prefabs_with_asset_database(registry, resolver, database);
+        let expansion = (scene).expand_prefabs_with_asset_resolution(
+            registry,
+            resolver,
+            database.resolver(&AssetPathScope::ROOT),
+        );
         assert!(
             !expansion.diagnostics.has_errors(),
             "{:?}",
@@ -795,7 +812,13 @@ fn spawn_owned_instance(
                 stable_id(SCENE_ID),
                 SourceDocumentKind::Scene,
             ));
-        nara_scene::spawn_scene(world, registry, &candidate, occurrence, Some(database))
+        nara_scene::spawn_scene(
+            world,
+            registry,
+            &candidate,
+            occurrence,
+            Some(database.resolver(&AssetPathScope::ROOT)),
+        )
     };
     assert!(!report.diagnostics.has_errors(), "{:?}", report.diagnostics);
     let instance = report.instance.unwrap();

@@ -1,6 +1,7 @@
 use std::{fs::File, path::Path};
 
 use nara::advanced_prelude::*;
+use nara::asset::{AssetPathScope, AssetSourcePath};
 
 const TEXTURE_ID: &str = "2f0d71c7-14fc-4ed4-b48b-1c61bba8b97f";
 const TEXTURE_BYTES: &[u8] = include_bytes!("../assets/textures/player.png");
@@ -9,7 +10,7 @@ const TEXTURE_BYTES: &[u8] = include_bytes!("../assets/textures/player.png");
 fn independent_game_imports_committed_png_through_the_public_bounded_path() {
     let record = AssetRecord::new(
         StableAssetId::parse_str(TEXTURE_ID).unwrap(),
-        AssetPath::new("textures/player.png").unwrap(),
+        AssetSourcePath::new("textures/player.png").unwrap(),
         AssetSourceKind::Image,
     );
     let source = source_directory(&Path::new(env!("CARGO_MANIFEST_DIR")).join("assets"));
@@ -97,7 +98,7 @@ fn source_directory(path: &Path) -> ImageSourceDirectory {
         HostCapabilityOptions::new(CapabilityRights::ReadOnly, TrustMode::TrustedLocal),
     )
     .unwrap();
-    ImageSourceDirectory::new(directory)
+    ImageSourceDirectory::new(directory, AssetPathScope::ROOT)
 }
 
 fn host_directory(path: &Path) -> File {

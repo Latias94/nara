@@ -1,6 +1,6 @@
 use std::collections::{BTreeSet, HashMap, HashSet};
 
-use nara_asset::{AssetRef, ProjectAssetDatabase};
+use nara_asset::{AssetRef, AssetReferenceResolver};
 use nara_diagnostic::{Diagnostic, DiagnosticReport};
 use nara_identity::WorldEntityLocator;
 use nara_reflect::{
@@ -94,15 +94,15 @@ impl SceneInspectorState {
         })
     }
 
-    pub fn apply_command_with_asset_database(
+    pub fn apply_command_with_asset_resolution(
         &self,
         session: &mut SceneAuthoringSession,
         registry: &ComponentRegistry,
-        database: &ProjectAssetDatabase,
+        asset_resolution: AssetReferenceResolver<'_>,
         command: SceneInspectorCommand,
     ) -> SceneInspectorCommandReport {
         self.apply_command_with_patch_apply(session, registry, command, |session, patch| {
-            session.apply_patch_with_asset_database(patch, registry, database)
+            session.apply_patch_with_asset_resolution(patch, registry, asset_resolution)
         })
     }
 

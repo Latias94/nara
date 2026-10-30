@@ -1,7 +1,7 @@
 use std::{fs, time::Duration};
 
 use nara::{
-    asset::{AssetPath, AssetRef},
+    asset::{AssetRef, AssetSourcePath},
     reflect::{ComponentRegistry, ComponentSchemaVersion, ComponentTypeId, ComponentValue},
     scene::{
         InMemoryPrefabSourceResolver, PrefabAddition, PrefabComponentSetMode, PrefabDocument,
@@ -22,7 +22,7 @@ fn id(value: &str) -> SceneEntityId {
 fn key() -> SourceDocumentKey {
     SourceDocumentKey::project_location(
         "c3504a11-271b-59f3-b385-4810c9a5c5a2".parse().unwrap(),
-        AssetPath::new("blueprints/ordinary.prefab.json").unwrap(),
+        AssetSourcePath::new("blueprints/ordinary.prefab.json").unwrap(),
         SourceDocumentKind::Prefab,
     )
 }

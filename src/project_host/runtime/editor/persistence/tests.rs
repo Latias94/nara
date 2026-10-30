@@ -193,7 +193,8 @@ impl Fixture {
                                 project_path: Arc::from(format!("scenes/{name}")),
                                 source_key: nara_scene::SourceDocumentKey::project_location(
                                     "6d57f8c5-867c-5463-b74a-057a8cabe2bc".parse().unwrap(),
-                                    AssetPath::new(format!("scenes/{name}")).unwrap(),
+                                    nara_asset::AssetSourcePath::new(format!("scenes/{name}"))
+                                        .unwrap(),
                                     nara_scene::SourceDocumentKind::Scene,
                                 ),
                                 document,
@@ -243,7 +244,8 @@ impl Fixture {
                                 project_path: Arc::from(format!("prefabs/{name}")),
                                 source_key: nara_scene::SourceDocumentKey::project_location(
                                     "6d57f8c5-867c-5463-b74a-057a8cabe2bc".parse().unwrap(),
-                                    AssetPath::new(format!("prefabs/{name}")).unwrap(),
+                                    nara_asset::AssetSourcePath::new(format!("prefabs/{name}"))
+                                        .unwrap(),
                                     nara_scene::SourceDocumentKind::Prefab,
                                 ),
                                 document,
@@ -436,7 +438,7 @@ fn independently_opened_scene_keeps_its_own_admitted_location_source() {
             .settings()
             .project
             .source_universe,
-        AssetPath::new("scenes/second.scene.json").unwrap(),
+        nara_asset::AssetSourcePath::new("scenes/second.scene.json").unwrap(),
         nara_scene::SourceDocumentKind::Scene,
     );
     assert_eq!(editor.scene_lanes[&document].source_key, expected);

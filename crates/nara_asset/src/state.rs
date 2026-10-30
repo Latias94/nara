@@ -950,7 +950,9 @@ impl AssetDependencyGraph {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{AssetPath, AssetRecord, AssetServer, AssetSourceKind, Assets, StableAssetId};
+    use crate::{
+        AssetRecord, AssetServer, AssetSourceKind, AssetSourcePath, Assets, StableAssetId,
+    };
 
     fn stable_id() -> StableAssetId {
         StableAssetId::parse_str("2f0d71c7-14fc-4ed4-b48b-1c61bba8b97f").unwrap()
@@ -964,7 +966,7 @@ mod tests {
         let mut server = AssetServer::new();
         let record = AssetRecord::new(
             stable_id(),
-            AssetPath::new("textures/player.png").unwrap(),
+            AssetSourcePath::new("textures/player.png").unwrap(),
             AssetSourceKind::Image,
         );
         server.reserve_record::<String>(&record).unwrap()

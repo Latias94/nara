@@ -450,7 +450,10 @@ fn fresh_custom_project_check_builds_before_strict_admission_and_does_not_start_
             .any(|source| source.local_entity_id() == &content_fixture::scene_id("second-sprite"))
     );
     assert_eq!(second.images().len(), 1);
-    assert_eq!(second.images()[0].path().as_str(), "textures/second.png");
+    assert_eq!(
+        second.images()[0].path().as_str(),
+        "assets/textures/second.png"
+    );
     assert_eq!(second.images()[0].image().pixels(), &[24, 120, 220, 255]);
     let delivery = loader.load_delivery(&settings, &plan).unwrap();
     assert!(String::from_utf8_lossy(&exported.stdout).contains(&format!(

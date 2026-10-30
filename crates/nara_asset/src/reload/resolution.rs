@@ -6,8 +6,9 @@ use std::{
 use nara_ecs::{Res, ResMut};
 
 use crate::{
-    AssetDependencyGraph, AssetError, AssetEventKind, AssetEvents, AssetId, AssetPath, AssetRecord,
-    AssetServer, AssetSourceKind, AssetStates, AssetVersion, ProjectAssetDatabase, StableAssetId,
+    AssetDependencyGraph, AssetError, AssetEventKind, AssetEvents, AssetId, AssetRecord,
+    AssetServer, AssetSourceKind, AssetSourcePath, AssetStates, AssetVersion, ProjectAssetDatabase,
+    StableAssetId,
 };
 
 use super::diagnostics::{
@@ -25,26 +26,26 @@ pub(super) const UNCLAIMED_RELOAD_REQUEST_CODE: &str = "asset.reload-consumer-di
 #[derive(Debug)]
 pub(super) enum AssetReloadResolutionError {
     RecordMissing {
-        path: AssetPath,
+        path: AssetSourcePath,
         change_kind: AssetSourceChangeKind,
     },
     DependentRecordMissing {
-        path: AssetPath,
+        path: AssetSourcePath,
         change_kind: AssetSourceChangeKind,
     },
     SourceConsumerMissing {
-        path: AssetPath,
+        path: AssetSourcePath,
         source_kind: AssetSourceKind,
         change_kind: AssetSourceChangeKind,
     },
     RequestAdmission {
-        path: AssetPath,
+        path: AssetSourcePath,
         source_kind: AssetSourceKind,
         change_kind: AssetSourceChangeKind,
         source: AssetReloadRequestAdmissionError,
     },
     Asset {
-        path: AssetPath,
+        path: AssetSourcePath,
         change_kind: AssetSourceChangeKind,
         source: AssetError,
     },
@@ -54,7 +55,7 @@ pub(super) enum AssetReloadResolutionError {
 pub(super) struct AssetReloadDiagnosticContext<'a> {
     pub(super) code: &'static str,
     pub(super) summary: &'static str,
-    pub(super) path: &'a AssetPath,
+    pub(super) path: &'a AssetSourcePath,
     pub(super) change_kind: AssetSourceChangeKind,
     pub(super) source_kind: Option<&'a AssetSourceKind>,
     pub(super) reason: &'static str,
@@ -406,7 +407,7 @@ fn reject_asset_reload(
 }
 
 fn transitive_dependent_origins(
-    sources: &BTreeMap<StableAssetId, AssetPath>,
+    sources: &BTreeMap<StableAssetId, AssetSourcePath>,
     dependencies: &AssetDependencyGraph,
 ) -> BTreeMap<StableAssetId, StableAssetId> {
     let mut queue = VecDeque::new();
@@ -430,7 +431,7 @@ fn transitive_dependent_origins(
 fn enqueue_dependent_origin(
     dependent: StableAssetId,
     source: StableAssetId,
-    sources: &BTreeMap<StableAssetId, AssetPath>,
+    sources: &BTreeMap<StableAssetId, AssetSourcePath>,
     origins: &mut BTreeMap<StableAssetId, StableAssetId>,
     queue: &mut VecDeque<StableAssetId>,
 ) {

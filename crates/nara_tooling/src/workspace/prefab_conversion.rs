@@ -2,7 +2,7 @@
 
 use std::{error::Error, fmt};
 
-use nara_asset::{AssetRef, ProjectAssetDatabase};
+use nara_asset::{AssetRef, AssetReferenceResolver};
 use nara_core::ByteLimit;
 use nara_scene::{
     LocalizedPrefabEntity, PrefabConversionError, PrefabConversionRequest, PrefabDocument,
@@ -64,7 +64,7 @@ impl EditorPrefabConversionRequest {
     /// Keeps the original owner-created candidate and all actual semantic source snapshots.
     pub fn prepare_with_loader<F, E>(
         self,
-        database: Option<&ProjectAssetDatabase>,
+        asset_resolution: Option<AssetReferenceResolver<'_>>,
         loader: F,
     ) -> Result<PreparedEditorPrefabConversion, PrefabConversionError<E>>
     where
@@ -75,10 +75,10 @@ impl EditorPrefabConversionRequest {
     {
         let source = match self.source {
             ConversionRequest::Scene(request) => {
-                PreparedConversion::Scene(request.prepare_with_loader(database, loader)?)
+                PreparedConversion::Scene(request.prepare_with_loader(asset_resolution, loader)?)
             }
             ConversionRequest::Prefab(request) => {
-                PreparedConversion::Prefab(request.prepare_with_loader(database, loader)?)
+                PreparedConversion::Prefab(request.prepare_with_loader(asset_resolution, loader)?)
             }
         };
         Ok(PreparedEditorPrefabConversion {

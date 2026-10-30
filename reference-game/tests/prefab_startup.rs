@@ -18,13 +18,13 @@ fn committed_prefab_expands_into_the_exact_startup_document() {
         .snapshot
         .prefabs()
         .iter()
-        .find(|prefab| prefab.path().as_str() == "enemy.prefab.json")
+        .find(|prefab| prefab.path().as_str() == "prefabs/enemy.prefab.json")
         .unwrap();
     let ui_prefab = loaded
         .snapshot
         .prefabs()
         .iter()
-        .find(|prefab| prefab.path().as_str() == "reference-ui.prefab.json")
+        .find(|prefab| prefab.path().as_str() == "prefabs/reference-ui.prefab.json")
         .unwrap();
 
     assert_eq!(loaded.snapshot.scene(), &expected_scene);

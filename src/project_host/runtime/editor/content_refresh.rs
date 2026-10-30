@@ -106,18 +106,14 @@ impl EditorProjectSession {
         let Some(lane) = self.trusted_compiled() else {
             return false;
         };
-        let path = format!(
-            "{}/{}",
-            lane.content_candidate.settings().paths.prefabs.as_str(),
-            prefab.as_str()
-        );
+        let path = lane.snapshot.prefab_resolution().scope().resolve(prefab);
         lane.snapshot
             .content_closure()
             .members()
             .iter()
             .any(|member| {
                 member.kind() == ProjectContentMemberKind::Prefab
-                    && member.path().as_str() == path
+                    && member.path().as_str() == path.as_str()
                     && member.digest() == digest
             })
     }

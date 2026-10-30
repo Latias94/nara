@@ -67,7 +67,8 @@ use nara_app::{
 #[cfg(all(feature = "desktop-winit", feature = "render-wgpu"))]
 use nara_app::{RuntimeControl, RuntimeControlRequestResult};
 use nara_asset::{
-    AssetMeta, AssetMetaIdentity, AssetPath, AssetRef, AssetSourceKind, StableAssetId,
+    AssetMeta, AssetMetaIdentity, AssetPath, AssetRef, AssetSourceKind, AssetSourcePath,
+    StableAssetId,
 };
 use nara_diagnostic::DiagnosticValueRef;
 use nara_ecs::{Res, Resource, bevy_ecs::error::BevyError, schedule::IntoScheduleConfigs};
@@ -944,7 +945,7 @@ logical_height = 540
     .unwrap();
     assert_eq!(
         editor.editor_authoring_image_catalog_facts(),
-        (1, vec![(image_path.to_owned(), image_settings)])
+        (1, vec![(format!("assets/{image_path}"), image_settings)])
     );
     let scene_document = editor.workspace().active_document().unwrap();
     let frame = editor.current_frame();
@@ -1113,7 +1114,7 @@ logical_height = 540
     assert_eq!(editor.test_project_content_revision(), last_good_content);
     assert_eq!(
         editor.editor_authoring_image_catalog_facts(),
-        (1, vec![(image_path.to_owned(), image_settings)])
+        (1, vec![(format!("assets/{image_path}"), image_settings)])
     );
     assert_eq!(
         editor
@@ -1192,7 +1193,7 @@ logical_height = 540
     ));
     assert_eq!(
         editor.editor_authoring_image_catalog_facts(),
-        (2, vec![(image_path.to_owned(), image_settings)])
+        (2, vec![(format!("assets/{image_path}"), image_settings)])
     );
     let retirement_deadline = std::time::Instant::now() + Duration::from_secs(5);
     while refreshed_frame.authoring_retirement_pending() {
@@ -1560,7 +1561,7 @@ fn generic_editor_image_import_publishes_metadata_and_preserves_last_good_on_fai
     #[cfg(feature = "runtime-ui")]
     assert_eq!(
         editor.editor_authoring_image_catalog_facts(),
-        (2, vec![("textures/imported.png".to_owned(), linear)])
+        (2, vec![("assets/textures/imported.png".to_owned(), linear)])
     );
     let refreshed_index = editor.project_source_index_snapshot().unwrap();
     assert!(refreshed_index.generation() > import_basis_generation);
@@ -1570,8 +1571,9 @@ fn generic_editor_image_import_publishes_metadata_and_preserves_last_good_on_fai
             .is_some()
     );
     let asset_path = AssetPath::new("textures/imported.png").unwrap();
+    let source_path = AssetSourcePath::new("assets/textures/imported.png").unwrap();
     let first_last_good = editor
-        .editor_image_last_good(&asset_path)
+        .editor_image_last_good(&source_path)
         .cloned()
         .expect("a successful import publishes concrete last-good image facts");
     assert_eq!(first_last_good.stable_id(), stable_id);
@@ -1607,18 +1609,18 @@ fn generic_editor_image_import_publishes_metadata_and_preserves_last_good_on_fai
         )
     ));
     assert_same_image_product(
-        editor.editor_image_last_good(&asset_path).unwrap(),
+        editor.editor_image_last_good(&source_path).unwrap(),
         &first_last_good,
     );
     drive_image_import_host_until_idle(&mut editor);
     assert_same_image_product(
-        editor.editor_image_last_good(&asset_path).unwrap(),
+        editor.editor_image_last_good(&source_path).unwrap(),
         &first_last_good,
     );
     #[cfg(feature = "runtime-ui")]
     assert_eq!(
         editor.editor_authoring_image_catalog_facts(),
-        (2, vec![("textures/imported.png".to_owned(), linear)])
+        (2, vec![("assets/textures/imported.png".to_owned(), linear)])
     );
     assert!(
         editor.apply_project_browser_local_action(EditorProjectBrowserLocalAction::Select {
@@ -1664,7 +1666,7 @@ fn generic_editor_image_import_publishes_metadata_and_preserves_last_good_on_fai
         }
     ));
     assert_same_image_product(
-        editor.editor_image_last_good(&asset_path).unwrap(),
+        editor.editor_image_last_good(&source_path).unwrap(),
         &first_last_good,
     );
 
@@ -1704,7 +1706,7 @@ fn generic_editor_image_import_publishes_metadata_and_preserves_last_good_on_fai
         other => panic!("the image reimport did not succeed: {other:?}"),
     };
     let second_last_good = editor
-        .editor_image_last_good(&asset_path)
+        .editor_image_last_good(&source_path)
         .cloned()
         .expect("a successful reimport replaces the concrete last-good image facts");
     assert_eq!(second_last_good.stable_id(), stable_id);
@@ -1735,7 +1737,7 @@ fn generic_editor_image_import_publishes_metadata_and_preserves_last_good_on_fai
         }
     ));
     assert_same_image_product(
-        editor.editor_image_last_good(&asset_path).unwrap(),
+        editor.editor_image_last_good(&source_path).unwrap(),
         &second_last_good,
     );
     drive_image_import_host_until_idle(&mut editor);
@@ -1763,7 +1765,7 @@ fn generic_editor_image_import_publishes_metadata_and_preserves_last_good_on_fai
         }
     ));
     assert_same_image_product(
-        editor.editor_image_last_good(&asset_path).unwrap(),
+        editor.editor_image_last_good(&source_path).unwrap(),
         &second_last_good,
     );
 
@@ -1813,7 +1815,7 @@ fn generic_editor_image_import_publishes_metadata_and_preserves_last_good_on_fai
         successor.editor_image_import_state(),
         super::editor::EditorImageImportState::Idle
     );
-    assert!(successor.editor_image_last_good(&asset_path).is_none());
+    assert!(successor.editor_image_last_good(&source_path).is_none());
     let frame = successor.drive_editor_frame(Duration::ZERO);
     let conflict = successor.request_editor_image_import(
         frame.revision(),
@@ -2044,7 +2046,7 @@ fn generic_editor_image_import_action_submits_the_exact_selected_detail() {
     );
     assert!(
         editor
-            .editor_image_last_good(&AssetPath::new("textures/imported.png").unwrap())
+            .editor_image_last_good(&AssetSourcePath::new("assets/textures/imported.png").unwrap())
             .is_none()
     );
 }
@@ -2429,7 +2431,7 @@ fn generic_editor_image_import_action_rejects_stale_detail_failure_atomically() 
     );
     assert!(
         editor
-            .editor_image_last_good(&AssetPath::new("textures/imported.png").unwrap())
+            .editor_image_last_good(&AssetSourcePath::new("assets/textures/imported.png").unwrap())
             .is_none()
     );
 }
@@ -2901,7 +2903,7 @@ fn generic_editor_preview_resolves_stable_image_after_source_rename() {
         }
         let diagnostics = editor.current_frame().diagnostics().clone();
         let hydrated = editor
-            .editor_image_last_good(&AssetPath::new(path).unwrap())
+            .editor_image_last_good(&AssetSourcePath::new(format!("assets/{path}")).unwrap())
             .is_some();
         let close = drive_editor_close_to_completion(&mut editor);
         drop(editor);
@@ -2951,7 +2953,7 @@ fn generic_editor_imported_image_can_be_selected_by_path_and_stable_id_in_scene_
     };
     drive_image_import_host_until_idle(&mut editor);
     let accepted_image = editor
-        .editor_image_last_good(&AssetPath::new(imported_path).unwrap())
+        .editor_image_last_good(&AssetSourcePath::new(format!("assets/{imported_path}")).unwrap())
         .cloned();
     let mut selections = Vec::new();
     if let Some(image) = accepted_image {

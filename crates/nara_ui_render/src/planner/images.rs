@@ -1,14 +1,13 @@
 use std::collections::{BTreeMap, BTreeSet};
 
-use nara_asset::AssetServer;
-use nara_image::{PreparedImageSnapshot, PreparedImages};
+use nara_image::{ImageAsset, PreparedImageSnapshot, PreparedImages};
 use nara_render::RenderResourceKey;
 use nara_ui_kernel::{UiFrame, UiImageId, UiPaintPrimitive, UiResolvedBrush};
 
 #[derive(Debug, Default)]
 pub struct UiPreparedImages {
-    images: BTreeMap<String, PreparedImageSnapshot>,
-    ambiguous: BTreeMap<String, (RenderResourceKey, RenderResourceKey)>,
+    images: BTreeMap<UiImageId, PreparedImageSnapshot>,
+    ambiguous: BTreeMap<UiImageId, (RenderResourceKey, RenderResourceKey)>,
 }
 
 impl UiPreparedImages {
@@ -18,15 +17,14 @@ impl UiPreparedImages {
     }
 
     pub fn insert(&mut self, id: UiImageId, snapshot: PreparedImageSnapshot) {
-        self.insert_alias(id.as_str().to_owned(), snapshot);
+        self.insert_snapshot(id, snapshot);
     }
 
     pub(crate) fn capture(
         referenced: &BTreeSet<UiImageId>,
-        asset_server: Option<&AssetServer>,
         prepared: Option<&PreparedImages>,
     ) -> Self {
-        let (Some(asset_server), Some(prepared)) = (asset_server, prepared) else {
+        let Some(prepared) = prepared else {
             return Self::default();
         };
         let mut index = Self::default();
@@ -37,35 +35,28 @@ impl UiPreparedImages {
             let Some(snapshot) = prepared.get(key) else {
                 continue;
             };
-            let path = asset_server.path(key.asset_id());
-            let stable_id = asset_server
-                .stable_id(key.asset_id())
-                .map(|id| id.to_string());
-            for id in referenced {
-                if !alias_matches(id.as_str(), path, stable_id.as_deref()) {
-                    continue;
-                }
-                index.insert_alias(id.as_str().to_owned(), snapshot.clone());
+            let id = UiImageId::external::<ImageAsset>(key.asset_id().raw());
+            if referenced.contains(&id) {
+                index.insert_snapshot(id, snapshot.clone());
             }
         }
         index
     }
 
-    fn insert_alias(&mut self, alias: String, snapshot: PreparedImageSnapshot) {
-        if self.ambiguous.contains_key(&alias) {
+    fn insert_snapshot(&mut self, id: UiImageId, snapshot: PreparedImageSnapshot) {
+        if self.ambiguous.contains_key(&id) {
             return;
         }
-        match self.images.get(&alias) {
+        match self.images.get(&id) {
             None => {
-                self.images.insert(alias, snapshot);
+                self.images.insert(id, snapshot);
             }
             Some(existing) if existing.identity() == snapshot.identity() => {}
             Some(existing) => {
                 let existing_key = existing.identity().key();
                 let replacement_key = snapshot.identity().key();
-                self.images.remove(&alias);
-                self.ambiguous
-                    .insert(alias, (existing_key, replacement_key));
+                self.images.remove(&id);
+                self.ambiguous.insert(id, (existing_key, replacement_key));
             }
         }
     }
@@ -74,19 +65,17 @@ impl UiPreparedImages {
         &self,
         id: &UiImageId,
     ) -> Result<PreparedImageSnapshot, UiPreparedImageError> {
-        if let Some((first, second)) = self.ambiguous.get(id.as_str()).copied() {
+        if let Some((first, second)) = self.ambiguous.get(id).copied() {
             return Err(UiPreparedImageError::Ambiguous {
-                id: id.as_str().to_owned(),
+                id: id.to_string(),
                 first,
                 second,
             });
         }
         self.images
-            .get(id.as_str())
+            .get(id)
             .cloned()
-            .ok_or_else(|| UiPreparedImageError::Missing {
-                id: id.as_str().to_owned(),
-            })
+            .ok_or_else(|| UiPreparedImageError::Missing { id: id.to_string() })
     }
 }
 
@@ -115,38 +104,4 @@ pub(crate) fn collect_referenced_image_ids(
             _ => None,
         })
         .collect()
-}
-
-fn alias_matches(candidate: &str, path: Option<&str>, stable_id: Option<&str>) -> bool {
-    path.is_some_and(|path| {
-        candidate == path
-            || candidate.strip_prefix("path:") == Some(path)
-            || candidate.strip_prefix("project://") == Some(path)
-    }) || stable_id.is_some_and(|stable_id| {
-        candidate == stable_id || candidate.strip_prefix("stable:") == Some(stable_id)
-    })
-}
-
-#[cfg(test)]
-mod tests {
-    use super::alias_matches;
-
-    #[test]
-    fn referenced_alias_matching_is_exact_and_domain_scoped() {
-        assert!(alias_matches(
-            "project://textures/hud.png",
-            Some("textures/hud.png"),
-            None
-        ));
-        assert!(alias_matches(
-            "stable:6a24b57a-122a-4a33-a443-c05d0d24f478",
-            None,
-            Some("6a24b57a-122a-4a33-a443-c05d0d24f478")
-        ));
-        assert!(!alias_matches(
-            "project://textures/hud.png.bak",
-            Some("textures/hud.png"),
-            None
-        ));
-    }
 }
