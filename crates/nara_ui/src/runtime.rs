@@ -3,8 +3,8 @@ use std::sync::Arc;
 use nara_ecs::{Mut, Resource, World};
 use nara_hierarchy::HierarchyOrder;
 use nara_input::{
-    InputGeometryGeneration, InputIngressError, InputPresentationEpoch, InputPresentedRoute,
-    InputRouteGeneration, InputSlotGeneration, InputSurfaceId, InputTimeline,
+    InputGeometryGeneration, InputIngressError, InputInvalidationReason, InputPresentationEpoch,
+    InputPresentedRoute, InputRouteGeneration, InputSlotGeneration, InputSurfaceId, InputTimeline,
 };
 use nara_ui_kernel::{
     UiDispatchError, UiEnvironmentError, UiFrame, UiJournalError, UiPresentationReceipt,
@@ -55,6 +55,27 @@ impl UiPreparedPresentationAuthority {
     pub const fn receipt(&self) -> UiPresentationReceipt {
         self.prepared.receipt()
     }
+}
+
+/// Total completion of one backend-accepted prepared UI presentation.
+///
+/// Invalidation preserves backend pixel acceptance, publishes no interactive receipt, and leaves
+/// the live presentation, interaction and reducers unchanged.
+#[must_use = "interactive publication requires a committed UI presentation"]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum UiPresentationCommit {
+    Committed(UiPresentationReceipt),
+    Invalidated {
+        reason: UiPresentationInvalidationReason,
+    },
+}
+
+/// Observed cause that prevents one prepared snapshot from becoming interactive.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum UiPresentationInvalidationReason {
+    Input(InputInvalidationReason),
+    InteractionChanged,
+    SurfaceUnavailable,
 }
 
 /// Move-only exact candidate retained while a backend makes retryable residency progress.
@@ -303,12 +324,13 @@ pub(crate) fn compile_ui_frames(world: &mut World) {
 /// Installs one new Host-owned surface lifetime without reusing retired identities.
 ///
 /// The Host supplies the initial immutable slot while the runtime remains the only successor-
-/// generation allocator.
+/// generation allocator. The Host must connect the logical Input endpoint before installation;
+/// the surface retains that exact lifetime claim independently of presented-route authority.
 pub fn install_ui_surface(world: &mut World, slot: UiSurfaceSlot) -> Result<(), UiAdapterError> {
     let theme_revision = active_theme_revision(world);
     slot.environment(theme_revision)?;
-    world.resource_scope(|_world, mut state: Mut<UiRuntimeState>| {
-        let prepared = state.prepare_surface_install(slot)?;
+    world.resource_scope(|world, mut state: Mut<UiRuntimeState>| {
+        let prepared = state.prepare_surface_install(slot, world.resource::<InputTimeline>())?;
         state.commit_surface_install(prepared);
         Ok(())
     })
@@ -318,6 +340,8 @@ pub fn install_ui_surface(world: &mut World, slot: UiSurfaceSlot) -> Result<(), 
 ///
 /// Endpoint and transform facts cannot be updated independently. Any change advances the slot,
 /// route, and presentation generations. A transform change also advances geometry generation.
+/// Endpoint changes capture the destination's connected Input lifetime; geometry-only updates
+/// retain the existing claim.
 pub fn update_ui_surface_slot(
     world: &mut World,
     surface_id: UiSurfaceId,
@@ -343,15 +367,29 @@ pub fn update_ui_surface_slot(
         if updated == previous {
             return Ok(updated);
         }
-        let prepared = state.prepare_surface_slot_update(updated, UiSurfaceAvailability::Active)?;
-        let previous_endpoint = previous.endpoint();
-        world
-            .resource_mut::<InputTimeline>()
-            .unbind_presented_endpoint(
-                previous_endpoint.window(),
-                previous_endpoint.seat(),
-                prepared.released_input_route(),
-            )?;
+        let input_endpoint = if endpoint == previous.endpoint() {
+            state
+                .surface(surface_id)
+                .expect("the installed surface retains its endpoint claim")
+                .input_endpoint()
+                .clone()
+        } else {
+            nara_input::__private::claim_input_endpoint(
+                world.resource::<InputTimeline>(),
+                endpoint.window(),
+                endpoint.seat(),
+            )?
+        };
+        let prepared = state.prepare_surface_slot_update(
+            updated,
+            UiSurfaceAvailability::Active,
+            input_endpoint,
+        )?;
+        nara_input::__private::unbind_claimed_endpoint(
+            &mut world.resource_mut::<InputTimeline>(),
+            prepared.released_input_endpoint(),
+            prepared.released_input_route(),
+        )?;
         state.commit_surface_slot_update(prepared);
         Ok(updated)
     })
@@ -373,14 +411,11 @@ pub fn suspend_ui_surface(
         else {
             return Ok(None);
         };
-        let endpoint = suspension.endpoint();
-        world
-            .resource_mut::<InputTimeline>()
-            .unbind_presented_endpoint(
-                endpoint.window(),
-                endpoint.seat(),
-                prepared.released_input_route(),
-            )?;
+        nara_input::__private::unbind_claimed_endpoint(
+            &mut world.resource_mut::<InputTimeline>(),
+            prepared.released_input_endpoint(),
+            prepared.released_input_route(),
+        )?;
         state.commit_surface_slot_update(prepared);
         Ok(Some(suspension))
     })
@@ -390,6 +425,7 @@ pub fn suspend_ui_surface(
 ///
 /// Restore never revives the previous packet or receipt. A fresh candidate must compile and pass
 /// backend acceptance before input or semantics become authoritative again.
+/// The destination Input endpoint must already be connected; restore captures its current lifetime.
 pub fn restore_ui_surface(
     world: &mut World,
     surface_id: UiSurfaceId,
@@ -398,23 +434,19 @@ pub fn restore_ui_surface(
 ) -> Result<UiSurfaceSlot, UiAdapterError> {
     let theme_revision = active_theme_revision(world);
     world.resource_scope(|world, mut state: Mut<UiRuntimeState>| {
-        let previous =
-            state
-                .surface_snapshot(surface_id)
-                .ok_or(UiAdapterError::UnknownSurface {
-                    surface: surface_id.get(),
-                })?;
-        let prepared = state.prepare_surface_restoration(surface_id, endpoint, transform)?;
+        let prepared = state.prepare_surface_restoration(
+            surface_id,
+            endpoint,
+            transform,
+            world.resource::<InputTimeline>(),
+        )?;
         let restored = prepared.slot();
         restored.environment(theme_revision)?;
-        let previous_endpoint = previous.slot().endpoint();
-        world
-            .resource_mut::<InputTimeline>()
-            .unbind_presented_endpoint(
-                previous_endpoint.window(),
-                previous_endpoint.seat(),
-                prepared.released_input_route(),
-            )?;
+        nara_input::__private::unbind_claimed_endpoint(
+            &mut world.resource_mut::<InputTimeline>(),
+            prepared.released_input_endpoint(),
+            prepared.released_input_route(),
+        )?;
         state.commit_surface_slot_update(prepared);
         Ok(restored)
     })
@@ -429,6 +461,8 @@ fn active_theme_revision(world: &World) -> u64 {
 }
 
 /// Retires one surface after balancing and clearing exactly the physical endpoint it owns.
+///
+/// Its retained Input claim protects same-label replacements even without a presented route stamp.
 pub fn retire_ui_surface(
     world: &mut World,
     surface_id: UiSurfaceId,
@@ -438,14 +472,11 @@ pub fn retire_ui_surface(
             return Ok(None);
         };
         let retirement = prepared.retirement();
-        let endpoint = retirement.endpoint();
-        world
-            .resource_mut::<InputTimeline>()
-            .retire_presented_endpoint(
-                endpoint.window(),
-                endpoint.seat(),
-                retirement.input_route(),
-            )?;
+        nara_input::__private::retire_claimed_endpoint(
+            &mut world.resource_mut::<InputTimeline>(),
+            prepared.input_endpoint(),
+            retirement.input_route(),
+        )?;
         Ok(Some(state.commit_surface_retirement(prepared)))
     })
 }
@@ -461,8 +492,11 @@ pub fn retired_ui_surface_token(
     Ok(state.retirement(surface_id))
 }
 
-/// Returns the latest compiled immutable frame for one surface.
-pub fn latest_ui_frame(
+/// Returns the current unpresented immutable candidate for one surface.
+///
+/// A successful presentation commit consumes the candidate. The presentation owner retains the
+/// accepted frame in its presentation packet.
+pub fn ui_candidate_frame(
     world: &World,
     surface_id: UiSurfaceId,
 ) -> Result<Option<Arc<UiFrame>>, UiAdapterError> {
@@ -475,8 +509,11 @@ pub fn latest_ui_frame(
         .map(state::candidate_frame))
 }
 
-/// Returns the latest immutable frame for every installed surface in stable surface order.
-pub fn latest_ui_frames(world: &World) -> Result<Vec<Arc<UiFrame>>, UiAdapterError> {
+/// Returns the current unpresented immutable candidates in stable surface order.
+///
+/// A successful presentation commit consumes the corresponding candidate. The presentation owner
+/// retains each accepted frame in its presentation packet.
+pub fn ui_candidate_frames(world: &World) -> Result<Vec<Arc<UiFrame>>, UiAdapterError> {
     let Some(state) = world.get_resource::<UiRuntimeState>() else {
         return Err(UiAdapterError::RuntimeUnavailable);
     };
@@ -515,6 +552,7 @@ pub fn ui_surface_slot_snapshots(
 }
 
 /// Stages every fallible UI and input-route fact before the exact frame reaches a backend.
+/// The surface's retained endpoint claim must still identify its original Input lifetime.
 pub fn prepare_ui_presentation(
     world: &mut World,
     frame: Arc<UiFrame>,
@@ -522,7 +560,7 @@ pub fn prepare_ui_presentation(
 ) -> Result<UiPreparedPresentationAuthority, UiAdapterError> {
     world.resource_scope(|world, state: Mut<UiRuntimeState>| {
         let surface_id = frame.environment().surface_id();
-        let (slot, facts, prepared) = {
+        let (slot, input_endpoint, facts, prepared) = {
             let surface = state
                 .surface(surface_id)
                 .ok_or(UiAdapterError::UnknownSurface {
@@ -544,9 +582,14 @@ pub fn prepare_ui_presentation(
                 });
             }
             let prepared = surface.prepare_presentation(presentation_epoch)?;
-            (surface.slot(), candidate.presentation_facts(), prepared)
+            (
+                surface.slot(),
+                surface.input_endpoint(),
+                candidate.presentation_facts(),
+                prepared,
+            )
         };
-        let input_route = prepare_input_route(world, slot, prepared.receipt())?;
+        let input_route = prepare_input_route(world, input_endpoint, slot, prepared.receipt())?;
         Ok(UiPreparedPresentationAuthority {
             surface_id,
             facts,
@@ -596,7 +639,8 @@ pub fn retry_deferred_ui_presentation(
         else {
             return Ok(UiDeferredPresentationRetry::Superseded);
         };
-        let input_route = prepare_input_route(world, slot, prepared.receipt())?;
+        let input_route =
+            prepare_input_route(world, surface.input_endpoint(), slot, prepared.receipt())?;
         Ok(UiDeferredPresentationRetry::Prepared(Box::new(
             UiPreparedPresentationAuthority {
                 surface_id: authority.surface_id,
@@ -611,42 +655,88 @@ pub fn retry_deferred_ui_presentation(
 /// Terminates deferred authority after a newer candidate is admitted.
 pub fn supersede_deferred_ui_presentation(_authority: UiDeferredPresentationAuthority) {}
 
-/// Commits one backend-accepted prepared presentation with no fallible post-submit work.
+/// Consumes one backend-accepted prepared presentation with no fallible post-submit work.
+///
+/// Input loss takes precedence over UI invalidation. Otherwise, an unavailable surface or changed
+/// interaction basis aborts the exact route token before publication. All checks and completion
+/// share this exclusive World access; a newer authored candidate alone does not invalidate the
+/// immutable packet accepted by the backend.
 #[must_use]
 pub fn commit_prepared_ui_presentation(
     world: &mut World,
     authority: UiPreparedPresentationAuthority,
-) -> UiPresentationReceipt {
+) -> UiPresentationCommit {
     let UiPreparedPresentationAuthority {
         surface_id,
         facts: _,
-        mut prepared,
+        prepared,
         input_route,
     } = authority;
-    world.resource_scope(|world, mut state: Mut<UiRuntimeState>| {
-        let input_route = nara_input::__private::commit_presented_route(
+    if nara_input::__private::prepared_route_invalidation(
+        world.resource::<InputTimeline>(),
+        &input_route,
+    )
+    .is_some()
+    {
+        let nara_input::__private::InputRouteCommit::Invalidated { reason } =
+            nara_input::__private::commit_presented_route(
+                &mut world.resource_mut::<InputTimeline>(),
+                input_route,
+            )
+        else {
+            unreachable!("exclusive completion preserves the observed Input invalidation");
+        };
+        return UiPresentationCommit::Invalidated {
+            reason: UiPresentationInvalidationReason::Input(reason),
+        };
+    }
+    let ui_invalidation = world
+        .get_resource::<UiRuntimeState>()
+        .and_then(|state| state.surface(surface_id))
+        .map_or(
+            Some(UiPresentationInvalidationReason::SurfaceUnavailable),
+            |surface| surface.prepared_presentation_invalidation(&prepared),
+        );
+    if let Some(reason) = ui_invalidation {
+        nara_input::__private::abort_presented_route(
             &mut world.resource_mut::<InputTimeline>(),
             input_route,
         );
-        prepared.bind_input_route(input_route);
-        let receipt = prepared.receipt();
-        state
-            .surface_mut(surface_id)
-            .expect("a prepared UI presentation keeps its Surface Slot installed")
-            .commit_presentation(prepared);
-        receipt
-    })
+        return UiPresentationCommit::Invalidated { reason };
+    }
+    let input_commit = nara_input::__private::commit_presented_route(
+        &mut world.resource_mut::<InputTimeline>(),
+        input_route,
+    );
+    match input_commit {
+        nara_input::__private::InputRouteCommit::Published(input_route) => {
+            let receipt = prepared.receipt();
+            world
+                .resource_mut::<UiRuntimeState>()
+                .surface_mut(surface_id)
+                .expect("a valid prepared UI presentation keeps its Surface Slot installed")
+                .commit_presentation(prepared, input_route);
+            UiPresentationCommit::Committed(receipt)
+        }
+        nara_input::__private::InputRouteCommit::Invalidated { reason } => {
+            UiPresentationCommit::Invalidated {
+                reason: UiPresentationInvalidationReason::Input(reason),
+            }
+        }
+    }
 }
 
 fn prepare_input_route(
     world: &mut World,
+    input_endpoint: &nara_input::__private::InputEndpointClaim,
     slot: UiSurfaceSlot,
     receipt: UiPresentationReceipt,
 ) -> Result<nara_input::__private::PreparedInputRoutePublication, UiAdapterError> {
     let epoch = InputPresentationEpoch::new(receipt.presentation_epoch())
         .ok_or(UiJournalError::ZeroPresentationEpoch)?;
-    nara_input::__private::prepare_presented_route(
+    nara_input::__private::prepare_claimed_route(
         &mut world.resource_mut::<InputTimeline>(),
+        input_endpoint,
         InputPresentedRoute::new(
             slot.endpoint().window(),
             InputSurfaceId::new(receipt.surface_id().get()),

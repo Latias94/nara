@@ -17,6 +17,113 @@ pub const MAX_INPUT_TIMELINE_ENTRIES: usize = 4_096;
 /// Maximum number of simultaneously known window/seat presentation routes.
 pub const MAX_INPUT_ROUTES: usize = 64;
 
+/// Finite live Input storage, including the once-connected synthetic endpoint and pointer.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct InputLimits {
+    events: usize,
+    endpoints: usize,
+    pointers: usize,
+    members: usize,
+}
+
+impl Default for InputLimits {
+    fn default() -> Self {
+        Self {
+            events: MAX_INPUT_TIMELINE_ENTRIES,
+            endpoints: 64,
+            pointers: 256,
+            members: 1_024,
+        }
+    }
+}
+
+impl InputLimits {
+    pub fn new(
+        events: usize,
+        endpoints: usize,
+        pointers: usize,
+        members: usize,
+    ) -> Result<Self, InputConfigurationError> {
+        if endpoints == 0 || pointers == 0 || members == 0 {
+            return Err(InputConfigurationError::ZeroCapacity);
+        }
+        if events < 3 {
+            return Err(InputConfigurationError::EventCapacityTooSmall { limit: events });
+        }
+        if events > MAX_INPUT_TIMELINE_ENTRIES {
+            return Err(InputConfigurationError::EventCapacityExceeded { limit: events });
+        }
+        events
+            .checked_add(endpoints)
+            .and_then(|count| count.checked_add(pointers))
+            .and_then(|count| count.checked_add(members))
+            .and_then(|count| count.checked_mul(crate::MAX_BINDINGS_PER_INPUT))
+            .ok_or(InputConfigurationError::CapacityOverflow)?;
+        Ok(Self {
+            events,
+            endpoints,
+            pointers,
+            members,
+        })
+    }
+
+    #[must_use]
+    pub const fn events(self) -> usize {
+        self.events
+    }
+    #[must_use]
+    pub const fn endpoints(self) -> usize {
+        self.endpoints
+    }
+    #[must_use]
+    pub const fn pointers(self) -> usize {
+        self.pointers
+    }
+    #[must_use]
+    pub const fn members(self) -> usize {
+        self.members
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum InputConfigurationError {
+    ZeroCapacity,
+    EventCapacityTooSmall { limit: usize },
+    EventCapacityExceeded { limit: usize },
+    CapacityOverflow,
+    AllocationRefused,
+}
+
+impl Display for InputConfigurationError {
+    fn fmt(&self, formatter: &mut Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::ZeroCapacity => {
+                formatter.write_str("input lifecycle and member capacities must be non-zero")
+            }
+            Self::EventCapacityTooSmall { limit } => write!(
+                formatter,
+                "input event capacity {limit} cannot reserve three synthetic lifecycle controls"
+            ),
+            Self::EventCapacityExceeded { limit } => write!(
+                formatter,
+                "input event capacity {limit} exceeds the supported maximum {MAX_INPUT_TIMELINE_ENTRIES}"
+            ),
+            Self::CapacityOverflow => formatter.write_str("input storage capacity overflowed"),
+            Self::AllocationRefused => formatter.write_str("input storage allocation was refused"),
+        }
+    }
+}
+
+impl Error for InputConfigurationError {}
+
+/// Origin is independent from route authority and from the original held member's identity.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+pub enum InputEventOrigin {
+    Platform,
+    Synthetic,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct InputWindowId(u64);
@@ -269,7 +376,8 @@ pub struct InputRouteStamp {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct ActionInputProvenance {
-    sequence: Option<u64>,
+    sequence: u64,
+    origin: InputEventOrigin,
     route: InputRouteStamp,
     press_sequence: Option<u64>,
     press_route: Option<InputRouteStamp>,
@@ -277,22 +385,13 @@ pub struct ActionInputProvenance {
 
 impl ActionInputProvenance {
     #[must_use]
-    pub const fn synthetic() -> Self {
-        Self {
-            sequence: None,
-            route: InputRouteStamp::unrouted(
-                InputWindowId::UNSPECIFIED,
-                InputSeatId::PRIMARY,
-                None,
-            ),
-            press_sequence: None,
-            press_route: None,
-        }
+    pub const fn sequence(self) -> u64 {
+        self.sequence
     }
 
     #[must_use]
-    pub const fn sequence(self) -> Option<u64> {
-        self.sequence
+    pub const fn origin(self) -> InputEventOrigin {
+        self.origin
     }
 
     #[must_use]
@@ -434,6 +533,7 @@ pub enum InputEventKind {
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct InputTimelineEntry {
     pub(super) sequence: u64,
+    pub(super) origin: InputEventOrigin,
     pub(super) route: InputRouteStamp,
     pub(super) logical_position: Option<Vec2>,
     pub(super) kind: InputEventKind,
@@ -446,6 +546,16 @@ impl InputTimelineEntry {
     #[must_use]
     pub const fn sequence(self) -> u64 {
         self.sequence
+    }
+
+    #[must_use]
+    pub const fn origin(self) -> InputEventOrigin {
+        self.origin
+    }
+
+    #[must_use]
+    pub const fn press_sequence(self) -> Option<u64> {
+        self.press_sequence
     }
 
     #[must_use]
@@ -471,7 +581,8 @@ impl InputTimelineEntry {
     #[must_use]
     pub const fn action_provenance(self) -> ActionInputProvenance {
         ActionInputProvenance {
-            sequence: Some(self.sequence),
+            sequence: self.sequence,
+            origin: self.origin,
             route: self.route,
             press_sequence: self.press_sequence,
             press_route: self.press_route,
@@ -567,15 +678,46 @@ impl InputEndpointRetirement {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum InputIngressError {
+    ForeignEndpointClaim,
+    EndpointClaimExpired {
+        window: InputWindowId,
+        seat: InputSeatId,
+    },
+    EndpointCapacityExceeded {
+        limit: usize,
+    },
+    PointerCapacityExceeded {
+        limit: usize,
+    },
+    MemberCapacityExceeded {
+        limit: usize,
+    },
+    UnknownEndpoint {
+        window: InputWindowId,
+        seat: InputSeatId,
+    },
+    UnknownPointer {
+        window: InputWindowId,
+        seat: InputSeatId,
+        pointer: InputPointerId,
+    },
+    EndpointRetiring {
+        window: InputWindowId,
+        seat: InputSeatId,
+    },
+    PointerRetiring {
+        window: InputWindowId,
+        seat: InputSeatId,
+        pointer: InputPointerId,
+    },
+    EndpointGenerationExhausted,
     CapacityExceeded {
         limit: usize,
         retained: usize,
         requested: usize,
-        route_invalidated: bool,
     },
     SequenceExhausted {
         requested: usize,
-        route_invalidated: bool,
     },
     RouteCapacityExceeded {
         limit: usize,
@@ -598,81 +740,81 @@ pub enum InputIngressError {
         window: InputWindowId,
         seat: InputSeatId,
     },
-    RouteBindingGenerationExhausted {
-        route_invalidated: bool,
-    },
+    RouteBindingGenerationExhausted,
     NonFinitePosition,
     InvalidLogicalSize,
     InvalidScaleFactor,
 }
 
-impl InputIngressError {
-    pub(super) fn after_route_invalidation(self) -> Self {
-        match self {
-            Self::CapacityExceeded {
-                limit,
-                retained,
-                requested,
-                ..
-            } => Self::CapacityExceeded {
-                limit,
-                retained,
-                requested,
-                route_invalidated: true,
-            },
-            Self::SequenceExhausted { requested, .. } => Self::SequenceExhausted {
-                requested,
-                route_invalidated: true,
-            },
-            other => other,
-        }
-    }
-
-    #[must_use]
-    pub const fn route_was_invalidated(self) -> bool {
-        matches!(
-            self,
-            Self::CapacityExceeded {
-                route_invalidated: true,
-                ..
-            } | Self::SequenceExhausted {
-                route_invalidated: true,
-                ..
-            } | Self::RouteBindingGenerationExhausted {
-                route_invalidated: true,
-            }
-        )
-    }
-}
-
 impl Display for InputIngressError {
     fn fmt(&self, formatter: &mut Formatter<'_>) -> fmt::Result {
         match self {
+            Self::ForeignEndpointClaim => {
+                formatter.write_str("input endpoint claim belongs to a different Input owner")
+            }
+            Self::EndpointClaimExpired { window, seat } => write!(
+                formatter,
+                "the original input endpoint ({}, {}) has retired",
+                window.get(),
+                seat.get()
+            ),
+            Self::EndpointCapacityExceeded { limit } => {
+                write!(formatter, "input endpoint capacity {limit} was exceeded")
+            }
+            Self::PointerCapacityExceeded { limit } => {
+                write!(formatter, "input pointer capacity {limit} was exceeded")
+            }
+            Self::MemberCapacityExceeded { limit } => {
+                write!(formatter, "input member capacity {limit} was exceeded")
+            }
+            Self::UnknownEndpoint { window, seat } => write!(
+                formatter,
+                "input endpoint ({}, {}) is not connected",
+                window.get(),
+                seat.get()
+            ),
+            Self::UnknownPointer {
+                window,
+                seat,
+                pointer,
+            } => write!(
+                formatter,
+                "input pointer ({}, {}, {}) is not connected",
+                window.get(),
+                seat.get(),
+                pointer.get()
+            ),
+            Self::EndpointRetiring { window, seat } => write!(
+                formatter,
+                "input endpoint ({}, {}) is still retiring",
+                window.get(),
+                seat.get()
+            ),
+            Self::PointerRetiring {
+                window,
+                seat,
+                pointer,
+            } => write!(
+                formatter,
+                "input pointer ({}, {}, {}) is still retiring",
+                window.get(),
+                seat.get(),
+                pointer.get()
+            ),
+            Self::EndpointGenerationExhausted => {
+                formatter.write_str("input endpoint identity was exhausted")
+            }
             Self::CapacityExceeded {
                 limit,
                 retained,
                 requested,
-                route_invalidated,
             } => write!(
                 formatter,
-                "input timeline limit {limit} cannot retain {requested} entries after {retained}{}",
-                if *route_invalidated {
-                    "; the affected route was invalidated"
-                } else {
-                    ""
-                }
+                "input timeline limit {limit} cannot admit {requested} records and terminal credits after {retained} retained records",
             ),
-            Self::SequenceExhausted {
-                requested,
-                route_invalidated,
-            } => write!(
+            Self::SequenceExhausted { requested } => write!(
                 formatter,
-                "input timeline sequence cannot admit {requested} entries{}",
-                if *route_invalidated {
-                    "; the affected route was invalidated"
-                } else {
-                    ""
-                }
+                "input timeline sequence cannot admit {requested} records and terminal credits",
             ),
             Self::RouteCapacityExceeded { limit } => {
                 write!(formatter, "input route limit {limit} was exceeded")
@@ -708,15 +850,9 @@ impl Display for InputIngressError {
                 window.get(),
                 seat.get(),
             ),
-            Self::RouteBindingGenerationExhausted { route_invalidated } => write!(
-                formatter,
-                "input route binding generation was exhausted{}",
-                if *route_invalidated {
-                    "; the affected route was invalidated"
-                } else {
-                    ""
-                }
-            ),
+            Self::RouteBindingGenerationExhausted => {
+                formatter.write_str("input route binding generation was exhausted")
+            }
             Self::NonFinitePosition => formatter.write_str("input position must be finite"),
             Self::InvalidLogicalSize => {
                 formatter.write_str("input logical size must be finite and non-negative")
@@ -797,6 +933,14 @@ pub struct InputFrameObservations {
 }
 
 impl InputFrameObservations {
+    pub(crate) fn with_capacity(capacity: usize) -> Result<Self, InputConfigurationError> {
+        let mut entries = Vec::new();
+        entries
+            .try_reserve_exact(capacity)
+            .map_err(|_| InputConfigurationError::AllocationRefused)?;
+        Ok(Self { entries })
+    }
+
     #[must_use]
     pub fn as_slice(&self) -> &[InputTimelineEntry] {
         &self.entries
@@ -824,6 +968,34 @@ pub enum InputWindowEvent {
 #[doc(hidden)]
 #[derive(Debug, Clone, PartialEq)]
 pub enum __InputDriverEvent {
+    ConnectEndpoint {
+        window: InputWindowId,
+        seat: InputSeatId,
+    },
+    ConnectPointer {
+        window: InputWindowId,
+        seat: InputSeatId,
+        pointer: InputPointerId,
+    },
+    RetirePointer {
+        window: InputWindowId,
+        seat: InputSeatId,
+        pointer: InputPointerId,
+    },
+    SyntheticKeyboard {
+        input: ButtonDriverInput<KeyCode>,
+    },
+    SyntheticMouse {
+        input: ButtonDriverInput<MouseButton>,
+    },
+    SyntheticPointer {
+        input: PointerDriverInput,
+    },
+    SyntheticGamepad {
+        gamepad: u16,
+        button: u16,
+        phase: ButtonTransitionPhase,
+    },
     Keyboard {
         window: InputWindowId,
         seat: InputSeatId,

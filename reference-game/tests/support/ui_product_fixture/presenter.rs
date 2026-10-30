@@ -26,7 +26,7 @@ use nara::{
     identity::{EntityLookup, WorldIdentityDomain},
     prelude::{App, Commands, FixedTime, Plugin, PluginError, Query, Res, ResMut, World},
     scene::SceneEntitySource,
-    ui::latest_ui_frame,
+    ui::ui_candidate_frame,
     window::WindowId,
 };
 use nara_reference_game::{
@@ -385,7 +385,7 @@ fn dispatch_component_accessibility_inputs(world: &mut World) {
 }
 
 fn present_latest_reference_ui_component(world: &mut World) {
-    let Ok(Some(frame)) = latest_ui_frame(world, reference_surface_id()) else {
+    let Ok(Some(frame)) = ui_candidate_frame(world, reference_surface_id()) else {
         return;
     };
     let (packet, epoch, backend_generation) = {
@@ -453,7 +453,10 @@ fn present_latest_reference_ui_component(world: &mut World) {
     }
     let acceptance = accepted.identity();
     let identity = accepted.packet().identity();
-    let receipt = nara_ui::__private::commit_prepared_ui_presentation(world, authority);
+    let receipt = match nara_ui::__private::commit_prepared_ui_presentation(world, authority) {
+        nara_ui::__private::UiPresentationCommit::Committed(receipt) => receipt,
+        nara_ui::__private::UiPresentationCommit::Invalidated { .. } => return,
+    };
     assert_eq!(receipt.surface_id(), identity.surface_id());
     assert_eq!(receipt.frame_revision(), identity.frame_revision());
     assert_eq!(receipt.route_revision(), identity.route_revision());

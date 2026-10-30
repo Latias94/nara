@@ -4,7 +4,8 @@ use std::{
 };
 
 use nara_ecs::Resource;
-use nara_input::InputRouteStamp as PresentedInputRouteStamp;
+use nara_input::__private::InputEndpointClaim;
+use nara_input::{InputRouteStamp as PresentedInputRouteStamp, InputTimeline};
 use nara_text::FontFace;
 use nara_ui_kernel::{
     UiCompileError, UiCompiler, UiDispatchBatch, UiDispatchError, UiDispatchOutcome, UiEnvironment,
@@ -15,7 +16,7 @@ use nara_ui_widgets::{UiButtonState, UiIntentBatch};
 use thiserror::Error;
 
 use super::{
-    UiAdapterError,
+    UiAdapterError, UiPresentationInvalidationReason,
     candidate::{
         UiBehaviorSnapshot, UiBehaviorSnapshotError, UiCandidateStaging, UiCompiledCandidate,
         UiPresentationFacts,
@@ -58,18 +59,23 @@ pub(crate) enum UiReducerPreparationError {
 pub(super) struct UiPreparedPresentation {
     presented: UiPresentedHistory,
     receipt: UiPresentationReceipt,
-    input_route: Option<PresentedInputRouteStamp>,
     interaction: UiInteractionSession,
     reducers: BTreeMap<UiKey, UiButtonState>,
+    interaction_basis: Arc<()>,
+    // Allocate the successor during preparation so accepted completion only installs it.
+    next_interaction_basis: Arc<()>,
 }
 
 pub(super) struct UiPreparedSlotUpdate {
     slot: UiSurfaceSlot,
     availability: UiSurfaceAvailability,
+    input_endpoint: InputEndpointClaim,
+    released_input_endpoint: InputEndpointClaim,
     released_input_route: Option<PresentedInputRouteStamp>,
     presented: UiPresentedHistory,
     interaction: UiInteractionSession,
     reducers: BTreeMap<UiKey, UiButtonState>,
+    interaction_basis: Arc<()>,
 }
 
 pub(super) struct UiPreparedSurfaceInstall {
@@ -84,17 +90,13 @@ pub(super) struct UiPreparedSurfaceSlotUpdate {
 
 pub(super) struct UiPreparedSurfaceRetirement {
     retirement: UiSurfaceRetirement,
+    input_endpoint: InputEndpointClaim,
     target: UiPreparedTargetRelease,
 }
 
 impl UiPreparedPresentation {
     pub(super) const fn receipt(&self) -> UiPresentationReceipt {
         self.receipt
-    }
-
-    pub(super) fn bind_input_route(&mut self, route: PresentedInputRouteStamp) {
-        debug_assert!(route.is_ui_routable());
-        self.input_route = Some(route);
     }
 }
 
@@ -112,11 +114,19 @@ impl UiPreparedSurfaceSlotUpdate {
     pub(super) const fn released_input_route(&self) -> Option<PresentedInputRouteStamp> {
         self.update.released_input_route()
     }
+
+    pub(super) fn released_input_endpoint(&self) -> &InputEndpointClaim {
+        &self.update.released_input_endpoint
+    }
 }
 
 impl UiPreparedSurfaceRetirement {
     pub(super) const fn retirement(&self) -> UiSurfaceRetirement {
         self.retirement
+    }
+
+    pub(super) fn input_endpoint(&self) -> &InputEndpointClaim {
+        &self.input_endpoint
     }
 }
 
@@ -124,18 +134,22 @@ impl UiPreparedSurfaceRetirement {
 pub(crate) struct UiSurfaceRuntime {
     slot: UiSurfaceSlot,
     availability: UiSurfaceAvailability,
+    input_endpoint: InputEndpointClaim,
     compiler: UiCompiler,
     candidate: Option<UiCompiledCandidate>,
     presented: UiPresentedHistory,
     presentation_authority: nara_ui_kernel::__private::UiFrameJournalAuthority,
     interaction: UiInteractionSession,
     reducers: BTreeMap<UiKey, UiButtonState>,
+    // Outstanding prepared snapshots keep the previous allocation alive, preventing identity reuse.
+    interaction_basis: Arc<()>,
     input_route: Option<PresentedInputRouteStamp>,
 }
 
 impl UiSurfaceRuntime {
     pub(super) fn new(
         slot: UiSurfaceSlot,
+        input_endpoint: InputEndpointClaim,
         font: FontFace,
         limits: UiLimits,
     ) -> Result<Self, String> {
@@ -144,6 +158,7 @@ impl UiSurfaceRuntime {
         Ok(Self {
             slot,
             availability: UiSurfaceAvailability::Active,
+            input_endpoint,
             compiler: UiCompiler::new(font, limits).map_err(|error| error.to_string())?,
             candidate: None,
             presented,
@@ -151,6 +166,7 @@ impl UiSurfaceRuntime {
             interaction: UiInteractionSession::with_limits(limits)
                 .map_err(|error| error.to_string())?,
             reducers: BTreeMap::new(),
+            interaction_basis: Arc::new(()),
             input_route: None,
         })
     }
@@ -167,17 +183,23 @@ impl UiSurfaceRuntime {
         self.availability.is_active()
     }
 
+    pub(super) fn input_endpoint(&self) -> &InputEndpointClaim {
+        &self.input_endpoint
+    }
+
     pub(super) fn prepare_slot_update(
         &self,
         slot: UiSurfaceSlot,
         availability: UiSurfaceAvailability,
+        input_endpoint: InputEndpointClaim,
     ) -> Result<UiPreparedSlotUpdate, UiAdapterError> {
         debug_assert_eq!(self.slot.surface_id(), slot.surface_id());
         let mut presented = self.presented.clone();
         let mut interaction = self.interaction.clone();
         let mut reducers = self.reducers.clone();
 
-        let endpoint_changed = self.slot.endpoint() != slot.endpoint();
+        let endpoint_changed =
+            self.slot.endpoint() != slot.endpoint() || self.input_endpoint != input_endpoint;
         if endpoint_changed {
             interaction.clear_surface_state(self.slot.surface_id());
             reducers.clear();
@@ -219,19 +241,24 @@ impl UiSurfaceRuntime {
         Ok(UiPreparedSlotUpdate {
             slot,
             availability,
+            input_endpoint,
+            released_input_endpoint: self.input_endpoint.clone(),
             released_input_route: self.input_route,
             presented,
             interaction,
             reducers,
+            interaction_basis: Arc::new(()),
         })
     }
 
     pub(super) fn commit_slot_update(&mut self, prepared: UiPreparedSlotUpdate) {
         self.slot = prepared.slot;
         self.availability = prepared.availability;
+        self.input_endpoint = prepared.input_endpoint;
         self.presented = prepared.presented;
         self.interaction = prepared.interaction;
         self.reducers = prepared.reducers;
+        self.interaction_basis = prepared.interaction_basis;
         self.input_route = None;
         self.discard_candidate();
     }
@@ -398,18 +425,39 @@ impl UiSurfaceRuntime {
         Ok(UiPreparedPresentation {
             presented,
             receipt,
-            input_route: None,
             interaction,
             reducers: candidate.reducers().clone(),
+            interaction_basis: Arc::clone(&self.interaction_basis),
+            next_interaction_basis: Arc::new(()),
         })
     }
 
-    pub(super) fn commit_presentation(&mut self, prepared: UiPreparedPresentation) {
-        debug_assert!(prepared.input_route.is_some());
+    pub(super) fn prepared_presentation_invalidation(
+        &self,
+        prepared: &UiPreparedPresentation,
+    ) -> Option<UiPresentationInvalidationReason> {
+        if !self.is_active() {
+            Some(UiPresentationInvalidationReason::SurfaceUnavailable)
+        } else if !Arc::ptr_eq(&self.interaction_basis, &prepared.interaction_basis) {
+            Some(UiPresentationInvalidationReason::InteractionChanged)
+        } else {
+            None
+        }
+    }
+
+    pub(super) fn commit_presentation(
+        &mut self,
+        prepared: UiPreparedPresentation,
+        input_route: PresentedInputRouteStamp,
+    ) {
+        debug_assert!(input_route.is_ui_routable());
         self.presented = prepared.presented;
         self.interaction = prepared.interaction;
         self.reducers = prepared.reducers;
-        self.input_route = prepared.input_route;
+        self.interaction_basis = prepared.next_interaction_basis;
+        self.input_route = Some(input_route);
+        // Every current candidate was reconciled against the previous live interaction basis.
+        self.discard_candidate();
     }
 
     pub(super) fn prepare_retirement(
@@ -470,6 +518,7 @@ impl UiSurfaceRuntime {
     ) {
         self.interaction = interaction;
         self.reducers = reducers;
+        self.interaction_basis = Arc::new(());
         self.discard_candidate();
     }
 
@@ -637,6 +686,7 @@ impl UiRuntimeState {
     pub(super) fn prepare_surface_install(
         &self,
         slot: UiSurfaceSlot,
+        input: &InputTimeline,
     ) -> Result<UiPreparedSurfaceInstall, UiAdapterError> {
         let surface_id = slot.surface_id();
         if self.surfaces.contains_key(&surface_id) {
@@ -650,7 +700,10 @@ impl UiRuntimeState {
             return Err(UiAdapterError::SurfaceLimitExceeded);
         }
         let target = self.targets.prepare_install(slot)?;
-        let runtime = UiSurfaceRuntime::new(slot, self.font.clone(), self.limits)
+        let endpoint = slot.endpoint();
+        let input_endpoint =
+            nara_input::__private::claim_input_endpoint(input, endpoint.window(), endpoint.seat())?;
+        let runtime = UiSurfaceRuntime::new(slot, input_endpoint, self.font.clone(), self.limits)
             .map_err(UiAdapterError::RuntimeSetup)?;
         Ok(UiPreparedSurfaceInstall { runtime, target })
     }
@@ -666,6 +719,7 @@ impl UiRuntimeState {
         &self,
         slot: UiSurfaceSlot,
         availability: UiSurfaceAvailability,
+        input_endpoint: InputEndpointClaim,
     ) -> Result<UiPreparedSurfaceSlotUpdate, UiAdapterError> {
         let runtime =
             self.surfaces
@@ -674,7 +728,7 @@ impl UiRuntimeState {
                     surface: slot.surface_id().get(),
                 })?;
         let target = self.targets.prepare_transition(runtime.slot(), slot)?;
-        let update = runtime.prepare_slot_update(slot, availability)?;
+        let update = runtime.prepare_slot_update(slot, availability, input_endpoint)?;
         Ok(UiPreparedSurfaceSlotUpdate { update, target })
     }
 
@@ -695,8 +749,11 @@ impl UiRuntimeState {
         let previous = runtime.slot();
         let suspended =
             previous.availability_successor(previous.endpoint(), previous.transform())?;
-        let prepared =
-            self.prepare_surface_slot_update(suspended, UiSurfaceAvailability::Suspended(reason))?;
+        let prepared = self.prepare_surface_slot_update(
+            suspended,
+            UiSurfaceAvailability::Suspended(reason),
+            runtime.input_endpoint.clone(),
+        )?;
         Ok(Some((
             prepared,
             UiSurfaceSuspension::new(previous.slot_generation(), suspended, reason),
@@ -708,6 +765,7 @@ impl UiRuntimeState {
         surface_id: nara_ui_kernel::UiSurfaceId,
         endpoint: super::UiSurfaceEndpoint,
         transform: nara_ui_kernel::UiSurfaceContentTransform,
+        input: &InputTimeline,
     ) -> Result<UiPreparedSurfaceSlotUpdate, UiAdapterError> {
         let runtime = self
             .surfaces
@@ -721,7 +779,9 @@ impl UiRuntimeState {
             });
         }
         let restored = runtime.slot().availability_successor(endpoint, transform)?;
-        self.prepare_surface_slot_update(restored, UiSurfaceAvailability::Active)
+        let input_endpoint =
+            nara_input::__private::claim_input_endpoint(input, endpoint.window(), endpoint.seat())?;
+        self.prepare_surface_slot_update(restored, UiSurfaceAvailability::Active, input_endpoint)
     }
 
     pub(super) fn commit_surface_slot_update(&mut self, prepared: UiPreparedSurfaceSlotUpdate) {
@@ -750,7 +810,11 @@ impl UiRuntimeState {
         let token = runtime.prepare_retirement(slot.next_retirement_generation()?)?;
         let retirement = UiSurfaceRetirement::new(slot.endpoint(), token, runtime.input_route());
         let target = self.targets.prepare_release(slot)?;
-        Ok(Some(UiPreparedSurfaceRetirement { retirement, target }))
+        Ok(Some(UiPreparedSurfaceRetirement {
+            retirement,
+            input_endpoint: runtime.input_endpoint.clone(),
+            target,
+        }))
     }
 
     pub(super) fn commit_surface_retirement(

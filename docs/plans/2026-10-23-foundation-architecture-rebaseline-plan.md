@@ -854,8 +854,8 @@ than requiring their public topology.
 
 ## R10: Motion, Time, Repeatability And Concrete Domain Seams
 
-**Design:** D09. **State:** motion/repeatability not started; the bounded Input endpoint successor
-is in progress. **Owners:** Input and concrete Physics/Animation/Audio/Network integrations.
+**Design:** D09. **State:** motion/repeatability not started; the bounded keyboard/mouse Input
+endpoint successor is qualified. **Owners:** Input and concrete Physics/Animation/Audio/Network integrations.
 
 Implement a bounded motion consumer with root-motion intent, kinematic target, dynamic solver
 pose, parent edits and interpolation. Define query/callback freshness and temporal authority.
@@ -898,9 +898,9 @@ do not conflate durable game player identity with a local input seat. Amend 0041
 
 The current [definition/source unit](2026-10-30-input-definition-and-source-admission-plan.md)
 establishes global immutable ownership and independent World state first. Its finite keyboard/mouse
-workflow does not qualify the seat/gamepad/replay requirements above. Keep the existing endpoint
-and semantic-contribution growth finding visible and repair it in the Input admission owner;
-context/revision costs alone are not a bound for the whole physical pipeline.
+workflow does not qualify the seat/gamepad/replay requirements above. The endpoint successor
+separately qualifies finite ingress/projection/contribution ownership; context/revision costs alone
+remain distinct from the entire physical pipeline.
 
 The [endpoint admission review](../research/2026-10-30-input-endpoint-admission-and-retirement-review.md)
 traces historical empty rows, live cross-frame memberships and platform-observed cancellation
@@ -909,9 +909,12 @@ that can clear ingress state without admitting terminal events. Its
 raw-ID admission, private lifecycle/member identity and shared ordered terminal credits after actual
 red regressions, adapter review and private shared/dedicated controls. Amended ADRs 0041/0102/0108
 also require total prepared-route/UI invalidation: a late backend acceptance cannot restore a
-cancelled interaction session. Production owner/projection replacement, all-consumer bounds and
-public/native acceptance remain open. Do not qualify complete Input boundedness from either the
-preceding source/processed definition work or the passing private count model.
+cancelled interaction session. The
+[production qualification](../knowledge/engineering/verification/2026-10/2026-10-30T140508Z-bounded-input-ownership-and-total-ui-presentation-qualification-b97643044e4a4f92b892a3539d2ad415.md)
+records the actual owner/projection replacement, independent gameplay, terminal-tail/claim/basis
+repairs, explicit candidate API, real Reference observation and selected Windows/DX12 evidence.
+Its bounded keyboard/mouse scope does not qualify the broader Input/motion work above. Neither
+preceding definition qualification nor the private count model substitutes for that evidence.
 
 ## R11: UI Content Association, Text Admission And Platform Qualification
 
@@ -932,6 +935,11 @@ selection/hit testing, font fallback and Editor font policy through this slice; 
 projection alone is insufficient. Keep model/property identity, live widget incarnation and saved
 panel identity distinct. Extract toolkit-free draft logic only when actual frontend consumers
 share it, and remove the corresponding Dear path after parity rather than waiting for every panel.
+
+Select composition custody and cancellation/retirement admission with the input boundary. A late
+preedit or commit from a retired field or endpoint must not target a same-label replacement.
+The first editable slice must distinguish restoration of the original focus lifetime from a new
+widget/endpoint lifetime; the bounded button/mouse Input qualification does not prove that policy.
 
 Consume Scene render results through R8's exact Host output/composite boundary. Keep physical
 leases in the UI adapter's owned render packet and display/input facts in its composite receipt;

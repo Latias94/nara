@@ -101,7 +101,15 @@ impl HeadlessInteractionPresenter {
         }
 
         let identity = accepted.packet().identity();
-        let receipt = nara_ui::__private::commit_prepared_ui_presentation(world, authority);
+        let receipt = match nara_ui::__private::commit_prepared_ui_presentation(world, authority) {
+            nara_ui::__private::UiPresentationCommit::Committed(receipt) => receipt,
+            nara_ui::__private::UiPresentationCommit::Invalidated { reason } => {
+                return Err(format!(
+                    "the interaction lab presentation was invalidated: {reason:?}"
+                )
+                .into());
+            }
+        };
         assert_eq!(receipt.surface_id(), identity.surface_id());
         assert_eq!(receipt.frame_revision(), identity.frame_revision());
         assert_eq!(receipt.route_revision(), identity.route_revision());

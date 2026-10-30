@@ -10,8 +10,7 @@ use nara_ecs::{Resource, World};
 use crate::{
     ActionBinding, ActionContext, ActionMapBindings, ActionMapBuilder, ActionMapDefinition,
     ActionMapError, ActionMapLimitKind, ActionMapLimits, InputBinding, MAX_ACTION_CONTEXTS,
-    MAX_INPUT_TIMELINE_ENTRIES, MAX_RETAINED_BUTTON_TRANSITIONS, definition::check_limit,
-    semantic::ActionMapRevision,
+    MAX_INPUT_TIMELINE_ENTRIES, definition::check_limit, semantic::ActionMapRevision,
 };
 
 /// Independently mutable World-local context and mapping state. It is deliberately not cloneable
@@ -51,12 +50,12 @@ impl Default for ActionMap {
 impl ActionMap {
     /// Fixed logical allowance for context state and all retained revision/staging snapshots.
     ///
-    /// The three finite edge logs can retain distinct snapshots. A fixed maximum-context allowance
+    /// The single finite ingress log can retain distinct snapshots. A fixed maximum-context allowance
     /// remains charged across replacement while old snapshots survive. Ingress endpoints, held
     /// semantic contributions and transient action output have separate ownership and are excluded.
     #[must_use]
     pub const fn required_state_bytes() -> usize {
-        let snapshots = MAX_INPUT_TIMELINE_ENTRIES + 2 * MAX_RETAINED_BUTTON_TRANSITIONS + 8;
+        let snapshots = MAX_INPUT_TIMELINE_ENTRIES + 8;
         snapshots * (128 + MAX_ACTION_CONTEXTS * (4 * size_of::<usize>()))
             + size_of::<Self>()
             + MAX_ACTION_CONTEXTS

@@ -44,6 +44,7 @@ pub(crate) struct UiPresentationBridgeStats {
     pub(crate) last_admitted_packets: u32,
     pub(crate) last_rejected_packets: u32,
     pub(crate) presented_packets: u64,
+    pub(crate) invalidated_presentations: u64,
     pub(crate) deferred_packets: u64,
     pub(crate) content_rejections: u64,
     pub(crate) backend_faults: u64,
@@ -166,7 +167,7 @@ fn compile_runtime_ui_packets(world: &mut World) {
         record_bridge_error(world, error);
         return;
     }
-    let frames = match nara_ui::latest_ui_frames(world) {
+    let frames = match nara_ui::ui_candidate_frames(world) {
         Ok(frames) => frames,
         Err(error) => {
             record_bridge_error(world, error.to_string());
@@ -544,8 +545,21 @@ fn commit_presented_attempt(world: &mut World, commit: nara_ui_render::OneShotPr
         return;
     };
     let accepted = nara_ui_render::__private::commit_ui_backend_presentation(world, commit);
+    let completion = nara_ui::__private::commit_prepared_ui_presentation(world, authority);
+    let receipt = match completion {
+        nara_ui::__private::UiPresentationCommit::Committed(receipt) => receipt,
+        nara_ui::__private::UiPresentationCommit::Invalidated { reason } => {
+            let mut bridge = world.resource_mut::<UiPresentationBridgeStats>();
+            bridge.presented_packets += 1;
+            bridge.invalidated_presentations += 1;
+            bridge.last_error = Some(format!(
+                "UI attempt {} was accepted by the backend after presentation invalidation: {reason:?}",
+                attempt_id.get(),
+            ));
+            return;
+        }
+    };
     let staged_observation = observation::stage_presented_ui_observation(world, &accepted);
-    let receipt = nara_ui::__private::commit_prepared_ui_presentation(world, authority);
     {
         let mut bridge = world.resource_mut::<UiPresentationBridgeStats>();
         bridge.presented_packets += 1;

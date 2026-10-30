@@ -5,9 +5,10 @@ use nara_app::{
 };
 use nara_ecs::{Mut, Resource, World};
 use nara_input::{
-    ButtonDriverInput, ButtonInputDriverError, InputWindowEvent, KeyCode, MouseButton,
-    PointerDriverInput, apply_keyboard_driver_input_at, apply_mouse_driver_input_at,
-    apply_pointer_driver_input_at, apply_window_input_driver_event,
+    ButtonDriverInput, ButtonInputDriverError, InputPointerId, InputSeatId, InputTimeline,
+    InputWindowEvent, InputWindowId, KeyCode, MouseButton, PointerDriverInput,
+    apply_keyboard_driver_input_at, apply_mouse_driver_input_at, apply_pointer_driver_input_at,
+    apply_window_input_driver_event,
 };
 use nara_project::{ProductCapability, ProductCapabilitySet};
 use nara_reflect::SchemaCompositionFingerprint;
@@ -138,6 +139,24 @@ impl Plugin for EditorGameViewBridgePlugin {
             .__register_driver_port::<EditorGameViewBridge>(apply_driver_input)?
             .add_systems(CoreStage::Last, capture_editor_game_view_candidate)?;
         Ok(())
+    }
+
+    fn finish(&self, app: &mut App) -> Result<(), PluginError> {
+        let Some(mut timeline) = app.world_mut()?.get_resource_mut::<InputTimeline>() else {
+            return Ok(());
+        };
+        // This bridge belongs to one Runtime start. Capture/focus changes must not reconnect
+        // retired labels while the timeline still retains their previous consumers.
+        let window = InputWindowId::new(self.config.logical_window.id.get());
+        timeline
+            .connect_endpoint(window, InputSeatId::PRIMARY)
+            .and_then(|()| {
+                timeline.connect_pointer(window, InputSeatId::PRIMARY, InputPointerId::PRIMARY)
+            })
+            .map_err(|error| PluginError::SetupFailed {
+                plugin: EDITOR_GAME_VIEW_BRIDGE_PLUGIN_ID,
+                message: format!("failed to connect Game View input: {error}"),
+            })
     }
 }
 
@@ -1310,67 +1329,96 @@ pub(super) fn apply_input_batch(
             _ => unreachable!("the world presentation retirement port returns an update outcome"),
         }
     }
-    let window = nara_input::InputWindowId::new(first.identity.start().logical_window().id.get());
+    let window = InputWindowId::new(first.identity.start().logical_window().id.get());
+    apply_admitted_input_events(
+        runtime,
+        window,
+        events.into_iter().map(EditorGameInputEnvelope::event),
+    )
+}
+
+// The Session has already fenced the complete batch's start and route. Keep that endpoint for
+// terminal delivery even when an ordinary event in the accepted prefix exhausts admission.
+fn apply_admitted_input_events(
+    runtime: &mut nara_app::RuntimeInstance,
+    window: InputWindowId,
+    events: impl IntoIterator<Item = EditorGameInputEvent>,
+) -> Result<(), EditorGameViewBridgeFailure> {
     let result = runtime.with_driver_scope(|scope| {
-        for (event_index, envelope) in events.into_iter().enumerate() {
-            let event = envelope.event();
+        let mut first_error = None;
+        for (event_index, event) in events.into_iter().enumerate() {
+            let terminal = matches!(
+                event,
+                EditorGameInputEvent::Focused(false)
+                    | EditorGameInputEvent::SurfaceRetired
+                    | EditorGameInputEvent::Pointer(PointerDriverInput::Left)
+                    | EditorGameInputEvent::Mouse(
+                        ButtonDriverInput::Release(_) | ButtonDriverInput::ReleaseAll
+                    )
+                    | EditorGameInputEvent::Keyboard(
+                        ButtonDriverInput::Release(_) | ButtonDriverInput::ReleaseAll
+                    )
+            );
+            if first_error.is_some() && !terminal {
+                continue;
+            }
             let result = match event {
                 EditorGameInputEvent::Focused(focused) => apply_window_input_driver_event(
                     scope,
                     window,
-                    nara_input::InputSeatId::PRIMARY,
+                    InputSeatId::PRIMARY,
                     InputWindowEvent::Focused(focused),
                 )
                 .map(|_| ()),
                 EditorGameInputEvent::SurfaceRetired => apply_window_input_driver_event(
                     scope,
                     window,
-                    nara_input::InputSeatId::PRIMARY,
+                    InputSeatId::PRIMARY,
                     InputWindowEvent::SurfaceRetired,
                 )
                 .map(|_| ()),
                 EditorGameInputEvent::Pointer(input) => apply_pointer_driver_input_at(
                     scope,
                     window,
-                    nara_input::InputSeatId::PRIMARY,
-                    nara_input::InputPointerId::PRIMARY,
+                    InputSeatId::PRIMARY,
+                    InputPointerId::PRIMARY,
                     input,
                 )
                 .map(|_| ()),
                 EditorGameInputEvent::Mouse(input) => apply_mouse_driver_input_at(
                     scope,
                     window,
-                    nara_input::InputSeatId::PRIMARY,
-                    nara_input::InputPointerId::PRIMARY,
+                    InputSeatId::PRIMARY,
+                    InputPointerId::PRIMARY,
                     input,
                 )
                 .map(|_| ()),
-                EditorGameInputEvent::Keyboard(input) => apply_keyboard_driver_input_at(
-                    scope,
-                    window,
-                    nara_input::InputSeatId::PRIMARY,
-                    input,
-                )
-                .map(|_| ()),
+                EditorGameInputEvent::Keyboard(input) => {
+                    apply_keyboard_driver_input_at(scope, window, InputSeatId::PRIMARY, input)
+                        .map(|_| ())
+                }
             };
-            result.map_err(|source| (event_index, source))?;
+            if let Err(source) = result {
+                first_error.get_or_insert((event_index, source));
+            }
         }
-        Ok(())
+        first_error.map_or(Ok(()), Err)
     });
     match result {
         Ok(outcome) => {
+            // The admitted prefix and terminal tail have already run. A sticky scope fault takes
+            // precedence over the first event rejection; neither outcome rolls those events back.
+            if let Some(fault) = outcome.post_operation_fault {
+                return Err(EditorGameViewBridgeFailure::InputScopeRejected {
+                    source: nara_app::RuntimeScopeError::Faulted { fault },
+                });
+            }
             outcome.output.map_err(|(event_index, source)| {
                 EditorGameViewBridgeFailure::InputEventRejected {
                     event_index,
                     source,
                 }
-            })?;
-            match outcome.post_operation_fault {
-                Some(fault) => Err(EditorGameViewBridgeFailure::InputScopeRejected {
-                    source: nara_app::RuntimeScopeError::Faulted { fault },
-                }),
-                None => Ok(()),
-            }
+            })
         }
         Err(source) => Err(EditorGameViewBridgeFailure::InputScopeRejected { source }),
     }
@@ -1470,6 +1518,447 @@ mod completion_test_support {
         ) -> &[UiCompletedBackendOutcome] {
             &self.outcomes
         }
+    }
+}
+
+#[cfg(test)]
+mod input_connection_tests {
+    use super::*;
+    use nara_input::{InputEventOrigin, InputPlugin};
+    use nara_window::{WindowId, WindowResolution};
+
+    fn config() -> EditorGameViewCaptureConfig {
+        let window =
+            Window::new("Game", WindowResolution::new(640, 360)).with_id(WindowId::new(29));
+        EditorGameViewCaptureConfig {
+            logical_window: RenderWindowPacket {
+                id: window.id,
+                resolution: window.resolution,
+                present_mode: window.present_mode,
+            },
+            resizable: true,
+            sprites: false,
+            ui: false,
+        }
+    }
+
+    #[test]
+    fn bridge_finish_connects_its_logical_window_and_primary_pointer() {
+        let config = config();
+        let mut app = App::new();
+        app.add_plugin(InputPlugin).unwrap();
+        EditorGameViewBridgePlugin { config }
+            .finish(&mut app)
+            .unwrap();
+
+        let window = InputWindowId::new(config.logical_window.id.get());
+        let mut timeline = app.world_mut().unwrap().resource_mut::<InputTimeline>();
+        timeline
+            .admit_keyboard(
+                window,
+                InputSeatId::PRIMARY,
+                ButtonDriverInput::Press(KeyCode::Enter),
+            )
+            .unwrap();
+        timeline
+            .admit_mouse_button(
+                window,
+                InputSeatId::PRIMARY,
+                InputPointerId::PRIMARY,
+                ButtonDriverInput::Press(MouseButton::Left),
+            )
+            .unwrap();
+        let entries = timeline.entries().copied().collect::<Vec<_>>();
+        assert_eq!(entries.len(), 2);
+        for entry in entries {
+            assert_eq!(entry.route().window(), window);
+            assert_eq!(entry.route().seat(), InputSeatId::PRIMARY);
+            assert_eq!(entry.origin(), InputEventOrigin::Platform);
+        }
+    }
+
+    #[test]
+    fn bridge_finish_without_input_plugin_keeps_input_optional() {
+        let mut app = App::new();
+        EditorGameViewBridgePlugin { config: config() }
+            .finish(&mut app)
+            .unwrap();
+        assert!(!app.world().contains_resource::<InputTimeline>());
+    }
+
+    #[test]
+    fn capture_changes_do_not_reconnect_a_retired_logical_endpoint() {
+        let config = config();
+        let mut app = App::new();
+        app.add_plugin(InputPlugin).unwrap();
+        EditorGameViewBridgePlugin { config }
+            .finish(&mut app)
+            .unwrap();
+        app.insert_resource(EditorGameViewBridge::new(config))
+            .unwrap();
+        app.__register_driver_port::<EditorGameViewBridge>(
+            EditorGameViewBridge::apply_driver_input_in_world,
+        )
+        .unwrap();
+        let mut runtime = nara_app::RuntimeInstance::start(app).unwrap();
+        let window = InputWindowId::new(config.logical_window.id.get());
+        runtime
+            .with_driver_scope(|scope| {
+                apply_window_input_driver_event(
+                    scope,
+                    window,
+                    InputSeatId::PRIMARY,
+                    InputWindowEvent::SurfaceRetired,
+                )
+            })
+            .unwrap()
+            .output
+            .unwrap();
+        set_capture_enabled(&mut runtime, false).unwrap();
+        set_capture_enabled(&mut runtime, true).unwrap();
+        let mut resized = config;
+        resized.logical_window.resolution.physical_width += 1;
+        reconfigure(&mut runtime, resized).unwrap();
+
+        let result = runtime
+            .with_driver_scope(|scope| {
+                apply_keyboard_driver_input_at(
+                    scope,
+                    window,
+                    InputSeatId::PRIMARY,
+                    ButtonDriverInput::Press(KeyCode::Enter),
+                )
+            })
+            .unwrap();
+        assert!(result.output.is_err());
+        assert!(result.post_operation_fault.is_none());
+        assert_eq!(
+            runtime
+                .world()
+                .resource::<InputTimeline>()
+                .entries()
+                .count(),
+            1,
+            "capture changes cannot revive labels pinned by the retirement event",
+        );
+        runtime.finish().unwrap();
+    }
+}
+
+#[cfg(test)]
+mod input_batch_tests {
+    use super::*;
+    use nara_app::{RuntimeFault, RuntimeFaultKind, RuntimeInstance};
+    use nara_core::{ByteLimit, Vec2};
+    use nara_ecs::{Res, ResMut};
+    use nara_input::{
+        ActionBinding, ActionContext, ActionId, ActionMap, ActionMapBuilder, ActionMapLimits,
+        ActionPhase, ButtonInput, ButtonTransition, ButtonTransitionPhase, InputEventKind,
+        InputIngressError, InputLimits, InputPlugin, PointerState, SemanticActionOutcome,
+        SemanticActions, connect_input_endpoint, connect_input_pointer,
+    };
+    use std::time::Duration;
+
+    #[derive(Default, Resource)]
+    struct ObservedInput {
+        keys: Vec<ButtonTransition<KeyCode>>,
+        mouse: Vec<ButtonTransition<MouseButton>>,
+        semantic: Vec<SemanticActionOutcome>,
+    }
+
+    fn observe_input(
+        keys: Res<ButtonInput<KeyCode>>,
+        mouse: Res<ButtonInput<MouseButton>>,
+        semantic: Res<SemanticActions>,
+        mut observed: ResMut<ObservedInput>,
+    ) {
+        observed.keys.extend_from_slice(keys.transitions());
+        observed.mouse.extend_from_slice(mouse.transitions());
+        observed.semantic.extend_from_slice(semantic.as_slice());
+    }
+
+    fn input_runtime() -> (RuntimeInstance, InputWindowId) {
+        let mut app = App::new();
+        app.insert_resource(
+            InputTimeline::with_limits(InputLimits::new(12, 2, 2, 1).unwrap()).unwrap(),
+        )
+        .unwrap();
+        app.add_plugin(InputPlugin).unwrap();
+        let mut bindings = ActionMapBuilder::new(ActionMapLimits::default());
+        bindings
+            .declare_context(ActionContext::gameplay(), true)
+            .unwrap();
+        bindings
+            .bind(ActionBinding::key(
+                ActionId::new("hold").unwrap(),
+                KeyCode::Enter,
+            ))
+            .unwrap();
+        app.insert_resource(
+            ActionMap::new(
+                bindings.compile().unwrap().into_bindings(),
+                ByteLimit::new(ActionMap::required_state_bytes()).unwrap(),
+            )
+            .unwrap(),
+        )
+        .unwrap();
+        app.init_resource::<ObservedInput>().unwrap();
+        app.add_systems(CoreStage::Update, observe_input).unwrap();
+        let mut runtime = RuntimeInstance::start(app).unwrap();
+        let window = InputWindowId::new(29);
+        let outcome = runtime
+            .with_driver_scope(|scope| {
+                connect_input_endpoint(scope, window, InputSeatId::PRIMARY)?;
+                connect_input_pointer(
+                    scope,
+                    window,
+                    InputSeatId::PRIMARY,
+                    InputPointerId::PRIMARY,
+                )?;
+                apply_keyboard_driver_input_at(
+                    scope,
+                    window,
+                    InputSeatId::PRIMARY,
+                    ButtonDriverInput::Press(KeyCode::Enter),
+                )?;
+                apply_pointer_driver_input_at(
+                    scope,
+                    window,
+                    InputSeatId::PRIMARY,
+                    InputPointerId::PRIMARY,
+                    PointerDriverInput::Moved(Vec2::ZERO),
+                )?;
+                Ok::<(), ButtonInputDriverError>(())
+            })
+            .unwrap();
+        outcome.output.unwrap();
+        assert!(outcome.post_operation_fault.is_none());
+        runtime.drive(Duration::ZERO).unwrap();
+        assert_eq!(
+            runtime.world().resource::<InputTimeline>().retained_len(),
+            0
+        );
+        assert!(
+            runtime
+                .world()
+                .resource::<ButtonInput<KeyCode>>()
+                .pressed(KeyCode::Enter)
+        );
+        assert!(
+            runtime
+                .world()
+                .resource::<SemanticActions>()
+                .pressed(&ActionId::new("hold").unwrap(), &ActionContext::gameplay())
+        );
+        (runtime, window)
+    }
+
+    fn saturated_batch() -> [EditorGameInputEvent; 13] {
+        [
+            EditorGameInputEvent::Pointer(PointerDriverInput::Moved(Vec2::new(1.0, 0.0))),
+            EditorGameInputEvent::Pointer(PointerDriverInput::Moved(Vec2::new(2.0, 0.0))),
+            EditorGameInputEvent::Pointer(PointerDriverInput::Moved(Vec2::new(3.0, 0.0))),
+            EditorGameInputEvent::Pointer(PointerDriverInput::Moved(Vec2::new(4.0, 0.0))),
+            EditorGameInputEvent::Keyboard(ButtonDriverInput::Press(KeyCode::Space)),
+            EditorGameInputEvent::Mouse(ButtonDriverInput::Press(MouseButton::Left)),
+            EditorGameInputEvent::Keyboard(ButtonDriverInput::Release(KeyCode::Space)),
+            EditorGameInputEvent::Keyboard(ButtonDriverInput::Release(KeyCode::Enter)),
+            EditorGameInputEvent::Focused(false),
+            EditorGameInputEvent::Pointer(PointerDriverInput::Left),
+            EditorGameInputEvent::Mouse(ButtonDriverInput::Release(MouseButton::Left)),
+            EditorGameInputEvent::Mouse(ButtonDriverInput::ReleaseAll),
+            EditorGameInputEvent::Keyboard(ButtonDriverInput::ReleaseAll),
+        ]
+    }
+
+    fn assert_balanced(runtime: &mut RuntimeInstance) {
+        runtime.drive(Duration::ZERO).unwrap();
+        let world = runtime.world();
+        assert_eq!(world.resource::<InputTimeline>().retained_len(), 0);
+        assert!(
+            !world
+                .resource::<ButtonInput<KeyCode>>()
+                .pressed(KeyCode::Enter)
+        );
+        assert!(
+            !world
+                .resource::<ButtonInput<KeyCode>>()
+                .pressed(KeyCode::Space)
+        );
+        assert!(
+            !world
+                .resource::<ButtonInput<MouseButton>>()
+                .pressed(MouseButton::Left)
+        );
+        assert_eq!(world.resource::<PointerState>().position(), None);
+        assert!(
+            !world
+                .resource::<SemanticActions>()
+                .pressed(&ActionId::new("hold").unwrap(), &ActionContext::gameplay())
+        );
+        let observed = world.resource::<ObservedInput>();
+        assert_eq!(
+            observed
+                .keys
+                .iter()
+                .map(|edge| (edge.button(), edge.phase()))
+                .collect::<Vec<_>>(),
+            [
+                (KeyCode::Enter, ButtonTransitionPhase::Pressed),
+                (KeyCode::Enter, ButtonTransitionPhase::Released),
+            ],
+            "a rejected or skipped press cannot fabricate a release",
+        );
+        assert_eq!(
+            observed.keys[0].press_sequence(),
+            observed.keys[1].press_sequence()
+        );
+        assert!(observed.mouse.is_empty());
+        assert_eq!(
+            observed
+                .semantic
+                .iter()
+                .map(|edge| edge.phase)
+                .collect::<Vec<_>>(),
+            [ActionPhase::Started, ActionPhase::Released],
+        );
+        for edge in &observed.semantic {
+            assert_eq!(edge.action.as_str(), "hold");
+            assert_eq!(
+                edge.provenance.unwrap().press_sequence(),
+                Some(observed.keys[0].press_sequence()),
+            );
+        }
+    }
+
+    #[test]
+    fn saturated_batch_keeps_first_error_and_delivers_the_real_release_and_loss_tail() {
+        let (mut runtime, window) = input_runtime();
+        let error =
+            apply_admitted_input_events(&mut runtime, window, saturated_batch()).unwrap_err();
+        assert!(matches!(
+            error,
+            EditorGameViewBridgeFailure::InputEventRejected {
+                event_index: 3,
+                source: ButtonInputDriverError::Timeline(InputIngressError::CapacityExceeded {
+                    limit: 12,
+                    ..
+                }),
+            }
+        ));
+        let positions = runtime
+            .world()
+            .resource::<InputTimeline>()
+            .entries()
+            .filter(|entry| matches!(entry.kind(), InputEventKind::PointerMoved))
+            .map(|entry| entry.logical_position().unwrap())
+            .collect::<Vec<_>>();
+        assert_eq!(
+            positions,
+            [
+                Vec2::new(1.0, 0.0),
+                Vec2::new(2.0, 0.0),
+                Vec2::new(3.0, 0.0)
+            ]
+        );
+        assert_balanced(&mut runtime);
+        runtime.finish().unwrap();
+    }
+
+    #[test]
+    fn member_refusal_skips_new_activity_but_finishes_terminal_events_and_keeps_first_error() {
+        let (mut runtime, window) = input_runtime();
+        let error = apply_admitted_input_events(
+            &mut runtime,
+            window,
+            [
+                EditorGameInputEvent::Keyboard(ButtonDriverInput::Press(KeyCode::Space)),
+                EditorGameInputEvent::Keyboard(ButtonDriverInput::Release(KeyCode::Space)),
+                EditorGameInputEvent::Mouse(ButtonDriverInput::Release(MouseButton::Left)),
+                EditorGameInputEvent::Mouse(ButtonDriverInput::ReleaseAll),
+                EditorGameInputEvent::Keyboard(ButtonDriverInput::ReleaseAll),
+                EditorGameInputEvent::Focused(false),
+                // This move would fit after the loss refunded credits. It must still be skipped.
+                EditorGameInputEvent::Pointer(PointerDriverInput::Moved(Vec2::new(99.0, 0.0))),
+                EditorGameInputEvent::Focused(true),
+                EditorGameInputEvent::Mouse(ButtonDriverInput::Press(MouseButton::Left)),
+                EditorGameInputEvent::Pointer(PointerDriverInput::Left),
+                EditorGameInputEvent::SurfaceRetired,
+                // The endpoint is now retiring. A later terminal rejection cannot replace index 0.
+                EditorGameInputEvent::Keyboard(ButtonDriverInput::Release(KeyCode::Space)),
+            ],
+        )
+        .unwrap_err();
+        assert!(matches!(
+            error,
+            EditorGameViewBridgeFailure::InputEventRejected {
+                event_index: 0,
+                source: ButtonInputDriverError::Timeline(
+                    InputIngressError::MemberCapacityExceeded { limit: 1 }
+                ),
+            }
+        ));
+        let kinds = runtime
+            .world()
+            .resource::<InputTimeline>()
+            .entries()
+            .map(|entry| entry.kind())
+            .collect::<Vec<_>>();
+        assert_eq!(
+            kinds,
+            [
+                InputEventKind::Key {
+                    key: KeyCode::Enter,
+                    phase: ButtonTransitionPhase::Released,
+                },
+                InputEventKind::PointerLeft,
+                InputEventKind::FocusChanged { focused: false },
+                InputEventKind::SurfaceRetired,
+            ],
+        );
+        assert_balanced(&mut runtime);
+        runtime.finish().unwrap();
+    }
+
+    #[test]
+    fn post_batch_scope_fault_takes_precedence_after_terminal_delivery() {
+        let (mut runtime, window) = input_runtime();
+        let reporter = runtime.fault_reporter();
+        let fault = RuntimeFault::engine(
+            RuntimeFaultKind::RequiredService,
+            "nara.test.game-input-batch-post-operation",
+        );
+        let events = saturated_batch().into_iter().inspect(|event| {
+            if matches!(event, EditorGameInputEvent::Focused(false)) {
+                reporter.report(fault.clone());
+            }
+        });
+        assert_eq!(
+            apply_admitted_input_events(&mut runtime, window, events),
+            Err(EditorGameViewBridgeFailure::InputScopeRejected {
+                source: RuntimeScopeError::Faulted {
+                    fault: fault.clone(),
+                },
+            }),
+        );
+        assert_eq!(runtime.fault(), Some(&fault));
+        assert_eq!(
+            runtime
+                .world()
+                .resource::<InputTimeline>()
+                .entries()
+                .filter(|entry| matches!(
+                    entry.kind(),
+                    InputEventKind::Key {
+                        key: KeyCode::Enter,
+                        phase: ButtonTransitionPhase::Released,
+                    }
+                ))
+                .count(),
+            1,
+            "the returned scope fault cannot undo the already admitted terminal tail",
+        );
+        let _ = runtime.finish();
     }
 }
 

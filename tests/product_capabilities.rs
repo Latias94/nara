@@ -318,7 +318,13 @@ fn locked_dependency_trees_match_the_coarse_feature_contract() {
             vec!["--no-default-features", "--features", "runtime-ui"],
             with_packages(
                 &runtime_core,
-                &["nara_text", "nara_ui", "nara_ui_kernel", "nara_ui_widgets"],
+                &[
+                    "nara_image",
+                    "nara_text",
+                    "nara_ui",
+                    "nara_ui_kernel",
+                    "nara_ui_widgets",
+                ],
             ),
         ),
         (

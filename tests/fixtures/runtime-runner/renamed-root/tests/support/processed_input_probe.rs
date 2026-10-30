@@ -26,8 +26,9 @@ use engine::{
     input::{
         ActionContext, ActionId, ActionMap, ActionMapBindings, ActionMapDomain,
         ActionMapRuntimeCodec, ActionOutcome, ActionOutcomes, ActionPhase, ButtonDriverInput,
-        ButtonInput, InputBinding, InputPointerId, InputSeatId, InputTimeline, InputWindowId,
-        KeyCode, MouseButton, SemanticActionCause, SemanticActionOutcome, SemanticActions,
+        ButtonInput, InputBinding, InputEventOrigin, InputPointerId, InputSeatId, InputTimeline,
+        InputWindowId, KeyCode, MouseButton, SemanticActionCause, SemanticActionOutcome,
+        SemanticActions,
     },
     project_host::{
         ProjectSceneRequestError, ProjectSceneRequestId, ProjectSceneRequestState, ProjectScenes,
@@ -289,7 +290,8 @@ impl Outcome {
                     ActionPhase::Started
                 },
             );
-            assert_eq!(edge.provenance.sequence(), Some(index as u64 + 1));
+            assert_eq!(edge.provenance.sequence(), index as u64 + 1);
+            assert_eq!(edge.provenance.origin(), InputEventOrigin::Platform);
             assert_eq!(edge.provenance.route().window(), WINDOW);
             assert_eq!(edge.provenance.route().seat(), SEAT);
             assert_eq!(edge.provenance.route().pointer(), pointer);
@@ -322,13 +324,21 @@ impl Outcome {
             );
             assert_eq!(edges[0].phase, ActionPhase::Started);
             assert_eq!(edges[0].cause, SemanticActionCause::PhysicalInput);
-            assert_eq!(edges[0].provenance.unwrap().sequence(), Some(first));
+            assert_eq!(edges[0].provenance.unwrap().sequence(), first);
+            assert_eq!(
+                edges[0].provenance.unwrap().origin(),
+                InputEventOrigin::Platform
+            );
             assert_eq!(edges[1].phase, ActionPhase::Released);
             assert_eq!(edges[1].cause, SemanticActionCause::ContextChanged);
             assert!(edges[1].provenance.is_none());
             assert_eq!(edges[2].phase, ActionPhase::Started);
             assert_eq!(edges[2].cause, SemanticActionCause::PhysicalInput);
-            assert_eq!(edges[2].provenance.unwrap().sequence(), Some(fresh));
+            assert_eq!(edges[2].provenance.unwrap().sequence(), fresh);
+            assert_eq!(
+                edges[2].provenance.unwrap().origin(),
+                InputEventOrigin::Platform
+            );
         }
     }
 }
@@ -345,6 +355,11 @@ fn assert_source_free(world: &World) {
 fn inspect_first_startup(world: &mut World) {
     assert_eq!(STARTUPS.fetch_add(1, Ordering::SeqCst), 0);
     assert_source_free(world);
+    {
+        let mut timeline = world.resource_mut::<InputTimeline>();
+        timeline.connect_endpoint(WINDOW, SEAT).unwrap();
+        timeline.connect_pointer(WINDOW, SEAT, POINTER).unwrap();
+    }
     let map = world.resource::<ActionMap>();
     assert_eq!(map.bindings().len(), 2);
     assert!(map.is_context_enabled(&ActionContext::gameplay()));

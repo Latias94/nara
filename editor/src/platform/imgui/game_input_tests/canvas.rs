@@ -106,7 +106,7 @@ fn read_canvas_button_probe(
             Ok::<(), String>(())
         },
     )?;
-    let Some(frame) = nara::ui::latest_ui_frame(world, nara::ui::UiSurfaceId::new(1).unwrap())
+    let Some(frame) = nara::ui::ui_candidate_frame(world, nara::ui::UiSurfaceId::new(1).unwrap())
         .map_err(|error| error.to_string())?
     else {
         return Ok(None);

@@ -9,7 +9,8 @@ use nara_ecs::Resource;
 
 use crate::{
     ActionContext, ActionId, ActionInputProvenance, ActionMap, ActionPhase, ActionValue,
-    ButtonInputEndpoint, ButtonTransitionPhase, InputBinding,
+    ButtonTransitionPhase, InputConfigurationError, InputLimits, InputTimelineEntry,
+    MAX_ACTION_BINDINGS, MAX_BINDINGS_PER_INPUT,
 };
 
 /// Why a semantic action changed its aggregate held state.
@@ -45,13 +46,45 @@ pub struct SemanticActionOutcome {
 ///
 /// Held state survives frames with zero or many fixed ticks. Outcomes last until frame cleanup;
 /// durable commands and replay consumers must capture them before that boundary.
-#[derive(Debug, Default, Resource)]
+#[derive(Debug, Resource)]
 pub struct SemanticActions {
     held: BTreeMap<ActionKey, HeldAction>,
     outcomes: Vec<SemanticActionOutcome>,
+    contribution_count: usize,
+    contribution_limit: usize,
+}
+
+impl Default for SemanticActions {
+    fn default() -> Self {
+        Self::with_limits(InputLimits::default()).expect("default semantic projection bounds fit")
+    }
 }
 
 impl SemanticActions {
+    pub(crate) fn with_limits(limits: InputLimits) -> Result<Self, InputConfigurationError> {
+        let contribution_limit = limits
+            .members()
+            .checked_mul(MAX_BINDINGS_PER_INPUT)
+            .ok_or(InputConfigurationError::CapacityOverflow)?;
+        // Reconciliation can cancel every held action once, followed by at most K edges per
+        // retained event. The current definition also bounds distinct held action/context keys.
+        let outcome_limit = limits
+            .events()
+            .checked_mul(MAX_BINDINGS_PER_INPUT)
+            .and_then(|count| count.checked_add(contribution_limit.min(MAX_ACTION_BINDINGS)))
+            .ok_or(InputConfigurationError::CapacityOverflow)?;
+        let mut outcomes = Vec::new();
+        outcomes
+            .try_reserve_exact(outcome_limit)
+            .map_err(|_| InputConfigurationError::AllocationRefused)?;
+        Ok(Self {
+            held: BTreeMap::new(),
+            outcomes,
+            contribution_count: 0,
+            contribution_limit,
+        })
+    }
+
     #[must_use]
     pub fn pressed(&self, action: &ActionId, context: &ActionContext) -> bool {
         self.held.contains_key(&ActionKey {
@@ -70,41 +103,36 @@ impl SemanticActions {
     }
 
     pub(crate) fn reconcile(&mut self, action_map: &ActionMap, revision: &StagedActionRevision) {
-        let expired = self
-            .held
-            .iter()
-            .filter_map(|(key, held)| {
-                let cause = if !Arc::ptr_eq(&held.mapping, &revision.mapping) {
-                    SemanticActionCause::MappingChanged
-                } else if !action_map.is_context_enabled(&key.context)
-                    || !action_map
-                        .definition()
-                        .context_index(&key.context)
-                        .is_some_and(|slot| {
-                            same_context_lifetime(
-                                held.context.as_ref(),
-                                revision.contexts[slot].as_ref(),
-                            )
-                        })
-                {
-                    SemanticActionCause::ContextChanged
-                } else {
-                    return None;
-                };
-                Some((key.clone(), cause))
-            })
-            .collect::<Vec<_>>();
-        for (key, cause) in expired {
-            self.held.remove(&key);
+        self.held.retain(|key, held| {
+            let cause = if !Arc::ptr_eq(&held.mapping, &revision.mapping) {
+                SemanticActionCause::MappingChanged
+            } else if !action_map.is_context_enabled(&key.context)
+                || !action_map
+                    .definition()
+                    .context_index(&key.context)
+                    .is_some_and(|slot| {
+                        same_context_lifetime(
+                            held.context.as_ref(),
+                            revision.contexts[slot].as_ref(),
+                        )
+                    })
+            {
+                SemanticActionCause::ContextChanged
+            } else {
+                return true;
+            };
+            self.contribution_count -= held.contributions.len();
+            assert!(self.outcomes.len() < self.outcomes.capacity());
             self.outcomes.push(SemanticActionOutcome {
-                action: key.action,
-                context: key.context,
+                action: key.action.clone(),
+                context: key.context.clone(),
                 phase: ActionPhase::Released,
                 value: ActionValue::released(),
                 cause,
                 provenance: None,
             });
-        }
+            false
+        });
     }
 
     pub(crate) fn apply(
@@ -112,38 +140,35 @@ impl SemanticActions {
         action_map: &ActionMap,
         revision: &StagedActionRevision,
         staged_revision: &StagedActionRevision,
-        input: InputBinding,
-        phase: ButtonTransitionPhase,
-        provenance: ActionInputProvenance,
+        entry: InputTimelineEntry,
     ) {
-        let physical = PhysicalContribution {
-            input,
-            endpoint: if provenance.sequence().is_some() {
-                ButtonInputEndpoint::from_route(provenance.route())
-            } else {
-                ButtonInputEndpoint::Synthetic
-            },
+        let Some((input, phase)) = entry.action_transition() else {
+            return;
         };
+        let press_sequence = entry
+            .press_sequence()
+            .expect("an admitted button edge names its original member");
+        let provenance = entry.action_provenance();
         if phase == ButtonTransitionPhase::Released {
-            let ended = self
-                .held
-                .iter_mut()
-                .filter_map(|(key, held)| {
-                    (held.contributions.remove(&physical) && held.contributions.is_empty())
-                        .then(|| key.clone())
-                })
-                .collect::<Vec<_>>();
-            for key in ended {
-                self.held.remove(&key);
+            self.held.retain(|key, held| {
+                if !held.contributions.remove(&press_sequence) {
+                    return true;
+                }
+                self.contribution_count -= 1;
+                if !held.contributions.is_empty() {
+                    return true;
+                }
+                assert!(self.outcomes.len() < self.outcomes.capacity());
                 self.outcomes.push(SemanticActionOutcome {
-                    action: key.action,
-                    context: key.context,
+                    action: key.action.clone(),
+                    context: key.context.clone(),
                     phase: ActionPhase::Released,
                     value: ActionValue::released(),
                     cause: SemanticActionCause::PhysicalInput,
                     provenance: Some(provenance),
                 });
-            }
+                false
+            });
             return;
         }
 
@@ -176,8 +201,13 @@ impl SemanticActions {
                 retention_owner: revision.retention_owner.clone(),
             });
             let started = held.contributions.is_empty();
-            held.contributions.insert(physical);
+            if !held.contributions.contains(&press_sequence) {
+                assert!(self.contribution_count < self.contribution_limit);
+                held.contributions.insert(press_sequence);
+                self.contribution_count += 1;
+            }
             if started {
+                assert!(self.outcomes.len() < self.outcomes.capacity());
                 self.outcomes.push(SemanticActionOutcome {
                     action: key.action,
                     context: key.context,
@@ -197,16 +227,11 @@ struct ActionKey {
     context: ActionContext,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
-struct PhysicalContribution {
-    input: InputBinding,
-    endpoint: ButtonInputEndpoint,
-}
-
 struct HeldAction {
     mapping: Arc<()>,
     context: Option<Arc<()>>,
-    contributions: BTreeSet<PhysicalContribution>,
+    // Each globally unique press sequence identifies an admitted Input owner member.
+    contributions: BTreeSet<u64>,
     // Only the original state ticket follows these identities until release or reconciliation.
     retention_owner: Option<Arc<dyn Any + Send + Sync>>,
 }
@@ -357,8 +382,8 @@ fn same_context_lifetime(left: Option<&Arc<()>>, right: Option<&Arc<()>>) -> boo
 mod tests {
     use super::{ActionMapRevision, ActionStaging, SemanticActions, same_context_lifetime};
     use crate::{
-        ActionBinding, ActionContext, ActionId, ActionInputProvenance, ActionMap,
-        ActionMapBindings, ActionMapBuilder, ActionMapLimits, ButtonTransitionPhase, InputBinding,
+        ActionBinding, ActionContext, ActionId, ActionMap, ActionMapBindings, ActionMapBuilder,
+        ActionMapLimits, ButtonDriverInput, InputLimits, InputSeatId, InputTimeline, InputWindowId,
         KeyCode,
     };
     use nara_core::ByteLimit;
@@ -496,15 +521,18 @@ mod tests {
         map.enable_context(&context).unwrap();
         let revision = staging.observe(&map);
         assert!(revision.contexts[0].is_some());
-        let mut semantic = SemanticActions::default();
-        semantic.apply(
-            &map,
-            &revision,
-            &revision,
-            InputBinding::Key(KeyCode::Space),
-            ButtonTransitionPhase::Pressed,
-            ActionInputProvenance::synthetic(),
-        );
+        let limits = InputLimits::new(16, 1, 1, 1).unwrap();
+        let mut timeline = InputTimeline::with_limits(limits).unwrap();
+        timeline
+            .admit_keyboard(
+                InputWindowId::UNSPECIFIED,
+                InputSeatId::PRIMARY,
+                ButtonDriverInput::Press(KeyCode::Space),
+            )
+            .unwrap();
+        let entry = *timeline.entries().last().unwrap();
+        let mut semantic = SemanticActions::with_limits(limits).unwrap();
+        semantic.apply(&map, &revision, &revision, entry);
         assert!(semantic.pressed(&action, &context));
 
         drop(revision);
@@ -514,5 +542,118 @@ mod tests {
         assert!(state_retained.upgrade().is_some());
         drop(semantic);
         assert!(state_retained.upgrade().is_none());
+    }
+
+    #[test]
+    fn release_removes_its_admitted_member_when_raw_labels_repeat() {
+        let limits = InputLimits::new(24, 1, 1, 2).unwrap();
+        let mut timeline = InputTimeline::with_limits(limits).unwrap();
+        for edge in [
+            ButtonDriverInput::Press(KeyCode::Space),
+            ButtonDriverInput::Release(KeyCode::Space),
+            ButtonDriverInput::Press(KeyCode::Space),
+            ButtonDriverInput::Release(KeyCode::Space),
+        ] {
+            timeline
+                .admit_keyboard(InputWindowId::UNSPECIFIED, InputSeatId::PRIMARY, edge)
+                .unwrap();
+        }
+        let entries = timeline.entries().copied().collect::<Vec<_>>();
+        let mut builder = ActionMapBuilder::new(ActionMapLimits::default());
+        let context = ActionContext::gameplay();
+        let action = ActionId::new("activate").unwrap();
+        builder.declare_context(context.clone(), true).unwrap();
+        builder
+            .bind(ActionBinding::key(action.clone(), KeyCode::Space))
+            .unwrap();
+        let map = ActionMap::new(
+            builder.compile().unwrap().into_bindings(),
+            ByteLimit::new(ActionMap::required_state_bytes()).unwrap(),
+        )
+        .unwrap();
+        let revision = ActionStaging::default().observe(&map);
+        let mut semantic = SemanticActions::with_limits(limits).unwrap();
+        // Apply both distinct admitted presses, then end the first member. The same raw endpoint
+        // and binding must not make the older release remove the later member's contribution.
+        for index in [0, 2, 1] {
+            let entry = entries[index];
+            semantic.apply(&map, &revision, &revision, entry);
+        }
+        assert!(semantic.pressed(&action, &context));
+        assert_eq!(semantic.contribution_count, 1);
+        assert_eq!(semantic.as_slice().len(), 1);
+
+        let release = entries[3];
+        semantic.apply(&map, &revision, &revision, release);
+        assert!(!semantic.pressed(&action, &context));
+        assert_eq!(semantic.contribution_count, 0);
+        assert_eq!(semantic.as_slice().len(), 2);
+        assert_eq!(
+            semantic.as_slice()[1].provenance,
+            Some(release.action_provenance())
+        );
+    }
+
+    #[test]
+    fn maximum_fanout_and_context_cancellation_fit_derived_projection_bounds() {
+        let limits = InputLimits::new(32, 2, 1, 2).unwrap();
+        let mut builder = ActionMapBuilder::new(ActionMapLimits::default());
+        let context = ActionContext::gameplay();
+        builder.declare_context(context.clone(), true).unwrap();
+        for index in 0..crate::MAX_BINDINGS_PER_INPUT {
+            builder
+                .bind(ActionBinding::key(
+                    ActionId::new(format!("action-{index}")).unwrap(),
+                    KeyCode::Space,
+                ))
+                .unwrap();
+        }
+        let mut map = ActionMap::new(
+            builder.compile().unwrap().into_bindings(),
+            ByteLimit::new(ActionMap::required_state_bytes()).unwrap(),
+        )
+        .unwrap();
+        let mut staging = ActionStaging::default();
+        let revision = staging.observe(&map);
+        let mut timeline = InputTimeline::with_limits(limits).unwrap();
+        let other = InputWindowId::new(99);
+        timeline
+            .connect_endpoint(other, InputSeatId::PRIMARY)
+            .unwrap();
+        for window in [InputWindowId::UNSPECIFIED, other] {
+            timeline
+                .admit_keyboard(
+                    window,
+                    InputSeatId::PRIMARY,
+                    ButtonDriverInput::Press(KeyCode::Space),
+                )
+                .unwrap();
+        }
+        let mut semantic = SemanticActions::with_limits(limits).unwrap();
+        let output_capacity = semantic.outcomes.capacity();
+        for entry in timeline.entries().copied() {
+            semantic.apply(&map, &revision, &revision, entry);
+        }
+        assert_eq!(
+            semantic.contribution_count,
+            limits.members() * crate::MAX_BINDINGS_PER_INPUT
+        );
+        assert_eq!(semantic.contribution_count, semantic.contribution_limit);
+        assert_eq!(semantic.held.len(), crate::MAX_BINDINGS_PER_INPUT);
+        assert_eq!(semantic.as_slice().len(), crate::MAX_BINDINGS_PER_INPUT);
+
+        semantic.clear_outcomes();
+        map.disable_context(&context).unwrap();
+        let disabled = staging.observe(&map);
+        semantic.reconcile(&map, &disabled);
+        assert!(semantic.held.is_empty());
+        assert_eq!(semantic.contribution_count, 0);
+        assert_eq!(semantic.as_slice().len(), crate::MAX_BINDINGS_PER_INPUT);
+        assert!(semantic.as_slice().iter().all(|outcome| {
+            outcome.phase == crate::ActionPhase::Released
+                && outcome.cause == super::SemanticActionCause::ContextChanged
+                && outcome.provenance.is_none()
+        }));
+        assert_eq!(semantic.outcomes.capacity(), output_capacity);
     }
 }

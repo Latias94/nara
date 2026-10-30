@@ -132,7 +132,7 @@ fn capture_font(world: &mut World) {
     use nara::ui_render::advanced::{
         UiPreparedImages, UiPresentationContentError, UiPresentationPlanner,
     };
-    let frame = nara::ui::latest_ui_frame(world, UiSurfaceId::new(1).unwrap())
+    let frame = nara::ui::ui_candidate_frame(world, UiSurfaceId::new(1).unwrap())
         .unwrap()
         .unwrap();
     let expected_face = world.resource::<ProfileFontRuntime>().face.id();
@@ -143,7 +143,7 @@ fn capture_font(world: &mut World) {
         Err(UiPresentationContentError::FontFaceMismatch { actual, .. }) if actual == expected_face
     );
     let face = world.resource::<ProfileFontRuntime>().face.clone();
-    let selected_frame = nara::ui::latest_ui_frame(world, UiSurfaceId::new(1).unwrap())
+    let selected_frame = nara::ui::ui_candidate_frame(world, UiSurfaceId::new(1).unwrap())
         .unwrap()
         .unwrap();
     let packet = UiPresentationPlanner::with_font(face, Default::default())

@@ -621,6 +621,25 @@ mod tests {
         ))
         .unwrap();
         let surface = UiSurfaceId::new(7).unwrap();
+        {
+            let mut input = app
+                .world_mut()
+                .unwrap()
+                .resource_mut::<nara_input::InputTimeline>();
+            input
+                .connect_endpoint(
+                    nara_input::InputWindowId::new(11),
+                    nara_input::InputSeatId::PRIMARY,
+                )
+                .unwrap();
+            input
+                .connect_pointer(
+                    nara_input::InputWindowId::new(11),
+                    nara_input::InputSeatId::PRIMARY,
+                    nara_input::InputPointerId::PRIMARY,
+                )
+                .unwrap();
+        }
         crate::install_ui_surface(
             app.world_mut().unwrap(),
             crate::UiSurfaceSlot::new(
@@ -655,7 +674,7 @@ mod tests {
         .unwrap();
         let mut runtime = nara_app::RuntimeInstance::start(app).unwrap();
         runtime.drive(std::time::Duration::ZERO).unwrap();
-        let frame = crate::latest_ui_frame(runtime.world(), surface).unwrap();
+        let frame = crate::ui_candidate_frame(runtime.world(), surface).unwrap();
         runtime.finish().unwrap();
         let frame = frame.expect("the equal-coordinate Runtime projection must compile");
         let keys = |frame: &UiFrame| {

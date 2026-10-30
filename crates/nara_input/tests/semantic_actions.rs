@@ -9,10 +9,11 @@ use nara_ecs::{Res, ResMut, Resource, schedule::IntoScheduleConfigs};
 use nara_input::__private::InputSet;
 use nara_input::{
     ActionBinding, ActionContext, ActionId, ActionMap, ActionMapBindings, ActionMapBuilder,
-    ActionMapLimits, ActionOutcome, ActionOutcomes, ActionPhase, ButtonDriverInput, ButtonInput,
-    InputBinding, InputSeatId, InputTimeline, InputWindowEvent, InputWindowId, KeyCode,
-    MouseButton, SemanticActionCause, SemanticActionOutcome, SemanticActions,
-    apply_keyboard_driver_input, apply_keyboard_driver_input_at, apply_window_input_driver_event,
+    ActionMapLimits, ActionOutcome, ActionOutcomes, ActionPhase, ButtonDriverInput, InputBinding,
+    InputEventOrigin, InputLimits, InputSeatId, InputTimeline, InputWindowEvent, InputWindowId,
+    KeyCode, MouseButton, SemanticActionCause, SemanticActionOutcome, SemanticActions,
+    apply_keyboard_driver_input, apply_keyboard_driver_input_at, apply_mouse_driver_input,
+    apply_window_input_driver_event, connect_input_endpoint,
 };
 
 #[derive(Debug, Default, Resource)]
@@ -40,8 +41,6 @@ enum MappingChange {
     Disable,
     Enable,
     Rebind(KeyCode),
-    SyntheticPress(InputBinding),
-    SyntheticRelease(InputBinding),
     SaveAndRebind(KeyCode),
     RestoreBindings,
 }
@@ -63,12 +62,7 @@ fn movement_bindings(key: KeyCode) -> ActionMapBindings {
     builder.compile().unwrap().into_bindings()
 }
 
-fn apply_mapping_changes(
-    changes: Res<MappingChanges>,
-    mut map: ResMut<ActionMap>,
-    mut keyboard: ResMut<ButtonInput<KeyCode>>,
-    mut mouse: ResMut<ButtonInput<MouseButton>>,
-) {
+fn apply_mapping_changes(changes: Res<MappingChanges>, mut map: ResMut<ActionMap>) {
     for change in changes.0.lock().unwrap().drain(..) {
         match change {
             MappingChange::Disable => {
@@ -80,22 +74,6 @@ fn apply_mapping_changes(
             MappingChange::Rebind(key) => {
                 map.replace_bindings(movement_bindings(key));
             }
-            MappingChange::SyntheticPress(input) => match input {
-                InputBinding::Key(key) => {
-                    keyboard.press(key).unwrap();
-                }
-                InputBinding::Mouse(button) => {
-                    mouse.press(button).unwrap();
-                }
-            },
-            MappingChange::SyntheticRelease(input) => match input {
-                InputBinding::Key(key) => {
-                    keyboard.release(key).unwrap();
-                }
-                InputBinding::Mouse(button) => {
-                    mouse.release(button).unwrap();
-                }
-            },
             MappingChange::SaveAndRebind(key) => {
                 let saved = map.bindings_handle();
                 map.replace_bindings(movement_bindings(key));
@@ -112,6 +90,10 @@ fn apply_mapping_changes(
 fn semantic_runtime() -> (RuntimeInstance, MappingChanges) {
     let mut app = App::new();
     let changes = MappingChanges::default();
+    app.insert_resource(
+        InputTimeline::with_limits(InputLimits::new(32, 3, 3, 8).unwrap()).unwrap(),
+    )
+    .unwrap();
     app.add_plugin(nara_input::InputPlugin).unwrap();
     app.insert_resource(changes.clone()).unwrap();
     app.insert_resource(CapturedSemanticActions::default())
@@ -151,18 +133,55 @@ fn semantic_runtime() -> (RuntimeInstance, MappingChanges) {
         .unwrap(),
     )
     .unwrap();
-    (RuntimeInstance::start(app).unwrap(), changes)
+    let mut runtime = RuntimeInstance::start(app).unwrap();
+    let connected = runtime
+        .with_driver_scope(|scope| {
+            connect_input_endpoint(scope, InputWindowId::new(1), InputSeatId::PRIMARY)
+        })
+        .unwrap();
+    assert!(connected.post_operation_fault.is_none());
+    connected.output.unwrap();
+    (runtime, changes)
 }
 
 fn key_edge(runtime: &mut RuntimeInstance, edge: ButtonDriverInput<KeyCode>) {
     runtime
-        .with_driver_scope(|scope| apply_keyboard_driver_input(scope, edge))
+        .with_driver_scope(|scope| {
+            apply_keyboard_driver_input_at(scope, InputWindowId::new(1), InputSeatId::PRIMARY, edge)
+        })
         .map(|outcome| {
             assert!(outcome.post_operation_fault.is_none());
             outcome.output
         })
         .unwrap()
         .unwrap();
+}
+
+fn synthetic_edge(runtime: &mut RuntimeInstance, input: InputBinding, pressed: bool) {
+    let outcome = runtime
+        .with_driver_scope(|scope| match input {
+            InputBinding::Key(key) => apply_keyboard_driver_input(
+                scope,
+                if pressed {
+                    ButtonDriverInput::Press(key)
+                } else {
+                    ButtonDriverInput::Release(key)
+                },
+            )
+            .map(|_| ()),
+            InputBinding::Mouse(button) => apply_mouse_driver_input(
+                scope,
+                if pressed {
+                    ButtonDriverInput::Press(button)
+                } else {
+                    ButtonDriverInput::Release(button)
+                },
+            )
+            .map(|_| ()),
+        })
+        .unwrap();
+    assert!(outcome.post_operation_fault.is_none());
+    outcome.output.unwrap();
 }
 
 fn movement_is_held(runtime: &RuntimeInstance) -> bool {
@@ -182,10 +201,8 @@ fn semantic_synthetic_paused_presses_keep_their_staged_lifetime() {
             RuntimeControlRequestResult::Accepted(_)
         ));
         runtime.drive(Duration::ZERO).unwrap();
-        changes.0.lock().unwrap().extend([
-            MappingChange::SyntheticPress(key),
-            MappingChange::SyntheticPress(InputBinding::Key(KeyCode::Space)),
-        ]);
+        synthetic_edge(&mut runtime, key, true);
+        synthetic_edge(&mut runtime, InputBinding::Key(KeyCode::Space), true);
         runtime.drive(Duration::ZERO).unwrap();
         if rebind {
             changes
@@ -234,18 +251,10 @@ fn semantic_synthetic_paused_presses_keep_their_staged_lifetime() {
                     && outcome.phase == ActionPhase::Started),
             "raw binding observations remain available"
         );
-        changes
-            .0
-            .lock()
-            .unwrap()
-            .push(MappingChange::SyntheticRelease(key));
+        synthetic_edge(&mut runtime, key, false);
         runtime.drive(Duration::ZERO).unwrap();
         assert!(!movement_is_held(&runtime));
-        changes
-            .0
-            .lock()
-            .unwrap()
-            .push(MappingChange::SyntheticPress(key));
+        synthetic_edge(&mut runtime, key, true);
         runtime.drive(Duration::ZERO).unwrap();
         assert!(movement_is_held(&runtime));
         runtime.finish().unwrap();
@@ -264,11 +273,7 @@ fn semantic_synthetic_paused_release_and_fresh_press_keep_only_the_new_lifetime(
             RuntimeControlRequestResult::Accepted(_)
         ));
         runtime.drive(Duration::ZERO).unwrap();
-        changes
-            .0
-            .lock()
-            .unwrap()
-            .push(MappingChange::SyntheticPress(input));
+        synthetic_edge(&mut runtime, input, true);
         runtime.drive(Duration::ZERO).unwrap();
         changes
             .0
@@ -276,10 +281,8 @@ fn semantic_synthetic_paused_release_and_fresh_press_keep_only_the_new_lifetime(
             .unwrap()
             .extend([MappingChange::Disable, MappingChange::Enable]);
         runtime.drive(Duration::ZERO).unwrap();
-        changes.0.lock().unwrap().extend([
-            MappingChange::SyntheticRelease(input),
-            MappingChange::SyntheticPress(input),
-        ]);
+        synthetic_edge(&mut runtime, input, false);
+        synthetic_edge(&mut runtime, input, true);
         runtime.drive(Duration::ZERO).unwrap();
         assert!(matches!(
             runtime.request_control(RuntimeControl::Resume),
@@ -294,6 +297,11 @@ fn semantic_synthetic_paused_release_and_fresh_press_keep_only_the_new_lifetime(
             "an expired press/release pair cannot start and end a new semantic lifetime"
         );
         assert_eq!(semantic[0].phase, ActionPhase::Started);
+        assert_eq!(
+            semantic[0].provenance.unwrap().origin(),
+            InputEventOrigin::Synthetic
+        );
+        assert!(semantic[0].provenance.unwrap().sequence() > 0);
         assert_eq!(
             runtime.world().resource::<CapturedActionOutcomes>().0.len(),
             3
@@ -315,11 +323,7 @@ fn semantic_observed_rebinding_survives_restoring_the_original_bindings() {
 fn observed_configuration_restore(rebind: bool) {
     let (mut runtime, changes) = semantic_runtime();
     let input = InputBinding::Key(KeyCode::Character('w'));
-    changes
-        .0
-        .lock()
-        .unwrap()
-        .push(MappingChange::SyntheticPress(input));
+    synthetic_edge(&mut runtime, input, true);
     runtime.drive(Duration::ZERO).unwrap();
     assert!(movement_is_held(&runtime));
     assert!(matches!(
@@ -359,17 +363,9 @@ fn observed_configuration_restore(rebind: bool) {
             SemanticActionCause::ContextChanged
         }
     );
-    changes
-        .0
-        .lock()
-        .unwrap()
-        .push(MappingChange::SyntheticRelease(input));
+    synthetic_edge(&mut runtime, input, false);
     runtime.drive(Duration::ZERO).unwrap();
-    changes
-        .0
-        .lock()
-        .unwrap()
-        .push(MappingChange::SyntheticPress(input));
+    synthetic_edge(&mut runtime, input, true);
     runtime.drive(Duration::ZERO).unwrap();
     assert!(movement_is_held(&runtime));
     assert_eq!(
@@ -433,7 +429,10 @@ fn semantic_multiple_bindings_release_only_the_final_contribution() {
         [ActionPhase::Started, ActionPhase::Released]
     );
     assert_eq!(captured[1].cause, SemanticActionCause::PhysicalInput);
-    assert!(captured[1].provenance.unwrap().sequence().is_some());
+    let release = captured[1].provenance.unwrap();
+    let press = captured[0].provenance.unwrap();
+    assert!(release.sequence() > press.sequence());
+    assert_eq!(release.origin(), InputEventOrigin::Platform);
     assert!(
         runtime
             .world()
@@ -662,6 +661,7 @@ fn semantic_same_binding_held_by_two_endpoints_survives_one_endpoint_focus_loss(
     ] {
         runtime
             .with_driver_scope(|scope| {
+                connect_input_endpoint(scope, window, seat)?;
                 apply_window_input_driver_event(
                     scope,
                     window,

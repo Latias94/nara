@@ -547,13 +547,17 @@ mod tests {
                 GameplayCommandTypeId::new("player.jump").unwrap(),
             ))
             .unwrap();
-        app.world_mut()
-            .unwrap()
-            .resource_mut::<nara_input::ButtonInput<KeyCode>>()
-            .press(KeyCode::Space)
-            .unwrap();
-
         let mut runtime = nara_app::RuntimeInstance::start(app).unwrap();
+        runtime
+            .with_driver_scope(|scope| {
+                nara_input::apply_keyboard_driver_input(
+                    scope,
+                    nara_input::ButtonDriverInput::Press(KeyCode::Space),
+                )
+            })
+            .unwrap()
+            .output
+            .unwrap();
         runtime.drive(Duration::ZERO).unwrap();
         assert_eq!(
             runtime
@@ -739,13 +743,17 @@ mod tests {
                 GameplayCommandTypeId::new("gameplay.should_not_match").unwrap(),
             ))
             .unwrap();
-        app.world_mut()
-            .unwrap()
-            .resource_mut::<nara_input::ButtonInput<KeyCode>>()
-            .press(KeyCode::Enter)
-            .unwrap();
-
         let mut runtime = nara_app::RuntimeInstance::start(app).unwrap();
+        runtime
+            .with_driver_scope(|scope| {
+                nara_input::apply_keyboard_driver_input(
+                    scope,
+                    nara_input::ButtonDriverInput::Press(KeyCode::Enter),
+                )
+            })
+            .unwrap()
+            .output
+            .unwrap();
         runtime.drive(FixedTime::DEFAULT_TIMESTEP).unwrap();
 
         let commands = &runtime.world().resource::<CommandsByTick>().0[0].1;
@@ -1528,13 +1536,17 @@ mod tests {
             .unwrap()
             .resource_mut::<GameplayCommandQueue>()
             .set_local_sequence_for_test(u64::MAX);
-        app.world_mut()
-            .unwrap()
-            .resource_mut::<nara_input::ButtonInput<KeyCode>>()
-            .press(KeyCode::Enter)
-            .unwrap();
-
         let mut runtime = nara_app::RuntimeInstance::start(app).unwrap();
+        runtime
+            .with_driver_scope(|scope| {
+                nara_input::apply_keyboard_driver_input(
+                    scope,
+                    nara_input::ButtonDriverInput::Press(KeyCode::Enter),
+                )
+            })
+            .unwrap()
+            .output
+            .unwrap();
         let error = runtime
             .drive(Duration::ZERO)
             .expect_err("local intent loss must cross the direct runtime boundary");

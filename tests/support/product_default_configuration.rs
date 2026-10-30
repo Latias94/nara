@@ -137,6 +137,19 @@ fn install_surface(world: &mut nara::ecs::World) {
         input::{InputPointerId, InputSeatId, InputWindowId},
         ui::{UiSize, UiSurfaceContentTransform, UiSurfaceEndpoint, UiSurfaceSlot},
     };
+    {
+        let mut input = world.resource_mut::<nara::input::InputTimeline>();
+        input
+            .connect_endpoint(InputWindowId::new(1), InputSeatId::PRIMARY)
+            .unwrap();
+        input
+            .connect_pointer(
+                InputWindowId::new(1),
+                InputSeatId::PRIMARY,
+                InputPointerId::PRIMARY,
+            )
+            .unwrap();
+    }
     nara::ui::install_ui_surface(
         world,
         UiSurfaceSlot::new(
@@ -271,7 +284,7 @@ fn capture_font_paint(world: &mut nara::ecs::World) {
     use nara::ui_render::advanced::{
         UiPreparedImages, UiPresentationContentError, UiPresentationPlanner,
     };
-    let frame = nara::ui::latest_ui_frame(world, UiSurfaceId::new(71).unwrap())
+    let frame = nara::ui::ui_candidate_frame(world, UiSurfaceId::new(71).unwrap())
         .unwrap()
         .unwrap();
     let mut bundled = UiPresentationPlanner::new(Default::default()).unwrap();

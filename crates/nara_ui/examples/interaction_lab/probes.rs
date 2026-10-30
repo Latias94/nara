@@ -9,7 +9,7 @@ use nara_input::{
 use nara_ui::{
     advanced::{
         UiAccessibilityInput, UiActivationSource, UiFrame, UiKey, UiPresentationReceipt,
-        UiRouteRejection, UiSeatId, UiSurfaceId, latest_ui_frame, ui_semantic_snapshot,
+        UiRouteRejection, UiSeatId, UiSurfaceId, ui_candidate_frame, ui_semantic_snapshot,
     },
     prelude::{UiActionConsumerId, UiActionCursor, UiActionId, UiActionJournal, UiSemanticRole},
 };
@@ -391,12 +391,12 @@ pub(super) fn required_frame(
     app: &LabRuntime,
     surface: UiSurfaceId,
 ) -> Result<Arc<UiFrame>, Box<dyn Error>> {
-    latest_ui_frame(app.world(), surface)?.ok_or_else(|| {
+    ui_candidate_frame(app.world(), surface)?.ok_or_else(|| {
         let diagnostics = app
             .world()
             .resource::<nara_ui::UiAdapterDiagnostics>()
             .as_slice();
-        let frames = nara_ui::advanced::latest_ui_frames(app.world()).map(|frames| {
+        let frames = nara_ui::advanced::ui_candidate_frames(app.world()).map(|frames| {
             frames
                 .iter()
                 .map(|frame| frame.environment().surface_id().get())

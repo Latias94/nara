@@ -22,8 +22,8 @@ use nara_fs::ContentDigest;
 use nara_identity::SceneEntityId;
 use nara_input::{
     ActionBinding, ActionContext, ActionId, ActionMap, ActionMapAsset, ActionMapBuilder,
-    ActionMapDomain, ActionMapLimits, ActionMapRuntimeCodec, ButtonInput, InputBinding,
-    InputPlugin, KeyCode, SemanticActions,
+    ActionMapDomain, ActionMapLimits, ActionMapRuntimeCodec, InputBinding, InputPlugin, KeyCode,
+    SemanticActions,
 };
 use nara_project::{ProductCapability, RuntimeConfiguration, RuntimePreset};
 use nara_scene::{
@@ -370,14 +370,20 @@ struct InputControls(Arc<Mutex<InputChanges>>);
 fn change_input(
     controls: Res<InputControls>,
     mut map: ResMut<ActionMap>,
-    mut keyboard: ResMut<ButtonInput<KeyCode>>,
+    mut timeline: ResMut<nara_input::InputTimeline>,
 ) {
     let mut changes = controls.0.lock().unwrap();
     if std::mem::take(&mut changes.replace) {
         *map = ActionMap::default();
     }
     if std::mem::take(&mut changes.press) {
-        keyboard.press(KeyCode::Space).unwrap();
+        timeline
+            .admit_keyboard(
+                nara_input::InputWindowId::UNSPECIFIED,
+                nara_input::InputSeatId::PRIMARY,
+                nara_input::ButtonDriverInput::Press(KeyCode::Space),
+            )
+            .unwrap();
     }
 }
 

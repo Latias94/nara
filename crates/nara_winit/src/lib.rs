@@ -32,10 +32,10 @@ use nara_app::{
     RuntimeDriverScope, RuntimeFault, RuntimeInstance, RuntimeScopeError, RuntimeState,
 };
 use nara_input::{
-    ButtonDriverInput, ButtonInputDriverError, InputPointerId, InputSeatId, InputTimeline,
-    InputWindowEvent, InputWindowId, KeyCode, MouseButton, PointerDriverInput,
+    ButtonDriverInput, ButtonInputDriverError, InputIngressError, InputPointerId, InputSeatId,
+    InputTimeline, InputWindowEvent, InputWindowId, KeyCode, MouseButton, PointerDriverInput,
     apply_keyboard_driver_input_at, apply_mouse_driver_input_at, apply_pointer_driver_input_at,
-    apply_window_input_driver_event,
+    apply_window_input_driver_event, connect_input_endpoint, connect_input_pointer,
 };
 use nara_window::{
     Window, WindowEvent, WindowId, WindowResolution,
@@ -384,11 +384,25 @@ impl<'runtime> WinitApp<'runtime> {
             .insert(platform_window.id(), window_id);
         self.platform_windows
             .insert(window_id, platform_window.clone());
+        self.connect_window_input(window_id)?;
         self.with_driver_scope(|scope| {
             push_window_driver_event(scope, WindowEvent::Created { window_id })
         })?;
 
         Ok(())
+    }
+
+    fn connect_window_input(&mut self, window_id: WindowId) -> Result<(), AppRunError> {
+        if !self.input_timeline_installed() {
+            return Ok(());
+        }
+        // The synchronous native owner connects once, before registered callbacks can run.
+        // Shutdown retires this endpoint and never recreates a window in the same session.
+        let window = InputWindowId::new(window_id.get());
+        self.with_driver_scope(|scope| {
+            connect_input_endpoint(scope, window, InputSeatId::PRIMARY)?;
+            connect_input_pointer(scope, window, InputSeatId::PRIMARY, InputPointerId::PRIMARY)
+        })
     }
 
     fn run_frame(&mut self, delta: Duration, event_loop: &ActiveEventLoop) {
@@ -781,15 +795,7 @@ impl<'runtime> WinitApp<'runtime> {
             .map_err(|_| AppRunError::runner("native window target is not registered"))?;
         if externally_destroyed {
             if self.input_timeline_installed() {
-                self.with_driver_scope(|scope| {
-                    apply_window_input_driver_event(
-                        scope,
-                        InputWindowId::new(window_id.get()),
-                        InputSeatId::PRIMARY,
-                        InputWindowEvent::SurfaceRetired,
-                    )
-                    .map(|_| ())
-                })?;
+                self.with_driver_scope(|scope| retire_window_input(scope, window_id))?;
             }
             self.with_driver_scope(|scope| {
                 push_window_driver_event(scope, WindowEvent::Closed { window_id })
@@ -1130,6 +1136,26 @@ fn should_process_window_event_during_shutdown(
     !shutdown.is_started() || matches!(event, WinitWindowEvent::Destroyed)
 }
 
+fn retire_window_input(
+    scope: &mut RuntimeDriverScope<'_>,
+    window_id: WindowId,
+) -> Result<(), ButtonInputDriverError> {
+    match apply_window_input_driver_event(
+        scope,
+        InputWindowId::new(window_id.get()),
+        InputSeatId::PRIMARY,
+        InputWindowEvent::SurfaceRetired,
+    ) {
+        // A failed connection or an already reclaimed retirement has no accepted input to end.
+        // Neither may prevent the native owner from releasing its remaining physical resources.
+        Ok(_)
+        | Err(ButtonInputDriverError::Timeline(InputIngressError::UnknownEndpoint { .. })) => {
+            Ok(())
+        }
+        Err(error) => Err(error),
+    }
+}
+
 fn retire_runtime_targets(
     runtime: &mut RuntimeInstance,
     backend_windows: &BackendWindowHandles,
@@ -1144,12 +1170,7 @@ fn retire_runtime_targets(
         let outcome = runtime
             .with_driver_scope(|scope| {
                 for window_id in owned_window_ids.iter().copied() {
-                    apply_window_input_driver_event(
-                        scope,
-                        InputWindowId::new(window_id.get()),
-                        InputSeatId::PRIMARY,
-                        InputWindowEvent::SurfaceRetired,
-                    )?;
+                    retire_window_input(scope, window_id)?;
                 }
                 Ok::<(), ButtonInputDriverError>(())
             })

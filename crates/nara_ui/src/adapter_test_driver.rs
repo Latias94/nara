@@ -7,6 +7,7 @@ use nara_input::{InputAdmission, InputIngressError, InputRouteStamp};
 
 use crate::runtime::{
     UiDeferredPresentationAuthority, UiDeferredPresentationRetry, UiPreparedPresentationAuthority,
+    UiPresentationCommit,
 };
 use crate::{UiActionConsumerError, UiActionSequence, UiSurfaceRetirement, UiSurfaceSuspension};
 
@@ -18,6 +19,26 @@ pub(super) struct UiTestApp {
 
 impl UiTestApp {
     pub(super) fn new(mut app: App) -> Self {
+        {
+            let mut timeline = app.world_mut().unwrap().resource_mut::<InputTimeline>();
+            for (window, seat) in [
+                (InputWindowId::new(11), InputSeatId::PRIMARY),
+                (InputWindowId::new(12), InputSeatId::PRIMARY),
+                (InputWindowId::new(12), InputSeatId::new(1)),
+            ] {
+                timeline.connect_endpoint(window, seat).unwrap();
+                timeline
+                    .connect_pointer(window, seat, InputPointerId::PRIMARY)
+                    .unwrap();
+            }
+            timeline
+                .connect_pointer(
+                    InputWindowId::new(11),
+                    InputSeatId::PRIMARY,
+                    InputPointerId::new(9),
+                )
+                .unwrap();
+        }
         app.insert_resource(UiTestDriver).unwrap();
         app.__register_driver_port::<UiTestDriver>(UiTestDriver::apply_driver_input_in_world)
             .unwrap();
@@ -151,6 +172,10 @@ macro_rules! ui_test_commands {
 }
 
 ui_test_commands! {
+    ConnectEndpoint => fn connect_endpoint(window: InputWindowId, seat: InputSeatId)
+        -> Result<(), InputIngressError> |world| { world.resource_mut::<InputTimeline>().connect_endpoint(window, seat) };
+    ConnectPointer => fn connect_pointer(window: InputWindowId, seat: InputSeatId, pointer: InputPointerId)
+        -> Result<(), InputIngressError> |world| { world.resource_mut::<InputTimeline>().connect_pointer(window, seat, pointer) };
     InstallSurface => fn install_surface(slot: UiSurfaceSlot) -> Result<(), UiAdapterError> |world| {
         install_ui_surface(world, slot)
     };
@@ -165,7 +190,7 @@ ui_test_commands! {
     };
     PreparePresentation => fn prepare_presentation(frame: Arc<nara_ui_kernel::UiFrame>, epoch: u64)
         -> Result<UiPreparedPresentationAuthority, UiAdapterError> |world| { crate::__private::prepare_ui_presentation(world, frame, epoch) };
-    CommitPresentation => fn commit_presentation(prepared: UiPreparedPresentationAuthority) -> UiPresentationReceipt |world| {
+    CommitPresentation => fn commit_presentation(prepared: UiPreparedPresentationAuthority) -> UiPresentationCommit |world| {
         crate::__private::commit_prepared_ui_presentation(world, prepared)
     };
     AbortPresentation => fn abort_presentation(prepared: UiPreparedPresentationAuthority) -> () |world| {
@@ -241,11 +266,5 @@ impl std::ops::Deref for UiTestTimeline<'_> {
 impl std::ops::DerefMut for UiTestTimeline<'_> {
     fn deref_mut(&mut self) -> &mut Self::Target {
         self.0
-    }
-}
-
-impl UiTestTimeline<'_> {
-    pub(super) fn retained_len(&self) -> usize {
-        self.0.world().resource::<InputTimeline>().retained_len()
     }
 }

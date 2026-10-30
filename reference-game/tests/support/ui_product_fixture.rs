@@ -21,7 +21,7 @@ use nara::{
             UiKey, UiSafeAreaInsets, UiSize, UiSurfaceContentTransform, active_ui_surface_slots,
             update_ui_surface_slot,
         },
-        latest_ui_frame, ui_semantic_snapshot,
+        ui_semantic_snapshot,
     },
     window::WindowId,
 };
@@ -391,9 +391,12 @@ pub fn capture_planner_performance() -> PlannerPerformanceCapture {
         bundled_wave_commands(),
     );
     drive_to_terminal(&mut runtime);
-    let frame = latest_ui_frame(runtime.world(), reference_surface_id())
-        .expect("the product UI adapter should remain installed")
-        .expect("the terminal product state should compile one immutable frame");
+    let (_, accepted) = runtime
+        .world()
+        .resource::<ComponentPresentationState>()
+        .latest()
+        .expect("the terminal product state should retain its accepted packet");
+    let frame = accepted.frame();
     let mut planner = UiPresentationPlanner::default();
     let prepared = UiPreparedImages::default();
     let mut durations_ns = Vec::with_capacity(PLANNER_RECORDED_SAMPLES);
@@ -775,25 +778,24 @@ fn drive_until_surface_target(runtime: &mut RuntimeInstance, target: UiPhysicalT
         else {
             continue;
         };
-        let Some(frame) = latest_ui_frame(runtime.world(), reference_surface_id())
-            .ok()
-            .flatten()
-        else {
-            continue;
-        };
-        let Some((_, packet)) = runtime
+        let Some((receipt, packet)) = runtime
             .world()
             .resource::<ComponentPresentationState>()
             .latest()
         else {
             continue;
         };
-        let packet_frame = packet.frame();
+        let frame = packet.frame();
         let transform = slot.transform();
         if (transform.physical_surface_size().width() - target.width as f32).abs() < 1.0e-6
             && (transform.physical_surface_size().height() - target.height as f32).abs() < 1.0e-6
             && (frame.environment().scale_factor() - target.render_scale).abs() < 1.0e-6
-            && Arc::ptr_eq(&packet_frame, &frame)
+            && frame.environment().content_transform() == transform
+            && receipt.surface_id() == slot.surface_id()
+            && receipt.slot_generation().get() == slot.slot_generation()
+            && receipt.route_revision().get() == slot.route_generation()
+            && receipt.geometry_generation().get() == slot.geometry_generation()
+            && ui_semantic_snapshot(runtime.world(), receipt, UiSeatId::PRIMARY).is_ok()
         {
             return;
         }
@@ -958,18 +960,14 @@ fn derive_product_ui_state(world: &World) -> ProductUiState {
 
 fn capture(runtime: &RuntimeInstance, target: UiPhysicalTarget) -> ProductUiCapture {
     let world = runtime.world();
-    let frame = latest_ui_frame(world, reference_surface_id())
-        .expect("the product UI adapter should remain installed")
-        .expect("the product state should compile one immutable frame");
     let presenter = world.resource::<ComponentPresentationState>();
     let (receipt, packet) = presenter
         .latest()
         .expect("the bounded presenter should retain the accepted product packet");
+    let frame = packet.frame();
     let acceptance = presenter
         .latest_acceptance_identity()
         .expect("the bounded presenter should retain backend acceptance identity");
-    let packet_frame = packet.frame();
-    assert!(Arc::ptr_eq(&packet_frame, &frame));
     let identity = packet.identity();
     assert_eq!(acceptance.packet(), identity);
     assert_eq!(acceptance.target(), packet.target());

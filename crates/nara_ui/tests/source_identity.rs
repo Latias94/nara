@@ -12,7 +12,7 @@ use nara_scene::{
 };
 use nara_ui::{
     UiAdapterDiagnostics, UiNode, UiPlugin, UiRoot, UiStyle, UiSurfaceEndpoint, UiSurfaceSlot,
-    install_ui_surface, latest_ui_frame,
+    install_ui_surface, ui_candidate_frame,
 };
 use nara_ui_kernel::{
     UiLayer, UiRootKey, UiSafeAreaInsets, UiSize, UiSurfaceContentTransform, UiSurfaceId,
@@ -74,7 +74,7 @@ fn source_and_occurrence_keep_equal_document_local_ui_roots_independent() {
 
         let mut runtime = RuntimeInstance::start(app).unwrap();
         runtime.drive(Duration::ZERO).unwrap();
-        let frame = latest_ui_frame(runtime.world(), surface).unwrap();
+        let frame = ui_candidate_frame(runtime.world(), surface).unwrap();
         let diagnostics = runtime
             .world()
             .resource::<UiAdapterDiagnostics>()
@@ -228,7 +228,7 @@ fn canonical_prefab_alias_rebuild_preserves_keys_but_a_containing_source_switch_
     let mut observations = Vec::new();
     for _ in 0..3 {
         runtime.drive(Duration::ZERO).unwrap();
-        let frame = latest_ui_frame(runtime.world(), surface).unwrap();
+        let frame = ui_candidate_frame(runtime.world(), surface).unwrap();
         let source = runtime
             .world()
             .iter_entities()
@@ -534,7 +534,7 @@ fn observe_shared_ui_roots(
             .resource::<UiAdapterDiagnostics>()
             .as_slice();
         assert!(diagnostics.is_empty(), "{diagnostics:?}");
-        let frame = latest_ui_frame(runtime.world(), surface)
+        let frame = ui_candidate_frame(runtime.world(), surface)
             .unwrap()
             .expect("complete source/addition provenance must compile without key aliases");
         let sources = runtime
@@ -670,6 +670,22 @@ fn source_identity_app() -> (App, UiSurfaceId) {
     .unwrap();
     let surface = UiSurfaceId::new(7).unwrap();
     let size = UiSize::new(200.0, 100.0).unwrap();
+    {
+        let mut input = app
+            .world_mut()
+            .unwrap()
+            .resource_mut::<nara_input::InputTimeline>();
+        input
+            .connect_endpoint(InputWindowId::new(11), InputSeatId::PRIMARY)
+            .unwrap();
+        input
+            .connect_pointer(
+                InputWindowId::new(11),
+                InputSeatId::PRIMARY,
+                InputPointerId::PRIMARY,
+            )
+            .unwrap();
+    }
     install_ui_surface(
         app.world_mut().unwrap(),
         UiSurfaceSlot::new(

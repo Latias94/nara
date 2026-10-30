@@ -42,6 +42,72 @@ retained lifetime observations; it is not a measurement of the entire input pipe
 `ButtonInput` and `SemanticActions` also own live state. Capture their public transitions, pressed
 observations or semantic outcomes for recording instead of copying the runtime resources.
 
+## Ingress And Bounded Lifetimes
+
+`InputTimeline` owns connected endpoints, pointer children, accepted button members and one ordered
+physical/synthetic event log. Configure smaller finite capacities before installing `InputPlugin`:
+
+```rust
+use nara_input::{InputLimits, InputTimeline};
+
+let limits = InputLimits::new(64, 4, 8, 16)?; // events, endpoints, pointers, members
+let mut app = nara_app::App::new();
+app.insert_resource(InputTimeline::with_limits(limits)?)?;
+app.add_plugin(nara_input::InputPlugin)?;
+```
+
+The configured pools include the once-connected default synthetic endpoint and pointer. Event
+capacity is between three and `MAX_INPUT_TIMELINE_ENTRIES`; three slots reserve the default
+lifecycle controls before any ordinary event. Counts may impose different admission ceilings:
+an available event slot does not imply another live member or endpoint is available. Queued,
+held and terminal-pending members remain charged while their internal consumers need them.
+Connected idle records intentionally retain their slots until explicitly retired.
+
+A native adapter connects its actual labels once before delivering events. Managed Hosts use
+driver scopes so Runtime state gating remains part of admission:
+
+```rust
+use nara_input::{
+    ButtonDriverInput, InputPointerId, InputSeatId, InputWindowId, KeyCode,
+    apply_keyboard_driver_input_at, connect_input_endpoint, connect_input_pointer,
+};
+
+let mut runtime = nara_app::RuntimeInstance::start(app)?;
+let window = InputWindowId::new(7);
+let seat = InputSeatId::PRIMARY;
+runtime.with_driver_scope(|scope| {
+    connect_input_endpoint(scope, window, seat)?;
+    connect_input_pointer(scope, window, seat, InputPointerId::PRIMARY)
+})?.output?;
+runtime.with_driver_scope(|scope| {
+    apply_keyboard_driver_input_at(scope, window, seat, ButtonDriverInput::Press(KeyCode::Space))
+})?.output?;
+```
+
+The default helpers without `_at` send synthetic events through the already connected default
+endpoint. They share the same admission, global sequence, mapping/context staging and termination
+rules. `InputEventOrigin` distinguishes origin without creating a second mutation queue.
+`ButtonInput` and `PointerState` expose observations; they have no independent public writers.
+Each button transition and action provenance names the original accepted press sequence, so a
+release cannot end another endpoint's or a later press's contribution.
+
+Ordinary refusal leaves accepted state and event order unchanged. Admission reserves the complete
+future release/leave/lifecycle obligations and their sequence space. Focus loss or physical
+retirement can therefore finish accepted holds when ordinary storage is full. Presentation unbind
+preserves physical holds; `InputWindowEvent::SurfaceRetired` ends the endpoint, while
+`retire_input_pointer` (or direct-App `InputTimeline::retire_pointer`) ends one pointer child.
+Pending consumers or prepared presentation tokens keep retiring records charged and prevent label
+reuse. Drain or discard external queued
+operations before reusing raw labels; looking up a current generation cannot identify an old
+originless OS event. Frame cleanup releases observation copies, while paused action work retains
+its own original members until resolution or the owning Runtime ends.
+
+A UI Host connects its logical endpoint before `install_ui_surface`, including when native window
+creation happens later. The Surface keeps that exact Input lifetime through suspension and geometry
+changes. An explicit restore may attach a newly connected incarnation with the same labels; that
+handoff clears predecessor interaction state. Late preparation or cleanup through the old Surface
+cannot adopt or terminate the replacement connection.
+
 ## Context Changes And Rebinding
 
 Enable and disable only declared contexts. Both operations report whether the state changed and
@@ -144,9 +210,8 @@ Input defaults from explicit configuration, and is unavailable through a post-St
 scope. Ordinary source Hosts perform this step as part of startup.
 
 Current action bindings cover keys and mouse buttons. Analog bindings, chords and a visual
-action-map editor remain separate workflows. The current state allowance does not bound all
-physical endpoint or semantic-contribution growth; that mutation-boundary correction remains
-open under foundation R10. See [ADR 0041](../architecture/adr/0041-input-routing-actions-text-focus-and-accessibility.md)
+action-map editor remain separate workflows. Mutable action-map state and bounded ingress storage
+have separate owners and allowances. See [ADR 0041](../architecture/adr/0041-input-routing-actions-text-focus-and-accessibility.md)
 for the owning contracts, the [source plan](../plans/2026-10-30-input-definition-and-source-admission-plan.md)
 and [processed plan](../plans/2026-10-30-processed-input-startup-and-process-proof-plan.md) for their
 actual qualification scopes. Target-build selection and complete packaged delivery remain separate.

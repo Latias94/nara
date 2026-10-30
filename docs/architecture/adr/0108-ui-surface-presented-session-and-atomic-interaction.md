@@ -4,7 +4,7 @@
 **Date**: 2026-08-08
 **Amended**: 2026-08-09 by the UIF-U1 presentation-reconciliation, UIF-U3C prepared-submission and
 UIF-U4C surface-lifecycle corrections; 2026-08-10 by the UIFM-U1 modal-entry-focus correction;
-2026-10-30 by prepared Input-loss completion without interaction resurrection
+2026-10-30 by total prepared completion, interaction-basis and endpoint-incarnation restoration
 **Owner**: UI kernel session, input routing, platform adapters, Host surface lifecycle
 **Refines**: [ADR 0041](0041-input-routing-actions-text-focus-and-accessibility.md) and
 [ADR 0102](0102-renderer-neutral-ui-text-widget-and-presented-frame-topology.md)
@@ -28,6 +28,19 @@ public Surface Slot requirements until a product consumes them.
 The Host installs an explicit Surface Slot. The kernel owns a presented session per Surface Slot and
 dispatches every normalized or accessibility action as one atomic transaction against an exact
 presentation receipt.
+
+Before installing a Surface Slot, the Host explicitly connects its logical Input endpoint. This
+may happen before native window creation; native callbacks later use that same admitted logical
+connection. Installation captures an Input-issued private incarnation claim. Suspension and
+geometry unbind preserve that claim independently of `input_route`; an explicit endpoint handoff
+captures the destination's admitted claim before publication. UI installation never claims whichever
+connection happens to be current at a later retirement. Source-built/manual Hosts follow the same
+ordering as the first-party product composition.
+
+Prepared and deferred presentation also use that retained claim when arming an Input route. If the
+original connection ended, an old active Surface cannot bind a same-label replacement by looking
+it up during presentation. An explicit Host restore/handoff must associate the admitted successor
+first. Capturing identity only for cleanup would not protect the publication path.
 
 ```mermaid
 sequenceDiagram
@@ -120,7 +133,10 @@ target for the owning seat before final visual compilation and semantic publicat
 initial modal and a base-to-modal transition that received no prior UI input. An initial non-modal
 frame does not receive implicit focus. This focus mutation is a session/reducer presentation fact;
 semantic projection remains read-only and cannot manufacture it. Endpoint replacement clears the
-predecessor session and seeds only the successor endpoint seat.
+predecessor session and seeds only the successor endpoint seat. Replacement includes a different
+Input incarnation with identical window/seat/pointer labels. Explicit restore captures that new
+claim and clears predecessor focus and reducers; restoring the same connected incarnation retains
+the ordinary suspension policy.
 
 All fallible history, session, reducer, journal and input-route admission completes before backend
 submission. The backend acceptance is move-only and bound to the packet plus target, slot,
@@ -136,13 +152,29 @@ the exact prepared token, discards that prepared interaction state and returns a
 outcome without a new fallible admission step. It does not replace a newer live session or rearm
 the input route. Abort and supersede likewise settle the exact token and its retention.
 
+Input reservation validity alone does not prove that prepared UI interaction is still current.
+The prepared presentation also captures its UI owner's exact interaction basis. A committed
+pointer/key/navigation/accessibility transaction or session reset invalidates that basis even
+when no physical route was revoked. Before publishing the Input route, compare it with the live
+surface's basis. A changed or unavailable basis consumes/aborts the exact reservation and returns
+an explicit UI invalidation outcome, leaving current session, reducers and routing intact. Do not
+publish a route first and discover stale UI afterward. Ordinary release, outside-content pointer
+cancellation and accessibility focus changes are separate counterexamples; they are not physical
+PointerLeft events. Current-candidate identity alone is insufficient because its invalidation
+does not retract already issued prepared authority. Conversely, an unpresented authored candidate
+does not by itself invalidate a retained presentation's unchanged interaction basis.
+
 The root keeps backend pixel acceptance truthful while skipping interactive receipt, observation
 and accessibility success publication for the invalidated candidate. Any revocation targets only
 its exact surface/candidate; another surface or a successor remains intact. Prove prepare, physical
 loss, live UI cancellation and late commit together, including focus/capture/reducers, exhaustion
-of new binding generations and invalidated abort. The selected contract is implementation work
-under the [Input endpoint plan](../../plans/2026-10-30-input-endpoint-admission-and-retirement-plan.md),
-not new conformance evidence for the current production implementation.
+of new binding generations and invalidated abort. Also commit ordinary release/activation,
+outside-content movement and accessibility changes between prepare and completion; their effects
+must survive without stale state or route publication. The selected contract is implemented under
+the [Input endpoint plan](../../plans/2026-10-30-input-endpoint-admission-and-retirement-plan.md).
+Its [qualification](../../knowledge/engineering/verification/2026-10/2026-10-30T140508Z-bounded-input-ownership-and-total-ui-presentation-qualification-b97643044e4a4f92b892a3539d2ad415.md)
+refreezes the exact changed inventory and records the actual public/neutral/Windows evidence;
+it does not qualify full editable text, OS IME candidate delivery or other platforms.
 
 Focus identity is independent from destination and activation eligibility. A focused stable control
 that becomes disabled retains focus identity and remains the sequential/directional navigation
@@ -186,6 +218,15 @@ before retirement mutates either owner. If a Surface Slot migrates from endpoint
 held edges remain attached to the exact consumer and predecessor endpoint lineage that received each
 press until a balanced release or explicit retirement cleanup completes; the successor endpoint
 cannot silently absorb or discard that ownership.
+
+Coordinated unbind/retirement uses the retained incarnation claim. If platform retirement already
+ended and reclaimed that incarnation, settle the old Surface without publishing more Input edges.
+A same-label replacement retains its holds, route and consumers even before its first UI
+publication. The claim keeps only original identity, not a mutable endpoint pin; pool capacity can
+be reused after the actual Input consumers finish. Within the same incarnation, a conflicting
+live route still refuses rather than being overwritten. These guarantees also apply to a Surface
+that was installed but never presented, so absence of a route stamp cannot mean permission to
+retire a newly looked-up endpoint.
 
 Surface availability is explicit. An active slot that loses a usable target through zero extent,
 missing endpoint or invalid scale becomes suspended with a successor generation. Suspension removes

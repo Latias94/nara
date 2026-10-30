@@ -25,15 +25,30 @@ The [complete persistent-key successor conformance](../../knowledge/engineering/
 identity inventory, exact neutral assertions and scoped qualification to implementation `f7ab300`.
 Historical inventories retain their recorded scope; this is not whole-toolkit qualification.
 
-The prepared-presentation/input-loss part of the public checkpoint is reopened by the
+The prepared-presentation/input-loss part of the public checkpoint was reopened by the
 [Input endpoint replacement](../../plans/2026-10-30-input-endpoint-admission-and-retirement-plan.md).
 Independent Input/UI source review exposed the prepare/loss/cancel/late-commit case: restoring a
 prepared whole-session clone can revive cancelled focus/capture/reducers even if a returned stamp
 is stale. ADRs 0041/0108 select total committed/invalidated completion and exact root publication
-tails. Migrate Runtime, manual neutral presenters, root and reference consumers directly; refreeze
-the changed public inventory only after focused neutral/public and relevant native qualification.
-Prior complete-key and typed-Image qualifications retain their recorded scope and do not qualify
-this successor. No compatibility receipt-returning alias is required.
+tails. Runtime, manual neutral presenters, root and Reference consumers are migrated directly.
+The [bounded Input/UI qualification](../../knowledge/engineering/verification/2026-10/2026-10-30T140508Z-bounded-input-ownership-and-total-ui-presentation-qualification-b97643044e4a4f92b892a3539d2ad415.md)
+refreezes the exact changed inventory with owning/public/neutral evidence, four selected actual
+Windows/DX12 Editor trajectories and the real Reference desktop observation path. Prior complete-key
+and typed-Image qualifications retain their recorded scope. No receipt-returning alias remains.
+
+The same checkpoint covers the independent live UI interaction basis: ordinary release, navigation
+or accessibility dispatch can invalidate prepared interaction without revoking Input routing.
+Check that basis before publishing the route, and report the UI-owned cause rather than inventing
+a platform loss. Unpresented authoring changes remain distinct from committed interaction changes.
+
+Candidate lookup is explicitly named `ui_candidate_frame` / `ui_candidate_frames`. It returns
+only current unpresented candidates; successful completion consumes them. Retained presented
+frames come from the presentation owner's accepted packet/receipt, which remains independent
+of the next candidate. The misleading `latest_ui_frame(s)` names are removed without aliases.
+Current presentation is validated through the receipt/session, never by requiring a candidate
+to remain installed after commit. This naming and consumer correction belongs to the same
+qualified inventory. The Reference observer resolves the retained Runtime/session/frame facts;
+ordinary authoring changes do not manufacture a new backend presentation.
 
 ## Context
 

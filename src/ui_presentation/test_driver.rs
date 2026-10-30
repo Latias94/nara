@@ -149,6 +149,31 @@ impl BridgeRuntime {
             BridgeTestResult::Done
         ));
     }
+
+    pub(super) fn lose_input_focus(&mut self, window: u64) {
+        self.0
+            .as_mut()
+            .unwrap()
+            .with_driver_scope(|scope| {
+                nara_input::apply_window_input_driver_event(
+                    scope,
+                    InputWindowId::new(window),
+                    InputSeatId::PRIMARY,
+                    nara_input::InputWindowEvent::Focused(false),
+                )
+            })
+            .unwrap()
+            .output
+            .unwrap();
+    }
+
+    pub(super) fn release_held_acceptances(&mut self) {
+        self.set_backend_mode(FakeBackendMode::PresentAndReleaseHeld);
+        assert!(matches!(
+            self.apply(BridgeTestOperation::ReleaseHeldAcceptances),
+            BridgeTestResult::Done
+        ));
+    }
 }
 
 impl Drop for BridgeRuntime {
@@ -172,6 +197,7 @@ enum BridgeTestOperation {
     TakeBackendFrame,
     CommitBackendOutcome(UiCompletedBackendOutcome),
     CommitPresentations,
+    ReleaseHeldAcceptances,
 }
 
 enum BridgeTestResult {
@@ -237,6 +263,10 @@ impl BridgeTestDriver {
             ),
             BridgeTestOperation::CommitPresentations => {
                 commit_runtime_ui_presentations(world);
+                BridgeTestResult::Done
+            }
+            BridgeTestOperation::ReleaseHeldAcceptances => {
+                release_fake_backend_acceptances(world);
                 BridgeTestResult::Done
             }
         })

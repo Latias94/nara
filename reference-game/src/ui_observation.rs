@@ -5,12 +5,10 @@ use nara::{
 };
 
 #[cfg(feature = "desktop")]
-use std::sync::Arc;
-
-#[cfg(feature = "desktop")]
 use nara::{
+    app::RuntimeGeneration,
     ui::advanced::{UiFrame, UiKey},
-    ui::latest_ui_frame,
+    ui::{UiSeatId, ui_semantic_snapshot},
     ui_render::advanced::PresentedUiObservation,
 };
 
@@ -27,6 +25,7 @@ pub struct ReferenceUiObservation {
     pub surface_id: u64,
     pub authored_width: f32,
     pub authored_height: f32,
+    /// Diagnostic expanded Scene identity; the source fields identify the authored control.
     pub retry_entity_id: String,
     pub retry_source_document: String,
     pub retry_source_entity: String,
@@ -162,6 +161,8 @@ impl ReferenceUiObservation {
     }
 
     /// Joins actual scene identity with the current owner-produced presented frame.
+    /// The retained submission must belong to this Runtime and its receipt must remain current.
+    /// Successful presentation has already consumed the unpresented candidate.
     #[must_use]
     #[cfg(feature = "desktop")]
     pub fn from_presented_observation(
@@ -172,8 +173,12 @@ impl ReferenceUiObservation {
         if frame.environment().surface_id().get() != REFERENCE_UI_SURFACE_ID {
             return None;
         }
-        let current = latest_ui_frame(world, frame.environment().surface_id()).ok()??;
-        if !Arc::ptr_eq(&current, &frame) {
+        let runtime_generation = world.get_resource::<RuntimeGeneration>()?;
+        if presented.submission().runtime_generation().get() != runtime_generation.get() {
+            return None;
+        }
+        let semantics = ui_semantic_snapshot(world, presented.receipt(), UiSeatId::PRIMARY).ok()?;
+        if semantics.frame_revision() != frame.revision() {
             return None;
         }
         let authored = Self::from_authoring_world(world)?;

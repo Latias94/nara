@@ -11,11 +11,12 @@ use nara_input::__private::InputSet;
 use nara_input::{
     ActionBinding, ActionContext, ActionId, ActionMap, ActionMapBuilder, ActionMapLimits,
     ActionOutcome, ActionOutcomes, ActionPhase, ButtonDriverInput, ButtonInput, InputEventKind,
-    InputFrameObservations, InputGeometryGeneration, InputPointerId, InputPresentationEpoch,
-    InputPresentedRoute, InputRouteGeneration, InputSeatId, InputSlotGeneration, InputSurfaceId,
-    InputTimeline, InputWindowEvent, InputWindowId, KeyCode, MouseButton,
-    apply_keyboard_driver_input, apply_keyboard_driver_input_at, apply_mouse_driver_input_at,
-    apply_window_input_driver_event,
+    InputEventOrigin, InputFrameObservations, InputGeometryGeneration, InputLimits, InputPointerId,
+    InputPresentationEpoch, InputPresentedRoute, InputRouteGeneration, InputSeatId,
+    InputSlotGeneration, InputSurfaceId, InputTimeline, InputWindowEvent, InputWindowId, KeyCode,
+    MouseButton, apply_keyboard_driver_input, apply_keyboard_driver_input_at,
+    apply_mouse_driver_input_at, apply_window_input_driver_event, connect_input_endpoint,
+    connect_input_pointer,
 };
 
 #[derive(Debug, Default, Resource)]
@@ -158,6 +159,11 @@ fn endpoint_projection_preserves_other_seat_keys_after_release_and_focus_loss() 
         (first_window, first_seat, InputSurfaceId::new(9)),
         (second_window, second_seat, InputSurfaceId::new(10)),
     ] {
+        app.world_mut()
+            .unwrap()
+            .resource_mut::<InputTimeline>()
+            .connect_endpoint(window, seat)
+            .unwrap();
         app.world_mut()
             .unwrap()
             .resource_mut::<InputTimeline>()
@@ -307,7 +313,8 @@ fn endpoint_projection_preserves_other_seat_keys_after_release_and_focus_loss() 
     for (outcome, (sequence, window, seat, press_sequence, surface)) in
         outcomes.iter().zip(expected_origins)
     {
-        assert_eq!(outcome.provenance.sequence(), Some(sequence));
+        assert_eq!(outcome.provenance.sequence(), sequence);
+        assert_eq!(outcome.provenance.origin(), InputEventOrigin::Platform);
         assert_eq!(outcome.provenance.route().window(), window);
         assert_eq!(outcome.provenance.route().seat(), seat);
         assert_eq!(outcome.provenance.press_sequence(), Some(press_sequence));
@@ -340,7 +347,9 @@ fn endpoint_projection_preserves_other_pointer_buttons_after_release() {
     let mut runtime = start_runtime(app);
     runtime
         .with_driver_scope(|scope| {
+            connect_input_endpoint(scope, window, seat)?;
             for pointer in [first_pointer, second_pointer] {
+                connect_input_pointer(scope, window, seat, pointer)?;
                 apply_mouse_driver_input_at(
                     scope,
                     window,
@@ -424,7 +433,8 @@ fn endpoint_projection_preserves_other_pointer_buttons_after_release() {
         (3, first_pointer, 1),
         (4, second_pointer, 2),
     ]) {
-        assert_eq!(outcome.provenance.sequence(), Some(sequence));
+        assert_eq!(outcome.provenance.sequence(), sequence);
+        assert_eq!(outcome.provenance.origin(), InputEventOrigin::Platform);
         assert_eq!(outcome.provenance.route().pointer(), Some(pointer));
         assert_eq!(outcome.provenance.press_sequence(), Some(press_sequence));
         assert_eq!(
@@ -435,19 +445,49 @@ fn endpoint_projection_preserves_other_pointer_buttons_after_release() {
 }
 
 #[test]
-fn endpoint_projection_keeps_direct_synthetic_and_default_driver_members_separate() {
+fn endpoint_projection_keeps_admitted_synthetic_and_platform_members_separate() {
     let key = KeyCode::Character('d');
+    let window = InputWindowId::new(1);
+    let seat = InputSeatId::PRIMARY;
     let mut app = App::new();
+    app.insert_resource(
+        InputTimeline::with_limits(InputLimits::new(16, 2, 1, 2).unwrap()).unwrap(),
+    )
+    .unwrap();
     app.add_plugin(nara_input::InputPlugin).unwrap();
-    app.world_mut()
-        .unwrap()
-        .resource_mut::<ButtonInput<KeyCode>>()
-        .press(key)
-        .unwrap();
     let mut runtime = start_runtime(app);
     runtime
         .with_driver_scope(|scope| {
-            apply_keyboard_driver_input(scope, ButtonDriverInput::Press(key))
+            connect_input_endpoint(scope, window, seat)?;
+            apply_keyboard_driver_input(scope, ButtonDriverInput::Press(key))?;
+            apply_keyboard_driver_input_at(scope, window, seat, ButtonDriverInput::Press(key))?;
+            Ok::<(), nara_input::ButtonInputDriverError>(())
+        })
+        .map(|outcome| {
+            assert!(outcome.post_operation_fault.is_none());
+            outcome.output
+        })
+        .unwrap()
+        .unwrap();
+    runtime.drive(Duration::ZERO).unwrap();
+    runtime
+        .with_driver_scope(|scope| {
+            apply_keyboard_driver_input_at(scope, window, seat, ButtonDriverInput::Release(key))
+        })
+        .map(|outcome| {
+            assert!(outcome.post_operation_fault.is_none());
+            outcome.output
+        })
+        .unwrap()
+        .unwrap();
+    runtime.drive(Duration::ZERO).unwrap();
+    let synthetic_survives_platform_release = runtime
+        .world()
+        .resource::<ButtonInput<KeyCode>>()
+        .pressed(key);
+    runtime
+        .with_driver_scope(|scope| {
+            apply_keyboard_driver_input_at(scope, window, seat, ButtonDriverInput::Press(key))
         })
         .map(|outcome| {
             assert!(outcome.post_operation_fault.is_none());
@@ -467,40 +507,13 @@ fn endpoint_projection_keeps_direct_synthetic_and_default_driver_members_separat
         .unwrap()
         .unwrap();
     runtime.drive(Duration::ZERO).unwrap();
-    let synthetic_survives_driver_release = runtime
+    let platform_survives_synthetic_release = runtime
         .world()
         .resource::<ButtonInput<KeyCode>>()
         .pressed(key);
     runtime
         .with_driver_scope(|scope| {
-            apply_keyboard_driver_input(scope, ButtonDriverInput::Press(key))
-        })
-        .map(|outcome| {
-            assert!(outcome.post_operation_fault.is_none());
-            outcome.output
-        })
-        .unwrap()
-        .unwrap();
-    runtime.drive(Duration::ZERO).unwrap();
-    runtime
-        .with_driver_scope(|scope| {
-            scope.__apply_port::<ButtonInput<KeyCode>>(ButtonDriverInput::Release(key))
-        })
-        .map(|outcome| {
-            assert!(outcome.post_operation_fault.is_none());
-            outcome.output
-        })
-        .unwrap()
-        .unwrap()
-        .unwrap();
-    runtime.drive(Duration::ZERO).unwrap();
-    let driver_survives_synthetic_release = runtime
-        .world()
-        .resource::<ButtonInput<KeyCode>>()
-        .pressed(key);
-    runtime
-        .with_driver_scope(|scope| {
-            apply_keyboard_driver_input(scope, ButtonDriverInput::Release(key))
+            apply_keyboard_driver_input_at(scope, window, seat, ButtonDriverInput::Release(key))
         })
         .map(|outcome| {
             assert!(outcome.post_operation_fault.is_none());
@@ -515,8 +528,8 @@ fn endpoint_projection_keeps_direct_synthetic_and_default_driver_members_separat
         .pressed(key);
     stop_runtime(&mut runtime);
 
-    assert!(synthetic_survives_driver_release);
-    assert!(driver_survives_synthetic_release);
+    assert!(synthetic_survives_platform_release);
+    assert!(platform_survives_synthetic_release);
     assert!(!held_after_final_release);
 }
 
@@ -553,6 +566,11 @@ fn exact_step_projects_admitted_key_and_focus_release_before_fixed_simulation() 
         KeyCode::Character('d'),
     )))
     .unwrap();
+    app.world_mut()
+        .unwrap()
+        .resource_mut::<InputTimeline>()
+        .connect_endpoint(window, InputSeatId::PRIMARY)
+        .unwrap();
     app.world_mut()
         .unwrap()
         .resource_mut::<InputTimeline>()
@@ -700,12 +718,14 @@ fn ordinary_catch_up_keeps_key_edges_through_all_ticks_and_last() {
         .unwrap()
         .add_systems(CoreStage::Last, capture_finalized_key)
         .unwrap();
-    app.world_mut()
-        .unwrap()
-        .resource_mut::<ButtonInput<KeyCode>>()
-        .press(KeyCode::Character('d'))
-        .unwrap();
     let mut runtime = start_runtime(app);
+    let press = runtime
+        .with_driver_scope(|scope| {
+            apply_keyboard_driver_input(scope, ButtonDriverInput::Press(KeyCode::Character('d')))
+        })
+        .unwrap();
+    assert!(press.post_operation_fault.is_none());
+    press.output.unwrap();
     runtime.drive(FixedTime::DEFAULT_TIMESTEP * 3).unwrap();
     let observed = runtime.world().resource::<FixedKeyObservations>().0.clone();
     let last = runtime
@@ -756,6 +776,11 @@ fn paused_ui_consumption_is_observed_once_and_skipped_by_gameplay_on_resume() {
         KeyCode::Enter,
     )))
     .unwrap();
+    app.world_mut()
+        .unwrap()
+        .resource_mut::<InputTimeline>()
+        .connect_endpoint(window, InputSeatId::PRIMARY)
+        .unwrap();
     app.world_mut()
         .unwrap()
         .resource_mut::<InputTimeline>()

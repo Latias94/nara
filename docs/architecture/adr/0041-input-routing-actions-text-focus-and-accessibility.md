@@ -116,6 +116,12 @@ observations and semantic contribution links derive from those members; they do 
 public mutation queues. Synthetic drivers use the same admission and termination path. The default
 synthetic endpoint is established once by its owner, not reconstructed on every mutation.
 
+Frame projections and action observations retain the original event while their internal copies
+are live. Admission-time pinning alone is insufficient: an event arriving after this frame's
+projection must reacquire the next frame's pin when it is actually copied. Only cleanup after
+those copies clear releases that pin; physical loss or another cursor cannot reclaim their space
+and admit another full frame of copies in the same frame.
+
 Raw adapter labels remain the public delivery identity for this bounded workflow. Explicit
 connection/retirement and private non-reused record/member identity protect internal lifetimes.
 Retirement prevents label reuse while old internal consumers still pin the record. The adapter
@@ -123,6 +129,13 @@ drains or discards externally queued operations before reusing labels. A current
 or a newly allocated public handle cannot recover an old event's missing origin. A future adapter
 with asynchronous native recreation must establish its own origin/nonreuse proof before support;
 the current source review does not qualify that broader behavior.
+
+Coordinated owners capture an Input-issued private endpoint-incarnation claim when associating
+with a connected endpoint. The claim retains original owner/identity, independently of the active
+presentation route, and does not pin a retired mutable slot. Unbind/retire through that claim
+settles an already ended incarnation without affecting a same-label replacement, including one
+that has not published any UI route. A foreign owner refuses. This integration claim is not an
+OS-event origin handle and does not change the raw platform ingress API.
 
 Use one shared ordered log with reserved terminal credits. For every accepted operation, retained
 records after its drafts plus all remaining terminal obligations fit the event capacity, and the
@@ -133,6 +146,12 @@ not independently acceptable subsets. FocusLost, CloseRequested and SurfaceRetir
 obligations; geometry revocation and a held unpositioned pointer's future leave also require their
 actual allowances. New activity explicitly rearms applicable obligations; repeated terminal
 notifications cannot fabricate duplicate edges or spend the same credit twice.
+
+An adapter consuming a batch must still deliver already observed terminal releases/loss after an
+ordinary event in that batch is refused. Preserve the first refusal and truthful partial outcome,
+skip later ordinary admissions as appropriate, and settle the actual terminal tail through the
+same owner. Dropping the remaining batch because a new press or pointer move failed would bypass
+the accepted members' terminal guarantees. Never synthesize a release for a refused press.
 
 Ordinary rejection changes no topology, accepted ownership, sequence or observable edge. A new
 press cannot evict an existing hold. Once platform loss has happened, terminate applicable accepted
@@ -152,8 +171,11 @@ fallible admission is introduced after backend submission.
 The [endpoint plan](../../plans/2026-10-30-input-endpoint-admission-and-retirement-plan.md) records
 the selected raw-ID/private-lifetime and shared-credit comparison against public handles and a
 dedicated terminal pool. Red regressions and private arithmetic controls establish the problem
-and design selection, not implementation qualification. Actual production topology, allocation
-bounds, consumer migration and public/native results remain open in the implementation ledger.
+and design selection. The separate
+[production qualification](../../knowledge/engineering/verification/2026-10/2026-10-30T140508Z-bounded-input-ownership-and-total-ui-presentation-qualification-b97643044e4a4f92b892a3539d2ad415.md)
+establishes finite topology/projections, actual consumer retention, independent gameplay workflows
+and selected Windows/DX12 results. Its keyboard/mouse scope does not qualify future asynchronous
+origin recovery, seat-scoped maps, gamepad/axis holds, replay or complete text/IME support.
 
 ### Immutable Definitions And Global Runtime Selection
 

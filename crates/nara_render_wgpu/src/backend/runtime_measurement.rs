@@ -181,6 +181,16 @@ fn runtime(population: usize, changing: bool) -> RuntimeInstance {
     HierarchyWriter::new(world)
         .apply_batch(&operations)
         .unwrap();
+    {
+        let mut input = world.resource_mut::<nara_input::InputTimeline>();
+        let window = InputWindowId::new(WindowId::PRIMARY.get());
+        input
+            .connect_endpoint(window, InputSeatId::PRIMARY)
+            .unwrap();
+        input
+            .connect_pointer(window, InputSeatId::PRIMARY, InputPointerId::PRIMARY)
+            .unwrap();
+    }
     nara_ui::install_ui_surface(
         world,
         UiSurfaceSlot::new(
@@ -272,9 +282,10 @@ fn tilemap_and_changing_hud_costs() {
                 let begin = Instant::now();
                 runtime.drive(Duration::ZERO).unwrap();
                 let drive_ns = begin.elapsed().as_nanos();
-                let frame = nara_ui::latest_ui_frame(runtime.world(), UiSurfaceId::new(1).unwrap())
-                    .unwrap()
-                    .unwrap();
+                let frame =
+                    nara_ui::ui_candidate_frame(runtime.world(), UiSurfaceId::new(1).unwrap())
+                        .unwrap()
+                        .unwrap();
                 let views = runtime.world().resource::<ExtractedViews>();
                 let packet = build_render_frame_packet_with_world_canvas(
                     runtime.generation(),

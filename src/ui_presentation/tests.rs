@@ -192,6 +192,19 @@ fn install_fake_backend(app: &mut App, mode: FakeBackendMode) {
 fn install_test_surface_and_root(app: &mut App, surface: u64, window: u64) -> Entity {
     let surface_id = UiSurfaceId::new(surface).expect("test surface should be non-zero");
     let world = app.world_mut().expect("test app should expose its world");
+    {
+        let mut input = world.resource_mut::<nara_input::InputTimeline>();
+        input
+            .connect_endpoint(InputWindowId::new(window), InputSeatId::PRIMARY)
+            .unwrap();
+        input
+            .connect_pointer(
+                InputWindowId::new(window),
+                InputSeatId::PRIMARY,
+                InputPointerId::PRIMARY,
+            )
+            .unwrap();
+    }
     let window_id = nara_window::WindowId::new(window);
     let window_exists = {
         let mut query = world.query::<&nara_window::Window>();
@@ -269,9 +282,9 @@ fn bridge_mirrors_and_retires_explicit_host_surface_routes() {
     assert_eq!(stats.last_rejected_packets, 0);
     assert_eq!(stats.last_error, None);
     assert!(app.world().get::<UiRoot>(root).is_some());
-    let frame = nara_ui::latest_ui_frame(app.world(), surface_id)
-        .expect("UI runtime should remain installed")
-        .expect("the active surface should have one compiled frame");
+    let frame = latest_presented_ui_observation(app.world())
+        .expect("the bridge should retain the exact accepted frame")
+        .frame();
 
     app.retire_surface(surface_id)
         .expect("test surface retirement should succeed");
@@ -283,6 +296,76 @@ fn bridge_mirrors_and_retires_explicit_host_surface_routes() {
         .expect("the UI packet compiler should remain available");
     assert_eq!(compile.admitted_packets, 0);
     assert_eq!(compile.rejected_packets, 1);
+}
+
+#[derive(Default, Resource)]
+struct AccessibilityPublicationWitness(usize);
+
+fn witness_accessibility_publication(
+    world: &mut World,
+    _receipt: UiPresentationReceipt,
+) -> Result<(), String> {
+    world.resource_mut::<AccessibilityPublicationWitness>().0 += 1;
+    Ok(())
+}
+
+#[test]
+fn accepted_pixels_after_input_loss_do_not_publish_interaction_observation_or_accessibility() {
+    let mut app = App::new();
+    app.add_plugins((RuntimeUiPlugins, PresentationUiPlugins))
+        .unwrap();
+    app.init_resource::<AccessibilityPublicationWitness>()
+        .unwrap();
+    app.insert_resource(NativeAccessibilityPresentationPort {
+        publish_presented: witness_accessibility_publication,
+    })
+    .unwrap();
+    install_fake_backend(&mut app, FakeBackendMode::Present);
+    install_test_surface_and_root(&mut app, 31, 1);
+    let mut app = BridgeRuntime::start(app);
+    app.update().unwrap();
+    let before = latest_presented_ui_observation(app.world()).unwrap();
+    let receipt = before.receipt();
+    assert_eq!(
+        app.world().resource::<AccessibilityPublicationWitness>().0,
+        1
+    );
+    app.set_backend_mode(FakeBackendMode::HoldAcceptance);
+    app.update().unwrap();
+    assert_eq!(
+        app.world().resource::<FakeHeldBackendAcceptances>().0.len(),
+        1
+    );
+    app.lose_input_focus(1);
+    app.release_held_acceptances();
+    let stats = app.world().resource::<UiPresentationBridgeStats>();
+    assert_eq!(
+        stats.presented_packets, 2,
+        "backend acceptance remains a physical presentation fact"
+    );
+    assert_eq!(stats.invalidated_presentations, 1);
+    assert_eq!(stats.last_presented_receipt, Some(receipt));
+    assert_eq!(
+        latest_presented_ui_observation(app.world())
+            .unwrap()
+            .receipt(),
+        receipt
+    );
+    assert_eq!(
+        app.world().resource::<AccessibilityPublicationWitness>().0,
+        1
+    );
+    assert!(
+        app.world()
+            .resource::<UiPresentationAttemptLedger>()
+            .is_empty()
+    );
+    assert!(
+        app.world()
+            .resource::<FakeHeldBackendAcceptances>()
+            .0
+            .is_empty()
+    );
 }
 
 #[cfg(all(feature = "desktop-winit", feature = "presentation-ui"))]
@@ -453,7 +536,7 @@ fn host_minimize_suspends_routes_and_restore_requires_fresh_presentation() {
             .is_empty()
     );
     assert!(
-        nara_ui::latest_ui_frame(app.world(), surface_id)
+        nara_ui::ui_candidate_frame(app.world(), surface_id)
             .unwrap()
             .is_none()
     );
@@ -722,7 +805,7 @@ fn a_newer_unpresented_candidate_cannot_replace_the_presented_observation() {
     app.update()
         .expect("the newer candidate should remain unpresented");
 
-    let latest_candidate = nara_ui::latest_ui_frame(
+    let latest_candidate = nara_ui::ui_candidate_frame(
         app.world(),
         UiSurfaceId::new(14).expect("test surface should be non-zero"),
     )

@@ -37,8 +37,9 @@ pub use runtime::{
     UiAdapterDiagnostic, UiAdapterDiagnostics, UiAdapterError, UiSurfaceAvailability,
     UiSurfaceEndpoint, UiSurfaceRetirement, UiSurfaceSlot, UiSurfaceSlotError,
     UiSurfaceSlotSnapshot, UiSurfaceSuspension, UiSurfaceSuspensionReason, active_ui_surface_slots,
-    install_ui_surface, latest_ui_frame, latest_ui_frames, restore_ui_surface, retire_ui_surface,
-    suspend_ui_surface, ui_semantic_snapshot, ui_surface_slot_snapshots, update_ui_surface_slot,
+    install_ui_surface, restore_ui_surface, retire_ui_surface, suspend_ui_surface,
+    ui_candidate_frame, ui_candidate_frames, ui_semantic_snapshot, ui_surface_slot_snapshots,
+    update_ui_surface_slot,
 };
 pub use style::*;
 
@@ -186,10 +187,11 @@ pub mod __private {
     pub use crate::codec::prefab_contains_ui_root;
     pub use crate::runtime::{
         UiDeferredPresentationAuthority, UiDeferredPresentationRetry,
-        UiPreparedPresentationAuthority, abort_prepared_ui_presentation,
-        commit_prepared_ui_presentation, defer_prepared_ui_presentation, prepare_ui_presentation,
-        retired_ui_surface_token, retry_deferred_ui_presentation,
-        supersede_deferred_ui_presentation, supersede_prepared_ui_presentation,
+        UiPreparedPresentationAuthority, UiPresentationCommit, UiPresentationInvalidationReason,
+        abort_prepared_ui_presentation, commit_prepared_ui_presentation,
+        defer_prepared_ui_presentation, prepare_ui_presentation, retired_ui_surface_token,
+        retry_deferred_ui_presentation, supersede_deferred_ui_presentation,
+        supersede_prepared_ui_presentation,
     };
 }
 
@@ -215,8 +217,8 @@ pub mod advanced {
         UiSurfaceContentTransform, UiSurfaceContentTransformError, UiSurfaceEndpoint, UiSurfaceId,
         UiSurfaceRetirement, UiSurfaceSlot, UiSurfaceSlotError, UiSurfaceSlotSnapshot,
         UiSurfaceSuspension, UiSurfaceSuspensionReason, active_ui_surface_slots,
-        dispatch_ui_accessibility_input, install_ui_surface, latest_ui_frame, latest_ui_frames,
-        restore_ui_surface, retire_ui_surface, suspend_ui_surface, ui_semantic_snapshot,
+        dispatch_ui_accessibility_input, install_ui_surface, restore_ui_surface, retire_ui_surface,
+        suspend_ui_surface, ui_candidate_frame, ui_candidate_frames, ui_semantic_snapshot,
         ui_surface_slot_snapshots, update_ui_surface_slot,
     };
     pub use nara_ui_kernel::{UiFrame, UiKey, UiNonActivation, UiSemanticSnapshot};

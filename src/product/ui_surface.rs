@@ -135,6 +135,15 @@ impl Plugin for ProjectPrimaryUiSurfacePlugin {
         let slot =
             UiSurfaceSlot::new(surface_id, endpoint, transform).map_err(|_| setup_error())?;
         app.insert_resource(self.profile)?;
+        {
+            let mut input = app.world_mut()?.resource_mut::<nara_input::InputTimeline>();
+            input.connect_endpoint(endpoint.window(), endpoint.seat())
+                .and_then(|()| input.connect_pointer(endpoint.window(), endpoint.seat(), endpoint.pointer()))
+                .map_err(|error| PluginError::SetupFailed {
+                    plugin: PROJECT_PRIMARY_UI_SURFACE_PLUGIN_ID,
+                    message: format!("the primary UI surface could not connect its logical Input endpoint: {error}"),
+                })?;
+        }
         install_ui_surface(app.world_mut()?, slot).map_err(|_| setup_error())
     }
 }

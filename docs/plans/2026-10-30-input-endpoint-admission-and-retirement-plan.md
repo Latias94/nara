@@ -1,7 +1,7 @@
 # Input Endpoint Admission And Retirement Plan
 
-Date: 2026-10-30. Status: selected owner design; production replacement in progress.
-Qualification: red regressions and private capacity comparison only, not the production successor.
+Date: 2026-10-30. Status: bounded owner and coupled UI replacement qualified.
+Qualification: [actual owner/public/neutral/native evidence](../knowledge/engineering/verification/2026-10/2026-10-30T140508Z-bounded-input-ownership-and-total-ui-presentation-qualification-b97643044e4a4f92b892a3539d2ad415.md).
 Parent: [foundation R10](2026-10-23-foundation-architecture-rebaseline-plan.md#r10-motion-time-repeatability-and-concrete-domain-seams).
 Source baseline: `b939da269c693349c5aeb099831731e70e013c95` plus the bounded test prototypes.
 Evidence and alternatives: [endpoint admission review](../research/2026-10-30-input-endpoint-admission-and-retirement-review.md).
@@ -9,14 +9,14 @@ Actual red/model evidence: [current progress](../knowledge/engineering/progress/
 
 ## Problem And Complete Consumer
 
-The current event and presentation-route limits do not bound persistent endpoints or held
-contributions across drained frames. Balanced press/release churn retains historical empty
-keyboard/mouse rows. Distinct live pointers can retain arbitrarily many members relative to those
+At the reviewed baseline, event and presentation-route limits did not bound persistent endpoints
+or held contributions across drained frames. Balanced press/release churn retained historical empty
+keyboard/mouse rows. Distinct live pointers could retain arbitrarily many members relative to those
 limits while producing one aggregate action. These are separate storage and live-state cases.
 
-The owning correction must also fix the confirmed
-[platform-observed failure path](../../crates/nara_input/src/timeline.rs#L1031): an oversized
-focus-loss/retirement batch can clear ingress state without admitting terminal events, leaving
+The owning correction addresses the reproduced
+[platform-observed failure path](../research/2026-10-30-input-endpoint-admission-and-retirement-review.md): an oversized
+focus-loss/retirement batch could clear ingress state without admitting terminal events, leaving
 button and semantic projections held. Adding a count check or empty-row pruning alone is not
 the complete correction.
 
@@ -32,8 +32,9 @@ event limit without changing the original global definition owner.
 This plan selects an Input-owned lifecycle/member replacement after executing the red regressions,
 shared-credit/dedicated-pool controls and adapter source review. The selected owning contract is
 reconciled in [ADR 0041](../architecture/adr/0041-input-routing-actions-text-focus-and-accessibility.md).
-The production topology, projections and consumers have not yet been replaced or qualified.
-Keep existing aggregation, press ownership, context/mapping cancellation and fresh-press rules.
+Production topology, projections and real consumers are replaced and qualified in the evidence
+above. Existing aggregation, press ownership, context/mapping cancellation and fresh-press rules
+remain. The broader motion/seat/analog/replay work in the foundation plan remains separate.
 
 The parent completed the separate
 [processed Input unit](2026-10-30-processed-input-startup-and-process-proof-plan.md). This document
@@ -56,6 +57,13 @@ separate. Existing gamepad UI-event consumers require migration only where share
    recycling. Current Winit and Editor source facts justify this bounded selection, not a promise
    for arbitrary future native recreation or retained external batch replay. A future asynchronous
    adapter must establish its actual origin contract before reuse.
+   UI/Host association captures a private Input incarnation claim before Surface installation.
+   Preserve it through logical unbind/suspension and use it for coordinated retirement; it cannot
+   claim a same-label replacement or pin an already retired mutable slot. Product composition
+   explicitly connects the logical endpoint before installation, even before native creation.
+   Explicit restore distinguishes the original Input incarnation from a same-label successor:
+   only the original incarnation may retain ordinary suspended focus. A successor clears the
+   predecessor interaction and reducer state before presentation.
 3. **One finite member pool and projections.** An accepted press retains its input, endpoint,
    provenance and original UI/gameplay owner until every relevant internal consumer finishes.
    `ButtonInput` becomes read-only observation. Synthetic presses enter the same owner; remove
@@ -78,6 +86,9 @@ separate. Existing gamepad UI-event consumers require migration only where share
    route. UI commit likewise reports committed or invalidated and cannot restore a prepared clone
    of cancelled focus/capture/reducers. Backend pixel acceptance remains truthful; root skips the
    interactive receipt/observation/accessibility success tail for the invalidated candidate.
+   UI also captures its own live interaction basis. Ordinary release, outside-content movement
+   or accessibility dispatch can change it without Input loss. Check it before publishing a new
+   route; stale UI aborts the token and preserves live effects with an explicit UI-owned cause.
    ADRs 0102/0108 adopt this successor; their changed public inventory remains open until migration
    and neutral/public/native qualification.
 
@@ -122,6 +133,12 @@ consumer completes. Include projection, frame observation, UI, action staging/re
 lifetimes and exact-step paths. Physical ingress clearing or advancing one cursor does not release
 member, endpoint, event or projection capacity still referenced elsewhere. A dedicated pool does
 not supply extra sequence headroom.
+
+Reestablish the frame pin when a previously late event actually produces the next frame's
+projection/observation/action copy. Cleanup can end the admission frame before any copy exists;
+that cannot make future copies uncharged. Also exercise Game View batches with an ordinary
+quota refusal before real release/focus-loss/retirement events. Retain the first error but settle
+the observed terminal tail; disposing the rest of a consumed batch is not terminal delivery.
 
 Use disjoint slot states, checked sizing and validated cross-limit settings. Select E/M defaults
 only after proving that their concrete terminal shapes fit; this plan supplies no measured
@@ -185,15 +202,15 @@ so the test observer does not manufacture the growth being measured.
 
 | Test family | Required behavior and evidence | Concrete starting location |
 | --- | --- | --- |
-| A1. Historical churn and allocation | With small E/M, connect, press/release, retire and drain repeatedly across more than 4,096 historical identities. Empty secondary indexes disappear; only intentionally connected idle records retain capacity. Endpoint/member/link pools and retained container capacities remain within admitted maxima, and retired capacity becomes reusable. Include keyboard and pointer paths. | [Timeline owner](../../crates/nara_input/src/timeline.rs#L567), [runtime projection tests](../../crates/nara_input/tests/timeline_runtime.rs#L139) |
-| A2. Live saturation after log drain | Add distinct held pointers one frame at a time until endpoint or member capacity is full, with event logs empty between frames. Refuse the next endpoint/position/focus-seat/member without clearing existing holds. Include multiple distinct inputs on one endpoint, maximum fanout and a synthetic endpoint. Reclaim only after the relevant consumers finish. | [Pointer projection test](../../crates/nara_input/tests/timeline_runtime.rs#L322), [semantic aggregation](../../crates/nara_input/tests/semantic_actions.rs#L387) |
-| A3. Atomic failure and no fabricated edges | Exercise exact/one-short endpoint, member, event, sequence and generation boundaries, including prepared/retiring records and synthetic input. Assert unchanged owner state, cursors and outcomes after ordinary rejection. A release for a rejected press emits no physical/semantic edge or gameplay effect. Successful ingress cannot fail later because a projection lacks capacity. | [Sequence regression](../../crates/nara_input/src/timeline.rs#L3006), [prepared route accounting](../../crates/nara_input/src/timeline.rs#L2004) |
-| A4. Focus/capture and combined terminal capacity | Hold one action through multiple endpoints, including a UI-consumed press and positioned pointers. Unbinding presentation preserves physical membership. Focus loss and PointerLeft terminate only accepted members with original UI/gameplay ownership. Test actual shared-log release/leave/control unions, geometry, overlap, retained prefixes and paused cursor lag; retain the private dedicated-pool comparison as its bounded control. Fill all allowed ordinary space and prove complete terminal delivery plus exact/one-short obligation admission. No ingress/projection disagreement or premature recycling is allowed. Coordinated refusal remains atomic. | [Endpoint focus isolation](../../crates/nara_input/tests/semantic_actions.rs#L657), [coordinated refusal](../../crates/nara_input/src/timeline.rs#L2949), UI lifecycle tests |
-| A5. Disconnect/reconnect identity | Retire a keyboard/pointer endpoint with paused/staged input and reconnect using the same raw labels. Prove adapter drain/nonreuse and private-reference fencing; pending retirement refuses reuse and stays charged until every relevant consumer finishes. Prepared loss followed by late commit/abort cannot revive old interaction or affect a replacement. An originless late raw event cannot be distinguished by looking up a generation. Repeated retirement is harmless. This is not gamepad or arbitrary native event-origin qualification. | [Timeline paused/exact-step tests](../../crates/nara_input/tests/timeline_runtime.rs#L524), UI prepared-route and lifecycle tests |
-| A6. Context/mapping and gameplay effects | At capacity with paused input, disable/enable and rebind/restore. The old semantic lifetime ends once with the correct cause and no physical provenance; other contexts survive. A real later release does not repeat cancellation. Only a fresh press restarts the action. Observe exact start/stop gameplay effects across zero and multiple fixed ticks. | [Context cancellation](../../crates/nara_input/tests/semantic_actions.rs#L449), [paused mapping](../../crates/nara_input/tests/semantic_actions.rs#L517), [actual command bridge](../../crates/nara_gameplay/src/lib.rs#L212) |
+| A1. Historical churn and allocation | With small E/M, connect, press/release, retire and drain repeatedly across more than 4,096 historical identities. Empty secondary indexes disappear; only intentionally connected idle records retain capacity. Endpoint/member/link pools and retained container capacities remain within admitted maxima, and retired capacity becomes reusable. Include keyboard and pointer paths. | [Timeline owner](../../crates/nara_input/src/timeline/owner.rs), [projection tests](../../crates/nara_input/src/projection_tests.rs) |
+| A2. Live saturation after log drain | Add distinct held pointers one frame at a time until endpoint or member capacity is full, with event logs empty between frames. Refuse the next endpoint/position/focus-seat/member without clearing existing holds. Include multiple distinct inputs on one endpoint, maximum fanout and a synthetic endpoint. Reclaim only after the relevant consumers finish. | [Retention tests](../../crates/nara_input/src/timeline/retention_tests.rs), [semantic aggregation](../../crates/nara_input/tests/semantic_actions.rs) |
+| A3. Atomic failure and no fabricated edges | Exercise exact/one-short endpoint, member, event, sequence and generation boundaries, including prepared/retiring records and synthetic input. Assert unchanged owner state, cursors and outcomes after ordinary rejection. A release for a rejected press emits no physical/semantic edge or gameplay effect. Successful ingress cannot fail later because a projection lacks capacity. | [Owner/route tests](../../crates/nara_input/src/timeline/tests.rs), [capacity controls](../../crates/nara_input/src/timeline/capacity.rs) |
+| A4. Focus/capture and combined terminal capacity | Hold one action through multiple endpoints, including a UI-consumed press and positioned pointers. Unbinding presentation preserves physical membership. Focus loss and PointerLeft terminate only accepted members with original UI/gameplay ownership. Test actual shared-log release/leave/control unions, geometry, overlap, retained prefixes and paused cursor lag; retain the private dedicated-pool comparison as its bounded control. Fill all allowed ordinary space and prove complete terminal delivery plus exact/one-short obligation admission. No ingress/projection disagreement or premature recycling is allowed. Coordinated refusal remains atomic. | [Endpoint focus isolation](../../crates/nara_input/tests/semantic_actions.rs), [coordinated owner tests](../../crates/nara_input/src/timeline/tests.rs), [UI loss tests](../../crates/nara_ui/src/adapter_prepared_loss_tests.rs) |
+| A5. Disconnect/reconnect identity | Retire a keyboard/pointer endpoint with paused/staged input and reconnect using the same raw labels. Prove adapter drain/nonreuse and private-reference fencing; pending retirement refuses reuse and stays charged until every relevant consumer finishes. Prepared loss followed by late commit/abort cannot revive old interaction or affect a replacement. An originless late raw event cannot be distinguished by looking up a generation. Repeated retirement is harmless. This is not gamepad or arbitrary native event-origin qualification. | [Timeline paused/exact-step tests](../../crates/nara_input/tests/timeline_runtime.rs), [UI claim/restore tests](../../crates/nara_ui/src/adapter_prepared_loss_tests.rs) |
+| A6. Context/mapping and gameplay effects | At capacity with paused input, disable/enable and rebind/restore. The old semantic lifetime ends once with the correct cause and no physical provenance; other contexts survive. A real later release does not repeat cancellation. Only a fresh press restarts the action. Observe exact start/stop gameplay effects across zero and multiple fixed ticks. | [Context/mapping tests](../../crates/nara_input/tests/semantic_actions.rs), [actual command bridge](../../crates/nara_gameplay/src/lib.rs), [independent workflow](../../tests/fixtures/module-consumer/tests/bounded_input_workflow.rs) |
 
-The complete independent public workflow should run through an Input consumer fixture, such as
-the existing [module consumer](../../tests/fixtures/module-consumer/tests/source_input_workflow.rs#L474),
+The complete independent public workflow runs through the
+[bounded module consumer](../../tests/fixtures/module-consumer/tests/bounded_input_workflow.rs),
 with small explicit capacities and real `ActionCommandMap` consumers. Configure and start the
 Runtime, connect input, drive normalized and synthetic presses, observe semantic-to-command game
 state changes, reject an over-capacity press without an effect, transfer focus/capture, retire and

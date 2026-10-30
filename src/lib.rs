@@ -210,9 +210,9 @@ pub mod prelude {
     };
     pub use nara_input::{
         ActionBinding, ActionContext, ActionId, ActionMap, ActionOutcome, ActionOutcomes,
-        ActionPhase, ActionValue, ButtonInput, ButtonInputError, ButtonTransition,
-        ButtonTransitionPhase, InputBinding, KeyCode, MAX_RETAINED_BUTTON_TRANSITIONS, MouseButton,
-        PointerState, SemanticActionCause, SemanticActionOutcome, SemanticActions,
+        ActionPhase, ActionValue, ButtonInput, ButtonTransition, ButtonTransitionPhase,
+        InputBinding, KeyCode, MouseButton, PointerState, SemanticActionCause,
+        SemanticActionOutcome, SemanticActions,
     };
     pub use nara_reflect::{
         ComponentCapability, ComponentFieldId, ComponentFieldPath, ComponentFieldSchema,
@@ -426,7 +426,7 @@ pub mod advanced_prelude {
         UiSurfaceEndpoint, UiSurfaceId, UiSurfaceRetirement, UiSurfaceSlot, UiSurfaceSlotError,
         UiSurfaceSlotSnapshot, UiSurfaceSuspension, UiSurfaceSuspensionReason,
         active_ui_surface_slots, dispatch_ui_accessibility_input, install_ui_surface,
-        latest_ui_frame, restore_ui_surface, retire_ui_surface, suspend_ui_surface,
+        restore_ui_surface, retire_ui_surface, suspend_ui_surface, ui_candidate_frame,
         ui_semantic_snapshot, ui_surface_slot_snapshots, update_ui_surface_slot,
     };
 }

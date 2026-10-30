@@ -60,6 +60,13 @@ fn run_headless_conformance() -> Result<(), Box<dyn Error>> {
         endpoint,
         content_transform(480.0, 270.0, 480.0, 270.0, 1.0)?,
     )?;
+    {
+        let mut input = app
+            .world_mut()?
+            .resource_mut::<nara::input::InputTimeline>();
+        input.connect_endpoint(endpoint.window(), endpoint.seat())?;
+        input.connect_pointer(endpoint.window(), endpoint.seat(), endpoint.pointer())?;
+    }
     install_ui_surface(app.world_mut()?, base_slot)?;
     let render_mapped = update_ui_surface_slot(
         app.world_mut()?,
@@ -93,7 +100,7 @@ fn run_headless_conformance() -> Result<(), Box<dyn Error>> {
     let mut runtime = RuntimeInstance::start(app)?;
     runtime.drive(Duration::ZERO)?;
 
-    let frame = latest_ui_frame(runtime.world(), mapped_slot.surface_id())?
+    let frame = ui_candidate_frame(runtime.world(), mapped_slot.surface_id())?
         .expect("the presentation gallery should compile a candidate frame");
     let handle = runtime.world().resource::<GalleryImage>().0;
     let image_snapshot = capture_prepared_image(runtime.world(), handle)?;
@@ -130,7 +137,7 @@ fn run_headless_conformance() -> Result<(), Box<dyn Error>> {
         driver::apply(&mut runtime, GalleryDriverInput::Commit(rejected))?,
         GalleryDriverOutput::Committed(None)
     ));
-    assert!(latest_ui_frame(runtime.world(), mapped_slot.surface_id())?.is_some());
+    assert!(ui_candidate_frame(runtime.world(), mapped_slot.surface_id())?.is_some());
 
     let GalleryDriverOutput::Submitted(presenter, presented) = driver::apply(
         &mut runtime,
@@ -214,7 +221,7 @@ fn run_headless_conformance() -> Result<(), Box<dyn Error>> {
         unreachable!("a successful resize returns the successor slot");
     };
     runtime.drive(Duration::ZERO)?;
-    let resized_frame = latest_ui_frame(runtime.world(), resized_slot.surface_id())?
+    let resized_frame = ui_candidate_frame(runtime.world(), resized_slot.surface_id())?
         .expect("the resized surface should compile a replacement candidate");
     let resized_logical_size = resized_frame.environment().logical_size();
     assert_eq!(resized_logical_size.width(), 512.0);
@@ -247,12 +254,24 @@ fn run_headless_conformance() -> Result<(), Box<dyn Error>> {
         endpoint,
         content_transform(480.0, 270.0, 720.0, 405.0, 1.2)?,
     )?;
+    runtime.drive(Duration::ZERO)?;
+    runtime
+        .with_driver_scope(|scope| {
+            nara::input::connect_input_endpoint(scope, endpoint.window(), endpoint.seat())?;
+            nara::input::connect_input_pointer(
+                scope,
+                endpoint.window(),
+                endpoint.seat(),
+                endpoint.pointer(),
+            )
+        })?
+        .output?;
     assert!(matches!(
         driver::apply(&mut runtime, GalleryDriverInput::InstallSurface(recovered))?,
         GalleryDriverOutput::Installed(Ok(()))
     ));
     runtime.drive(Duration::ZERO)?;
-    assert!(latest_ui_frame(runtime.world(), recovered.surface_id())?.is_some());
+    assert!(ui_candidate_frame(runtime.world(), recovered.surface_id())?.is_some());
 
     assert!(packet.images()[0].snapshot().resource().pixel_len() > 0);
     assert!(
@@ -286,6 +305,14 @@ fn run_windowed() -> Result<(), Box<dyn Error>> {
     ))?;
     app.add_systems(StartupStage::Scene, setup_gallery)?;
     app.world_mut()?.insert_resource(AssetServer::new());
+    {
+        let mut input = app
+            .world_mut()?
+            .resource_mut::<nara::input::InputTimeline>();
+        let window = InputWindowId::new(WindowId::PRIMARY.get());
+        input.connect_endpoint(window, InputSeatId::PRIMARY)?;
+        input.connect_pointer(window, InputSeatId::PRIMARY, InputPointerId::PRIMARY)?;
+    }
     install_ui_surface(
         app.world_mut()?,
         UiSurfaceSlot::new(

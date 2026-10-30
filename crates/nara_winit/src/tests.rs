@@ -13,9 +13,10 @@ use nara_gameplay::{
 };
 use nara_input::{
     ActionBinding, ActionContext, ActionId, ActionMap, ActionMapBuilder, ActionMapLimits,
-    ActionPhase, ButtonInput, InputEventKind, InputGeometryGeneration, InputInvalidationReason,
-    InputPlugin, InputPresentationEpoch, InputPresentedRoute, InputRouteGeneration, InputSeatId,
-    InputSlotGeneration, InputSurfaceId, InputTimeline, InputWindowId, PointerState,
+    ActionPhase, ButtonInput, InputEventKind, InputEventOrigin, InputGeometryGeneration,
+    InputInvalidationReason, InputLimits, InputPlugin, InputPresentationEpoch, InputPresentedRoute,
+    InputRouteGeneration, InputSeatId, InputSlotGeneration, InputSurfaceId, InputTimeline,
+    InputWindowId, PointerState,
 };
 use nara_window::{
     WindowEvents, WindowPlugin,
@@ -423,6 +424,7 @@ fn focus_event_wiring_releases_input_and_lowers_a_semantic_stop_command() {
     }
     let mut runtime = start_runtime(app);
     let mut state = WinitApp::new(&mut runtime).unwrap();
+    state.connect_window_input(WindowId::PRIMARY).unwrap();
     let key = convert_key_code(WinitKeyCode::KeyW).unwrap();
     assert!(
         state
@@ -521,19 +523,27 @@ fn winit_ingress_captures_the_exact_route_before_focus_loss_invalidation() {
     let mut app = App::new();
     app.add_plugin(InputPlugin).unwrap();
     app.add_plugin(WindowPlugin::default()).unwrap();
-    app.world_mut()
-        .unwrap()
-        .resource_mut::<InputTimeline>()
-        .publish_presented_route(InputPresentedRoute::new(
-            InputWindowId::new(WindowId::PRIMARY.get()),
-            InputSurfaceId::new(41),
-            InputSeatId::PRIMARY,
-            InputPresentationEpoch::new(73).unwrap(),
-            InputSlotGeneration::new(3).unwrap(),
-            InputRouteGeneration::new(5).unwrap(),
-            InputGeometryGeneration::new(7).unwrap(),
-        ))
-        .unwrap();
+    {
+        let window = InputWindowId::new(WindowId::PRIMARY.get());
+        let mut timeline = app.world_mut().unwrap().resource_mut::<InputTimeline>();
+        timeline
+            .connect_endpoint(window, InputSeatId::PRIMARY)
+            .unwrap();
+        timeline
+            .connect_pointer(window, InputSeatId::PRIMARY, InputPointerId::PRIMARY)
+            .unwrap();
+        timeline
+            .publish_presented_route(InputPresentedRoute::new(
+                window,
+                InputSurfaceId::new(41),
+                InputSeatId::PRIMARY,
+                InputPresentationEpoch::new(73).unwrap(),
+                InputSlotGeneration::new(3).unwrap(),
+                InputRouteGeneration::new(5).unwrap(),
+                InputGeometryGeneration::new(7).unwrap(),
+            ))
+            .unwrap();
+    }
     let mut runtime = start_runtime(app);
     let mut state = WinitApp::new(&mut runtime).unwrap();
 
@@ -572,6 +582,7 @@ fn winit_ingress_captures_the_exact_route_before_focus_loss_invalidation() {
         })
         .unwrap();
     assert_eq!(pressed.route().surface(), Some(InputSurfaceId::new(41)));
+    assert_eq!(pressed.origin(), InputEventOrigin::Platform);
     assert_eq!(
         pressed.route().presentation_epoch(),
         InputPresentationEpoch::new(73)
@@ -601,6 +612,154 @@ fn winit_ingress_captures_the_exact_route_before_focus_loss_invalidation() {
 
     drop(state);
     stop_runtime(&mut runtime);
+}
+
+#[test]
+fn window_input_activation_without_input_plugin_keeps_input_optional() {
+    let mut app = App::new();
+    app.add_plugin(WindowPlugin::default()).unwrap();
+    let mut runtime = start_runtime(app);
+    let mut state = WinitApp::new(&mut runtime).unwrap();
+
+    state.connect_window_input(WindowId::PRIMARY).unwrap();
+    assert!(!state.input_timeline_installed());
+    assert!(
+        !state
+            .apply_physical_keyboard_driver_event(
+                raw_key_event(WinitKeyCode::Enter, ElementState::Pressed),
+                false,
+            )
+            .unwrap()
+    );
+    state
+        .apply_focus_driver_event(WindowId::PRIMARY, true)
+        .unwrap();
+
+    drop(state);
+    stop_runtime(&mut runtime);
+}
+
+#[test]
+fn window_input_activation_connects_pointer_and_retirement_rejects_late_input() {
+    let mut app = App::new();
+    app.add_plugin(InputPlugin).unwrap();
+    app.add_plugin(WindowPlugin::default()).unwrap();
+    let handles = app.world().resource::<BackendWindowHandles>().clone();
+    handles
+        .insert(
+            WindowId::PRIMARY,
+            WindowHandleProvider::new(Arc::new(TestWindowSource {
+                events: Arc::new(Mutex::new(Vec::new())),
+            })),
+        )
+        .unwrap();
+    let mut runtime = start_runtime(app);
+    let mut state = WinitApp::new(&mut runtime).unwrap();
+    state.owned_window_ids.insert(WindowId::PRIMARY);
+    state.connect_window_input(WindowId::PRIMARY).unwrap();
+    assert!(
+        state
+            .apply_physical_keyboard_driver_event(
+                raw_key_event(WinitKeyCode::Enter, ElementState::Pressed),
+                false,
+            )
+            .unwrap()
+    );
+    state
+        .with_driver_scope(|scope| {
+            apply_mouse_driver_input_at(
+                scope,
+                InputWindowId::new(WindowId::PRIMARY.get()),
+                InputSeatId::PRIMARY,
+                InputPointerId::PRIMARY,
+                ButtonDriverInput::Press(MouseButton::Left),
+            )
+            .map(|_| ())
+        })
+        .unwrap();
+    retire_runtime_targets(state.runtime, &handles, &state.owned_window_ids).unwrap();
+    let entries = state
+        .runtime
+        .world()
+        .resource::<InputTimeline>()
+        .entries()
+        .copied()
+        .collect::<Vec<_>>();
+    assert!(matches!(
+        entries.last().unwrap().kind(),
+        InputEventKind::SurfaceRetired
+    ));
+    for kind in [
+        InputEventKind::Key {
+            key: KeyCode::Enter,
+            phase: nara_input::ButtonTransitionPhase::Released,
+        },
+        InputEventKind::PointerButton {
+            button: MouseButton::Left,
+            phase: nara_input::ButtonTransitionPhase::Released,
+        },
+    ] {
+        assert!(entries.iter().any(|entry| entry.kind() == kind));
+    }
+    assert!(
+        state
+            .apply_physical_keyboard_driver_event(
+                raw_key_event(WinitKeyCode::KeyW, ElementState::Pressed),
+                false,
+            )
+            .is_err()
+    );
+    assert_eq!(
+        state
+            .runtime
+            .world()
+            .resource::<InputTimeline>()
+            .entries()
+            .count(),
+        entries.len(),
+        "late input must not reconnect the retired native endpoint",
+    );
+
+    drop(state);
+    stop_runtime(&mut runtime);
+}
+
+#[test]
+fn input_connection_refusal_preserves_native_provider_retirement() {
+    for (endpoints, pointers) in [(1, 2), (2, 1)] {
+        let mut app = App::new();
+        app.insert_resource(
+            InputTimeline::with_limits(InputLimits::new(16, endpoints, pointers, 1).unwrap())
+                .unwrap(),
+        )
+        .unwrap();
+        app.add_plugin(InputPlugin).unwrap();
+        app.add_plugin(WindowPlugin::default()).unwrap();
+        let handles = app.world().resource::<BackendWindowHandles>().clone();
+        let events = Arc::new(Mutex::new(Vec::new()));
+        handles
+            .insert(
+                WindowId::PRIMARY,
+                WindowHandleProvider::new(Arc::new(TestWindowSource {
+                    events: Arc::clone(&events),
+                })),
+            )
+            .unwrap();
+        let mut runtime = start_runtime(app);
+        let mut state = WinitApp::new(&mut runtime).unwrap();
+        state.owned_window_ids.insert(WindowId::PRIMARY);
+
+        assert!(state.connect_window_input(WindowId::PRIMARY).is_err());
+        retire_runtime_targets(state.runtime, &handles, &state.owned_window_ids).unwrap();
+        assert_eq!(*events.lock().unwrap(), vec!["provider"]);
+        assert_eq!(
+            handles.snapshot(WindowId::PRIMARY).unwrap().phase,
+            nara_window::backend::WindowTargetPhase::ProviderReleased
+        );
+
+        drop(state);
+        stop_runtime(&mut runtime);
+    }
 }
 
 #[test]

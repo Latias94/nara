@@ -25,7 +25,7 @@ use nara::{
     scene::SceneEntitySource,
     sprite_render::__private::{ExtractedSprites, TextureUvRect},
     transform::{Transform2d, historical_spatial_snapshot, presented_spatial_snapshot},
-    ui::{UiLayer, UiSurfaceId, latest_ui_frame},
+    ui::{UiLayer, UiSurfaceId, ui_candidate_frame},
 };
 use nara_reference_game::{
     EnemyRole, PlayerRole, ReferenceHudProjection, WaveOutcome, WaveSnapshot, Weapon,
@@ -474,7 +474,7 @@ fn render_terminal(outcome: WaveOutcome) -> RenderObservation {
         .iter()
         .filter(|sprite| sprite.material.image == player_sprite.material.image)
         .all(|sprite| sprite.material.sampler == SamplerDescriptor::NEAREST_CLAMP);
-    let frame = latest_ui_frame(
+    let frame = ui_candidate_frame(
         world,
         UiSurfaceId::new(1).expect("the reference UI surface is non-zero"),
     )

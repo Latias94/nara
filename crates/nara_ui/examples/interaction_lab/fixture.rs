@@ -69,6 +69,13 @@ pub(super) fn build_lab() -> Result<App, Box<dyn Error>> {
     app.insert_resource(GameplayProbe::new(gameplay_action))?;
     app.add_systems(CoreStage::Update, capture_gameplay_outcome)?;
 
+    {
+        let mut input = app.world_mut()?.resource_mut::<nara_input::InputTimeline>();
+        for window in [InputWindowId::new(11), InputWindowId::new(12)] {
+            input.connect_endpoint(window, InputSeatId::PRIMARY)?;
+            input.connect_pointer(window, InputSeatId::PRIMARY, InputPointerId::PRIMARY)?;
+        }
+    }
     install_ui_surface(
         app.world_mut()?,
         surface_slot(surface_id(1), InputWindowId::new(11), 1.0)?,

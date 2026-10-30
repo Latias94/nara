@@ -7,6 +7,7 @@ use std::{
 };
 
 use nara::advanced_prelude::*;
+use nara::input::InputTimeline;
 use nara::prelude::World;
 use nara::ui_render::advanced::{
     OneShotPresentationCommit, UiPaintPacket, UiPresentationAttemptIdentity,
@@ -39,6 +40,7 @@ pub(super) struct HeadlessTestPresenter {
     target: RenderTarget,
     backend_generation: UiPresentationBackendGeneration,
     submitted: Option<Arc<UiPaintPacket>>,
+    input_initialized: bool,
 }
 
 impl HeadlessTestPresenter {
@@ -51,6 +53,7 @@ impl HeadlessTestPresenter {
             )
             .expect("the headless presenter uses non-zero backend generations"),
             submitted: None,
+            input_initialized: false,
         }
     }
 
@@ -64,6 +67,17 @@ impl HeadlessTestPresenter {
             return Ok(HeadlessTestOutcome::ContentRejected {
                 attempt: nara_ui_render::__private::presentation_attempt(&packet),
             });
+        }
+        if !self.input_initialized {
+            let slot = active_ui_surface_slots(world)?
+                .into_iter()
+                .find(|slot| slot.surface_id() == packet.identity().surface_id())
+                .ok_or("the headless presenter requires its installed Surface Slot")?;
+            let endpoint = slot.endpoint();
+            let mut timeline = world.resource_mut::<InputTimeline>();
+            timeline.connect_endpoint(endpoint.window(), endpoint.seat())?;
+            timeline.connect_pointer(endpoint.window(), endpoint.seat(), endpoint.pointer())?;
+            self.input_initialized = true;
         }
 
         assert!(!packet.primitives().is_empty());
@@ -137,19 +151,23 @@ pub(super) fn commit_headless_test_outcome(
                 nara_ui::__private::supersede_prepared_ui_presentation(world, *authority);
                 return Err("backend acceptance did not retain the exact prepared frame".into());
             }
-            let receipt = nara_ui::__private::commit_prepared_ui_presentation(world, *authority);
-            assert_eq!(receipt.surface_id(), identity.surface_id());
-            assert_eq!(receipt.frame_revision(), identity.frame_revision());
-            assert_eq!(receipt.route_revision(), identity.route_revision());
-            assert_eq!(
-                receipt.presentation_revision(),
-                identity.presentation_revision()
-            );
-            assert_eq!(
-                receipt.presentation_epoch(),
-                accepted.identity().presentation_epoch().get()
-            );
-            Ok(Some(receipt))
+            match nara_ui::__private::commit_prepared_ui_presentation(world, *authority) {
+                nara_ui::__private::UiPresentationCommit::Committed(receipt) => {
+                    assert_eq!(receipt.surface_id(), identity.surface_id());
+                    assert_eq!(receipt.frame_revision(), identity.frame_revision());
+                    assert_eq!(receipt.route_revision(), identity.route_revision());
+                    assert_eq!(
+                        receipt.presentation_revision(),
+                        identity.presentation_revision()
+                    );
+                    assert_eq!(
+                        receipt.presentation_epoch(),
+                        accepted.identity().presentation_epoch().get()
+                    );
+                    Ok(Some(receipt))
+                }
+                nara_ui::__private::UiPresentationCommit::Invalidated { .. } => Ok(None),
+            }
         }
         HeadlessTestOutcome::ContentRejected { .. } => Ok(None),
     }

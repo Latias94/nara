@@ -51,9 +51,19 @@ impl InputCapacity {
         self.state.obligations
     }
 
-    /// The last assigned sequence, matching `InputTimeline::next_sequence`.
+    /// The last assigned sequence in this owner's ordered log.
+    #[cfg(test)]
     pub(super) const fn next_sequence(&self) -> u64 {
         self.state.next_sequence
+    }
+
+    #[cfg(test)]
+    pub(super) fn set_last_sequence(&mut self, sequence: u64) -> Result<(), InputCapacityError> {
+        sequence
+            .checked_add(self.state.obligations as u64)
+            .ok_or(InputCapacityError::Sequence)?;
+        self.state.next_sequence = sequence;
+        Ok(())
     }
 
     /// Checks all new records and the complete obligations remaining after this operation.
