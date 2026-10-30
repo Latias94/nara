@@ -21,7 +21,7 @@ Its [qualification](../../knowledge/engineering/verification/2026-10/2026-10-29T
 records final root/owner1082, public80, independent84, Source/Editor55, Reference6, all three selected
 native DX12 trajectories, strict consumer Clippy and minimal features. Source-authored Door
 dependencies, processed input, target selection and the packaged Player remain ordered work.
-The [source-location successor](../source-location-and-reference-resolution-design.md) is a
+The [source-location successor](../source-location-and-reference-resolution-design.md) is
 implemented as `a56a1d3` under ADRs 0007/0038. Its
 [qualification](../../knowledge/engineering/verification/2026-10/2026-10-30T015832Z-canonical-source-locations-and-typed-ui-image-binding-qualification-0ce5bafdc65f4893aa0079009668e41a.md)
 records canonical/scoped source identities, source-asset/document association, real separated and
@@ -29,9 +29,14 @@ nested source roots, independent consumers, watch/reload and actual source CLI E
 unit refreezes ADR 0102's public Image inventory: typed asset bindings and process-local opaque
 identities replace string-based inference, with Runtime/Canvas, independent manual/provider IDs,
 all three neutral examples and four selected actual Windows/DX12 trajectories. It also qualifies
-frame-independent Editor TileSet maintenance after Image publication/revocation. Source-authored
-Door dependencies and the complete custom-drawn Editor remain unimplemented. ADR 0047 adopts the
-next demanded open-Scene working-copy contract without claiming that implementation.
+frame-independent Editor TileSet maintenance after Image publication/revocation. The subsequent
+[Source Scene qualification](../../knowledge/engineering/verification/2026-10/2026-10-30T060408Z-finite-source-scene-data-closures-and-retained-editor-observations-qualification-deea8e4f86ac44f3a6faf27aefa53a4e.md)
+at `f96951a` implements ADRs 0047/0110's finite source data closure, actual canonical readers,
+primary Product travel and demanded open Scene working copies. Root1020, final capture20,
+independent12, corrected integration, native6 and final affected Reference18 pass in the recorded
+scope. Move-only input observations and separate Host/worker retention replace premature refunds
+and retained unrelated selections. Input/target delivery and the complete custom-drawn Editor
+remain open; source Scene qualification does not complete those units.
 
 The [October 29 rendering review](../../research/2026-10-29-render-architecture-and-refactor-plan-review.md)
 and long-horizon refinement prefer a finite explicit resource graph, typed contributions and

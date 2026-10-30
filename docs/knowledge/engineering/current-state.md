@@ -3,7 +3,7 @@ type: "Current State"
 title: "Current Engineering State"
 description: "Derived summary of immutable engineering-memory shards."
 tags: ["engineering-memory", "derived"]
-source_fingerprint: "f0b89904d28bb52072cc4192ecd9f0b9769e6bb159e853c8fc73846377c5f326"
+source_fingerprint: "513b6438a249c4069eb652b31f36825fca4c003c6b03d6deae8fa0750cb98a14"
 ---
 
 # Current State
@@ -12,8 +12,8 @@ source_fingerprint: "f0b89904d28bb52072cc4192ecd9f0b9769e6bb159e853c8fc73846377c
 
 This file is derived from immutable shards. Record new facts in shards, then render during integration.
 
-- Source fingerprint: `f0b89904d28bb52072cc4192ecd9f0b9769e6bb159e853c8fc73846377c5f326`
-- Immutable records: 1041
+- Source fingerprint: `513b6438a249c4069eb652b31f36825fca4c003c6b03d6deae8fa0750cb98a14`
+- Immutable records: 1051
 - Active lane heads: 2
 
 # Active Registrations
@@ -51,7 +51,7 @@ This file is derived from immutable shards. Record new facts in shards, then ren
 - [Editor foundation U9 and U1-U8 complete with exact-source external acceptance](registry/2026-10/2026-10-17T102710Z-nara-editor-foundation-implementation-codex-root-76fa1ccb656c4ebd8c2b5f77f83287f7.md): `completed` (nara-editor-foundation-implementation-codex-root; producer `codex-root`)
 - [Editor foundation research and refactor planning complete](registry/2026-10/2026-10-16T044159Z-nara-editor-foundation-planning-codex-root-d0e8f37adfd54751b67d7ae647f06d83.md): `completed` (nara-editor-foundation-planning-codex-root; producer `codex-root`)
 - [First 2D author workflow complete with clean committed-source acceptance](registry/2026-10/2026-10-16T025148Z-nara-first-2d-author-workflow-codex-root-fe7312236c5d4906b8e950d366111171.md): `completed` (nara-first-2d-author-workflow-codex-root; producer `codex-root`)
-- [Qualified source and typed UI replacement; Source Scene successor begins](registry/2026-10/2026-10-30T021002Z-nara-foundation-rebaseline-codex-main-a4289144cb0d45168f1ef18767ad98e4.md): `active` (nara-foundation-rebaseline-codex-main; producer `codex-foundation-main`)
+- [Foundation Source Scene qualification delivered](registry/2026-10/2026-10-30T060858Z-nara-foundation-rebaseline-codex-main-7d6478add94942108d584a9ae4f01933.md): `active` (nara-foundation-rebaseline-codex-main; producer `codex-foundation-main`)
 - [Ordinary structural authoring qualified](registry/2026-10/2026-10-20T053614Z-ordinary-authoring-codex-root-ac405c79936d43b09f6cfb4197d747ed.md): `completed` (ordinary-authoring-codex-root; producer `codex-root`)
 - [Persistent checkpoint consumer qualified on Windows](registry/2026-10/2026-10-21T032628Z-persistent-two-level-game-codex-root-1ac997abdab142e590af8a6c21f9f443.md): `complete` (persistent-two-level-game-codex-root; producer `codex-root`)
 - [N05 plugin failure facts qualified](registry/2026-10/2026-10-19T172945Z-plugin-error-facts-codex-root-c20974513f104398967edbed73efccaa.md): `completed` (plugin-error-facts-codex-root; producer `codex-root`)
@@ -70,6 +70,11 @@ This file is derived from immutable shards. Record new facts in shards, then ren
 
 # Recent Evidence
 
+- **Verification Evidence**: [Finite source Scene data closures and retained Editor observations qualification](verification/2026-10/2026-10-30T060408Z-finite-source-scene-data-closures-and-retained-editor-observations-qualification-deea8e4f86ac44f3a6faf27aefa53a4e.md) - Qualifies finite authored Scene dependencies, primary Product travel, open working copies, exact retained observations and affected Windows/DX12 workflows at f96951a.
+- **Work Progress**: [Source Scene accepted observation custody replaced after retained allowance review](progress/2026-10/2026-10-30T054311Z-source-scene-accepted-observation-custody-replaced-after-retained-allowance-review-8f842ab1a411446791af1ed8f90bf6f1.md) - Records predecessor native/build/game evidence and a later independent accepted-result retention finding with its move-only handoff replacement under qualification.
+- **Work Progress**: [Source Scene owner and public cancellation observation verification checkpoint](progress/2026-10/2026-10-30T044756Z-source-scene-owner-and-public-cancellation-observation-verification-checkpoint-a400ebcdfccc4c4d85d6b7cf00f02baa.md) - Records closed independent findings and executed root, Editor and public Source Scene evidence while integration/native qualification remains in progress.
+- **Work Progress**: [Source Scene closure qualification and global lookup boundary corrections in progress](progress/2026-10/2026-10-30T041730Z-source-scene-closure-qualification-and-global-lookup-boundary-corrections-in-progress-322c0046b4b74b459d2ccde9613a899a.md) - Records executed Source Scene cohorts, physical-return/retry fixes and the discovered global lookup and overlapping-reader identity corrections before qualification.
+- **Work Progress**: [Source Scene actual-reader closure and working-copy integration under review](progress/2026-10/2026-10-30T034018Z-source-scene-actual-reader-closure-and-working-copy-integration-under-review-f469994dd6dd4a5f9536f8b8b8e8d83d.md) - Tracks finite source data custody, Product travel, admitted Editor inputs and independently found ownership and budget corrections before final qualification.
 - **Verification Evidence**: [Canonical source locations and typed UI Image binding qualification](verification/2026-10/2026-10-30T015832Z-canonical-source-locations-and-typed-ui-image-binding-qualification-0ce5bafdc65f4893aa0079009668e41a.md) - Records the complete scoped source-location replacement, exact public image inventory, real consumer/native evidence and remaining Source Scene work.
 - **Work Progress**: [Canonical source and typed UI qualification with frame-independent content maintenance](progress/2026-10/2026-10-30T002435Z-canonical-source-and-typed-ui-qualification-with-frame-independent-content-maintenance-25781c8bea5c4c639412a82d4651a700.md) - Records source association and UI ownership corrections, actual root owner and native results, reviewed forward contracts and remaining consumer gates.
 - **Work Progress**: [Source location review corrections and typed UI Image binding replacement](progress/2026-10/2026-10-29T175710Z-source-location-review-corrections-and-typed-ui-image-binding-replacement-b7fd68aeb4ba4783b01ce02acb355ab8.md) - Records bounded domain verification, source-path preadmission, forward render contracts and the active typed UI Image owner replacement.
@@ -77,11 +82,6 @@ This file is derived from immutable shards. Record new facts in shards, then ren
 - **Verification Evidence**: [First-party processed Runtime Hosts and explicit source facets qualification](verification/2026-10/2026-10-29T152520Z-first-party-processed-runtime-hosts-and-explicit-source-facets-qualification-c2d2a14cd90243f0a200a287f1ce4d20.md) - Qualifies original-plan codecs, shared source/processed startup and travel, finite Scene dependencies, native residency, budgets and retained custody; records the source-location successor.
 - **Work Progress**: [Processed Host integration review corrections and qualification in progress](progress/2026-10/2026-10-29T130902Z-processed-host-integration-review-corrections-and-qualification-in-progress-3defca0f0fbf4f979d7066029882eae9.md) - Captures actual partial verification, corrected publication association and metadata admission, native facet counterexamples and remaining qualification commands.
 - **Work Progress**: [First-party processed Runtime integration and explicit source facets in progress](progress/2026-10/2026-10-29T122106Z-first-party-processed-runtime-integration-and-explicit-source-facets-in-progress-2c878dfe537f42eab9df31e120d1afb6.md) - Records the plan-owned Runtime codec agreement, complete typed collections, native residency and shared startup/travel replacement before integration qualification.
-- **Verification Evidence**: [Processed TileSet ownership and exact Scene resource baselines qualification](verification/2026-10/2026-10-29T114236Z-processed-tileset-ownership-and-exact-scene-resource-baselines-qualification-e5b31550eacc4fd1a3d4b6168fb4df52.md) - Qualifies actual Runtime dependencies, shared source and processed TileSet publication, concrete Scene resource baselines and retained native pixels through public games and DX12 consumers.
-- **Work Progress**: [Shared TileSet content ownership and concrete resource baseline integration](progress/2026-10/2026-10-29T101227Z-shared-tileset-content-ownership-and-concrete-resource-baseline-integration-839822b154f24bf6b658c0c9954fa2b1.md) - Records in-progress processed TileSet/native integration, actual dependency inventory and the resource-baseline correction; not qualification.
-- **Verification Evidence**: [Actual Runtime decoded-output charging and shared pixel retention qualification](verification/2026-10/2026-10-29T094316Z-actual-runtime-decoded-output-charging-and-shared-pixel-retention-qualification-14f023431b4c462dbeb1051f1739662e.md) - Qualifies required concrete codec cost queries, upfront maximum admission and actual output refunds through compound data, many small Images, held large decode and last-owner native captures.
-- **Verification Evidence**: [Anonymous and processed Image content with retained native publication qualification](verification/2026-10/2026-10-29T090832Z-anonymous-and-processed-image-content-with-retained-native-publication-qualification-3e529af056d34a5caa2c12924c0c1014.md) - Qualifies source-free Runtime Image decode, explicit managed Product admission, anonymous procedural render content and original output custody through CPU, public Scene, GPU and native Editor workflows.
-- **Work Progress**: [Source-independent Runtime Image ownership and final qualification in progress](progress/2026-10/2026-10-29T081235Z-source-independent-runtime-image-ownership-and-final-qualification-in-progress-421a0d14cb7a41c7877c249ec9184b8a.md) - Integrates actual pixel identity, bounded Runtime Image decode and source-owned rejection with independent native Scene consumers; final Host/native qualification and next-owner review remain active.
 
 # Integration Notes
 

@@ -20,7 +20,7 @@ with separate in-memory facts and receipt-backed publication evidence
 **Amended**: 2026-10-28 to replace mixed installed/project-content protection with managed
 artifacts and explicit project-owned template import, removing optional-ledger persistence gates
 **Amended**: 2026-10-30 to extend the working-copy contract to demanded open Scene dependencies
-under the exact nominal Schema basis; implementation is under qualification
+under the exact nominal Schema basis, with finite retained observation custody
 **Refined By**: [ADR 0104](0104-host-owned-editor-workspace-installation.md): Host-Owned Editor
 Workspace Installation
 

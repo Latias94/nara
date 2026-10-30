@@ -1,8 +1,8 @@
 # Asset Import Ownership And Processed Runtime Delivery
 
 **Date:** 2026-10-29. **Status:** Source/import, compound identity, immutable base and bounded
-first-party processed startup/travel and canonical source-location replacement qualified;
-source Scene references, input and target/package delivery open.
+first-party processed startup/travel, canonical source locations and Source Scene references qualified;
+input and target/package delivery open.
 **Baseline:** `13a2744`.
 **Parent:** [Foundation rebaseline](2026-10-23-foundation-architecture-rebaseline-plan.md), R6/R7.
 
@@ -303,9 +303,9 @@ resource, target-build selection, third-party native publication or a standalone
 
 ## Source Scene Reference Successor
 
-Complete the same Door workflow from authored Scenes and real metadata. The current source
-catalogue discovers Assets/Prefabs and its resource queue rejects Scene kind. Correct source
-identity, preparation, request authority and content receipts together; adding another scan root
+Complete the same Door workflow from authored Scenes and real metadata. At this unit's baseline,
+the source catalogue discovered Assets/Prefabs and its resource queue rejected Scene kind. Correct
+source identity, preparation, request authority and content receipts together; adding another scan root
 alone is insufficient.
 
 The source-location prerequisite replaces the baseline's root-relative `AssetPath` global key
@@ -396,7 +396,22 @@ source-carrying Export away from the original project, failed-candidate last-goo
 physical cancellation return, escaped owners and exact/one-short content budgets. This successor
 extends the existing source owner; it introduces no Scene manager or importer registry.
 
+The Source Scene successor is implemented as `f96951a`. Its
+[qualification](../knowledge/engineering/verification/2026-10/2026-10-30T060408Z-finite-source-scene-data-closures-and-retained-editor-observations-qualification-deea8e4f86ac44f3a6faf27aefa53a4e.md)
+records finite raw/effective custody, actual reader identity, source Product travel, demanded open
+working copies, precise Host/worker observation retention and source Export/relocation. Final root
+1020, final startup/capture20, independent12, corrected integration cases, six actual Windows/DX12
+trajectories and affected Reference Game18 pass with the exact predecessor/final scope recorded.
+It removes the assets-only custody, kind-based source lookup and duplicate retained selection
+mechanisms. Input, target-build selection and complete packaged delivery remain open.
+
 ## Input And Target-Build Successors
+
+The [input ownership review](../research/2026-10-30-input-definition-and-runtime-ownership-review.md)
+traces actual source refusal, mutable definitions/state and startup installation. Its intrinsic
+source Product, finite format ceilings and source projection names are candidate decisions.
+Implement a complete source physical-input workflow before processed input; reconcile the owning
+contracts and use both consumers to determine the final APIs.
 
 The next input unit must start from actual source support. Current ActionMap serde rebuilds its
 runtime index, but is not a strict bounded persistent-file admission path. Source manifest

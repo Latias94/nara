@@ -255,6 +255,12 @@ Check validates each declared Scene and its transitive dependencies. Export incl
 source union and excludes undeclared, unreferenced files. A declaration grants delivery, not
 automatic loading or runtime residency. Code-first content consumers can use
 `ProjectContentLoader::load_scene` to prepare one selected Scene without changing startup.
+An authored Door can retain the destination's primary `AssetProductRef` and pass it directly to
+`ProjectScenes`. The preparation worker resolves its actual Scene metadata and checks that its
+source is startup or a declared Scene root. A Required reference also captures the destination
+document as data, including finite A-to-B-to-A references; that membership alone grants no travel.
+Only the requested Scene is instantiated. See the [hosted Scene workflow](rust-product-recipes.md#strict-tools-use-the-compiled-project)
+for observing preparation and explicitly committing the prepared result.
 
 ## Export and run independently
 

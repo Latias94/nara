@@ -37,9 +37,10 @@ load or satisfy an actual required Scene reference.
 
 A Required reference may name another Scene, including a finite back-edge. First-party preparation
 admits and retains those Scene documents as data; it instantiates only the selected root. A dependent
-Scene is not automatically a public travel root. This processed capability does not establish
-source-side Scene/sidecar discovery; the authored Door path has its own pending correction in the
-ordered delivery plan.
+Scene is not automatically a public travel root. The separate
+[source-backed workflow](rust-product-recipes.md#strict-tools-use-the-compiled-project) resolves
+actual Scene sidecars and retains its own flat source-document closure. Its saved-source receipts
+and declared-root checks remain separate from this immutable processed base.
 
 ## Capture And Acquisition
 

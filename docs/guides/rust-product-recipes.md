@@ -270,9 +270,20 @@ instance. Validate game-owned checkpoint references and prepare owned runtime va
 project/schema authority, loader budget and CPU residency transaction; gameplay does not resolve a
 second RuntimePlan or construct direct sources to bypass resource ownership. Processed runs
 request a complete `AssetProductRef` through the same interface and retain their original base and
-configuration plan. `selected_scene_path()` and `selected_scene_product()` return only the matching
-kind. Their typed collections and concrete Image/TileSet residency use that same publication tail.
+configuration plan. Source Hosts also accept a primary Scene Product: preparation resolves its
+actual sidecar and separately checks startup or declared-root membership. The original request
+remains available through `selected_scene()` and `selected_scene_product()`;
+`selected_scene_path()` additionally exposes its captured path for source-backed content.
+Processed content has no source path. Their typed collections and concrete Image/TileSet residency use that same publication tail.
 See the [processed Runtime entry](runtime-content-base.md#materialization-and-retention).
+
+Required Scene references retain dependency documents as data. `ProjectContentSnapshot::scene_dependencies()`
+borrows the flat captured collection, with canonical location, document identity, raw authored
+document and effective compiled Scene kept separately. Self-reference, back-edges and diamonds
+capture each source once. Only the requested root is instantiated, and a dependency that is not a
+declared root remains unavailable for public travel. File-backed Check and Export consume saved
+sources. Authoring preview can instead select a demanded open Scene working copy under the same
+exact Schema basis; Save of the containing Scene never implicitly saves that dependency.
 
 Exclusive callers use `ProjectScenes::scope(world, |scenes| ...)` for that same request interface.
 For example, the scope can turn `scenes.prepared(id)` into owned checkpoint validation data; call

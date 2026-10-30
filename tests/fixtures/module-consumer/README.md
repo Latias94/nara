@@ -18,6 +18,13 @@ resource root of the same role, overlapping scopes, Path/StableId/Product equiva
 Path export and save/reopen, narrow Image directory reads, wrong-scope refusal, and duplicate
 UUID/case/sidecar rejection. It does not exercise Source Scene dependency loading or Door travel.
 
+`tests/source_scene_references.rs` supplies that separate source consumer through public APIs.
+It writes real Scene sidecars and authored Door components, captures finite self/back-edge/diamond
+dependencies, observes raw versus effective documents, drives A-to-B-to-A travel and rejects
+dependency-only travel. It also covers actual cross-root locations, moved Products, exact source
+observations, failed-candidate preservation and retained dependency owners. These are source-backed
+tests; the processed-base consumer retains its distinct acquisition and source-free evidence.
+
 The [asset-domain consumer](asset-domain-consumer/README.md) contributes a text resource through
 public product composition. It checks exact auxiliary-source receipts, reads typed products during
 headless Play, and qualifies Scene replacement and retained-generation behavior. Source Export

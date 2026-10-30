@@ -521,7 +521,7 @@ native trust. Delete duplicate root/domain registrations and incorrect recipe/co
 ## R7: Target Build And Base Source-Free Delivery
 
 **Design:** D12. **State:** in progress; immutable local base and bounded first-party startup/travel
-qualified; source Scene references, processed input, target-build selection and packaged delivery remain open.
+qualified, including finite source Scene references; input, target-build selection and packaged delivery remain open.
 **Owners:** Cargo tooling, Host capture/cook and Runtime loader.
 
 Separate Host tool selection, target executable artifacts, content cook, release candidate and
@@ -544,10 +544,12 @@ at `44470ed` closes bounded Host startup/Scene requests, stock Image/TileSet res
 CPU reads using the original base/plan. It removes mandatory source execution from native
 Asset/Image plugins and qualifies finite retained Scene data dependencies, cancellation, exact
 baselines and pre-allocation budgets. It does not qualify the complete packaged Player.
-Next correct [source locations and resolution](../architecture/source-location-and-reference-resolution-design.md)
-with the actual Source Door/Save/Export consumer, then implement input/target delivery through the
-ordered plan. Future third-party native families need a typed publication facet through the same
-owner before their Material/render interface freezes; CPU decode alone grants no residency.
+The [source Scene qualification](../knowledge/engineering/verification/2026-10/2026-10-30T060408Z-finite-source-scene-data-closures-and-retained-editor-observations-qualification-deea8e4f86ac44f3a6faf27aefa53a4e.md)
+at `f96951a` closes canonical source resolution, the actual Source Door/Save/Export consumer,
+finite dependency custody and exact retained Editor observations. Next implement source input,
+processed input and target delivery through the ordered plan. Future third-party native families
+need a typed publication facet through the same owner before their Material/render interface
+freezes; CPU decode alone grants no residency.
 
 Decide the future content-set boundary now: Product identity never becomes a package/mount key.
 A provider or overlay must contribute a separately admitted immutable context, with its selected

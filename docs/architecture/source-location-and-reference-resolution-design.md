@@ -1,7 +1,7 @@
 # Source Locations And Reference Resolution
 
 **Status:** Source addressing/resolution implemented and qualified under ADRs 0007/0038;
-Source Scene dependencies remain the next implementation unit.
+Source Scene dependencies are implemented and qualified as `f96951a`.
 **Date:** 2026-10-29.
 **Owner plan:** [Asset import and Runtime delivery](../plans/2026-10-29-asset-import-and-runtime-delivery-plan.md#source-scene-reference-successor).
 
@@ -56,6 +56,15 @@ catalogue record needs the actual binding; an unconditional `From<AssetMetaIdent
 invent it. Global stable-ID uniqueness, complete primary/auxiliary Product identity and source
 content revisions remain independent of location. A source move with admitted metadata can keep
 its Product while changing its locator.
+
+Stable lookup observations name the global UUID and its canonical target, including an unresolved
+target. Query kind, the alias scope and the actual source reader remain separate admission facts.
+A missing UUID cannot become an Assets-only absence observation: its later discovery through any
+admitted reader changes the original observation. Revalidation compares that global target and
+the actually captured source/metadata receipts. An overlapping narrow reader can read a source
+whose sidecar uses an outer configured scope; validate that both denote the same canonical source
+instead of comparing their different local aliases. Path-first, StableId-first and Product lookup
+must agree on that source identity.
 
 Under [ADR 0038](adr/0038-scene-prefab-authoring-identity-and-provenance.md), a `ProjectLocation`
 source key still uses its authored universe and complete document path. `StableMetadata` requires
@@ -128,6 +137,8 @@ Use one independent source consumer to challenge the complete representation bef
 The source-contract qualification covers canonical/scoped identities, separated and nested real
 source roots, the independent consumer, watch/reload owners and source-carrying CLI Export. Its
 exact public UI inventory also qualifies manual image IDs, native asset bindings, Runtime/Canvas
-and retained presentation packets. Step 5's authored Door travel, dependent Scene data retention,
-root admission and dependent working-copy Save/refresh remain in the owner plan. Earlier processed
-Scene dependency evidence does not establish that source-backed successor.
+and retained presentation packets. The subsequent
+[Source Scene qualification](../knowledge/engineering/verification/2026-10/2026-10-30T060408Z-finite-source-scene-data-closures-and-retained-editor-observations-qualification-deea8e4f86ac44f3a6faf27aefa53a4e.md)
+adds step 5's authored Door travel, flat dependent data custody, declared-root admission,
+working-copy Save/refresh, source Export/relocation and exact Host observation retention. Its
+source evidence remains distinct from the earlier processed Scene consumer.
