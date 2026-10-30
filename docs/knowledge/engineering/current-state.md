@@ -3,7 +3,7 @@ type: "Current State"
 title: "Current Engineering State"
 description: "Derived summary of immutable engineering-memory shards."
 tags: ["engineering-memory", "derived"]
-source_fingerprint: "50198f6e55d86d96b0a24d74cbe92e0111f54ed8e4473e5e4f83d6318ad66112"
+source_fingerprint: "4fe28f63718bf50733735540c7a78e13660adae70758d2f2f36d6eb30bbe6a92"
 ---
 
 # Current State
@@ -12,8 +12,8 @@ source_fingerprint: "50198f6e55d86d96b0a24d74cbe92e0111f54ed8e4473e5e4f83d6318ad
 
 This file is derived from immutable shards. Record new facts in shards, then render during integration.
 
-- Source fingerprint: `50198f6e55d86d96b0a24d74cbe92e0111f54ed8e4473e5e4f83d6318ad66112`
-- Immutable records: 1078
+- Source fingerprint: `4fe28f63718bf50733735540c7a78e13660adae70758d2f2f36d6eb30bbe6a92`
+- Immutable records: 1080
 - Active lane heads: 2
 
 # Active Registrations
@@ -51,7 +51,7 @@ This file is derived from immutable shards. Record new facts in shards, then ren
 - [Editor foundation U9 and U1-U8 complete with exact-source external acceptance](registry/2026-10/2026-10-17T102710Z-nara-editor-foundation-implementation-codex-root-76fa1ccb656c4ebd8c2b5f77f83287f7.md): `completed` (nara-editor-foundation-implementation-codex-root; producer `codex-root`)
 - [Editor foundation research and refactor planning complete](registry/2026-10/2026-10-16T044159Z-nara-editor-foundation-planning-codex-root-d0e8f37adfd54751b67d7ae647f06d83.md): `completed` (nara-editor-foundation-planning-codex-root; producer `codex-root`)
 - [First 2D author workflow complete with clean committed-source acceptance](registry/2026-10/2026-10-16T025148Z-nara-first-2d-author-workflow-codex-root-fe7312236c5d4906b8e950d366111171.md): `completed` (nara-first-2d-author-workflow-codex-root; producer `codex-root`)
-- [Foundation demand-aware workflows and prepared membership correction](registry/2026-10/2026-10-30T163457Z-nara-foundation-rebaseline-codex-main-02a49b6901d64de78bb864b1103e1f7c.md): `active` (nara-foundation-rebaseline-codex-main; producer `codex-foundation-main`)
+- [Foundation demand-aware content replacement qualified and committed](registry/2026-10/2026-10-30T173701Z-nara-foundation-rebaseline-codex-main-734715a24a964139b1516f1988a0cb22.md): `active` (nara-foundation-rebaseline-codex-main; producer `codex-foundation-main`)
 - [Ordinary structural authoring qualified](registry/2026-10/2026-10-20T053614Z-ordinary-authoring-codex-root-ac405c79936d43b09f6cfb4197d747ed.md): `completed` (ordinary-authoring-codex-root; producer `codex-root`)
 - [Persistent checkpoint consumer qualified on Windows](registry/2026-10/2026-10-21T032628Z-persistent-two-level-game-codex-root-1ac997abdab142e590af8a6c21f9f443.md): `complete` (persistent-two-level-game-codex-root; producer `codex-root`)
 - [N05 plugin failure facts qualified](registry/2026-10/2026-10-19T172945Z-plugin-error-facts-codex-root-c20974513f104398967edbed73efccaa.md): `completed` (plugin-error-facts-codex-root; producer `codex-root`)
@@ -70,6 +70,7 @@ This file is derived from immutable shards. Record new facts in shards, then ren
 
 # Recent Evidence
 
+- **Verification Evidence**: [Reference validity and current demand production replacement qualification](verification/2026-10/2026-10-30T172312Z-reference-validity-and-current-demand-production-replacement-qualification-b16511fa33a74c2b808270394b28bf62.md) - Verification Evidence for Reference validity and current demand production replacement qualification.
 - **Work Progress**: [Demand-aware public travel and editor prepared-membership correction verified](progress/2026-10/2026-10-30T163329Z-demand-aware-public-travel-and-editor-prepared-membership-correction-verified-fccc1404b4914d28b825e008efa969fd.md) - Work Progress for Demand-aware public travel and editor prepared-membership correction verified.
 - **Work Progress**: [Actual demand admission and compact deep validation integration in progress](progress/2026-10/2026-10-30T153010Z-actual-demand-admission-and-compact-deep-validation-integration-in-progress-e2a98fb4e3ef490d83d93fd3b900f655.md) - Records the unqualified demand-aware owning replacement, verified Reflect surface and selected compact cross-member deep validation.
 - **Work Progress**: [Reference validity and current load demand design selected after pinned source review](progress/2026-10/2026-10-30T145320Z-reference-validity-and-current-load-demand-design-selected-after-pinned-source-review-33a51556e0074d0180f63ff2eacb189a.md) - Records the CP3 owning design, compound/Authoring proof limits, exact-set admission and deterministic discovered-work scheduling before implementation.
@@ -81,7 +82,6 @@ This file is derived from immutable shards. Record new facts in shards, then ren
 - **Work Progress**: [Engine research reconciliation and bounded Input terminal comparison](progress/2026-10/2026-10-30T105046Z-engine-research-reconciliation-and-bounded-input-terminal-comparison-84d7a4b9cbdf44419a23d851f92b9a7d.md) - Current-HEAD research dispositions, five reproduced Input failures and selected shared-credit design; production replacement remains open.
 - **Verification Evidence**: [Processed startup Input ownership and prebuilt source-free physical process qualification](verification/2026-10/2026-10-30T100534Z-processed-startup-input-ownership-and-prebuilt-source-free-physical-process-qualification-35c2432f89d04982b10d2be3fa0f9d12.md) - Qualifies complete processed startup Product configuration, original typed acquisition and independent World state, source-free seven-case process execution, structured budgets and selected Windows DX12 regression.
 - **Work Progress**: [Processed startup Input ownership and source-free process integration](progress/2026-10/2026-10-30T093204Z-processed-startup-input-ownership-and-source-free-process-integration-b55da685b66d4b64ab68c071525c90ab.md) - Actual typed acquisition, independent state and selected codec pass focused tests; seven prebuilt source-free child cases pass, final integration remains in progress.
-- **Verification Evidence**: [Immutable Input definitions and global source workflow qualification](verification/2026-10/2026-10-30T083131Z-immutable-input-definitions-and-global-source-workflow-qualification-f8db4628f79943ac94a90593cef6c736.md) - Actual owner-backed captured definitions, source receipts, pre-Startup selection, physical travel, relocated Export and selected native DX12 paths qualified.
 
 # Integration Notes
 
