@@ -20,7 +20,7 @@ with separate in-memory facts and receipt-backed publication evidence
 **Amended**: 2026-10-28 to replace mixed installed/project-content protection with managed
 artifacts and explicit project-owned template import, removing optional-ledger persistence gates
 **Amended**: 2026-10-30 to extend the working-copy contract to demanded open Scene dependencies
-under the exact nominal Schema basis; implementation and qualification remain outstanding
+under the exact nominal Schema basis; implementation is under qualification
 **Refined By**: [ADR 0104](0104-host-owned-editor-workspace-installation.md): Host-Owned Editor
 Workspace Installation
 
@@ -343,7 +343,9 @@ Rules:
   stale or Schema-incompatible selected working-copy ownership rejects the capture without disk
   fallback. Disk-backed dependencies retain their own immutable source/metadata evidence. A Scene
   self-reference reuses the captured root. Dependency Scenes remain data; only the selected root
-  is materialized.
+  is materialized. The accepted capture retains the actual raw and effective dependency data
+  through preview publication, replacement and retirement; an accounting allowance alone cannot
+  substitute for custody of those documents.
 - File-backed Check, source-carrying Export/delivery and Runtime capture retain their saved-source
   policies. Ordinary supervised Play retains ADR 0116's saved-source policy; this Authoring capture
   contract does not redefine trusted compiled Play source selection or ADR 0114's separate
@@ -351,7 +353,15 @@ Rules:
 - Preview composition and source revalidation run as bounded background work. Before first
   materialization, verify the captured source and Schema evidence; the owner also checks the
   selected root and participating sessions before publication. A cancelled task remains owned
-  until physical return before admitting its replacement. Subsequent background validation may
+  until physical return before admitting its replacement, including when the selected document
+  has closed and no successor is selected. Capture inputs are admitted before copying source
+  selections and working snapshots, then move into the finite worker request. Failed input
+  admission retains a bounded retry observation rather than repeating full preparation each
+  frame. Worker return releases only the inputs it actually retires. Host observations keep their
+  allowance through candidate validation and acceptance; copied result observations are admitted
+  before allocation. Accepted state retains the root and actual participants rather than the full
+  offered working set. Ordinary currentness checks borrow the root and actual demanded observations; unrelated
+  edits neither cancel admitted work nor revoke an accepted capture. Subsequent background validation may
   detect external changes; its private scheduling policy is not a filesystem-watcher or latency
   guarantee.
 - The complete preview content stamp includes actual dependency selection independently of the

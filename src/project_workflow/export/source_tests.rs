@@ -209,6 +209,262 @@ fn domain_sources_export_exact_members_and_reject_changed_or_missing_dependencie
 }
 
 #[test]
+fn cyclic_scene_dependencies_export_exact_sources_and_check_after_relocation() {
+    use nara_asset::{
+        AssetMeta, AssetMetaIdentity, AssetPath, AssetProductRef, AssetRef, AssetSourceKind,
+        ImportedProductId, StableAssetId,
+    };
+    use nara_reflect::PersistentComponentProvider;
+
+    use crate::project_host::{ProjectContentLoader, ProjectContentMemberKind};
+
+    let project = SourceProject::new();
+    let manifest_path = project.root.join("nara.toml");
+    let manifest = fs::read_to_string(&manifest_path).unwrap();
+    fs::write(
+        &manifest_path,
+        manifest.replace("scenes = [\"b.scene.json\"]", "scenes = []"),
+    )
+    .unwrap();
+    let primary = |id| {
+        AssetProductRef::new(
+            StableAssetId::parse_str(id).unwrap(),
+            ImportedProductId::PRIMARY,
+        )
+        .unwrap()
+    };
+    let a = primary("5422b495-16b7-4f5c-b567-85811976c4a1");
+    let b = primary("5422b495-16b7-4f5c-b567-85811976c4b2");
+    let c = primary("5422b495-16b7-4f5c-b567-85811976c4c3");
+    let linked_scene = |target| {
+        let component = SourceText {
+            source: AssetRef::Product(target),
+        };
+        SceneDocument::from_ordered_roots([nara_scene::SceneEntityRecord::new(
+            nara_identity::SceneEntityId::new("door").unwrap(),
+        )
+        .with_component(
+            nara_reflect::ComponentTypeId::new("test.export.SourceText"),
+            nara_scene::SceneComponentRecord::new(
+                nara_reflect::ComponentSchemaVersion::ONE,
+                component.__encode_persistent_component().unwrap(),
+            ),
+        )])
+    };
+    let scene_a = linked_scene(b);
+    let scene_b = linked_scene(a);
+    let scene_c = SceneDocument::default();
+    for (name, product, scene) in [
+        ("a.scene.json", a, &scene_a),
+        ("b.scene.json", b, &scene_b),
+        ("c.scene.json", c, &scene_c),
+    ] {
+        fs::write(
+            project.root.join("scenes").join(name),
+            scene.to_json_string().unwrap(),
+        )
+        .unwrap();
+        let metadata = AssetMeta::new(
+            AssetMetaIdentity::new(
+                product.source(),
+                AssetPath::new(name).unwrap(),
+                AssetSourceKind::Scene,
+            ),
+            (),
+        );
+        fs::write(
+            project.root.join("scenes").join(format!("{name}.meta")),
+            metadata.to_json_string().unwrap(),
+        )
+        .unwrap();
+    }
+    let root = host_fs::readable_directory(&project.root).unwrap();
+    let manifest = root
+        .open_file(&RelativePath::new("nara.toml").unwrap())
+        .unwrap();
+    let candidate = ingest_project_manifest(&manifest, None).unwrap();
+    assert!(candidate.settings().content.scenes.is_empty());
+    let plan = resolve_product_recipe(&candidate, source_text_recipe()).unwrap();
+    fs::write(
+        project.root.join("schema/authoring.bundle.json"),
+        plan.schema_validation()
+            .authoring_schema_bundle()
+            .to_json_string()
+            .unwrap(),
+    )
+    .unwrap();
+    let delivery =
+        check_project(ProjectCheckRequest::new(root.share(), source_text_recipe())).unwrap();
+    assert_eq!(
+        delivery
+            .scene_roots()
+            .iter()
+            .map(|path| path.as_str())
+            .collect::<Vec<_>>(),
+        ["a.scene.json"]
+    );
+    assert_eq!(
+        delivery
+            .members()
+            .iter()
+            .map(|member| (member.kind(), member.path().as_str()))
+            .collect::<Vec<_>>(),
+        [
+            (ProjectContentMemberKind::ProjectManifest, "nara.toml"),
+            (ProjectContentMemberKind::Scene, "scenes/a.scene.json"),
+            (
+                ProjectContentMemberKind::AssetMetadata,
+                "scenes/a.scene.json.meta",
+            ),
+            (ProjectContentMemberKind::Scene, "scenes/b.scene.json"),
+            (
+                ProjectContentMemberKind::AssetMetadata,
+                "scenes/b.scene.json.meta",
+            ),
+            (
+                ProjectContentMemberKind::AuthoringSchemaBundle,
+                "schema/authoring.bundle.json",
+            ),
+        ]
+    );
+    assert_eq!(delivery.startup_content().members(), delivery.members());
+
+    // Synthetic artifacts prove source custody and publication only; no process runs here.
+    let prepare = || {
+        let build = project
+            .synthetic_build(
+                delivery.startup_content(),
+                &delivery.schema_fingerprint().to_string(),
+            )
+            .unwrap();
+        prepare_project_export(ProjectExportRequest::new(
+            host_fs::writable_directory(&project.root).unwrap(),
+            RelativeComponent::new("published").unwrap(),
+            delivery.clone(),
+            build,
+        ))
+        .unwrap()
+    };
+    let prepared = prepare();
+    // Catalogue discovery does not make an unrelated Scene part of the exact source receipt.
+    fs::write(
+        project.root.join("scenes/c.scene.json"),
+        b"{ unrelated Scene C is not demanded",
+    )
+    .unwrap();
+    let published = match prepared.publish() {
+        super::ProjectExportOutcome::Published(receipt) => receipt,
+        other => panic!("source export must publish: {other:?}"),
+    };
+    let published_path = project.root.join("published");
+    assert_eq!(
+        published.plan().members().len(),
+        delivery.members().len() + 2
+    );
+    let published_bytes = published
+        .plan()
+        .members()
+        .iter()
+        .map(|member| {
+            let bytes = fs::read(published_path.join(member.path().as_str())).unwrap();
+            assert_eq!(crate::fs::ContentDigest::of_bytes(&bytes), member.digest());
+            (member.path().clone(), bytes)
+        })
+        .collect::<Vec<_>>();
+    for path in ["scenes/c.scene.json", "scenes/c.scene.json.meta"] {
+        assert!(!published_path.join("project").join(path).exists());
+    }
+    drop(published);
+
+    for path in ["scenes/b.scene.json", "scenes/b.scene.json.meta"] {
+        let prepared = prepare();
+        let root_entries = entries(&project.root);
+        let original = fs::read(project.root.join(path)).unwrap();
+        let mut changed = original.clone();
+        *changed.iter_mut().find(|byte| **byte == b' ').unwrap() = b'\t';
+        fs::write(project.root.join(path), changed).unwrap();
+        let rejection = match prepared.publish() {
+            super::ProjectExportOutcome::Rejected(rejection) => rejection,
+            other => panic!("changed dependency must refuse publication: {other:?}"),
+        };
+        assert_eq!(
+            rejection.kind(),
+            super::ProjectExportRejectionKind::SourceChanged
+        );
+        match rejection.source_change() {
+            Some(ProjectExportPlanError::ContentChanged {
+                path: changed,
+                source,
+            }) => {
+                assert_eq!(changed.as_str(), path);
+                assert!(matches!(source, FsError::DigestMismatch { .. }));
+            }
+            other => panic!("unexpected dependency source error: {other:?}"),
+        }
+        assert_eq!(entries(&project.root), root_entries);
+        for (path, bytes) in &published_bytes {
+            assert_eq!(
+                fs::read(published_path.join(path.as_str())).unwrap(),
+                *bytes
+            );
+        }
+        fs::write(project.root.join(path), original).unwrap();
+    }
+
+    // Move the actual export within this owned temporary directory, then invalidate the originals.
+    let relocated = project.root.join("relocated-export");
+    fs::rename(&published_path, &relocated).unwrap();
+    for path in ["scenes/a.scene.json", "scenes/b.scene.json"] {
+        fs::write(project.root.join(path), b"{ original Scene is unavailable").unwrap();
+    }
+    let exported_root = host_fs::readable_directory(&relocated.join("project")).unwrap();
+    assert_ne!(exported_root.identity(), root.identity());
+    let manifest = exported_root
+        .open_file(&RelativePath::new("nara.toml").unwrap())
+        .unwrap();
+    let candidate = ingest_project_manifest(&manifest, None).unwrap();
+    let plan = resolve_product_recipe(&candidate, source_text_recipe()).unwrap();
+    let loader = ProjectContentLoader::new(exported_root.share()).unwrap();
+    let snapshot = loader.load(&candidate, &plan).unwrap();
+    assert_eq!(snapshot.selected_scene_path().as_str(), "a.scene.json");
+    assert_eq!(snapshot.selected_scene_product(), Some(a));
+    assert_eq!(snapshot.scene(), &scene_a);
+    assert_eq!(snapshot.scene_dependencies().len(), 1);
+    let dependency = &snapshot.scene_dependencies()[0];
+    assert_eq!(dependency.path().as_str(), "scenes/b.scene.json");
+    assert_eq!(dependency.document(), &scene_b);
+    for (product, path) in [(a, "scenes/a.scene.json"), (b, "scenes/b.scene.json")] {
+        let record = snapshot
+            .asset_resolution()
+            .resolve_ref(&AssetRef::Product(product))
+            .unwrap();
+        assert_eq!(record.path().as_str(), path);
+        assert_eq!(record.source_kind(), &AssetSourceKind::Scene);
+    }
+    assert!(
+        snapshot
+            .asset_resolution()
+            .resolve_ref(&AssetRef::Product(c))
+            .is_err()
+    );
+    let checked = check_project(ProjectCheckRequest::new(
+        exported_root,
+        source_text_recipe(),
+    ))
+    .unwrap();
+    assert_ne!(
+        checked.project_root_identity(),
+        delivery.project_root_identity()
+    );
+    assert_eq!(checked.scene_roots(), delivery.scene_roots());
+    assert_eq!(checked.members(), delivery.members());
+    assert_eq!(
+        checked.startup_content().members(),
+        delivery.startup_content().members()
+    );
+}
+
+#[test]
 fn export_revalidation_rejects_a_changed_nonstartup_delivery_scene_before_staging() {
     let project = SourceProject::new();
     let delivery = check_project(ProjectCheckRequest::new(

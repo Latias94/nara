@@ -14,7 +14,10 @@ use crate::project_host::authoring::tests::independent_capture::{
 };
 
 mod composition_failure;
+mod host_retention;
 mod prefab_acquisition;
+mod scene_dependencies;
+mod source_admission;
 mod stable_lookup;
 
 const SECOND_SCENE: &str = "scenes/second.scene.json";
@@ -60,7 +63,12 @@ fn shared_root_input_must_fit_the_retained_budget_even_when_its_preview_is_small
     );
 
     let mut request = snapshot
-        .capture_scene_request(&source, &session, Box::new([]))
+        .capture_scene_request(
+            &source,
+            &session,
+            snapshot.admit_source_capture_inputs(0, 0).unwrap(),
+            Box::new([]),
+        )
         .unwrap();
     let root_retained = request.document.retained_bytes().unwrap();
     let preview_retained =
@@ -164,7 +172,12 @@ fn stable_root_metadata_counts_toward_encoded_bytes_and_unique_file_limits() {
         );
 
         let mut request = snapshot
-            .capture_scene_request(&source, &session, Box::new([]))
+            .capture_scene_request(
+                &source,
+                &session,
+                snapshot.admit_source_capture_inputs(0, 0).unwrap(),
+                Box::new([]),
+            )
             .unwrap();
         drop(captured);
         drop(snapshot);

@@ -4,16 +4,14 @@ use nara_asset::StableAssetId;
 use nara_fs::{ContentDigest, DirectoryCapability, FileIdentity};
 use nara_project::ProjectPath;
 use nara_reflect::SchemaCompositionFingerprint;
-use nara_scene::SourceDocumentOrigin;
 
 use super::catalogue::DeliveryCatalogue;
 use super::{
     ARC_CONTROL_BLOCK_BYTES, BTREE_ENTRY_OVERHEAD, ProjectContentBudgetKind,
     ProjectContentClosureReceipt, ProjectContentError, ProjectContentErrorKind,
-    ProjectContentLease, ProjectContentLoader, ProjectContentMemberKind,
-    ProjectContentMemberReceipt, ProjectContentSnapshot, ProjectSettingsCandidate,
-    ProjectSettingsLineage, RuntimePlan, StartupContentClosureReceipt, allocation_failed,
-    append_frame, checked_plan_product, checked_plan_sum, string_retained_bytes,
+    ProjectContentLease, ProjectContentLoader, ProjectContentMemberReceipt, ProjectContentSnapshot,
+    ProjectSettingsCandidate, ProjectSettingsLineage, RuntimePlan, StartupContentClosureReceipt,
+    allocation_failed, append_frame, checked_plan_product, checked_plan_sum, string_retained_bytes,
 };
 
 /// Exact source delivery for startup and the project's explicitly declared Scene roots.
@@ -186,12 +184,7 @@ impl ProjectContentLoader {
         roots.dedup();
 
         let mut source_identities = BTreeMap::new();
-        merge_delivery_source_identities(
-            &mut source_identities,
-            &snapshot,
-            candidate,
-            &mut budget,
-        )?;
+        merge_delivery_source_identities(&mut source_identities, &snapshot, &mut budget)?;
         let mut members = BTreeMap::<String, ProjectContentMemberReceipt>::new();
         self.merge_delivery_members(
             &mut members,
@@ -212,12 +205,7 @@ impl ProjectContentLoader {
                 catalogue.is_none(),
             )?;
             catalogue = next_catalogue.or(catalogue);
-            merge_delivery_source_identities(
-                &mut source_identities,
-                &snapshot,
-                candidate,
-                &mut budget,
-            )?;
+            merge_delivery_source_identities(&mut source_identities, &snapshot, &mut budget)?;
             self.merge_delivery_members(
                 &mut members,
                 &snapshot.content_closure(),
@@ -346,34 +334,10 @@ impl ProjectContentLoader {
 fn merge_delivery_source_identities(
     identities: &mut BTreeMap<StableAssetId, ProjectPath>,
     snapshot: &ProjectContentSnapshot,
-    candidate: &ProjectSettingsCandidate,
     budget: &mut super::BudgetTicket,
 ) -> Result<(), ProjectContentError> {
-    let paths = &candidate.settings().paths;
-    if let SourceDocumentOrigin::StableAsset { stable_id } =
-        snapshot.selected_scene_source_key().origin()
-    {
-        let closure = snapshot.content_closure();
-        let selected = closure
-            .members()
-            .iter()
-            .find(|member| {
-                member.kind() == ProjectContentMemberKind::Scene
-                    && member
-                        .path()
-                        .as_str()
-                        .strip_prefix(paths.scenes.as_str())
-                        .and_then(|suffix| suffix.strip_prefix('/'))
-                        == Some(snapshot.selected_scene_path().as_str())
-            })
-            .ok_or_else(|| {
-                delivery_error(
-                    "project.delivery.scene-source-unavailable",
-                    "Selected Scene has no exact source receipt",
-                )
-            })?;
-        admit_delivery_source_identity(identities, *stable_id, selected.path().as_str(), budget)?;
-    }
+    // Source content retains every actually used Scene association in the same canonical index.
+    // Delivery neither reconstructs a directory prefix nor rediscovers dependency identities.
     for record in snapshot.asset_database().records() {
         admit_delivery_source_identity(
             identities,

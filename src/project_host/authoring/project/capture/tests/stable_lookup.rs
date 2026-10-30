@@ -204,15 +204,14 @@ fn admitted_prefab_association_conflicts_report_the_actual_catalogue_path() {
     let mut budget = AuthoringProjectAdmissionBudget::new(Default::default());
     let mut catalogue = ReferenceCatalogue::new(
         snapshot.project_root(),
-        [
-            ProjectPath::new("assets").unwrap(),
-            ProjectPath::new("prefabs").unwrap(),
-        ],
+        ReferenceCatalogue::project_bindings(snapshot.settings()),
         &mut budget,
     )
     .unwrap();
     assert_eq!(
-        catalogue.resolve(&product, true, &mut budget).unwrap(),
+        catalogue
+            .resolve(&product, &catalogue.prefabs(), &mut budget)
+            .unwrap(),
         Some(AssetPath::new("outer.prefab.json").unwrap()),
     );
     for key in [
@@ -293,7 +292,7 @@ fn unreferenced_metadata_kinds_do_not_block_open_or_activate_their_sources() {
         for (directory, path, _, _) in &unreferenced {
             let source_path = format!("{directory}/{path}");
             assert!(!facts.contains(&source_path.as_str()));
-            assert!(facts.contains(&format!("{source_path}.meta").as_str()));
+            assert!(!facts.contains(&format!("{source_path}.meta").as_str()));
         }
         capture.source_validation().validate().unwrap();
     }
@@ -592,11 +591,15 @@ fn unresolved_stable_lookup_is_reobserved_and_still_requires_explicit_recapture(
         project.root.join("prefabs/recovered.prefab.json"),
     )
     .unwrap();
-    assert!(matches!(
-        capture.source_validation().validate(),
-        Err(AuthoringProjectSourceAdmissionError::AssetMetadataChanged { path })
-            if path.as_str() == "prefabs/recovered.prefab.json"
-    ));
+    let changed = capture.source_validation().validate();
+    assert!(
+        matches!(
+            &changed,
+            Err(AuthoringProjectSourceAdmissionError::AssetMetadataChanged { path })
+                if path.as_str() == "prefabs/recovered.prefab.json"
+        ),
+        "{changed:?}"
+    );
     assert!(capture.requires_recapture());
     let recovered = snapshot
         .capture_scene_document(&source, &session, &[])

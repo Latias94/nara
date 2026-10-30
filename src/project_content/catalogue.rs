@@ -10,13 +10,19 @@ mod measurement_tests;
 
 #[derive(Default, Clone)]
 pub(super) struct ReferenceCatalogue {
-    metadata: BTreeMap<AssetSourcePath, ContentDigest>,
+    pub(super) metadata: BTreeMap<AssetSourcePath, CataloguedSource>,
     pub(super) work_bytes: usize,
     complete: bool,
 }
 
+#[derive(Clone)]
+pub(super) struct CataloguedSource {
+    pub(super) digest: ContentDigest,
+    pub(super) reader: usize,
+}
+
 pub(crate) struct DeliveryCatalogue {
-    pub(super) roots: [nara_project::ProjectPath; 2],
+    pub(super) roots: Vec<nara_project::ProjectPath>,
     pub(super) catalogue: ReferenceCatalogue,
     pub(super) asset_database: ProjectAssetDatabase,
     pub(super) asset_database_work_bytes: usize,
@@ -46,12 +52,15 @@ impl LoadContext<'_> {
             .catalogue
             .as_ref()
             .expect("complete catalogue remains available during delivery capture");
-        let roots_work = roots.iter().try_fold(0usize, |bytes, root| {
-            checked_plan_sum(
-                ProjectContentBudgetKind::WorkBytes,
-                [bytes, string_retained_bytes(root.as_str())?],
-            )
-        })?;
+        let roots_work = roots.iter().try_fold(
+            size_of::<nara_project::ProjectPath>() * roots.len(),
+            |bytes, root| {
+                checked_plan_sum(
+                    ProjectContentBudgetKind::WorkBytes,
+                    [bytes, string_retained_bytes(root.as_str())?],
+                )
+            },
+        )?;
         let mut budget = self.loader.budget_host.reserve();
         budget
             .set(
@@ -86,20 +95,33 @@ impl LoadContext<'_> {
         {
             return Ok(());
         }
-        let roots = self
+        let root_count = self
             .catalogue_roots
             .as_ref()
             .expect("content loading binds the manifest directories before decoding")
-            .clone();
+            .len();
         self.catalogue
             .get_or_insert_with(ReferenceCatalogue::default);
         #[cfg(all(test, feature = "project-workflow"))]
         measurement_tests::record(|counts| counts.catalogue_builds += 1);
-        for (root_index, path) in roots.iter().enumerate() {
-            let directory = self.open_directory(path)?;
+        for root_index in 0..root_count {
+            let path_bytes = string_retained_bytes(
+                self.catalogue_roots
+                    .as_ref()
+                    .expect("catalogue roots remain bound")[root_index]
+                    .as_str(),
+            )?;
+            let path_work = self.reserve_work(path_bytes)?;
+            let path = self
+                .catalogue_roots
+                .as_ref()
+                .expect("catalogue roots remain bound")[root_index]
+                .clone();
+            let directory = self.open_directory(&path)?;
             let result = self.scan_metadata_directory(&directory, root_index);
-            drop(directory);
+            drop((directory, path));
             self.subtract_budget(ProjectContentBudgetKind::OpenHandles, 1);
+            self.subtract_budget(ProjectContentBudgetKind::WorkBytes, path_work.reserved);
             result?;
         }
         self.catalogue
@@ -265,7 +287,11 @@ impl LoadContext<'_> {
         let reservation = self.reserve_work(scratch)?;
         let result = (|| {
             let observed = self.catalogue_scope(root_index).resolve(&path);
-            let owner_index = (0..2)
+            let owner_index = (0..self
+                .catalogue_roots
+                .as_ref()
+                .expect("source roots are bound")
+                .len())
                 .find(|index| {
                     self.catalogue_scope(*index).relative_path(&observed)
                         == Some(identity.path().as_str())
@@ -275,12 +301,12 @@ impl LoadContext<'_> {
             if record.path() != &observed {
                 return Err(identity_conflict(&observed));
             }
-            if let Some(indexed_digest) = self
+            if let Some(indexed) = self
                 .catalogue
                 .as_ref()
                 .and_then(|catalogue| catalogue.metadata.get(&observed))
             {
-                if *indexed_digest != digest {
+                if indexed.digest != digest || indexed.reader != owner_index {
                     return Err(ProjectContentError::with_identifier(
                         ProjectContentErrorKind::HostAuthorityRejected,
                         "project.content.asset-metadata-source-changed",
@@ -299,7 +325,7 @@ impl LoadContext<'_> {
             self.reserve_catalogue_work(checked_plan_sum(
                 ProjectContentBudgetKind::WorkBytes,
                 [
-                    size_of::<(AssetSourcePath, ContentDigest)>(),
+                    size_of::<(AssetSourcePath, CataloguedSource)>(),
                     observed.as_str().len(),
                     BTREE_ENTRY_OVERHEAD,
                 ],
@@ -311,7 +337,13 @@ impl LoadContext<'_> {
                 .as_mut()
                 .expect("indexing owns a catalogue")
                 .metadata
-                .insert(observed, digest);
+                .insert(
+                    observed,
+                    CataloguedSource {
+                        digest,
+                        reader: owner_index,
+                    },
+                );
             Ok(())
         })();
         self.subtract_budget(ProjectContentBudgetKind::WorkBytes, reservation.reserved);
@@ -351,15 +383,17 @@ impl LoadContext<'_> {
 
     pub(super) fn retain_loaded_asset_identities(
         &mut self,
-        prefabs: &BTreeMap<AssetPath, LoadedPrefabContent>,
+        selected_scene: &AssetSourcePath,
+        scenes: &[ProjectSceneContent],
+        prefabs: &BTreeMap<AssetSourcePath, LoadedPrefabContent>,
         images: &[ProjectImageContent],
         tilesets: &[ProjectTileSetContent],
         domains: &[Box<dyn domains::ErasedCollection>],
     ) -> Result<ProjectAssetDatabase, ProjectContentError> {
         let paths = || {
-            prefabs
-                .values()
-                .map(|prefab| &prefab.path)
+            std::iter::once(selected_scene)
+                .chain(scenes.iter().map(ProjectSceneContent::path))
+                .chain(prefabs.values().map(|prefab| &prefab.path))
                 .chain(images.iter().map(ProjectImageContent::path))
                 .chain(tilesets.iter().map(ProjectTileSetContent::path))
                 .chain(
@@ -368,7 +402,7 @@ impl LoadContext<'_> {
                         .flat_map(|domain| domain.records().iter().map(AssetRecord::path)),
                 )
         };
-        let mut bytes = size_of::<ProjectContentAssets>() + ARC_CONTROL_BLOCK_BYTES;
+        let mut bytes = size_of::<ProjectSourceContent>() + ARC_CONTROL_BLOCK_BYTES;
         for path in paths() {
             if let Some(record) = self.asset_database.record_for_path(path) {
                 bytes = bytes
@@ -431,6 +465,106 @@ impl LoadContext<'_> {
             .map_err(|_| unresolved())?;
         let path = scope.relativize(record.path()).ok_or_else(unresolved)?;
         Ok((path, work))
+    }
+
+    /// Resolves native source data through the sidecar's actual reader binding.
+    /// Bare Path declarations retain the caller's explicit alias directory.
+    pub(super) fn resolve_native_source(
+        &mut self,
+        reference: &AssetRef,
+        kind: &AssetSourceKind,
+        alias_root: &nara_project::ProjectPath,
+    ) -> Result<(NativeSourceSelection, WorkReservation), ProjectContentError> {
+        if !reference.is_primary() {
+            return Err(unsupported_product_selection(reference));
+        }
+        let reader = match reference {
+            AssetRef::Path(_) => self
+                .catalogue_roots
+                .as_ref()
+                .and_then(|roots| roots.iter().position(|root| root == alias_root))
+                .expect("the native alias directory has an admitted reader"),
+            AssetRef::StableId(_) | AssetRef::Product(_) => {
+                self.ensure_reference_catalogue()?;
+                let id = match reference {
+                    AssetRef::StableId(id) => *id,
+                    AssetRef::Product(product) => product.source(),
+                    AssetRef::Path(_) => unreachable!(),
+                };
+                let record = self
+                    .asset_database
+                    .record_for_stable_id(id)
+                    .filter(|record| record.source_kind() == kind)
+                    .ok_or_else(unresolved_source)?;
+                self.catalogue
+                    .as_ref()
+                    .and_then(|catalogue| catalogue.metadata.get(record.path()))
+                    .map(|source| source.reader)
+                    .ok_or_else(unresolved_source)?
+            }
+        };
+        let scope = self.catalogue_scope(reader);
+        let (canonical_bytes, alias_bytes) = match reference {
+            AssetRef::Path(path) => (scoped_path_bytes(scope, path)?, path.as_str().len()),
+            AssetRef::StableId(_) | AssetRef::Product(_) => {
+                let id = match reference {
+                    AssetRef::StableId(id) => *id,
+                    AssetRef::Product(product) => product.source(),
+                    AssetRef::Path(_) => unreachable!(),
+                };
+                let canonical = self
+                    .asset_database
+                    .record_for_stable_id(id)
+                    .expect("the stable native source was admitted above")
+                    .path();
+                (
+                    canonical.as_str().len(),
+                    scope
+                        .relative_path(canonical)
+                        .ok_or_else(unresolved_source)?
+                        .len(),
+                )
+            }
+        };
+        let work = self.reserve_work(checked_plan_sum(
+            ProjectContentBudgetKind::WorkBytes,
+            [
+                size_of::<NativeSourceSelection>(),
+                canonical_bytes,
+                alias_bytes,
+                2 * STRING_ALLOCATION_OVERHEAD,
+            ],
+        )?)?;
+        let scope = self.catalogue_scope(reader);
+        let (path, alias) = match reference {
+            AssetRef::Path(alias) => (scope.resolve(alias), alias.clone()),
+            AssetRef::StableId(_) | AssetRef::Product(_) => {
+                let id = match reference {
+                    AssetRef::StableId(id) => *id,
+                    AssetRef::Product(product) => product.source(),
+                    AssetRef::Path(_) => unreachable!(),
+                };
+                let path = self
+                    .asset_database
+                    .record_for_stable_id(id)
+                    .expect("the stable native source was admitted above")
+                    .path();
+                (
+                    path.clone(),
+                    scope
+                        .relativize(path)
+                        .expect("the reader relation was admitted above"),
+                )
+            }
+        };
+        Ok((
+            NativeSourceSelection {
+                path,
+                reader,
+                alias,
+            },
+            work,
+        ))
     }
 
     pub(super) fn discover_source_reference(
@@ -496,7 +630,7 @@ impl LoadContext<'_> {
                 .scope_for_root(root)
                 .and_then(|scope| scope.relative_path(path))
                 .is_none()
-                || *expected != digest
+                || expected.digest != digest
             {
                 return Err(ProjectContentError::with_identifier(
                     ProjectContentErrorKind::HostAuthorityRejected,
@@ -510,11 +644,11 @@ impl LoadContext<'_> {
         Ok(())
     }
 
-    pub(super) fn admit_catalogued_prefab_metadata(
+    pub(super) fn admit_catalogued_native_metadata(
         &mut self,
         directory: &DirectoryCapability,
         root: &nara_project::ProjectPath,
-        path: &AssetPath,
+        path: &str,
         source_path: &AssetSourcePath,
         source_key: &SourceDocumentKey,
     ) -> Result<(), ProjectContentError> {
@@ -528,17 +662,25 @@ impl LoadContext<'_> {
         let record = self
             .asset_database
             .record_for_path(source_path)
-            .expect("indexed Prefab metadata has its actual source record");
+            .expect("indexed native metadata has its actual source record");
         source_key.validate_asset_source(record).map_err(|_| {
             ProjectContentError::with_identifier(
                 ProjectContentErrorKind::AssetMetaMismatch,
-                "project.content.prefab-source-association-invalid",
-                "Prefab metadata conflicts with its admitted document source",
-                "prefab",
+                if source_key.kind() == SourceDocumentKind::Prefab {
+                    "project.content.prefab-source-association-invalid"
+                } else {
+                    "project.content.scene-source-association-invalid"
+                },
+                "Native document metadata conflicts with its admitted source",
+                "source",
                 source_path.as_str(),
             )
         })?;
-        let meta_path = path.meta_path();
+        let path_work = self.reserve_work(checked_plan_sum(
+            ProjectContentBudgetKind::WorkBytes,
+            [path.len(), ".meta".len(), STRING_ALLOCATION_OVERHEAD],
+        )?)?;
+        let meta_path = format!("{path}.meta");
         let (_, digest) = self.read_native_file(
             directory,
             &meta_path,
@@ -550,7 +692,10 @@ impl LoadContext<'_> {
             root,
             &meta_path,
             digest,
-        )
+        )?;
+        drop(meta_path);
+        self.subtract_budget(ProjectContentBudgetKind::WorkBytes, path_work.reserved);
+        Ok(())
     }
 }
 

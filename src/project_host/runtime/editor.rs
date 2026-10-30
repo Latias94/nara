@@ -2559,10 +2559,13 @@ impl EditorProjectSession {
 
     #[cfg(feature = "presentation-2d")]
     fn drive_editor_preview(&mut self) {
-        if self.closing
-            || self.schema_adoption_fenced()
-            || self.authoring_runtime.preview_extent().is_none()
-        {
+        if self.closing || self.schema_adoption_fenced() {
+            return;
+        }
+        if self.authoring_runtime.preview_extent().is_none() {
+            if self.authoring_project().is_some() {
+                self.cancel_authoring_scene_capture();
+            }
             return;
         }
         let source = if self.authoring_project().is_some() {
@@ -2599,7 +2602,6 @@ impl EditorProjectSession {
         if let Some(report) = self.authoring_runtime.drive_preview(source) {
             let _ = self.diagnostics.extend(report);
         }
-        self.release_published_scene_capture();
     }
 
     #[cfg(test)]

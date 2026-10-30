@@ -13,6 +13,7 @@ pub(crate) struct AuthoringPrefabCaptureRequest {
     basis: AuthoringSchemaBasis,
     adapter_retained: usize,
     open_prefabs: Box<[AuthoringPrefabSessionSnapshot]>,
+    inputs: AuthoringSourceCaptureInputs,
     root_input_retained: usize,
     budget: AuthoringProjectAdmissionBudget,
 }
@@ -25,9 +26,10 @@ impl AuthoringProjectSessionSnapshot {
         source: &AuthoringDocumentSourceFact,
         basis: &AuthoringSchemaBasis,
         kind: SourceDocumentKind,
+        inputs: AuthoringSourceCaptureInputs,
         open_prefabs: Box<[AuthoringPrefabSessionSnapshot]>,
     ) -> Result<AuthoringPrefabCaptureRequest, AuthoringProjectSourceAdmissionError> {
-        if basis != &self.startup_scene.schema_basis() {
+        if basis != &self.startup_scene.schema_basis() || &inputs.basis != basis {
             return Err(AuthoringProjectSourceAdmissionError::SchemaBasisMismatch);
         }
         if source.source_key().kind() != kind {
@@ -42,6 +44,7 @@ impl AuthoringProjectSessionSnapshot {
             basis: basis.clone(),
             adapter_retained: adapter_receipts_retained_bytes(&self.adapters)?,
             open_prefabs,
+            inputs,
             root_input_retained: 0,
             budget: self.schema.budget,
         })
@@ -49,8 +52,8 @@ impl AuthoringProjectSessionSnapshot {
 }
 
 impl AuthoringPrefabCaptureRequest {
-    /// Register all root/request retention held by the source owner before acquisition.
-    /// This is independent of the additional prepared-token charge at completion.
+    /// Registers additional root/request retention not already admitted in `inputs`.
+    /// The prepared result has its own compiler-reservation transfer at completion.
     pub(crate) fn retain_root_input(&mut self, bytes: usize) {
         self.root_input_retained = self.root_input_retained.max(bytes);
     }
@@ -60,11 +63,16 @@ impl AuthoringPrefabCaptureRequest {
         &mut self,
     ) -> Result<AuthoringPrefabAcquisition<'_>, AuthoringProjectSourceAdmissionError> {
         self.budget = self.schema.budget;
+        // Conversion keeps both input reservations conservatively charged through its result.
+        self.inputs.charge_inputs(
+            open_prefab_inputs_retained_bytes(&self.open_prefabs)?,
+            &mut self.budget,
+        )?;
         let (_, containing) = charge_capture_inputs(
             &self.source,
             self.root_input_retained,
             self.adapter_retained,
-            &self.open_prefabs,
+            &[],
             &mut self.budget,
         )?;
         let mut acquisition = AuthoringPrefabAcquisition::new(
@@ -128,8 +136,8 @@ pub(crate) struct AuthoringPrefabAcquisition<'a> {
     pub(super) source_facts: BTreeMap<String, Arc<AuthoringSourceFact>>,
     pub(super) unresolved_dependencies: Vec<AuthoringUnresolvedDependency>,
     pub(super) catalogue: ReferenceCatalogue,
-    pub(super) prefabs_directory: Option<DirectoryCapability>,
-    pub(super) prefabs: BTreeMap<AssetPath, AuthoringPrefabSource>,
+    pub(super) prefabs_directory: Option<(Arc<ProjectPath>, DirectoryCapability)>,
+    pub(super) prefabs: BTreeMap<AssetSourcePath, AuthoringPrefabSource>,
     pub(super) compiler_limit: ByteLimit,
     pub(super) compiler_reservation: usize,
     source_policy: NativeDocumentSourcePolicy,
@@ -185,10 +193,7 @@ impl<'a> AuthoringPrefabAcquisition<'a> {
         )?;
         let catalogue = ReferenceCatalogue::new(
             schema.project_root.share(),
-            [
-                schema.settings.paths.assets.clone(),
-                schema.settings.paths.prefabs.clone(),
-            ],
+            ReferenceCatalogue::project_bindings(&schema.settings),
             budget,
         )?;
         let compiler_limit = remaining_compiler_work(
@@ -297,9 +302,8 @@ impl<'a> AuthoringPrefabAcquisition<'a> {
         let prefabs_directory = &mut self.prefabs_directory;
         let prefabs = &mut self.prefabs;
         let source_policy = &self.source_policy;
-        let prefab_root = &schema.settings.paths.prefabs;
         let unresolved_dependencies = &mut self.unresolved_dependencies;
-        let Some(path) = catalogue.resolve(reference, true, budget)? else {
+        let Some(selected) = catalogue.resolve_prefab(reference, budget)? else {
             budget.charge_reference(16, depth, true)?;
             unresolved_dependencies.push(AuthoringUnresolvedDependency {
                 kind: AuthoringUnresolvedDependencyKind::Prefab,
@@ -308,21 +312,35 @@ impl<'a> AuthoringPrefabAcquisition<'a> {
             });
             return Ok(None);
         };
+        let path = selected.path;
+        let binding = selected.binding;
+        budget.charge_source_bytes(
+            0,
+            0,
+            0,
+            checked_sum([binding.directory.as_str().len(), path.as_str().len(), 1])?,
+        )?;
+        let canonical = binding.scope.resolve(&path);
         budget.charge_reference(path.as_str().len(), depth, true)?;
-        if let Some(prefab) = prefabs.get(&path) {
+        if let Some(prefab) = prefabs.get(&canonical) {
             let prefab: &AuthoringPrefabSource = prefab;
             return catalogue
                 .bind_prefab_source(reference, prefab.resolved_source())
                 .map(Some);
         }
-        if prefabs_directory.is_none() {
+        if prefabs_directory
+            .as_ref()
+            .is_none_or(|(root, _)| root != &binding.directory)
+        {
             match open_source_directory(
                 &schema.project_root,
-                &prefab_root,
+                &binding.directory,
                 AuthoringSourceKind::Prefab,
                 budget,
             ) {
-                Ok(directory) => *prefabs_directory = Some(directory),
+                Ok(directory) => {
+                    *prefabs_directory = Some((Arc::clone(&binding.directory), directory))
+                }
                 Err(error) if is_missing_source(&error) => {
                     unresolved_dependencies.push(AuthoringUnresolvedDependency {
                         kind: AuthoringUnresolvedDependencyKind::Prefab,
@@ -334,10 +352,11 @@ impl<'a> AuthoringPrefabAcquisition<'a> {
                 Err(error) => return Err(error),
             }
         }
-        let project_path = join_project_path(&prefab_root, path.as_str())?;
+        let project_path = join_project_path(&binding.directory, path.as_str())?;
         let opened = match open_source_file(
             prefabs_directory
                 .as_ref()
+                .map(|(_, directory)| directory)
                 .expect("requested Prefab directory is retained"),
             project_path,
             path.as_str(),
@@ -384,7 +403,7 @@ impl<'a> AuthoringPrefabAcquisition<'a> {
         }
         include_native_metadata_source(&native_source, identities, source_facts)?;
         let mut matching_sessions = open_prefabs.iter().filter(|snapshot| {
-            snapshot.source.relative_path() == opened.project_path.as_str()
+            snapshot.project_path.as_ref() == opened.project_path.as_str()
                 || snapshot.source_key() == native_source.key()
         });
         let selected_session = matching_sessions.next();
@@ -396,21 +415,27 @@ impl<'a> AuthoringPrefabAcquisition<'a> {
             );
         }
         let (source, content, limits) = if let Some(snapshot) = selected_session {
+            let Some(snapshot_source) = snapshot.source.as_ref() else {
+                return Err(AuthoringProjectSourceAdmissionError::SourceChanged {
+                    kind: AuthoringSourceKind::Prefab,
+                    path: opened.project_path,
+                });
+            };
             if snapshot.source_key().kind() != nara_scene::SourceDocumentKind::Prefab
                 || !snapshot.persistence_available
                 || !snapshot.source_matches
                 || snapshot.source_key() != native_source.key()
-                || snapshot.source.relative_path() != opened.project_path.as_str()
-                || snapshot.source.identity() != opened.identity
-                || snapshot.source.parent_identity() != opened.parent_identity
+                || snapshot_source.relative_path() != opened.project_path.as_str()
+                || snapshot_source.identity() != opened.identity
+                || snapshot_source.parent_identity() != opened.parent_identity
                 || !matching_metadata(
-                    snapshot.source.native_source().metadata_source(),
+                    snapshot_source.native_source().metadata_source(),
                     native_source.metadata_source(),
                 )
                 || (is_containing_prefab
-                    && (snapshot.source.digest() != containing_source.digest()
-                        || snapshot.source.encoded_bytes() != containing_source.encoded_bytes()
-                        || snapshot.source.parent_identity()
+                    && (snapshot_source.digest() != containing_source.digest()
+                        || snapshot_source.encoded_bytes() != containing_source.encoded_bytes()
+                        || snapshot_source.parent_identity()
                             != containing_source.parent_identity()))
             {
                 return Err(AuthoringProjectSourceAdmissionError::SourceChanged {
@@ -431,10 +456,10 @@ impl<'a> AuthoringPrefabAcquisition<'a> {
             let source = AuthoringSourceFact {
                 kind: AuthoringSourceKind::Prefab,
                 project_path: opened.project_path,
-                identity: snapshot.source.identity(),
-                parent_identity: snapshot.source.parent_identity(),
-                digest: snapshot.source.digest(),
-                encoded_bytes: snapshot.source.encoded_bytes(),
+                identity: snapshot_source.identity(),
+                parent_identity: snapshot_source.parent_identity(),
+                digest: snapshot_source.digest(),
+                encoded_bytes: snapshot_source.encoded_bytes(),
                 dependency_depth: depth,
             };
             // No decode or encoded input is charged for a shared working document.
@@ -447,58 +472,23 @@ impl<'a> AuthoringPrefabAcquisition<'a> {
                 document: Arc::clone(&snapshot.document),
                 revision: snapshot.revision,
             };
-            identities.insert(
-                source.identity(),
-                LoadedIdentity::Prefab {
-                    source: Arc::clone(&source),
-                    document: Arc::clone(&snapshot.document),
-                    limits: scene_limits,
-                },
-            );
+            identities.insert(source.identity(), LoadedIdentity::Prefab);
             source_facts.insert(
                 source.project_path().as_str().to_owned(),
                 Arc::clone(&source),
             );
             (source, content, scene_limits)
-        } else if let Some(loaded) = identities.get(&opened.identity) {
-            let LoadedIdentity::Prefab {
-                source,
-                document,
-                limits,
-            } = loaded
-            else {
-                return Err(
-                    AuthoringProjectSourceAdmissionError::SourceIdentityKindConflict {
-                        path: opened.project_path,
-                    },
-                );
-            };
-            if prefabs.values().any(|prefab: &AuthoringPrefabSource| {
-                prefab.source.identity() == opened.identity && prefab.session_revision().is_some()
-            }) {
-                return Err(
-                    AuthoringProjectSourceAdmissionError::SourceIdentityKindConflict {
-                        path: opened.project_path,
-                    },
-                );
-            }
-            (
-                Arc::clone(source),
-                AuthoringPrefabContent::File(Arc::clone(document)),
-                *limits,
-            )
+        } else if identities.contains_key(&opened.identity) {
+            return Err(
+                AuthoringProjectSourceAdmissionError::SourceIdentityKindConflict {
+                    path: opened.project_path,
+                },
+            );
         } else {
             let read = read_unique_source(opened, scene_limits.encoded_bytes().get(), budget)?;
             let (document, limits) = admit_prefab_composition_source(&read, scene_limits, budget)?;
             let source = Arc::clone(&read.source);
-            identities.insert(
-                source.identity(),
-                LoadedIdentity::Prefab {
-                    source: Arc::clone(&source),
-                    document: Arc::clone(&document),
-                    limits,
-                },
-            );
+            identities.insert(source.identity(), LoadedIdentity::Prefab);
             source_facts.insert(
                 source.project_path().as_str().to_owned(),
                 Arc::clone(&source),
@@ -506,7 +496,8 @@ impl<'a> AuthoringPrefabAcquisition<'a> {
             (source, AuthoringPrefabContent::File(document), limits)
         };
         let prefab = AuthoringPrefabSource {
-            path: path.clone(),
+            path,
+            binding,
             native_source,
             source,
             content,
@@ -514,7 +505,7 @@ impl<'a> AuthoringPrefabAcquisition<'a> {
             limits,
         };
         let resolved = catalogue.bind_prefab_source(reference, prefab.resolved_source())?;
-        prefabs.insert(path, prefab);
+        prefabs.insert(canonical, prefab);
         Ok(Some(resolved))
     }
 
@@ -641,21 +632,19 @@ pub(super) fn charge_capture_inputs(
     ))
 }
 
-pub(super) fn open_prefab_inputs_retained_bytes(
+pub(in crate::project_host::authoring::project) fn open_prefab_inputs_retained_bytes(
     open_prefabs: &[AuthoringPrefabSessionSnapshot],
 ) -> Result<usize, AuthoringProjectSourceAdmissionError> {
     let mut input_retained = 0;
     for snapshot in open_prefabs {
         input_retained = checked_sum([
             input_retained,
-            size_of::<AuthoringPrefabSessionSnapshot>(),
-            snapshot.document.retained_bytes()?,
-            snapshot.source.relative_path().len(),
-            snapshot
-                .source
-                .native_source()
-                .retained_bytes()
-                .ok_or(AuthoringProjectSourceAdmissionError::AccountingOverflow)?,
+            AuthoringPrefabSessionSnapshot::input_retained_bytes(
+                snapshot.source.as_ref(),
+                &snapshot.source_key,
+                &snapshot.project_path,
+                &snapshot.document,
+            )?,
         ])?;
     }
     Ok(input_retained)
@@ -664,7 +653,7 @@ pub(super) fn open_prefab_inputs_retained_bytes(
 pub(super) fn revalidate_sources(
     schema: &AuthoringSchemaReceipt,
     containing_native_source: &AdmittedNativeDocumentSource,
-    prefabs: &BTreeMap<AssetPath, AuthoringPrefabSource>,
+    prefabs: &BTreeMap<AssetSourcePath, AuthoringPrefabSource>,
     identities: &mut HashMap<FileIdentity, LoadedIdentity>,
     source_facts: &mut BTreeMap<String, Arc<AuthoringSourceFact>>,
     catalogue: &ReferenceCatalogue,

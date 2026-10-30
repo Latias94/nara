@@ -157,7 +157,8 @@ impl EditorProjectSession {
                 self.scene_capture.unsaved_dependencies(),
             )
         } else {
-            (false, None, 0)
+            // Physical return still needs maintenance when no preview is presented.
+            (self.scene_capture.has_pending_work(), None, 0)
         };
         #[cfg(not(feature = "presentation-2d"))]
         let preview_work = (false, None, 0);

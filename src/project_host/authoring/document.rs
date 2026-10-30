@@ -95,6 +95,24 @@ impl AuthoringDocumentSourceFact {
         })
     }
 
+    /// Compares an accepted Host observation without copying its source key or metadata.
+    pub(crate) fn matches_persistence_observation(
+        &self,
+        base: &Self,
+        identity: FileIdentity,
+        parent_identity: Option<FileIdentity>,
+        digest: ContentDigest,
+    ) -> bool {
+        self.relative_path == base.relative_path
+            && self.identity == identity
+            && self.parent_identity == parent_identity
+            && self.digest == digest
+            && usize::try_from(digest.length()).ok() == Some(self.encoded_bytes)
+            && self
+                .native
+                .matches_source_identity_update(&base.native, identity)
+    }
+
     /// Replaces freshly admitted metadata without changing the document's canonical identity.
     pub(crate) fn with_native_source(
         &self,

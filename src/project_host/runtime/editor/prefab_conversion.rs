@@ -35,7 +35,6 @@ const REVIEW_BYTES: usize = 128 * 1024;
 const REVIEW_RESERVATION: usize =
     4 * REVIEW_BYTES + 3 * REVIEW_ROWS * size_of::<EditorPrefabConversionMappingRow>();
 
-#[derive(Clone)]
 struct ConversionSelection {
     root: AuthoringSourceSelection,
     prefabs: Vec<AuthoringSourceSelection>,
@@ -251,6 +250,40 @@ impl EditorProjectSession {
         if anchor.as_str().len() > REVIEW_BYTES {
             return rejected(None, Rejection::BudgetExceeded);
         }
+        let Some(selection_bytes) = self
+            .authoring_source_selection_retained_bytes(basis.document)
+            .and_then(|root| {
+                self.prefab_lanes.keys().try_fold(root, |bytes, &document| {
+                    bytes.checked_add(self.authoring_source_selection_retained_bytes(document)?)
+                })
+            })
+            .and_then(|bytes| bytes.checked_add(size_of::<ConversionSelection>()))
+            .and_then(|bytes| bytes.checked_mul(2))
+            .and_then(|bytes| bytes.checked_add(anchor.as_str().len()))
+            .and_then(|bytes| bytes.checked_add(4 * size_of::<usize>()))
+        else {
+            return rejected(None, Rejection::BudgetExceeded);
+        };
+        let inputs = self
+            .prefab_working_set_retained_bytes()
+            .and_then(|bytes| {
+                bytes
+                    .checked_add(selection_bytes)
+                    .ok_or(AuthoringProjectSourceAdmissionError::AccountingOverflow)
+            })
+            .and_then(|bytes| {
+                self.authoring_project()
+                    .expect("checked authoring mode")
+                    .admit_source_capture_inputs(0, bytes)
+            });
+        let inputs = match inputs {
+            Ok(inputs) => inputs,
+            Err(error) => {
+                let failure = admission_failure(error, Rejection::PreparationFailed);
+                let _ = self.diagnostics.extend(failure.diagnostics);
+                return rejected(None, failure.reason);
+            }
+        };
         let Some(root) = self.authoring_source_selection(basis.document) else {
             return rejected(None, Rejection::SourceUnavailable);
         };
@@ -292,7 +325,7 @@ impl EditorProjectSession {
         let mut context = match self
             .authoring_project()
             .expect("checked authoring mode")
-            .capture_prefab_conversion_request(receipt, schema, kind, snapshots)
+            .capture_prefab_conversion_request(receipt, schema, kind, inputs, snapshots)
         {
             Ok(context) => context,
             Err(error) => {
@@ -302,13 +335,6 @@ impl EditorProjectSession {
             }
         };
         let selection = ConversionSelection { root, prefabs };
-        let Some(selection_bytes) = selection_retained_bytes(&selection)
-            .and_then(|bytes| bytes.checked_mul(2))
-            .and_then(|bytes| bytes.checked_add(anchor.as_str().len()))
-            .and_then(|bytes| bytes.checked_add(4 * size_of::<usize>()))
-        else {
-            return rejected(None, Rejection::BudgetExceeded);
-        };
         let Some(sequence) = self.prefab_conversion.sequence.checked_add(1) else {
             return rejected(None, Rejection::IdExhausted);
         };
@@ -325,7 +351,6 @@ impl EditorProjectSession {
                     let result = (|| {
                         let retained = request
                             .checked_retained_bytes()
-                            .and_then(|bytes| bytes.checked_add(selection_bytes))
                             .and_then(|bytes| bytes.checked_add(REVIEW_RESERVATION))
                             .ok_or_else(|| failure(Rejection::BudgetExceeded))?;
                         context.retain_root_input(retained);
@@ -400,21 +425,14 @@ impl EditorProjectSession {
     }
 
     fn conversion_matches(&self, prepared: &PreparedOperation) -> bool {
-        if self
-            .authoring_source_selection(prepared.root.document)
-            .as_ref()
-            != Some(&prepared.root)
-        {
-            return false;
-        }
-        let current = self.authoring_prefab_selections();
-        prepared.participants.iter().all(|participant| {
-            let mut matches = current.iter().filter(|source| {
-                source.source_key == participant.key
-                    || source.project_path == participant.project_path
-            });
-            matches.next() == participant.selected.as_ref() && matches.next().is_none()
-        })
+        self.authoring_source_selection_is_current(&prepared.root)
+            && prepared.participants.iter().all(|participant| {
+                self.authoring_dependency_selection_is_current(
+                    &participant.key,
+                    &participant.project_path,
+                    participant.selected.as_ref(),
+                )
+            })
     }
 
     fn validate_prefab_conversion(&mut self, operation: EditorPrefabConversionId) -> Outcome {
@@ -687,23 +705,6 @@ impl fmt::Write for BoundedText {
         self.text.push_str(value);
         Ok(())
     }
-}
-
-fn selection_retained_bytes(selection: &ConversionSelection) -> Option<usize> {
-    std::iter::once(&selection.root)
-        .chain(&selection.prefabs)
-        .try_fold(size_of::<ConversionSelection>(), |bytes, source| {
-            bytes
-                .checked_add(size_of::<AuthoringSourceSelection>())?
-                .checked_add(source.source_key.retained_bytes())?
-                .checked_add(source.project_path.len())?
-                .checked_add(
-                    source
-                        .receipt
-                        .as_ref()
-                        .map_or(Some(0), |receipt| receipt.checked_retained_bytes())?,
-                )
-        })
 }
 
 fn accepted(operation: EditorPrefabConversionId, phase: Phase) -> Outcome {

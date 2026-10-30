@@ -18,7 +18,8 @@ pub(crate) use project::{
     AuthoringAssetSource, AuthoringDocumentCapture, AuthoringPrefabSessionSnapshot,
     AuthoringPrefabSourceCapture, AuthoringProjectCandidate, AuthoringProjectReadiness,
     AuthoringProjectReceipt, AuthoringProjectSessionSnapshot, AuthoringProjectSnapshot,
-    AuthoringProjectSourceAdmissionError, AuthoringSchemaOwnerProjectInput, AuthoringSourceKind,
+    AuthoringProjectSourceAdmissionError, AuthoringSceneSessionSnapshot,
+    AuthoringSchemaOwnerProjectInput, AuthoringSourceCaptureInputs, AuthoringSourceKind,
     AuthoringSourceValidation, CapturedAuthoringPreview, PreparedAuthoringProject,
     PreparedSchemaOwnerProject, PreparedSchemaOwnerSceneCapture,
     SchemaOwnerObservedProjectAttachmentFailure, SchemaOwnerProjectAttachmentFailure,
@@ -108,6 +109,13 @@ impl AuthoringProjectAdmissionLimits {
             retained_candidate_bytes: ByteLimit::new(256 * 1024 * 1024)
                 .expect("the authoring project retained-byte limit is non-zero"),
         }
+    }
+
+    /// Sets the finite retained candidate ceiling for project admission and source capture.
+    #[must_use]
+    pub(crate) const fn with_retained_candidate_bytes(mut self, maximum: ByteLimit) -> Self {
+        self.retained_candidate_bytes = maximum;
+        self
     }
 
     #[must_use]
@@ -268,6 +276,24 @@ impl AuthoringProjectAdmissionUsage {
     pub(crate) const fn retained_candidate_bytes(self) -> usize {
         self.retained_candidate_bytes
     }
+}
+
+fn checked_retained_replacement(
+    current: usize,
+    previous: usize,
+    next: usize,
+    maximum: usize,
+) -> Result<usize, project::AuthoringProjectSourceAdmissionError> {
+    let retained = current
+        .checked_sub(previous)
+        .and_then(|bytes| bytes.checked_add(next))
+        .ok_or(project::AuthoringProjectSourceAdmissionError::AccountingOverflow)?;
+    if retained > maximum {
+        return Err(
+            AuthoringProjectAdmissionError::RetainedCandidateBytesExceeded { maximum }.into(),
+        );
+    }
+    Ok(retained)
 }
 
 #[derive(Clone, Copy)]

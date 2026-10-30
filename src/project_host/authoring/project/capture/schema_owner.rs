@@ -11,6 +11,7 @@ impl PreparedAuthoringSchemaOwner {
         source: &super::super::super::document::AuthoringDocumentSourceFact,
         view: nara_scene::__private::PreparedSceneSchemaSource<'_>,
         open_prefabs: &[AuthoringPrefabSessionSnapshot],
+        open_scenes: &[AuthoringSceneSessionSnapshot],
     ) -> Result<PreparedSchemaOwnerSceneCapture, AuthoringProjectSourceAdmissionError> {
         let basis = view.schema_basis();
         if &basis != self.schema_basis() {
@@ -23,6 +24,12 @@ impl PreparedAuthoringSchemaOwner {
         }
         let mut budget = self.budget();
         let result = (|| {
+            budget.charge_source_bytes(
+                0,
+                0,
+                0,
+                scenes::open_scene_inputs_retained_bytes(open_scenes)?,
+            )?;
             budget.charge_source_bytes(0, 0, 0, size_of::<Arc<AuthoringSchemaReceipt>>())?;
             prefabs::charge_capture_inputs(
                 source,
@@ -42,6 +49,7 @@ impl PreparedAuthoringSchemaOwner {
                     AuthoringProjectReadiness::from_document(view.readiness()),
                     &mut budget,
                     open_prefabs,
+                    open_scenes,
                     AuthoringCapturePreview::Prepare,
                 )
             })

@@ -68,7 +68,7 @@ fn observed_successor_reprepares_dirty_source_and_attaches_without_another_write
     assert_eq!(owner.observation().bundle_digest(), published_digest);
     assert_ne!(owner.schema_basis(), &old_successor_basis);
     let basis = owner.schema_basis().clone();
-    let saved = owner.prepare_project_input(&input, &[]).unwrap();
+    let saved = owner.prepare_project_input(&input, &[], &[]).unwrap();
     let mut work = SchemaReclassificationWork::default();
     let prepared_scene = scene
         .prepare_schema_reclassification(&basis, owner.reclassification_kind(), &mut work)
@@ -77,6 +77,7 @@ fn observed_successor_reprepares_dirty_source_and_attaches_without_another_write
         .capture_scene(
             &source,
             borrow_prepared_scene_schema_source(&scene, &prepared_scene).unwrap(),
+            &[],
             &[],
         )
         .unwrap();
@@ -166,7 +167,7 @@ fn observed_owner_refuses_changed_manifest_dropped_lineage_and_reviewed_leaf_dri
     else {
         panic!("the exact successor must prepare");
     };
-    let saved = observed.prepare_project_input(&input, &[]).unwrap();
+    let saved = observed.prepare_project_input(&input, &[], &[]).unwrap();
     observed.validate().unwrap();
     let mut changed = successor.to_vec();
     changed.push(b' ');

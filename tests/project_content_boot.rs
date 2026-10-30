@@ -916,9 +916,12 @@ fn stable_native_identity_admits_metadata_and_rejects_mismatch() {
 
     project.write_scene_meta(prefab_id);
     let error = loader.load(&candidate, &plan).unwrap_err();
+    assert_eq!(error.kind(), ProjectContentErrorKind::AssetMetaMismatch);
     assert!(error.diagnostics().iter().any(|diagnostic| {
-        diagnostic.code().as_str() == "project.content.native-source-identity-conflict"
+        diagnostic.code().as_str() == "project.content.asset-identity-conflict"
     }));
+    assert!(matches!(snapshot.selected_scene_source_key().origin(),
+        SourceDocumentOrigin::StableAsset { stable_id } if *stable_id == scene_id));
 }
 
 #[test]

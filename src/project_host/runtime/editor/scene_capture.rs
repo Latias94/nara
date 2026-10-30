@@ -5,15 +5,16 @@ use std::{
     time::{Duration, Instant},
 };
 
-use nara_fs::{FileCapability, FsError};
-use nara_scene::SceneAuthoringRevision;
+use nara_fs::{ContentDigest, FileCapability, FileIdentity, FsError};
+use nara_scene::{AuthoringSchemaBasis, SceneAuthoringRevision};
 use nara_tasks::{
     TaskDomainKey, TaskHandle, TaskPoolKind, TaskReturnState, TaskSpawnRequest, TaskTerminal,
 };
 use nara_tooling::{EditorDocumentQueryBasis, EditorDocumentQueryRejection};
 
 use crate::project_host::authoring::{
-    AuthoringDocumentCapture, AuthoringSourceValidation, CapturedAuthoringPreview,
+    AuthoringDocumentCapture, AuthoringProjectSourceAdmissionError, AuthoringSourceCaptureInputs,
+    AuthoringSourceValidation, CapturedAuthoringPreview,
 };
 
 use super::authoring_preview::EditorAuthoringPreviewOmissions;
@@ -30,50 +31,93 @@ const CAPTURE_DOMAIN: TaskDomainKey = TaskDomainKey::new(0x7363_656e_6563_6170);
 #[cfg(all(test, any(windows, target_os = "linux")))]
 mod tests;
 
-#[derive(Clone, PartialEq, Eq)]
 struct CaptureSelection {
     root: AuthoringSourceSelection,
     prefabs: Vec<AuthoringSourceSelection>,
+    scenes: Vec<AuthoringSourceSelection>,
+}
+
+impl CaptureSelection {
+    fn checked_retained_bytes(&self) -> Option<usize> {
+        let spare = self
+            .prefabs
+            .capacity()
+            .checked_sub(self.prefabs.len())?
+            .checked_add(self.scenes.capacity().checked_sub(self.scenes.len())?)?
+            .checked_mul(std::mem::size_of::<AuthoringSourceSelection>())?;
+        self.prefabs.iter().chain(&self.scenes).try_fold(
+            std::mem::size_of::<Self>()
+                .checked_add(self.root.checked_retained_bytes()?)?
+                .checked_add(spare)?,
+            |bytes, source| bytes.checked_add(source.checked_retained_bytes()?),
+        )
+    }
+
+    fn source(
+        &self,
+        key: &nara_scene::SourceDocumentKey,
+        revision: SceneAuthoringRevision,
+    ) -> Option<&AuthoringSourceSelection> {
+        self.prefabs.iter().chain(&self.scenes).find(|source| {
+            &source.source_key == key && source.revision == revision && source.receipt.is_some()
+        })
+    }
+}
+
+/// A failed admission's retry key, without copying source keys, paths or working documents.
+/// It controls scheduling only; accepted captures still compare their complete source facts.
+#[derive(PartialEq, Eq)]
+struct CaptureRootObservation {
+    document: EditorDocumentId,
+    revision: SceneAuthoringRevision,
+    schema: Option<AuthoringSchemaBasis>,
+    source_available: bool,
+    persistence: Option<(FileIdentity, Option<FileIdentity>, ContentDigest)>,
 }
 
 struct CapturedScene {
-    selection: CaptureSelection,
+    root: AuthoringSourceSelection,
     dependencies: EditorPreviewDependencies,
     validation: AuthoringSourceValidation,
     projection: Option<EditorPreviewProjection>,
     unsaved_dependencies: usize,
-    sources: Vec<(
-        nara_scene::SourceDocumentKey,
-        Option<AuthoringSourceSelection>,
-    )>,
+    sources: Vec<CapturedSource>,
     source_capture: Option<AuthoringDocumentCapture>,
     native_ready: bool,
     requires_recapture: bool,
     verified: bool,
 }
 
+struct CapturedSource {
+    key: nara_scene::SourceDocumentKey,
+    path: Arc<str>,
+    selected: Option<AuthoringSourceSelection>,
+}
+
 impl CapturedScene {
-    fn matches(&self, current: &CaptureSelection) -> bool {
-        self.selection.root == current.root
-            && self.sources.iter().all(|(key, expected)| {
-                current
-                    .prefabs
-                    .iter()
-                    .find(|source| &source.source_key == key)
-                    == expected.as_ref()
+    fn matches(&self, editor: &EditorProjectSession) -> bool {
+        editor.scene_preview_document == Some(self.root.document)
+            && editor.authoring_source_selection_is_current(&self.root)
+            && self.sources.iter().all(|source| {
+                editor.authoring_dependency_selection_is_current(
+                    &source.key,
+                    &source.path,
+                    source.selected.as_ref(),
+                )
             })
     }
 }
 
 enum CaptureWork {
-    Compose(
-        TaskHandle<
+    Compose {
+        selection: CaptureSelection,
+        task: TaskHandle<
             Result<
                 AuthoringDocumentCapture,
                 crate::project_host::authoring::AuthoringProjectSourceAdmissionError,
             >,
         >,
-    ),
+    },
     Candidate {
         selection: CaptureSelection,
         capture: AuthoringDocumentCapture,
@@ -91,7 +135,7 @@ enum CaptureWork {
 impl CaptureWork {
     fn cancel(&self) {
         match self {
-            Self::Compose(task) => {
+            Self::Compose { task, .. } => {
                 task.cancel();
             }
             Self::Candidate { task, .. } => {
@@ -102,16 +146,25 @@ impl CaptureWork {
             }
         }
     }
+
+    fn root(&self) -> Option<&AuthoringSourceSelection> {
+        match self {
+            Self::Compose { selection, .. } | Self::Candidate { selection, .. } => {
+                Some(&selection.root)
+            }
+            Self::Validate(_) => None,
+        }
+    }
 }
 
 #[derive(Default)]
 pub(super) struct EditorSceneCapture {
     generation: u64,
-    selection: Option<CaptureSelection>,
     captured: Option<CapturedScene>,
     pending: Option<CaptureWork>,
     pending_stale: bool,
     failure: Option<DiagnosticReport>,
+    failed_attempt: Option<CaptureRootObservation>,
     retry_at: Option<Instant>,
     validate_at: Option<Instant>,
     #[cfg(test)]
@@ -158,7 +211,7 @@ impl EditorSceneCapture {
         work.cancel();
         self.pending_stale = true;
         let state = match work {
-            CaptureWork::Compose(task) => task.return_observer().state(),
+            CaptureWork::Compose { task, .. } => task.return_observer().state(),
             CaptureWork::Candidate { task, .. } => task.return_observer().state(),
             CaptureWork::Validate(task) => task.return_observer().state(),
         };
@@ -175,7 +228,10 @@ impl EditorSceneCapture {
         }
         self.pending_stale = self.pending.is_some();
         self.captured = None;
-        self.selection = None;
+        self.failed_attempt = None;
+        self.failure = None;
+        self.retry_at = None;
+        self.validate_at = None;
     }
 
     pub(super) fn invalidate(&mut self) {
@@ -185,6 +241,7 @@ impl EditorSceneCapture {
         self.pending_stale = self.pending.is_some();
         self.captured = None;
         self.failure = None;
+        self.failed_attempt = None;
         self.retry_at = None;
         self.validate_at = None;
     }
@@ -223,57 +280,204 @@ impl EditorProjectSession {
         self.scene_capture.observe_schema_adoption_drain();
     }
 
-    fn capture_selection(&self) -> Option<CaptureSelection> {
+    fn capture_selection(
+        &self,
+    ) -> Result<
+        Option<(CaptureSelection, AuthoringSourceCaptureInputs)>,
+        AuthoringProjectSourceAdmissionError,
+    > {
+        let Some(document) = self
+            .scene_preview_document
+            .filter(|document| self.workspace.scene(*document).is_some())
+        else {
+            return Ok(None);
+        };
+        let overflow = || AuthoringProjectSourceAdmissionError::AccountingOverflow;
+        let root_bytes = self
+            .authoring_source_selection_retained_bytes(document)
+            .ok_or_else(overflow)?;
+        let selection_bytes = self
+            .scene_lanes
+            .keys()
+            .filter(|&&other| other != document)
+            .chain(self.prefab_lanes.keys())
+            .try_fold(root_bytes, |bytes, &document| {
+                bytes.checked_add(self.authoring_source_selection_retained_bytes(document)?)
+            })
+            .ok_or_else(overflow)?;
+        // Keep Host observations distinct from the snapshots released by the worker.
+        let working_bytes = self.scene_working_set_retained_bytes(document)?;
+        let root_source_bytes = self
+            .scene_lanes
+            .get(&document)
+            .and_then(|lane| lane.authoring_source.as_ref())
+            .map_or(Some(0), |source| source.checked_retained_bytes())
+            .ok_or_else(overflow)?;
+        let host_retained = selection_bytes
+            .checked_add(std::mem::size_of::<CaptureSelection>())
+            .ok_or_else(overflow)?;
+        let worker_retained = working_bytes
+            .checked_add(root_source_bytes)
+            .ok_or_else(overflow)?;
+        let admitted = self
+            .authoring_project()
+            .expect("authoring capture owns its project")
+            .admit_source_capture_inputs(host_retained, worker_retained)?;
+        Ok(Some((
+            CaptureSelection {
+                root: self
+                    .authoring_source_selection(document)
+                    .ok_or(AuthoringProjectSourceAdmissionError::DocumentSourceMismatch)?,
+                prefabs: self.authoring_prefab_selections(),
+                scenes: self.authoring_scene_selections(document),
+            },
+            admitted,
+        )))
+    }
+
+    fn capture_root_is_current(&self, root: &AuthoringSourceSelection) -> bool {
+        self.scene_preview_document == Some(root.document)
+            && self.authoring_source_selection_is_current(root)
+    }
+
+    fn capture_root_observation(&self) -> Option<CaptureRootObservation> {
         let document = self.scene_preview_document?;
-        self.workspace.scene(document)?;
-        Some(CaptureSelection {
-            root: self.authoring_source_selection(document)?,
-            prefabs: self.authoring_prefab_selections(),
+        let slot = self.workspace.scene(document)?;
+        let lane = self.scene_lanes.get(&document);
+        Some(CaptureRootObservation {
+            document,
+            revision: slot.revision(),
+            schema: slot.session().authoring_schema_basis(),
+            source_available: lane.is_some_and(|lane| lane.authoring_source.is_some()),
+            persistence: lane.and_then(|lane| {
+                lane.host
+                    .try_with(|host| host.accepted_source_observation())
+                    .flatten()
+            }),
         })
     }
 
-    pub(super) fn initialize_authoring_scene_capture(&mut self) {
-        let Some(selection) = self.capture_selection() else {
-            return;
-        };
-        let Some(project) = self.authoring_project_mut() else {
-            return;
-        };
-        let validation = project.startup_source_validation();
-        let database = project.asset_database();
-        let asset_scope = project.asset_scope();
-        let sources = project
-            .prefab_sources()
-            .map(|prefab| (prefab.native_source().key().clone(), None))
-            .collect();
-        let preview = project.take_startup_preview();
-        let dependencies = EditorPreviewDependencies::captured(1, Arc::from([]));
-        self.scene_capture.generation = 1;
-        self.scene_capture.selection = Some(selection.clone());
-        if let Some(preview) = preview {
-            self.scene_capture.captured = Some(CapturedScene {
-                projection: Some(projection(
-                    selection.root.document,
-                    selection.root.revision,
-                    preview,
-                    database,
-                    asset_scope,
-                )),
-                dependencies,
-                selection,
-                validation,
-                unsaved_dependencies: 0,
-                sources,
-                source_capture: None,
-                native_ready: true,
-                requires_recapture: false,
-                verified: false,
-            });
-            self.scene_capture.validate_at = Some(Instant::now());
+    fn start_current_scene_capture(&mut self) {
+        if self.scene_capture.pending.is_none() {
+            match self.capture_selection() {
+                Ok(Some((selection, inputs))) => self.start_scene_capture(selection, inputs),
+                Ok(None) => {}
+                Err(error) => {
+                    self.reject_scene_capture(admission_error(error));
+                }
+            }
         }
     }
 
-    fn start_scene_capture(&mut self, selection: CaptureSelection) {
+    pub(super) fn initialize_authoring_scene_capture(&mut self) {
+        let captured = match self.capture_startup_scene_observations() {
+            Ok(Some(captured)) => captured,
+            Ok(None) => return,
+            Err(error) => {
+                self.reject_scene_capture(admission_error(error));
+                return;
+            }
+        };
+        self.scene_capture.generation = 1;
+        self.scene_capture.captured = Some(captured);
+        self.scene_capture.validate_at = Some(Instant::now());
+    }
+
+    fn capture_startup_scene_observations(
+        &mut self,
+    ) -> Result<Option<CapturedScene>, AuthoringProjectSourceAdmissionError> {
+        let Some(document) = self
+            .scene_preview_document
+            .filter(|document| self.workspace.scene(*document).is_some())
+        else {
+            return Ok(None);
+        };
+        let root_bytes = self
+            .authoring_source_selection_retained_bytes(document)
+            .ok_or(AuthoringProjectSourceAdmissionError::AccountingOverflow)?;
+        let Some(project) = self.authoring_project() else {
+            return Ok(None);
+        };
+        project
+            .startup_source_validation()
+            .with_additional_retained_bytes(root_bytes)?;
+        let selection = CaptureSelection {
+            root: self
+                .authoring_source_selection(document)
+                .ok_or(AuthoringProjectSourceAdmissionError::DocumentSourceMismatch)?,
+            prefabs: Vec::new(),
+            scenes: Vec::new(),
+        };
+        let observed = || {
+            project
+                .prefab_sources()
+                .map(|prefab| {
+                    (
+                        prefab.native_source().key(),
+                        prefab.source().project_path().as_str(),
+                        None,
+                    )
+                })
+                .chain(
+                    project
+                        .scene_sources()
+                        .iter()
+                        .filter(|scene| scene.native_source().key() != &selection.root.source_key)
+                        .map(|scene| {
+                            (
+                                scene.native_source().key(),
+                                scene.source().project_path().as_str(),
+                                None,
+                            )
+                        }),
+                )
+        };
+        let cost = observation_cost(&selection, observed(), 0)?;
+        let validation = project
+            .startup_source_validation()
+            .with_additional_retained_bytes(cost.retained_bytes)?;
+        let mut sources = Vec::with_capacity(cost.source_count);
+        for (key, path, _) in observed() {
+            sources.push(CapturedSource {
+                key: key.clone(),
+                path: Arc::from(path),
+                selected: None,
+            });
+        }
+        let database = project.asset_database();
+        let asset_scope = project.asset_scope();
+        let Some(preview) = self
+            .authoring_project_mut()
+            .expect("startup capture owns its project")
+            .take_startup_preview()
+        else {
+            return Ok(None);
+        };
+        Ok(Some(CapturedScene {
+            projection: Some(projection(
+                selection.root.document,
+                selection.root.revision,
+                preview,
+                database,
+                asset_scope,
+            )),
+            root: selection.root,
+            dependencies: EditorPreviewDependencies::captured(1, Arc::from([])),
+            validation,
+            unsaved_dependencies: 0,
+            sources,
+            source_capture: None,
+            native_ready: true,
+            requires_recapture: false,
+            verified: false,
+        }))
+    }
+
+    fn start_scene_capture(
+        &mut self,
+        selection: CaptureSelection,
+        inputs: AuthoringSourceCaptureInputs,
+    ) {
         if self.scene_capture.pending.is_some() {
             return;
         }
@@ -284,7 +488,7 @@ impl EditorProjectSession {
         // Release the predecessor before another budgeted capture owns its sources.
         self.scene_capture.captured = None;
         self.scene_capture.failure = None;
-        self.scene_capture.selection = Some(selection.clone());
+        self.scene_capture.failed_attempt = None;
         self.scene_capture.retry_at = None;
         self.scene_capture.validate_at = None;
         let Some(root_source) = selection.root.receipt.as_ref() else {
@@ -294,6 +498,7 @@ impl EditorProjectSession {
             return;
         };
         let open_prefabs = self.capture_open_prefabs(&selection.prefabs);
+        let open_scenes = self.capture_open_scenes(&selection.scenes);
         let request = self
             .authoring_project()
             .expect("authoring capture has a project")
@@ -303,8 +508,10 @@ impl EditorProjectSession {
                     .scene(selection.root.document)
                     .expect("captured Scene is open")
                     .session(),
+                inputs,
                 open_prefabs,
-            );
+            )
+            .map(|request| request.with_open_scenes(open_scenes));
         let request = match request {
             Ok(request) => request,
             Err(error) => {
@@ -332,7 +539,9 @@ impl EditorProjectSession {
             .into_handle()
             .ok();
         match task {
-            Some(task) => self.scene_capture.pending = Some(CaptureWork::Compose(task)),
+            Some(task) => {
+                self.scene_capture.pending = Some(CaptureWork::Compose { selection, task })
+            }
             None => self
                 .reject_scene_capture(capture_error("project.editor.scene-capture-task-rejected")),
         }
@@ -342,6 +551,7 @@ impl EditorProjectSession {
         self.authoring_runtime.invalidate_preview_content();
         self.scene_capture.captured = None;
         self.scene_capture.pending = None;
+        self.scene_capture.failed_attempt = self.capture_root_observation();
         if !self.scene_capture.next_generation() {
             return;
         }
@@ -390,6 +600,26 @@ impl EditorProjectSession {
             ));
             return;
         }
+        let cost = match observation_cost(
+            &selection,
+            demanded_sources(&capture, &selection.root.source_key),
+            capture.diagnostics().retained_bytes(),
+        ) {
+            Ok(cost) => cost,
+            Err(error) => {
+                self.reject_scene_capture(admission_error(error));
+                return;
+            }
+        };
+        let overlap = selection
+            .checked_retained_bytes()
+            .and_then(|bytes| bytes.checked_add(cost.retained_bytes))
+            .ok_or(AuthoringProjectSourceAdmissionError::AccountingOverflow)
+            .and_then(|bytes| capture.replace_host_retained_bytes(bytes));
+        if let Err(error) = overlap {
+            self.reject_scene_capture(admission_error(error));
+            return;
+        }
         let requires_recapture = capture.requires_recapture();
         let preview = capture.take_preview();
         let native_ready = preview.is_some();
@@ -403,31 +633,58 @@ impl EditorProjectSession {
             ),
             None => EditorPreviewProjection::rejected(capture.diagnostics().clone()),
         });
-        let mut participants = Vec::new();
+        let mut participants = Vec::with_capacity(cost.participant_count);
         let mut unsaved = 0;
-        let mut sources = Vec::new();
-        for prefab in capture.prefabs() {
-            let key = prefab.native_source().key();
-            let Some(revision) = prefab.session_revision() else {
-                sources.push((key.clone(), None));
+        let mut sources = Vec::with_capacity(cost.source_count);
+        let CaptureSelection {
+            root,
+            mut prefabs,
+            mut scenes,
+        } = selection;
+        for (key, path, revision) in demanded_sources(&capture, &root.source_key) {
+            let Some(revision) = revision else {
+                sources.push(CapturedSource {
+                    key: key.clone(),
+                    path: Arc::from(path),
+                    selected: None,
+                });
                 continue;
             };
-            let Some(source) = selection.prefabs.iter().find(|source| {
-                &source.source_key == key && source.revision == revision && source.receipt.is_some()
-            }) else {
+            let offered = match key.kind() {
+                nara_scene::SourceDocumentKind::Scene => &mut scenes,
+                nara_scene::SourceDocumentKind::Prefab => &mut prefabs,
+            };
+            let Some(source) = offered
+                .iter()
+                .position(|source| {
+                    &source.source_key == key
+                        && source.revision == revision
+                        && source.receipt.is_some()
+                })
+                .map(|index| offered.swap_remove(index))
+            else {
                 self.reject_scene_capture(capture_error(
                     "project.editor.scene-capture-participant-missing",
                 ));
                 return;
             };
             let document = source.document;
-            sources.push((key.clone(), Some(source.clone())));
+            sources.push(CapturedSource {
+                key: key.clone(),
+                path: Arc::from(path),
+                selected: Some(source),
+            });
             participants.push(EditorPreviewParticipant {
                 document,
                 revision,
-                source_key: prefab.native_source().key().clone(),
+                source_key: key.clone(),
             });
             unsaved += usize::from(self.workspace.document_is_dirty(document) == Some(true));
+        }
+        drop((prefabs, scenes));
+        if let Err(error) = capture.replace_host_retained_bytes(cost.retained_bytes) {
+            self.reject_scene_capture(admission_error(error));
+            return;
         }
         let validation = capture.source_validation();
         if !self.scene_capture.next_generation() {
@@ -437,7 +694,7 @@ impl EditorProjectSession {
             EditorPreviewDependencies::captured(self.scene_capture.generation, participants.into());
         let prepared = CapturedScene {
             projection,
-            selection,
+            root,
             dependencies,
             validation,
             unsaved_dependencies: unsaved,
@@ -447,18 +704,8 @@ impl EditorProjectSession {
             requires_recapture,
             verified: true,
         };
-        if !self
-            .capture_selection()
-            .as_ref()
-            .is_some_and(|current| prepared.matches(current))
-        {
-            if self.capture_selection().as_ref() == Some(&prepared.selection) {
-                self.reject_scene_capture(capture_error(
-                    "project.editor.scene-capture-source-unavailable",
-                ));
-            } else {
-                self.scene_capture.invalidate();
-            }
+        if !prepared.matches(self) {
+            self.scene_capture.invalidate();
             return;
         }
         if native_ready && let EditorExecutionLane::Authoring(project) = &self.execution {
@@ -472,18 +719,25 @@ impl EditorProjectSession {
         }
         self.scene_capture.captured = Some(prepared);
         self.scene_capture.failure = None;
+        self.scene_capture.failed_attempt = None;
         self.scene_capture.retry_at = None;
         self.scene_capture.validate_at = Some(Instant::now() + SOURCE_RECHECK);
     }
 
-    fn poll_scene_capture(&mut self, selection: &CaptureSelection) {
+    fn poll_scene_capture(&mut self) {
         let Some(work) = self.scene_capture.pending.take() else {
             return;
         };
         match work {
-            CaptureWork::Compose(mut task) => {
+            CaptureWork::Compose {
+                selection: original,
+                mut task,
+            } => {
                 if task.return_observer().state() == TaskReturnState::Pending {
-                    self.scene_capture.pending = Some(CaptureWork::Compose(task));
+                    self.scene_capture.pending = Some(CaptureWork::Compose {
+                        selection: original,
+                        task,
+                    });
                     return;
                 }
                 if self.scene_capture.pending_stale {
@@ -492,12 +746,7 @@ impl EditorProjectSession {
                 }
                 match task.try_take() {
                     Some(TaskTerminal::Completed(Ok(capture))) => {
-                        let original = self
-                            .scene_capture
-                            .selection
-                            .clone()
-                            .expect("capture work retains its selection");
-                        if original.root != selection.root {
+                        if !self.capture_root_is_current(&original.root) {
                             self.scene_capture.invalidate();
                         } else {
                             self.validate_scene_candidate(original, capture);
@@ -530,7 +779,7 @@ impl EditorProjectSession {
                 }
                 match task.try_take() {
                     Some(TaskTerminal::Completed(Ok(()))) => {
-                        if original.root == selection.root {
+                        if self.capture_root_is_current(&original.root) {
                             self.accept_scene_capture(original, capture);
                         } else {
                             self.scene_capture.invalidate();
@@ -543,7 +792,7 @@ impl EditorProjectSession {
                         } else {
                             self.scene_capture.invalidate();
                             self.authoring_runtime.invalidate_preview_content();
-                            self.start_scene_capture(selection.clone());
+                            self.start_current_scene_capture();
                         }
                     }
                     _ => self.reject_scene_capture(capture_error(
@@ -584,30 +833,50 @@ impl EditorProjectSession {
                     }
                     _ => {
                         self.scene_capture.invalidate();
-                        self.start_scene_capture(selection.clone());
+                        self.start_current_scene_capture();
                     }
                 }
             }
         }
     }
 
+    /// Keeps task return observable after its presentation consumer becomes unavailable.
+    pub(super) fn cancel_authoring_scene_capture(&mut self) {
+        self.scene_capture.cancel();
+        self.poll_scene_capture();
+        self.authoring_runtime.invalidate_preview_content();
+    }
+
     pub(super) fn drive_authoring_scene_capture(&mut self) -> Option<EditorPreviewSource> {
-        let Some(selection) = self.capture_selection() else {
-            self.scene_capture.cancel();
-            self.authoring_runtime.invalidate_preview_content();
+        let Some(document) = self
+            .scene_preview_document
+            .filter(|document| self.workspace.scene(*document).is_some())
+        else {
+            self.cancel_authoring_scene_capture();
             return None;
         };
         let current = self.scene_capture.captured.as_ref().map_or_else(
-            || self.scene_capture.selection.as_ref() == Some(&selection),
-            |capture| capture.matches(&selection),
+            || {
+                self.scene_capture.failed_attempt.as_ref().map_or_else(
+                    || {
+                        self.scene_capture
+                            .pending
+                            .as_ref()
+                            .and_then(CaptureWork::root)
+                            .is_some_and(|root| self.capture_root_is_current(root))
+                    },
+                    |attempt| self.capture_root_observation().as_ref() == Some(attempt),
+                )
+            },
+            |capture| capture.matches(self),
         );
         if !current {
             self.scene_capture.invalidate();
             self.authoring_runtime.invalidate_preview_content();
-            self.poll_scene_capture(&selection);
-            self.start_scene_capture(selection.clone());
+            self.poll_scene_capture();
+            self.start_current_scene_capture();
         } else {
-            self.poll_scene_capture(&selection);
+            self.poll_scene_capture();
         }
         let now = Instant::now();
         if self.scene_capture.pending.is_none() {
@@ -617,7 +886,7 @@ impl EditorProjectSession {
                     .retry_at
                     .is_none_or(|deadline| deadline <= now)
             {
-                self.start_scene_capture(selection.clone());
+                self.start_current_scene_capture();
             } else if self
                 .scene_capture
                 .validate_at
@@ -626,7 +895,7 @@ impl EditorProjectSession {
             {
                 if capture.requires_recapture {
                     // Successful receipts cannot observe a previously missing dependency.
-                    self.start_scene_capture(selection.clone());
+                    self.start_current_scene_capture();
                 } else {
                     let validation = capture.validation.clone();
                     self.scene_capture.validate_at = None;
@@ -666,8 +935,12 @@ impl EditorProjectSession {
             )
         };
         Some(EditorPreviewSource {
-            document: selection.root.document,
-            revision: selection.root.revision,
+            document,
+            revision: self
+                .workspace
+                .scene(document)
+                .expect("selected Scene remains open")
+                .revision(),
             dependencies,
             projection,
         })
@@ -688,17 +961,13 @@ impl EditorProjectSession {
         self.workspace.validate_document_query_basis(basis)?;
         let Some(capture) = self.scene_capture.captured.as_ref().filter(|capture| {
             capture.verified
-                && capture.selection.root.document == basis.document
-                && capture.selection.root.revision == basis.revision
-                && capture.selection.root.schema == basis.schema
+                && capture.root.document == basis.document
+                && capture.root.revision == basis.revision
+                && capture.root.schema == basis.schema
         }) else {
             return Ok(None);
         };
-        if !self
-            .capture_selection()
-            .as_ref()
-            .is_some_and(|current| capture.matches(current))
-        {
+        if !capture.matches(self) {
             return Ok(None);
         }
         Ok(capture
@@ -718,11 +987,7 @@ impl EditorProjectSession {
             if !capture.verified || !capture.native_ready {
                 return None;
             }
-            if !self
-                .capture_selection()
-                .as_ref()
-                .is_some_and(|current| capture.matches(current))
-            {
+            if !capture.matches(self) {
                 return None;
             }
         } else {
@@ -737,18 +1002,6 @@ impl EditorProjectSession {
             }
         }
         self.authoring_runtime.current_preview_content_stamp()
-    }
-
-    pub(super) fn release_published_scene_capture(&mut self) {
-        if self
-            .authoring_runtime
-            .current_preview_content_stamp()
-            .is_some()
-            && let Some(capture) = &mut self.scene_capture.captured
-            && capture.native_ready
-        {
-            capture.source_capture = None;
-        }
     }
 }
 
@@ -767,28 +1020,118 @@ fn projection(
     )
 }
 
-fn dependencies(
-    generation: u64,
-    sources: &[(
-        nara_scene::SourceDocumentKey,
-        Option<AuthoringSourceSelection>,
-    )],
-) -> EditorPreviewDependencies {
+fn dependencies(generation: u64, sources: &[CapturedSource]) -> EditorPreviewDependencies {
     EditorPreviewDependencies::captured(
         generation,
         sources
             .iter()
-            .filter_map(|(key, source)| {
-                let source = source.as_ref()?;
+            .filter_map(|observed| {
+                let source = observed.selected.as_ref()?;
                 Some(EditorPreviewParticipant {
                     document: source.document,
                     revision: source.revision,
-                    source_key: key.clone(),
+                    source_key: observed.key.clone(),
                 })
             })
             .collect::<Vec<_>>()
             .into(),
     )
+}
+
+fn demanded_sources<'a>(
+    capture: &'a AuthoringDocumentCapture,
+    root: &'a nara_scene::SourceDocumentKey,
+) -> impl Iterator<
+    Item = (
+        &'a nara_scene::SourceDocumentKey,
+        &'a str,
+        Option<SceneAuthoringRevision>,
+    ),
+> + 'a {
+    capture
+        .prefabs()
+        .iter()
+        .map(|prefab| {
+            (
+                prefab.native_source().key(),
+                prefab.source().project_path().as_str(),
+                prefab.session_revision(),
+            )
+        })
+        .chain(
+            capture
+                .scenes()
+                .iter()
+                .filter(move |scene| scene.native_source().key() != root)
+                .map(|scene| {
+                    (
+                        scene.native_source().key(),
+                        scene.source().project_path().as_str(),
+                        scene.session_revision(),
+                    )
+                }),
+        )
+}
+
+struct CaptureObservationCost {
+    retained_bytes: usize,
+    source_count: usize,
+    participant_count: usize,
+}
+
+fn observation_cost<'a>(
+    selection: &CaptureSelection,
+    sources: impl Iterator<
+        Item = (
+            &'a nara_scene::SourceDocumentKey,
+            &'a str,
+            Option<SceneAuthoringRevision>,
+        ),
+    >,
+    diagnostics_bytes: usize,
+) -> Result<CaptureObservationCost, AuthoringProjectSourceAdmissionError> {
+    let overflow = || AuthoringProjectSourceAdmissionError::AccountingOverflow;
+    let mut cost = CaptureObservationCost {
+        retained_bytes: std::mem::size_of::<CapturedScene>()
+            .checked_add(
+                selection
+                    .root
+                    .checked_retained_bytes()
+                    .ok_or_else(overflow)?,
+            )
+            .and_then(|bytes| bytes.checked_add(2 * std::mem::size_of::<usize>()))
+            .and_then(|bytes| bytes.checked_add(diagnostics_bytes))
+            .ok_or_else(overflow)?,
+        source_count: 0,
+        participant_count: 0,
+    };
+    for (key, path, revision) in sources {
+        let mut bytes = std::mem::size_of::<CapturedSource>()
+            .checked_add(key.retained_bytes())
+            .and_then(|bytes| bytes.checked_add(path.len()))
+            .and_then(|bytes| bytes.checked_add(2 * std::mem::size_of::<usize>()))
+            .ok_or_else(overflow)?;
+        if let Some(revision) = revision {
+            let selected = selection
+                .source(key, revision)
+                .ok_or(AuthoringProjectSourceAdmissionError::DocumentSourceMismatch)?;
+            bytes = bytes
+                .checked_add(selected.checked_retained_bytes().ok_or_else(overflow)?)
+                // The temporary participant vector and final Arc overlap, but move their keys.
+                .and_then(|bytes| {
+                    bytes.checked_add(2 * std::mem::size_of::<EditorPreviewParticipant>())
+                })
+                .and_then(|bytes| bytes.checked_add(key.retained_bytes()))
+                .ok_or_else(overflow)?;
+            cost.participant_count = cost.participant_count.checked_add(1).ok_or_else(overflow)?;
+        }
+        cost.retained_bytes = cost
+            .retained_bytes
+            .checked_add(bytes)
+            .ok_or_else(overflow)?;
+        cost.source_count = cost.source_count.checked_add(1).ok_or_else(overflow)?;
+    }
+    Ok(cost)
 }
 
 fn capture_error(code: &'static str) -> DiagnosticReport {

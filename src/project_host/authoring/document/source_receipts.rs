@@ -233,6 +233,15 @@ fn accepted_publication_advances_only_file_observation_and_preserves_old_receipt
     let updated = original
         .with_persistence_observation(identity, parent, digest)
         .unwrap();
+    assert!(updated.matches_persistence_observation(&original, identity, parent, digest));
+    assert!(updated.matches_persistence_observation(&updated, identity, parent, digest));
+    assert!(!original.matches_persistence_observation(&original, identity, parent, digest));
+    assert!(!updated.matches_persistence_observation(
+        &original,
+        identity,
+        parent,
+        original.digest()
+    ));
     assert_ne!(updated.identity(), original.identity());
     assert_eq!(updated.identity(), identity);
     assert_eq!(updated.parent_identity(), parent);

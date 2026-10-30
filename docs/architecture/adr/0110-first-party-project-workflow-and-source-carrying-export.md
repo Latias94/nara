@@ -8,6 +8,7 @@ creation terminality, build-input freshness and startup-closure ownership
 **Amended**: 2026-10-16 by the First 2D Author Workflow for repository-external local projects
 **Amended**: 2026-10-21 by finite declared Scene delivery for the persistent two-level consumer
 **Amended**: 2026-10-21 by explicit complete-frame headless execution
+**Amended**: 2026-10-30 by finite authored Scene data capture and original Product travel admission
 **Owner**: root product workflow, `nara_project`, `nara_fs`, project content and Runtime Hosts
 **Refines**: [ADR 0020](0020-project-layout-and-package-format.md),
 [ADR 0035](0035-project-manifest-and-runtime-settings-authority.md),
@@ -122,6 +123,17 @@ flowchart LR
 - Project-wide `[content] scenes` declares at most 64 additional Scene paths relative to the
   effective `paths.scenes`. Startup is an implicit root; duplicate explicit entries and invalid
   paths reject. Profiles may change the directory or startup selection, but not this global list.
+- Source Scene references capture a finite data closure through the same source owner and
+  production Prefab compiler. Self-edges, back-edges and diamonds visit each canonical Scene
+  once; the structural Prefab cycle rules remain independent. Raw authored documents, effective
+  compiled candidates, actual reader bindings and source/metadata receipts retain distinct facts.
+  The immutable source-content owner keeps the flat dependency documents alive through escaped
+  `SceneSource` values; it creates no dependency Worlds or recursive Scene owners. Only the
+  requested root is instantiated. An original primary Scene Product request resolves real
+  metadata in preparation, then separately requires startup or declared-root admission.
+  Dependency membership alone cannot authorize travel. Ready publication uses the original
+  request, captured source, exact plan/context and complete current Scene receipt without another
+  source discovery pass.
 - Strict Check validates startup and every declared Scene with the same bounded loader. It returns
   a separate `ProjectContentDeliveryReceipt`: sorted roots, exact deduplicated member facts and a
   delivery digest, bound to one project, manifest and schema authority. Differing kind/digest facts

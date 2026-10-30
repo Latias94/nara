@@ -170,7 +170,7 @@ fn saved_project_and_dirty_scene_keep_distinct_roots_and_rebuild_the_actual_sour
             &mut SchemaReclassificationWork::default(),
         )
         .unwrap();
-    let prepared = owner.prepare_project(&incumbent, &[]).unwrap();
+    let prepared = owner.prepare_project(&incumbent, &[], &[]).unwrap();
     assert_eq!(prepared.readiness(), AuthoringProjectReadiness::Complete);
     assert!(!prepared.diagnostics().has_errors());
     assert!(prepared.composition_failure().is_none());
@@ -182,6 +182,7 @@ fn saved_project_and_dirty_scene_keep_distinct_roots_and_rebuild_the_actual_sour
         .capture_scene(
             &source,
             borrow_prepared_scene_schema_source(&scene, &prepared_scene).unwrap(),
+            &[],
             &[],
         )
         .unwrap();
@@ -291,7 +292,7 @@ fn saved_startup_is_reread_as_b_while_the_incumbent_retains_a_and_the_scene_is_d
             &mut SchemaReclassificationWork::default(),
         )
         .unwrap();
-    let prepared = owner.prepare_project(&incumbent, &[]).unwrap();
+    let prepared = owner.prepare_project(&incumbent, &[], &[]).unwrap();
     assert_ne!(saved_a.document(), &saved_b);
     assert_ne!(dirty_c.as_ref(), &saved_b);
     assert_eq!(prepared.startup.document.document(), &saved_b);
@@ -304,6 +305,7 @@ fn saved_startup_is_reread_as_b_while_the_incumbent_retains_a_and_the_scene_is_d
         .capture_scene(
             &current_source,
             borrow_prepared_scene_schema_source(&scene, &reclassified).unwrap(),
+            &[],
             &[],
         )
         .unwrap();
@@ -381,7 +383,7 @@ fn prepared_project_selects_the_dirty_prefab_arc_and_revision_without_disk_previ
         borrow_prepared_prefab_schema_source(&session, &reclassified).unwrap(),
     )
     .unwrap()];
-    let prepared = owner.prepare_project(&incumbent, &open).unwrap();
+    let prepared = owner.prepare_project(&incumbent, &open, &[]).unwrap();
     assert_eq!(prepared.readiness(), AuthoringProjectReadiness::Complete);
     assert!(!prepared.diagnostics().has_errors());
     assert!(prepared.composition_failure().is_none());
@@ -452,7 +454,7 @@ fn newly_known_asset_reference_captures_actual_asset_metadata_bytes_and_database
     assert_eq!(incumbent.asset_sources().count(), 0);
     assert!(incumbent.asset_database().is_empty());
     let (mut owner, mut publication) = prepare_owner(&incumbent);
-    let prepared = owner.prepare_project(&incumbent, &[]).unwrap();
+    let prepared = owner.prepare_project(&incumbent, &[], &[]).unwrap();
     assert_eq!(prepared.readiness(), AuthoringProjectReadiness::Complete);
     assert!(!prepared.diagnostics().has_errors());
     assert!(prepared.composition_failure().is_none());
@@ -509,8 +511,8 @@ fn wrong_nominal_project_attachment_retains_the_actual_successor_leaf_and_eviden
     let (mut second, mut publication) = prepare_owner(&incumbent);
     assert_eq!(first.bytes(), second.bytes());
     assert_ne!(first.schema_basis(), second.schema_basis());
-    let prepared_first = first.prepare_project(&incumbent, &[]).unwrap();
-    let prepared_second = second.prepare_project(&incumbent, &[]).unwrap();
+    let prepared_first = first.prepare_project(&incumbent, &[], &[]).unwrap();
+    let prepared_second = second.prepare_project(&incumbent, &[], &[]).unwrap();
     assert!(matches!(
         prepared_first.validate(&mut second),
         Err(AuthoringProjectSourceAdmissionError::SchemaBasisMismatch)
@@ -568,21 +570,21 @@ fn failed_saved_source_captures_and_validation_attempts_share_the_owner_budget()
     fs::write(project.root.join(STARTUP), b"{").unwrap();
     let before = owner.budget().usage();
     assert!(matches!(
-        owner.prepare_project(&incumbent, &[]),
+        owner.prepare_project(&incumbent, &[], &[]),
         Err(AuthoringProjectSourceAdmissionError::SourceFormat { .. })
     ));
     let failed_once = owner.budget().usage();
     assert!(failed_once.decode_work() > before.decode_work());
     assert!(failed_once.aggregate_encoded_bytes() > before.aggregate_encoded_bytes());
     assert!(matches!(
-        owner.prepare_project(&incumbent, &[]),
+        owner.prepare_project(&incumbent, &[], &[]),
         Err(AuthoringProjectSourceAdmissionError::SourceFormat { .. })
     ));
     let failed_twice = owner.budget().usage();
     assert!(failed_twice.decode_work() > failed_once.decode_work());
     assert!(failed_twice.aggregate_encoded_bytes() > failed_once.aggregate_encoded_bytes());
     fs::write(project.root.join(STARTUP), &saved_bytes).unwrap();
-    let prepared = owner.prepare_project(&incumbent, &[]).unwrap();
+    let prepared = owner.prepare_project(&incumbent, &[], &[]).unwrap();
     prepared.validate(&mut owner).unwrap();
     let validated_once = owner.budget().usage().decode_work();
     prepared.validate(&mut owner).unwrap();
@@ -601,7 +603,7 @@ fn failed_saved_source_captures_and_validation_attempts_share_the_owner_budget()
     ));
     assert!(owner.budget().usage().decode_work() > maximum);
     assert!(matches!(
-        owner.prepare_project(&incumbent, &[]),
+        owner.prepare_project(&incumbent, &[], &[]),
         Err(AuthoringProjectSourceAdmissionError::Budget(
             AuthoringProjectAdmissionError::DecodeWorkExceeded { maximum: observed }
         )) if observed == maximum
@@ -616,7 +618,7 @@ fn prepared_validation_refuses_source_bundle_manifest_and_parent_observation_dri
         let project = independent_project();
         let incumbent = open_project(&project);
         let (mut owner, publication) = prepare_owner(&incumbent);
-        let prepared = owner.prepare_project(&incumbent, &[]).unwrap();
+        let prepared = owner.prepare_project(&incumbent, &[], &[]).unwrap();
         prepared.validate(&mut owner).unwrap();
         if change == "parent" {
             let before = prepared.startup.source.clone();
@@ -769,11 +771,12 @@ fn preserved_history_can_expose_a_composition_conflict_and_redo_its_exact_source
                 &mut SchemaReclassificationWork::default(),
             )
             .unwrap();
-        let prepared = owner.prepare_project(&incumbent, &[]).unwrap();
+        let prepared = owner.prepare_project(&incumbent, &[], &[]).unwrap();
         let current = owner
             .capture_scene(
                 &source,
                 borrow_prepared_scene_schema_source(&scene, &reclassified).unwrap(),
+                &[],
                 &[],
             )
             .unwrap();
@@ -886,7 +889,7 @@ fn saved_project_receipt_preserves_a_source_admitted_current_composition_conflic
     let bytes = saved.to_json_string().unwrap();
     fs::write(project.root.join(STARTUP), &bytes).unwrap();
     let (mut owner, mut publication) = prepare_owner(&incumbent);
-    let prepared = owner.prepare_project(&incumbent, &[]).unwrap();
+    let prepared = owner.prepare_project(&incumbent, &[], &[]).unwrap();
     assert_eq!(prepared.readiness(), AuthoringProjectReadiness::Degraded);
     assert!(prepared.diagnostics().has_errors());
     assert_eq!(

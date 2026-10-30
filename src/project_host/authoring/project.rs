@@ -32,7 +32,7 @@ use nara_scene::{
 use super::{
     AUTHORING_BASIS_ENCODED_MULTIPLIER, AuthoringProjectAdmissionBudget,
     AuthoringProjectAdmissionError, AuthoringProjectAdmissionUsage,
-    AuthoringProjectAttemptGeneration, AuthoringSchemaReceipt,
+    AuthoringProjectAttemptGeneration, AuthoringSchemaReceipt, checked_retained_replacement,
     document::{AuthoringDocumentDataError, admit_scene_bytes_with_basis},
     source_index::ProjectSourceIndexState,
 };
@@ -43,6 +43,7 @@ mod catalogue;
 mod schema_owner;
 pub(crate) use capture::{
     AuthoringDocumentCapture, AuthoringPrefabSessionSnapshot, AuthoringPrefabSourceCapture,
+    AuthoringSceneSessionSnapshot, AuthoringSceneSource, AuthoringSourceCaptureInputs,
     AuthoringSourceValidation, CapturedAuthoringPreview,
 };
 #[cfg(any(feature = "tooling", test))]
@@ -232,6 +233,7 @@ impl AuthoringUnresolvedDependency {
 
 pub(crate) struct AuthoringPrefabSource {
     path: AssetPath,
+    binding: catalogue::SourceDirectoryBinding,
     native_source: AdmittedNativeDocumentSource,
     source: Arc<AuthoringSourceFact>,
     content: AuthoringPrefabContent,
@@ -393,6 +395,7 @@ struct AuthoringProjectSnapshotInner {
     startup_source: Arc<AuthoringSourceFact>,
     startup_native_source: AdmittedNativeDocumentSource,
     startup_scene: Arc<PublishedAuthoringSceneDocument>,
+    scenes: Box<[AuthoringSceneSource]>,
     prefabs: Box<[AuthoringPrefabSource]>,
     assets: Box<[AuthoringAssetSource]>,
     asset_database: Arc<ProjectAssetDatabase>,
@@ -590,6 +593,7 @@ impl AuthoringProjectReceipt {
             startup_source: inner.startup_source,
             startup_native_source: inner.startup_native_source,
             startup_scene: inner.startup_scene,
+            scenes: inner.scenes,
             prefabs: inner.prefabs,
             assets: inner.assets,
             asset_database: inner.asset_database,
@@ -641,6 +645,7 @@ pub(crate) struct AuthoringProjectSessionSnapshot {
     startup_source: Arc<AuthoringSourceFact>,
     startup_native_source: AdmittedNativeDocumentSource,
     startup_scene: Arc<PublishedAuthoringSceneDocument>,
+    scenes: Box<[AuthoringSceneSource]>,
     prefabs: Box<[AuthoringPrefabSource]>,
     assets: Box<[AuthoringAssetSource]>,
     asset_database: Arc<ProjectAssetDatabase>,
@@ -710,16 +715,57 @@ impl AuthoringProjectSessionSnapshot {
         session: &nara_scene::SceneAuthoringSession,
         open_prefabs: &[AuthoringPrefabSessionSnapshot],
     ) -> Result<AuthoringDocumentCapture, AuthoringProjectSourceAdmissionError> {
-        self.capture_scene_request(source, session, open_prefabs.iter().cloned().collect())?
-            .prepare()
+        let inputs = self.admit_source_capture_inputs(
+            0,
+            checked_sum([
+                capture::prefabs::open_prefab_inputs_retained_bytes(open_prefabs)?,
+                source
+                    .checked_retained_bytes()
+                    .ok_or(AuthoringProjectSourceAdmissionError::AccountingOverflow)?,
+            ])?,
+        )?;
+        self.capture_scene_request(
+            source,
+            session,
+            inputs,
+            open_prefabs.iter().cloned().collect(),
+        )?
+        .prepare()
+    }
+
+    /// Admits Host and worker custody before source selections or working snapshots are copied.
+    /// Host retention transfers into the capture; worker retention ends with the request.
+    pub(crate) fn admit_source_capture_inputs(
+        &self,
+        host_retained_bytes: usize,
+        worker_retained_bytes: usize,
+    ) -> Result<AuthoringSourceCaptureInputs, AuthoringProjectSourceAdmissionError> {
+        let retained_bytes = checked_sum([host_retained_bytes, worker_retained_bytes])?;
+        let mut budget = self.schema.budget;
+        checked_retained_replacement(
+            budget.retained_candidate_bytes,
+            0,
+            retained_bytes,
+            budget.limits.retained_candidate_bytes().get(),
+        )?;
+        budget.charge_source_bytes(0, 0, 0, retained_bytes)?;
+        Ok(AuthoringSourceCaptureInputs {
+            basis: self.startup_scene.schema_basis(),
+            host_retained_bytes,
+            worker_retained_bytes,
+        })
     }
 
     pub(crate) fn capture_scene_request(
         &self,
         source: &super::document::AuthoringDocumentSourceFact,
         session: &nara_scene::SceneAuthoringSession,
+        inputs: AuthoringSourceCaptureInputs,
         open_prefabs: Box<[AuthoringPrefabSessionSnapshot]>,
     ) -> Result<capture::OwnedAuthoringSceneCapture, AuthoringProjectSourceAdmissionError> {
+        if inputs.basis != self.startup_scene.schema_basis() {
+            return Err(AuthoringProjectSourceAdmissionError::SchemaBasisMismatch);
+        }
         let basis = session
             .authoring_schema_basis()
             .filter(|basis| basis == &self.startup_scene.schema_basis())
@@ -746,11 +792,17 @@ impl AuthoringProjectSessionSnapshot {
             ),
             adapter_retained: adapter_receipts_retained_bytes(&self.adapters)?,
             open_prefabs,
+            open_scenes: Box::new([]),
+            inputs,
         })
     }
 
     pub(crate) fn startup_native_source(&self) -> &AdmittedNativeDocumentSource {
         &self.startup_native_source
+    }
+
+    pub(crate) fn scene_sources(&self) -> &[AuthoringSceneSource] {
+        &self.scenes
     }
 
     #[must_use]
@@ -840,7 +892,10 @@ impl AuthoringProjectSessionSnapshot {
 
     #[must_use]
     pub(crate) fn prefab(&self, path: &AssetPath) -> Option<&AuthoringPrefabSource> {
-        self.prefabs.iter().find(|prefab| prefab.path() == path)
+        let canonical = self.prefab_scope.resolve(path);
+        self.prefabs
+            .iter()
+            .find(|prefab| prefab.source().project_path().as_str() == canonical.as_str())
     }
 
     pub(crate) fn prefab_sources(&self) -> impl Iterator<Item = &AuthoringPrefabSource> {
@@ -1017,6 +1072,7 @@ impl PreparedAuthoringProject {
             self.schema.bundle_bytes().len(),
             &mut budget,
             &[],
+            &[],
             capture::AuthoringCapturePreview::Prepare,
         )?;
         #[cfg(feature = "presentation-2d")]
@@ -1051,6 +1107,7 @@ impl CapturedSavedStartup {
             readiness,
             diagnostics: startup_compilation_diagnostics,
             prefabs,
+            scenes,
             assets,
             asset_database,
             asset_scope,
@@ -1059,6 +1116,7 @@ impl CapturedSavedStartup {
             source_facts,
             stable_lookups,
             usage: _,
+            host_retained_bytes: _,
             preview: startup_preview,
             composition_failure: startup_composition_failure,
             root_revision: _,
@@ -1077,6 +1135,7 @@ impl CapturedSavedStartup {
                 startup_source: self.source,
                 startup_native_source: self.native_source,
                 startup_scene: self.document,
+                scenes,
                 prefabs,
                 assets,
                 asset_database,
@@ -1138,6 +1197,7 @@ fn capture_saved_startup(
     bundle_encoded_bytes: usize,
     budget: &mut AuthoringProjectAdmissionBudget,
     open_prefabs: &[AuthoringPrefabSessionSnapshot],
+    open_scenes: &[AuthoringSceneSessionSnapshot],
     preview: capture::AuthoringCapturePreview,
 ) -> Result<CapturedSavedStartup, AuthoringProjectSourceAdmissionError> {
     let document = admit_scene_document(&read, scene_limits, basis, bundle_encoded_bytes, budget)?;
@@ -1152,6 +1212,12 @@ fn capture_saved_startup(
         budget,
     )?;
     capture::charge_open_prefab_inputs(open_prefabs, budget)?;
+    budget.charge_source_bytes(
+        0,
+        0,
+        0,
+        capture::scenes::open_scene_inputs_retained_bytes(open_scenes)?,
+    )?;
     let capture = capture::capture_scene(
         schema,
         scene_limits,
@@ -1162,6 +1228,7 @@ fn capture_saved_startup(
         AuthoringProjectReadiness::from_document(document.readiness()),
         budget,
         open_prefabs,
+        open_scenes,
         preview,
     )?;
     Ok(CapturedSavedStartup {
@@ -1207,11 +1274,7 @@ enum LoadedIdentity {
     ContainingDocument,
     AssetMetadata,
     AssetSource,
-    Prefab {
-        source: Arc<AuthoringSourceFact>,
-        document: Arc<PrefabDocument>,
-        limits: SceneFileLimits,
-    },
+    Prefab,
 }
 
 fn include_native_metadata_source(
@@ -1479,9 +1542,8 @@ fn admit_prefab_composition_source(
     scene_limits: SceneFileLimits,
     budget: &mut AuthoringProjectAdmissionBudget,
 ) -> Result<(Arc<PrefabDocument>, SceneFileLimits), AuthoringProjectSourceAdmissionError> {
-    let encoded_limit = ByteLimit::new(source.read_limit)
-        .ok_or(AuthoringProjectSourceAdmissionError::AccountingOverflow)?;
-    let limits = scene_limits.with_encoded_bytes(encoded_limit);
+    let reservation = reserve_composition_decode(source, scene_limits, budget)?;
+    let limits = reservation.limits;
     let path = source.source.project_path().as_str();
     let candidate = if path.ends_with(".ron") {
         PrefabDocumentCandidate::decode_ron_bytes_with_limits(&source.bytes, limits)
@@ -1494,9 +1556,7 @@ fn admit_prefab_composition_source(
             budget,
         ));
     }
-    .map_err(|error| {
-        map_document_data_error(source, AuthoringDocumentDataError::Format(error), budget)
-    })?;
+    .map_err(|error| reservation.format_error(source, error))?;
     let document = candidate.into_composition_source().map_err(|error| {
         if let Err(budget_error) = budget.charge_diagnostics(
             error.diagnostics().len(),
@@ -1510,8 +1570,137 @@ fn admit_prefab_composition_source(
             source: error,
         }
     })?;
-    charge_composition_source(&source.source, source.bytes.len(), &document, budget)?;
+    let retained = checked_sum([
+        document.retained_bytes()?,
+        source_fact_retained_bytes(&source.source)?,
+        size_of::<Arc<PrefabDocument>>(),
+    ])?;
+    budget.reconcile_retained_reservation(reservation.bytes, retained)?;
+    budget.charge_source_bytes(
+        0,
+        document.retained_bytes()?,
+        checked_sum([document.retained_bytes()?, source.bytes.len()])?,
+        0,
+    )?;
     Ok((Arc::new(document), limits))
+}
+
+/// The production decoder enforces this shape ceiling before allocating domain data.
+/// Parser/domain memory is reserved separately from the finite wire scan work.
+struct CompositionDecodeReservation {
+    bytes: usize,
+    limits: SceneFileLimits,
+    constrained_nodes: bool,
+    maximum_retained: usize,
+}
+
+impl CompositionDecodeReservation {
+    fn format_error(
+        &self,
+        source: &ReadAuthoringSource,
+        error: SceneFormatError,
+    ) -> AuthoringProjectSourceAdmissionError {
+        if self.constrained_nodes
+            && matches!(
+                error.shape_error(),
+                Some(
+                    nara_core::SerdeShapeError::NodeLimitExceeded { .. }
+                        | nara_core::SerdeShapeError::ContainerItemLimitExceeded { .. }
+                )
+            )
+        {
+            return AuthoringProjectAdmissionError::RetainedCandidateBytesExceeded {
+                maximum: self.maximum_retained,
+            }
+            .into();
+        }
+        AuthoringProjectSourceAdmissionError::SourceFormat {
+            kind: source.source.kind(),
+            path: source.source.project_path().clone(),
+            source: error,
+        }
+    }
+}
+
+fn reserve_composition_decode(
+    source: &ReadAuthoringSource,
+    limits: SceneFileLimits,
+    budget: &mut AuthoringProjectAdmissionBudget,
+) -> Result<CompositionDecodeReservation, AuthoringProjectSourceAdmissionError> {
+    let encoded = source.bytes.len().max(1);
+    let maximum_retained = budget.limits.retained_candidate_bytes().get();
+    let available = maximum_retained.saturating_sub(budget.retained_candidate_bytes);
+    let bound = |nodes| {
+        checked_sum([
+            checked_product(encoded, 8)?,
+            checked_product(nodes, 32)?,
+            checked_product(limits.shape().container_items().get().min(nodes), 64)?,
+            checked_product(
+                limits.entities().get().min(nodes),
+                checked_sum([
+                    size_of::<SceneEntityRecord>(),
+                    3 * size_of::<nara_scene::SceneEntityId>(),
+                    128,
+                ])?,
+            )?,
+            checked_product(
+                limits.components().get().min(nodes),
+                checked_sum([
+                    size_of::<nara_scene::SceneComponentRecord>(),
+                    size_of::<nara_reflect::ComponentTypeId>(),
+                    128,
+                ])?,
+            )?,
+            checked_product(
+                limits.prefab_instances().get().min(nodes),
+                size_of::<PrefabInstance>(),
+            )?,
+            checked_product(limits.overlay_declarations().get().min(nodes), 512)?,
+            checked_product(limits.component_value_nodes().get().min(nodes), 96)?,
+            checked_product(limits.diagnostic_sources().get().min(nodes), 128)?,
+            source_fact_retained_bytes(&source.source)?,
+            4 * size_of::<usize>(),
+        ])
+    };
+    let mut lower = 0;
+    let mut upper = limits.shape().nodes().get().min(encoded);
+    while lower < upper {
+        let midpoint = lower + (upper - lower) / 2 + 1;
+        if bound(midpoint)? <= available {
+            lower = midpoint;
+        } else {
+            upper = midpoint - 1;
+        }
+    }
+    let nodes = nara_core::ItemLimit::new(lower).ok_or(
+        AuthoringProjectAdmissionError::RetainedCandidateBytesExceeded {
+            maximum: maximum_retained,
+        },
+    )?;
+    let shape = limits.shape();
+    let limits = limits
+        .with_encoded_bytes(
+            ByteLimit::new(source.read_limit)
+                .ok_or(AuthoringProjectSourceAdmissionError::AccountingOverflow)?,
+        )
+        .with_shape(nara_core::SerdeShapeLimits::new(
+            shape.depth(),
+            nodes,
+            nara_core::ItemLimit::new(shape.container_items().get().min(nodes.get()))
+                .ok_or(AuthoringProjectSourceAdmissionError::AccountingOverflow)?,
+            shape.string_bytes(),
+            shape.total_string_bytes(),
+        ));
+    let bytes = bound(nodes.get())?;
+    // Shape, header and payload parsing each scan the actual encoded input. Memory capacity
+    // is not work performed; whitespace must not masquerade as millions of domain records.
+    budget.charge_source_bytes(0, 0, checked_product(source.bytes.len(), 3)?, bytes)?;
+    Ok(CompositionDecodeReservation {
+        bytes,
+        limits,
+        constrained_nodes: nodes.get() < shape.nodes().get().min(encoded),
+        maximum_retained,
+    })
 }
 
 fn charge_composition_source(
@@ -1796,42 +1985,6 @@ fn declared_asset_references_retained_bytes<'a>(
         }
     }
     Ok(total)
-}
-
-fn enqueue_document_assets<'a>(
-    references: impl IntoIterator<Item = &'a DeclaredAssetReference>,
-    current_depth: usize,
-    pending: &mut BTreeMap<AssetPath, usize>,
-    unresolved_dependencies: &mut Vec<AuthoringUnresolvedDependency>,
-    catalogue: &mut ReferenceCatalogue,
-    budget: &mut AuthoringProjectAdmissionBudget,
-) -> Result<(), AuthoringProjectSourceAdmissionError> {
-    let dependency_depth = current_depth
-        .checked_add(1)
-        .ok_or(AuthoringProjectSourceAdmissionError::AccountingOverflow)?;
-    for declared in references {
-        let reference = declared.asset_ref();
-        match catalogue.resolve(reference, false, budget)? {
-            Some(path) => {
-                budget.charge_reference(path.as_str().len(), dependency_depth, true)?;
-                pending
-                    .entry(path)
-                    .and_modify(|observed_depth| {
-                        *observed_depth = (*observed_depth).min(dependency_depth);
-                    })
-                    .or_insert(dependency_depth);
-            }
-            None => {
-                budget.charge_reference(16, dependency_depth, true)?;
-                unresolved_dependencies.push(AuthoringUnresolvedDependency {
-                    kind: AuthoringUnresolvedDependencyKind::Asset,
-                    reference: reference.clone(),
-                    dependency_depth,
-                });
-            }
-        }
-    }
-    Ok(())
 }
 
 fn remaining_compiler_work(

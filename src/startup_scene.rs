@@ -44,7 +44,7 @@ use nara_scene::{
 
 #[cfg(all(feature = "runtime-2d", feature = "serde"))]
 use crate::project_content::{
-    ProjectContentAssets, ProjectContentGenerationLease, ProjectContentLease,
+    ProjectContentGenerationLease, ProjectContentLease, ProjectSourceContent,
 };
 #[cfg(feature = "serde")]
 use crate::scene_retention::direct_runtime_scene_retained_bytes;
@@ -89,7 +89,7 @@ enum SceneRetention {
     Project {
         _lease: ProjectContentLease,
         _generation: ProjectContentGenerationLease,
-        assets: Arc<ProjectContentAssets>,
+        sources: Arc<ProjectSourceContent>,
         retained_bytes: usize,
         schema_authority: Arc<nara_scene::SceneComponentBindingsWitness>,
     },
@@ -201,7 +201,7 @@ impl SceneSource {
     #[cfg(all(feature = "runtime-2d", feature = "serde"))]
     pub(crate) fn from_project_content(
         candidate: Arc<ExpandedSceneCandidate>,
-        assets: Arc<ProjectContentAssets>,
+        sources: Arc<ProjectSourceContent>,
         lease: ProjectContentLease,
         generation: ProjectContentGenerationLease,
         retained_bytes: usize,
@@ -212,7 +212,7 @@ impl SceneSource {
             retention: SceneRetention::Project {
                 _lease: lease,
                 _generation: generation,
-                assets,
+                sources,
                 retained_bytes,
                 schema_authority,
             },
@@ -266,7 +266,7 @@ impl SceneSource {
     pub(crate) fn asset_resolution(&self) -> Option<nara_asset::AssetReferenceResolver<'_>> {
         match &self.retention {
             #[cfg(all(feature = "runtime-2d", feature = "serde"))]
-            SceneRetention::Project { assets, .. } => Some(assets.resolution()),
+            SceneRetention::Project { sources, .. } => Some(sources.resolution()),
             #[cfg(all(feature = "runtime-2d", feature = "serde"))]
             SceneRetention::RuntimeContent { .. } => None,
             SceneRetention::Direct { .. } => None,

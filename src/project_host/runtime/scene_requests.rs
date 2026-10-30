@@ -67,13 +67,23 @@ impl Context {
         }
     }
 
-    fn declares(&self, selection: &ProjectSceneSelection) -> bool {
+    fn declares_source_path(&self, path: &ProjectPath) -> bool {
+        let Self::Source { candidate, .. } = self else {
+            return false;
+        };
+        let settings = candidate.settings();
+        settings.startup.default_scene.as_ref() == Some(path)
+            || settings.content.scenes.contains(path)
+    }
+
+    fn admits_request(&self, selection: &ProjectSceneSelection) -> bool {
         match (self, selection) {
-            (Self::Source { candidate, .. }, ProjectSceneSelection::Source(path)) => {
-                let settings = candidate.settings();
-                settings.startup.default_scene.as_ref() == Some(path)
-                    || settings.content.scenes.contains(path)
+            (Self::Source { .. }, ProjectSceneSelection::Source(path)) => {
+                self.declares_source_path(path)
             }
+            // Product identity and declared-root membership need actual source discovery. The
+            // worker admits that association or returns a rejection without owner-thread I/O.
+            (Self::Source { .. }, ProjectSceneSelection::Product(_)) => true,
             (Self::Processed { base }, ProjectSceneSelection::Product(product)) => {
                 base.catalog().scenes().contains(product)
                     && base.member(*product).is_some_and(|member| {
@@ -209,7 +219,7 @@ impl RequestOwner {
         if self.slot.is_some() {
             return Err(ProjectSceneRequestError::Busy);
         }
-        if !self.context.declares(&selection) {
+        if !self.context.admits_request(&selection) {
             return Err(ProjectSceneRequestError::UndeclaredScene);
         }
         let sequence = NEXT_REQUEST
@@ -424,8 +434,15 @@ pub(crate) fn poll_project_scene_requests(world: &mut World) {
         if let Some(result) = preparation.poll() {
             let state = discard.take();
             let id = admission.id;
+            let content_valid = result
+                .as_ref()
+                .is_ok_and(|content| api::content_matches_admission(content, admission));
             slot = match (state, result) {
                 (Some(state), _) => Slot::terminal(id, state),
+                (None, Ok(_)) if !content_valid => Slot::terminal(
+                    id,
+                    ProjectSceneRequestState::Rejected(ProjectSceneRequestError::Stale),
+                ),
                 (None, Ok(content)) => {
                     let Slot::Preparing { admission, .. } = slot else {
                         unreachable!()

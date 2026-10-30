@@ -106,14 +106,16 @@ impl PreparedAuthoringSchemaOwner {
         &mut self,
         incumbent: &AuthoringProjectSessionSnapshot,
         open_prefabs: &[AuthoringPrefabSessionSnapshot],
+        open_scenes: &[AuthoringSceneSessionSnapshot],
     ) -> Result<PreparedSchemaOwnerProject, AuthoringProjectSourceAdmissionError> {
-        self.prepare_project_input(&incumbent.schema_owner_input(), open_prefabs)
+        self.prepare_project_input(&incumbent.schema_owner_input(), open_prefabs, open_scenes)
     }
 
     pub(crate) fn prepare_project_input(
         &mut self,
         input: &AuthoringSchemaOwnerProjectInput,
         open_prefabs: &[AuthoringPrefabSessionSnapshot],
+        open_scenes: &[AuthoringSceneSessionSnapshot],
     ) -> Result<PreparedSchemaOwnerProject, AuthoringProjectSourceAdmissionError> {
         if !Arc::ptr_eq(self.incumbent(), &input.incumbent) {
             return Err(AuthoringProjectSourceAdmissionError::SchemaBasisMismatch);
@@ -141,6 +143,7 @@ impl PreparedAuthoringSchemaOwner {
                 self.bytes().len(),
                 &mut budget,
                 open_prefabs,
+                open_scenes,
                 capture::AuthoringCapturePreview::Omit,
             )?;
             // This closure may include dirty Prefab participants. Ordinary startup seeding marks

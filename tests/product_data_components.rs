@@ -684,10 +684,9 @@ fn authoring_bundle_metadata_does_not_activate_unselected_data_owners() {
         nara::project_host::ProjectContentErrorKind::PrefabExpansion
     );
     assert!(rejected.diagnostics().iter().any(|diagnostic| {
-        diagnostic.code().as_str() == "scene.prefab-compilation-failed"
+        diagnostic.code().as_str() == "scene.unknown-component"
             && diagnostic.fields().iter().any(|field| {
-                field.key().as_str() == "failure-kind"
-                    && field.display_value().as_ref() == "owner-admission"
+                field.key().as_str() == "component-id" && field.display_value().as_ref() == MOTION
             })
     }));
     assert_eq!(loader.budget_snapshot().active_reservations(), 0);

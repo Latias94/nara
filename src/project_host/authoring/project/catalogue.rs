@@ -10,12 +10,38 @@ use super::*;
 #[cfg(test)]
 mod tests;
 
-/// One demanded query in its source directory, separate from file or working-copy evidence.
+/// One demanded global identity observation, separate from its reader and working-copy evidence.
 pub(super) struct StableLookupObservation {
     stable_id: StableAssetId,
-    prefab: bool,
     // An unresolved result remains provisional; capture still requires recapture.
     target: Option<AssetSourcePath>,
+}
+
+/// The actual directory capability binding and expected kind of a source query.
+/// Neither field is part of canonical source identity.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(super) struct SourceDirectoryBinding {
+    pub(super) directory: Arc<ProjectPath>,
+    pub(super) scope: Arc<AssetPathScope>,
+    pub(super) expected_kind: Option<AssetSourceKind>,
+}
+
+impl SourceDirectoryBinding {
+    pub(super) fn new(directory: ProjectPath, expected_kind: Option<AssetSourceKind>) -> Self {
+        let prefix = AssetSourcePath::new(directory.as_str())
+            .expect("an admitted project directory is a canonical source prefix");
+        Self {
+            directory: Arc::new(directory),
+            scope: Arc::new(AssetPathScope::under(prefix)),
+            expected_kind,
+        }
+    }
+}
+
+#[derive(Clone)]
+pub(super) struct ResolvedResourceSource {
+    pub(super) path: AssetPath,
+    pub(super) binding: SourceDirectoryBinding,
 }
 
 impl StableLookupObservation {
@@ -29,21 +55,37 @@ impl StableLookupObservation {
 
 pub(super) struct ReferenceCatalogue {
     root: DirectoryCapability,
-    directories: [ProjectPath; 2],
-    scopes: [Arc<AssetPathScope>; 2],
+    bindings: Vec<SourceDirectoryBinding>,
     indexed: bool,
     database: ProjectAssetDatabase,
     metadata: BTreeMap<AssetSourcePath, Arc<AuthoringSourceFact>>,
-    lookups: BTreeMap<(StableAssetId, bool), StableLookupObservation>,
+    source_bindings: BTreeMap<AssetSourcePath, SourceDirectoryBinding>,
+    lookups: BTreeMap<StableAssetId, StableLookupObservation>,
 }
 
 impl ReferenceCatalogue {
+    pub(super) fn project_bindings(
+        settings: &EffectiveProjectSettings,
+    ) -> Vec<SourceDirectoryBinding> {
+        vec![
+            SourceDirectoryBinding::new(settings.paths.assets.clone(), None),
+            SourceDirectoryBinding::new(
+                settings.paths.prefabs.clone(),
+                Some(AssetSourceKind::Prefab),
+            ),
+            SourceDirectoryBinding::new(
+                settings.paths.scenes.clone(),
+                Some(AssetSourceKind::Scene),
+            ),
+        ]
+    }
+
     pub(super) fn new(
         root: DirectoryCapability,
-        directories: [ProjectPath; 2],
+        bindings: Vec<SourceDirectoryBinding>,
         budget: &mut AuthoringProjectAdmissionBudget,
     ) -> Result<Self, AuthoringProjectSourceAdmissionError> {
-        let mut bind_scope = |directory: &ProjectPath| {
+        for binding in &bindings {
             budget.charge_source_bytes(
                 0,
                 0,
@@ -51,31 +93,36 @@ impl ReferenceCatalogue {
                 checked_sum([
                     size_of::<AssetPathScope>(),
                     2 * size_of::<usize>(),
-                    directory.as_str().len(),
+                    binding.directory.as_str().len(),
+                    size_of::<SourceDirectoryBinding>(),
                 ])?,
             )?;
-            let prefix = AssetSourcePath::new(directory.as_str()).map_err(|source| {
-                AuthoringProjectSourceAdmissionError::DocumentSourcePath {
-                    path: directory.clone(),
-                    source,
-                }
-            })?;
-            Ok::<_, AuthoringProjectSourceAdmissionError>(Arc::new(AssetPathScope::under(prefix)))
-        };
-        let scopes = [bind_scope(&directories[0])?, bind_scope(&directories[1])?];
+        }
         Ok(Self {
             root,
-            directories,
-            scopes,
+            bindings,
             indexed: false,
             database: ProjectAssetDatabase::default(),
             metadata: BTreeMap::new(),
+            source_bindings: BTreeMap::new(),
             lookups: BTreeMap::new(),
         })
     }
 
-    pub(super) fn scope(&self, prefab: bool) -> &Arc<AssetPathScope> {
-        &self.scopes[usize::from(prefab)]
+    pub(super) fn assets(&self) -> SourceDirectoryBinding {
+        self.bindings
+            .iter()
+            .find(|binding| binding.expected_kind.is_none())
+            .expect("the source owner binds an Assets query directory")
+            .clone()
+    }
+
+    pub(super) fn prefabs(&self) -> SourceDirectoryBinding {
+        self.bindings
+            .iter()
+            .find(|binding| binding.expected_kind == Some(AssetSourceKind::Prefab))
+            .expect("the source owner binds a Prefab query directory")
+            .clone()
     }
 
     pub(super) const fn is_indexed(&self) -> bool {
@@ -83,16 +130,113 @@ impl ReferenceCatalogue {
     }
 
     pub(super) fn lookup_sources(&self) -> impl Iterator<Item = &Arc<AuthoringSourceFact>> {
-        self.metadata.values()
+        self.lookups
+            .values()
+            .filter_map(|lookup| self.metadata.get(lookup.target.as_ref()?))
+    }
+
+    /// Bare paths keep their Assets-relative meaning. Stable selections retain the actual
+    /// directory which observed the sidecar, including native data outside Assets.
+    pub(super) fn resolve_resource(
+        &mut self,
+        reference: &AssetRef,
+        budget: &mut AuthoringProjectAdmissionBudget,
+    ) -> Result<Option<ResolvedResourceSource>, AuthoringProjectSourceAdmissionError> {
+        if let AssetRef::Path(path) = reference {
+            budget.charge_source_bytes(
+                0,
+                0,
+                0,
+                checked_sum([
+                    size_of::<ResolvedResourceSource>(),
+                    path.as_str().len(),
+                    self.assets().directory.as_str().len(),
+                ])?,
+            )?;
+            return Ok(Some(ResolvedResourceSource {
+                path: path.clone(),
+                binding: self.assets(),
+            }));
+        }
+        self.ensure_indexed(budget)?;
+        let id = match reference {
+            AssetRef::StableId(id) => *id,
+            AssetRef::Product(product) => product.source(),
+            AssetRef::Path(_) => unreachable!(),
+        };
+        let Some(record) = self.database.record_for_stable_id(id) else {
+            let binding = self.assets();
+            self.resolve(reference, &binding, budget)?;
+            return Ok(None);
+        };
+        if record.source_kind() == &AssetSourceKind::Scene && !reference.is_primary() {
+            return Err(AuthoringProjectSourceAdmissionError::NativeSource(
+                super::super::AuthoringDocumentAdmissionError::NativeSourceMetadataMismatch,
+            ));
+        }
+        let binding = self
+            .source_bindings
+            .get(record.path())
+            .expect("an indexed record retains its actual directory binding");
+        budget.charge_source_bytes(
+            0,
+            0,
+            0,
+            checked_sum([
+                size_of::<ResolvedResourceSource>(),
+                record.path().as_str().len(),
+                binding.directory.as_str().len() * 2,
+            ])?,
+        )?;
+        let mut binding = binding.clone();
+        binding.expected_kind = Some(record.source_kind().clone());
+        let path = self.resolve(reference, &binding, budget)?;
+        Ok(path.map(|path| ResolvedResourceSource { path, binding }))
+    }
+
+    pub(super) fn resolve_prefab(
+        &mut self,
+        reference: &AssetRef,
+        budget: &mut AuthoringProjectAdmissionBudget,
+    ) -> Result<Option<ResolvedResourceSource>, AuthoringProjectSourceAdmissionError> {
+        if !reference.is_primary() {
+            return Ok(None);
+        }
+        if let AssetRef::Path(path) = reference {
+            budget.charge_source_bytes(
+                0,
+                0,
+                0,
+                checked_sum([size_of::<ResolvedResourceSource>(), path.as_str().len()])?,
+            )?;
+            return Ok(Some(ResolvedResourceSource {
+                path: path.clone(),
+                binding: self.prefabs(),
+            }));
+        }
+        let selected = self.resolve_resource(reference, budget)?;
+        if selected
+            .as_ref()
+            .is_some_and(|selected| selected.binding.expected_kind != Some(AssetSourceKind::Prefab))
+        {
+            return Err(AuthoringProjectSourceAdmissionError::NativeSource(
+                super::super::AuthoringDocumentAdmissionError::NativeSourceMetadataMismatch,
+            ));
+        }
+        Ok(selected)
     }
 
     pub(super) fn resolve(
         &mut self,
         reference: &AssetRef,
-        prefab: bool,
+        binding: &SourceDirectoryBinding,
         budget: &mut AuthoringProjectAdmissionBudget,
     ) -> Result<Option<AssetPath>, AuthoringProjectSourceAdmissionError> {
-        if prefab && !reference.is_primary() {
+        if matches!(
+            binding.expected_kind,
+            Some(AssetSourceKind::Prefab | AssetSourceKind::Scene)
+        ) && !reference.is_primary()
+        {
             return Ok(None);
         }
         let stable_id = match reference {
@@ -101,29 +245,27 @@ impl ReferenceCatalogue {
             AssetRef::Product(product) => product.source(),
         };
         self.ensure_indexed(budget)?;
-        let key = (stable_id, prefab);
-        if !self.lookups.contains_key(&key) {
-            let target = self.resolve_indexed(reference, prefab);
+        if !self.lookups.contains_key(&stable_id) {
+            let target = self.indexed_source_path(stable_id);
             budget.charge_source_bytes(
                 0,
                 0,
                 0,
                 checked_sum([
-                    size_of::<((StableAssetId, bool), StableLookupObservation)>(),
+                    size_of::<StableLookupObservation>(),
                     target.map_or(0, |path| path.as_str().len()),
                     64,
                 ])?,
             )?;
             let observation = StableLookupObservation {
                 stable_id,
-                prefab,
                 target: target.cloned(),
             };
-            self.lookups.insert(key, observation);
+            self.lookups.insert(stable_id, observation);
         }
         Ok(self
-            .resolve_indexed(reference, prefab)
-            .and_then(|path| self.scope(prefab).relativize(path)))
+            .resolve_indexed(reference, binding)
+            .and_then(|path| binding.scope.relativize(path)))
     }
 
     fn ensure_indexed(
@@ -131,8 +273,8 @@ impl ReferenceCatalogue {
         budget: &mut AuthoringProjectAdmissionBudget,
     ) -> Result<(), AuthoringProjectSourceAdmissionError> {
         if !self.indexed {
-            for prefab in [false, true] {
-                self.index_directory(prefab, budget)?;
+            for index in 0..self.bindings.len() {
+                self.index_directory(index, budget)?;
             }
             self.indexed = true;
         }
@@ -161,20 +303,42 @@ impl ReferenceCatalogue {
         })
     }
 
-    fn resolve_indexed(&self, reference: &AssetRef, prefab: bool) -> Option<&AssetSourcePath> {
-        if prefab && !reference.is_primary() {
+    fn resolve_indexed(
+        &self,
+        reference: &AssetRef,
+        binding: &SourceDirectoryBinding,
+    ) -> Option<&AssetSourcePath> {
+        if matches!(
+            binding.expected_kind,
+            Some(AssetSourceKind::Prefab | AssetSourceKind::Scene)
+        ) && !reference.is_primary()
+        {
             return None;
         }
+        let stable_id = match reference {
+            AssetRef::StableId(id) => *id,
+            AssetRef::Product(product) => product.source(),
+            AssetRef::Path(_) => return None,
+        };
         self.database
-            .resolver(self.scope(prefab))
-            .resolve_ref(reference)
-            .ok()
+            .record_for_stable_id(stable_id)
             .and_then(|record| {
                 self.metadata.get(record.path())?;
-                (self.scope(prefab).relative_path(record.path()).is_some()
-                    && (!prefab || record.source_kind() == &AssetSourceKind::Prefab))
-                    .then(|| record.path())
+                (binding.scope.relative_path(record.path()).is_some()
+                    && binding
+                        .expected_kind
+                        .as_ref()
+                        .is_none_or(|kind| record.source_kind() == kind))
+                .then(|| record.path())
             })
+    }
+
+    /// Stable identity is global to the admitted catalogue. A lookup observation must not
+    /// inherit the fallback alias scope used before an unresolved source has an actual reader.
+    fn indexed_source_path(&self, stable_id: StableAssetId) -> Option<&AssetSourcePath> {
+        let record = self.database.record_for_stable_id(stable_id)?;
+        self.metadata.get(record.path())?;
+        Some(record.path())
     }
 
     pub(super) fn into_lookup_observations(
@@ -196,7 +360,7 @@ impl ReferenceCatalogue {
 
     pub(super) fn revalidate_lookups(
         root: &DirectoryCapability,
-        directories: [&ProjectPath; 2],
+        bindings: Vec<SourceDirectoryBinding>,
         observations: &[StableLookupObservation],
         budget: &mut AuthoringProjectAdmissionBudget,
     ) -> Result<(), AuthoringProjectSourceAdmissionError> {
@@ -208,18 +372,17 @@ impl ReferenceCatalogue {
             0,
             0,
             checked_sum([
-                directories[0].as_str().len(),
-                directories[1].as_str().len(),
+                bindings
+                    .iter()
+                    .map(|binding| binding.directory.as_str().len())
+                    .sum(),
                 size_of::<Self>(),
             ])?,
         )?;
-        let mut current = Self::new(root.share(), directories.map(Clone::clone), budget)?;
+        let mut current = Self::new(root.share(), bindings, budget)?;
         current.ensure_indexed(budget)?;
         for observation in observations {
-            let target = current.resolve_indexed(
-                &AssetRef::StableId(observation.stable_id),
-                observation.prefab,
-            );
+            let target = current.indexed_source_path(observation.stable_id);
             if target != observation.target.as_ref() {
                 // None is an observed unresolved lookup, never a durable absence receipt.
                 let path = observation
@@ -240,10 +403,10 @@ impl ReferenceCatalogue {
 
     fn index_directory(
         &mut self,
-        prefab: bool,
+        index: usize,
         budget: &mut AuthoringProjectAdmissionBudget,
     ) -> Result<(), AuthoringProjectSourceAdmissionError> {
-        let root_path = &self.directories[usize::from(prefab)];
+        let root_path = &self.bindings[index].directory;
         budget.charge_reference(root_path.as_str().len(), 0, false)?;
         let relative = RelativePath::new(root_path.as_str()).map_err(|source| {
             AuthoringProjectSourceAdmissionError::SourceDirectoryPath {
@@ -324,7 +487,7 @@ impl ReferenceCatalogue {
                             pending.push_back((path, next_depth));
                         }
                         FileKind::Regular if path.ends_with(".meta") => {
-                            self.index_metadata(&directory, prefab, &path, depth, budget)?;
+                            self.index_metadata(&directory, index, &path, depth, budget)?;
                         }
                         _ => {}
                     }
@@ -343,7 +506,7 @@ impl ReferenceCatalogue {
     fn index_metadata(
         &mut self,
         directory: &DirectoryCapability,
-        prefab: bool,
+        index: usize,
         metadata_path: &str,
         depth: usize,
         budget: &mut AuthoringProjectAdmissionBudget,
@@ -351,8 +514,7 @@ impl ReferenceCatalogue {
         let source_path = metadata_path
             .strip_suffix(".meta")
             .expect("selected metadata suffix");
-        let project_path =
-            join_project_path(&self.directories[usize::from(prefab)], metadata_path)?;
+        let project_path = join_project_path(&self.bindings[index].directory, metadata_path)?;
         let path = AssetPath::new(source_path).map_err(|source| {
             AuthoringProjectSourceAdmissionError::DocumentSourcePath {
                 path: project_path.clone(),
@@ -380,18 +542,19 @@ impl ReferenceCatalogue {
         )
         .map_err(
             |source| AuthoringProjectSourceAdmissionError::AssetMetadataFormat {
-                path: self.scope(prefab).resolve(&path),
+                path: self.bindings[index].scope.resolve(&path),
                 source,
             },
         )?;
-        let canonical_path = self.scope(prefab).resolve(&path);
+        let canonical_path = self.bindings[index].scope.resolve(&path);
         // A traversal root locates the observed file. The sidecar's local spelling binds
         // through an actual configured scope, independently of its source kind or owner.
         let scope = self
-            .scopes
+            .bindings
             .iter()
-            .find(|scope| {
-                scope.relative_path(&canonical_path) == Some(metadata.identity().path().as_str())
+            .find(|binding| {
+                binding.scope.relative_path(&canonical_path)
+                    == Some(metadata.identity().path().as_str())
             })
             .ok_or_else(
                 || AuthoringProjectSourceAdmissionError::AssetMetadataPathMismatch {
@@ -399,7 +562,8 @@ impl ReferenceCatalogue {
                     declared: metadata.identity().path().clone(),
                 },
             )?;
-        let record = metadata.identity().clone().into_record(scope);
+        let source_binding = scope.clone();
+        let record = metadata.identity().clone().into_record(&scope.scope);
         if record.path() != &canonical_path {
             return Err(
                 AuthoringProjectSourceAdmissionError::AssetMetadataPathMismatch {
@@ -436,10 +600,14 @@ impl ReferenceCatalogue {
             0,
             checked_sum([
                 size_of::<(AssetSourcePath, Arc<AuthoringSourceFact>)>(),
+                size_of::<(AssetSourcePath, SourceDirectoryBinding)>(),
+                canonical_path.as_str().len(),
                 canonical_path.as_str().len(),
                 64,
             ])?,
         )?;
+        self.source_bindings
+            .insert(canonical_path.clone(), source_binding);
         self.metadata.insert(canonical_path, read.source);
         Ok(())
     }
@@ -447,10 +615,10 @@ impl ReferenceCatalogue {
     pub(super) fn verify_metadata(
         &self,
         path: &AssetPath,
-        prefab: bool,
+        binding: &SourceDirectoryBinding,
         source: &AuthoringSourceFact,
     ) -> Result<(), AuthoringProjectSourceAdmissionError> {
-        let canonical_path = self.scope(prefab).resolve(path);
+        let canonical_path = binding.scope.resolve(path);
         if let Some(indexed) = self.metadata.get(&canonical_path) {
             if !indexed.same_file_observation(source) {
                 return Err(AuthoringProjectSourceAdmissionError::AssetMetadataChanged {
@@ -465,10 +633,11 @@ impl ReferenceCatalogue {
         &self,
         directory: &DirectoryCapability,
         path: &AssetPath,
+        binding: &SourceDirectoryBinding,
         budget: &mut AuthoringProjectAdmissionBudget,
     ) -> Result<Option<(AssetRecord, Arc<AuthoringSourceFact>)>, AuthoringProjectSourceAdmissionError>
     {
-        let canonical_path = self.scope(true).resolve(path);
+        let canonical_path = binding.scope.resolve(path);
         let Some(indexed) = self.metadata.get(&canonical_path) else {
             return Ok(None);
         };
@@ -476,7 +645,7 @@ impl ReferenceCatalogue {
         let read = read_unique_source(
             open_source_file(
                 directory,
-                join_project_path(&self.directories[1], &metadata_path)?,
+                join_project_path(&binding.directory, &metadata_path)?,
                 &metadata_path,
                 AuthoringSourceKind::AssetMetadata,
                 indexed.dependency_depth(),
@@ -485,7 +654,7 @@ impl ReferenceCatalogue {
             AssetMetaFileLimits::default().encoded_bytes().get(),
             budget,
         )?;
-        self.verify_metadata(path, true, &read.source)?;
+        self.verify_metadata(path, binding, &read.source)?;
         let record = self
             .database
             .record_for_path(&canonical_path)

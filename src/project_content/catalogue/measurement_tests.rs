@@ -192,7 +192,7 @@ fn warmed_loader_rechecks_duplicate_identity_and_changed_delivery_source() {
         false,
     )
     .unwrap();
-    context.catalogue_roots = Some([
+    context.catalogue_roots = Some(vec![
         candidate.settings().paths.assets.clone(),
         candidate.settings().paths.prefabs.clone(),
     ]);
@@ -329,7 +329,7 @@ fn catalogue_capture_and_scene_copy_reject_budget_pressure_without_retaining_wor
         false,
     )
     .unwrap();
-    context.catalogue_roots = Some([
+    context.catalogue_roots = Some(vec![
         candidate.settings().paths.assets.clone(),
         candidate.settings().paths.prefabs.clone(),
     ]);
@@ -676,8 +676,10 @@ requested = ["runtime-2d"]
         let groups = self.identities.div_ceil(32);
         CatalogueCounts {
             catalogue_builds: 1,
-            directory_enumerations: 2 + groups,
-            directory_entries: 2 * self.identities + groups,
+            // Assets, Prefabs and Scenes are actual catalogue readers. Scene document files
+            // are observed as entries without being decoded or joining the dependency closure.
+            directory_enumerations: 3 + groups,
+            directory_entries: 2 * self.identities + groups + self.scenes,
             identity_metadata_reads: self.identities,
             metadata_revalidations: self.scenes * 2,
         }

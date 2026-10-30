@@ -1,6 +1,7 @@
 //! Actual indexed documents qualify composition and publication through the Editor owner.
 
 mod composition_failure;
+mod scene_dependencies;
 
 use std::{
     fs,
@@ -29,8 +30,8 @@ use nara_transform::Transform2d;
 
 use super::*;
 use crate::project_host::authoring::{
-    AuthoringDocumentKind, AuthoringProjectAdmissionHost, PreparedAuthoringProject,
-    project_authoring_adapters,
+    AuthoringDocumentKind, AuthoringProjectAdmissionHost, AuthoringProjectAdmissionLimits,
+    PreparedAuthoringProject, project_authoring_adapters,
 };
 use crate::project_host::runtime::editor::document_open::EditorDocumentOpenRequestResult;
 
@@ -125,7 +126,20 @@ requested = ["runtime-2d"]
     }
 
     fn editor(&self) -> EditorProjectSession {
-        let schema = AuthoringProjectAdmissionHost::default()
+        self.editor_with_limits(AuthoringProjectAdmissionLimits::default())
+    }
+
+    fn editor_with_limits(&self, limits: AuthoringProjectAdmissionLimits) -> EditorProjectSession {
+        let mut editor = self.open_editor_with_limits(limits);
+        settle_source_index(&mut editor);
+        editor
+    }
+
+    fn open_editor_with_limits(
+        &self,
+        limits: AuthoringProjectAdmissionLimits,
+    ) -> EditorProjectSession {
+        let schema = AuthoringProjectAdmissionHost::new(limits)
             .prepare(self.capability.share(), None)
             .unwrap()
             .admit_bundle()
@@ -136,13 +150,18 @@ requested = ["runtime-2d"]
             .admit_startup_closure()
             .unwrap()
             .publish();
-        let mut editor = EditorProjectSession::open(receipt, None).unwrap();
-        settle_source_index(&mut editor);
-        editor
+        EditorProjectSession::open(receipt, None).unwrap()
     }
 
     fn run(&self, test: impl FnOnce(&mut EditorProjectSession)) {
-        let mut editor = self.editor();
+        self.run_editor(self.editor(), test);
+    }
+
+    fn run_editor(
+        &self,
+        mut editor: EditorProjectSession,
+        test: impl FnOnce(&mut EditorProjectSession),
+    ) {
         let result = catch_unwind(AssertUnwindSafe(|| test(&mut editor)));
         let deadline = Instant::now() + WAIT;
         loop {

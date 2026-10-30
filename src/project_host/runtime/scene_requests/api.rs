@@ -18,10 +18,12 @@ impl ProjectSceneRequestId {
     }
 }
 
-/// A declared source Scene path or complete processed Scene Product.
+/// An authored source Scene path or complete Scene Product under the original Host authority.
 ///
-/// The selection must match the original Host's content mode. Products never resolve through
-/// source paths or fall back to their enclosing primary Product.
+/// Source Hosts resolve a Product through its actual primary Scene sidecar in the preparation
+/// worker, then require its resolved path to be startup or an explicitly declared Scene root.
+/// Processed Hosts require an exact Product in their original immutable base. Neither mode falls
+/// back to the other, and an auxiliary selection never selects its enclosing primary Product.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ProjectSceneSelection {
     Source(ProjectPath),
@@ -132,16 +134,18 @@ impl PreparedProjectSceneView<'_> {
         &self.admission.selection
     }
 
-    /// Returns a real source path only for source-backed requests.
+    /// Returns the actual captured path relative to the configured Scenes directory for source
+    /// content, including requests originally made by Product. Processed content has no source path.
     #[must_use]
     pub fn selected_scene_path(&self) -> Option<&ProjectPath> {
-        match self.selected_scene() {
-            ProjectSceneSelection::Source(path) => Some(path),
-            ProjectSceneSelection::Product(_) => None,
+        match self.content {
+            PreparedSceneContent::Source(snapshot) => Some(snapshot.selected_scene_path()),
+            PreparedSceneContent::Processed(_) => None,
         }
     }
 
-    /// Returns the complete Product only for processed requests.
+    /// Returns the caller's original Product selection in either content mode. A request made by
+    /// source path returns `None`, even when its captured source has an admitted Product association.
     #[must_use]
     pub fn selected_scene_product(&self) -> Option<AssetProductRef> {
         match self.selected_scene() {
@@ -283,8 +287,10 @@ impl ProjectScenes<'_> {
 
     /// Requests asynchronous preparation of a declared Scene through the original Host authority.
     ///
-    /// The current source must belong to first-party hosted content. The selection must match
-    /// that Host's source or processed mode. Missing authority or generation returns
+    /// The current source must belong to first-party hosted content. Source Products enter
+    /// Preparing provisionally: the worker resolves their actual primary Scene and checks declared
+    /// root membership. Dependency membership alone does not authorize travel. Processed requests
+    /// select only Products declared by the original base. Missing authority or generation returns
     /// [`ProjectSceneRequestError::Unavailable`]; a missing I/O pool returns
     /// [`ProjectSceneRequestError::TaskUnavailable`]. An occupied slot remains
     /// [`ProjectSceneRequestError::Busy`] until its terminal result is explicitly acknowledged.
@@ -356,7 +362,8 @@ impl ProjectScenes<'_> {
                 admission,
                 self.generation.as_deref().copied(),
                 self.current.as_deref(),
-            ))
+            )
+            && content_matches_admission(content, admission))
         .then_some(PreparedProjectSceneView { admission, content })
     }
 
@@ -634,11 +641,22 @@ pub(super) fn content_matches_admission(
             Context::Source {
                 candidate, plan, ..
             },
-            ProjectSceneSelection::Source(path),
+            selection,
         ) => {
-            snapshot.lineage() == candidate.lineage()
+            let selection_matches = match selection {
+                ProjectSceneSelection::Source(path) => snapshot.selected_scene_path() == path,
+                ProjectSceneSelection::Product(product) => {
+                    product.product() == nara_asset::ImportedProductId::PRIMARY
+                        && snapshot.selected_scene_product() == Some(*product)
+                }
+            };
+            selection_matches
+                && snapshot.lineage() == candidate.lineage()
+                && plan.lineage() == candidate.lineage()
                 && snapshot.content_closure().manifest_digest() == candidate.manifest_digest()
-                && snapshot.selected_scene_path() == path
+                && admission
+                    .context
+                    .declares_source_path(snapshot.selected_scene_path())
                 && snapshot.shares_component_bindings(plan.schema_validation().bindings())
                 && snapshot.matches_asset_domains(plan)
         }
@@ -649,7 +667,7 @@ pub(super) fn content_matches_admission(
         ) => {
             base.same_base(content.base())
                 && content.product() == *product
-                && admission.context.declares(&admission.selection)
+                && admission.context.admits_request(&admission.selection)
                 && content
                     .scene
                     .candidate()

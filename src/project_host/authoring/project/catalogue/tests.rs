@@ -61,7 +61,11 @@ fn unreferenced_source_kinds_do_not_block_identity_discovery() {
                 .unwrap();
         assert_eq!(
             catalogue
-                .resolve(&AssetRef::StableId(fixture.id()), true, &mut budget)
+                .resolve(
+                    &AssetRef::StableId(fixture.id()),
+                    &catalogue.prefabs(),
+                    &mut budget
+                )
                 .unwrap(),
             Some(AssetPath::new("enemy.prefab.json").unwrap()),
         );
@@ -74,7 +78,11 @@ fn unreferenced_source_kinds_do_not_block_identity_discovery() {
         assert_eq!(record.source_kind(), &kind);
         assert_eq!(
             catalogue
-                .resolve(&AssetRef::StableId(unreferenced_id), false, &mut budget)
+                .resolve(
+                    &AssetRef::StableId(unreferenced_id),
+                    &catalogue.assets(),
+                    &mut budget
+                )
                 .unwrap(),
             Some(AssetPath::new("unowned").unwrap()),
         );
@@ -110,16 +118,19 @@ fn overlapping_readers_bind_metadata_by_actual_scope_without_a_source_kind_names
             AuthoringProjectAdmissionBudget::new(AuthoringProjectAdmissionLimits::default());
         let mut catalogue = ReferenceCatalogue::new(
             fixture.capability(),
-            [
-                ProjectPath::new("data").unwrap(),
-                ProjectPath::new("data/prefabs").unwrap(),
+            vec![
+                SourceDirectoryBinding::new(ProjectPath::new("data").unwrap(), None),
+                SourceDirectoryBinding::new(
+                    ProjectPath::new("data/prefabs").unwrap(),
+                    Some(AssetSourceKind::Prefab),
+                ),
             ],
             &mut budget,
         )
         .unwrap();
         catalogue.ensure_indexed(&mut budget).unwrap();
         assert_eq!(catalogue.database.len(), 1);
-        assert_eq!(catalogue.lookup_sources().count(), 1);
+        assert_eq!(catalogue.metadata.len(), 1);
         let record = catalogue
             .database
             .record_for_stable_id(fixture.id())
@@ -154,7 +165,7 @@ fn product_source_lookup_never_admits_an_auxiliary_product_as_a_prefab() {
     );
     assert!(
         catalogue
-            .resolve(&auxiliary, true, &mut budget)
+            .resolve(&auxiliary, &catalogue.prefabs(), &mut budget)
             .unwrap()
             .is_none()
     );
@@ -163,24 +174,69 @@ fn product_source_lookup_never_admits_an_auxiliary_product_as_a_prefab() {
     let primary =
         AssetRef::Product(AssetProductRef::new(fixture.id(), ImportedProductId::PRIMARY).unwrap());
     let path = catalogue
-        .resolve(&primary, true, &mut budget)
+        .resolve(&primary, &catalogue.prefabs(), &mut budget)
         .unwrap()
         .unwrap();
     let retained = budget.retained_candidate_bytes;
     assert_eq!(
         catalogue
-            .resolve(&AssetRef::StableId(fixture.id()), true, &mut budget)
+            .resolve(
+                &AssetRef::StableId(fixture.id()),
+                &catalogue.prefabs(),
+                &mut budget
+            )
             .unwrap(),
         Some(path)
     );
     assert_eq!(budget.retained_candidate_bytes, retained);
     assert!(
         catalogue
-            .resolve(&auxiliary, true, &mut budget)
+            .resolve(&auxiliary, &catalogue.prefabs(), &mut budget)
             .unwrap()
             .is_none()
     );
     assert_eq!(catalogue.lookups.len(), 1);
+}
+
+#[test]
+fn unresolved_stable_resource_is_reobserved_across_actual_readers() {
+    let fixture = CatalogueFixture::new();
+    let stable = StableAssetId::parse_str("6a584aed-d6c4-4de3-8ad6-4184d8e74f67").unwrap();
+    let reference = AssetRef::StableId(stable);
+    let mut budget =
+        AuthoringProjectAdmissionBudget::new(AuthoringProjectAdmissionLimits::default());
+    let mut catalogue =
+        ReferenceCatalogue::new(fixture.capability(), fixture.directories(), &mut budget).unwrap();
+    assert!(
+        catalogue
+            .resolve_resource(&reference, &mut budget)
+            .unwrap()
+            .is_none()
+    );
+    let observations = catalogue.into_lookup_observations(&mut budget).unwrap();
+    assert_eq!(observations.len(), 1);
+    fs::write(
+        fixture.root.join("prefabs/recovered.png.meta"),
+        AssetMeta::new(
+            AssetMetaIdentity::new(
+                stable,
+                AssetPath::new("recovered.png").unwrap(),
+                AssetSourceKind::Image,
+            ),
+            (),
+        )
+        .to_json_string()
+        .unwrap(),
+    )
+    .unwrap();
+    let mut validation_budget =
+        AuthoringProjectAdmissionBudget::new(AuthoringProjectAdmissionLimits::default());
+    assert!(
+        matches!(ReferenceCatalogue::revalidate_lookups(&fixture.capability(),
+        fixture.directories(), &observations, &mut validation_budget),
+        Err(AuthoringProjectSourceAdmissionError::AssetMetadataChanged { path })
+            if path.as_str() == "prefabs/recovered.png")
+    );
 }
 
 #[test]
@@ -228,7 +284,11 @@ fn actual_prefab_metadata_read_rejects_changed_bytes_and_replaced_identity_after
     let mut catalogue =
         ReferenceCatalogue::new(root.share(), fixture.directories(), &mut budget).unwrap();
     let path = catalogue
-        .resolve(&AssetRef::StableId(fixture.id()), true, &mut budget)
+        .resolve(
+            &AssetRef::StableId(fixture.id()),
+            &catalogue.prefabs(),
+            &mut budget,
+        )
         .unwrap()
         .unwrap();
     let directory = root
@@ -242,7 +302,8 @@ fn actual_prefab_metadata_read_rejects_changed_bytes_and_replaced_identity_after
     .to_json_string()
     .unwrap();
     fs::write(fixture.metadata_path(), changed).unwrap();
-    let changed_bytes = catalogue.admit_prefab_metadata(&directory, &path, &mut budget);
+    let changed_bytes =
+        catalogue.admit_prefab_metadata(&directory, &path, &catalogue.prefabs(), &mut budget);
     assert!(matches!(
         changed_bytes,
         Err(AuthoringProjectSourceAdmissionError::AssetMetadataChanged { .. })
@@ -254,7 +315,8 @@ fn actual_prefab_metadata_read_rejects_changed_bytes_and_replaced_identity_after
     )
     .unwrap();
     fs::write(fixture.metadata_path(), fixture.metadata()).unwrap();
-    let replaced_identity = catalogue.admit_prefab_metadata(&directory, &path, &mut budget);
+    let replaced_identity =
+        catalogue.admit_prefab_metadata(&directory, &path, &catalogue.prefabs(), &mut budget);
     assert!(matches!(
         replaced_identity,
         Err(AuthoringProjectSourceAdmissionError::AssetMetadataChanged { .. })
@@ -273,7 +335,11 @@ fn stable_lookup_directory_scan_uses_the_shared_admission_ceiling() {
     let mut budget = AuthoringProjectAdmissionBudget::new(limits);
     let mut catalogue =
         ReferenceCatalogue::new(fixture.capability(), fixture.directories(), &mut budget).unwrap();
-    let rejected = catalogue.resolve(&AssetRef::StableId(fixture.id()), true, &mut budget);
+    let rejected = catalogue.resolve(
+        &AssetRef::StableId(fixture.id()),
+        &catalogue.prefabs(),
+        &mut budget,
+    );
     assert!(matches!(
         rejected,
         Err(AuthoringProjectSourceAdmissionError::Budget(
@@ -283,47 +349,44 @@ fn stable_lookup_directory_scan_uses_the_shared_admission_ceiling() {
 }
 
 #[test]
-fn stable_lookup_observations_distinguish_requested_kind_and_deduplicate_repeated_requests() {
+fn stable_identity_observations_are_independent_of_query_scope_and_deduplicate_requests() {
     let fixture = CatalogueFixture::new();
     let mut budget =
         AuthoringProjectAdmissionBudget::new(AuthoringProjectAdmissionLimits::default());
     let mut catalogue =
         ReferenceCatalogue::new(fixture.capability(), fixture.directories(), &mut budget).unwrap();
     let reference = AssetRef::StableId(fixture.id());
-    let path = catalogue.resolve(&reference, true, &mut budget).unwrap();
+    let path = catalogue
+        .resolve(&reference, &catalogue.prefabs(), &mut budget)
+        .unwrap();
     let retained = budget.retained_candidate_bytes;
     assert_eq!(
-        catalogue.resolve(&reference, true, &mut budget).unwrap(),
+        catalogue
+            .resolve(&reference, &catalogue.prefabs(), &mut budget)
+            .unwrap(),
         path
     );
     assert_eq!(budget.retained_candidate_bytes, retained);
     assert!(
         catalogue
-            .resolve(&reference, false, &mut budget)
+            .resolve(&reference, &catalogue.assets(), &mut budget)
             .unwrap()
             .is_none()
     );
+    assert_eq!(budget.retained_candidate_bytes, retained);
     let observations = catalogue.into_lookup_observations(&mut budget).unwrap();
-    assert_eq!(observations.len(), 2);
-    let prefab = observations.iter().find(|lookup| lookup.prefab).unwrap();
+    assert_eq!(observations.len(), 1);
+    let prefab = &observations[0];
     assert_eq!(prefab.stable_id, fixture.id());
     assert_eq!(
         prefab.target,
         path.as_ref()
             .map(|path| AssetSourcePath::new(format!("prefabs/{path}")).unwrap()),
     );
-    assert!(
-        observations
-            .iter()
-            .find(|lookup| !lookup.prefab)
-            .unwrap()
-            .target
-            .is_none()
-    );
     let directories = fixture.directories();
     ReferenceCatalogue::revalidate_lookups(
         &fixture.capability(),
-        [&directories[0], &directories[1]],
+        directories,
         &observations,
         &mut budget,
     )
@@ -340,7 +403,11 @@ fn stable_lookup_observation_is_admitted_before_target_copy_and_map_insertion() 
     catalogue.ensure_indexed(&mut budget).unwrap();
     let maximum = budget.retained_candidate_bytes;
     budget.limits.retained_candidate_bytes = ByteLimit::new(maximum).unwrap();
-    let rejected = catalogue.resolve(&AssetRef::StableId(fixture.id()), true, &mut budget);
+    let rejected = catalogue.resolve(
+        &AssetRef::StableId(fixture.id()),
+        &catalogue.prefabs(),
+        &mut budget,
+    );
     assert!(matches!(
         rejected,
         Err(AuthoringProjectSourceAdmissionError::Budget(
@@ -358,7 +425,11 @@ fn stable_lookup_observation_transfer_is_admitted_before_allocating_the_shared_s
     let mut catalogue =
         ReferenceCatalogue::new(fixture.capability(), fixture.directories(), &mut budget).unwrap();
     catalogue
-        .resolve(&AssetRef::StableId(fixture.id()), true, &mut budget)
+        .resolve(
+            &AssetRef::StableId(fixture.id()),
+            &catalogue.prefabs(),
+            &mut budget,
+        )
         .unwrap();
     let maximum = budget.retained_candidate_bytes;
     budget.limits.retained_candidate_bytes = ByteLimit::new(maximum).unwrap();
@@ -388,19 +459,17 @@ fn path_lookup_and_empty_observation_revalidation_do_not_scan_metadata() {
     let path = AssetPath::new("enemy.prefab.json").unwrap();
     assert_eq!(
         catalogue
-            .resolve(&AssetRef::Path(path.clone()), true, &mut budget)
+            .resolve(
+                &AssetRef::Path(path.clone()),
+                &catalogue.prefabs(),
+                &mut budget
+            )
             .unwrap(),
         Some(path),
     );
     assert!(!catalogue.is_indexed());
     assert!(catalogue.lookups.is_empty());
-    ReferenceCatalogue::revalidate_lookups(
-        &root,
-        [&directories[0], &directories[1]],
-        &[],
-        &mut budget,
-    )
-    .unwrap();
+    ReferenceCatalogue::revalidate_lookups(&root, directories, &[], &mut budget).unwrap();
     assert_eq!(budget.usage(), before);
 }
 
@@ -414,7 +483,11 @@ fn fresh_stable_lookup_revalidation_rejects_removed_and_rebound_targets() {
     let mut catalogue =
         ReferenceCatalogue::new(root.share(), fixture.directories(), &mut budget).unwrap();
     catalogue
-        .resolve(&AssetRef::StableId(fixture.id()), true, &mut budget)
+        .resolve(
+            &AssetRef::StableId(fixture.id()),
+            &catalogue.prefabs(),
+            &mut budget,
+        )
         .unwrap();
     let observations = catalogue.into_lookup_observations(&mut budget).unwrap();
     fs::remove_file(fixture.metadata_path()).unwrap();
@@ -440,7 +513,7 @@ fn fresh_stable_lookup_revalidation_rejects_removed_and_rebound_targets() {
         assert!(matches!(
             ReferenceCatalogue::revalidate_lookups(
                 &root,
-                [&directories[0], &directories[1]],
+                directories.clone(),
                 &observations,
                 &mut budget,
             ),
@@ -481,10 +554,13 @@ impl CatalogueFixture {
         StableAssetId::parse_str("4e438770-1757-44f0-bbeb-6237cd6768ab").unwrap()
     }
 
-    fn directories(&self) -> [ProjectPath; 2] {
-        [
-            ProjectPath::new("assets").unwrap(),
-            ProjectPath::new("prefabs").unwrap(),
+    fn directories(&self) -> Vec<SourceDirectoryBinding> {
+        vec![
+            SourceDirectoryBinding::new(ProjectPath::new("assets").unwrap(), None),
+            SourceDirectoryBinding::new(
+                ProjectPath::new("prefabs").unwrap(),
+                Some(AssetSourceKind::Prefab),
+            ),
         ]
     }
 

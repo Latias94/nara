@@ -981,8 +981,15 @@ fn owned_request_keeps_root_and_prefab_snapshots_after_both_sessions_change_and_
         .capture_scene_document(&source, &session, std::slice::from_ref(&input))
         .unwrap();
     let expected_preview = expected.take_preview().unwrap();
+    let inputs = snapshot
+        .admit_source_capture_inputs(
+            0,
+            AuthoringPrefabSessionSnapshot::capture_retained_bytes(&prefab_source, &prefab_session)
+                .unwrap(),
+        )
+        .unwrap();
     let request = snapshot
-        .capture_scene_request(&source, &session, vec![input].into_boxed_slice())
+        .capture_scene_request(&source, &session, inputs, vec![input].into_boxed_slice())
         .unwrap();
     let prefab_edit = prefab_session.apply_authoring_patch(&ScenePatchDocument::new([
         ScenePatchOperation::SetPrefabInstance {
@@ -1094,7 +1101,12 @@ fn scene_request_rejects_same_basis_wrong_source_even_when_documents_are_identic
     assert_ne!(source.source_key(), other_source.source_key());
     for (receipt, working) in [(&source, &other_session), (&other_source, &session)] {
         let error = snapshot
-            .capture_scene_request(receipt, working, Box::new([]))
+            .capture_scene_request(
+                receipt,
+                working,
+                snapshot.admit_source_capture_inputs(0, 0).unwrap(),
+                Box::new([]),
+            )
             .err()
             .expect("equal document content cannot authorize a different containing source");
         assert!(matches!(
@@ -1103,7 +1115,12 @@ fn scene_request_rejects_same_basis_wrong_source_even_when_documents_are_identic
         ));
     }
     let admitted = snapshot
-        .capture_scene_request(&other_source, &other_session, Box::new([]))
+        .capture_scene_request(
+            &other_source,
+            &other_session,
+            snapshot.admit_source_capture_inputs(0, 0).unwrap(),
+            Box::new([]),
+        )
         .unwrap()
         .prepare()
         .unwrap();

@@ -7,7 +7,8 @@ use nara_tasks::{
 
 use super::{
     Context, Diagnostic, DiagnosticCode, DiagnosticReport, PreparedSceneContent,
-    ProjectSceneRequestError, ProjectSceneSelection, SafeSummary, error_diagnostics,
+    ProjectContentErrorKind, ProjectSceneRequestError, ProjectSceneSelection, SafeSummary,
+    error_diagnostics,
 };
 
 #[derive(Debug)]
@@ -22,6 +23,21 @@ impl PreparationFailure {
         Self {
             error,
             diagnostics: error_diagnostics(error),
+        }
+    }
+
+    fn source_content(error: crate::project_host::ProjectContentError) -> Self {
+        let undeclared = error.kind() == ProjectContentErrorKind::HostAuthorityRejected
+            && error.diagnostics().iter().any(|diagnostic| {
+                diagnostic.code().as_str() == "project.content.scene-not-declared"
+            });
+        Self {
+            error: if undeclared {
+                ProjectSceneRequestError::UndeclaredScene
+            } else {
+                ProjectSceneRequestError::Content(error.kind())
+            },
+            diagnostics: error.diagnostics().clone(),
         }
     }
 
@@ -86,14 +102,33 @@ impl Preparation {
                                 plan,
                                 loader,
                             },
-                            ProjectSceneSelection::Source(path),
-                        ) => loader
-                            .load_scene(candidate, plan, path)
-                            .map(PreparedSceneContent::Source)
-                            .map_err(|error| PreparationFailure {
-                                error: ProjectSceneRequestError::Content(error.kind()),
-                                diagnostics: error.diagnostics().clone(),
-                            }),
+                            selection,
+                        ) => {
+                            let result = match selection {
+                                ProjectSceneSelection::Source(path) => {
+                                    loader.load_scene(candidate, plan, path)
+                                }
+                                ProjectSceneSelection::Product(product) => {
+                                    loader.load_scene_product(candidate, plan, *product)
+                                }
+                            };
+                            result.map_err(PreparationFailure::source_content).and_then(
+                                |snapshot| {
+                                    // Required dependencies are data, not public travel roots.
+                                    if !work
+                                        .context
+                                        .declares_source_path(snapshot.selected_scene_path())
+                                    {
+                                        let error = ProjectSceneRequestError::UndeclaredScene;
+                                        return Err(PreparationFailure {
+                                            error,
+                                            diagnostics: error_diagnostics(error),
+                                        });
+                                    }
+                                    Ok(PreparedSceneContent::Source(snapshot))
+                                },
+                            )
+                        }
                         (Context::Processed { base }, ProjectSceneSelection::Product(product)) => {
                             base.prepare_scene_content(*product)
                                 .map(PreparedSceneContent::Processed)

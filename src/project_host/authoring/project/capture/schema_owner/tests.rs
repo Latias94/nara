@@ -149,6 +149,7 @@ fn actual_capture_uses_prepared_dirty_prefab_and_attaches_only_the_same_nominal_
             &scene_source,
             borrow_prepared_scene_schema_source(&scene, &prepared_scene).unwrap(),
             &open_prefabs,
+            &[],
         )
         .unwrap();
     assert!(capture.composition_failure().is_none());
@@ -195,6 +196,7 @@ fn actual_capture_uses_prepared_dirty_prefab_and_attaches_only_the_same_nominal_
         .capture_scene(
             &scene_source,
             borrow_prepared_scene_schema_source(&scene, &independent_scene).unwrap(),
+            &[],
             &[],
         )
         .unwrap();

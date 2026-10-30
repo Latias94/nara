@@ -88,7 +88,7 @@ fn cloned_input_prepares_on_its_actual_root_after_the_live_project_is_dropped() 
         };
         assert!(Arc::ptr_eq(owner.incumbent(), &owned.incumbent));
         let successor_basis = owner.schema_basis().clone();
-        let prepared = owner.prepare_project_input(&owned, &[]).unwrap();
+        let prepared = owner.prepare_project_input(&owned, &[], &[]).unwrap();
         assert_eq!(prepared.startup.document.schema_basis(), successor_basis);
         assert_eq!(owner.schema_basis(), &successor_basis);
         assert_eq!(prepared.readiness(), AuthoringProjectReadiness::Complete);
@@ -130,12 +130,12 @@ fn input_rejects_foreign_and_independently_readmitted_project_authority() {
     let usage = owner.budget().usage();
     for other in [&readmitted, &foreign] {
         assert!(matches!(
-            owner.prepare_project_input(&other.schema_owner_input(), &[]),
+            owner.prepare_project_input(&other.schema_owner_input(), &[], &[]),
             Err(AuthoringProjectSourceAdmissionError::SchemaBasisMismatch)
         ));
         assert_eq!(owner.budget().usage(), usage);
     }
-    owner.prepare_project_input(&input, &[]).unwrap();
+    owner.prepare_project_input(&input, &[], &[]).unwrap();
 }
 
 #[test]
@@ -149,7 +149,7 @@ fn current_capture_validation_keeps_saved_project_budget_and_original_source_obs
     else {
         panic!("the missing owner must prepare");
     };
-    let saved = owner.prepare_project_input(&input, &[]).unwrap();
+    let saved = owner.prepare_project_input(&input, &[], &[]).unwrap();
     let saved_work = owner.budget().usage().decode_work();
     let mut work = SchemaReclassificationWork::default();
     let prepared_scene = scene
@@ -163,6 +163,7 @@ fn current_capture_validation_keeps_saved_project_budget_and_original_source_obs
         .capture_scene(
             &source,
             borrow_prepared_scene_schema_source(&scene, &prepared_scene).unwrap(),
+            &[],
             &[],
         )
         .unwrap();

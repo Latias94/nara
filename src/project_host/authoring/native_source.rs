@@ -44,7 +44,6 @@ impl NativeDocumentSourcePolicy {
             root,
             path,
             path,
-            None,
             kind,
             expected_identity,
             0,
@@ -65,7 +64,6 @@ impl NativeDocumentSourcePolicy {
             directory,
             logical_path,
             &path,
-            Some(logical_path),
             kind,
             expected_identity,
             0,
@@ -133,7 +131,6 @@ impl NativeDocumentSourcePolicy {
                 root,
                 path,
                 path,
-                None,
                 kind,
                 expected_identity,
                 dependency_depth,
@@ -174,7 +171,6 @@ impl NativeDocumentSourcePolicy {
         root: &DirectoryCapability,
         open_path: &str,
         path: &str,
-        declaration_path: Option<&str>,
         kind: SourceDocumentKind,
         expected_identity: FileIdentity,
         dependency_depth: usize,
@@ -197,24 +193,6 @@ impl NativeDocumentSourcePolicy {
                 metadata: None,
             });
         }
-        let inferred_path = [
-            &self.roots.assets,
-            &self.roots.scenes,
-            &self.roots.prefabs,
-            &self.roots.scripts,
-        ]
-        .into_iter()
-        .filter_map(|root| {
-            path.strip_prefix(root.as_str())
-                .and_then(|suffix| suffix.strip_prefix('/'))
-                .filter(|suffix| !suffix.is_empty())
-                .map(|suffix| (root.as_str().len(), suffix))
-        })
-        .max_by_key(|(length, _)| *length)
-        .map(|(_, suffix)| suffix);
-        let logical_path = declaration_path
-            .or(inferred_path)
-            .ok_or(AuthoringDocumentAdmissionError::NativeSourceMetadataMismatch)?;
         let metadata_path = RelativePath::new(format!("{open_path}.meta"))
             .map_err(AuthoringDocumentAdmissionError::RelativePath)?;
         let metadata_file = root
@@ -237,9 +215,22 @@ impl NativeDocumentSourcePolicy {
             SourceDocumentKind::Scene => AssetSourceKind::Scene,
             SourceDocumentKind::Prefab => AssetSourceKind::Prefab,
         };
-        if metadata.identity().path().as_str() != logical_path
-            || metadata.identity().source_kind() != &expected_kind
-        {
+        let declared_path = metadata.identity().path().as_str();
+        // A reader's local alias does not define metadata identity. The declaration must
+        // locate this canonical source through one of the actual configured scopes.
+        let path_matches = [
+            &self.roots.assets,
+            &self.roots.scenes,
+            &self.roots.prefabs,
+            &self.roots.scripts,
+        ]
+        .into_iter()
+        .any(|root| {
+            path.strip_prefix(root.as_str())
+                .and_then(|suffix| suffix.strip_prefix('/'))
+                == Some(declared_path)
+        });
+        if !path_matches || metadata.identity().source_kind() != &expected_kind {
             return Err(AuthoringDocumentAdmissionError::NativeSourceMetadataMismatch);
         }
         Ok(AdmittedNativeDocumentSource {
@@ -289,6 +280,14 @@ impl AdmittedNativeDocumentSource {
             source_identity: identity,
             ..self.clone()
         }
+    }
+
+    pub(super) fn matches_source_identity_update(
+        &self,
+        base: &Self,
+        identity: FileIdentity,
+    ) -> bool {
+        self.source_identity == identity && self.key == base.key && self.metadata == base.metadata
     }
 
     pub(super) fn metadata_source(&self) -> Option<&Arc<AuthoringSourceFact>> {

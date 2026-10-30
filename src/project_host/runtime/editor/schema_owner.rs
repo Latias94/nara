@@ -853,6 +853,9 @@ impl EditorProjectSession {
                 .checked_mul(
                     std::mem::size_of::<EditorDocumentId>()
                         + std::mem::size_of::<AuthoringPrefabSessionSnapshot>()
+                        + std::mem::size_of::<
+                            crate::project_host::authoring::AuthoringSceneSessionSnapshot,
+                        >()
                         + std::mem::size_of::<(EditorDocumentId, PreparedSchemaOwnerSceneCapture)>(
                         )
                         + std::mem::size_of::<(EditorDocumentId, AuthoringDocumentCapture)>(),
@@ -1228,8 +1231,71 @@ fn prepare(
     let workspace = request
         .prepare()
         .map_err(|report| Failure::workspace(report, phase))?;
-    let mut prefabs = Vec::with_capacity(sources.len());
+    let mut snapshot_bytes = 0_usize;
     for source in &sources {
+        let receipt = source
+            .receipt
+            .as_ref()
+            .ok_or_else(|| Failure::new(EditorSchemaOwnerAdoptionError::Stale, phase))?;
+        let (retained, inline) = if let Some(view) = workspace.scene_snapshot(source.document) {
+            (crate::project_host::authoring::AuthoringSceneSessionSnapshot::prepared_retained_bytes(receipt, view),
+                std::mem::size_of::<crate::project_host::authoring::AuthoringSceneSessionSnapshot>())
+        } else if let Some(view) = workspace.prefab_snapshot(source.document) {
+            (
+                AuthoringPrefabSessionSnapshot::prepared_retained_bytes(receipt, view),
+                std::mem::size_of::<AuthoringPrefabSessionSnapshot>(),
+            )
+        } else {
+            continue;
+        };
+        let retained = retained.map_err(|error| {
+            Failure::source(
+                error,
+                EditorSchemaOwnerAdoptionError::Preparation,
+                phase,
+                Some(source.document),
+            )
+        })?;
+        // Both array capacities were admitted before capturing the workspace request.
+        let payload = retained
+            .checked_sub(inline)
+            .ok_or_else(|| Failure::new(EditorSchemaOwnerAdoptionError::Preparation, phase))?;
+        snapshot_bytes = snapshot_bytes
+            .checked_add(payload)
+            .ok_or_else(|| Failure::new(EditorSchemaOwnerAdoptionError::Preparation, phase))?;
+    }
+    metadata
+        .owner
+        .retain_operation_inputs(snapshot_bytes)
+        .map_err(|error| {
+            Failure::source(
+                error.into(),
+                EditorSchemaOwnerAdoptionError::Preparation,
+                phase,
+                None,
+            )
+        })?;
+    let mut prefabs = Vec::with_capacity(sources.len());
+    let mut scenes = Vec::with_capacity(sources.len());
+    for source in &sources {
+        if let Some(view) = workspace.scene_snapshot(source.document) {
+            scenes.push(
+                crate::project_host::authoring::AuthoringSceneSessionSnapshot::capture_prepared(
+                    source.receipt.as_ref().ok_or_else(|| {
+                        Failure::new(EditorSchemaOwnerAdoptionError::Stale, phase)
+                    })?,
+                    view,
+                )
+                .map_err(|error| {
+                    Failure::source(
+                        error,
+                        EditorSchemaOwnerAdoptionError::Preparation,
+                        phase,
+                        Some(source.document),
+                    )
+                })?,
+            );
+        }
         if let Some(view) = workspace.prefab_snapshot(source.document) {
             prefabs.push(
                 AuthoringPrefabSessionSnapshot::capture_prepared(
@@ -1251,7 +1317,7 @@ fn prepare(
     }
     let project = metadata
         .owner
-        .prepare_project_input(&metadata.input, &prefabs)
+        .prepare_project_input(&metadata.input, &prefabs, &scenes)
         .map_err(|error| {
             Failure::source(
                 error,
@@ -1271,6 +1337,7 @@ fn prepare(
                     })?,
                     view,
                     &prefabs,
+                    &scenes,
                 )
                 .map_err(|error| {
                     Failure::source(

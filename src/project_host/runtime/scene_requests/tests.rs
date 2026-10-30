@@ -28,6 +28,7 @@ use crate::project_host::{
 use crate::startup_scene::{CurrentScene, StartupSceneActivationPlugin, materialize_startup_scene};
 
 mod processed;
+mod source_products;
 
 #[test]
 fn direct_world_without_project_owner_needs_no_tasks_or_current_scene() {
@@ -47,20 +48,11 @@ fn direct_world_without_project_owner_needs_no_tasks_or_current_scene() {
 }
 
 #[test]
-fn source_requests_reject_products_and_undeclared_paths_without_queuing_work() {
+fn source_requests_reject_undeclared_paths_without_queuing_work() {
     Fixture::new().with_world(|world| {
         world.insert_resource(pools());
         let expected = CurrentScene::get(world).unwrap().receipt().clone();
-        let product = AssetProductRef::new(
-            nara_asset::StableAssetId::parse_str("00000000-0000-4000-8000-000000000001").unwrap(),
-            nara_asset::ImportedProductId::PRIMARY,
-        )
-        .unwrap();
         ProjectScenes::scope(world, |scenes| {
-            assert_eq!(
-                scenes.request(product),
-                Err(ProjectSceneRequestError::UndeclaredScene)
-            );
             assert_eq!(
                 scenes.request(ProjectPath::new("undeclared.scene.json").unwrap()),
                 Err(ProjectSceneRequestError::UndeclaredScene),
@@ -447,8 +439,7 @@ impl Fixture {
         };
         let snapshot = loader.load(candidate, plan).unwrap();
         let source = snapshot.scene_source();
-        drop(snapshot);
-        with_context_world(context, source, inspect);
+        with_context_world_and_startup(context, source, Some(snapshot), inspect);
     }
 
     fn new() -> Self {
@@ -500,6 +491,10 @@ requested = ["runtime-2d"]
     }
 
     fn context(&self) -> Arc<Context> {
+        self.context_with_recipe(crate::ProductRecipe::new())
+    }
+
+    fn context_with_recipe(&self, recipe: crate::ProductRecipe) -> Arc<Context> {
         #[cfg(windows)]
         let directory = {
             use std::os::windows::fs::OpenOptionsExt;
@@ -524,7 +519,7 @@ requested = ["runtime-2d"]
             None,
         )
         .unwrap();
-        let plan = resolve_product_recipe(&candidate, crate::ProductRecipe::new()).unwrap();
+        let plan = resolve_product_recipe(&candidate, recipe).unwrap();
         Arc::new(Context::Source {
             candidate,
             plan,
@@ -536,6 +531,15 @@ requested = ["runtime-2d"]
 fn with_context_world(
     context: Arc<Context>,
     source: crate::startup_scene::SceneSource,
+    inspect: impl FnOnce(&mut World) + Send + Sync + 'static,
+) {
+    with_context_world_and_startup(context, source, None, inspect);
+}
+
+fn with_context_world_and_startup(
+    context: Arc<Context>,
+    source: crate::startup_scene::SceneSource,
+    source_startup: Option<crate::project_host::ProjectContentSnapshot>,
     inspect: impl FnOnce(&mut World) + Send + Sync + 'static,
 ) {
     let schema = match context.as_ref() {
@@ -582,6 +586,9 @@ fn with_context_world(
     candidate
         .with_admission_scope(move |scope| {
             scope.apply_command(move |world: &mut World| {
+                if let Some(snapshot) = source_startup {
+                    super::super::content_residency::publish_startup(world, &snapshot).unwrap();
+                }
                 if let Context::Processed { base } = context.as_ref()
                     && source.is_content_managed()
                 {
