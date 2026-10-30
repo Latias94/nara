@@ -174,6 +174,34 @@ version. On unavailable input, preserve only an authorized compatible last-good 
 reject explicitly; device loss cannot preserve old-epoch authority. No lookup of the latest output,
 source or asset may reconstruct an older UI capture.
 
+**Repeated display and one-shot UI completion.** An output lease, a destination display attempt
+and the original Runtime UI submission permit are separate lifetimes. Composite admission names
+one exact interactive occurrence/display attempt to settle that permit. Only its matching final
+composite may produce Presented; hidden, failed or cancelled attempts settle their actual terminal
+outcomes, while Deferred retains the existing exact-retry rules. A passive mirror cannot win a
+race to complete the permit, and later repaints cannot complete it again or advance simulation,
+captured time or history. Do not wait for all hypothetical future displays to finish. Image
+equality or per-image deduplication alone does not identify the designated completing attempt.
+
+Initially allow one interactive occurrence per logical Runtime UI surface, with passive mirrors.
+A passive occurrence may retain exact pixels and its own clip/DPI/display mapping, but receives
+no producer UI receipt/session, Game input capture, keyboard/text/IME target or actionable producer
+accessibility mapping. Host-local actions such as activating a view remain separate and require
+an explicit handoff before acquiring producer interaction. Changing an active occurrence to passive
+revokes its old route, focus/capture, IME and platform action mapping; retained image or widget
+identity cannot renew them. Queued old occurrence-stamped events/actions reject or are consumed
+closed, never restamped as unbound gameplay input. Multiple interactive mirrors remain separate
+future work.
+
+Occurrence loss has occurrence scope. A hidden/failed passive mirror cannot cancel a healthy
+interactive occurrence or settle the original permit again. Losing the interactive occurrence
+revokes interaction even when a passive mirror keeps displaying old pixels. Producer retirement
+revokes its interaction authority while admitted consumers retain physical output custody;
+device loss still invalidates old-epoch presentation authority. Join these rules with ADRs
+0108/0112 before changing their current single-placement contracts. The current Input prepared-loss
+replacement under 0041/0102/0108 independently prevents late commits from restoring cancelled
+sessions; full render composition is not a prerequisite for that correction.
+
 ### Execution Ownership
 
 A runner/Editor-local Host owns GPU initialization, device/queue, targets, submission and
@@ -282,6 +310,17 @@ arbitrary shader's inverse.
     two clipped UI placements and reject stale input/composite mappings independently. Exercise
     the selected copy/direct-sampling path and device-epoch refusal without requiring a complete
     custom-drawn Editor toolkit.
+14. Produce Runtime UI output A42 with designated interactive completer D and passive mirror M.
+    M displays first without completing the original permit; D completes it exactly once. Repaint
+    A42 while producer B advances, then independently hide/fail M and D and downgrade D to passive.
+    Old pointer, keyboard and accessibility actions cannot restore authority or leak into gameplay;
+    only the affected occurrence is revoked. A retained mirror cannot keep D interactive. Include
+    prepared successor P43, observed loss and late backend acceptance: settle its token without
+    restoring session/capture/reducers or platform action mapping. Record the one-shot completion
+    and exact output lifetimes separately, at distinct producer/display rates rather than from a
+    single lockstep screenshot. Also let M display while D is hidden or fails before its first
+    successful composite: settle the original permit exactly once without granting interaction
+    or blocking producer B.
 
 Shader/material artifacts and shared View envelope details are separate owner designs in
 [reassessment D15/D16](../foundation-architecture-reassessment.md#d15-shader-material-and-pipeline-resources).

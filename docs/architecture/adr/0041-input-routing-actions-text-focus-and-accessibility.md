@@ -69,11 +69,10 @@ Rules:
   A mapping change ends the previous mapping lifetime with the same fresh-press requirement.
   Context/mapping lifetime identity survives deferred action resolution while paused, including
   disable/enable between resolution passes; an obsolete staged press cannot revive an old action.
-  One staging owner issues these lifetime identities for both normalized timeline events and direct
-  synthetic button mutations. Observed context/mapping exits cannot be erased by restoring a cloned
-  or moved configuration snapshot. Synthetic edges capture identity at the same First staging
-  boundary; later synthetic edges are captured at resolution, without changing physical observation
-  retention or admitting an event-time configuration promise.
+  One staging owner issues these lifetime identities for both physical and synthetic ingress.
+  Observed context/mapping exits cannot be erased by restoring a cloned or moved configuration
+  snapshot. Both enter the same bounded Input owner and capture mapping/context identity at the
+  defined staging boundary, without admitting an event-time configuration promise.
   Low-level binding outcomes retain their physical meaning and do not synthesize cancellation
   releases. Semantic cancellation identifies its context/mapping cause without physical provenance.
 - UI routing happens before gameplay action delivery for inputs captured or consumed by focused UI,
@@ -100,12 +99,61 @@ Rules:
 - Normalized window/seat/pointer identity survives button projection and semantic action delivery.
   Held physical state is owned per endpoint; the convenient `pressed(button)` observation is the
   aggregate of those memberships. Releasing or invalidating one endpoint cannot clear another.
-  Timeline-derived action outcomes retain their event sequence and route stamp; direct unstamped
-  low-level mutations are explicitly distinguishable. UI/gameplay release delivery follows the
-  accepted press ownership even when a presented route changes before release.
+  Action outcomes retain their accepted event sequence and route stamp; synthetic origin remains
+  explicitly distinguishable without a second mutable button owner. UI/gameplay release delivery
+  follows the accepted press ownership even when a presented route changes before release.
 
 Frame-transient input/window events follow ADR 0036 and ADR 0039 cleanup rules. Retained input
 state such as pressed buttons, focused element, and pointer capture persists until changed.
+
+### Bounded Ingress And Terminal Retirement
+
+One Input owner admits connected window/seat records, pointer children, accepted physical/synthetic
+members and their ordered event log. Configuration bounds persistent pools, indexes, prepared and
+retiring records, projections and retained/transient outputs. Queued, held and terminal-pending
+members stay admitted until every relevant internal consumer finishes. Read-only `ButtonInput`
+observations and semantic contribution links derive from those members; they do not own separate
+public mutation queues. Synthetic drivers use the same admission and termination path. The default
+synthetic endpoint is established once by its owner, not reconstructed on every mutation.
+
+Raw adapter labels remain the public delivery identity for this bounded workflow. Explicit
+connection/retirement and private non-reused record/member identity protect internal lifetimes.
+Retirement prevents label reuse while old internal consumers still pin the record. The adapter
+drains or discards externally queued operations before reusing labels. A current-generation lookup
+or a newly allocated public handle cannot recover an old event's missing origin. A future adapter
+with asynchronous native recreation must establish its own origin/nonreuse proof before support;
+the current source review does not qualify that broader behavior.
+
+Use one shared ordered log with reserved terminal credits. For every accepted operation, retained
+records after its drafts plus all remaining terminal obligations fit the event capacity, and the
+last sequence plus its drafts and obligations fits `u64`. Publishing a release, leave or lifecycle
+control spends an existing obligation and retains the resulting record until actually reclaimed.
+Advancing one cursor or clearing physical ingress is not reclamation. Count complete scope unions,
+not independently acceptable subsets. FocusLost, CloseRequested and SurfaceRetired are distinct
+obligations; geometry revocation and a held unpositioned pointer's future leave also require their
+actual allowances. New activity explicitly rearms applicable obligations; repeated terminal
+notifications cannot fabricate duplicate edges or spend the same credit twice.
+
+Ordinary rejection changes no topology, accepted ownership, sequence or observable edge. A new
+press cannot evict an existing hold. Once platform loss has happened, terminate applicable accepted
+members and revoke only its routing authority using reserved capacity, retaining original press
+ownership through projections and semantic delivery. Presentation unbind preserves physical holds.
+Revocation/unbind never allocate a new binding generation; exhaustion rejects a new publication
+without preventing old work's termination. Global route poisoning is not the lifetime mechanism.
+
+A prepared route pins an exact immutable declaration and a separate owner-side invalidation fact.
+Platform loss can revoke it while the move-only token remains outstanding. Commit consumes that
+token with a total Published/Invalidated outcome; invalidated completion cannot rearm routing.
+UI presentation completion consumes the same fact without restoring prepared focus, capture or
+reducers. Backend pixel acceptance remains a separate truthful outcome. The root must not publish
+interactive receipt, observation or accessibility success for that invalidated candidate. No new
+fallible admission is introduced after backend submission.
+
+The [endpoint plan](../../plans/2026-10-30-input-endpoint-admission-and-retirement-plan.md) records
+the selected raw-ID/private-lifetime and shared-credit comparison against public handles and a
+dedicated terminal pool. Red regressions and private arithmetic controls establish the problem
+and design selection, not implementation qualification. Actual production topology, allocation
+bounds, consumer migration and public/native results remain open in the implementation ledger.
 
 ### Immutable Definitions And Global Runtime Selection
 

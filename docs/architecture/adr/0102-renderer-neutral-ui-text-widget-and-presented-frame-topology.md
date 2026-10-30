@@ -25,6 +25,16 @@ The [complete persistent-key successor conformance](../../knowledge/engineering/
 identity inventory, exact neutral assertions and scoped qualification to implementation `f7ab300`.
 Historical inventories retain their recorded scope; this is not whole-toolkit qualification.
 
+The prepared-presentation/input-loss part of the public checkpoint is reopened by the
+[Input endpoint replacement](../../plans/2026-10-30-input-endpoint-admission-and-retirement-plan.md).
+Independent Input/UI source review exposed the prepare/loss/cancel/late-commit case: restoring a
+prepared whole-session clone can revive cancelled focus/capture/reducers even if a returned stamp
+is stale. ADRs 0041/0108 select total committed/invalidated completion and exact root publication
+tails. Migrate Runtime, manual neutral presenters, root and reference consumers directly; refreeze
+the changed public inventory only after focused neutral/public and relevant native qualification.
+Prior complete-key and typed-Image qualifications retain their recorded scope and do not qualify
+this successor. No compatibility receipt-returning alias is required.
+
 ## Context
 
 The current runtime UI combines persistent ECS components, renderer-owned view discovery, layout,

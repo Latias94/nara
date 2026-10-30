@@ -3,7 +3,8 @@
 **Status**: Accepted
 **Date**: 2026-08-08
 **Amended**: 2026-08-09 by the UIF-U1 presentation-reconciliation, UIF-U3C prepared-submission and
-UIF-U4C surface-lifecycle corrections; 2026-08-10 by the UIFM-U1 modal-entry-focus correction
+UIF-U4C surface-lifecycle corrections; 2026-08-10 by the UIFM-U1 modal-entry-focus correction;
+2026-10-30 by prepared Input-loss completion without interaction resurrection
 **Owner**: UI kernel session, input routing, platform adapters, Host surface lifecycle
 **Refines**: [ADR 0041](0041-input-routing-actions-text-focus-and-accessibility.md) and
 [ADR 0102](0102-renderer-neutral-ui-text-widget-and-presented-frame-topology.md)
@@ -45,7 +46,7 @@ sequenceDiagram
     B-->>P: accepted exact permit
     P-->>H: backend presentation commit
     H->>K: consume prepared authority + commit
-    K-->>H: presentation receipt
+    K-->>H: committed receipt or terminal invalidated outcome
     I->>K: receipt-stamped event
     K-->>I: Consumed / PassThrough / RejectedClosed + intents
 ```
@@ -123,8 +124,25 @@ predecessor session and seeds only the successor endpoint seat.
 
 All fallible history, session, reducer, journal and input-route admission completes before backend
 submission. The backend acceptance is move-only and bound to the packet plus target, slot,
-environment, capability and GPU generations. Consuming it performs an infallible authority swap;
-ordinary consumers and the frame journal cannot mint or advance receipt authority independently.
+environment, capability and GPU generations. Consuming it has a total outcome: commit admitted
+authority if it remains valid, or consume an already invalidated attempt without publishing it.
+Ordinary consumers and the frame journal cannot mint or advance receipt authority independently.
+
+Platform-observed loss may revoke an exact input endpoint while a prepared publication still pins
+it. Preserve the token's immutable declaration and separately retain its invalidation. A late
+backend acceptance proves the submitted pixels; it cannot restore prepared focus, capture, reducer
+or presented-session state that cancellation already invalidated. An invalidated commit consumes
+the exact prepared token, discards that prepared interaction state and returns an explicit terminal
+outcome without a new fallible admission step. It does not replace a newer live session or rearm
+the input route. Abort and supersede likewise settle the exact token and its retention.
+
+The root keeps backend pixel acceptance truthful while skipping interactive receipt, observation
+and accessibility success publication for the invalidated candidate. Any revocation targets only
+its exact surface/candidate; another surface or a successor remains intact. Prove prepare, physical
+loss, live UI cancellation and late commit together, including focus/capture/reducers, exhaustion
+of new binding generations and invalidated abort. The selected contract is implementation work
+under the [Input endpoint plan](../../plans/2026-10-30-input-endpoint-admission-and-retirement-plan.md),
+not new conformance evidence for the current production implementation.
 
 Focus identity is independent from destination and activation eligibility. A focused stable control
 that becomes disabled retains focus identity and remains the sequential/directional navigation

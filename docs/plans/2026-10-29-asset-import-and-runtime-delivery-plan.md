@@ -1,8 +1,8 @@
 # Asset Import Ownership And Processed Runtime Delivery
 
 **Date:** 2026-10-29. **Status:** Source/import, compound identity, immutable base and bounded
-first-party processed startup/travel, canonical source locations and Source Scene references qualified;
-input and target/package delivery open.
+first-party processed startup/travel, canonical source locations, Source Scene references and global
+source/processed Input qualified; target/package delivery and selective-demand/backing successors open.
 **Baseline:** `13a2744`.
 **Parent:** [Foundation rebaseline](2026-10-23-foundation-architecture-rebaseline-plan.md), R6/R7.
 
@@ -47,6 +47,14 @@ copies remain outside installation disposal authority.
 Each step is a reviewable dependency unit, not completion of all R6/R7. Local CAS/group publication,
 remote services, patch/DLC and universal all-platform qualification remain later work in the
 foundation plan.
+
+The October 30 [research disposition](../research/2026-10-30-engine-direction-reconciliation.md)
+adds three freeze boundaries to that existing organization: R6/R7 separates validated Scene
+destinations from current materialization demand; R7 separately compares immutable member backing
+and residency; R6b closes the actual finite build recipe before persistent reuse/target cooking.
+These do not reinterpret today's `Soft` edges or reopen the bounded base/startup qualifications.
+Select their Schema/catalogue, backing and recipe contracts through the named consumers in the
+parent plan before implementing them; lazy bytes alone do not make preparation demand selective.
 
 Step 1 is implemented as `c352614`, with independently consumed parsing, Check/Play/Scene and
 Editor metadata workflows. The [qualification](../knowledge/engineering/verification/2026-10/2026-10-28T233934Z-source-import-contracts-below-project-hosts-with-typed-read-errors-e617bfdd9a104fb69bdf3a20936f7d57.md)

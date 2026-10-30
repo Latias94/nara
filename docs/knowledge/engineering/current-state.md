@@ -3,7 +3,7 @@ type: "Current State"
 title: "Current Engineering State"
 description: "Derived summary of immutable engineering-memory shards."
 tags: ["engineering-memory", "derived"]
-source_fingerprint: "f9bb57791c5c259717eee6e34fa145ebaa51b1753b896be12d165ada32474bae"
+source_fingerprint: "576d58ca7ef8669f8757d3f30d2eab6ef491ef02e95ed49e03ac7884fe324995"
 ---
 
 # Current State
@@ -12,8 +12,8 @@ source_fingerprint: "f9bb57791c5c259717eee6e34fa145ebaa51b1753b896be12d165ada324
 
 This file is derived from immutable shards. Record new facts in shards, then render during integration.
 
-- Source fingerprint: `f9bb57791c5c259717eee6e34fa145ebaa51b1753b896be12d165ada32474bae`
-- Immutable records: 1062
+- Source fingerprint: `576d58ca7ef8669f8757d3f30d2eab6ef491ef02e95ed49e03ac7884fe324995`
+- Immutable records: 1064
 - Active lane heads: 2
 
 # Active Registrations
@@ -51,7 +51,7 @@ This file is derived from immutable shards. Record new facts in shards, then ren
 - [Editor foundation U9 and U1-U8 complete with exact-source external acceptance](registry/2026-10/2026-10-17T102710Z-nara-editor-foundation-implementation-codex-root-76fa1ccb656c4ebd8c2b5f77f83287f7.md): `completed` (nara-editor-foundation-implementation-codex-root; producer `codex-root`)
 - [Editor foundation research and refactor planning complete](registry/2026-10/2026-10-16T044159Z-nara-editor-foundation-planning-codex-root-d0e8f37adfd54751b67d7ae647f06d83.md): `completed` (nara-editor-foundation-planning-codex-root; producer `codex-root`)
 - [First 2D author workflow complete with clean committed-source acceptance](registry/2026-10/2026-10-16T025148Z-nara-first-2d-author-workflow-codex-root-fe7312236c5d4906b8e950d366111171.md): `completed` (nara-first-2d-author-workflow-codex-root; producer `codex-root`)
-- [Foundation processed Input delivered; continue bounded endpoint retirement](registry/2026-10/2026-10-30T101250Z-nara-foundation-rebaseline-codex-main-0bb1d7f880554778ade88da7a13419c6.md): `active` (nara-foundation-rebaseline-codex-main; producer `codex-foundation-main`)
+- [Foundation research reconciled; implement bounded Input lifetime owner](registry/2026-10/2026-10-30T105817Z-nara-foundation-rebaseline-codex-main-3a690ec81e5d488c84700df9698ad299.md): `active` (nara-foundation-rebaseline-codex-main; producer `codex-foundation-main`)
 - [Ordinary structural authoring qualified](registry/2026-10/2026-10-20T053614Z-ordinary-authoring-codex-root-ac405c79936d43b09f6cfb4197d747ed.md): `completed` (ordinary-authoring-codex-root; producer `codex-root`)
 - [Persistent checkpoint consumer qualified on Windows](registry/2026-10/2026-10-21T032628Z-persistent-two-level-game-codex-root-1ac997abdab142e590af8a6c21f9f443.md): `complete` (persistent-two-level-game-codex-root; producer `codex-root`)
 - [N05 plugin failure facts qualified](registry/2026-10/2026-10-19T172945Z-plugin-error-facts-codex-root-c20974513f104398967edbed73efccaa.md): `completed` (plugin-error-facts-codex-root; producer `codex-root`)
@@ -70,6 +70,7 @@ This file is derived from immutable shards. Record new facts in shards, then ren
 
 # Recent Evidence
 
+- **Work Progress**: [Engine research reconciliation and bounded Input terminal comparison](progress/2026-10/2026-10-30T105046Z-engine-research-reconciliation-and-bounded-input-terminal-comparison-84d7a4b9cbdf44419a23d851f92b9a7d.md) - Current-HEAD research dispositions, five reproduced Input failures and selected shared-credit design; production replacement remains open.
 - **Verification Evidence**: [Processed startup Input ownership and prebuilt source-free physical process qualification](verification/2026-10/2026-10-30T100534Z-processed-startup-input-ownership-and-prebuilt-source-free-physical-process-qualification-35c2432f89d04982b10d2be3fa0f9d12.md) - Qualifies complete processed startup Product configuration, original typed acquisition and independent World state, source-free seven-case process execution, structured budgets and selected Windows DX12 regression.
 - **Work Progress**: [Processed startup Input ownership and source-free process integration](progress/2026-10/2026-10-30T093204Z-processed-startup-input-ownership-and-source-free-process-integration-b55da685b66d4b64ab68c071525c90ab.md) - Actual typed acquisition, independent state and selected codec pass focused tests; seven prebuilt source-free child cases pass, final integration remains in progress.
 - **Verification Evidence**: [Immutable Input definitions and global source workflow qualification](verification/2026-10/2026-10-30T083131Z-immutable-input-definitions-and-global-source-workflow-qualification-f8db4628f79943ac94a90593cef6c736.md) - Actual owner-backed captured definitions, source receipts, pre-Startup selection, physical travel, relocated Export and selected native DX12 paths qualified.
@@ -81,7 +82,6 @@ This file is derived from immutable shards. Record new facts in shards, then ren
 - **Work Progress**: [Source Scene closure qualification and global lookup boundary corrections in progress](progress/2026-10/2026-10-30T041730Z-source-scene-closure-qualification-and-global-lookup-boundary-corrections-in-progress-322c0046b4b74b459d2ccde9613a899a.md) - Records executed Source Scene cohorts, physical-return/retry fixes and the discovered global lookup and overlapping-reader identity corrections before qualification.
 - **Work Progress**: [Source Scene actual-reader closure and working-copy integration under review](progress/2026-10/2026-10-30T034018Z-source-scene-actual-reader-closure-and-working-copy-integration-under-review-f469994dd6dd4a5f9536f8b8b8e8d83d.md) - Tracks finite source data custody, Product travel, admitted Editor inputs and independently found ownership and budget corrections before final qualification.
 - **Verification Evidence**: [Canonical source locations and typed UI Image binding qualification](verification/2026-10/2026-10-30T015832Z-canonical-source-locations-and-typed-ui-image-binding-qualification-0ce5bafdc65f4893aa0079009668e41a.md) - Records the complete scoped source-location replacement, exact public image inventory, real consumer/native evidence and remaining Source Scene work.
-- **Work Progress**: [Canonical source and typed UI qualification with frame-independent content maintenance](progress/2026-10/2026-10-30T002435Z-canonical-source-and-typed-ui-qualification-with-frame-independent-content-maintenance-25781c8bea5c4c639412a82d4651a700.md) - Records source association and UI ownership corrections, actual root owner and native results, reviewed forward contracts and remaining consumer gates.
 
 # Integration Notes
 

@@ -52,8 +52,12 @@ and final affected7, final native3, workspace/minimal/Clippy/format checks pass 
 predecessor/final scope. Seven prebuilt child cases run after complete source fixture removal.
 Safe budget diagnostics survive both codec and Host bridges. The context/revision allowance still
 does not close the [endpoint/contribution gap](../../research/2026-10-30-input-endpoint-admission-and-retirement-review.md);
-its finite owner/terminal comparison remains proposed, while target-build and packaged delivery
-remain separate work.
+its finite owner/terminal comparison now selects bounded raw-ID admission with private member
+lifetimes, read-only projections and shared terminal credits under amended ADR 0041. The
+[progress record](../../knowledge/engineering/progress/2026-10/2026-10-30T105046Z-engine-research-reconciliation-and-bounded-input-terminal-comparison-84d7a4b9cbdf44419a23d851f92b9a7d.md)
+records five reproduced failures and the passing private eight-test capacity comparison. Production
+owner/projection replacement and total prepared UI invalidation under 0102/0108 remain unimplemented
+and unqualified; their public checkpoint is open. Target-build and packaged delivery remain separate.
 
 The [October 29 rendering review](../../research/2026-10-29-render-architecture-and-refactor-plan-review.md)
 and long-horizon refinement prefer a finite explicit resource graph, typed contributions and

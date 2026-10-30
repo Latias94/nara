@@ -100,6 +100,13 @@ adds the concrete Editor Host retirement phases and selected Windows/DX12 qualif
 SDK failure coverage and full R4 remain bounded by that evidence; the source study does not
 establish their completion.
 
+The October 30 [research reconciliation](../research/2026-10-30-engine-direction-reconciliation.md)
+reconciles the user-supplied engine-direction archive with the current development baseline.
+It refines reference demand/backing, authored evolution, joint motion/execution, render/UI
+completion and concrete Editor/tool consumers inside the existing rebaseline plan. Imported
+research keeps its original revision and evidence limits; this integration does not qualify
+those replacements or promote Proposed ADRs.
+
 ## Background Designs
 
 The [Tasks activity-custody design](task-activity-scope-design.md) separates optional Host-owned

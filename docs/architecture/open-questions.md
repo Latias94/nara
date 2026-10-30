@@ -259,22 +259,26 @@ flowchart LR
 - **Related ADRs**: 0034, 0045, 0047
 - **Question**: How should field projections, conflict detection, and inverse patches narrow Play Mode write-back?
 
-## OQ-010: Editor Runtime-UI Dogfooding Gate
+## OQ-010: Custom-Drawn Editor Interaction And First Complete Slice
 
 - **Status**: open
-- **Owner**: `nara_ui_kernel`, `nara_ui_widgets`, and a separate Editor UI adapter
-- **Trigger**: The shared kernel and widget modules have text/IME, navigation, focus, scroll,
-  accessibility semantics, and the capabilities required by one complete existing egui panel.
-- **Related ADRs**: 0015, 0025, 0041, 0102, 0104, 0107, 0113
+- **Owner**: Editor application/frontend, shared UI/text foundations and platform adapters
+- **Trigger**: The first editable Nara-drawn Inspector and live Scene view, before the Editor
+  widget and extension interfaces freeze. Complete toolkit parity is not a prerequisite.
+- **Related ADRs**: 0015, 0025, 0041, 0102, 0104, 0107, 0108, 0113, 0118; Proposed 0121
 - **Evidence**: Completed EUA-U1 through EUA-U5 (`ed9f1cd`, conformance record
-  `cf11b0c7d23a44e7b127b41199ee4ee7`) prove that egui and Nara UI Canvas can share one immutable
-  authoring frame and ordered action seam. They do not provide a complete Nara UI Editor panel and
-  therefore do not trigger toolkit convergence.
-- **Question**: Which complete panel should prove the separate Editor adapter, session-state, and
-  tooling-command boundary first, and which later heterogeneous workloads (a virtualized
-  hierarchy/table, viewport, timeline, or graph) are required before deciding whether the shared
-  kernel can support the primary editor toolkit? The first panel does not admit shared persistence,
-  Editor Shell ownership, docking, native multi-window policy, or toolkit convergence.
+  `cf11b0c7d23a44e7b127b41199ee4ee7`) proved the then-current frontend/Canvas semantic seam.
+  They did not qualify an editable Editor toolkit. The selected destination is Nara's own
+  custom-drawn Editor, as recorded in [R11](../plans/2026-10-23-foundation-architecture-rebaseline-plan.md#r11-ui-content-association-text-admission-and-platform-qualification).
+  The October 30 [Editor study](../research/2026-10-30-engine-direction/editor-and-extensibility.md)
+  and [text/render study](../research/2026-10-30-engine-direction/rendering-and-custom-ui.md)
+  refine the first consumer; they do not change its implementation status.
+- **Question**: Which Editor-owned widget/draft/focus lifetimes and editable-text/platform contracts
+  make a multilingual numeric/text Inspector, filtered rows and a clipped live Scene image usable
+  through exact results, Undo and Save/Reopen? Keep model/property, live widget incarnation and
+  saved panel identities separate. Determine shared text/layout primitives through this slice,
+  then qualify virtualization, native detach/DPI/IME/accessibility and docking in their actual
+  workflows. A game World, shared persistence model or embedded foreign UI runtime is not implied.
 
 ## OQ-011: Platform Export, Signing, and Store Adapter
 

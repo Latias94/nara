@@ -12,6 +12,13 @@ maps its 36 topics and all 103 baseline ADRs to the decisions below. The
 and comparison experiments. Earlier probes remain evidence at their recorded revisions; they are
 not fresh qualification of these designs.
 
+The October 30 [research reconciliation](../research/2026-10-30-engine-direction-reconciliation.md)
+refines the current plan's cross-owner consumers: validated reference demand versus residency,
+Schema/claim/address evolution, joint motion/execution, repeated render display versus UI
+completion, and commands/tool coexistence independent of panels. It preserves completed scopes
+and distinguishes the archive's older baseline from current implementation; no whole-foundation
+completion follows from that research integration.
+
 Six independent read-only reviews challenged execution, data, assets, rendering, extensions and
 Editor/UI against actual callers and pinned Bevy/Godot sources. Recommendations are integrated
 here rather than treated as six independent architectures. Current implementation, accepted
@@ -405,7 +412,7 @@ four different qualifications.
 
 ## D07: Extensible Automatic Execution
 
-Topics: T09, T16, T25, T29. ADRs: 0003, 0010, 0023, 0036, 0039, 0080, 0084.
+Topics: T09, T16, T25, T29. ADRs: 0003, 0010, 0023, 0036, 0039, 0057, 0080, 0084.
 
 **Pressure.** `CoreStage::ALL` owns the automatic sequence and pause policy. Custom schedules
 are externally driven, not automatic fixed-tick phases. Adding systems within FixedUpdate is
@@ -427,13 +434,20 @@ plan.fixed_phase(PhysicsStep).after(MotionIntent).before(SpatialPublication)?;
 
 **Invariants and impact.** Seal topology before startup; reject cycles, missing anchors and
 duplicate drive. Declare clock, pause, exact-step, deferred visibility and fault policy. Keep
-one execution owner and a whole successful fixed-tick finalization before command Ack. Domain
-render stages need not remain hardcoded App knowledge. Default TaskUpdate is an observation cut,
+one execution owner and an explicit success/finalization rule. Whole successful-tick completion
+before command Ack is a candidate stronger than Accepted ADR 0057's current narrow Ack. Select
+between that stronger boundary and an independently observed tick-success rule through R4c's joint
+motion/failure consumer; reconcile the relevant contracts before phase/executor interface freeze.
+Neither choice rolls back partial World/native effects. Domain render stages need not remain
+hardcoded App knowledge. Default TaskUpdate is an observation cut,
 not the one permissible future authoritative integration point.
 
 **Acceptance.** Physics-like and Animation-like independent plugins combine without editing App
 or using private anchors. Cover deferred writes, paused background service, exact step, empty
-ticks and failure without Ack. Record author complexity and glue as well as execution cost.
+ticks and failure after command consumption/Capture but before later authoritative completion.
+Observe command Ack, tick-success and retained effects separately. Verify a real borrowed solver-job
+join and the behavior of each supported executor profile before freezing that support. Record
+author complexity and glue as well as execution cost.
 
 ## D08: Execution Facilities, Activity Scopes And Close Dependencies
 

@@ -93,10 +93,11 @@ R4b activity scopes / facility policy and R4c phase-plan comparison qualify inde
 R1/R2 + selected Host custody -> R1b real tool placement / local install lifecycle
 R6a continuity + typed Runtime decode + bounded immutable catalog -> R7 base delivery
 R6b recipe-index / CAS is an independent cache work unit, not base delivery admission
+R6/R7 validated-reference demand precedes travel/package contract freeze; backing residency is separate
 R8 render composition + R9a View / color / captured-time facts qualify together
 R6 shader inputs + selected R8 seam -> R9b durable shader/material resources
 R9c retained geometry is a separate measured mechanism
-R4c + motion/input consumers -> selected R10 domain / repeatability qualification
+R10 joint motion oracle -> R4c phase/executor selection -> selected R10 domain qualification
 every changed seam -> matching R11 / R12 integration, deletion and current documentation
 ```
 
@@ -153,6 +154,14 @@ Acceptance: every baseline ADR occurs exactly once, every topic maps to a substa
 all new IDs/status/links agree, and an independent reviewer challenges omissions/contradictions.
 Document checks are sufficient for documentation closure; no inherited test count is new evidence.
 
+The October 30 [research disposition](../research/2026-10-30-engine-direction-reconciliation.md)
+reconciles the user-supplied archive against `b939da2`, preserving the ten original studies and
+their different reference revisions. It refines the existing units below rather than adding a
+parallel roadmap or reopening qualified source-free, Input-definition and Prefab replacements.
+Its risk/capability findings are not new product qualification. The current endpoint-retirement
+unit continues first; reference demand, motion phases and render/UI completion constrain later
+interfaces before they freeze.
+
 ## R1: Minimal Semantic Tool And Exact Operation Outcomes
 
 **Design:** D13, D17. R1a is the owned direct-submission prerequisite; its qualified scope belongs
@@ -175,6 +184,13 @@ and project workflow adapters; no new Automation crate.
   claim follows from it. The [finite source-tool owner plan](2026-10-28-finite-source-tool-owner-plan.md)
   places this concrete operation in Project Session/Application, using existing Tasks custody and
   source preparation rather than retaining the EnemyStats fixture's parallel proposal owner.
+
+Add an ordinary semantic command contribution whose lifetime is independent of panel visibility.
+Use the external Snap operation from a menu and shortcut with its panel closed; both use the
+same query/prepare/commit/results and one transaction/Undo boundary. A panel owns its draft,
+while the admitted contribution or Session owns command availability and execution. Reconcile
+ADR 0118 before replacing the panel-only contribution surface; a string command bus is unnecessary.
+This consumer can use current fields without waiting for every R2 query or R5 evolution outcome.
 
 **R1b placement and local lifecycle** is a separate deliverable beyond that proposal experiment.
 The [finite inline facet consumer](2026-10-28-inline-source-tool-facet-plan.md) now implements one
@@ -229,6 +245,16 @@ adds closed Prefab collection copying/import with source-owned identities, sidec
 remapping, fixed preparation and retained directory publication. Scene/image collections, explicit
 external bindings, existing-owner Schema evolution and full management controls remain open;
 this is not a complete R1b claim.
+
+The next coexistence consumer keeps two installed, pre-admitted tool owners available together.
+Updating or disabling A must preserve B's Inspector route and still-valid review, reject A's
+stale result and observe A's physical retirement. Replace singleton contribution routing rather
+than repeatedly switching one active slot; child execution can remain serialized. The current
+single-slot policy is deliberate, so reconcile ADR 0118 before extending it. First refuse an
+overlapping property contribution explicitly instead of inventing a universal arbitration kernel.
+Static Rust objects and finite children do not prove resident native-code unload. Before claiming
+that capability, test retained Editor views, commands, candidates, history and destructors under
+the selected R3c/R4a code-custody rule; ordinary static APIs need no speculative unload tokens.
 
 Acceptance: panel/session parity, exact result, one Undo, Save/Reopen, rejected/stale proposal,
 delayed completion after newer requests, multiple observers and bounded structured diagnostic
@@ -385,7 +411,33 @@ Three independently verifiable sub-units:
    execution, blocking work, Future I/O and real-time callbacks distinct.
 3. **R4c execution phases:** compare public sets, a sealed automatic phase plan and
    `bevy_app::App::empty()` using independently authored Physics-like/Animation-like flows.
-   Preserve one driver and whole successful fixed-tick finalization; reject bad topology before startup.
+   Preserve one driver; select success/finalization and retirement boundaries through the joint
+   consumer, and reject bad topology before Startup.
+
+Bring the R10 motion oracle into this comparison before selecting the schedule API: motion intent,
+kinematic target/solve, solver pose commit and spatial publication need an explicit same-tick join.
+Use a deterministic stand-in for initial sequencing, then verify the actual borrowed-job join
+with a thin real solver before freezing the supported phase/executor interface. Borrowed same-tick
+jobs join before pose commit; owned cross-frame Tasks keep their
+existing admission/cancel/disposal custody. TaskUpdate before the fixed loop is not that join.
+
+Select a supported executor profile at composition/seal and apply it to all automatically driven
+schedules. An unrelated dependency's Bevy `multi_threaded` feature must not silently select engine
+execution policy. Compare an explicit serial baseline and supported explicit parallel execution,
+including feature-unified independent consumers, NonSend placement, deferred work and faults.
+Unavailable requests refuse before Startup; ECS, solver and background worker budgets remain
+distinct facts. Record exactly which profiles are admitted: a parallel comparison does not itself
+qualify production parallel support. This needs no new executor implementation or global pool.
+
+Resolve command consumption/Capture/Ack versus whole-tick success in this same consumer. ADR 0057
+currently permits later unrelated failure after Ack, while D07's stronger successful-tick goal
+would place every authoritative phase and deferred pose/spatial effect before finalization.
+Either reconcile 0003/0039/0057 for that stronger boundary or retain narrow Ack and revise the
+stronger design claim explicitly. Neither option implies rollback of partial World/native effects;
+preserve truthful sticky-fault, close and new-generation recovery behavior. Select and reconcile
+this contract before R4c phase/executor interface freeze. Exercise the same trace where command
+consumption/Capture completes and a later authoritative phase fails; observe Ack, tick-success
+and retained effects independently under the selected rule.
 
 Acceptance: two independent scopes, independent close, saturation/cancel/late/sub-work,
 uncooperative worker, partial startup, local SDK controller and close cycles/missing dependencies.
@@ -393,7 +445,8 @@ Measure admission-to-start, interactive latency and worker/facility multiplicity
 old worker counts as new performance evidence. Fix earlier F4 Stop observation retention using
 an explicit retained/expired result policy, not a larger unexplained ring.
 
-Replace 0008's long-term model only with a complete successor; amend 0003/0010/0042/0052/0082/0084.
+Replace 0008's long-term model only with a complete successor; reconcile
+0003/0010/0039/0042/0052/0057/0082/0084 for affected contracts.
 Delete extra physical owners and accidental hardcoded phase knowledge when superseded.
 
 ## R5: Durable Addressing, Prefab Overlays And Projection Lifetime
@@ -456,6 +509,24 @@ lifetime outcomes below. Complete conversion has its separately qualified succes
 Qualify ordinary incremental projection versus epoch reconstruction only when an actual measured
 projection workflow requires it, not by adding a generic incremental graph.
 
+The October 30 [content study](../research/2026-10-30-engine-direction/content-and-persistence.md)
+refines the remaining evolution consumer. A component-value migration does not migrate versioned
+property claims, selectors or occurrence paths. Qualify an explicit reviewed project upgrade over
+direct records, dormant overlays and dirty dependent documents, with a changed unit, an unaffected
+stable pin and an unavailable owner. Choose a new history checkpoint or prove retained old-history
+bases; do not reinterpret old inverses or run project migration code during ordinary generic Open.
+Separately extract a nested Prefab subtree into another source using a complete old/new occurrence
+map and dependent claim/reference rewrites. Keeping terminal entity IDs is insufficient when the
+source/hop chain changes. Unknown records remain intact or cause a specific refusal. Reuse the
+existing document transactions and per-document history; no parallel global Undo engine is needed.
+
+Before the first source replacement, retain bounded recovery information for the reviewed operation,
+including participating dirty inputs. Interrupt before publication, between replacements and after
+publication before acknowledgment, then reopen in a fresh process. Identify verified old/new and
+unresolved members, fence external edits and make retries idempotent. Per-file rename cannot attest
+project-wide atomicity. Recovered Check/Play consumes a coherent admitted generation or refuses.
+This is meaningful authored evolution, not a requirement to retain abandoned pre-release readers.
+
 Acceptance: nested and repeated instances, base rename/reorder/delete, same-name members,
 Behavior migration, convert-to-local and explicit remap. Long edit churn preserves stale-alias
 protection without silently exhausting lifetime identity. Amend 0058 before changing classification:
@@ -489,6 +560,14 @@ publication with tracked inputs; identity does not come from generated cache or 
 
 R6a is the facet/continuity/verified Runtime-product contract. R6b adds the durable recipe index
 and local CAS; it does not block an independently qualified R7 immutable base catalog.
+
+Before R6b reuse or target cooking becomes public, the executing owner must close its finite build
+recipe: selected versioned importer/cooker, normalized settings, observed auxiliary/processed inputs
+and consumed target facts. In-process `TypeId` and a profile label are not durable recipe authority.
+Keep logical Product identity, recipe key, output-byte digest and immutable group manifest distinct.
+Qualify two clean builds, auxiliary/settings/target changes and interrupted group publication with
+the existing compound importer plus one real target-sensitive consumer. No stale-cache defect is
+asserted for the current capture-local cache; this is the upcoming reuse contract's freeze gate.
 
 The [ordered importer and delivery plan](2026-10-29-asset-import-and-runtime-delivery-plan.md)
 first moves the existing executing source facet below root/Scene/2D while preserving all actual
@@ -568,6 +647,25 @@ retarget admitted acquisitions/recovery inputs. Equal catalog bytes do not estab
 base/plan owner. This preserves the directory-backed implementation without selecting overlay
 precedence, a package resolver or another storage executor.
 
+Before freezing Scene travel/reference semantics, separate a valid deliverable target from a
+dependency required to materialize the requested Scene. Both participate in strict Check/Export
+closure and target validation; only selected demand requires current preparation/residency. The
+present `Soft` edge permits absent membership and cannot implement validated lazy destinations by
+renaming `Required`. Qualify three Scenes linked by Door/menu components, a shared atlas and heavy
+later-level resources through both source and processed paths. Opening A validates B/C without
+preparing their heavy resources; an explicit request or bounded prefetch acquires the selected
+destination under the original plan, cancellation owner and transactional publication tail.
+
+Separately compare the qualified eager base with a concrete immutable retained-pack backing before
+claiming larger content-store suitability. Immutable catalogue/codec authority, encoded member
+backing and decoded/native residency have different lifetimes. A lazy acquisition retains its
+original backing and needed data, never a newly opened mutable directory or current global base.
+Test encoded eviction, overlapping generations, cancellation and an escaped Image. State each
+backend's availability guarantee; retain the eager backend's captured-file-removal behavior.
+Lazy backing alone does not reduce a Required preparation closure, and selective demand alone
+does not release an eager base's encoded bytes. These are separate experiments within R6/R7,
+not prerequisites to requalify the completed bounded source-free startup/Input units.
+
 Acceptance: two clean content builds, a different host/target selection, source/cache inaccessible
 and no Cargo on the runtime machine, server stripping, wrong target/schema/digest rejection,
 failed candidate retaining last-good executable/data. State non-hermetic inputs and actual
@@ -602,6 +700,18 @@ joins the producer output at composite admission. Qualify source/processed gener
 contribution withdrawal with retained work, and two UI placements of one output. Initial static
 registration and one copy/direct-sampling path are legitimate staged capabilities within that
 contract; dynamic loading, hot unload and a complete toolkit are separate work.
+
+Close the repeated-display join with ADRs 0108/0112: output pixels, destination display attempts
+and one-shot Runtime UI completion differ. Admission designates one exact interactive completing
+attempt; passive mirrors and repeated repaints cannot complete it again or advance history.
+Initially allow one interactive occurrence per logical surface. Passive mirrors retain pixels and
+placement facts without producer route/session, Game capture, IME or actionable accessibility.
+Active-to-passive transition revokes old occurrence authority and rejects queued old actions without
+leaking them to gameplay. Mirror failure revokes only that occurrence; loss of the interactive one
+cannot be repaired by keeping a passive copy visible. Use a Game output at 30 Hz, preview at 60 Hz
+and Editor redraw at 144 Hz as test schedules, not performance claims. Exercise a mirror displaying
+first, designated completion once, hide/failure/downgrade and producer-local retirement. The
+current prepared/loss/late-commit Input correction is required independently of the full R8 graph.
 
 Validate the architecture on an independent two-pass Scene-color blur, keeping Runtime HUD crisp,
 then retain original color for an Editor before/after view and independently chain a second effect.
@@ -744,12 +854,32 @@ than requiring their public topology.
 
 ## R10: Motion, Time, Repeatability And Concrete Domain Seams
 
-**Design:** D09. **State:** not started. **Owners:** concrete Physics/Animation/Audio/Network integrations.
+**Design:** D09. **State:** motion/repeatability not started; the bounded Input endpoint successor
+is in progress. **Owners:** Input and concrete Physics/Animation/Audio/Network integrations.
 
 Implement a bounded motion consumer with root-motion intent, kinematic target, dynamic solver
 pose, parent edits and interpolation. Define query/callback freshness and temporal authority.
 Add a minimal audio semantic-effect consumer with sample-time and shutdown rules. Do not invent
 generic physics/audio providers or enforce a World-wide writer ACL.
+
+Use this minimum motion consumer during R4c selection, not after its interface freezes. Define
+root motion as intent, dynamic pose as solver output and the owner of corrections/writeback;
+Transform continues to own spatial projection. R4c's freeze gate is the joint motion ordering,
+actual borrowed-job join and each admitted executor profile's deferred/fault/NonSend behavior.
+The following generated-content and authoring workflow is the separate R10 domain qualification,
+not an additional prerequisite for every R4c comparison. Exercise one authored collision definition that
+generates solver body/collider/debug state. Attribute generated roles to source, occurrence,
+component/property and input revision; edit/remove/duplicate it and prove current membership,
+diagnostics and old-output retirement without persisting runtime handles. Compare private
+post-spawn derivation with a domain cook only if startup/delivery pressure requires it. Preserve
+exact native persistent bindings; no generic baker or World-mutating codec is implied.
+
+Before freezing non-TRS spatial import, KeepWorld tooling or affected persistent animation
+targets, reuse the [affine representation comparison](../architecture/spatial-affine-representation-design.md)
+with a complete 2D import/edit/animate/Undo/Redo/Save/Reopen consumer. Settle authored-base
+preservation/canonicalization, interpolation targets, inverse refusal and numerical error together.
+Select and amend 0097/0100 and relevant codecs from that evidence. Ordinary TRS/KeepLocal motion
+can proceed while this conditional gate remains open.
 
 Acceptance: pause/exact-step/teleport/reparent, fixed versus presented snapshots and correction
 cut. Define a closed-input same-build repeatability profile with explicit RNG/outcome policy;
@@ -775,12 +905,13 @@ context/revision costs alone are not a bound for the whole physical pipeline.
 The [endpoint admission review](../research/2026-10-30-input-endpoint-admission-and-retirement-review.md)
 traces historical empty rows, live cross-frame memberships and platform-observed cancellation
 that can clear ingress state without admitting terminal events. Its
-[successor plan](2026-10-30-input-endpoint-admission-and-retirement-plan.md) compares finite
-raw-ID admission with lifecycle/member pools and checked generations, including terminal capacity,
-paused consumers, synthetic writers and actual adapter incarnation facts. These are proposed
-owner replacements with source-derived counterexamples; execute the red cases and bounded
-comparison before adopting the concrete contract. Do not qualify complete Input boundedness
-from the preceding source/processed definition work.
+[successor plan](2026-10-30-input-endpoint-admission-and-retirement-plan.md) now selects finite
+raw-ID admission, private lifecycle/member identity and shared ordered terminal credits after actual
+red regressions, adapter review and private shared/dedicated controls. Amended ADRs 0041/0102/0108
+also require total prepared-route/UI invalidation: a late backend acceptance cannot restore a
+cancelled interaction session. Production owner/projection replacement, all-consumer bounds and
+public/native acceptance remain open. Do not qualify complete Input boundedness from either the
+preceding source/processed definition work or the passing private count model.
 
 ## R11: UI Content Association, Text Admission And Platform Qualification
 
@@ -793,6 +924,14 @@ Preserve current semantic owners and use Dear's existing workflow behavior as th
 Nara-owned controls, identity, interaction, layout and drawing. Mature text/layout primitives
 may be reused without importing a complete foreign UI runtime. No third-party embedding
 experiment or demonstration that adoption fails is required first.
+
+The first complete visual slice is an editable multilingual/numeric Inspector plus a clipped live
+Scene image and the ordinary external semantic command. Preserve exact operation results, draft
+conflicts, Undo and Save/Reopen from the working predecessor. Select editable cluster/caret,
+selection/hit testing, font fallback and Editor font policy through this slice; display glyph
+projection alone is insufficient. Keep model/property identity, live widget incarnation and saved
+panel identity distinct. Extract toolkit-free draft logic only when actual frontend consumers
+share it, and remove the corresponding Dear path after parity rather than waiting for every panel.
 
 Consume Scene render results through R8's exact Host output/composite boundary. Keep physical
 leases in the UI adapter's owned render packet and display/input facts in its composite receipt;
@@ -826,6 +965,14 @@ F7/F8). Move glyph preparation reservations ahead of raster allocation where the
 them (F9), while distinguishing modeled bound from arbitrary allocator isolation. Keep terminal
 and last-presented behavior explicit on candidate rejection.
 
+Sharpen the existing color/mapping oracle: display the same translucent sprite, glyph edge and UI
+rectangle directly and through an offscreen image. Before presentation encoding, half-opacity red
+over transparent yields linear premultiplied `(0.5, 0, 0, 0.5)` and then over opaque blue yields
+`(0.5, 0, 0.5, 1)`. Set format-dependent tolerances before GPU execution; include alpha-zero colored
+texels and sRGB texture/tint controls. At nonzero letterbox origin, fractional DPI, clip and mirrored
+placement, paint, picking and accessibility bounds use the same admitted mapping. Outside-content
+input cannot clamp to a control; resize revokes the old mapping. Screenshots alone do not qualify it.
+
 Qualify semantic draft/basis/result reuse and separate toolkit edit buffers. Test Unicode/IME
 composition, focus, keyboard routing, DPI and actual affected native detach/accessibility seams.
 Pure semantic tool delivery is not blocked on unrelated whole-toolkit parity, and Runtime
@@ -841,6 +988,30 @@ justify deleting the working frontend or claim its native capability has transfe
 For the selected completed units, run independent direct/renamed/public consumers and relevant
 root/Editor/native paths serially. Verify unknown data, exact operation results, content/identity
 retention, close and old-generation rejection together. Review adapters, not only owner unit tests.
+
+Name the Rust capture/rebuild/restore successor explicitly. The game owns checkpoint data and
+compatibility; supervised Play owns build, immutable executable generation and process lifecycle.
+Join body and structural edits to restoration of the same meaningful playable situation, including
+capture/build/restore failures. Reconcile ADR 0116's current one-READY launch protocol before
+adding post-launch capture exchange; ADR 0093 already admits reliable rebuild/restore. Preserve
+saved-source receipts and exact last-good scope. Unchanged Restart is not recompilation, and
+successful launch is not the correct playable-result endpoint.
+
+Add one non-implementing author's bounded external-project task with current public guides:
+persistent property plus semantic tool, edit/Play/Undo/Save/Reopen and the supported Export path.
+Record assistance, undocumented steps, engine patches and the reproducible project artifact.
+Completion with zero private engine changes is author-success evidence; automated independent
+compilation remains a separate regression proof. If an external author is unavailable, keep
+that cell explicitly unqualified rather than substituting maintainer execution.
+
+Attach measurement and platform evidence to the changed workflow. Name hardware, source/toolchain,
+cold/warm state, actual correct-result endpoint and numeric/sample budgets before comparison;
+retain distributions and run-to-run variation. Short historical edit cohorts are not current P95
+claims. For each supported OS, exercise actual filesystem guarantee tier, Open/new-Save/rename,
+Export/Play/close and failure cleanup. Custom UI adds actual IME candidate placement and assistive
+technology. Missing hardware leaves native cells unqualified. Reuse owner tests, existing harnesses
+and native procedures; do not build a compiler-like validation script or rerun unrelated broad
+qualification solely to close documentation.
 
 The [Scene/runtime extension review](../audits/2026-10-27-scene-runtime-and-extension-plan-review.md)
 adds bounded consumer-driven cleanup: verify whether the Schema-first registry still needs its
