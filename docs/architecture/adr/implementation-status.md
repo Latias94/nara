@@ -39,7 +39,7 @@ and retained unrelated selections. Input/target delivery and the complete custom
 remain open; source Scene qualification does not complete those units.
 
 The [Input source unit](../../plans/2026-10-30-input-definition-and-source-admission-plan.md) is
-qualified under amended ADRs 0035/0041/0051. Immutable compiled definitions and actual shared owners
+qualified at `ff228af` under amended ADRs 0035/0041/0051. Immutable compiled definitions and actual shared owners
 replace mutable live-map serde; context slots, move-only World state and candidate-scope selection
 preserve semantic lifetimes. Its [qualification](../../knowledge/engineering/verification/2026-10/2026-10-30T083131Z-immutable-input-definitions-and-global-source-workflow-qualification-f8db4628f79943ac94a90593cef6c736.md)
 records final source/Authoring/Export105, independent physical5, owner17, Reference179, samples34,

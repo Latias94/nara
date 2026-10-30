@@ -2,7 +2,7 @@
 
 Date: 2026-10-30. Status: source workflow qualified; processed Input and endpoint successors remain open.
 Parent: [foundation rebaseline](2026-10-23-foundation-architecture-rebaseline-plan.md), R7/R10.
-Baseline: `6ef3cb0`. Predecessor: qualified finite Source Scene capture at `f96951a`.
+Baseline: `6ef3cb0`. Implementation: `ff228af`. Predecessor: qualified finite Source Scene capture at `f96951a`.
 
 ## Problem And Consumer
 
