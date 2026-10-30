@@ -7,7 +7,7 @@ use std::{
 use crate::{
     AssetDependencyGraph, AssetEventKind, AssetEventLimits, AssetEventPushOutcome, AssetEvents,
     AssetId, AssetRecord, AssetServer, AssetSourceKind, AssetSourcePath, AssetStates, AssetVersion,
-    Assets, ImportArtifactDigest, LoadState, ProjectAssetDatabase, StableAssetId,
+    Assets, ImportRecipeDigest, LoadState, ProjectAssetDatabase, StableAssetId,
 };
 use nara_core::{ByteLimit, ItemLimit};
 use nara_ecs::ResMut;

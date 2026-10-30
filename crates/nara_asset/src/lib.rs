@@ -1,12 +1,12 @@
 //! Asset identity, project metadata, typed handles, and in-memory asset tables.
 
-mod artifact;
 mod database;
 #[cfg(feature = "serde")]
 mod format;
 mod identity;
 #[cfg(feature = "serde")]
 mod import;
+mod import_recipe;
 mod product_identity;
 mod reference;
 mod reload;
@@ -21,13 +21,6 @@ use std::{
     fmt::{self, Display, Formatter},
 };
 
-pub use artifact::{
-    ArtifactFormatVersion, ArtifactLabel, DigestParseError, ImportArtifactDigest,
-    ImportArtifactKey, ImportArtifactPath, ImportArtifactPathError, ImportArtifactRecord,
-    ImportDependency, ImportDependencyDigest, ImportDependencyRole, ImportLabelError,
-    ImportLabelKind, ImportProfile, ImportSettingsHash, ImportedAssetType, ImporterId,
-    ImporterVersion, SourceHash,
-};
 pub use database::{
     AssetDatabaseError, AssetMeta, AssetMetaIdentity, AssetRecord, AssetReferenceResolver,
     AssetSourceKind, ProjectAssetDatabase,
@@ -42,6 +35,11 @@ pub use identity::{
 };
 #[cfg(feature = "serde")]
 pub use import::{AssetImportError, AssetImportLimits, AssetImportSource, SourceAssetImporter};
+pub use import_recipe::{
+    DigestParseError, ImportDependency, ImportDependencyDigest, ImportDependencyRole,
+    ImportLabelError, ImportLabelKind, ImportRecipe, ImportRecipeDigest, ImportSettingsHash,
+    ImporterId, ImporterVersion, SourceHash,
+};
 pub use product_identity::{AssetProductIdentityError, AssetProductRef, ImportedProductId};
 pub use reference::AssetReferenceDemand;
 pub use reload::{

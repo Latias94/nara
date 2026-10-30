@@ -10,13 +10,12 @@ use std::{
 
 use nara_app::{App, CoreStage};
 use nara_asset::{
-    ArtifactFormatVersion, ArtifactLabel, AssetEventKind, AssetEvents, AssetId,
-    AssetLoadGeneration, AssetLoadGenerations, AssetPath, AssetPathScope, AssetRecord,
-    AssetReloadDiagnostics, AssetReloadRequest, AssetReloadRequestId, AssetReloadRequestKind,
-    AssetServer, AssetSourceChangeKind, AssetSourceChanges, AssetSourceKind, AssetSourcePath,
-    AssetStates, AssetTaskUpdateSet, AssetVersion, Assets, Handle, ImportArtifactKey,
-    ImportArtifactPathError, ImportArtifactRecord, ImportDependencyDigest, ImportProfile,
-    ImportedAssetType, ImporterId, ImporterVersion, LoadState, SourceHash, StableAssetId,
+    AssetEventKind, AssetEvents, AssetId, AssetLoadGeneration, AssetLoadGenerations, AssetPath,
+    AssetPathScope, AssetRecord, AssetReloadDiagnostics, AssetReloadRequest, AssetReloadRequestId,
+    AssetReloadRequestKind, AssetServer, AssetSourceChangeKind, AssetSourceChanges,
+    AssetSourceKind, AssetSourcePath, AssetStates, AssetTaskUpdateSet, AssetVersion, Assets,
+    Handle, ImportDependencyDigest, ImportRecipe, ImporterId, ImporterVersion, LoadState,
+    SourceHash, StableAssetId,
 };
 #[cfg(feature = "serde")]
 use nara_asset::{AssetMeta, AssetMetaIdentity};
@@ -445,7 +444,6 @@ fn rgba_png(width: u32, height: u32, pixels: &[u8]) -> Vec<u8> {
 }
 
 const SAFE_DIAGNOSTIC_ASSET_PATH: &str = "textures/player.png";
-const HOST_PATH_DETAIL_CANARY: &str = "C:\\private\\nara-host-path-canary.png";
 const DECODER_DETAIL_CANARY: &str = "nara-decoder-detail-canary";
 const PANIC_PAYLOAD_CANARY: &str = "nara-image-panic-payload-canary";
 
@@ -570,17 +568,6 @@ fn image_reload_diagnostic_matrix_preserves_codes_and_typed_privacy_fields() {
             }),
             "image.import-format-unsupported",
             "Image format is unsupported",
-            vec![identifier_field("stage", "admission")],
-        ),
-        ImageDiagnosticCase::new(
-            "import-artifact-path",
-            ImageReloadError::Import(ImageImportError::ArtifactPath(
-                ImportArtifactPathError::OutsideImportCache {
-                    path: HOST_PATH_DETAIL_CANARY.to_owned(),
-                },
-            )),
-            "image.import-artifact-path-failed",
-            "Image artifact path creation failed",
             vec![identifier_field("stage", "admission")],
         ),
         ImageDiagnosticCase::new(
@@ -856,22 +843,8 @@ fn image_reload_diagnostic_matrix_preserves_codes_and_typed_privacy_fields() {
 }
 
 #[test]
-fn image_reload_diagnostic_sinks_hide_upstream_host_and_decoder_detail_canaries() {
+fn image_reload_diagnostic_sinks_hide_upstream_decoder_detail() {
     let path = AssetSourcePath::new(SAFE_DIAGNOSTIC_ASSET_PATH).unwrap();
-    let host_path_error = ImageReloadError::Import(ImageImportError::ArtifactPath(
-        ImportArtifactPathError::OutsideImportCache {
-            path: HOST_PATH_DETAIL_CANARY.to_owned(),
-        },
-    ));
-    assert!(matches!(
-        &host_path_error,
-        ImageReloadError::Import(ImageImportError::ArtifactPath(
-            ImportArtifactPathError::OutsideImportCache { path }
-        )) if path == HOST_PATH_DETAIL_CANARY
-    ));
-    let host_path_diagnostic = image_reload_diagnostic(&path, &host_path_error);
-    assert_diagnostic_sinks_hide(&host_path_diagnostic, &[HOST_PATH_DETAIL_CANARY]);
-
     let record = image_record(SAFE_DIAGNOSTIC_ASSET_PATH);
     let mut malformed = rgba_png(1, 1, &[0, 0, 0, 255]);
     malformed[29] ^= 0xff;
@@ -916,12 +889,9 @@ fn png_import_produces_rgba8_image_asset() {
         imported.image().source().unwrap().path().as_str(),
         "textures/player.png"
     );
-    assert!(
-        imported
-            .artifact()
-            .artifact_path()
-            .as_str()
-            .starts_with(".nara/import-cache/nara_image_png/default/nara_image.image/")
+    assert_eq!(
+        imported.import_recipe(),
+        imported.image().source().unwrap().import_recipe()
     );
 }
 
@@ -977,7 +947,7 @@ fn concrete_image_importer_owns_extension_admission() {
 }
 
 #[test]
-fn concrete_image_import_owns_stable_artifact_identity() {
+fn concrete_image_import_records_its_actual_six_field_recipe() {
     let importer = ImageImporter::default();
     let record = image_record("textures/player.png");
     let bytes = rgba_png(1, 1, &[0, 0, 255, 255]);
@@ -994,19 +964,15 @@ fn concrete_image_import_owns_stable_artifact_identity() {
             &AssetStates::default(),
         )
         .unwrap();
-    let key = imported.artifact().key();
+    let recipe = imported.import_recipe();
 
-    assert_eq!(key.stable_id(), record.stable_id());
-    assert_eq!(key.source_hash(), SourceHash::from_bytes(&bytes));
+    assert_eq!(recipe.stable_id(), record.stable_id());
+    assert_eq!(recipe.source_hash(), SourceHash::from_bytes(&bytes));
     assert_eq!(imported.source_digest(), ContentDigest::of_bytes(&bytes));
-    assert_eq!(key.dependency_digest(), ImportDependencyDigest::empty());
-    assert_eq!(key.importer_id().as_str(), "nara_image_png");
-    assert_eq!(key.importer_version(), ImporterVersion::new(3));
-    assert_eq!(key.settings_hash(), settings.settings_hash());
-    assert_eq!(key.profile(), &ImportProfile::default());
-    assert_eq!(key.output_asset_type().as_str(), "nara_image.image");
-    assert_eq!(key.artifact_label(), &ArtifactLabel::default());
-    assert_eq!(key.artifact_format_version(), ArtifactFormatVersion::new(1));
+    assert_eq!(recipe.dependency_digest(), ImportDependencyDigest::empty());
+    assert_eq!(recipe.importer_id().as_str(), "nara_image_png");
+    assert_eq!(recipe.importer_version(), ImporterVersion::new(3));
+    assert_eq!(recipe.settings_hash(), settings.settings_hash());
 }
 
 #[test]
@@ -1039,8 +1005,8 @@ fn admitted_file_import_reports_the_digest_of_the_authorized_source() {
     assert_eq!(imported.image().extent(), ImageExtent::new(1, 1));
     assert_eq!(imported.source_digest(), ContentDigest::of_bytes(&bytes));
     assert_eq!(
-        imported.artifact().key().output_asset_type().as_str(),
-        "nara_image.image"
+        imported.import_recipe().source_hash(),
+        SourceHash::from_bytes(&bytes)
     );
 
     remove_temp_root(&temp_root);
@@ -1096,6 +1062,14 @@ fn imported_image_stores_under_reserved_handle() {
     let stored = images.get(handle).unwrap();
     assert_eq!(stored.extent(), ImageExtent::new(1, 1));
     assert_eq!(server.stable_id(handle.id()), Some(stable_id()));
+    assert_eq!(
+        states.state(handle.id()).unwrap().import_recipe_digest(),
+        Some(stored.source().unwrap().import_recipe().digest())
+    );
+    assert_eq!(
+        states.state(handle.id()).unwrap().source_hash(),
+        Some(SourceHash::from_bytes(&bytes))
+    );
 }
 
 #[test]
@@ -2524,7 +2498,7 @@ fn image_plugin_coalesced_source_and_metadata_changes_use_the_latest_recipe() {
                     image.source().unwrap().settings(),
                     image.color_space(),
                     image.pixels().to_vec(),
-                    image.source().unwrap().artifact().key().settings_hash(),
+                    image.source().unwrap().import_recipe().settings_hash(),
                 )
             });
         let version = runtime
@@ -4245,8 +4219,7 @@ fn image_plugin_meta_reload_preserves_last_good_but_revokes_changed_identity() {
         .unwrap()
         .source()
         .unwrap()
-        .artifact()
-        .key()
+        .import_recipe()
         .settings_hash();
     fs::write(&metadata_path, b"{ invalid metadata").unwrap();
     app.world_mut()
@@ -4268,7 +4241,7 @@ fn image_plugin_meta_reload_preserves_last_good_but_revokes_changed_identity() {
     );
     assert_eq!(image.color_space(), ImageColorSpace::Srgb);
     assert_eq!(
-        image.source().unwrap().artifact().key().settings_hash(),
+        image.source().unwrap().import_recipe().settings_hash(),
         last_good_hash
     );
     assert_eq!(
@@ -4331,11 +4304,11 @@ fn image_plugin_meta_reload_preserves_last_good_but_revokes_changed_identity() {
     assert_eq!(image.source().unwrap().settings(), linear);
     assert_eq!(image.color_space(), ImageColorSpace::Linear);
     assert_eq!(
-        image.source().unwrap().artifact().key().settings_hash(),
+        image.source().unwrap().import_recipe().settings_hash(),
         linear.settings_hash()
     );
     assert_ne!(
-        image.source().unwrap().artifact().key().settings_hash(),
+        image.source().unwrap().import_recipe().settings_hash(),
         last_good_hash
     );
     assert_eq!(
@@ -6076,11 +6049,11 @@ fn content_hash_changes_when_content_descriptor_changes() {
 fn direct_image_source() -> ImageSourceMetadata {
     let record = image_record("textures/direct-image.png");
     let source_bytes = b"direct image source";
-    let artifact = test_artifact_record(&record, source_bytes);
+    let import_recipe = test_import_recipe(&record, source_bytes);
     ImageSourceMetadata::new(
         record.path().clone(),
         ImageImportSettings::default(),
-        artifact,
+        import_recipe,
     )
     .unwrap()
 }
@@ -6090,10 +6063,11 @@ fn image_source_metadata_rejects_a_mismatched_settings_hash() {
     let record = image_record("textures/player.png");
     let source_bytes = b"image-source";
     let settings = ImageImportSettings::new(ImageColorSpace::Linear);
-    let artifact = test_artifact_record(&record, source_bytes);
-    let actual = artifact.key().settings_hash();
+    let import_recipe = test_import_recipe(&record, source_bytes);
+    let actual = import_recipe.settings_hash();
 
-    let error = ImageSourceMetadata::new(record.path().clone(), settings, artifact).unwrap_err();
+    let error =
+        ImageSourceMetadata::new(record.path().clone(), settings, import_recipe).unwrap_err();
 
     assert_eq!(
         error,
@@ -6104,20 +6078,15 @@ fn image_source_metadata_rejects_a_mismatched_settings_hash() {
     );
 }
 
-fn test_artifact_record(record: &AssetRecord, source_bytes: &[u8]) -> ImportArtifactRecord {
-    ImportArtifactRecord::new(ImportArtifactKey::new(
+fn test_import_recipe(record: &AssetRecord, source_bytes: &[u8]) -> ImportRecipe {
+    ImportRecipe::new(
         record.stable_id(),
         SourceHash::from_bytes(source_bytes),
         ImportDependencyDigest::empty(),
         ImporterId::new("image-test").unwrap(),
         ImporterVersion::new(1),
         ImageImportSettings::default().settings_hash(),
-        ImportProfile::default(),
-        ImportedAssetType::new("image-test").unwrap(),
-        ArtifactLabel::default(),
-        ArtifactFormatVersion::new(1),
-    ))
-    .unwrap()
+    )
 }
 
 #[test]
@@ -6168,7 +6137,7 @@ fn image_asset_rejects_zero_overflowing_and_mismatched_rgba_storage() {
 fn image_asset_reuses_the_admitted_pixel_allocation() {
     let record = image_record("textures/player.png");
     let source_bytes = b"image allocation fixture";
-    let artifact = test_artifact_record(&record, source_bytes);
+    let import_recipe = test_import_recipe(&record, source_bytes);
     let pixels = vec![24, 120, 220, 255];
     let admitted_allocation = pixels.as_ptr();
 
@@ -6176,7 +6145,7 @@ fn image_asset_reuses_the_admitted_pixel_allocation() {
         ImageSourceMetadata::new(
             record.path().clone(),
             ImageImportSettings::default(),
-            artifact,
+            import_recipe,
         )
         .unwrap(),
         ImageExtent::new(1, 1),

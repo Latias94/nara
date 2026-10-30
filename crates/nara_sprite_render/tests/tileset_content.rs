@@ -2,10 +2,9 @@ use std::{collections::VecDeque, time::Duration};
 
 use nara_app::{App, CoreStage};
 use nara_asset::{
-    ArtifactFormatVersion, ArtifactLabel, AssetEvents, AssetPlugin, AssetRecord, AssetRef,
-    AssetServer, AssetSourceKind, AssetSourcePath, AssetStates, Assets, Handle, ImportArtifactKey,
-    ImportArtifactRecord, ImportDependencyDigest, ImportProfile, ImportedAssetType, ImporterId,
-    ImporterVersion, ProjectAssetDatabase, SourceHash, StableAssetId,
+    AssetEvents, AssetPlugin, AssetRecord, AssetRef, AssetServer, AssetSourceKind, AssetSourcePath,
+    AssetStates, Assets, Handle, ImportDependencyDigest, ImportRecipe, ImporterId, ImporterVersion,
+    ProjectAssetDatabase, SourceHash, StableAssetId,
 };
 use nara_core::{ByteLimit, ItemLimit, Vec2};
 use nara_ecs::{Entity, Resource, World};
@@ -116,25 +115,16 @@ fn record(id: &str, path: &str, kind: AssetSourceKind) -> AssetRecord {
 fn image(record: &AssetRecord, width: u32, byte: u8) -> ImageAsset {
     let pixels = vec![byte; width as usize * 4];
     let settings = ImageImportSettings::default();
-    let key = ImportArtifactKey::new(
+    let import_recipe = ImportRecipe::new(
         record.stable_id(),
         SourceHash::from_bytes(&pixels),
         ImportDependencyDigest::empty(),
         ImporterId::new("test.image").unwrap(),
         ImporterVersion::new(1),
         settings.settings_hash(),
-        ImportProfile::default(),
-        ImportedAssetType::new("image").unwrap(),
-        ArtifactLabel::default(),
-        ArtifactFormatVersion::new(1),
     );
     ImageAsset::from_import(
-        ImageSourceMetadata::new(
-            record.path().clone(),
-            settings,
-            ImportArtifactRecord::new(key).unwrap(),
-        )
-        .unwrap(),
+        ImageSourceMetadata::new(record.path().clone(), settings, import_recipe).unwrap(),
         ImageExtent::new(width, 1),
         ImageFormat::Rgba8,
         pixels,

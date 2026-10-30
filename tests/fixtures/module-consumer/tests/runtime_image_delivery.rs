@@ -120,7 +120,7 @@ impl ImageProducts {
         let state = self.states.state(handle.id()).unwrap();
         assert!(state.usable_version().is_some());
         assert!(state.source_hash().is_none());
-        assert!(state.import_hash().is_none());
+        assert!(state.import_recipe_digest().is_none());
     }
 
     fn capture(&self, world: &World, handle: Handle<ImageAsset>) -> ImageContentSnapshot {
@@ -382,7 +382,7 @@ impl Fixture {
         for forbidden in [
             SOURCE_FILE,
             "\"settings\"",
-            "\"artifact\"",
+            "\"import_recipe\"",
             "\"source_hash\"",
             "\"content_hash\"",
         ] {

@@ -4,6 +4,11 @@ use nara_asset::{AssetDomain, ImportedProductId};
 
 use crate::ImageAsset;
 
+// The Runtime format and CPU cook share these exact representation constraints.
+pub(crate) const MAX_DIMENSION: u32 = 16_384;
+pub(crate) const MAX_PIXELS: u64 = 16_777_216;
+pub(crate) const MAX_RGBA_BYTES: usize = 64 * 1024 * 1024;
+
 /// An immutable Image CPU product, independent of source importing and GPU preparation.
 ///
 /// A persistent value carries one complete Product identity, either primary or auxiliary; it does
@@ -74,15 +79,12 @@ mod codec {
         de::{self, MapAccess, Visitor},
     };
 
-    use super::ImageRuntimeCodec;
+    use super::{ImageRuntimeCodec, MAX_DIMENSION, MAX_PIXELS, MAX_RGBA_BYTES};
     use crate::{ImageAsset, ImageColorSpace, ImageExtent, ImageFormat};
 
     pub(super) const MAGIC: &[u8; 4] = b"NRI\0";
     pub(super) const PREFIX_BYTES: usize = 8;
     pub(super) const MAX_METADATA_BYTES: usize = 16 * 1024;
-    pub(super) const MAX_RGBA_BYTES: usize = 64 * 1024 * 1024;
-    const MAX_DIMENSION: u32 = 16_384;
-    const MAX_PIXELS: u64 = 16_777_216;
     const KIND: &str = "runtime_image";
 
     #[derive(Serialize, Deserialize)]

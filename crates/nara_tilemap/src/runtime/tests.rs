@@ -449,7 +449,7 @@ mod codec_tests {
         for field in [
             "source_path",
             "source_hash",
-            "artifact",
+            "import_recipe",
             "cache",
             "image_handle",
             "content_hash",

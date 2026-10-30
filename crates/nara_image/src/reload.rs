@@ -1274,7 +1274,6 @@ pub(super) fn image_reload_diagnostic(
                 }
                 ImageImportError::MissingSourceExtension { .. }
                 | ImageImportError::UnsupportedFormat { .. }
-                | ImageImportError::ArtifactPath(_)
                 | ImageImportError::Cancelled { .. } => {}
             }
         }

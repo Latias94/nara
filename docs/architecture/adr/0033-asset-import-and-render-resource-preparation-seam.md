@@ -4,7 +4,8 @@
 **Date**: 2026-07-08
 **Amended**: 2026-10-23 for Image-owned immutable prepared captures; 2026-10-29 for
 source-independent Image/TileSet content and neutral prepared-content hashes; 2026-10-30 for
-scope-bound source declarations and frame-independent dependency maintenance
+scope-bound source declarations and frame-independent dependency maintenance; 2026-10-31 for
+actual source import recipes and explicit CPU target cooking
 **Refined By**: ADR 0037: Runtime Asset Acquisition, Reload, and Lifetime Policy; ADR 0040:
 Render Resource Lifetime and Submitter Ownership; ADR 0054: GPU Upload Budget and Buffer
 Allocation Policy; ADR 0080: Domain-Owned TaskUpdate Integration Sets;
@@ -34,7 +35,7 @@ rendering, atlases, materials, runtime UI images, or 3D mesh/material rendering.
 Rules:
 
 - `nara_asset` owns source asset identity, strict identity-first `.meta` admission, typed
-  `AssetMeta<TSettings>` composition, imported artifact records, asset dependency graph data, load
+  `AssetMeta<TSettings>` composition, source import recipes, asset dependency graph data, load
   states, and reload events. Concrete asset domains own settings semantics and hashing plus import
   execution; `nara_asset` has no generic decoder registry.
 - `nara_asset` must not own GPU resources or depend on render backend crates.
@@ -44,13 +45,25 @@ Rules:
 - When a durable imported-artifact product is separately admitted, generated artifacts live under
   `.nara/import-cache/` and are never hand-authored source data. ADR 0115's Editor image v1 keeps
   accepted decoded pixels session-local and does not publish that cache.
-- An import recipe key includes stable asset ID, source content digest, importer ID/version and
-  implementation digest, canonical import settings, every tracked import-input dependency,
-  output schema/format, and target/import profile when relevant. An artifact content digest
-  identifies immutable output bytes and is not the recipe key or durable product identity.
+- Source Image provenance records its actual source identity/content, importer identity/revision,
+  effective settings hash and observed dependency digest in `ImportRecipe`. Its digest is a recipe
+  fingerprint, not artifact bytes. It carries no synthetic cache path or unused output/profile
+  fields. A reusable build recipe additionally closes selected import/cook definitions, normalized
+  settings, actual raw/processed observations, output contracts and consumed target facts. Explicit
+  versioned definitions declare executable meaning; they are not an automatic Rust/compiler or
+  environment hash. An artifact content digest identifies exact output bytes independently of
+  the recipe and durable Product. The [local build design](../local-artifact-build-design.md)
+  keeps tracked execution/group publication separate from source provenance.
 - Importers produce backend-neutral runtime assets or descriptors, such as image pixels, sprite
   atlas metadata, mesh data, material descriptors, or font atlases. They do not create
   backend-native handles.
+- Image's optional pure CPU cook consumes the target's actual 2D dimension cap and explicit
+  `Reject` or proportional `FitNearest` policy. It preserves complete Product, format and color
+  interpretation while producing independently owned, source-free Runtime pixels. Runtime format
+  limits are shared with the codec. Output and conservative allocation-overlap bounds precede
+  allocation; the caller retains aggregate input/output custody. This operation does not publish
+  a reusable group, select target executable code, allocate GPU resources or implicitly repair
+  an atlas layout after shrinking its Image.
 - Importers must not observe untracked ambient files, environment state, clocks, or mutable global
   ECS state. Dependency discovery and multi-product publication require a bounded tracked import
   context and an atomically published artifact group.

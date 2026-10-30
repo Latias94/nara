@@ -207,10 +207,8 @@ impl Error for ImageContentError {}
 mod tests {
     use super::*;
     use nara_asset::{
-        ArtifactFormatVersion, ArtifactLabel, AssetEvents, AssetRecord, AssetSourceKind,
-        AssetSourcePath, ImportArtifactKey, ImportArtifactRecord, ImportDependencyDigest,
-        ImportProfile, ImportedAssetType, ImportedProductId, ImporterId, ImporterVersion,
-        SourceHash, StableAssetId,
+        AssetEvents, AssetRecord, AssetSourceKind, AssetSourcePath, ImportDependencyDigest,
+        ImportRecipe, ImportedProductId, ImporterId, ImporterVersion, SourceHash, StableAssetId,
     };
 
     use crate::ImageImportSettings;
@@ -228,25 +226,16 @@ mod tests {
             AssetSourceKind::Image,
         );
         let settings = ImageImportSettings::default();
-        let key = ImportArtifactKey::new(
+        let import_recipe = ImportRecipe::new(
             record.stable_id(),
             SourceHash::from_bytes(b"pixels"),
             ImportDependencyDigest::empty(),
             ImporterId::new("test.image").unwrap(),
             ImporterVersion::new(1),
             settings.settings_hash(),
-            ImportProfile::default(),
-            ImportedAssetType::new("image").unwrap(),
-            ArtifactLabel::default(),
-            ArtifactFormatVersion::new(1),
         );
         let image = ImageAsset::from_import(
-            ImageSourceMetadata::new(
-                record.path().clone(),
-                settings,
-                ImportArtifactRecord::new(key).unwrap(),
-            )
-            .unwrap(),
+            ImageSourceMetadata::new(record.path().clone(), settings, import_recipe).unwrap(),
             ImageExtent::new(1, 1),
             ImageFormat::Rgba8,
             vec![1, 2, 3, 4],
@@ -556,7 +545,7 @@ mod tests {
             ImageSourceMetadata::new(
                 AssetSourcePath::new("other/source.png").unwrap(),
                 source.settings(),
-                source.artifact().clone(),
+                source.import_recipe().clone(),
             )
             .unwrap(),
             image.extent(),

@@ -5,7 +5,7 @@ use std::{
 
 use nara_asset::{
     AssetId, AssetPath, AssetPathScope, AssetServer, AssetSlotRevision, AssetSourcePath,
-    AssetStates, AssetVersion, Assets, Handle, ImportArtifactDigest, LoadState, SourceHash,
+    AssetStates, AssetVersion, Assets, Handle, ImportRecipeDigest, LoadState, SourceHash,
     StableAssetId,
 };
 #[cfg(feature = "presentation-ui")]
@@ -34,7 +34,7 @@ pub(super) struct EditorAuthoringImageProduct {
     version: AssetVersion,
     slot_revision: AssetSlotRevision,
     source_hash: SourceHash,
-    artifact_hash: ImportArtifactDigest,
+    import_recipe_digest: ImportRecipeDigest,
     settings: ImageImportSettings,
     extent: ImageExtent,
     format: ImageFormat,
@@ -258,7 +258,7 @@ impl EditorAuthoringImageCatalogCandidate {
             };
             if state.load_state() != &LoadState::Loaded
                 || state.source_hash() != Some(source.source_hash())
-                || state.import_hash() != Some(source.artifact().key().digest())
+                || state.import_recipe_digest() != Some(source.import_recipe().digest())
             {
                 return Err(EditorAuthoringImageCatalogError::LoadedStateMismatch { id });
             }
@@ -275,7 +275,7 @@ impl EditorAuthoringImageCatalogCandidate {
                 version: state.version(),
                 slot_revision: images.slot_revision(handle),
                 source_hash: source.source_hash(),
-                artifact_hash: source.artifact().key().digest(),
+                import_recipe_digest: source.import_recipe().digest(),
                 settings: source.settings(),
                 extent: image.extent(),
                 format: image.format(),

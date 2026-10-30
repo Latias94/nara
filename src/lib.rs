@@ -297,17 +297,16 @@ pub mod advanced_prelude {
         TimeFrameError, TimeFrameResource, TimeSettingsError,
     };
     pub use nara_asset::{
-        ArtifactFormatVersion, ArtifactLabel, AssetDatabaseError, AssetDependencyGraph, AssetError,
-        AssetEvent, AssetEventKind, AssetEvents, AssetLoadGeneration, AssetLoadGenerations,
-        AssetMeta, AssetMetaIdentity, AssetMutationBaseline, AssetPathError, AssetPathScope,
-        AssetRecord, AssetRefError, AssetRefExportPolicy, AssetReferenceResolver,
-        AssetReloadDiagnostics, AssetReloadRequest, AssetReloadRequestId, AssetReloadRequestKind,
-        AssetReloadRequests, AssetSourceChange, AssetSourceChangeKind, AssetSourceChanges,
-        AssetSourceKind, AssetSourcePath, AssetSourceRoot, AssetState, AssetStateError,
-        AssetStates, AssetTaskUpdateSet, AssetVersion, DigestParseError, ImportArtifactDigest,
-        ImportArtifactKey, ImportArtifactPath, ImportArtifactRecord, ImportDependency,
-        ImportDependencyDigest, ImportDependencyRole, ImportProfile, ImportSettingsHash,
-        ImporterId, LoadState, ProjectAssetDatabase, SourceHash, StableAssetIdGenerationError,
+        AssetDatabaseError, AssetDependencyGraph, AssetError, AssetEvent, AssetEventKind,
+        AssetEvents, AssetLoadGeneration, AssetLoadGenerations, AssetMeta, AssetMetaIdentity,
+        AssetMutationBaseline, AssetPathError, AssetPathScope, AssetRecord, AssetRefError,
+        AssetRefExportPolicy, AssetReferenceResolver, AssetReloadDiagnostics, AssetReloadRequest,
+        AssetReloadRequestId, AssetReloadRequestKind, AssetReloadRequests, AssetSourceChange,
+        AssetSourceChangeKind, AssetSourceChanges, AssetSourceKind, AssetSourcePath,
+        AssetSourceRoot, AssetState, AssetStateError, AssetStates, AssetTaskUpdateSet,
+        AssetVersion, DigestParseError, ImportDependency, ImportDependencyDigest,
+        ImportDependencyRole, ImportRecipe, ImportRecipeDigest, ImportSettingsHash, ImporterId,
+        LoadState, ProjectAssetDatabase, SourceHash, StableAssetIdGenerationError,
     };
     pub use nara_core::{ByteLimit, DepthLimit, ItemLimit, TimeLimit};
     pub use nara_diagnostic::{

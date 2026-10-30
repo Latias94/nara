@@ -1,10 +1,9 @@
 use std::{collections::BTreeSet, sync::Arc};
 
 use nara_asset::{
-    ArtifactFormatVersion, ArtifactLabel, AssetEvents, AssetPathScope, AssetProductRef,
-    AssetRecord, AssetServer, AssetSourceKind, AssetSourcePath, AssetStates, Assets,
-    ImportArtifactKey, ImportArtifactRecord, ImportDependencyDigest, ImportProfile,
-    ImportedAssetType, ImportedProductId, ImporterId, ImporterVersion, SourceHash, StableAssetId,
+    AssetEvents, AssetPathScope, AssetProductRef, AssetRecord, AssetServer, AssetSourceKind,
+    AssetSourcePath, AssetStates, Assets, ImportDependencyDigest, ImportRecipe, ImportedProductId,
+    ImporterId, ImporterVersion, SourceHash, StableAssetId,
 };
 use nara_image::{
     ImageAsset, ImageColorSpace, ImageExtent, ImageFormat, ImageImportSettings,
@@ -95,24 +94,19 @@ fn solid_node(key: &str, x: f32) -> UiNode {
 fn image_asset(pixels: [u8; 4]) -> ImageAsset {
     let stable_id = StableAssetId::parse_str("d7961f69-0e25-41d5-8893-0ef85ab19615").unwrap();
     let source_hash = SourceHash::from_bytes(pixels);
-    let artifact = ImportArtifactRecord::new(ImportArtifactKey::new(
+    let import_recipe = ImportRecipe::new(
         stable_id,
         source_hash,
         ImportDependencyDigest::empty(),
         ImporterId::new("nara-ui-planner-test").unwrap(),
         ImporterVersion::new(1),
         ImageImportSettings::default().settings_hash(),
-        ImportProfile::default(),
-        ImportedAssetType::new("image").unwrap(),
-        ArtifactLabel::default(),
-        ArtifactFormatVersion::new(1),
-    ))
-    .unwrap();
+    );
     ImageAsset::from_import(
         ImageSourceMetadata::new(
             AssetSourcePath::new("ui/planner.png").unwrap(),
             ImageImportSettings::default(),
-            artifact,
+            import_recipe,
         )
         .unwrap(),
         ImageExtent::new(1, 1),

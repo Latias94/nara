@@ -83,6 +83,14 @@ has [production evidence](../../knowledge/engineering/verification/2026-10/2026-
 Root1022, independent50, actual travel/held cancellation, escaped pixels, original generations,
 exact raw/decode budgets, corruption/refund and relevant feature/Clippy checks. GPU/streaming
 performance, general providers/cache, target cooking and the packaged Player remain separate.
+The [local build successor](../../plans/2026-10-31-local-artifact-build-plan.md) remains in progress.
+Its [prerequisite qualification](../../knowledge/engineering/verification/2026-10/2026-10-30T201802Z-source-import-recipes-and-target-sensitive-cpu-image-cook-prerequisite-qualification-462c0179d20b44fd8545d4c135e814f9.md)
+records actual six-field source recipes, removed synthetic artifact records/paths and pure CPU
+target-sensitive Image cooking: owner328, downstream219, Root1039, independent22 and selected
+nativeDX12 two trajectories, plus minimal/Clippy/format/doctest evidence. The
+[design](../local-artifact-build-design.md) still needs tracked execution and local complete-group
+reuse; these prerequisites do not qualify R6b, durable publication, target executable selection
+or packaged delivery.
 
 The [October 29 rendering review](../../research/2026-10-29-render-architecture-and-refactor-plan-review.md)
 and long-horizon refinement prefer a finite explicit resource graph, typed contributions and

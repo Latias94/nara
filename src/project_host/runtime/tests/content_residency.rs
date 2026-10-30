@@ -2,10 +2,9 @@ use super::*;
 
 use nara_app::CoreStage;
 use nara_asset::{
-    ArtifactFormatVersion, ArtifactLabel, AssetEvent, AssetPathScope, AssetRecord,
-    AssetSlotRevision, AssetSourcePath, AssetState, AssetStateRevision, Handle, ImportArtifactKey,
-    ImportArtifactRecord, ImportDependencyDigest, ImportProfile, ImportedAssetType, ImporterId,
-    ImporterVersion, ProjectAssetDatabase, SourceHash,
+    AssetEvent, AssetPathScope, AssetRecord, AssetSlotRevision, AssetSourcePath, AssetState,
+    AssetStateRevision, Handle, ImportDependencyDigest, ImportRecipe, ImporterId, ImporterVersion,
+    ProjectAssetDatabase, SourceHash,
 };
 use nara_core::{ByteLimit, ItemLimit, Vec2};
 use nara_ecs::{
@@ -324,25 +323,16 @@ struct ForeignPublication {
 fn foreign_image(record: &AssetRecord) -> ImageAsset {
     let pixels = vec![30, 40, 50, 255];
     let settings = ImageImportSettings::default();
-    let key = ImportArtifactKey::new(
+    let import_recipe = ImportRecipe::new(
         record.stable_id(),
         SourceHash::from_bytes(&pixels),
         ImportDependencyDigest::empty(),
         ImporterId::new("test.residency").unwrap(),
         ImporterVersion::new(1),
         settings.settings_hash(),
-        ImportProfile::default(),
-        ImportedAssetType::new("image").unwrap(),
-        ArtifactLabel::default(),
-        ArtifactFormatVersion::new(1),
     );
     ImageAsset::from_import(
-        ImageSourceMetadata::new(
-            record.path().clone(),
-            settings,
-            ImportArtifactRecord::new(key).unwrap(),
-        )
-        .unwrap(),
+        ImageSourceMetadata::new(record.path().clone(), settings, import_recipe).unwrap(),
         ImageExtent::new(1, 1),
         ImageFormat::Rgba8,
         pixels,

@@ -315,7 +315,7 @@ impl AssetReloadResolutionContext<'_> {
         }
 
         let expected_version = self.states.version(asset_id).unwrap_or(AssetVersion::ZERO);
-        let affected_artifacts = self.dependencies.affected_artifacts(record.stable_id());
+        let affected_recipes = self.dependencies.affected_recipes(record.stable_id());
         let request_path = record.path().clone();
         let request_source_kind = record.source_kind().clone();
 
@@ -326,7 +326,7 @@ impl AssetReloadResolutionContext<'_> {
             change_kind,
             expected_version,
             generation,
-            affected_artifacts,
+            affected_recipes,
             image_authority,
             Some(previous_state),
         ) {

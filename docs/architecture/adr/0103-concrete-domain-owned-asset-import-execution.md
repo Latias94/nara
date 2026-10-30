@@ -2,7 +2,7 @@
 
 **Status**: Accepted
 **Date**: 2026-08-04
-**Last Revised**: 2026-10-29
+**Last Revised**: 2026-10-31
 **Owner**: `nara_asset`, concrete asset domains, host-authorized source reads, and runtime asset publication
 **Refines**: [ADR 0007](0007-asset-identity-and-import-pipeline.md),
 [ADR 0033](0033-asset-import-and-render-resource-preparation-seam.md),
@@ -67,9 +67,14 @@ flowchart LR
 - Image is the first admitted path. Its importer produces backend-neutral CPU image data and never
   allocates a GPU resource or publishes through a renderer-owned store.
 - `nara_asset` remains the owner of stable source/runtime identity, strict identity-first
-  `AssetMeta<TSettings>` admission, reload generations, expected versions, artifact records where
+  `AssetMeta<TSettings>` admission, reload generations, expected versions, source import recipes where
   already consumed, and the scheduling sets that concrete domains join. It does not depend on
   Image, interpret image settings, compute their hash, or dispatch a domain decoder.
+- Source Image provenance records the actual `ImportRecipe` and its `ImportRecipeDigest`.
+  Recipe inputs do not establish an artifact file or content digest. Remove synthetic cache
+  records/paths and unused output/profile fields rather than claim an unexecuted publication.
+  The [local build design](../local-artifact-build-design.md) separates this correction from
+  closed tracked execution, actual target cooking and complete reusable artifact groups.
 - The unused `TypedImporter<T>`, generic `ImportedAsset<T>`, erased importer registry, registration
   API, provider ID, and metadata that no executor consumes are removed rather than deprecated.
 - Failed, cancelled, over-budget, stale, and superseded work publishes no new asset state. A prior

@@ -122,6 +122,13 @@ with one original file and authenticated temporary member reads. The
 [production qualification](../knowledge/engineering/verification/2026-10/2026-10-30T184847Z-retained-runtime-pack-and-independent-encoded-residency-qualification-386d2e5e9c124b66bc4390f69b796053.md)
 records complete owner/public Headless workflows; the file's continued availability is distinct
 from immutable admitted meaning. GPU/streaming performance and general providers remain separate.
+The [local artifact build design](local-artifact-build-design.md),
+[source/consumer study](../research/2026-10-31-local-build-recipes-and-publication.md) and
+[unit plan](../plans/2026-10-31-local-artifact-build-plan.md) own the next R6b boundary.
+Source import provenance, closed execution recipes, actual output digests and group publication
+are distinct. The [qualified recipe/CPU cook prerequisites](../knowledge/engineering/verification/2026-10/2026-10-30T201802Z-source-import-recipes-and-target-sensitive-cpu-image-cook-prerequisite-qualification-462c0179d20b44fd8545d4c135e814f9.md)
+remove synthetic source artifact records and add actual target-dependent pixels. Durable-store,
+tracked build execution and complete target-build qualification remain open.
 
 ## Background Designs
 

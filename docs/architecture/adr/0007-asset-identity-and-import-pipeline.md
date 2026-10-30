@@ -2,7 +2,7 @@
 
 **Status**: Accepted
 **Date**: 2026-07-08
-**Last Revised**: 2026-10-30
+**Last Revised**: 2026-10-31
 **Refined By**: ADR 0049: Untrusted Project Input and Parse Budget Policy; ADR 0050: Asset Root,
 Symlink, Junction, and Package Trust Policy; ADR 0051: Persistent File Envelope, Migration, and
 Golden Fixtures; ADR 0080: Domain-Owned TaskUpdate Integration Sets;
@@ -65,6 +65,12 @@ Core rules:
   publication remain the concrete content owner's responsibility.
 - Hot reload changes asset versions behind stable handles; it should not require all scenes to rewrite references.
 - Source assets and imported artifacts are distinct concepts.
+
+Source import provenance uses `ImportRecipe` and `ImportRecipeDigest` for the actual source,
+settings, dependency and versioned importer facts. It does not fabricate an artifact file/path
+or identify output bytes. A reusable artifact group needs independently verified output content,
+complete membership and its closed executing build recipe; the
+[local build design](../local-artifact-build-design.md) owns that in-progress successor.
 
 ### Canonical source locations and scoped references
 

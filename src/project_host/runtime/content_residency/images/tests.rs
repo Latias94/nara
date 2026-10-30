@@ -147,7 +147,7 @@ fn pathless_publication_keeps_complete_identity_without_source_hashes() {
     assert!(receipt.matches(&values.server, &values.images, &values.states));
     let state = values.states.state(receipt.handle.id()).unwrap();
     assert!(state.source_hash().is_none());
-    assert!(state.import_hash().is_none());
+    assert!(state.import_recipe_digest().is_none());
 }
 
 #[test]

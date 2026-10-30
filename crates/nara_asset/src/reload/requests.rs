@@ -6,7 +6,7 @@ use nara_ecs::Resource;
 
 use crate::{
     AssetError, AssetId, AssetRecord, AssetServer, AssetSourceKind, AssetSourcePath,
-    AssetStateRevision, AssetStates, AssetVersion, ImageRecoveryContinuity, ImportArtifactDigest,
+    AssetStateRevision, AssetStates, AssetVersion, ImageRecoveryContinuity, ImportRecipeDigest,
     StableAssetId,
 };
 
@@ -294,7 +294,7 @@ pub struct AssetReloadRequest {
     previous_state: Option<(AssetStateRevision, Option<AssetVersion>)>,
     resolved_state_revision: Option<AssetStateRevision>,
     generation: AssetLoadGeneration,
-    affected_artifacts: Vec<ImportArtifactDigest>,
+    affected_recipes: Vec<ImportRecipeDigest>,
     image_authority: Option<Arc<()>>,
 }
 
@@ -309,7 +309,7 @@ impl AssetReloadRequest {
         source_change_kind: AssetSourceChangeKind,
         expected_version: AssetVersion,
         generation: AssetLoadGeneration,
-        affected_artifacts: Vec<ImportArtifactDigest>,
+        affected_recipes: Vec<ImportRecipeDigest>,
     ) -> Self {
         Self {
             id,
@@ -321,7 +321,7 @@ impl AssetReloadRequest {
             previous_state: None,
             resolved_state_revision: None,
             generation,
-            affected_artifacts,
+            affected_recipes,
             image_authority: None,
         }
     }
@@ -335,7 +335,7 @@ impl AssetReloadRequest {
         source_change_kind: AssetSourceChangeKind,
         expected_version: AssetVersion,
         generation: AssetLoadGeneration,
-        affected_artifacts: Vec<ImportArtifactDigest>,
+        affected_recipes: Vec<ImportRecipeDigest>,
         image_authority: Arc<()>,
         previous_state: Option<(AssetStateRevision, Option<AssetVersion>)>,
     ) -> Self {
@@ -347,7 +347,7 @@ impl AssetReloadRequest {
             source_change_kind,
             expected_version,
             generation,
-            affected_artifacts,
+            affected_recipes,
         );
         request.image_authority = Some(image_authority);
         request.previous_state = previous_state;
@@ -424,8 +424,8 @@ impl AssetReloadRequest {
     }
 
     #[must_use]
-    pub fn affected_artifacts(&self) -> &[ImportArtifactDigest] {
-        &self.affected_artifacts
+    pub fn affected_recipes(&self) -> &[ImportRecipeDigest] {
+        &self.affected_recipes
     }
 
     #[must_use]
@@ -435,9 +435,9 @@ impl AssetReloadRequest {
 
     pub(super) fn retained_payload_bytes(&self) -> Option<usize> {
         self.record.retained_bytes()?.checked_add(
-            self.affected_artifacts
+            self.affected_recipes
                 .capacity()
-                .checked_mul(std::mem::size_of::<ImportArtifactDigest>())?,
+                .checked_mul(std::mem::size_of::<ImportRecipeDigest>())?,
         )
     }
 }
@@ -487,7 +487,7 @@ impl AssetReloadRequests {
         source_change_kind: AssetSourceChangeKind,
         expected_version: AssetVersion,
         generation: AssetLoadGeneration,
-        affected_artifacts: Vec<ImportArtifactDigest>,
+        affected_recipes: Vec<ImportRecipeDigest>,
         image_authority: Arc<()>,
         previous_state: Option<(AssetStateRevision, Option<AssetVersion>)>,
     ) -> Result<&mut AssetReloadRequest, AssetReloadRequestAdmissionError> {
@@ -501,7 +501,7 @@ impl AssetReloadRequests {
             source_change_kind,
             expected_version,
             generation,
-            affected_artifacts,
+            affected_recipes,
             image_authority,
             previous_state,
         );

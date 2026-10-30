@@ -266,12 +266,19 @@ impl ImagePublications {
         let mut receipts = Vec::with_capacity(self.publish.len());
         for item in self.publish.into_values() {
             let source_hash = item.image.source().map(|source| source.source_hash());
-            let import_hash = item
+            let import_recipe_digest = item
                 .image
                 .source()
-                .map(|source| source.artifact().key().digest());
+                .map(|source| source.import_recipe().digest());
             item.baseline
-                .commit_loaded(item.image, images, states, events, source_hash, import_hash)
+                .commit_loaded(
+                    item.image,
+                    images,
+                    states,
+                    events,
+                    source_hash,
+                    import_recipe_digest,
+                )
                 .expect("Scene Image publication version was preflighted");
             receipts.push(OwnedImage::capture(
                 item.handle,

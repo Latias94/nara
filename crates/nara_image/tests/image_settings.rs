@@ -1,3 +1,4 @@
+use nara_asset::ImportSettingsHash;
 #[cfg(feature = "serde")]
 use nara_asset::{
     AssetMeta, AssetMetaCandidate, AssetMetaIdentity, AssetPath, AssetSourceKind, StableAssetId,
@@ -10,6 +11,15 @@ fn image_settings_hash_is_deterministic_and_color_space_sensitive() {
     let linear = ImageImportSettings::new(ImageColorSpace::Linear);
 
     assert_eq!(srgb.settings_hash(), srgb.settings_hash());
+    assert_eq!(srgb, ImageImportSettings::default());
+    assert_eq!(
+        srgb.settings_hash(),
+        ImportSettingsHash::from_bytes(srgb.canonical_bytes())
+    );
+    assert_eq!(
+        linear.settings_hash(),
+        ImportSettingsHash::from_bytes(linear.canonical_bytes())
+    );
     assert_ne!(srgb.canonical_bytes(), linear.canonical_bytes());
     assert_ne!(srgb.settings_hash(), linear.settings_hash());
 }

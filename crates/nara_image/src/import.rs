@@ -7,10 +7,9 @@ use std::{
 };
 
 use nara_asset::{
-    ArtifactFormatVersion, ArtifactLabel, AssetPath, AssetPathScope, AssetRecord, AssetServer,
-    AssetSourcePath, AssetStates, AssetVersion, Assets, Handle, ImportArtifactKey,
-    ImportArtifactPathError, ImportArtifactRecord, ImportDependencyDigest, ImportProfile,
-    ImportedAssetType, ImporterId, ImporterVersion, SourceHash,
+    AssetPath, AssetPathScope, AssetRecord, AssetServer, AssetSourcePath, AssetStates,
+    AssetVersion, Assets, Handle, ImportDependencyDigest, ImportRecipe, ImporterId,
+    ImporterVersion, SourceHash,
 };
 use nara_ecs::Resource;
 use nara_fs::{
@@ -181,7 +180,6 @@ pub enum ImageImportError {
     UnsupportedFormat {
         extension: String,
     },
-    ArtifactPath(ImportArtifactPathError),
     Budget {
         stage: ImageImportStage,
         error: ImageImportBudgetError,
@@ -208,9 +206,9 @@ impl ImageImportError {
     #[must_use]
     pub const fn stage(&self) -> ImageImportStage {
         match self {
-            Self::MissingSourceExtension { .. }
-            | Self::UnsupportedFormat { .. }
-            | Self::ArtifactPath(_) => ImageImportStage::Admission,
+            Self::MissingSourceExtension { .. } | Self::UnsupportedFormat { .. } => {
+                ImageImportStage::Admission
+            }
             Self::Budget { stage, .. } => *stage,
             Self::Unsupported { stage, .. }
             | Self::Png { stage, .. }
@@ -225,7 +223,6 @@ impl ImageImportError {
         match self {
             Self::MissingSourceExtension { .. } => "image.import-source-extension-missing",
             Self::UnsupportedFormat { .. } => "image.import-format-unsupported",
-            Self::ArtifactPath(_) => "image.import-artifact-path-failed",
             Self::Budget { .. } => "image.import-budget-exceeded",
             Self::Unsupported { .. } => "image.import-feature-unsupported",
             Self::Png { .. } => "image.import-png-invalid",
@@ -240,7 +237,6 @@ impl ImageImportError {
         match self {
             Self::MissingSourceExtension { .. } => "Image source extension is missing",
             Self::UnsupportedFormat { .. } => "Image format is unsupported",
-            Self::ArtifactPath(_) => "Image artifact path creation failed",
             Self::Budget { .. } => "Image import budget was exceeded",
             Self::Unsupported { .. } => "PNG feature is unsupported",
             Self::Png { .. } => "PNG input is invalid",
@@ -843,34 +839,22 @@ impl ImageImporter {
             .retain_publication_charge()
     }
 
-    fn import_record(
-        &self,
-        request: &ImageDecodeRequest<'_>,
-    ) -> Result<ImportArtifactRecord, ImageImportError> {
-        let key = ImportArtifactKey::new(
+    fn import_recipe(&self, request: &ImageDecodeRequest<'_>) -> ImportRecipe {
+        ImportRecipe::new(
             request.source.stable_id(),
             request.source_hash,
             ImportDependencyDigest::empty(),
             IMAGE_IMPORTER_ID.clone(),
             IMAGE_IMPORTER_VERSION,
             request.settings.settings_hash(),
-            ImportProfile::default(),
-            IMAGE_OUTPUT_ASSET_TYPE.clone(),
-            ArtifactLabel::default(),
-            IMAGE_ARTIFACT_FORMAT_VERSION,
-        );
-        ImportArtifactRecord::new(key).map_err(ImageImportError::ArtifactPath)
+        )
     }
 }
 
 static IMAGE_IMPORTER_ID: LazyLock<ImporterId> = LazyLock::new(|| {
     ImporterId::new("nara_image_png").expect("built-in image importer id is valid")
 });
-static IMAGE_OUTPUT_ASSET_TYPE: LazyLock<ImportedAssetType> = LazyLock::new(|| {
-    ImportedAssetType::new("nara_image.image").expect("built-in image output type is valid")
-});
 const IMAGE_IMPORTER_VERSION: ImporterVersion = ImporterVersion::new(3);
-const IMAGE_ARTIFACT_FORMAT_VERSION: ArtifactFormatVersion = ArtifactFormatVersion::new(1);
 
 fn validate_extension(path: &AssetSourcePath) -> Result<(), ImageImportError> {
     let file_name = path.as_str().rsplit('/').next().unwrap_or(path.as_str());

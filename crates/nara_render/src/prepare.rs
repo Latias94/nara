@@ -60,7 +60,7 @@ impl RenderResourceKey {
 /// digest with [`Self::from_digest`] when it covers that same complete prepared content.
 ///
 /// This hash does not identify a logical resource, an asset slot mutation, a GPU epoch, or an import
-/// artifact. Those identities remain the responsibility of their respective owners.
+/// recipe. Those identities remain the responsibility of their respective owners.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct RenderResourceContentHash([u8; 32]);
 
@@ -88,19 +88,19 @@ impl RenderResourceContentHash {
 /// The slot revision binds the snapshot to the exact value stored in [`nara_asset::Assets`], even
 /// when a direct replacement does not advance loader-owned [`AssetVersion`] metadata.
 ///
-/// The content hash has a distinct type from an import-artifact digest:
+/// The content hash has a distinct type from an import-recipe digest:
 ///
 /// ```compile_fail
-/// use nara_asset::{AssetSlotRevision, AssetVersion, ImportArtifactDigest};
+/// use nara_asset::{AssetSlotRevision, AssetVersion, ImportRecipeDigest};
 /// use nara_render::{RenderResourceKey, RenderResourceSnapshot};
 ///
 /// fn imported_snapshot(
 ///     key: RenderResourceKey,
 ///     version: AssetVersion,
 ///     slot: AssetSlotRevision,
-///     artifact: ImportArtifactDigest,
+///     import_recipe: ImportRecipeDigest,
 /// ) -> RenderResourceSnapshot {
-///     RenderResourceSnapshot::new(key, version, slot, artifact)
+///     RenderResourceSnapshot::new(key, version, slot, import_recipe)
 /// }
 /// ```
 #[derive(Debug, Clone, PartialEq, Eq)]

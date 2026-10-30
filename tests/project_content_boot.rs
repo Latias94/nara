@@ -7,7 +7,7 @@ use std::sync::Arc;
 
 use nara::advanced_prelude::Component;
 
-use nara::asset::{AssetMeta, AssetRef, StableAssetId};
+use nara::asset::{AssetMeta, AssetRef, ImportDependencyDigest, SourceHash, StableAssetId};
 use nara::diagnostic::DiagnosticValueRef;
 use nara::image::{ImageColorSpace, ImageImportSettings};
 use nara::project_host::{
@@ -19,7 +19,9 @@ use nara::scene::{
     PrefabDocument, PrefabInstance, PrefabProjectionStep, SceneComponentRecord, SceneDocument,
     SceneEntityRecord, SourceDocumentOrigin,
 };
-use project_content_fixture::{TestProject, player_image_meta, scene_id, tileset_meta};
+use project_content_fixture::{
+    TestProject, player_image_meta, scene_id, tileset_meta, valid_png_bytes,
+};
 
 struct EscapeOwner;
 
@@ -445,11 +447,24 @@ fn strict_project_content_load_uses_the_persisted_linear_recipe() {
 
     let snapshot = loader.load(&candidate, &plan).unwrap();
     let image = snapshot.images()[0].image();
+    let source = image.source().unwrap();
+    let import_recipe = source.import_recipe();
 
     assert_eq!(image.color_space(), ImageColorSpace::Linear);
-    assert_eq!(image.source().unwrap().settings(), *meta.settings());
+    assert_eq!(source.settings(), *meta.settings());
+    assert_eq!(import_recipe.stable_id(), meta.identity().stable_id());
     assert_eq!(
-        image.source().unwrap().artifact().key().settings_hash(),
+        import_recipe.source_hash(),
+        SourceHash::from_bytes(valid_png_bytes())
+    );
+    assert_eq!(
+        import_recipe.dependency_digest(),
+        ImportDependencyDigest::empty()
+    );
+    assert_eq!(import_recipe.importer_id().as_str(), "nara_image_png");
+    assert_eq!(import_recipe.importer_version().raw(), 3);
+    assert_eq!(
+        import_recipe.settings_hash(),
         meta.settings().settings_hash()
     );
 }

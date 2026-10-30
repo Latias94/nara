@@ -546,7 +546,12 @@ fn codec_promises_cover_binary_output_copying_and_retained_product_without_impor
     let decoded = ImageRuntimeCodec::decode_runtime(GOLDEN).unwrap();
     let overhead = ImageRuntimeCodec::runtime_retained_bytes(&decoded).unwrap() - PIXELS.len();
     assert!(overhead >= size_of::<ImageAsset>());
-    assert!(codec::MAX_RGBA_BYTES.checked_add(overhead).unwrap() <= limits.retained_bytes().get());
+    assert!(
+        crate::runtime::MAX_RGBA_BYTES
+            .checked_add(overhead)
+            .unwrap()
+            <= limits.retained_bytes().get()
+    );
 }
 
 #[test]

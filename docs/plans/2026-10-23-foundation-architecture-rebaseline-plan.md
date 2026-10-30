@@ -568,6 +568,14 @@ Keep logical Product identity, recipe key, output-byte digest and immutable grou
 Qualify two clean builds, auxiliary/settings/target changes and interrupted group publication with
 the existing compound importer plus one real target-sensitive consumer. No stale-cache defect is
 asserted for the current capture-local cache; this is the upcoming reuse contract's freeze gate.
+The [local build design](../architecture/local-artifact-build-design.md) and
+[implementation plan](2026-10-31-local-artifact-build-plan.md) now own this successor. First
+replace synthetic source artifact records with actual import recipes through current Image/
+reload/prepared consumers; that prerequisite does not qualify durable groups or target cooking.
+The [qualified prerequisite](../knowledge/engineering/verification/2026-10/2026-10-30T201802Z-source-import-recipes-and-target-sensitive-cpu-image-cook-prerequisite-qualification-462c0179d20b44fd8545d4c135e814f9.md)
+now records the actual recipe replacement and real CPU target-sensitive Image transform, with
+owning/downstream/public/native evidence. Tracked closed execution, durable groups and target
+build/delivery remain open; the CPU transform does not complete those contracts.
 
 The [ordered importer and delivery plan](2026-10-29-asset-import-and-runtime-delivery-plan.md)
 first moves the existing executing source facet below root/Scene/2D while preserving all actual

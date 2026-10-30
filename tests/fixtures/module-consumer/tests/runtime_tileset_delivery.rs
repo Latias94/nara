@@ -805,7 +805,7 @@ fn inspect_headless_tile(
         let state = states.state(id).unwrap();
         assert!(state.usable_version().is_some());
         assert!(state.source_hash().is_none());
-        assert!(state.import_hash().is_none());
+        assert!(state.import_recipe_digest().is_none());
     }
     let domains = world.resource::<ProjectDomainAssets>();
     let cpu_images = domains.collection::<ImageDomain>().unwrap();
@@ -1972,7 +1972,7 @@ fn real_import_reaches_source_free_primary_and_auxiliary_tilemap_publication_and
         assert!(world.resource::<AssetServer>().path(id).is_none());
         let state = products.states.state(id).unwrap();
         assert!(state.source_hash().is_none());
-        assert!(state.import_hash().is_none());
+        assert!(state.import_recipe_digest().is_none());
     }
     let exported = base
         .plan()

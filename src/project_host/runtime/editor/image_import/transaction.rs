@@ -1088,7 +1088,7 @@ impl EditorImageImportHost {
                 .validate_completion(project, &pending, source, &imported)
                 .and_then(|()| {
                     let source_digest = imported.source_digest();
-                    let settings_hash = imported.artifact().key().settings_hash();
+                    let settings_hash = imported.import_recipe().settings_hash();
                     let version = runtime
                         .commit_image_import(imported)
                         .map_err(EditorImageImportFailure::Runtime)?;
@@ -1178,7 +1178,7 @@ impl EditorImageImportHost {
         let imported_source = imported.source();
         if imported_source.stable_id() != pending.stable_id
             || imported_source.path() != &pending.asset_path
-            || imported.artifact().key().settings_hash() != pending.settings.settings_hash()
+            || imported.import_recipe().settings_hash() != pending.settings.settings_hash()
         {
             return Err(EditorImageImportFailure::ResultMismatch);
         }

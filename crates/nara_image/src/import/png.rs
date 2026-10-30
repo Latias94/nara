@@ -163,11 +163,11 @@ impl ImageImporter {
         drop(native_row);
         drop(reader);
 
-        let artifact = self.import_record(&request)?;
+        let import_recipe = self.import_recipe(&request);
         let source = ImageSourceMetadata::new(
             request.source().path().clone(),
             request.settings(),
-            artifact,
+            import_recipe,
         )
         .map_err(|_| ImageImportError::Png {
             stage: ImageImportStage::Finalize,

@@ -6,8 +6,8 @@ use std::{
 };
 
 use nara_asset::{
-    AssetProductIdentityError, AssetProductRef, AssetSourcePath, ImportArtifactRecord,
-    ImportSettingsHash, ImportedProductId, SourceHash, StableAssetId,
+    AssetProductIdentityError, AssetProductRef, AssetSourcePath, ImportRecipe, ImportSettingsHash,
+    ImportedProductId, SourceHash, StableAssetId,
 };
 
 use crate::ImageImportSettings;
@@ -88,17 +88,17 @@ impl ImageContentHash {
 pub struct ImageSourceMetadata {
     path: AssetSourcePath,
     settings: ImageImportSettings,
-    artifact: ImportArtifactRecord,
+    import_recipe: ImportRecipe,
 }
 
 impl ImageSourceMetadata {
     pub fn new(
         path: AssetSourcePath,
         settings: ImageImportSettings,
-        artifact: ImportArtifactRecord,
+        import_recipe: ImportRecipe,
     ) -> Result<Self, ImageSourceMetadataCreateError> {
         let expected = settings.settings_hash();
-        let actual = artifact.key().settings_hash();
+        let actual = import_recipe.settings_hash();
         if actual != expected {
             return Err(ImageSourceMetadataCreateError::SettingsHashMismatch { expected, actual });
         }
@@ -106,13 +106,13 @@ impl ImageSourceMetadata {
         Ok(Self {
             path,
             settings,
-            artifact,
+            import_recipe,
         })
     }
 
     #[must_use]
     pub const fn stable_id(&self) -> StableAssetId {
-        self.artifact.key().stable_id()
+        self.import_recipe.stable_id()
     }
 
     #[must_use]
@@ -122,7 +122,7 @@ impl ImageSourceMetadata {
 
     #[must_use]
     pub const fn source_hash(&self) -> SourceHash {
-        self.artifact.key().source_hash()
+        self.import_recipe.source_hash()
     }
 
     #[must_use]
@@ -131,15 +131,15 @@ impl ImageSourceMetadata {
     }
 
     #[must_use]
-    pub const fn artifact(&self) -> &ImportArtifactRecord {
-        &self.artifact
+    pub const fn import_recipe(&self) -> &ImportRecipe {
+        &self.import_recipe
     }
 }
 
 /// Failure to compose image source metadata from one self-consistent typed recipe.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ImageSourceMetadataCreateError {
-    /// The artifact was authenticated from settings other than the supplied typed settings.
+    /// The recipe fingerprints settings other than the supplied typed settings.
     SettingsHashMismatch {
         expected: ImportSettingsHash,
         actual: ImportSettingsHash,
@@ -149,8 +149,9 @@ pub enum ImageSourceMetadataCreateError {
 impl Display for ImageSourceMetadataCreateError {
     fn fmt(&self, formatter: &mut Formatter<'_>) -> fmt::Result {
         match self {
-            Self::SettingsHashMismatch { .. } => formatter
-                .write_str("image artifact settings hash does not match typed import settings"),
+            Self::SettingsHashMismatch { .. } => formatter.write_str(
+                "image import recipe settings hash does not match typed import settings",
+            ),
         }
     }
 }
@@ -168,11 +169,11 @@ impl<'de> serde::Deserialize<'de> for ImageSourceMetadata {
         struct ImageSourceMetadataWire {
             path: AssetSourcePath,
             settings: ImageImportSettings,
-            artifact: ImportArtifactRecord,
+            import_recipe: ImportRecipe,
         }
 
         let wire = ImageSourceMetadataWire::deserialize(deserializer)?;
-        Self::new(wire.path, wire.settings, wire.artifact).map_err(serde::de::Error::custom)
+        Self::new(wire.path, wire.settings, wire.import_recipe).map_err(serde::de::Error::custom)
     }
 }
 

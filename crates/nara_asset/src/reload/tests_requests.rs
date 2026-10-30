@@ -687,15 +687,15 @@ fn reload_request_charges_the_actual_owned_spare_capacity() {
         AssetSourcePath::new(path).unwrap(),
         AssetSourceKind::Image,
     );
-    let mut artifacts = Vec::with_capacity(8);
-    artifacts.push(ImportArtifactDigest::from_digest([7; 32]));
+    let mut recipes = Vec::with_capacity(8);
+    recipes.push(ImportRecipeDigest::from_digest([7; 32]));
     let expected_bytes = record
         .retained_bytes()
         .unwrap()
         .checked_add(
-            artifacts
+            recipes
                 .capacity()
-                .checked_mul(std::mem::size_of::<ImportArtifactDigest>())
+                .checked_mul(std::mem::size_of::<ImportRecipeDigest>())
                 .unwrap(),
         )
         .unwrap();
@@ -712,7 +712,7 @@ fn reload_request_charges_the_actual_owned_spare_capacity() {
             AssetSourceChangeKind::Modified,
             AssetVersion::ZERO,
             AssetLoadGeneration::ZERO,
-            artifacts,
+            recipes,
             authority,
             None,
         )

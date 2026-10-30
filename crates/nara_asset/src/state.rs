@@ -10,7 +10,7 @@ use nara_ecs::Resource;
 
 use crate::revision::{RevisionCounter, RevisionIdentity};
 use crate::{
-    Asset, AssetId, AssetMutationBaseline, AssetSlotRevision, Assets, ImportArtifactDigest,
+    Asset, AssetId, AssetMutationBaseline, AssetSlotRevision, Assets, ImportRecipeDigest,
     SourceHash, StableAssetId,
 };
 
@@ -163,7 +163,7 @@ pub struct AssetState {
     version: AssetVersion,
     load_state: LoadState,
     source_hash: Option<SourceHash>,
-    import_hash: Option<ImportArtifactDigest>,
+    import_recipe_digest: Option<ImportRecipeDigest>,
     published_available: bool,
 }
 
@@ -173,14 +173,14 @@ impl AssetState {
         version: AssetVersion,
         load_state: LoadState,
         source_hash: Option<SourceHash>,
-        import_hash: Option<ImportArtifactDigest>,
+        import_recipe_digest: Option<ImportRecipeDigest>,
     ) -> Self {
         let published_available = matches!(load_state, LoadState::Loaded);
         Self {
             version,
             load_state,
             source_hash,
-            import_hash,
+            import_recipe_digest,
             published_available,
         }
     }
@@ -211,8 +211,8 @@ impl AssetState {
     }
 
     #[must_use]
-    pub const fn import_hash(&self) -> Option<ImportArtifactDigest> {
-        self.import_hash
+    pub const fn import_recipe_digest(&self) -> Option<ImportRecipeDigest> {
+        self.import_recipe_digest
     }
 }
 
@@ -494,13 +494,18 @@ impl AssetStates {
         id: AssetId,
         version: AssetVersion,
         source_hash: Option<SourceHash>,
-        import_hash: Option<ImportArtifactDigest>,
+        import_recipe_digest: Option<ImportRecipeDigest>,
     ) {
         self.removed_sources.remove(&id);
         self.published_slots.remove(&id);
         self.insert_state(
             id,
-            AssetState::new(version, LoadState::Loaded, source_hash, import_hash),
+            AssetState::new(
+                version,
+                LoadState::Loaded,
+                source_hash,
+                import_recipe_digest,
+            ),
         );
     }
 
@@ -850,8 +855,8 @@ impl AssetEvents {
 
 #[derive(Debug, Default, Resource)]
 pub struct AssetDependencyGraph {
-    source_to_artifacts: BTreeMap<StableAssetId, BTreeSet<ImportArtifactDigest>>,
-    artifact_to_sources: BTreeMap<ImportArtifactDigest, BTreeSet<StableAssetId>>,
+    source_to_recipes: BTreeMap<StableAssetId, BTreeSet<ImportRecipeDigest>>,
+    recipe_to_sources: BTreeMap<ImportRecipeDigest, BTreeSet<StableAssetId>>,
     source_to_dependents: BTreeMap<StableAssetId, BTreeSet<StableAssetId>>,
 }
 
@@ -861,63 +866,56 @@ impl AssetDependencyGraph {
         Self::default()
     }
 
-    pub fn add_artifact_dependency(
-        &mut self,
-        source: StableAssetId,
-        artifact: ImportArtifactDigest,
-    ) {
-        self.source_to_artifacts
+    /// Records one source-to-recipe association without asserting successful output publication.
+    pub fn record_recipe(&mut self, source: StableAssetId, recipe: ImportRecipeDigest) {
+        self.source_to_recipes
             .entry(source)
             .or_default()
-            .insert(artifact);
-        self.artifact_to_sources
-            .entry(artifact)
+            .insert(recipe);
+        self.recipe_to_sources
+            .entry(recipe)
             .or_default()
             .insert(source);
     }
 
-    pub fn remove_artifact_dependency(
-        &mut self,
-        source: StableAssetId,
-        artifact: ImportArtifactDigest,
-    ) {
-        if let Some(artifacts) = self.source_to_artifacts.get_mut(&source) {
-            artifacts.remove(&artifact);
-            if artifacts.is_empty() {
-                self.source_to_artifacts.remove(&source);
+    pub fn remove_recipe(&mut self, source: StableAssetId, recipe: ImportRecipeDigest) {
+        if let Some(recipes) = self.source_to_recipes.get_mut(&source) {
+            recipes.remove(&recipe);
+            if recipes.is_empty() {
+                self.source_to_recipes.remove(&source);
             }
         }
-        if let Some(sources) = self.artifact_to_sources.get_mut(&artifact) {
+        if let Some(sources) = self.recipe_to_sources.get_mut(&recipe) {
             sources.remove(&source);
             if sources.is_empty() {
-                self.artifact_to_sources.remove(&artifact);
+                self.recipe_to_sources.remove(&recipe);
             }
         }
     }
 
-    pub fn artifacts_for_source(
+    pub fn recipes_for_source(
         &self,
         source: StableAssetId,
-    ) -> impl Iterator<Item = ImportArtifactDigest> + '_ {
-        self.source_to_artifacts
+    ) -> impl Iterator<Item = ImportRecipeDigest> + '_ {
+        self.source_to_recipes
             .get(&source)
             .into_iter()
-            .flat_map(|artifacts| artifacts.iter().copied())
+            .flat_map(|recipes| recipes.iter().copied())
     }
 
-    pub fn sources_for_artifact(
+    pub fn sources_for_recipe(
         &self,
-        artifact: ImportArtifactDigest,
+        recipe: ImportRecipeDigest,
     ) -> impl Iterator<Item = StableAssetId> + '_ {
-        self.artifact_to_sources
-            .get(&artifact)
+        self.recipe_to_sources
+            .get(&recipe)
             .into_iter()
             .flat_map(|sources| sources.iter().copied())
     }
 
     #[must_use]
-    pub fn affected_artifacts(&self, source: StableAssetId) -> Vec<ImportArtifactDigest> {
-        self.artifacts_for_source(source).collect()
+    pub fn affected_recipes(&self, source: StableAssetId) -> Vec<ImportRecipeDigest> {
+        self.recipes_for_source(source).collect()
     }
 
     pub fn add_source_dependency(&mut self, source: StableAssetId, dependent: StableAssetId) {
@@ -1093,7 +1091,7 @@ mod tests {
         let mut states = AssetStates::default();
         let mut events = AssetEvents::default();
         let source_hash = SourceHash::from_bytes(b"source-v1");
-        let import_hash = ImportArtifactDigest::from_bytes(b"import-v1");
+        let import_recipe_digest = ImportRecipeDigest::from_bytes(b"import-v1");
 
         let version = assets
             .commit_loaded(
@@ -1102,7 +1100,7 @@ mod tests {
                 &mut states,
                 &mut events,
                 Some(source_hash),
-                Some(import_hash),
+                Some(import_recipe_digest),
             )
             .unwrap();
 
@@ -1113,6 +1111,10 @@ mod tests {
             states.state(handle.id()).unwrap().source_hash(),
             Some(source_hash)
         );
+        assert_eq!(
+            states.state(handle.id()).unwrap().import_recipe_digest(),
+            Some(import_recipe_digest)
+        );
 
         let version = assets
             .commit_reload(
@@ -1122,12 +1124,16 @@ mod tests {
                 &mut states,
                 &mut events,
                 Some(SourceHash::from_bytes(b"source-v2")),
-                Some(ImportArtifactDigest::from_bytes(b"import-v2")),
+                Some(ImportRecipeDigest::from_bytes(b"import-v2")),
             )
             .unwrap();
 
         assert_eq!(version, AssetVersion::from_raw(2));
         assert_eq!(assets.get(handle).map(String::as_str), Some("second"));
+        assert_eq!(
+            states.state(handle.id()).unwrap().import_recipe_digest(),
+            Some(ImportRecipeDigest::from_bytes(b"import-v2"))
+        );
         assert_eq!(
             events.drain(),
             vec![
@@ -1151,14 +1157,16 @@ mod tests {
         let mut assets = Assets::<String>::default();
         let mut states = AssetStates::default();
         let mut events = AssetEvents::default();
+        let source_hash = SourceHash::from_bytes(b"last-good-source");
+        let import_recipe_digest = ImportRecipeDigest::from_bytes(b"last-good-recipe");
         let version = assets
             .commit_loaded(
                 handle,
                 "first".to_string(),
                 &mut states,
                 &mut events,
-                None,
-                None,
+                Some(source_hash),
+                Some(import_recipe_digest),
             )
             .unwrap();
         events.drain();
@@ -1173,6 +1181,14 @@ mod tests {
             Some(version)
         );
         assert_eq!(assets.get(handle).map(String::as_str), Some("first"));
+        assert_eq!(
+            states.state(handle.id()).unwrap().source_hash(),
+            Some(source_hash)
+        );
+        assert_eq!(
+            states.state(handle.id()).unwrap().import_recipe_digest(),
+            Some(import_recipe_digest)
+        );
         assert_eq!(
             states.state(handle.id()).unwrap().load_state(),
             &LoadState::Failed {
@@ -1308,22 +1324,36 @@ mod tests {
     }
 
     #[test]
-    fn dependency_graph_queries_source_to_artifacts() {
+    fn dependency_graph_queries_source_to_recipes() {
         let mut graph = AssetDependencyGraph::default();
-        let first = ImportArtifactDigest::from_bytes(b"first");
-        let second = ImportArtifactDigest::from_bytes(b"second");
+        let first = ImportRecipeDigest::from_digest([1; 32]);
+        let second = ImportRecipeDigest::from_digest([2; 32]);
 
-        graph.add_artifact_dependency(stable_id(), first);
-        graph.add_artifact_dependency(stable_id(), second);
-        graph.add_artifact_dependency(other_stable_id(), second);
+        graph.record_recipe(stable_id(), first);
+        graph.record_recipe(stable_id(), first);
+        graph.record_recipe(stable_id(), second);
+        graph.record_recipe(other_stable_id(), second);
 
-        assert_eq!(graph.affected_artifacts(stable_id()), vec![first, second]);
+        assert_eq!(graph.affected_recipes(stable_id()), vec![first, second]);
         assert_eq!(
-            graph.sources_for_artifact(second).collect::<Vec<_>>(),
+            graph.sources_for_recipe(second).collect::<Vec<_>>(),
             vec![stable_id(), other_stable_id()]
         );
 
-        graph.remove_artifact_dependency(stable_id(), first);
-        assert_eq!(graph.affected_artifacts(stable_id()), vec![second]);
+        graph.remove_recipe(stable_id(), first);
+        graph.remove_recipe(stable_id(), first);
+        assert_eq!(graph.affected_recipes(stable_id()), vec![second]);
+        assert!(graph.sources_for_recipe(first).next().is_none());
+
+        graph.remove_recipe(stable_id(), second);
+        assert!(graph.recipes_for_source(stable_id()).next().is_none());
+        assert_eq!(graph.affected_recipes(other_stable_id()), vec![second]);
+        assert_eq!(
+            graph.sources_for_recipe(second).collect::<Vec<_>>(),
+            vec![other_stable_id()]
+        );
+        graph.remove_recipe(other_stable_id(), second);
+        assert!(graph.source_to_recipes.is_empty());
+        assert!(graph.recipe_to_sources.is_empty());
     }
 }

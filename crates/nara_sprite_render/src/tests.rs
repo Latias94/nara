@@ -6,9 +6,8 @@ use nara_app::{
     RuntimeClosePolicy, RuntimeInstance, RuntimeObligationLedger,
 };
 use nara_asset::{
-    ArtifactFormatVersion, ArtifactLabel, AssetEvents, AssetSourcePath, AssetStates, Assets,
-    Handle, ImportArtifactKey, ImportArtifactRecord, ImportDependencyDigest, ImportProfile,
-    ImportedAssetType, ImporterId, ImporterVersion, SourceHash, StableAssetId,
+    AssetEvents, AssetSourcePath, AssetStates, Assets, Handle, ImportDependencyDigest,
+    ImportRecipe, ImporterId, ImporterVersion, SourceHash, StableAssetId,
 };
 use nara_core::{Color, Vec2};
 use nara_ecs::{Entity, Resource, World, schedule::IntoScheduleConfigs};
@@ -728,7 +727,7 @@ fn queued_image_snapshots_survive_successor_publication_and_cache_removal() {
     let [old, new] = [vec![255; 16], [0, 255, 0, 255].repeat(4)].map(|pixels| {
         let image = test_image_with_pixels(pixels);
         let source_hash = image.source().unwrap().source_hash();
-        let import_hash = image.source().unwrap().artifact().key().digest();
+        let import_recipe_digest = image.source().unwrap().import_recipe().digest();
         let version = images
             .commit_loaded(
                 handle,
@@ -736,7 +735,7 @@ fn queued_image_snapshots_survive_successor_publication_and_cache_removal() {
                 &mut states,
                 &mut events,
                 Some(source_hash),
-                Some(import_hash),
+                Some(import_recipe_digest),
             )
             .unwrap();
         let snapshot = PreparedImageSnapshot::capture(handle, &images, &states).unwrap();
@@ -1550,7 +1549,7 @@ fn queued_item(entity_index: u32) -> QueuedSpriteItem {
 fn insert_loaded_image(app: &mut App, handle: Handle<ImageAsset>) {
     let image = test_image();
     let source_hash = image.source().unwrap().source_hash();
-    let import_hash = image.source().unwrap().artifact().key().digest();
+    let import_recipe_digest = image.source().unwrap().import_recipe().digest();
     let mut images = Assets::<ImageAsset>::default();
     let mut states = AssetStates::default();
     let mut events = AssetEvents::default();
@@ -1561,7 +1560,7 @@ fn insert_loaded_image(app: &mut App, handle: Handle<ImageAsset>) {
             &mut states,
             &mut events,
             Some(source_hash),
-            Some(import_hash),
+            Some(import_recipe_digest),
         )
         .unwrap();
     app.world_mut()
@@ -1579,23 +1578,18 @@ fn test_image() -> ImageAsset {
 fn test_image_with_pixels(pixels: Vec<u8>) -> ImageAsset {
     let stable_id = StableAssetId::parse_str("ce2ab2f8-c58b-48e3-b94e-9465340262a1").unwrap();
     let source_hash = SourceHash::from_bytes(&pixels);
-    let key = ImportArtifactKey::new(
+    let import_recipe = ImportRecipe::new(
         stable_id,
         source_hash,
         ImportDependencyDigest::empty(),
         ImporterId::new("nara-image").unwrap(),
         ImporterVersion::new(1),
         ImageImportSettings::default().settings_hash(),
-        ImportProfile::default(),
-        ImportedAssetType::new("image").unwrap(),
-        ArtifactLabel::default(),
-        ArtifactFormatVersion::new(1),
     );
-    let artifact = ImportArtifactRecord::new(key).unwrap();
     let source = ImageSourceMetadata::new(
         AssetSourcePath::new("textures/test.png").unwrap(),
         ImageImportSettings::default(),
-        artifact,
+        import_recipe,
     )
     .unwrap();
     ImageAsset::from_import(source, ImageExtent::new(2, 2), ImageFormat::Rgba8, pixels).unwrap()
@@ -1607,7 +1601,7 @@ fn prepared_image_snapshot() -> PreparedImageSnapshot {
     let mut states = AssetStates::default();
     let image = test_image();
     let source_hash = image.source().unwrap().source_hash();
-    let import_hash = image.source().unwrap().artifact().key().digest();
+    let import_recipe_digest = image.source().unwrap().import_recipe().digest();
     images
         .commit_loaded(
             handle,
@@ -1615,7 +1609,7 @@ fn prepared_image_snapshot() -> PreparedImageSnapshot {
             &mut states,
             &mut AssetEvents::default(),
             Some(source_hash),
-            Some(import_hash),
+            Some(import_recipe_digest),
         )
         .unwrap();
     PreparedImageSnapshot::capture(handle, &images, &states).unwrap()

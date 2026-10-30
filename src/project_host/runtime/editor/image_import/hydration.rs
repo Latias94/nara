@@ -911,7 +911,7 @@ impl EditorImageHydrationHost {
                             }
                         };
                         let source_digest = imported.source_digest();
-                        let settings_hash = imported.artifact().key().settings_hash();
+                        let settings_hash = imported.import_recipe().settings_hash();
                         let version = runtime.commit_image_import(imported).map_err(|_| {
                             EditorImageHydrationFailureKind::Runtime(
                                 EditorImageRuntimeFailure::Publication,
@@ -1065,7 +1065,7 @@ impl EditorImageHydrationHost {
         if source.stable_id() != expected.stable_id()
             || source.path() != expected.asset_path()
             || source.settings() != expected.settings
-            || imported.artifact().key().settings_hash() != expected.settings.settings_hash()
+            || imported.import_recipe().settings_hash() != expected.settings.settings_hash()
         {
             return Err(EditorImageHydrationFailureKind::ResultMismatch);
         }

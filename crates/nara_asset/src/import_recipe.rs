@@ -1,29 +1,23 @@
+//! Source import provenance, independent of output content and storage.
+
 use std::{
     error::Error,
     fmt::{self, Debug, Display, Formatter},
 };
 
-use crate::{AssetPath, AssetPathError, AssetSourceKind, StableAssetId};
-
-pub const IMPORT_CACHE_ROOT: &str = ".nara/import-cache";
+use crate::{AssetPath, AssetSourceKind, StableAssetId};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ImportLabelKind {
     ImporterId,
-    ImportProfile,
-    ImportedAssetType,
     ImportDependencyRole,
-    ArtifactLabel,
 }
 
 impl Display for ImportLabelKind {
     fn fmt(&self, formatter: &mut Formatter<'_>) -> fmt::Result {
         match self {
             Self::ImporterId => formatter.write_str("importer id"),
-            Self::ImportProfile => formatter.write_str("import profile"),
-            Self::ImportedAssetType => formatter.write_str("imported asset type"),
             Self::ImportDependencyRole => formatter.write_str("import dependency role"),
-            Self::ArtifactLabel => formatter.write_str("artifact label"),
         }
     }
 }
@@ -142,22 +136,7 @@ macro_rules! import_label_type {
 }
 
 import_label_type!(ImporterId, ImportLabelKind::ImporterId);
-import_label_type!(ImportProfile, ImportLabelKind::ImportProfile);
-import_label_type!(ImportedAssetType, ImportLabelKind::ImportedAssetType);
 import_label_type!(ImportDependencyRole, ImportLabelKind::ImportDependencyRole);
-import_label_type!(ArtifactLabel, ImportLabelKind::ArtifactLabel);
-
-impl Default for ImportProfile {
-    fn default() -> Self {
-        Self("default".to_string())
-    }
-}
-
-impl Default for ArtifactLabel {
-    fn default() -> Self {
-        Self("primary".to_string())
-    }
-}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
@@ -176,28 +155,6 @@ impl ImporterVersion {
 }
 
 impl Display for ImporterVersion {
-    fn fmt(&self, formatter: &mut Formatter<'_>) -> fmt::Result {
-        Display::fmt(&self.0, formatter)
-    }
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
-#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
-pub struct ArtifactFormatVersion(u32);
-
-impl ArtifactFormatVersion {
-    #[must_use]
-    pub const fn new(version: u32) -> Self {
-        Self(version)
-    }
-
-    #[must_use]
-    pub const fn raw(self) -> u32 {
-        self.0
-    }
-}
-
-impl Display for ArtifactFormatVersion {
     fn fmt(&self, formatter: &mut Formatter<'_>) -> fmt::Result {
         Display::fmt(&self.0, formatter)
     }
@@ -302,7 +259,7 @@ macro_rules! digest_type {
 digest_type!(SourceHash);
 digest_type!(ImportSettingsHash);
 digest_type!(ImportDependencyDigest);
-digest_type!(ImportArtifactDigest);
+digest_type!(ImportRecipeDigest);
 
 impl ImportDependencyDigest {
     #[must_use]
@@ -395,23 +352,22 @@ impl ImportDependency {
     }
 }
 
+/// The source identity, observed inputs and selected importer settings used for an import.
+///
+/// A recipe does not establish output storage or a reusable artifact group.
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
-pub struct ImportArtifactKey {
+#[cfg_attr(feature = "serde", serde(deny_unknown_fields))]
+pub struct ImportRecipe {
     stable_id: StableAssetId,
     source_hash: SourceHash,
     dependency_digest: ImportDependencyDigest,
     importer_id: ImporterId,
     importer_version: ImporterVersion,
     settings_hash: ImportSettingsHash,
-    profile: ImportProfile,
-    output_asset_type: ImportedAssetType,
-    artifact_label: ArtifactLabel,
-    artifact_format_version: ArtifactFormatVersion,
 }
 
-impl ImportArtifactKey {
-    #[allow(clippy::too_many_arguments)]
+impl ImportRecipe {
     #[must_use]
     pub const fn new(
         stable_id: StableAssetId,
@@ -420,10 +376,6 @@ impl ImportArtifactKey {
         importer_id: ImporterId,
         importer_version: ImporterVersion,
         settings_hash: ImportSettingsHash,
-        profile: ImportProfile,
-        output_asset_type: ImportedAssetType,
-        artifact_label: ArtifactLabel,
-        artifact_format_version: ArtifactFormatVersion,
     ) -> Self {
         Self {
             stable_id,
@@ -432,10 +384,6 @@ impl ImportArtifactKey {
             importer_id,
             importer_version,
             settings_hash,
-            profile,
-            output_asset_type,
-            artifact_label,
-            artifact_format_version,
         }
     }
 
@@ -469,30 +417,11 @@ impl ImportArtifactKey {
         self.settings_hash
     }
 
+    /// Fingerprints these six inputs under the versioned `nara.import_recipe.v1` domain.
     #[must_use]
-    pub const fn profile(&self) -> &ImportProfile {
-        &self.profile
-    }
-
-    #[must_use]
-    pub const fn output_asset_type(&self) -> &ImportedAssetType {
-        &self.output_asset_type
-    }
-
-    #[must_use]
-    pub const fn artifact_label(&self) -> &ArtifactLabel {
-        &self.artifact_label
-    }
-
-    #[must_use]
-    pub const fn artifact_format_version(&self) -> ArtifactFormatVersion {
-        self.artifact_format_version
-    }
-
-    #[must_use]
-    pub fn digest(&self) -> ImportArtifactDigest {
+    pub fn digest(&self) -> ImportRecipeDigest {
         let mut hasher = blake3::Hasher::new();
-        feed_field(&mut hasher, "domain", b"nara.import_artifact_key.v1");
+        feed_field(&mut hasher, "domain", b"nara.import_recipe.v1");
         feed_field(
             &mut hasher,
             "stable_id",
@@ -515,128 +444,9 @@ impl ImportArtifactKey {
             &self.importer_version.raw().to_le_bytes(),
         );
         feed_field(&mut hasher, "settings_hash", &self.settings_hash.as_bytes());
-        feed_field(&mut hasher, "profile", self.profile.as_str().as_bytes());
-        feed_field(
-            &mut hasher,
-            "output_asset_type",
-            self.output_asset_type.as_str().as_bytes(),
-        );
-        feed_field(
-            &mut hasher,
-            "artifact_label",
-            self.artifact_label.as_str().as_bytes(),
-        );
-        feed_field(
-            &mut hasher,
-            "artifact_format_version",
-            &self.artifact_format_version.raw().to_le_bytes(),
-        );
-        ImportArtifactDigest::from_digest(*hasher.finalize().as_bytes())
+        ImportRecipeDigest::from_digest(*hasher.finalize().as_bytes())
     }
 }
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
-pub struct ImportArtifactRecord {
-    key: ImportArtifactKey,
-    artifact_path: ImportArtifactPath,
-}
-
-impl ImportArtifactRecord {
-    pub fn new(key: ImportArtifactKey) -> Result<Self, ImportArtifactPathError> {
-        let artifact_path = ImportArtifactPath::for_key(&key)?;
-        Ok(Self { key, artifact_path })
-    }
-
-    #[must_use]
-    pub const fn key(&self) -> &ImportArtifactKey {
-        &self.key
-    }
-
-    #[must_use]
-    pub const fn artifact_path(&self) -> &ImportArtifactPath {
-        &self.artifact_path
-    }
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
-pub struct ImportArtifactPath(String);
-
-impl ImportArtifactPath {
-    pub fn new(path: impl Into<String>) -> Result<Self, ImportArtifactPathError> {
-        let path = path.into();
-        AssetPath::new(path.clone()).map_err(ImportArtifactPathError::InvalidPath)?;
-        if !path.starts_with(&format!("{IMPORT_CACHE_ROOT}/")) {
-            return Err(ImportArtifactPathError::OutsideImportCache { path });
-        }
-        Ok(Self(path))
-    }
-
-    pub fn for_key(key: &ImportArtifactKey) -> Result<Self, ImportArtifactPathError> {
-        Self::new(format!(
-            "{IMPORT_CACHE_ROOT}/{}/{}/{}/{}/{}-{}.v{}.artifact",
-            key.importer_id(),
-            key.profile(),
-            key.output_asset_type(),
-            key.stable_id(),
-            key.artifact_label(),
-            key.digest(),
-            key.artifact_format_version(),
-        ))
-    }
-
-    #[must_use]
-    pub fn as_str(&self) -> &str {
-        &self.0
-    }
-}
-
-impl Display for ImportArtifactPath {
-    fn fmt(&self, formatter: &mut Formatter<'_>) -> fmt::Result {
-        formatter.write_str(self.as_str())
-    }
-}
-
-#[cfg(feature = "serde")]
-impl serde::Serialize for ImportArtifactPath {
-    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
-    where
-        S: serde::Serializer,
-    {
-        serializer.serialize_str(self.as_str())
-    }
-}
-
-#[cfg(feature = "serde")]
-impl<'de> serde::Deserialize<'de> for ImportArtifactPath {
-    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
-    where
-        D: serde::Deserializer<'de>,
-    {
-        let path = <String as serde::Deserialize>::deserialize(deserializer)?;
-        Self::new(path).map_err(serde::de::Error::custom)
-    }
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum ImportArtifactPathError {
-    InvalidPath(AssetPathError),
-    OutsideImportCache { path: String },
-}
-
-impl Display for ImportArtifactPathError {
-    fn fmt(&self, formatter: &mut Formatter<'_>) -> fmt::Result {
-        match self {
-            Self::InvalidPath(error) => write!(formatter, "invalid import artifact path: {error}"),
-            Self::OutsideImportCache { path } => write!(
-                formatter,
-                "import artifact path '{path}' must live under {IMPORT_CACHE_ROOT}/"
-            ),
-        }
-    }
-}
-
-impl Error for ImportArtifactPathError {}
 
 fn canonical_dependency_key(dependency: &ImportDependency) -> Vec<u8> {
     let mut key = Vec::new();
@@ -718,66 +528,103 @@ mod tests {
         StableAssetId::parse_str(value).unwrap()
     }
 
-    fn key() -> ImportArtifactKey {
-        ImportArtifactKey::new(
+    fn recipe() -> ImportRecipe {
+        ImportRecipe::new(
             stable_id("2f0d71c7-14fc-4ed4-b48b-1c61bba8b97f"),
             SourceHash::from_bytes(b"source"),
             ImportDependencyDigest::empty(),
             ImporterId::new("mock_importer").unwrap(),
             ImporterVersion::new(1),
             ImportSettingsHash::from_bytes(b"settings"),
-            ImportProfile::default(),
-            ImportedAssetType::new("mock_asset").unwrap(),
-            ArtifactLabel::default(),
-            ArtifactFormatVersion::new(1),
         )
     }
 
     #[test]
-    fn artifact_key_changes_for_all_identity_inputs() {
-        let base = key().digest();
+    fn recipe_digest_changes_for_all_six_inputs() {
+        let base = recipe().digest();
 
-        let mut changed = key();
+        let mut changed = recipe();
         changed.source_hash = SourceHash::from_bytes(b"changed-source");
         assert_ne!(base, changed.digest());
 
-        let mut changed = key();
+        let mut changed = recipe();
         changed.dependency_digest = ImportDependencyDigest::from_digest([1; 32]);
         assert_ne!(base, changed.digest());
 
-        let mut changed = key();
+        let mut changed = recipe();
         changed.importer_version = ImporterVersion::new(2);
         assert_ne!(base, changed.digest());
 
-        let mut changed = key();
+        let mut changed = recipe();
         changed.settings_hash = ImportSettingsHash::from_bytes(b"changed-settings");
         assert_ne!(base, changed.digest());
 
-        let mut changed = key();
-        changed.profile = ImportProfile::new("mobile").unwrap();
+        let mut changed = recipe();
+        changed.importer_id = ImporterId::new("other_importer").unwrap();
         assert_ne!(base, changed.digest());
 
-        let mut changed = key();
+        let mut changed = recipe();
         changed.stable_id = stable_id("b73f0f16-09e8-4265-b090-b689b41c197e");
-        assert_ne!(base, changed.digest());
-
-        let mut changed = key();
-        changed.output_asset_type = ImportedAssetType::new("other_asset").unwrap();
         assert_ne!(base, changed.digest());
     }
 
     #[test]
-    fn artifact_paths_are_deterministic_and_under_import_cache() {
-        let first = ImportArtifactRecord::new(key()).unwrap();
-        let second = ImportArtifactRecord::new(key()).unwrap();
+    fn recipe_digest_is_stable_across_equivalent_construction() {
+        let first = recipe();
+        let second = ImportRecipe::new(
+            first.stable_id(),
+            first.source_hash(),
+            first.dependency_digest(),
+            ImporterId::new("MOCK_IMPORTER").unwrap(),
+            first.importer_version(),
+            first.settings_hash(),
+        );
 
         assert_eq!(first, second);
-        assert!(
-            first
-                .artifact_path()
-                .as_str()
-                .starts_with(".nara/import-cache/mock_importer/default/mock_asset/")
+        assert_eq!(first.digest(), second.digest());
+    }
+
+    #[cfg(feature = "serde")]
+    #[test]
+    fn recipe_wire_contains_only_the_six_required_inputs() {
+        let original = recipe();
+        let wire = serde_json::to_value(&original).unwrap();
+        let fields = wire.as_object().unwrap();
+        let required = [
+            "stable_id",
+            "source_hash",
+            "dependency_digest",
+            "importer_id",
+            "importer_version",
+            "settings_hash",
+        ];
+        assert_eq!(fields.len(), required.len());
+        assert_eq!(
+            serde_json::from_value::<ImportRecipe>(wire.clone()).unwrap(),
+            original
         );
+        for field in required {
+            assert!(fields.contains_key(field), "{field}");
+            let mut missing = wire.clone();
+            missing.as_object_mut().unwrap().remove(field);
+            assert!(
+                serde_json::from_value::<ImportRecipe>(missing).is_err(),
+                "{field}"
+            );
+        }
+        for field in [
+            "profile",
+            "output_asset_type",
+            "artifact_label",
+            "artifact_format_version",
+        ] {
+            let mut obsolete = wire.clone();
+            obsolete[field] = serde_json::Value::Null;
+            assert!(
+                serde_json::from_value::<ImportRecipe>(obsolete).is_err(),
+                "{field}"
+            );
+        }
     }
 
     #[test]

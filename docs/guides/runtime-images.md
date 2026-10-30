@@ -83,6 +83,47 @@ its local `AssetPath`. A caller that reads the path from `ImageSourceMetadata` m
 the Assets directory again. Standalone readers explicitly select `AssetPathScope::ROOT`; a
 project reader uses its actual configured prefix. Processed and anonymous Images need neither.
 
+Source provenance exposes `ImageSourceMetadata::import_recipe()` with its six actual inputs:
+stable source ID, source hash, observed dependency digest, importer ID/revision and effective
+settings hash. `ImportRecipeDigest` fingerprints these inputs under `nara.import_recipe.v1`;
+`ImageAsset::source()` exposes that recipe only for actual source provenance. A recipe neither
+establishes an artifact file nor identifies pixel bytes. There is no synthetic cache path or
+unconsumed output/profile metadata. A persistent reusable build group additionally needs tracked
+execution, actual output digests and complete publication under the
+[local build design](../architecture/local-artifact-build-design.md).
+
+## Cook For A Target
+
+`cook_runtime_image` consumes borrowed pixels, explicit `ImageCookSettings`, a target's actual
+nonzero `max_texture_dimension_2d` and per-call `ImageCookLimits`. It returns fresh source-independent
+pixels with the same complete Product, format and color space. Anonymous images reject; select
+a persistent Product before cooking delivery content. Source provenance/retention owners stay
+with the input and are not attached to the newly allocated output.
+
+The default oversize policy is `Reject`. `FitNearest` explicitly chooses proportional shrinking:
+the longest axis fits the target cap, the other axis rounds down with a minimum of one texel,
+and images already within the cap are not enlarged. Sampling maps each destination pixel center
+to its nearest source texel with integer arithmetic, choosing the higher coordinate on a tie.
+Complete RGBA texels are copied unchanged. This pixel-art option performs no filtering, color
+conversion, premultiplication, automatic atlas repair or GPU work.
+
+```rust,ignore
+let cooked = cook_runtime_image(
+    &imported_image,
+    ImageCookSettings { oversize: ImageOversizePolicy::FitNearest },
+    ImageCookTarget::new(device_dimension_limit),
+    selected_cook_limits,
+)?;
+let member_bytes = ImageRuntimeCodec::encode_runtime(&cooked)?;
+```
+
+Runtime format dimensions/pixel limits and both byte allowances are checked before allocation.
+Retained output counts the inline Image, shared pixel allocation overhead and RGBA bytes; the
+conservative allocation peak adds one possible overlapping RGBA buffer. The caller accounts for
+borrowed input, encoded output and aggregate operation custody. This pure CPU operation does not
+publish a reusable group, select an executable target or install native resources. Atlas layouts
+that depend on exact Image extents require their own explicit coordinated cook.
+
 ## Use Images In UI
 
 The Scene/ECS UI adapter binds an Image explicitly with

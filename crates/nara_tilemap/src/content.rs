@@ -1004,8 +1004,7 @@ mod tests {
     use super::*;
     use nara_asset::ProjectAssetDatabase;
     use nara_asset::{
-        ArtifactFormatVersion, ArtifactLabel, AssetRef, AssetSourcePath, ImportArtifactKey,
-        ImportArtifactRecord, ImportDependencyDigest, ImportProfile, ImportedAssetType, ImporterId,
+        AssetRef, AssetSourcePath, ImportDependencyDigest, ImportRecipe, ImporterId,
         ImporterVersion, StableAssetId,
     };
     use nara_core::Vec2;
@@ -1240,25 +1239,16 @@ mod tests {
     fn image(record: &AssetRecord, width: u32, height: u32, byte: u8) -> ImageAsset {
         let pixels = vec![byte; width as usize * height as usize * 4];
         let settings = ImageImportSettings::default();
-        let key = ImportArtifactKey::new(
+        let import_recipe = ImportRecipe::new(
             record.stable_id(),
             SourceHash::from_bytes(&pixels),
             ImportDependencyDigest::empty(),
             ImporterId::new("test.image").unwrap(),
             ImporterVersion::new(1),
             settings.settings_hash(),
-            ImportProfile::default(),
-            ImportedAssetType::new("image").unwrap(),
-            ArtifactLabel::default(),
-            ArtifactFormatVersion::new(1),
         );
         ImageAsset::from_import(
-            ImageSourceMetadata::new(
-                record.path().clone(),
-                settings,
-                ImportArtifactRecord::new(key).unwrap(),
-            )
-            .unwrap(),
+            ImageSourceMetadata::new(record.path().clone(), settings, import_recipe).unwrap(),
             ImageExtent::new(width, height),
             ImageFormat::Rgba8,
             pixels,

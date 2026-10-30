@@ -1772,7 +1772,7 @@ fn publish_snapshot_assets(
                 handle,
                 image,
                 source.source_hash(),
-                source.artifact().key().digest(),
+                source.import_recipe().digest(),
             ));
         }
     }
@@ -1782,7 +1782,7 @@ fn publish_snapshot_assets(
             world.resource_scope(
                 |world, mut states: Mut<'_, AssetStates>| -> Result<(), HostFault> {
                     let mut events = world.resource_mut::<AssetEvents>();
-                    for (handle, image, source_hash, import_hash) in publications {
+                    for (handle, image, source_hash, import_recipe_digest) in publications {
                         images
                             .commit_loaded(
                                 handle,
@@ -1790,7 +1790,7 @@ fn publish_snapshot_assets(
                                 &mut states,
                                 &mut events,
                                 Some(source_hash),
-                                Some(import_hash),
+                                Some(import_recipe_digest),
                             )
                             .map_err(|_| {
                                 HostFault::new(single_error(

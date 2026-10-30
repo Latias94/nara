@@ -11,7 +11,7 @@ use nara_ecs::Resource;
 use crate::revision::{RevisionCounter, RevisionIdentity};
 use crate::{
     AssetError, AssetEventKind, AssetEvents, AssetId, AssetServer, AssetStateError, AssetStates,
-    AssetVersion, ImportArtifactDigest, SourceHash,
+    AssetVersion, ImportRecipeDigest, SourceHash,
 };
 
 pub trait Asset: Send + Sync + 'static {}
@@ -165,10 +165,17 @@ impl<T: Asset> AssetMutationBaseline<T> {
         states: &mut AssetStates,
         events: &mut AssetEvents,
         source_hash: Option<SourceHash>,
-        import_hash: Option<ImportArtifactDigest>,
+        import_recipe_digest: Option<ImportRecipeDigest>,
     ) -> Result<AssetVersion, AssetStateError> {
         self.validate(assets, states)?;
-        assets.commit_loaded(self.handle, value, states, events, source_hash, import_hash)
+        assets.commit_loaded(
+            self.handle,
+            value,
+            states,
+            events,
+            source_hash,
+            import_recipe_digest,
+        )
     }
 
     pub fn record_failure(
@@ -355,7 +362,7 @@ impl<T: Asset> Assets<T> {
         states: &mut AssetStates,
         events: &mut AssetEvents,
         source_hash: Option<SourceHash>,
-        import_hash: Option<ImportArtifactDigest>,
+        import_recipe_digest: Option<ImportRecipeDigest>,
     ) -> Result<AssetVersion, AssetStateError> {
         let id = handle.id();
         let version = states.next_version(id)?;
@@ -365,7 +372,7 @@ impl<T: Asset> Assets<T> {
         } else {
             AssetEventKind::Added
         };
-        states.set_loaded_at(id, version, source_hash, import_hash);
+        states.set_loaded_at(id, version, source_hash, import_recipe_digest);
         states.bind_published_slot(id, self.slot_revision(handle));
         self.bind_state_store(handle, states);
         let _ = events.push(id, version, event_kind);
@@ -380,10 +387,17 @@ impl<T: Asset> Assets<T> {
         states: &mut AssetStates,
         events: &mut AssetEvents,
         source_hash: Option<SourceHash>,
-        import_hash: Option<ImportArtifactDigest>,
+        import_recipe_digest: Option<ImportRecipeDigest>,
     ) -> Result<AssetVersion, AssetStateError> {
         states.ensure_version(handle.id(), expected_version)?;
-        self.commit_loaded(handle, value, states, events, source_hash, import_hash)
+        self.commit_loaded(
+            handle,
+            value,
+            states,
+            events,
+            source_hash,
+            import_recipe_digest,
+        )
     }
 
     pub fn record_reload_failure(

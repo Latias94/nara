@@ -3,9 +3,8 @@ use super::*;
 use std::collections::HashSet;
 
 use nara_asset::{
-    ArtifactFormatVersion, ArtifactLabel, AssetEvents, AssetRecord, AssetServer, AssetSourceKind,
-    AssetStates, Assets, ImportArtifactKey, ImportDependencyDigest, ImportProfile,
-    ImportedAssetType, ImporterId, ImporterVersion,
+    AssetEvents, AssetRecord, AssetServer, AssetSourceKind, AssetStates, Assets,
+    ImportDependencyDigest, ImportRecipe, ImporterId, ImporterVersion,
 };
 
 use crate::budget::{ImageImportCharge, ImageImportPixelLease};
@@ -21,20 +20,15 @@ fn product(selection: ImportedProductId) -> AssetProductRef {
 
 fn source(path: &str, source_bytes: &[u8], color_space: ImageColorSpace) -> ImageSourceMetadata {
     let settings = ImageImportSettings::new(color_space);
-    let artifact = ImportArtifactRecord::new(ImportArtifactKey::new(
+    let import_recipe = ImportRecipe::new(
         product(ImportedProductId::PRIMARY).source(),
         SourceHash::from_bytes(source_bytes),
         ImportDependencyDigest::empty(),
         ImporterId::new("test.image").unwrap(),
         ImporterVersion::new(1),
         settings.settings_hash(),
-        ImportProfile::default(),
-        ImportedAssetType::new("image").unwrap(),
-        ArtifactLabel::default(),
-        ArtifactFormatVersion::new(1),
-    ))
-    .unwrap();
-    ImageSourceMetadata::new(AssetSourcePath::new(path).unwrap(), settings, artifact).unwrap()
+    );
+    ImageSourceMetadata::new(AssetSourcePath::new(path).unwrap(), settings, import_recipe).unwrap()
 }
 
 fn processed(selection: ImportedProductId, color_space: ImageColorSpace) -> ImageAsset {
@@ -97,6 +91,10 @@ fn content_hash_covers_pixels_and_descriptor_without_import_or_product_identity(
     assert_ne!(first.product(), runtime.product());
     assert_ne!(first.product(), other_product.product());
     assert_ne!(first.source(), other_source.source());
+    assert_ne!(
+        first.source().unwrap().import_recipe().digest(),
+        other_source.source().unwrap().import_recipe().digest()
+    );
     for same in [&anonymous, &other_source, &runtime, &other_product] {
         assert_eq!(first.content_hash(), same.content_hash());
     }
@@ -397,6 +395,12 @@ fn serde_rejects_forged_source_product_color_and_cached_hash() {
     .unwrap();
     let wire = serde_json::to_value(&image).unwrap();
     assert_eq!(wire.as_object().unwrap().len(), 6);
+    let source_fields = wire["source"].as_object().unwrap();
+    assert_eq!(source_fields.len(), 3);
+    for field in ["path", "settings", "import_recipe"] {
+        assert!(source_fields.contains_key(field));
+    }
+    assert_eq!(source_fields["import_recipe"].as_object().unwrap().len(), 6);
     assert_eq!(
         serde_json::from_value::<ImageAsset>(wire.clone()).unwrap(),
         image
@@ -423,7 +427,7 @@ fn serde_rejects_forged_source_product_color_and_cached_hash() {
     for field in [
         "content_hash",
         "source_hash",
-        "artifact_hash",
+        "import_recipe_digest",
         "retention",
         "unexpected",
     ] {

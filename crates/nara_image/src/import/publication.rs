@@ -2,7 +2,7 @@ use std::fmt::{self, Debug, Formatter};
 
 use nara_asset::{
     AssetEvents, AssetMutationBaseline, AssetRecord, AssetServer, AssetSourcePath, AssetStateError,
-    AssetStates, AssetVersion, Assets, Handle, ImportArtifactRecord, StableAssetId,
+    AssetStates, AssetVersion, Assets, Handle, ImportRecipe, StableAssetId,
 };
 use nara_fs::ContentDigest;
 
@@ -292,8 +292,8 @@ impl ImageImportedAsset {
     }
 
     #[must_use]
-    pub fn artifact(&self) -> &ImportArtifactRecord {
-        self.source().artifact()
+    pub fn import_recipe(&self) -> &ImportRecipe {
+        self.source().import_recipe()
     }
 
     /// Returns actual source provenance guaranteed by the private PNG import constructor.
@@ -413,7 +413,7 @@ fn commit_published_image(
     snapshot.validate_baseline(images, states)?;
 
     let source_hash = source.source_hash();
-    let artifact_hash = source.artifact().key().digest();
+    let import_recipe_digest = source.import_recipe().digest();
     let version = snapshot
         .mutation(images, states)?
         .commit_loaded(
@@ -422,7 +422,7 @@ fn commit_published_image(
             states,
             events,
             Some(source_hash),
-            Some(artifact_hash),
+            Some(import_recipe_digest),
         )
         .map_err(map_asset_state_error)?;
     states.acknowledge_metadata_publication(snapshot.handle.id());
@@ -433,7 +433,7 @@ impl Debug for ImageImportedAsset {
     fn fmt(&self, formatter: &mut Formatter<'_>) -> fmt::Result {
         formatter
             .debug_struct("ImageImportedAsset")
-            .field("artifact", self.artifact())
+            .field("import_recipe", self.import_recipe())
             .field("source", self.source())
             .field("extent", &self.image.extent())
             .field("format", &self.image.format())

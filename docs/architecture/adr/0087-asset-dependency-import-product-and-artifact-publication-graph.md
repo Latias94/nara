@@ -18,6 +18,9 @@ reconciliation, invalidation graphs, and atomic artifact-group publication.
 The separate [ADR 0122](0122-scoped-imported-product-identity-and-authored-continuity.md) adopts
 the logical product identity and authored-continuity semantics only; it does not qualify this
 artifact-group graph or its publication contract.
+The [local build successor](../local-artifact-build-design.md) now separates the implemented
+source-only `ImportRecipeDigest` from the closed build-recipe identity proposed here. Removing
+synthetic source artifact paths does not accept this broader graph or establish reusable output.
 
 ## Context
 
@@ -63,7 +66,7 @@ The graph keeps these values distinct:
 | `StableAssetId` | Durable source asset identity | Artifact bytes or runtime handle |
 | `ImportedProductId` | Durable logical product within one source | Name, index, label, or digest |
 | `AssetProductRef` | `StableAssetId + ImportedProductId` | Residency or load lease |
-| `ImportRecipeDigest` | Identity of every declared input to one import result | Durable product identity |
+| Closed build-recipe digest | Identity of declared import/cook definitions, observed inputs, settings and consumed target facts | Source-only `ImportRecipeDigest`, output bytes or durable product identity |
 | `ArtifactContentDigest` | Identity/integrity of immutable member bytes | Recipe or source identity |
 | `ArtifactGroupManifest` digest | Atomic publication generation for one source import | Package generation or authoring commit |
 
@@ -116,7 +119,7 @@ specific edge kind with safe cyclic semantics.
 
 ### Recipe and Invalidation
 
-`ImportRecipeDigest` covers:
+The closed build-recipe digest covers:
 
 - stable source ID and immutable source-content digest;
 - the admitted authored product-continuity mapping revision/digest;
