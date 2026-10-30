@@ -1,6 +1,10 @@
 use nara::{
+    core::ByteLimit,
     gameplay::{ActionCommandBinding, ActionCommandMap},
-    input::{ActionBinding, ActionId, ActionMap, ActionPhase, KeyCode},
+    input::{
+        ActionBinding, ActionContext, ActionId, ActionMap, ActionMapBuilder, ActionMapError,
+        ActionMapLimits, ActionPhase, KeyCode,
+    },
     prelude::{App, PluginError},
 };
 
@@ -41,14 +45,26 @@ pub(crate) fn install_desktop_input(app: &mut App) -> Result<(), PluginError> {
         ),
     ];
 
-    {
-        let world = app.world_mut()?;
-        let mut action_map = world.resource_mut::<ActionMap>();
-        for (id, key, alternate, _) in bindings {
-            action_map.bind(ActionBinding::key(action_id(id), key));
-            action_map.bind(ActionBinding::key(action_id(id), alternate));
-        }
+    let mut builder = ActionMapBuilder::new(ActionMapLimits::default());
+    builder
+        .declare_context(ActionContext::gameplay(), true)
+        .map_err(action_map_error)?;
+    for (id, key, alternate, _) in bindings {
+        builder
+            .bind(ActionBinding::key(action_id(id), key))
+            .map_err(action_map_error)?;
+        builder
+            .bind(ActionBinding::key(action_id(id), alternate))
+            .map_err(action_map_error)?;
     }
+    let definition = builder.compile().map_err(action_map_error)?;
+    let action_map = ActionMap::new(
+        definition.into_bindings(),
+        ByteLimit::new(ActionMap::required_state_bytes())
+            .expect("action-map state allowance is nonzero"),
+    )
+    .map_err(action_map_error)?;
+    app.insert_resource(action_map)?;
 
     {
         let world = app.world_mut()?;
@@ -69,6 +85,13 @@ pub(crate) fn install_desktop_input(app: &mut App) -> Result<(), PluginError> {
         }
     }
     Ok(())
+}
+
+fn action_map_error(error: ActionMapError) -> PluginError {
+    PluginError::SetupFailed {
+        plugin: REFERENCE_DESKTOP_PLUGIN_ID,
+        message: error.to_string(),
+    }
 }
 
 fn bind_movement(

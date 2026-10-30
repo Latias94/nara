@@ -6,8 +6,9 @@ use nara_hierarchy::{
     HierarchyOperation, HierarchyPlacement, HierarchyPlacementOwner, HierarchyWriter,
 };
 use nara_input::{
-    ActionId as InputActionId, ActionMap, ActionOutcomes, ActionPhase, InputPointerId, InputSeatId,
-    InputWindowId, KeyCode,
+    ActionBinding, ActionContext, ActionId as InputActionId, ActionMap, ActionMapBuilder,
+    ActionMapLimits, ActionOutcomes, ActionPhase, InputPointerId, InputSeatId, InputWindowId,
+    KeyCode,
 };
 use nara_reflect::{ComponentRegistry, ComponentRegistryPlugin, component_registry};
 use nara_scene::{SceneDocument, SceneEntityId, SceneEntityRecord, SceneEntitySource};
@@ -58,9 +59,13 @@ pub(super) fn build_lab() -> Result<App, Box<dyn Error>> {
         UiPlugin::default(),
     ))?;
     let gameplay_action = InputActionId::new(GAMEPLAY_ACTION)?;
+    let mut builder = ActionMapBuilder::new(ActionMapLimits::default());
+    builder.declare_context(ActionContext::gameplay(), true)?;
+    builder.bind(ActionBinding::key(gameplay_action.clone(), KeyCode::Escape))?;
+    let bindings = builder.compile()?.into_bindings();
     app.world_mut()?
         .resource_mut::<ActionMap>()
-        .bind_key(gameplay_action.clone(), KeyCode::Escape);
+        .replace_bindings(bindings);
     app.insert_resource(GameplayProbe::new(gameplay_action))?;
     app.add_systems(CoreStage::Update, capture_gameplay_outcome)?;
 

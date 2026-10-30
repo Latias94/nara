@@ -51,6 +51,7 @@ enum Context {
         candidate: ProjectSettingsCandidate,
         plan: RuntimePlan,
         loader: Arc<ProjectContentLoader>,
+        input: Option<crate::project_content::ProjectInputContent>,
     },
     Processed {
         base: RuntimeContentBase,
@@ -330,6 +331,7 @@ pub(super) fn install_context(
     candidate: ProjectSettingsCandidate,
     plan: RuntimePlan,
     loader: Arc<ProjectContentLoader>,
+    input: Option<crate::project_content::ProjectInputContent>,
 ) -> Result<(), ProjectSceneRequestError> {
     if candidate.lineage() != plan.lineage() {
         return Err(ProjectSceneRequestError::Stale);
@@ -340,6 +342,7 @@ pub(super) fn install_context(
             candidate,
             plan,
             loader,
+            input,
         },
     )
 }

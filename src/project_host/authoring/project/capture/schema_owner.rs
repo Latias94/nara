@@ -51,6 +51,7 @@ impl PreparedAuthoringSchemaOwner {
                     open_prefabs,
                     open_scenes,
                     AuthoringCapturePreview::Prepare,
+                    None,
                 )
             })
         })();

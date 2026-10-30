@@ -15,6 +15,9 @@ pub(super) struct StableLookupObservation {
     stable_id: StableAssetId,
     // An unresolved result remains provisional; capture still requires recapture.
     target: Option<AssetSourcePath>,
+    // An intrinsic source participates in the same global identity universe even without a
+    // sidecar. Revalidation must still reject newly conflicting, otherwise unrelated metadata.
+    intrinsic: Option<AssetRecord>,
 }
 
 /// The actual directory capability binding and expected kind of a source query.
@@ -49,6 +52,9 @@ impl StableLookupObservation {
         checked_sum([
             size_of::<Self>(),
             self.target.as_ref().map_or(0, |path| path.as_str().len()),
+            self.intrinsic
+                .as_ref()
+                .map_or(Ok(0), asset_record_retained_bytes)?,
         ])
     }
 }
@@ -260,6 +266,7 @@ impl ReferenceCatalogue {
             let observation = StableLookupObservation {
                 stable_id,
                 target: target.cloned(),
+                intrinsic: None,
             };
             self.lookups.insert(stable_id, observation);
         }
@@ -279,6 +286,91 @@ impl ReferenceCatalogue {
             self.indexed = true;
         }
         Ok(())
+    }
+
+    /// Joins an intrinsic source to the existing catalogue, retaining its actual optional
+    /// metadata observation and a global identity check for subsequent source validation.
+    pub(super) fn admit_intrinsic_source(
+        &mut self,
+        record: &AssetRecord,
+        metadata: Option<(&nara_asset::AssetMetaIdentity, &AuthoringSourceFact)>,
+        budget: &mut AuthoringProjectAdmissionBudget,
+    ) -> Result<(), AuthoringProjectSourceAdmissionError> {
+        self.ensure_indexed(budget)?;
+        if let Some((identity, _)) = metadata {
+            let path_matches = self.bindings.iter().any(|binding| {
+                binding.scope.relative_path(record.path()) == Some(identity.path().as_str())
+            }) || AssetPathScope::ROOT.relative_path(record.path())
+                == Some(identity.path().as_str());
+            if identity.stable_id() != record.stable_id()
+                || identity.source_kind() != record.source_kind()
+                || !path_matches
+            {
+                return Err(
+                    AuthoringProjectSourceAdmissionError::IntrinsicSourceMetadataMismatch {
+                        path: record.path().clone(),
+                    },
+                );
+            }
+        }
+        if let Some(indexed) = self.metadata.get(record.path())
+            && !metadata.is_some_and(|(_, source)| indexed.same_file_observation(source))
+        {
+            return Err(AuthoringProjectSourceAdmissionError::AssetMetadataChanged {
+                path: record.path().clone(),
+            });
+        }
+        self.validate_intrinsic_record(record)?;
+
+        let stable_id = record.stable_id();
+        if let Some(observation) = self.lookups.get_mut(&stable_id) {
+            if observation.intrinsic.is_none() {
+                budget.charge_source_bytes(0, 0, 0, asset_record_retained_bytes(record)?)?;
+                observation.intrinsic = Some(record.clone());
+            }
+        } else {
+            let target = self.indexed_source_path(stable_id);
+            budget.charge_source_bytes(
+                0,
+                0,
+                0,
+                checked_sum([
+                    size_of::<StableLookupObservation>(),
+                    target.map_or(0, |path| path.as_str().len()),
+                    asset_record_retained_bytes(record)?,
+                    64,
+                ])?,
+            )?;
+            let target = target.cloned();
+            self.lookups.insert(
+                stable_id,
+                StableLookupObservation {
+                    stable_id,
+                    target,
+                    intrinsic: Some(record.clone()),
+                },
+            );
+        }
+        if self.database.record_for_path(record.path()).is_none() {
+            charge_database_record(record, budget)?;
+            insert_asset_record(&mut self.database, record.clone())?;
+        }
+        Ok(())
+    }
+
+    fn validate_intrinsic_record(
+        &self,
+        record: &AssetRecord,
+    ) -> Result<(), AuthoringProjectSourceAdmissionError> {
+        if self.database.record_for_path(record.path()) == Some(record) {
+            return Ok(());
+        }
+        self.database.validate_insert(record).map_err(|source| {
+            AuthoringProjectSourceAdmissionError::AssetIdentity {
+                path: record.path().clone(),
+                source,
+            }
+        })
     }
 
     /// Attaches actual metadata after a successful Prefab lookup, preserving source identity.
@@ -382,6 +474,9 @@ impl ReferenceCatalogue {
         let mut current = Self::new(root.share(), bindings, budget)?;
         current.ensure_indexed(budget)?;
         for observation in observations {
+            if let Some(record) = &observation.intrinsic {
+                current.validate_intrinsic_record(record)?;
+            }
             let target = current.indexed_source_path(observation.stable_id);
             if target != observation.target.as_ref() {
                 // None is an observed unresolved lookup, never a durable absence receipt.

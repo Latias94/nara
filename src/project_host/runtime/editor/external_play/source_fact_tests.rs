@@ -26,6 +26,13 @@ use super::*;
 const SCENE_METADATA: &str = "scenes/startup.scene.json.meta";
 const PREFAB_METADATA: &str = "prefabs/shared.prefab.json.meta";
 const PREFAB_ID: &str = "71e9bc93-21e8-4c8f-b1d3-a508b726da70";
+const INPUT_PATH: &str = "controls/player.actions.json";
+const INPUT_METADATA: &str = "controls/player.actions.json.meta";
+const INPUT_ID: &str = "919617ea-c89c-4f83-9cce-b084de435a83";
+const INPUT_GOLDEN: &str = include_str!(concat!(
+    env!("CARGO_MANIFEST_DIR"),
+    "/crates/nara_input/tests/fixtures/formats/v1/action-map.json"
+));
 static NEXT_PROJECT: AtomicU64 = AtomicU64::new(0);
 
 #[test]
@@ -52,7 +59,61 @@ fn supervised_receipt_includes_shared_stable_prefab_metadata_once() {
     }
 }
 
-fn assert_receipt_matches_strict_startup(project: &SourceReceiptProject, metadata_paths: &[&str]) {
+#[test]
+fn supervised_receipt_includes_intrinsic_input_with_and_without_optional_metadata() {
+    for metadata in [false, true] {
+        let project = SourceReceiptProject::new(&[]);
+        project.select_input(metadata);
+        let metadata_paths: &[&str] = if metadata {
+            &[INPUT_METADATA, SCENE_METADATA]
+        } else {
+            &[SCENE_METADATA]
+        };
+        let receipt = assert_receipt_matches_strict_startup(&project, metadata_paths);
+        let facts = receipt
+            .source_facts()
+            .iter()
+            .filter(|fact| fact.kind() == EditorExternalPlaySourceKind::InputActionMap)
+            .collect::<Vec<_>>();
+        assert_eq!(facts.len(), 1);
+        assert_eq!(facts[0].project_path().as_str(), INPUT_PATH);
+        assert_eq!(
+            facts[0].digest(),
+            ContentDigest::of_bytes(INPUT_GOLDEN.as_bytes())
+        );
+    }
+}
+
+#[test]
+fn changed_input_and_metadata_produce_new_supervised_source_and_content_receipts() {
+    let project = SourceReceiptProject::new(&[]);
+    project.select_input(true);
+    let metadata_paths = &[INPUT_METADATA, SCENE_METADATA];
+    let first = assert_receipt_matches_strict_startup(&project, metadata_paths);
+    fs::write(project.root.join(INPUT_PATH), format!("{INPUT_GOLDEN} ")).unwrap();
+    let changed_input = assert_receipt_matches_strict_startup(&project, metadata_paths);
+    assert_ne!(first.content_digest(), changed_input.content_digest());
+    assert_ne!(
+        first.encode_canonical().unwrap(),
+        changed_input.encode_canonical().unwrap()
+    );
+    let metadata = fs::read_to_string(project.root.join(INPUT_METADATA)).unwrap();
+    fs::write(project.root.join(INPUT_METADATA), format!("{metadata} ")).unwrap();
+    let changed_metadata = assert_receipt_matches_strict_startup(&project, metadata_paths);
+    assert_ne!(
+        changed_input.content_digest(),
+        changed_metadata.content_digest()
+    );
+    assert_ne!(
+        changed_input.encode_canonical().unwrap(),
+        changed_metadata.encode_canonical().unwrap()
+    );
+}
+
+fn assert_receipt_matches_strict_startup(
+    project: &SourceReceiptProject,
+    metadata_paths: &[&str],
+) -> EditorExternalPlaySourceReceipt {
     let schema = AuthoringProjectAdmissionHost::default()
         .prepare(project.capability(), Some("desktop"))
         .unwrap()
@@ -138,6 +199,7 @@ fn assert_receipt_matches_strict_startup(project: &SourceReceiptProject, metadat
             .collect::<Vec<_>>(),
         metadata_paths
     );
+    receipt
 }
 
 struct SourceReceiptProject {
@@ -145,6 +207,26 @@ struct SourceReceiptProject {
 }
 
 impl SourceReceiptProject {
+    fn select_input(&self, metadata: bool) {
+        fs::create_dir_all(self.root.join("controls")).unwrap();
+        fs::write(self.root.join(INPUT_PATH), INPUT_GOLDEN).unwrap();
+        let path = self.root.join("nara.toml");
+        let manifest = fs::read_to_string(&path).unwrap();
+        fs::write(
+            path,
+            format!("{manifest}\n[input]\naction_map = '{INPUT_PATH}'\n"),
+        )
+        .unwrap();
+        if metadata {
+            self.write_metadata(
+                INPUT_METADATA,
+                INPUT_PATH,
+                AssetSourceKind::Other("input-action-map".to_owned()),
+                INPUT_ID,
+            );
+        }
+    }
+
     fn new(prefab_references: &[AssetRef]) -> Self {
         let project = Self {
             root: std::env::temp_dir().join(format!(

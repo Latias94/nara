@@ -15,13 +15,25 @@ use nara_app::{
 use nara_core::Vec2;
 use nara_ecs::{Res, ResMut, Resource, bevy_ecs::error::BevyError, schedule::IntoScheduleConfigs};
 
+mod definition;
+#[cfg(feature = "serde")]
+mod format;
 mod schedule;
 mod semantic;
+mod state;
 mod timeline;
 
+pub use definition::{
+    ActionContextDefinition, ActionMapBindings, ActionMapBuilder, ActionMapCompileCost,
+    ActionMapDefinition, ActionMapError, ActionMapLimitKind, ActionMapLimits, MAX_ACTION_BINDINGS,
+    MAX_ACTION_CONTEXTS, MAX_ACTION_IDENTIFIER_BYTES, MAX_BINDINGS_PER_INPUT,
+};
+#[cfg(feature = "serde")]
+pub use format::{ActionMapFileCandidate, ActionMapFileError, ActionMapFileLimits};
 use schedule::InputSet;
-use semantic::{ActionMapRevision, ActionStaging, StagedActionRevision};
+use semantic::{ActionStaging, StagedActionRevision};
 pub use semantic::{SemanticActionCause, SemanticActionOutcome, SemanticActions};
+pub use state::{ActionMap, InputSelectionError, finalize_input_selection};
 
 #[doc(hidden)]
 pub use timeline::{__InputDriverEvent, __InputDriverOutput};
@@ -133,7 +145,9 @@ impl Display for ButtonInputError {
 impl Error for ButtonInputError {}
 
 /// Retained button state plus one bounded edge log with independent frame and action cursors.
-#[derive(Debug, Clone, Resource)]
+/// Capture public transitions or pressed-button observations for history; the live owner also
+/// retains private action lifetimes and is deliberately move-only.
+#[derive(Debug, Resource)]
 pub struct ButtonInput<T> {
     pressed: BTreeMap<T, BTreeSet<ButtonInputEndpoint>>,
     transitions: Vec<ButtonTransition<T>>,
@@ -679,13 +693,13 @@ pub fn apply_window_input_driver_event(
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
-pub struct ActionId(String);
+pub struct ActionId(Box<str>);
 
 impl ActionId {
     pub fn new(id: impl Into<String>) -> Result<Self, ActionIdError> {
         let id = id.into();
         validate_identifier(&id)?;
-        Ok(Self(id))
+        Ok(Self(id.into_boxed_str()))
     }
 
     #[must_use]
@@ -725,6 +739,7 @@ impl<'de> serde::Deserialize<'de> for ActionId {
 pub enum ActionIdError {
     Empty,
     ContainsControl,
+    TooLong { bytes: usize, limit: usize },
 }
 
 impl Display for ActionIdError {
@@ -734,6 +749,10 @@ impl Display for ActionIdError {
             Self::ContainsControl => {
                 formatter.write_str("action id cannot contain control characters")
             }
+            Self::TooLong { bytes, limit } => write!(
+                formatter,
+                "action identifier has {bytes} bytes, limit {limit}"
+            ),
         }
     }
 }
@@ -741,7 +760,7 @@ impl Display for ActionIdError {
 impl Error for ActionIdError {}
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
-pub struct ActionContext(String);
+pub struct ActionContext(Box<str>);
 
 impl Default for ActionContext {
     fn default() -> Self {
@@ -752,13 +771,13 @@ impl Default for ActionContext {
 impl ActionContext {
     #[must_use]
     pub fn gameplay() -> Self {
-        Self("gameplay".to_owned())
+        Self("gameplay".into())
     }
 
     pub fn new(id: impl Into<String>) -> Result<Self, ActionIdError> {
         let id = id.into();
         validate_identifier(&id)?;
-        Ok(Self(id))
+        Ok(Self(id.into_boxed_str()))
     }
 
     #[must_use]
@@ -832,121 +851,6 @@ impl ActionBinding {
     pub fn with_context(mut self, context: ActionContext) -> Self {
         self.context = context;
         self
-    }
-}
-
-#[derive(Debug, Default, Clone, Resource)]
-#[cfg_attr(feature = "serde", derive(serde::Serialize))]
-pub struct ActionMap {
-    bindings: Vec<ActionBinding>,
-    disabled_contexts: BTreeSet<ActionContext>,
-    #[cfg_attr(feature = "serde", serde(skip))]
-    bindings_by_input: BTreeMap<InputBinding, Vec<usize>>,
-    #[cfg_attr(feature = "serde", serde(skip))]
-    revision: Arc<ActionMapRevision>,
-}
-
-impl PartialEq for ActionMap {
-    fn eq(&self, other: &Self) -> bool {
-        self.bindings == other.bindings && self.disabled_contexts == other.disabled_contexts
-    }
-}
-
-impl Eq for ActionMap {}
-
-#[cfg(feature = "serde")]
-impl<'de> serde::Deserialize<'de> for ActionMap {
-    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
-    where
-        D: serde::Deserializer<'de>,
-    {
-        #[derive(serde::Deserialize)]
-        struct RawActionMap {
-            #[serde(default)]
-            bindings: Vec<ActionBinding>,
-            #[serde(default)]
-            disabled_contexts: BTreeSet<ActionContext>,
-        }
-
-        let raw = <RawActionMap as serde::Deserialize>::deserialize(deserializer)?;
-        let mut action_map = Self::default();
-        for binding in raw.bindings {
-            action_map.bind(binding);
-        }
-        action_map.disabled_contexts = raw.disabled_contexts;
-        Ok(action_map)
-    }
-}
-
-impl ActionMap {
-    /// Adds a physical binding and begins a new mapping lifetime.
-    ///
-    /// Reconfiguring the map ends delivered semantic held actions on the next resolution pass;
-    /// inputs already held do not become presses in the replacement mapping.
-    pub fn bind(&mut self, binding: ActionBinding) {
-        ActionMapRevision::mapping_changed(&mut self.revision);
-        self.bindings_by_input
-            .entry(binding.input)
-            .or_default()
-            .push(self.bindings.len());
-        self.bindings.push(binding);
-    }
-
-    pub fn bind_key(&mut self, action: ActionId, key: KeyCode) {
-        self.bind(ActionBinding::key(action, key));
-    }
-
-    pub fn bind_mouse(&mut self, action: ActionId, button: MouseButton) {
-        self.bind(ActionBinding::mouse(action, button));
-    }
-
-    pub fn disable_context(&mut self, context: ActionContext) {
-        if self.disabled_contexts.insert(context.clone()) {
-            if self
-                .bindings
-                .iter()
-                .any(|binding| binding.context == context)
-            {
-                ActionMapRevision::context_changed(&mut self.revision, context);
-            }
-        }
-    }
-
-    pub fn enable_context(&mut self, context: &ActionContext) {
-        if self.disabled_contexts.remove(context) {
-            if self
-                .bindings
-                .iter()
-                .any(|binding| &binding.context == context)
-            {
-                ActionMapRevision::context_changed(&mut self.revision, context.clone());
-            }
-        }
-    }
-
-    #[must_use]
-    pub fn is_context_enabled(&self, context: &ActionContext) -> bool {
-        !self.disabled_contexts.contains(context)
-    }
-
-    #[must_use]
-    pub fn bindings(&self) -> &[ActionBinding] {
-        &self.bindings
-    }
-
-    pub fn binding_indices_for_input(
-        &self,
-        input: InputBinding,
-    ) -> impl Iterator<Item = usize> + '_ {
-        self.bindings_by_input
-            .get(&input)
-            .into_iter()
-            .flat_map(|indices| indices.iter().copied())
-    }
-
-    #[must_use]
-    pub fn binding_at(&self, index: usize) -> Option<&ActionBinding> {
-        self.bindings.get(index)
     }
 }
 
@@ -1047,8 +951,11 @@ impl Plugin for InputPlugin {
             app.insert_resource(ButtonInput::<MouseButton>::default())?;
         }
         if !app.world().contains_resource::<ActionMap>() {
-            app.insert_resource(ActionMap::default())?;
+            app.insert_resource(ActionMap::pristine())?;
         }
+        app.insert_resource(state::InputInstallation::new(
+            app.world().resource::<ActionMap>(),
+        ))?;
         if !app.world().contains_resource::<ActionOutcomes>() {
             app.insert_resource(ActionOutcomes::default())?;
         }
@@ -1339,6 +1246,12 @@ fn validate_identifier(id: &str) -> Result<(), ActionIdError> {
     if id.chars().any(|character| character.is_control()) {
         return Err(ActionIdError::ContainsControl);
     }
+    if id.len() > MAX_ACTION_IDENTIFIER_BYTES {
+        return Err(ActionIdError::TooLong {
+            bytes: id.len(),
+            limit: MAX_ACTION_IDENTIFIER_BYTES,
+        });
+    }
     Ok(())
 }
 
@@ -1346,6 +1259,7 @@ fn validate_identifier(id: &str) -> Result<(), ActionIdError> {
 mod tests {
     use super::*;
     use nara_app::CoreStage;
+    use nara_core::ByteLimit;
     use nara_ecs::{DetectChanges, Res, Resource};
     use std::time::Duration;
 
@@ -1531,10 +1445,20 @@ mod tests {
             .unwrap()
             .add_systems(CoreStage::Update, inject_late_key_release)
             .unwrap();
+        let mut builder = ActionMapBuilder::new(ActionMapLimits::default());
+        builder
+            .declare_context(ActionContext::gameplay(), true)
+            .unwrap();
+        builder
+            .bind(ActionBinding::key(
+                ActionId::new("jump").unwrap(),
+                KeyCode::Space,
+            ))
+            .unwrap();
         app.world_mut()
             .unwrap()
             .resource_mut::<ActionMap>()
-            .bind_key(ActionId::new("jump").unwrap(), KeyCode::Space);
+            .replace_bindings(builder.compile().unwrap().into_bindings());
         app.world_mut()
             .unwrap()
             .resource_mut::<ButtonInput<KeyCode>>()
@@ -1725,10 +1649,20 @@ mod tests {
             .unwrap()
             .add_systems(CoreStage::Update, observe_outcomes)
             .unwrap();
+        let mut builder = ActionMapBuilder::new(ActionMapLimits::default());
+        builder
+            .declare_context(ActionContext::gameplay(), true)
+            .unwrap();
+        builder
+            .bind(ActionBinding::key(
+                ActionId::new("jump").unwrap(),
+                KeyCode::Space,
+            ))
+            .unwrap();
         app.world_mut()
             .unwrap()
             .resource_mut::<ActionMap>()
-            .bind_key(ActionId::new("jump").unwrap(), KeyCode::Space);
+            .replace_bindings(builder.compile().unwrap().into_bindings());
         app.world_mut()
             .unwrap()
             .resource_mut::<ButtonInput<KeyCode>>()
@@ -1756,10 +1690,20 @@ mod tests {
             .unwrap()
             .add_systems(CoreStage::Update, observe_outcomes)
             .unwrap();
+        let mut builder = ActionMapBuilder::new(ActionMapLimits::default());
+        builder
+            .declare_context(ActionContext::gameplay(), true)
+            .unwrap();
+        builder
+            .bind(ActionBinding::key(
+                ActionId::new("jump").unwrap(),
+                KeyCode::Space,
+            ))
+            .unwrap();
         app.world_mut()
             .unwrap()
             .resource_mut::<ActionMap>()
-            .bind_key(ActionId::new("jump").unwrap(), KeyCode::Space);
+            .replace_bindings(builder.compile().unwrap().into_bindings());
         let mut runtime = nara_app::RuntimeInstance::start(app).unwrap();
         runtime
             .with_driver_scope(|scope| {
@@ -1800,10 +1744,20 @@ mod tests {
             .unwrap()
             .add_systems(CoreStage::Update, observe_outcomes)
             .unwrap();
+        let mut builder = ActionMapBuilder::new(ActionMapLimits::default());
+        builder
+            .declare_context(ActionContext::gameplay(), true)
+            .unwrap();
+        builder
+            .bind(ActionBinding::mouse(
+                ActionId::new("select").unwrap(),
+                MouseButton::Left,
+            ))
+            .unwrap();
         app.world_mut()
             .unwrap()
             .resource_mut::<ActionMap>()
-            .bind_mouse(ActionId::new("select").unwrap(), MouseButton::Left);
+            .replace_bindings(builder.compile().unwrap().into_bindings());
         app.world_mut()
             .unwrap()
             .resource_mut::<ButtonInput<MouseButton>>()
@@ -1831,10 +1785,20 @@ mod tests {
             .unwrap()
             .add_systems(CoreStage::Update, observe_outcomes)
             .unwrap();
+        let mut builder = ActionMapBuilder::new(ActionMapLimits::default());
+        builder
+            .declare_context(ActionContext::gameplay(), true)
+            .unwrap();
+        builder
+            .bind(ActionBinding::mouse(
+                ActionId::new("select").unwrap(),
+                MouseButton::Left,
+            ))
+            .unwrap();
         app.world_mut()
             .unwrap()
             .resource_mut::<ActionMap>()
-            .bind_mouse(ActionId::new("select").unwrap(), MouseButton::Left);
+            .replace_bindings(builder.compile().unwrap().into_bindings());
         let mut runtime = nara_app::RuntimeInstance::start(app).unwrap();
         runtime
             .with_driver_scope(|scope| {
@@ -1877,14 +1841,23 @@ mod tests {
             .unwrap()
             .add_systems(CoreStage::Update, observe_outcomes)
             .unwrap();
-        app.world_mut().unwrap().resource_mut::<ActionMap>().bind(
-            ActionBinding::key(ActionId::new("confirm").unwrap(), KeyCode::Enter)
-                .with_context(menu.clone()),
-        );
+        let mut builder = ActionMapBuilder::new(ActionMapLimits::default());
+        builder.declare_context(menu.clone(), true).unwrap();
+        builder
+            .bind(
+                ActionBinding::key(ActionId::new("confirm").unwrap(), KeyCode::Enter)
+                    .with_context(menu.clone()),
+            )
+            .unwrap();
         app.world_mut()
             .unwrap()
             .resource_mut::<ActionMap>()
-            .disable_context(menu);
+            .replace_bindings(builder.compile().unwrap().into_bindings());
+        app.world_mut()
+            .unwrap()
+            .resource_mut::<ActionMap>()
+            .disable_context(menu)
+            .unwrap();
         app.world_mut()
             .unwrap()
             .resource_mut::<ButtonInput<KeyCode>>()
@@ -1907,14 +1880,20 @@ mod tests {
             .add_systems(CoreStage::Update, observe_outcomes)
             .unwrap();
         let action = ActionId::new("move-up").unwrap();
+        let mut builder = ActionMapBuilder::new(ActionMapLimits::default());
+        builder
+            .declare_context(ActionContext::gameplay(), true)
+            .unwrap();
+        builder
+            .bind(ActionBinding::key(action.clone(), KeyCode::Character('w')))
+            .unwrap();
+        builder
+            .bind(ActionBinding::key(action, KeyCode::ArrowUp))
+            .unwrap();
         app.world_mut()
             .unwrap()
             .resource_mut::<ActionMap>()
-            .bind_key(action.clone(), KeyCode::Character('w'));
-        app.world_mut()
-            .unwrap()
-            .resource_mut::<ActionMap>()
-            .bind_key(action, KeyCode::ArrowUp);
+            .replace_bindings(builder.compile().unwrap().into_bindings());
         app.world_mut()
             .unwrap()
             .resource_mut::<ButtonInput<KeyCode>>()
@@ -1951,11 +1930,22 @@ mod tests {
             .unwrap()
             .add_systems(CoreStage::Update, observe_outcomes)
             .unwrap();
-        {
-            let mut action_map = app.world_mut().unwrap().resource_mut::<ActionMap>();
-            action_map.bind_key(ActionId::new("first").unwrap(), KeyCode::Space);
-            action_map.bind_key(ActionId::new("second").unwrap(), KeyCode::Space);
+        let mut builder = ActionMapBuilder::new(ActionMapLimits::default());
+        builder
+            .declare_context(ActionContext::gameplay(), true)
+            .unwrap();
+        for action in ["first", "second"] {
+            builder
+                .bind(ActionBinding::key(
+                    ActionId::new(action).unwrap(),
+                    KeyCode::Space,
+                ))
+                .unwrap();
         }
+        app.world_mut()
+            .unwrap()
+            .resource_mut::<ActionMap>()
+            .replace_bindings(builder.compile().unwrap().into_bindings());
         app.world_mut()
             .unwrap()
             .resource_mut::<ButtonInput<KeyCode>>()
@@ -1986,10 +1976,20 @@ mod tests {
             .unwrap()
             .add_systems(CoreStage::Update, observe_outcomes)
             .unwrap();
+        let mut builder = ActionMapBuilder::new(ActionMapLimits::default());
+        builder
+            .declare_context(ActionContext::gameplay(), true)
+            .unwrap();
+        builder
+            .bind(ActionBinding::key(
+                ActionId::new("confirm").unwrap(),
+                KeyCode::Enter,
+            ))
+            .unwrap();
         app.world_mut()
             .unwrap()
             .resource_mut::<ActionMap>()
-            .bind_key(ActionId::new("confirm").unwrap(), KeyCode::Enter);
+            .replace_bindings(builder.compile().unwrap().into_bindings());
         {
             let mut keyboard = app
                 .world_mut()
@@ -2037,42 +2037,65 @@ mod tests {
         assert!(serde_json::from_str::<ActionContext>("\"bad\\nid\"").is_err());
     }
 
-    #[cfg(feature = "serde")]
     #[test]
-    fn serde_rebuilds_action_map_input_index() {
-        let action_map = serde_json::from_str::<ActionMap>(
-            r#"{
-                "bindings": [
-                    {
-                        "action": "confirm",
-                        "input": { "Key": "Enter" },
-                        "context": "gameplay"
-                    }
-                ],
-                "disabled_contexts": []
-            }"#,
+    fn rejected_replacement_definition_preserves_handles_and_staged_lifetime() {
+        let mut builder = ActionMapBuilder::new(ActionMapLimits::default());
+        builder
+            .declare_context(ActionContext::gameplay(), true)
+            .unwrap();
+        builder
+            .bind(ActionBinding::key(
+                ActionId::new("jump").unwrap(),
+                KeyCode::Space,
+            ))
+            .unwrap();
+        let mut action_map = ActionMap::new(
+            builder.compile().unwrap().into_bindings(),
+            ByteLimit::new(ActionMap::required_state_bytes()).unwrap(),
         )
         .unwrap();
-        let mut app = App::new();
-        app.add_plugin(InputPlugin).unwrap();
-        app.insert_resource(action_map)
-            .unwrap()
-            .insert_resource(ObservedOutcomes::default())
-            .unwrap()
-            .add_systems(CoreStage::Update, observe_outcomes)
+        action_map
+            .disable_context(ActionContext::gameplay())
             .unwrap();
-        app.world_mut()
-            .unwrap()
-            .resource_mut::<ButtonInput<KeyCode>>()
-            .press(KeyCode::Enter)
-            .unwrap();
+        let bindings = action_map.bindings_handle();
+        let revision = Arc::clone(&action_map.revision);
+        let mut staging = ActionStaging::default();
+        let staged = staging.observe(&action_map);
+        let unknown = ActionContext::new("undeclared").unwrap();
 
-        let mut runtime = nara_app::RuntimeInstance::start(app).unwrap();
-        runtime.drive(Duration::ZERO).unwrap();
+        let result: Result<(), ActionMapError> = (|| {
+            let mut candidate = ActionMapBuilder::new(ActionMapLimits::default());
+            candidate.declare_context(ActionContext::gameplay(), true)?;
+            candidate.bind(
+                ActionBinding::key(ActionId::new("confirm").unwrap(), KeyCode::Enter)
+                    .with_context(unknown.clone()),
+            )?;
+            action_map.replace_bindings(candidate.compile()?.into_bindings());
+            Ok(())
+        })();
 
-        let observed = &runtime.world().resource::<ObservedOutcomes>().0;
-        assert_eq!(observed.len(), 1);
-        assert_eq!(observed[0].action.as_str(), "confirm");
-        runtime.finish().unwrap();
+        assert_eq!(result, Err(ActionMapError::UnknownContext(unknown.clone())));
+        assert!(bindings.shares_owner_with(&action_map.bindings_handle()));
+        assert!(std::ptr::eq(
+            bindings.definition().bindings(),
+            action_map.definition().bindings()
+        ));
+        assert!(Arc::ptr_eq(&revision, &action_map.revision));
+        assert!(Arc::ptr_eq(&staged, &staging.observe(&action_map)));
+        assert!(!action_map.is_context_enabled(&ActionContext::gameplay()));
+        assert_eq!(action_map.bindings(), bindings.definition().bindings());
+
+        assert_eq!(
+            action_map.enable_context(&unknown),
+            Err(ActionMapError::UnknownContext(unknown))
+        );
+        assert!(Arc::ptr_eq(&revision, &action_map.revision));
+        assert!(Arc::ptr_eq(&staged, &staging.observe(&action_map)));
+        assert!(
+            action_map
+                .enable_context(&ActionContext::gameplay())
+                .unwrap()
+        );
+        assert!(!Arc::ptr_eq(&staged, &staging.observe(&action_map)));
     }
 }

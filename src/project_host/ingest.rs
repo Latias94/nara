@@ -226,18 +226,18 @@ fn validate_product_request(
     lineage: ProjectSettingsLineage,
     manifest_digest: ContentDigest,
 ) -> Result<ProjectSettingsCandidate, ProjectCandidateError> {
-    let runtime_configuration = settings.runtime_configuration().map_err(|error| {
+    let source_runtime_projection = settings.source_runtime_projection().map_err(|error| {
         ProjectCandidateError::new(
             ProjectCandidateErrorKind::RuntimeConfiguration,
             error.diagnostics().clone(),
         )
     })?;
-    let admission = validate_runtime_capabilities(&runtime_configuration)?;
+    let admission = validate_runtime_capabilities(source_runtime_projection.runtime())?;
     Ok(ProjectSettingsCandidate {
         lineage,
         manifest_digest,
         settings,
-        runtime_configuration,
+        source_runtime_projection,
         capabilities: admission,
     })
 }

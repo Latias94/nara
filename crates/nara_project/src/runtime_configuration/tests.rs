@@ -730,6 +730,65 @@ fn source_input_requires_an_explicit_profile_clear_and_does_not_leak_its_path() 
 }
 
 #[test]
+fn source_projection_retains_an_owned_unfulfilled_input_requirement() {
+    let mut source = project_settings();
+    let expected_runtime = source.runtime_configuration().unwrap();
+    let input_path = ProjectPath::new("source/input.actions.json").unwrap();
+    source.input.action_map = Some(input_path.clone());
+    let original = source.clone();
+
+    let projection: crate::SourceRuntimeProjection = source.source_runtime_projection().unwrap();
+    assert_eq!(source, original);
+    assert_eq!(projection.runtime(), &expected_runtime);
+    assert_eq!(projection.input_requirement(), Some(&input_path));
+
+    source.input.action_map = Some(ProjectPath::new("other/input.actions.json").unwrap());
+    drop(source);
+    assert_eq!(projection.input_requirement(), Some(&input_path));
+    assert_eq!(projection.runtime(), &expected_runtime);
+}
+
+#[test]
+fn source_projection_preserves_profile_input_selection_and_clear() {
+    let source = format!(
+        "{PROJECT_SOURCE}\n[profiles.custom.input]\naction_map = 'input/profile.actions.json'\n"
+    );
+    let load = ProjectManifest::parse_toml_str(&source);
+    assert!(!load.has_errors(), "{:?}", load.diagnostics);
+    let manifest = load.manifest.unwrap();
+
+    for (profile, expected_path) in [
+        (None, Some("source/input.actions.json")),
+        (Some("custom"), Some("input/profile.actions.json")),
+        (Some("release"), None),
+    ] {
+        let settings = manifest.resolve_profile(profile).unwrap();
+        let projection = settings.source_runtime_projection().unwrap();
+        assert_eq!(
+            projection.input_requirement().map(ProjectPath::as_str),
+            expected_path,
+            "profile={profile:?}",
+        );
+        assert_eq!(
+            projection.input_requirement(),
+            settings.input.action_map.as_ref(),
+        );
+        if expected_path.is_none() {
+            assert_eq!(
+                projection.runtime(),
+                &settings.runtime_configuration().unwrap(),
+            );
+        } else {
+            assert_diagnostic(
+                &settings.runtime_configuration().unwrap_err(),
+                "runtime.configuration.source-input-required",
+                "input.action_map",
+            );
+        }
+    }
+}
+
+#[test]
 fn resolved_profile_exports_all_values_without_source_or_profile_dependencies() {
     let settings = project_settings();
     let effective = settings.runtime_configuration().unwrap();
@@ -790,28 +849,32 @@ fn projection_revalidates_public_effective_primitives() {
         .with_max_debt_steps(MAX_PROJECT_FIXED_DEBT_STEPS + 1)
         .unwrap();
     settings.runtime.replace(runtime, fixed);
-    let failure = settings.runtime_configuration().unwrap_err();
-    for (code, field) in [
-        (
-            "project.runtime.max-fixed-steps-too-large",
-            "runtime.max_fixed_steps_per_frame",
-        ),
-        (
-            "project.runtime.max-fixed-debt-too-large",
-            "runtime.max_fixed_debt_steps",
-        ),
-        ("project.window.invalid-width", "window.width"),
-        ("project.window.invalid-scale-factor", "window.scale_factor"),
-        (
-            "project.render.invalid-world-canvas-extent",
-            "render.world_canvas.height",
-        ),
-        (
-            "project.ui.invalid-horizontal-safe-area",
-            "ui.primary_surface.safe_area",
-        ),
-    ] {
-        assert_diagnostic(&failure, code, field);
+    let runtime_failure = settings.runtime_configuration().unwrap_err();
+    settings.input.action_map = Some(ProjectPath::new("source/input.actions.json").unwrap());
+    let source_failure = settings.source_runtime_projection().unwrap_err();
+    for failure in [&runtime_failure, &source_failure] {
+        for (code, field) in [
+            (
+                "project.runtime.max-fixed-steps-too-large",
+                "runtime.max_fixed_steps_per_frame",
+            ),
+            (
+                "project.runtime.max-fixed-debt-too-large",
+                "runtime.max_fixed_debt_steps",
+            ),
+            ("project.window.invalid-width", "window.width"),
+            ("project.window.invalid-scale-factor", "window.scale_factor"),
+            (
+                "project.render.invalid-world-canvas-extent",
+                "render.world_canvas.height",
+            ),
+            (
+                "project.ui.invalid-horizontal-safe-area",
+                "ui.primary_surface.safe_area",
+            ),
+        ] {
+            assert_diagnostic(failure, code, field);
+        }
     }
 }
 
@@ -833,17 +896,21 @@ fn projection_rejects_unrepresentable_task_and_diagnostic_policies() {
         .runtime
         .with_summary_byte_limit(ByteLimit::new(42).unwrap())
         .unwrap();
-    let failure = settings.runtime_configuration().unwrap_err();
-    assert_diagnostic(
-        &failure,
-        "runtime.configuration.unrepresentable-tasks",
-        "tasks",
-    );
-    assert_diagnostic(
-        &failure,
-        "runtime.configuration.unrepresentable-diagnostics",
-        "diagnostics",
-    );
+    let runtime_failure = settings.runtime_configuration().unwrap_err();
+    settings.input.action_map = Some(ProjectPath::new("source/input.actions.json").unwrap());
+    let source_failure = settings.source_runtime_projection().unwrap_err();
+    for failure in [&runtime_failure, &source_failure] {
+        assert_diagnostic(
+            failure,
+            "runtime.configuration.unrepresentable-tasks",
+            "tasks",
+        );
+        assert_diagnostic(
+            failure,
+            "runtime.configuration.unrepresentable-diagnostics",
+            "diagnostics",
+        );
+    }
 }
 
 #[test]
@@ -931,6 +998,10 @@ fn source_projection_preserves_durations_that_float_seconds_cannot_encode() {
     assert_eq!(effective.to_configuration().runtime.max_delta, exact);
     assert_eq!(effective.to_configuration().runtime.fixed_timestep, exact);
     assert_round_trip(&effective);
+
+    settings.input.action_map = Some(ProjectPath::new("source/input.actions.json").unwrap());
+    let projection = settings.source_runtime_projection().unwrap();
+    assert_eq!(projection.runtime(), &effective);
 }
 
 #[test]

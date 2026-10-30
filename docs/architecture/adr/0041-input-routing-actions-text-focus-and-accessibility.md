@@ -2,7 +2,7 @@
 
 **Status**: Accepted
 **Date**: 2026-07-09
-**Last Revised**: 2026-10-18
+**Last Revised**: 2026-10-30
 **Refines**: ADR 0013, ADR 0025, ADR 0035, ADR 0036, ADR 0039
 **Refined By**: ADR 0056: Headless Runtime and Dedicated Server Readiness; ADR 0095: Plugin-Owned
 Specialized Domains and Project Configuration;
@@ -106,6 +106,53 @@ Rules:
 
 Frame-transient input/window events follow ADR 0036 and ADR 0039 cleanup rules. Retained input
 state such as pressed buttons, focused element, and pointer capture persists until changed.
+
+### Immutable Definitions And Global Runtime Selection
+
+`nara_input` owns one finite compiler for code-first and file-backed action definitions. An
+`ActionMapDefinition` contains declared contexts, their initial enable state, ordered physical
+bindings and compiled lookup data. It contains no mutable World state or execution authority.
+The World-local `ActionMap` is move-only and owns context enable state and mapping lifetimes;
+it is not a persistent authoring record. Unknown context operations fail without growing state.
+Live `ButtonInput` and `SemanticActions` are likewise move-only: copying observations or outcomes
+does not implicitly duplicate their private edge queues, held ownership or revision custody.
+Replacing bindings consumes an already compiled definition and always begins a new mapping
+lifetime, including restoration of previously used bindings. The fixed maximum-context allowance
+covers this operation and retained old snapshots; rejected candidate compilation leaves the old
+state unchanged, without a fictitious fallible installation step for an admitted definition.
+
+An owning `ActionMapBindings` handle captures immutable compiled data and its actual shared owner
+together. Owner projection runs once at construction; an owner returning another definition later
+cannot change installed bindings. Compiled storage sharing remains private behind a move-only
+definition wrapper, with no public borrowed-definition cloning operation.
+Source ownership retains the compiled output and its original charge; processed ownership retains
+the actual typed acquisition. Borrowing a definition cannot detach a clone of its allocation and
+substitute an unrelated retention token. A second independently mutable World state has its own
+finite context/revision allowance. These costs do not by themselves establish a bound for all
+physical endpoints, semantic contributions or transient output in the ingress pipeline.
+
+The canonical native source file is an `action_map` version-one JSON envelope with an intrinsic
+complete primary Product, explicitly declared contexts and ordered bindings. It does not require
+a second identity sidecar. An observed sidecar/catalogue identity must agree with the intrinsic
+source UUID and actual canonical location; conflicting UUIDs or locations refuse admission.
+The first source workflow supports current key/mouse bindings. Chords, analog bindings and an
+action-map editor require their own complete consumer before implementation.
+
+A manifest-selected global map is installed once through `RuntimeCandidateScope`, before Scene
+materialization and Startup. The actual Input owner verifies its pristine resource identity and
+rejects a competing explicit code configuration, including an explicit empty map. Missing Input
+ownership, resource replacement and repeated selection refuse installation. No installation API
+accepts an arbitrary World or a post-Startup runtime scope. With no file selection, code-first
+configuration remains valid. Startup selection and later explicit runtime rebinding are separate
+operations.
+
+The global source owner survives Scene collection replacement and travel with the same World
+state. Target preparation verifies the original file receipt and reuses that owner; changed or
+missing source refuses the target. Using a changed global definition requires an explicit restart;
+restoring the original admitted source permits a preparation retry. Ready publication consumes
+captured facts rather than discovering or installing another map at commit. The definition/state and source workflow
+are selected contracts; their implementation and actual qualification belong in the
+[Input plan](../../plans/2026-10-30-input-definition-and-source-admission-plan.md) and ledger.
 
 ## Alternatives Considered
 

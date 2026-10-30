@@ -27,7 +27,7 @@ use nara::{
         RuntimeWorldAccessError, SealedApp, StartupStage, VirtualTime, drive_runtime_quarantine,
         runtime_quarantine_status,
     },
-    core::{ItemLimit, TimeLimit},
+    core::{ByteLimit, ItemLimit, TimeLimit},
     ecs::{
         Commands, Res, ResMut, Resource, World, bevy_ecs::change_detection::DetectChangesMut,
         bevy_ecs::event::Event, bevy_ecs::observer::On, schedule::IntoScheduleConfigs,
@@ -39,9 +39,9 @@ use nara::{
         GameplayCommandTypeId, submit_gameplay_driver_command,
     },
     input::{
-        ActionId, ActionMap, ActionOutcome, ActionOutcomes, ActionPhase, ButtonDriverInput,
-        ButtonInput, InputPlugin, KeyCode, MouseButton, apply_keyboard_driver_input,
-        apply_mouse_driver_input,
+        ActionBinding, ActionContext, ActionId, ActionMap, ActionMapBuilder, ActionMapLimits,
+        ActionOutcome, ActionOutcomes, ActionPhase, ButtonDriverInput, ButtonInput, InputPlugin,
+        KeyCode, MouseButton, apply_keyboard_driver_input, apply_mouse_driver_input,
     },
     tasks::{
         TaskDomainKey, TaskHandle, TaskKindConfig, TaskPlugin, TaskPoolConfig, TaskPoolKind,
@@ -3380,14 +3380,30 @@ fn paused_input_edges_are_retained_until_the_next_resolving_frame() {
         .unwrap()
         .add_systems(CoreStage::Extract, observe_input_frame_edges)
         .unwrap();
-    app.world_mut()
-        .unwrap()
-        .resource_mut::<ActionMap>()
-        .bind_key(ActionId::new("confirm").unwrap(), KeyCode::Enter);
-    app.world_mut()
-        .unwrap()
-        .resource_mut::<ActionMap>()
-        .bind_mouse(ActionId::new("select").unwrap(), MouseButton::Left);
+    let mut builder = ActionMapBuilder::new(ActionMapLimits::default());
+    builder
+        .declare_context(ActionContext::gameplay(), true)
+        .unwrap();
+    builder
+        .bind(ActionBinding::key(
+            ActionId::new("confirm").unwrap(),
+            KeyCode::Enter,
+        ))
+        .unwrap();
+    builder
+        .bind(ActionBinding::mouse(
+            ActionId::new("select").unwrap(),
+            MouseButton::Left,
+        ))
+        .unwrap();
+    app.insert_resource(
+        ActionMap::new(
+            builder.compile().unwrap().into_bindings(),
+            ByteLimit::new(ActionMap::required_state_bytes()).unwrap(),
+        )
+        .unwrap(),
+    )
+    .unwrap();
     let mut runtime = start_runtime(app);
 
     accepted_ticket(runtime.request_control(RuntimeControl::Pause));

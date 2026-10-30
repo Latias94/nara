@@ -639,7 +639,10 @@ pub(super) fn content_matches_admission(
         (
             PreparedSceneContent::Source(snapshot),
             Context::Source {
-                candidate, plan, ..
+                candidate,
+                plan,
+                input,
+                ..
             },
             selection,
         ) => {
@@ -650,7 +653,13 @@ pub(super) fn content_matches_admission(
                         && snapshot.selected_scene_product() == Some(*product)
                 }
             };
+            let input_matches = match (snapshot.input_action_map(), input) {
+                (Some(captured), Some(original)) => captured.shares_owner_with(original),
+                (None, None) => true,
+                _ => false,
+            };
             selection_matches
+                && input_matches
                 && snapshot.lineage() == candidate.lineage()
                 && plan.lineage() == candidate.lineage()
                 && snapshot.content_closure().manifest_digest() == candidate.manifest_digest()

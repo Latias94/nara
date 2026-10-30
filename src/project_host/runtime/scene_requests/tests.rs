@@ -205,6 +205,7 @@ fn worker_prepares_selected_scene_and_refunds_rejected_content() {
         candidate,
         plan,
         loader,
+        ..
     } = context.as_ref()
     else {
         unreachable!()
@@ -269,6 +270,7 @@ fn cancellation_keeps_worker_and_prepared_generation_until_physical_return() {
         candidate,
         plan,
         loader,
+        ..
     } = context.as_ref()
     else {
         unreachable!()
@@ -311,6 +313,7 @@ fn failed_worker_discards_its_prepared_snapshot_and_closed_pool_never_reads_inli
         candidate,
         plan,
         loader,
+        ..
     } = context.as_ref()
     else {
         unreachable!()
@@ -433,6 +436,7 @@ impl Fixture {
             candidate,
             plan,
             loader,
+            ..
         } = context.as_ref()
         else {
             unreachable!()
@@ -524,6 +528,7 @@ requested = ["runtime-2d"]
             candidate,
             plan,
             loader: Arc::new(ProjectContentLoader::new(root).unwrap()),
+            input: None,
         })
     }
 }
@@ -604,9 +609,16 @@ fn with_context_world_and_startup(
                         candidate,
                         plan,
                         loader,
+                        input,
                     } => {
-                        install_context(world, candidate.clone(), plan.clone(), Arc::clone(loader))
-                            .unwrap();
+                        install_context(
+                            world,
+                            candidate.clone(),
+                            plan.clone(),
+                            Arc::clone(loader),
+                            input.clone(),
+                        )
+                        .unwrap();
                     }
                     Context::Processed { base } => {
                         install_runtime_context(world, base.clone()).unwrap();

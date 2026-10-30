@@ -36,6 +36,7 @@ pub(in crate::project_host::runtime::editor) fn authoring_source_failure(
         | E::SourceTooLarge { path, .. }
         | E::UnsupportedSourceEncoding { path, .. }
         | E::SourceFormat { path, .. }
+        | E::InputFormat { path, .. }
         | E::DocumentSourcePath { path, .. } => (
             Some(path.as_str().to_owned()),
             single_error(
@@ -43,7 +44,9 @@ pub(in crate::project_host::runtime::editor) fn authoring_source_failure(
                 "A required project source could not be admitted for authoring",
             ),
         ),
-        E::AssetMetadataFormat { path, .. } | E::AssetIdentity { path, .. } => (
+        E::AssetMetadataFormat { path, .. }
+        | E::AssetIdentity { path, .. }
+        | E::IntrinsicSourceMetadataMismatch { path } => (
             Some(path.as_str().to_owned()),
             single_error(
                 "project.editor.authoring-asset-rejected",
@@ -87,6 +90,9 @@ pub(in crate::project_host::runtime::editor) fn authoring_source_failure(
                     }
                     AuthoringSourceKind::Prefab => {
                         "The configured Prefab source directory could not be admitted"
+                    }
+                    AuthoringSourceKind::InputActionMap => {
+                        "The configured Input source directory could not be admitted"
                     }
                     AuthoringSourceKind::AssetMetadata | AuthoringSourceKind::AssetSource => {
                         "The configured asset source directory could not be admitted"

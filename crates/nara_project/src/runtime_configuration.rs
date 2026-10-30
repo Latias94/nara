@@ -12,6 +12,7 @@ use crate::effective::{
     EffectiveTaskSettings, EffectiveUiSettings, EffectiveWindowSettings,
     enforce_runtime_preset_invariants,
 };
+use crate::path::ProjectPath;
 use crate::profile::ProjectProfileError;
 use crate::render::{EffectiveRenderSettings, ProjectRenderManifest, ProjectWorldCanvasManifest};
 use crate::sections::{
@@ -310,12 +311,38 @@ impl EffectiveRuntimeConfiguration {
     }
 }
 
+/// Admitted runtime values and the source input selection that still requires fulfillment.
+///
+/// The input requirement is relative to the project root. Retaining it does not read or admit
+/// the selected file, grant source authority, or establish that an Input owner is installed.
+#[derive(Debug, Clone, PartialEq)]
+#[must_use = "source input requirements must be fulfilled before runtime startup"]
+pub struct SourceRuntimeProjection {
+    runtime: EffectiveRuntimeConfiguration,
+    input_requirement: Option<ProjectPath>,
+}
+
+impl SourceRuntimeProjection {
+    /// Returns the independently admitted runtime values.
+    #[must_use]
+    pub const fn runtime(&self) -> &EffectiveRuntimeConfiguration {
+        &self.runtime
+    }
+
+    /// Returns the resolved source action-map path that the source Host must fulfill.
+    #[must_use]
+    pub const fn input_requirement(&self) -> Option<&ProjectPath> {
+        self.input_requirement.as_ref()
+    }
+}
+
 impl EffectiveProjectSettings {
     /// Projects the resolved profile into independently admitted runtime values.
     ///
     /// A remaining input action-map path requires source admission and is rejected. A profile
     /// can explicitly clear that path before projection. Public effective fields are validated
-    /// again, and values the runtime record cannot represent exactly are rejected.
+    /// again, and values the runtime record cannot represent exactly are rejected. Source Hosts
+    /// can retain the selection as an obligation through [`Self::source_runtime_projection`].
     pub fn runtime_configuration(
         &self,
     ) -> Result<EffectiveRuntimeConfiguration, RuntimeConfigurationError> {
@@ -327,6 +354,27 @@ impl EffectiveProjectSettings {
             ));
         }
 
+        self.project_runtime_configuration()
+    }
+
+    /// Projects a resolved source profile while retaining its unfulfilled input selection.
+    ///
+    /// Uses the same runtime validation and exact representation checks as
+    /// [`Self::runtime_configuration`]. The source Host must separately admit any selected input
+    /// file and its receiving owner before runtime startup. Profile clearing is applied before
+    /// projection and leaves no input requirement.
+    pub fn source_runtime_projection(
+        &self,
+    ) -> Result<SourceRuntimeProjection, RuntimeConfigurationError> {
+        Ok(SourceRuntimeProjection {
+            runtime: self.project_runtime_configuration()?,
+            input_requirement: self.input.action_map.clone(),
+        })
+    }
+
+    fn project_runtime_configuration(
+        &self,
+    ) -> Result<EffectiveRuntimeConfiguration, RuntimeConfigurationError> {
         let configuration = configuration_record(
             self.requested_capabilities,
             RuntimeTimeConfiguration::from_effective(self.runtime_preset, &self.runtime),

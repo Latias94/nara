@@ -389,9 +389,11 @@ impl LoadContext<'_> {
         images: &[ProjectImageContent],
         tilesets: &[ProjectTileSetContent],
         domains: &[Box<dyn domains::ErasedCollection>],
+        input: Option<&ProjectInputContent>,
     ) -> Result<ProjectAssetDatabase, ProjectContentError> {
         let paths = || {
             std::iter::once(selected_scene)
+                .chain(input.map(ProjectInputContent::path))
                 .chain(scenes.iter().map(ProjectSceneContent::path))
                 .chain(prefabs.values().map(|prefab| &prefab.path))
                 .chain(images.iter().map(ProjectImageContent::path))

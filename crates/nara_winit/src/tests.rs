@@ -12,10 +12,10 @@ use nara_gameplay::{
     GameplayCommandTypeId,
 };
 use nara_input::{
-    ActionBinding, ActionId, ActionMap, ActionPhase, ButtonInput, InputEventKind,
-    InputGeometryGeneration, InputInvalidationReason, InputPlugin, InputPresentationEpoch,
-    InputPresentedRoute, InputRouteGeneration, InputSeatId, InputSlotGeneration, InputSurfaceId,
-    InputTimeline, InputWindowId, PointerState,
+    ActionBinding, ActionContext, ActionId, ActionMap, ActionMapBuilder, ActionMapLimits,
+    ActionPhase, ButtonInput, InputEventKind, InputGeometryGeneration, InputInvalidationReason,
+    InputPlugin, InputPresentationEpoch, InputPresentedRoute, InputRouteGeneration, InputSeatId,
+    InputSlotGeneration, InputSurfaceId, InputTimeline, InputWindowId, PointerState,
 };
 use nara_window::{
     WindowEvents, WindowPlugin,
@@ -389,10 +389,21 @@ fn focus_event_wiring_releases_input_and_lowers_a_semantic_stop_command() {
     app.add_plugin(GameplayCommandPlugin::default()).unwrap();
     app.add_plugin(WindowPlugin::default()).unwrap();
     let action = ActionId::new("test.move-up").unwrap();
-    app.world_mut()
-        .unwrap()
-        .resource_mut::<ActionMap>()
-        .bind(ActionBinding::key(action.clone(), KeyCode::Character('w')));
+    let mut bindings = ActionMapBuilder::new(ActionMapLimits::default());
+    bindings
+        .declare_context(ActionContext::gameplay(), true)
+        .unwrap();
+    bindings
+        .bind(ActionBinding::key(action.clone(), KeyCode::Character('w')))
+        .unwrap();
+    app.insert_resource(
+        ActionMap::new(
+            bindings.compile().unwrap().into_bindings(),
+            nara_core::ByteLimit::new(ActionMap::required_state_bytes()).unwrap(),
+        )
+        .unwrap(),
+    )
+    .unwrap();
     {
         let mut commands = app.world_mut().unwrap().resource_mut::<ActionCommandMap>();
         commands

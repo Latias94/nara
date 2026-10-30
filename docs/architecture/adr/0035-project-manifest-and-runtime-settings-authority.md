@@ -48,6 +48,16 @@ remaining path explicitly refuses Runtime projection; selecting a profile that e
 it is valid. Projection must not silently discard a requested input map. A concrete input-resource
 delivery workflow can replace this restriction later through its own owner.
 
+Source-backed composition uses an explicit `SourceRuntimeProjection` containing admitted shared
+Runtime values and the remaining Input selection obligation. This projection does not make a
+source path Runtime-independent: `runtime_configuration()` continues refusing that path. Both
+projections share the same exact validation and lowering; clearing or copying settings to hide
+an obligation is prohibited. A source plan with an Input obligation must select the actual
+compiled Input plugin, and Host startup must fulfill the obligation through the Input-owned
+pre-Startup receiving operation. File capture, identity, global retention and travel verification
+follow ADR 0041. The selected Input plan records implementation and qualification; the projection
+alone does not prove file-backed input support.
+
 Root composition consumes the admitted Runtime values for its plugin and product-capability
 closures. Its source candidate retains actual project/manifest/profile lineage separately;
 the source-backed Runtime plan continues binding that lineage without storing the entire
@@ -186,6 +196,8 @@ metadata under the stable policy refuses admission; it never selects the locatio
 an identity during loading. Stable asset/product identity does not inherit the receiving project's
 universe. These fields cannot be profile overlays. A deliberate policy or identity change requires
 source readmission rather than transparent identity continuity.
+This document-key policy governs Scene/Prefab source documents. Native Input action-map files
+use ADR 0041's intrinsic primary Product, independently of that document-key policy.
 
 Ordinary integrated project creation selects `stable_metadata`. Explicit project creation prepares
 fresh source identities once and retains their exact manifest/metadata bytes in the creation plan.

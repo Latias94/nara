@@ -546,8 +546,14 @@ Asset/Image plugins and qualifies finite retained Scene data dependencies, cance
 baselines and pre-allocation budgets. It does not qualify the complete packaged Player.
 The [source Scene qualification](../knowledge/engineering/verification/2026-10/2026-10-30T060408Z-finite-source-scene-data-closures-and-retained-editor-observations-qualification-deea8e4f86ac44f3a6faf27aefa53a4e.md)
 at `f96951a` closes canonical source resolution, the actual Source Door/Save/Export consumer,
-finite dependency custody and exact retained Editor observations. Next implement source input,
-processed input and target delivery through the ordered plan. Future third-party native families
+finite dependency custody and exact retained Editor observations. The active
+[Input source unit](2026-10-30-input-definition-and-source-admission-plan.md) replaces mutable
+live definitions and detached retention with immutable actual owners, move-only context state and
+scope-only startup selection under amended ADRs 0035/0041/0051. Its
+[qualification](../knowledge/engineering/verification/2026-10/2026-10-30T083131Z-immutable-input-definitions-and-global-source-workflow-qualification-f8db4628f79943ac94a90593cef6c736.md)
+records actual-file, independent physical travel, Editor receipts and relocated source Export.
+Continue processed
+input and target delivery after that complete source workflow. Future third-party native families
 need a typed publication facet through the same owner before their Material/render interface
 freezes; CPU decode alone grants no residency.
 
@@ -755,6 +761,12 @@ disconnect/reconnect and rebinding while held. Raw pipeline replay pins normaliz
 semantic replay records stable admitted actions at the application tick and must not change
 meaning after a physical rebind. Reject incompatible vocabulary, never persist OS handles, and
 do not conflate durable game player identity with a local input seat. Amend 0041 for selected rules.
+
+The current [definition/source unit](2026-10-30-input-definition-and-source-admission-plan.md)
+establishes global immutable ownership and independent World state first. Its finite keyboard/mouse
+workflow does not qualify the seat/gamepad/replay requirements above. Keep the existing endpoint
+and semantic-contribution growth finding visible and repair it in the Input admission owner;
+context/revision costs alone are not a bound for the whole physical pipeline.
 
 ## R11: UI Content Association, Text Admission And Platform Qualification
 

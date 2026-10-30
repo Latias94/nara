@@ -89,6 +89,7 @@ pub struct ProjectContentLimits {
     scene_file: SceneFileLimits,
     prefab_expansion: PrefabExpansionLimits,
     image_import: ImageImportLimits,
+    input_file: nara_input::ActionMapFileLimits,
 }
 
 impl Default for ProjectContentLimits {
@@ -114,11 +115,23 @@ impl Default for ProjectContentLimits {
             scene_file: SceneFileLimits::default(),
             prefab_expansion: PrefabExpansionLimits::default(),
             image_import: ImageImportLimits::default(),
+            input_file: nara_input::ActionMapFileLimits::default(),
         }
     }
 }
 
 impl ProjectContentLimits {
+    #[must_use]
+    pub const fn input_file(self) -> nara_input::ActionMapFileLimits {
+        self.input_file
+    }
+
+    #[must_use]
+    pub const fn with_input_file(mut self, limits: nara_input::ActionMapFileLimits) -> Self {
+        self.input_file = limits;
+        self
+    }
+
     #[must_use]
     pub const fn limit(self, kind: ProjectContentBudgetKind) -> usize {
         match kind.index() {
@@ -671,6 +684,9 @@ struct ProjectContentLeaseInner {
     host: ProjectContentBudgetHost,
     charge: [usize; TRACKED_KIND_COUNT],
 }
+
+pub(super) const CONTENT_LEASE_RETAINED_BYTES: usize =
+    size_of::<ProjectContentLeaseInner>() + super::ARC_CONTROL_BLOCK_BYTES;
 
 impl ProjectContentLease {
     pub(super) fn budget_ticket(&self) -> BudgetTicket {

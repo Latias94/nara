@@ -101,16 +101,25 @@ impl Preparation {
                                 candidate,
                                 plan,
                                 loader,
+                                input,
                             },
                             selection,
                         ) => {
                             let result = match selection {
-                                ProjectSceneSelection::Source(path) => {
-                                    loader.load_scene(candidate, plan, path)
-                                }
-                                ProjectSceneSelection::Product(product) => {
-                                    loader.load_scene_product(candidate, plan, *product)
-                                }
+                                ProjectSceneSelection::Source(path) => loader
+                                    .load_scene_reusing_input(
+                                        candidate,
+                                        plan,
+                                        path,
+                                        input.as_ref(),
+                                    ),
+                                ProjectSceneSelection::Product(product) => loader
+                                    .load_scene_product_reusing_input(
+                                        candidate,
+                                        plan,
+                                        *product,
+                                        input.as_ref(),
+                                    ),
                             };
                             result.map_err(PreparationFailure::source_content).and_then(
                                 |snapshot| {

@@ -4,7 +4,7 @@
 **Date**: 2026-07-09
 **Amended**: 2026-08-20 for the EIR-U0 canonical typed asset-metadata reset; 2026-10-24 for
 the unreleased schema-catalog envelope reset; 2026-10-29 for processed Runtime kinds and compact
-Image metadata framing
+Image metadata framing; 2026-10-30 for the native action-map source contract
 **Implemented Slices**: RGF-U1 scene, prefab, scene-patch, and component-catalog envelopes; RGF-U12
 asset-metadata envelope
 **Refines**: ADR 0006, ADR 0007, ADR 0011, ADR 0037, ADR 0043, ADR 0045
@@ -81,6 +81,13 @@ Rules:
 | `runtime_scene` | 1 | 1 | none; Scene-owned flat processed representation |
 | `runtime_content_catalog` | 1 | 1 | none; independently expected immutable local base |
 | `runtime_image` metadata | 1 | 1 | none; compact Image-owned metadata envelope plus exact raw RGBA |
+| `action_map` | 1 | 1 | none; Input-owned native JSON definition with intrinsic primary Product |
+
+`action_map` payload records and domain containers are bounded before their allocations. Its
+payload contains a complete primary Product, explicit context declarations and ordered bindings;
+it does not serialize live World state, lifetime identities or disabled-context snapshots. The
+unreleased bare `ActionMap` serde reader is removed without a fallback or migration reader.
+The format owner's nonempty golden and rejection tests qualify this boundary when implemented.
 
 The Image transport begins with `NRI\0`, a little-endian `u32` metadata length, that exact JSON
 envelope and raw pixel bytes. Its format owner bounds framing, metadata structure and pixel

@@ -67,6 +67,7 @@ pub(crate) enum AuthoringSourceKind {
     SchemaBundle,
     Scene,
     Prefab,
+    InputActionMap,
     AssetMetadata,
     AssetSource,
 }
@@ -78,6 +79,7 @@ impl Display for AuthoringSourceKind {
             Self::SchemaBundle => "authoring Schema bundle",
             Self::Scene => "Scene",
             Self::Prefab => "Prefab",
+            Self::InputActionMap => "Input action map",
             Self::AssetMetadata => "asset metadata",
             Self::AssetSource => "asset source",
         })
@@ -1230,6 +1232,7 @@ fn capture_saved_startup(
         open_prefabs,
         open_scenes,
         preview,
+        schema.settings.input.action_map.as_ref(),
     )?;
     Ok(CapturedSavedStartup {
         source,
@@ -1275,6 +1278,7 @@ enum LoadedIdentity {
     AssetMetadata,
     AssetSource,
     Prefab,
+    InputActionMap,
 }
 
 fn include_native_metadata_source(
@@ -1495,9 +1499,15 @@ fn asset_record_retained_bytes(
 pub(super) fn source_fact_retained_bytes(
     source: &AuthoringSourceFact,
 ) -> Result<usize, AuthoringProjectSourceAdmissionError> {
+    source_fact_path_retained_bytes(source.project_path().as_str())
+}
+
+fn source_fact_path_retained_bytes(
+    path: &str,
+) -> Result<usize, AuthoringProjectSourceAdmissionError> {
     checked_sum([
         size_of::<AuthoringSourceFact>(),
-        source.project_path().as_str().len(),
+        path.len(),
         size_of::<Arc<AuthoringSourceFact>>(),
     ])
 }
@@ -2250,6 +2260,13 @@ pub(crate) enum AuthoringProjectSourceAdmissionError {
         path: ProjectPath,
         source: SceneFormatError,
     },
+    InputFormat {
+        path: ProjectPath,
+        source: nara_input::ActionMapFileError,
+    },
+    IntrinsicSourceMetadataMismatch {
+        path: AssetSourcePath,
+    },
     SourceStructure {
         kind: AuthoringSourceKind,
         path: ProjectPath,
@@ -2357,6 +2374,13 @@ impl Display for AuthoringProjectSourceAdmissionError {
             Self::SourceFormat { kind, path, .. } => {
                 write!(formatter, "{kind} source '{path}' is invalid")
             }
+            Self::InputFormat { path, .. } => {
+                write!(formatter, "Input action-map source '{path}' is invalid")
+            }
+            Self::IntrinsicSourceMetadataMismatch { path } => write!(
+                formatter,
+                "asset metadata for '{path}' disagrees with its intrinsic source identity"
+            ),
             Self::SourceStructure { kind, path, .. } => {
                 write!(
                     formatter,
@@ -2416,6 +2440,7 @@ impl Error for AuthoringProjectSourceAdmissionError {
             }
             Self::JoinedSourcePath(source) => Some(source),
             Self::SourceFormat { source, .. } => Some(source),
+            Self::InputFormat { source, .. } => Some(source),
             Self::SourceStructure { source, .. } => Some(source),
             Self::DocumentSourcePath { source, .. } => Some(source),
             Self::SourcePublication { source, .. } => Some(source),
@@ -2433,6 +2458,7 @@ impl Error for AuthoringProjectSourceAdmissionError {
             | Self::SourceTooLarge { .. }
             | Self::UnsupportedSourceEncoding { .. }
             | Self::AssetMetadataPathMismatch { .. }
+            | Self::IntrinsicSourceMetadataMismatch { .. }
             | Self::CatalogueNameInvalid
             | Self::AssetMetadataChanged { .. }
             | Self::AssetDirectoryAuthorityUnavailable

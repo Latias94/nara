@@ -58,9 +58,9 @@ impl Plugin for InputContextProbe {
             CoreStage::First,
             (move |mut actions: ResMut<ActionMap>| {
                 if enabled.load(Ordering::Relaxed) {
-                    actions.enable_context(&ActionContext::gameplay());
+                    actions.enable_context(&ActionContext::gameplay()).unwrap();
                 } else {
-                    actions.disable_context(ActionContext::gameplay());
+                    actions.disable_context(ActionContext::gameplay()).unwrap();
                 }
             })
             .before(nara::input::__private::InputSet::StageActions),

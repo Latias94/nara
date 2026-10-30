@@ -23,6 +23,7 @@ pub(crate) enum EditorExternalPlaySourceKind {
     AssetSource,
     CargoManifest,
     CargoLock,
+    InputActionMap,
 }
 
 impl EditorExternalPlaySourceKind {
@@ -36,6 +37,7 @@ impl EditorExternalPlaySourceKind {
             Self::AssetSource => 6,
             Self::CargoManifest => 7,
             Self::CargoLock => 8,
+            Self::InputActionMap => 9,
         }
     }
 
@@ -49,6 +51,7 @@ impl EditorExternalPlaySourceKind {
             6 => Ok(Self::AssetSource),
             7 => Ok(Self::CargoManifest),
             8 => Ok(Self::CargoLock),
+            9 => Ok(Self::InputActionMap),
             _ => Err(EditorExternalPlaySourceReceiptError::InvalidEncoding(
                 "source kind is unsupported",
             )),
@@ -552,6 +555,37 @@ mod tests {
                     .any(|bytes| bytes == forbidden)
             );
         }
+    }
+
+    #[test]
+    fn canonical_receipt_roundtrips_the_input_kind_on_wire_tag_nine() {
+        let mut receipt = source_receipt("desktop", 1, [7; 32], b"scene");
+        let mut facts = receipt.source_facts.into_vec();
+        facts.push(source_fact(
+            EditorExternalPlaySourceKind::InputActionMap,
+            "controls/player.actions.json",
+            b"input source",
+        ));
+        receipt.source_facts = facts.into_boxed_slice();
+        // Rebuild through the constructor so the added source receives canonical ordering.
+        let receipt = EditorExternalPlaySourceReceipt::new(
+            receipt.project_stable_id,
+            receipt.profile_name,
+            receipt.target,
+            receipt.launch_context_version,
+            receipt.manifest_digest,
+            receipt.authoring_bundle_digest,
+            receipt.content_digest,
+            receipt.schema_fingerprint,
+            receipt.source_facts.into_vec(),
+        )
+        .unwrap();
+        assert_eq!(EditorExternalPlaySourceKind::InputActionMap.wire_value(), 9);
+        let encoded = receipt.encode_canonical().unwrap();
+        assert_eq!(
+            EditorExternalPlaySourceReceipt::decode_canonical(&encoded).unwrap(),
+            receipt
+        );
     }
 
     #[test]

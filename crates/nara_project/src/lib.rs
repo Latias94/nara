@@ -55,7 +55,7 @@ pub use render::{
 };
 pub use runtime_configuration::{
     EffectiveRuntimeConfiguration, RuntimeConfiguration, RuntimeConfigurationError,
-    RuntimeTimeConfiguration,
+    RuntimeTimeConfiguration, SourceRuntimeProjection,
 };
 pub use sections::{
     NativeDocumentIdentity, ProjectAuthoringManifest, ProjectCapabilitiesManifest,
@@ -89,8 +89,8 @@ pub mod prelude {
         ProjectTaskShutdownPatch, ProjectTasksManifest, ProjectTasksPatch, ProjectUiManifest,
         ProjectUiPatch, ProjectUiSafeAreaManifest, ProjectUiSurfaceManifest, ProjectWindowManifest,
         ProjectWindowMode, ProjectWorldCanvasManifest, RuntimeConfiguration,
-        RuntimeConfigurationError, RuntimePreset, RuntimeTimeConfiguration, SourceUniverseId,
-        SourceUniverseIdError,
+        RuntimeConfigurationError, RuntimePreset, RuntimeTimeConfiguration,
+        SourceRuntimeProjection, SourceUniverseId, SourceUniverseIdError,
     };
 }
 

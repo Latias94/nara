@@ -5,6 +5,7 @@ mod catalogue;
 mod closure;
 mod delivery;
 mod domains;
+mod input;
 mod scenes;
 
 use std::{
@@ -81,6 +82,7 @@ pub(crate) use domains::validate_asset_domain_kind;
 pub(crate) use domains::{EditorSourceValidation, validate_editor_source};
 pub(crate) use domains::{ErasedCollection, runtime_collection};
 pub use domains::{ProjectAssetCollection, ProjectDomainAssets};
+pub use input::ProjectInputContent;
 use scenes::pending_scene_source_work_bytes;
 
 /// Computes the canonical Runtime startup-content digest from already admitted logical members.
@@ -281,6 +283,7 @@ struct ProjectContentSnapshotInner {
     domain_authority: ProjectAssetDomains,
     content_closure: ProjectContentClosureReceipt,
     source_upgrade_required: bool,
+    input: Option<ProjectInputContent>,
     prefabs: Box<[ProjectPrefabContent]>,
     images: Box<[ProjectImageContent]>,
     tilesets: Box<[ProjectTileSetContent]>,
@@ -318,6 +321,12 @@ impl ProjectSourceContent {
 }
 
 impl ProjectContentSnapshot {
+    /// The separately retained global input definition selected by the source manifest.
+    #[must_use]
+    pub fn input_action_map(&self) -> Option<&ProjectInputContent> {
+        self.inner.input.as_ref()
+    }
+
     pub(crate) fn matches_asset_domains(&self, plan: &RuntimePlan) -> bool {
         self.inner.domain_authority.matches(&plan.asset_domains)
     }
@@ -726,6 +735,7 @@ pub enum ProjectContentErrorKind {
     HostAuthorityRejected,
     BudgetExceeded,
     SceneFormat,
+    InputDefinition,
     ScenePublication,
     PrefabExpansion,
     AssetReference,
@@ -901,6 +911,7 @@ impl Display for ProjectContentError {
             }
             ProjectContentErrorKind::BudgetExceeded => "project content budget was exceeded",
             ProjectContentErrorKind::SceneFormat => "project scene format is invalid",
+            ProjectContentErrorKind::InputDefinition => "project input definition is invalid",
             ProjectContentErrorKind::ScenePublication => {
                 "project scene semantic publication failed"
             }
@@ -1020,23 +1031,6 @@ impl ProjectContentLoader {
         )
     }
 
-    /// Resolves a primary Scene Product and its declared travel root in source preparation.
-    pub(crate) fn load_scene_product(
-        &self,
-        candidate: &ProjectSettingsCandidate,
-        plan: &RuntimePlan,
-        product: AssetProductRef,
-    ) -> Result<ProjectContentSnapshot, ProjectContentError> {
-        self.load_inner(
-            candidate,
-            plan,
-            Some(SourceSceneSelection::Product(product)),
-            None,
-            BTreeMap::new(),
-            None,
-        )
-    }
-
     pub(crate) fn load_with_runtime_agreement(
         &self,
         candidate: &ProjectSettingsCandidate,
@@ -1129,6 +1123,7 @@ impl ProjectContentLoader {
             runtime_agreement,
             None,
             false,
+            None,
         )
         .map(|(snapshot, _)| snapshot)
     }
@@ -1149,6 +1144,7 @@ impl ProjectContentLoader {
             Some(agreement),
             None,
             true,
+            None,
         )
     }
 
@@ -1169,6 +1165,7 @@ impl ProjectContentLoader {
             None,
             catalogue,
             capture_catalogue,
+            None,
         )
     }
 
@@ -1182,6 +1179,7 @@ impl ProjectContentLoader {
         runtime_agreement: Option<PreparedRuntimeSchemaAgreement>,
         delivery_catalogue: Option<&DeliveryCatalogue>,
         capture_delivery_catalogue: bool,
+        input_reuse: Option<&ProjectInputContent>,
     ) -> Result<(ProjectContentSnapshot, Option<DeliveryCatalogue>), ProjectContentError> {
         self.validate_inputs(candidate, plan)?;
         let settings = candidate.settings();
@@ -1219,7 +1217,7 @@ impl ProjectContentLoader {
             delivery_catalogue,
             capture_delivery_catalogue,
         )?;
-        let snapshot = context.load(candidate, selected_scene)?;
+        let snapshot = context.load(candidate, selected_scene, input_reuse)?;
         Ok((snapshot, context.take_delivery_catalogue()))
     }
 
@@ -1463,6 +1461,7 @@ impl<'a> LoadContext<'a> {
         &mut self,
         candidate: &ProjectSettingsCandidate,
         selected_scene: Option<SourceSceneSelection<'_>>,
+        input_reuse: Option<&ProjectInputContent>,
     ) -> Result<ProjectContentSnapshot, ProjectContentError> {
         self.add_budget(ProjectContentBudgetKind::OpenHandles, 1)?;
         let settings = candidate.settings();
@@ -1488,6 +1487,7 @@ impl<'a> LoadContext<'a> {
             settings.paths.prefabs.clone(),
             settings.paths.scenes.clone(),
         ]);
+        let input = self.load_input(candidate, input_reuse)?;
         self.content_closure
             .as_mut()
             .expect("load context owns one Scene closure builder until publication")
@@ -1628,7 +1628,7 @@ impl<'a> LoadContext<'a> {
             let (path, digest) = agreement.revalidate_and_into_closure_member(&self.loader.root)?;
             self.record_project_member(
                 ProjectContentMemberKind::AuthoringSchemaBundle,
-                path,
+                path.as_str(),
                 digest,
             )?;
         }
@@ -1782,6 +1782,7 @@ impl<'a> LoadContext<'a> {
             &images,
             &tilesets,
             &domain_collections,
+            input.as_ref(),
         )?;
         self.release_catalogue_work();
         drop((scenes, prefabs, assets));
@@ -1953,6 +1954,7 @@ impl<'a> LoadContext<'a> {
                 domain_authority: self.domains.clone(),
                 content_closure,
                 source_upgrade_required: self.source_upgrade_required,
+                input,
                 prefabs,
                 images,
                 tilesets,
@@ -2991,11 +2993,18 @@ impl<'a> LoadContext<'a> {
     fn record_project_member(
         &mut self,
         kind: ProjectContentMemberKind,
-        path: nara_project::ProjectPath,
+        path: &str,
         digest: ContentDigest,
     ) -> Result<(), ProjectContentError> {
-        let work = content_closure_entry_work_bytes(path.as_str().len())?;
+        let work = content_closure_entry_work_bytes(path.len())?;
         self.add_budget(ProjectContentBudgetKind::WorkBytes, work)?;
+        let path = nara_project::ProjectPath::new(path).map_err(|_| {
+            ProjectContentError::single(
+                ProjectContentErrorKind::InvalidLogicalPath,
+                "project.content.member-path-invalid",
+                "Content member has an invalid project-relative path",
+            )
+        })?;
         self.content_closure
             .as_mut()
             .expect("load context owns one Scene closure builder until publication")
@@ -4470,7 +4479,7 @@ mod tests {
                 for by_product in [false, true] {
                     let snapshot = if by_product {
                         loader
-                            .load_scene_product(&candidate, &plan, product)
+                            .load_scene_product_reusing_input(&candidate, &plan, product, None)
                             .unwrap()
                     } else {
                         loader
@@ -4518,7 +4527,7 @@ mod tests {
                 )
                 .unwrap();
                 let error = loader
-                    .load_scene_product(&candidate, &plan, product)
+                    .load_scene_product_reusing_input(&candidate, &plan, product, None)
                     .unwrap_err();
                 assert_eq!(error.kind(), ProjectContentErrorKind::AssetMetaMismatch);
                 assert_eq!(loader.budget_snapshot().active_reservations(), 0);
@@ -4856,7 +4865,7 @@ mod tests {
                 false,
             )
             .unwrap();
-            let error = context.load(&candidate, None).unwrap_err();
+            let error = context.load(&candidate, None, None).unwrap_err();
             assert_eq!(error.kind(), ProjectContentErrorKind::HostAuthorityRejected);
             assert!(
                 error

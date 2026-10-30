@@ -12,7 +12,7 @@ use nara_app::{
 use nara_fs::{ContentDigest, FileIdentity};
 use nara_project::{
     EffectiveProjectSettings, EffectiveRuntimeConfiguration, ProductCapability,
-    ProductCapabilitySet,
+    ProductCapabilitySet, ProjectPath, SourceRuntimeProjection,
 };
 use nara_reflect::__private::{
     ResolvedComponentSchemaProvider, register_or_validate_resolved_schema_provider,
@@ -106,12 +106,14 @@ impl ProjectSettingsLineage {
 }
 
 /// An immutable settings candidate whose product capability request fits this binary.
+///
+/// Source input selection remains an explicit obligation until content and receiving admission.
 #[derive(Clone, PartialEq)]
 pub struct ProjectSettingsCandidate {
     pub(super) lineage: ProjectSettingsLineage,
     pub(super) manifest_digest: ContentDigest,
     pub(super) settings: EffectiveProjectSettings,
-    pub(super) runtime_configuration: EffectiveRuntimeConfiguration,
+    pub(super) source_runtime_projection: SourceRuntimeProjection,
     pub(super) capabilities: RuntimeCapabilityAdmission,
 }
 
@@ -134,7 +136,13 @@ impl ProjectSettingsCandidate {
     /// Runtime-only values admitted from the fully resolved source profile.
     #[must_use]
     pub const fn runtime_configuration(&self) -> &EffectiveRuntimeConfiguration {
-        &self.runtime_configuration
+        self.source_runtime_projection.runtime()
+    }
+
+    /// Returns the source action-map path that still requires content and receiving admission.
+    #[must_use]
+    pub const fn input_requirement(&self) -> Option<&ProjectPath> {
+        self.source_runtime_projection.input_requirement()
     }
 
     #[must_use]
@@ -427,10 +435,12 @@ impl SchemaValidationInput {
     }
 }
 
+/// A source-lineage-bound Runtime composition and its remaining input selection obligation.
 #[derive(Clone)]
 pub struct RuntimePlan {
     lineage: ProjectSettingsLineage,
     configuration: RuntimeConfigurationPlan,
+    input_requirement: Option<ProjectPath>,
     #[cfg(all(feature = "runtime-2d", feature = "serde"))]
     pub(crate) asset_domains: crate::project_content::ProjectAssetDomains,
 }
@@ -459,9 +469,16 @@ impl RuntimePlan {
     #[must_use]
     /// Returns only the admitted values consumed by the Runtime composition.
     ///
-    /// Project paths, authoring inputs and profile selection remain with the source candidate.
+    /// The source input obligation is retained separately through [`Self::input_requirement`].
+    /// Other project paths, authoring inputs and profile selection remain with the source candidate.
     pub const fn settings(&self) -> &EffectiveRuntimeConfiguration {
         self.configuration.settings()
+    }
+
+    /// Returns the exact source action-map path that the Host must fulfill before startup.
+    #[must_use]
+    pub const fn input_requirement(&self) -> Option<&ProjectPath> {
+        self.input_requirement.as_ref()
     }
 
     #[must_use]
@@ -502,6 +519,8 @@ impl RuntimePlan {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum CompositionError {
     ProjectLineageMismatch,
+    /// A source input selection has no actual Input plugin in the resolved plan.
+    InputOwnerRequired,
     UnsupportedDefaultConfiguration {
         plugin: PluginId,
     },
@@ -563,6 +582,7 @@ impl fmt::Display for CompositionError {
             Self::ProjectLineageMismatch => {
                 "project runtime request lineage does not match candidate"
             }
+            Self::InputOwnerRequired => "source input action map requires the Input plugin",
             Self::UnsupportedDefaultConfiguration { .. } => {
                 "product recipe configures a default absent from the selected profile"
             }
@@ -836,9 +856,20 @@ pub fn resolve_runtime_plan(
         },
         known_providers,
     )?;
+    if candidate.input_requirement().is_some()
+        && !resolved
+            .configuration
+            .plugin_plan()
+            .entries()
+            .iter()
+            .any(|entry| entry.plugin_id() == nara_input::INPUT_PLUGIN_ID)
+    {
+        return Err(CompositionError::InputOwnerRequired.into());
+    }
     Ok(RuntimePlan {
         lineage: candidate.lineage,
         configuration: resolved.configuration,
+        input_requirement: candidate.input_requirement().cloned(),
         #[cfg(all(feature = "runtime-2d", feature = "serde"))]
         asset_domains: resolved.asset_domains,
     })

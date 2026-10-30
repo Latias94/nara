@@ -20,6 +20,7 @@ pub enum ProjectContentMemberKind {
     AuthoringSchemaBundle,
     Scene,
     Prefab,
+    InputActionMap,
     AssetMetadata,
     AssetSource,
 }
@@ -31,6 +32,7 @@ impl ProjectContentMemberKind {
             Self::AuthoringSchemaBundle => "authoring-schema-bundle",
             Self::Scene => "scene",
             Self::Prefab => "prefab",
+            Self::InputActionMap => "input-action-map",
             Self::AssetMetadata => "asset-meta",
             Self::AssetSource => "asset",
         }

@@ -1,0 +1,52 @@
+{
+  "kind": "action_map",
+  "format_version": 1,
+  "engine_min_version": "0.1.0",
+  "generator": {
+    "name": "nara",
+    "version": "0.1.0"
+  },
+  "payload": {
+    "product": {
+      "source": "919617ea-c89c-4f83-9cce-b084de435a83",
+      "product": {
+        "kind": "primary"
+      }
+    },
+    "contexts": [
+      {
+        "context": "gameplay",
+        "enabled": true
+      },
+      {
+        "context": "menu",
+        "enabled": false
+      }
+    ],
+    "bindings": [
+      {
+        "action": "jump",
+        "input": {
+          "Key": "Space"
+        },
+        "context": "gameplay"
+      },
+      {
+        "action": "move-up",
+        "input": {
+          "Key": {
+            "Character": "w"
+          }
+        },
+        "context": "gameplay"
+      },
+      {
+        "action": "confirm",
+        "input": {
+          "Mouse": "Left"
+        },
+        "context": "menu"
+      }
+    ]
+  }
+}

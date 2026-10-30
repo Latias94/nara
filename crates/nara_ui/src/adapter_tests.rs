@@ -13,11 +13,12 @@ use nara_hierarchy::{
     HierarchyOperation, HierarchyPlacement, HierarchyPlacementOwner, HierarchyWriter,
 };
 use nara_input::{
-    ActionId, ActionMap, ActionOutcomes, ActionPhase, ButtonDriverInput, ButtonTransitionPhase,
-    InputEventKind, InputGeometryGeneration, InputPointerId, InputPresentationEpoch,
-    InputPresentedRoute, InputRouteGeneration, InputSeatId, InputSlotGeneration, InputSurfaceId,
-    InputTimeline, InputWindowEvent, InputWindowId, KeyCode, MAX_INPUT_TIMELINE_ENTRIES,
-    MouseButton, PointerDriverInput, apply_mouse_driver_input_at, apply_pointer_driver_input_at,
+    ActionBinding, ActionContext, ActionId, ActionMap, ActionMapBuilder, ActionMapLimits,
+    ActionOutcomes, ActionPhase, ButtonDriverInput, ButtonTransitionPhase, InputEventKind,
+    InputGeometryGeneration, InputPointerId, InputPresentationEpoch, InputPresentedRoute,
+    InputRouteGeneration, InputSeatId, InputSlotGeneration, InputSurfaceId, InputTimeline,
+    InputWindowEvent, InputWindowId, KeyCode, MAX_INPUT_TIMELINE_ENTRIES, MouseButton,
+    PointerDriverInput, apply_mouse_driver_input_at, apply_pointer_driver_input_at,
 };
 use nara_reflect::__macro_support::PersistentFieldCodec;
 use nara_reflect::{
@@ -87,12 +88,31 @@ fn capture_gameplay_phases(
         .extend(outcomes.as_slice().iter().map(|outcome| outcome.phase));
 }
 
-fn install_gameplay_capture(app: &mut UiTestApp) {
-    app.configuration_world()
-        .insert_resource(CapturedGameplayPhases::default());
+fn install_gameplay_capture(app: &mut UiTestApp, additional_bindings: &[ActionBinding]) {
+    let mut builder = ActionMapBuilder::new(ActionMapLimits::default());
+    builder
+        .declare_context(ActionContext::gameplay(), true)
+        .expect("gameplay context should fit test limits");
+    builder
+        .bind(ActionBinding::mouse(
+            ActionId::new("fire").unwrap(),
+            MouseButton::Left,
+        ))
+        .expect("fire binding should fit test limits");
+    for binding in additional_bindings {
+        builder
+            .bind(binding.clone())
+            .expect("additional gameplay binding should fit test limits");
+    }
+    let bindings = builder
+        .compile()
+        .expect("test gameplay definition should compile")
+        .into_bindings();
     app.configuration_world()
         .resource_mut::<ActionMap>()
-        .bind_mouse(ActionId::new("fire").unwrap(), MouseButton::Left);
+        .replace_bindings(bindings);
+    app.configuration_world()
+        .insert_resource(CapturedGameplayPhases::default());
     app.configuration()
         .add_systems(CoreStage::Update, capture_gameplay_phases)
         .expect("gameplay action capture should install");
@@ -1845,7 +1865,7 @@ fn build_button_app() -> (UiTestApp, Entity) {
 #[test]
 fn nonmodal_content_miss_reaches_gameplay_and_releases_over_a_button() {
     let (mut app, _) = build_unstarted_button_app();
-    install_gameplay_capture(&mut app);
+    install_gameplay_capture(&mut app, &[]);
     app.update().unwrap();
     let frame = latest_ui_frame(app.world(), surface_id()).unwrap().unwrap();
     assert!(!frame.blocks_unhandled_input());
@@ -1912,10 +1932,13 @@ fn nonmodal_content_miss_reaches_gameplay_and_releases_over_a_button() {
 #[test]
 fn nonmodal_unsupported_pointer_button_reaches_gameplay() {
     let (mut app, _) = build_unstarted_button_app();
-    install_gameplay_capture(&mut app);
-    app.configuration_world()
-        .resource_mut::<ActionMap>()
-        .bind_mouse(ActionId::new("inspect").unwrap(), MouseButton::Right);
+    install_gameplay_capture(
+        &mut app,
+        &[ActionBinding::mouse(
+            ActionId::new("inspect").unwrap(),
+            MouseButton::Right,
+        )],
+    );
     app.update().unwrap();
     let frame = latest_ui_frame(app.world(), surface_id()).unwrap().unwrap();
     app.present_frame(frame, 1).unwrap();
@@ -1960,10 +1983,13 @@ fn nonmodal_unsupported_pointer_button_reaches_gameplay() {
 #[test]
 fn nonmodal_unfocused_activation_reaches_gameplay() {
     let (mut app, _) = build_unstarted_button_app();
-    install_gameplay_capture(&mut app);
-    app.configuration_world()
-        .resource_mut::<ActionMap>()
-        .bind_key(ActionId::new("interact").unwrap(), KeyCode::Enter);
+    install_gameplay_capture(
+        &mut app,
+        &[ActionBinding::key(
+            ActionId::new("interact").unwrap(),
+            KeyCode::Enter,
+        )],
+    );
     app.update().unwrap();
     let frame = latest_ui_frame(app.world(), surface_id()).unwrap().unwrap();
     app.present_frame(frame, 1).unwrap();
@@ -3984,7 +4010,7 @@ fn retirement_route_mismatch_preserves_surface_session_and_identity() {
 #[test]
 fn surface_retirement_releases_only_gameplay_owned_held_edges() {
     let mut gameplay_owned = build_unstarted_button_app().0;
-    install_gameplay_capture(&mut gameplay_owned);
+    install_gameplay_capture(&mut gameplay_owned, &[]);
     gameplay_owned
         .update_surface(
             surface_id(),
@@ -4040,7 +4066,7 @@ fn surface_retirement_releases_only_gameplay_owned_held_edges() {
     );
 
     let mut ui_owned = build_unstarted_button_app().0;
-    install_gameplay_capture(&mut ui_owned);
+    install_gameplay_capture(&mut ui_owned, &[]);
     ui_owned.update().unwrap();
     let frame = latest_ui_frame(ui_owned.world(), surface_id())
         .unwrap()

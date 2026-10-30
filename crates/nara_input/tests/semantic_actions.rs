@@ -4,14 +4,15 @@ use std::{
 };
 
 use nara_app::{App, CoreStage, RuntimeControl, RuntimeControlRequestResult, RuntimeInstance};
+use nara_core::ByteLimit;
 use nara_ecs::{Res, ResMut, Resource, schedule::IntoScheduleConfigs};
 use nara_input::__private::InputSet;
 use nara_input::{
-    ActionContext, ActionId, ActionMap, ActionOutcome, ActionOutcomes, ActionPhase,
-    ButtonDriverInput, ButtonInput, InputBinding, InputSeatId, InputTimeline, InputWindowEvent,
-    InputWindowId, KeyCode, MouseButton, SemanticActionCause, SemanticActionOutcome,
-    SemanticActions, apply_keyboard_driver_input, apply_keyboard_driver_input_at,
-    apply_window_input_driver_event,
+    ActionBinding, ActionContext, ActionId, ActionMap, ActionMapBindings, ActionMapBuilder,
+    ActionMapLimits, ActionOutcome, ActionOutcomes, ActionPhase, ButtonDriverInput, ButtonInput,
+    InputBinding, InputSeatId, InputTimeline, InputWindowEvent, InputWindowId, KeyCode,
+    MouseButton, SemanticActionCause, SemanticActionOutcome, SemanticActions,
+    apply_keyboard_driver_input, apply_keyboard_driver_input_at, apply_window_input_driver_event,
 };
 
 #[derive(Debug, Default, Resource)]
@@ -41,15 +42,26 @@ enum MappingChange {
     Rebind(KeyCode),
     SyntheticPress(InputBinding),
     SyntheticRelease(InputBinding),
-    SaveAndChange { move_original: bool, rebind: bool },
-    Restore,
+    SaveAndRebind(KeyCode),
+    RestoreBindings,
 }
 
 #[derive(Debug, Default, Clone, Resource)]
 struct MappingChanges(
     Arc<Mutex<Vec<MappingChange>>>,
-    Arc<Mutex<Option<ActionMap>>>,
+    Arc<Mutex<Option<ActionMapBindings>>>,
 );
+
+fn movement_bindings(key: KeyCode) -> ActionMapBindings {
+    let mut builder = ActionMapBuilder::new(ActionMapLimits::default());
+    builder
+        .declare_context(ActionContext::gameplay(), true)
+        .unwrap();
+    builder
+        .bind(ActionBinding::key(ActionId::new("move").unwrap(), key))
+        .unwrap();
+    builder.compile().unwrap().into_bindings()
+}
 
 fn apply_mapping_changes(
     changes: Res<MappingChanges>,
@@ -59,11 +71,14 @@ fn apply_mapping_changes(
 ) {
     for change in changes.0.lock().unwrap().drain(..) {
         match change {
-            MappingChange::Disable => map.disable_context(ActionContext::gameplay()),
-            MappingChange::Enable => map.enable_context(&ActionContext::gameplay()),
+            MappingChange::Disable => {
+                map.disable_context(ActionContext::gameplay()).unwrap();
+            }
+            MappingChange::Enable => {
+                map.enable_context(&ActionContext::gameplay()).unwrap();
+            }
             MappingChange::Rebind(key) => {
-                *map = ActionMap::default();
-                map.bind_key(ActionId::new("move").unwrap(), key);
+                map.replace_bindings(movement_bindings(key));
             }
             MappingChange::SyntheticPress(input) => match input {
                 InputBinding::Key(key) => {
@@ -81,31 +96,14 @@ fn apply_mapping_changes(
                     mouse.release(button).unwrap();
                 }
             },
-            MappingChange::SaveAndChange {
-                move_original,
-                rebind,
-            } => {
-                let change = |target: &mut ActionMap| {
-                    if rebind {
-                        *target = ActionMap::default();
-                        target.bind_key(ActionId::new("move").unwrap(), KeyCode::Character('w'));
-                    } else {
-                        target.disable_context(ActionContext::gameplay());
-                    }
-                };
-                let saved = if move_original {
-                    let mut successor = map.clone();
-                    change(&mut successor);
-                    std::mem::replace(&mut *map, successor)
-                } else {
-                    let saved = map.clone();
-                    change(&mut map);
-                    saved
-                };
+            MappingChange::SaveAndRebind(key) => {
+                let saved = map.bindings_handle();
+                map.replace_bindings(movement_bindings(key));
                 *changes.1.lock().unwrap() = Some(saved);
             }
-            MappingChange::Restore => {
-                *map = changes.1.lock().unwrap().take().unwrap();
+            MappingChange::RestoreBindings => {
+                let bindings = changes.1.lock().unwrap().take().unwrap();
+                map.replace_bindings(bindings);
             }
         }
     }
@@ -130,17 +128,29 @@ fn semantic_runtime() -> (RuntimeInstance, MappingChanges) {
         (capture_semantic_actions, capture_action_outcomes),
     )
     .unwrap();
-    {
-        let mut map = app.world_mut().unwrap().resource_mut::<ActionMap>();
-        let action = ActionId::new("move").unwrap();
-        map.bind_key(action.clone(), KeyCode::Character('w'));
-        map.bind_key(action.clone(), KeyCode::ArrowUp);
-        map.bind_mouse(action, MouseButton::Left);
-        map.bind(
-            nara_input::ActionBinding::key(ActionId::new("menu").unwrap(), KeyCode::Space)
-                .with_context(ActionContext::new("menu").unwrap()),
-        );
+    let mut builder = ActionMapBuilder::new(ActionMapLimits::default());
+    builder
+        .declare_context(ActionContext::gameplay(), true)
+        .unwrap();
+    let menu = ActionContext::new("menu").unwrap();
+    builder.declare_context(menu.clone(), true).unwrap();
+    let action = ActionId::new("move").unwrap();
+    for binding in [
+        ActionBinding::key(action.clone(), KeyCode::Character('w')),
+        ActionBinding::key(action.clone(), KeyCode::ArrowUp),
+        ActionBinding::mouse(action, MouseButton::Left),
+        ActionBinding::key(ActionId::new("menu").unwrap(), KeyCode::Space).with_context(menu),
+    ] {
+        builder.bind(binding).unwrap();
     }
+    app.insert_resource(
+        ActionMap::new(
+            builder.compile().unwrap().into_bindings(),
+            ByteLimit::new(ActionMap::required_state_bytes()).unwrap(),
+        )
+        .unwrap(),
+    )
+    .unwrap();
     (RuntimeInstance::start(app).unwrap(), changes)
 }
 
@@ -293,20 +303,16 @@ fn semantic_synthetic_paused_release_and_fresh_press_keep_only_the_new_lifetime(
 }
 
 #[test]
-fn semantic_observed_context_exit_survives_cloned_or_moved_configuration_restore() {
-    for move_original in [false, true] {
-        observed_configuration_restore(move_original, false);
-    }
+fn semantic_observed_context_exit_survives_reenabling_the_context() {
+    observed_configuration_restore(false);
 }
 
 #[test]
-fn semantic_observed_rebinding_survives_cloned_or_moved_configuration_restore() {
-    for move_original in [false, true] {
-        observed_configuration_restore(move_original, true);
-    }
+fn semantic_observed_rebinding_survives_restoring_the_original_bindings() {
+    observed_configuration_restore(true);
 }
 
-fn observed_configuration_restore(move_original: bool, rebind: bool) {
+fn observed_configuration_restore(rebind: bool) {
     let (mut runtime, changes) = semantic_runtime();
     let input = InputBinding::Key(KeyCode::Character('w'));
     changes
@@ -321,16 +327,17 @@ fn observed_configuration_restore(move_original: bool, rebind: bool) {
         RuntimeControlRequestResult::Accepted(_)
     ));
     runtime.drive(Duration::ZERO).unwrap();
-    changes
-        .0
-        .lock()
-        .unwrap()
-        .push(MappingChange::SaveAndChange {
-            move_original,
-            rebind,
-        });
+    changes.0.lock().unwrap().push(if rebind {
+        MappingChange::SaveAndRebind(KeyCode::Character('w'))
+    } else {
+        MappingChange::Disable
+    });
     runtime.drive(Duration::ZERO).unwrap();
-    changes.0.lock().unwrap().push(MappingChange::Restore);
+    changes.0.lock().unwrap().push(if rebind {
+        MappingChange::RestoreBindings
+    } else {
+        MappingChange::Enable
+    });
     runtime.drive(Duration::ZERO).unwrap();
     assert!(matches!(
         runtime.request_control(RuntimeControl::Resume),

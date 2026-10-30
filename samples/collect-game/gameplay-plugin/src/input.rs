@@ -1,7 +1,11 @@
 use nara::{
     app::{PluginCategory, PluginDeclaration, PluginId},
+    core::ByteLimit,
     gameplay::{ActionCommandBinding, ActionCommandMap},
-    input::{ActionBinding, ActionId, ActionMap, ActionPhase, KeyCode},
+    input::{
+        ActionBinding, ActionContext, ActionId, ActionMap, ActionMapBuilder, ActionMapError,
+        ActionMapLimits, ActionPhase, KeyCode,
+    },
     prelude::{App, Plugin, PluginError},
 };
 
@@ -29,21 +33,52 @@ impl Plugin for DesktopInputPlugin {
             ('d', Direction::Right),
             ('w', Direction::Up),
             ('s', Direction::Down),
-        ];
-        for (key, direction) in directions {
-            let id = ActionId::new(format!("collect-game.move-{key}")).expect("static action ID");
-            app.world_mut()?
-                .resource_mut::<ActionMap>()
-                .bind(ActionBinding::key(id.clone(), KeyCode::Character(key)));
+        ]
+        .map(|(key, direction)| {
+            (
+                ActionId::new(format!("collect-game.move-{key}")).expect("static action ID"),
+                KeyCode::Character(key),
+                direction,
+            )
+        });
+        let reset_action = ActionId::new("collect-game.reset").expect("static action ID");
+        let mut builder = ActionMapBuilder::new(ActionMapLimits::default());
+        builder
+            .declare_context(ActionContext::gameplay(), true)
+            .map_err(action_map_error)?;
+        for (id, key, _) in &directions {
+            builder
+                .bind(ActionBinding::key(id.clone(), *key))
+                .map_err(action_map_error)?;
+        }
+        builder
+            .bind(ActionBinding::key(
+                reset_action.clone(),
+                KeyCode::Character('r'),
+            ))
+            .map_err(action_map_error)?;
+        let definition = builder.compile().map_err(action_map_error)?;
+        let action_map = ActionMap::new(
+            definition.into_bindings(),
+            ByteLimit::new(ActionMap::required_state_bytes())
+                .expect("action-map state allowance is nonzero"),
+        )
+        .map_err(action_map_error)?;
+        app.insert_resource(action_map)?;
+
+        for (id, _, direction) in directions {
             for (phase, pressed) in [(ActionPhase::Started, true), (ActionPhase::Released, false)] {
                 bind(app, id.clone(), phase, movement(direction, pressed))?;
             }
         }
-        let id = ActionId::new("collect-game.reset").expect("static action ID");
-        app.world_mut()?
-            .resource_mut::<ActionMap>()
-            .bind(ActionBinding::key(id.clone(), KeyCode::Character('r')));
-        bind(app, id, ActionPhase::Started, reset())
+        bind(app, reset_action, ActionPhase::Started, reset())
+    }
+}
+
+fn action_map_error(error: ActionMapError) -> PluginError {
+    PluginError::SetupFailed {
+        plugin: ID,
+        message: error.to_string(),
     }
 }
 

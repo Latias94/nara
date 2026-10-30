@@ -18,10 +18,10 @@ use nara::{
     diagnostic::RuntimeDiagnostics,
     ecs::{Res, ResMut, Resource},
     fs::RelativePath,
-    project::RuntimePreset,
+    project::{ProjectPath, RuntimePreset},
     project_host::{
-        HeadlessRun, HeadlessRunIntent, HeadlessRunOutcome, ProjectCandidateErrorKind,
-        ingest_project_manifest, resolve_product_recipe,
+        HeadlessRun, HeadlessRunIntent, HeadlessRunOutcome, ingest_project_manifest,
+        resolve_product_recipe,
     },
     tasks::{TaskPoolKind, TaskPools},
 };
@@ -195,24 +195,44 @@ pending_capacity = 8
 }
 
 #[test]
-fn source_relative_input_requires_explicit_profile_clear_before_runtime_admission() {
+fn source_relative_input_is_retained_as_an_obligation_until_explicit_profile_clear() {
     let project = TestProject::with_prefab_startup();
     let path = project.path().join("nara.toml");
     let base = fs::read_to_string(&path).unwrap();
-    fs::write(&path, format!("{base}\n[input]\naction_map = 'input/game.ron'\n[profiles.delivery.input]\nclear_action_map = true\n")).unwrap();
+    fs::write(
+        &path,
+        format!(
+            "{base}\n[input]\naction_map = 'input/game.actions.json'\n\
+             [profiles.delivery.input]\nclear_action_map = true\n"
+        ),
+    )
+    .unwrap();
     let root = project.root_capability();
     let file = root
         .open_file(&RelativePath::new("nara.toml").unwrap())
         .unwrap();
-    let error = ingest_project_manifest(&file, None).unwrap_err();
+    let input_path = ProjectPath::new("input/game.actions.json").unwrap();
+    assert!(!project.path().join(input_path.as_str()).exists());
+    let candidate = ingest_project_manifest(&file, None).unwrap();
+    assert_eq!(candidate.input_requirement(), Some(&input_path));
     assert_eq!(
-        error.kind(),
-        ProjectCandidateErrorKind::RuntimeConfiguration
+        candidate.settings().input.action_map.as_ref(),
+        Some(&input_path)
     );
-    assert!(error.diagnostics().has_errors());
+    assert!(candidate.settings().runtime_configuration().is_err());
+    let plan = resolve_product_recipe(&candidate, ProductRecipe::new()).unwrap();
+    assert_eq!(plan.settings(), candidate.runtime_configuration());
+    assert_eq!(plan.input_requirement(), Some(&input_path));
+    let cloned_plan = plan.clone();
+    drop(plan);
+    drop(candidate);
+    assert_eq!(cloned_plan.input_requirement(), Some(&input_path));
+
     let candidate = ingest_project_manifest(&file, Some("delivery")).unwrap();
     assert!(candidate.settings().input.action_map.is_none());
-    assert!(resolve_product_recipe(&candidate, ProductRecipe::new()).is_ok());
+    assert!(candidate.input_requirement().is_none());
+    let plan = resolve_product_recipe(&candidate, ProductRecipe::new()).unwrap();
+    assert!(plan.input_requirement().is_none());
 }
 
 #[test]

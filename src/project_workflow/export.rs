@@ -625,6 +625,9 @@ fn member_kind_name(kind: ProjectExportMemberKind) -> &'static str {
         }
         ProjectExportMemberKind::Content(ProjectContentMemberKind::Scene) => "scene",
         ProjectExportMemberKind::Content(ProjectContentMemberKind::Prefab) => "prefab",
+        ProjectExportMemberKind::Content(ProjectContentMemberKind::InputActionMap) => {
+            "input-action-map"
+        }
         ProjectExportMemberKind::Content(ProjectContentMemberKind::AssetMetadata) => "asset-meta",
         ProjectExportMemberKind::Content(ProjectContentMemberKind::AssetSource) => "asset",
     }

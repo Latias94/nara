@@ -252,6 +252,10 @@ const fn authoring_source_kinds(
             EditorExternalPlaySourceKind::Prefab,
             ProjectContentMemberKind::Prefab,
         ),
+        AuthoringSourceKind::InputActionMap => (
+            EditorExternalPlaySourceKind::InputActionMap,
+            ProjectContentMemberKind::InputActionMap,
+        ),
         AuthoringSourceKind::AssetMetadata => (
             EditorExternalPlaySourceKind::AssetMetadata,
             ProjectContentMemberKind::AssetMetadata,

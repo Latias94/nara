@@ -1,7 +1,11 @@
 use nara::{
     app::{PluginCategory, PluginDeclaration, PluginId},
+    core::ByteLimit,
     gameplay::{ActionCommandBinding, ActionCommandMap},
-    input::{ActionBinding, ActionId, ActionMap, ActionPhase, KeyCode},
+    input::{
+        ActionBinding, ActionContext, ActionId, ActionMap, ActionMapBuilder, ActionMapError,
+        ActionMapLimits, ActionPhase, KeyCode,
+    },
     prelude::{App, Plugin, PluginError},
 };
 
@@ -22,11 +26,15 @@ impl Plugin for DesktopInputPlugin {
         &DECLARATION
     }
     fn build(&self, app: &mut App) -> Result<(), PluginError> {
+        let mut builder = ActionMapBuilder::new(ActionMapLimits::default());
+        builder
+            .declare_context(ActionContext::gameplay(), true)
+            .map_err(action_map_error)?;
         for (direction, key) in ['a', 'd', 'w', 's'].into_iter().enumerate() {
             let id = ActionId::new(format!("two-level-game.move-{key}")).unwrap();
-            app.world_mut()?
-                .resource_mut::<ActionMap>()
-                .bind(ActionBinding::key(id.clone(), KeyCode::Character(key)));
+            builder
+                .bind(ActionBinding::key(id.clone(), KeyCode::Character(key)))
+                .map_err(action_map_error)?;
             for (phase, pressed) in [(ActionPhase::Started, true), (ActionPhase::Released, false)] {
                 bind(app, id.clone(), phase, movement(direction, pressed))?;
             }
@@ -40,12 +48,27 @@ impl Plugin for DesktopInputPlugin {
             ('r', RETRY),
         ] {
             let id = ActionId::new(format!("two-level-game.{key}")).unwrap();
-            app.world_mut()?
-                .resource_mut::<ActionMap>()
-                .bind(ActionBinding::key(id.clone(), KeyCode::Character(key)));
+            builder
+                .bind(ActionBinding::key(id.clone(), KeyCode::Character(key)))
+                .map_err(action_map_error)?;
             bind(app, id, ActionPhase::Started, action(command))?;
         }
+        let definition = builder.compile().map_err(action_map_error)?;
+        let action_map = ActionMap::new(
+            definition.into_bindings(),
+            ByteLimit::new(ActionMap::required_state_bytes())
+                .expect("action-map state allowance is nonzero"),
+        )
+        .map_err(action_map_error)?;
+        app.insert_resource(action_map)?;
         Ok(())
+    }
+}
+
+fn action_map_error(error: ActionMapError) -> PluginError {
+    PluginError::SetupFailed {
+        plugin: ID,
+        message: error.to_string(),
     }
 }
 

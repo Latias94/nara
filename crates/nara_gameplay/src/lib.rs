@@ -365,7 +365,8 @@ mod tests {
         spawn_identity_entity,
     };
     use nara_input::{
-        ActionBinding, ActionContext, ActionId, ActionMap, ActionPhase, InputPlugin, KeyCode,
+        ActionBinding, ActionContext, ActionId, ActionMap, ActionMapBuilder, ActionMapLimits,
+        ActionPhase, InputPlugin, KeyCode,
     };
 
     #[derive(Debug, Default, Resource)]
@@ -416,6 +417,19 @@ mod tests {
 
     fn command(command_type: &str) -> GameplayCommandDraft {
         GameplayCommandDraft::new(GameplayCommandTypeId::new(command_type).unwrap())
+    }
+
+    fn action_map(binding: ActionBinding) -> ActionMap {
+        let mut builder = ActionMapBuilder::new(ActionMapLimits::default());
+        builder
+            .declare_context(binding.context.clone(), true)
+            .unwrap();
+        builder.bind(binding).unwrap();
+        ActionMap::new(
+            builder.compile().unwrap().into_bindings(),
+            ByteLimit::new(ActionMap::required_state_bytes()).unwrap(),
+        )
+        .unwrap()
     }
 
     fn tick(value: u64) -> GameplayCommandTick {
@@ -519,10 +533,11 @@ mod tests {
             .unwrap();
 
         let action = ActionId::new("jump").unwrap();
-        app.world_mut()
-            .unwrap()
-            .resource_mut::<ActionMap>()
-            .bind(ActionBinding::key(action.clone(), KeyCode::Space));
+        app.insert_resource(action_map(ActionBinding::key(
+            action.clone(),
+            KeyCode::Space,
+        )))
+        .unwrap();
         app.world_mut()
             .unwrap()
             .resource_mut::<ActionCommandMap>()
@@ -590,10 +605,11 @@ mod tests {
             .unwrap();
 
         let action = ActionId::new("interact").unwrap();
-        app.world_mut()
-            .unwrap()
-            .resource_mut::<ActionMap>()
-            .bind(ActionBinding::key(action.clone(), KeyCode::Enter));
+        app.insert_resource(action_map(ActionBinding::key(
+            action.clone(),
+            KeyCode::Enter,
+        )))
+        .unwrap();
         {
             let mut command_map = app.world_mut().unwrap().resource_mut::<ActionCommandMap>();
             command_map
@@ -696,10 +712,10 @@ mod tests {
             .insert("slot", GameplayCommandValue::I64(2))
             .unwrap();
         let target = GameplayCommandTarget::named("player").unwrap();
-        app.world_mut()
-            .unwrap()
-            .resource_mut::<ActionMap>()
-            .bind(ActionBinding::key(action.clone(), KeyCode::Enter).with_context(context.clone()));
+        app.insert_resource(action_map(
+            ActionBinding::key(action.clone(), KeyCode::Enter).with_context(context.clone()),
+        ))
+        .unwrap();
         app.world_mut()
             .unwrap()
             .resource_mut::<ActionCommandMap>()
@@ -802,10 +818,11 @@ mod tests {
             .unwrap();
 
         let action = ActionId::new("cancel").unwrap();
-        app.world_mut()
-            .unwrap()
-            .resource_mut::<ActionMap>()
-            .bind(ActionBinding::key(action.clone(), KeyCode::Escape));
+        app.insert_resource(action_map(ActionBinding::key(
+            action.clone(),
+            KeyCode::Escape,
+        )))
+        .unwrap();
         app.world_mut()
             .unwrap()
             .resource_mut::<ActionCommandMap>()
@@ -1493,10 +1510,11 @@ mod tests {
         app.add_plugin(GameplayCommandPlugin::default()).unwrap();
 
         let action = ActionId::new("interact").unwrap();
-        app.world_mut()
-            .unwrap()
-            .resource_mut::<ActionMap>()
-            .bind(ActionBinding::key(action.clone(), KeyCode::Enter));
+        app.insert_resource(action_map(ActionBinding::key(
+            action.clone(),
+            KeyCode::Enter,
+        )))
+        .unwrap();
         app.world_mut()
             .unwrap()
             .resource_mut::<ActionCommandMap>()

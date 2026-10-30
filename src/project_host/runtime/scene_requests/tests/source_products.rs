@@ -130,6 +130,7 @@ fn source_product_dependency_membership_does_not_authorize_travel() {
         candidate,
         plan,
         loader,
+        ..
     } = context.as_ref()
     else {
         unreachable!()
@@ -369,6 +370,7 @@ fn source_product_publication_rejects_foreign_candidate_definitions_and_selectio
                 candidate,
                 plan,
                 loader,
+                ..
             } = context.as_ref()
             else {
                 unreachable!()
@@ -399,7 +401,12 @@ fn source_product_publication_rejects_foreign_candidate_definitions_and_selectio
             // A foreign preparation has its own budget owner while sharing the actual root.
             let foreign_loader = ProjectContentLoader::new(loader.project_root()).unwrap();
             let foreign = foreign_loader
-                .load_scene_product(&foreign_candidate, &foreign_plan, primary(2))
+                .load_scene_product_reusing_input(
+                    &foreign_candidate,
+                    &foreign_plan,
+                    primary(2),
+                    None,
+                )
                 .unwrap();
             assert_eq!(foreign.selected_scene_product(), Some(primary(2)));
             assert_eq!(foreign.selected_scene_path(), &selected());
@@ -463,6 +470,7 @@ fn source_product_stale_context_and_current_receipt_preserve_last_good() {
                     candidate,
                     plan,
                     loader,
+                    input,
                 } = owner.context.as_ref()
                 else {
                     unreachable!()
@@ -471,6 +479,7 @@ fn source_product_stale_context_and_current_receipt_preserve_last_good() {
                     candidate: candidate.clone(),
                     plan: plan.clone(),
                     loader: Arc::clone(loader),
+                    input: input.clone(),
                 });
             } else {
                 let report = crate::startup_scene::restart_current_scene_with_product(

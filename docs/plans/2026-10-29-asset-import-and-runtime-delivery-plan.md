@@ -408,17 +408,20 @@ mechanisms. Input, target-build selection and complete packaged delivery remain 
 ## Input And Target-Build Successors
 
 The [input ownership review](../research/2026-10-30-input-definition-and-runtime-ownership-review.md)
-traces actual source refusal, mutable definitions/state and startup installation. Its intrinsic
-source Product, finite format ceilings and source projection names are candidate decisions.
-Implement a complete source physical-input workflow before processed input; reconcile the owning
-contracts and use both consumers to determine the final APIs.
+traces the baseline source refusal, mutable definitions/state and startup installation. The
+[Input source plan](2026-10-30-input-definition-and-source-admission-plan.md) now owns its active
+replacement under amended Accepted ADRs 0035/0041/0051: intrinsic primary Product JSON, finite
+immutable definitions, actual owner-backed bindings, independently retained move-only state and
+explicit source obligations. Implement and qualify the complete source physical-input workflow
+before processed input.
 
-The next input unit must start from actual source support. Current ActionMap serde rebuilds its
-runtime index, but is not a strict bounded persistent-file admission path. Source manifest
-`input.action_map` is currently refused during Runtime projection; no hidden source loader is
-already installing it. Preserve that truthful refusal until a concrete source owner supplies
-real input bytes, identity and content-receipt coverage. Never clear the requested path to make
-projection succeed.
+The replacement removes bare live-map serde and incremental binding mutation. Source projection
+retains `input.action_map` while its actual capture/receiving owner fulfills that selection; strict
+source-independent projection still refuses the unresolved path. Never clear the requested path
+to make projection succeed. The [source qualification](../knowledge/engineering/verification/2026-10/2026-10-30T083131Z-immutable-input-definitions-and-global-source-workflow-qualification-f8db4628f79943ac94a90593cef6c736.md)
+now records actual file capture, Editor source receipts, independent physical/travel and relocated
+Export alongside affected games/native checks. Continue the processed startup successor below;
+the source unit does not establish the packaged source-free process or target-build support.
 
 The candidate processed design uses an explicit complete action-map Product in admitted Runtime
 configuration as a startup root, independent of Scene roots. `nara_input` owns strict version-one

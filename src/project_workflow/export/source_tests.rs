@@ -209,21 +209,28 @@ fn domain_sources_export_exact_members_and_reject_changed_or_missing_dependencie
 }
 
 #[test]
-fn cyclic_scene_dependencies_export_exact_sources_and_check_after_relocation() {
+fn cyclic_scenes_and_input_export_exact_sources_and_check_after_relocation() {
     use nara_asset::{
         AssetMeta, AssetMetaIdentity, AssetPath, AssetProductRef, AssetRef, AssetSourceKind,
         ImportedProductId, StableAssetId,
+    };
+    use nara_input::{
+        ActionBinding, ActionContext, ActionId, ActionMapBuilder, ActionMapFileCandidate,
+        ActionMapLimits, KeyCode, MouseButton,
     };
     use nara_reflect::PersistentComponentProvider;
 
     use crate::project_host::{ProjectContentLoader, ProjectContentMemberKind};
 
     let project = SourceProject::new();
+    let input_path = "input/player.actions.json";
     let manifest_path = project.root.join("nara.toml");
-    let manifest = fs::read_to_string(&manifest_path).unwrap();
+    let manifest = fs::read_to_string(&manifest_path)
+        .unwrap()
+        .replace("scenes = [\"b.scene.json\"]", "scenes = []");
     fs::write(
         &manifest_path,
-        manifest.replace("scenes = [\"b.scene.json\"]", "scenes = []"),
+        format!("{manifest}\n[input]\naction_map = '{input_path}'\n"),
     )
     .unwrap();
     let primary = |id| {
@@ -236,6 +243,27 @@ fn cyclic_scene_dependencies_export_exact_sources_and_check_after_relocation() {
     let a = primary("5422b495-16b7-4f5c-b567-85811976c4a1");
     let b = primary("5422b495-16b7-4f5c-b567-85811976c4b2");
     let c = primary("5422b495-16b7-4f5c-b567-85811976c4c3");
+    let input_product = primary("5422b495-16b7-4f5c-b567-85811976c4d4");
+    let mut builder = ActionMapBuilder::new(ActionMapLimits::default());
+    builder
+        .declare_context(ActionContext::gameplay(), true)
+        .unwrap();
+    let menu = ActionContext::new("menu").unwrap();
+    builder.declare_context(menu.clone(), false).unwrap();
+    for binding in [
+        ActionBinding::key(ActionId::new("jump").unwrap(), KeyCode::Space),
+        ActionBinding::mouse(ActionId::new("fire").unwrap(), MouseButton::Left),
+        ActionBinding::key(ActionId::new("confirm").unwrap(), KeyCode::Enter).with_context(menu),
+    ] {
+        builder.bind(binding).unwrap();
+    }
+    let input_file =
+        ActionMapFileCandidate::new(input_product, builder.compile().unwrap()).unwrap();
+    let input_bytes = input_file.to_json_string().unwrap().into_bytes();
+    // The manifest selects a project-relative source outside Assets, with intrinsic identity only.
+    fs::create_dir(project.root.join("input")).unwrap();
+    fs::write(project.root.join(input_path), &input_bytes).unwrap();
+    assert!(!project.root.join(format!("{input_path}.meta")).exists());
     let linked_scene = |target| {
         let component = SourceText {
             source: AssetRef::Product(target),
@@ -284,6 +312,7 @@ fn cyclic_scene_dependencies_export_exact_sources_and_check_after_relocation() {
         .unwrap();
     let candidate = ingest_project_manifest(&manifest, None).unwrap();
     assert!(candidate.settings().content.scenes.is_empty());
+    assert_eq!(candidate.input_requirement().unwrap().as_str(), input_path);
     let plan = resolve_product_recipe(&candidate, source_text_recipe()).unwrap();
     fs::write(
         project.root.join("schema/authoring.bundle.json"),
@@ -310,6 +339,7 @@ fn cyclic_scene_dependencies_export_exact_sources_and_check_after_relocation() {
             .map(|member| (member.kind(), member.path().as_str()))
             .collect::<Vec<_>>(),
         [
+            (ProjectContentMemberKind::InputActionMap, input_path),
             (ProjectContentMemberKind::ProjectManifest, "nara.toml"),
             (ProjectContentMemberKind::Scene, "scenes/a.scene.json"),
             (
@@ -328,9 +358,22 @@ fn cyclic_scene_dependencies_export_exact_sources_and_check_after_relocation() {
         ]
     );
     assert_eq!(delivery.startup_content().members(), delivery.members());
+    let input_member = delivery
+        .members()
+        .iter()
+        .find(|member| member.kind() == ProjectContentMemberKind::InputActionMap)
+        .unwrap();
+    assert_eq!(
+        input_member.digest(),
+        crate::fs::ContentDigest::of_bytes(&input_bytes)
+    );
+    assert_eq!(
+        input_member.byte_len(),
+        u64::try_from(input_bytes.len()).unwrap()
+    );
 
     // Synthetic artifacts prove source custody and publication only; no process runs here.
-    let prepare = || {
+    let prepare = |destination: &str| {
         let build = project
             .synthetic_build(
                 delivery.startup_content(),
@@ -339,13 +382,12 @@ fn cyclic_scene_dependencies_export_exact_sources_and_check_after_relocation() {
             .unwrap();
         prepare_project_export(ProjectExportRequest::new(
             host_fs::writable_directory(&project.root).unwrap(),
-            RelativeComponent::new("published").unwrap(),
+            RelativeComponent::new(destination).unwrap(),
             delivery.clone(),
             build,
         ))
-        .unwrap()
     };
-    let prepared = prepare();
+    let prepared = prepare("published").unwrap();
     // Catalogue discovery does not make an unrelated Scene part of the exact source receipt.
     fs::write(
         project.root.join("scenes/c.scene.json"),
@@ -360,6 +402,30 @@ fn cyclic_scene_dependencies_export_exact_sources_and_check_after_relocation() {
     assert_eq!(
         published.plan().members().len(),
         delivery.members().len() + 2
+    );
+    let exported_input = published
+        .plan()
+        .members()
+        .iter()
+        .find(|member| {
+            member.kind()
+                == super::ProjectExportMemberKind::Content(ProjectContentMemberKind::InputActionMap)
+        })
+        .unwrap();
+    assert_eq!(
+        exported_input.path().as_str(),
+        format!("project/{input_path}")
+    );
+    assert_eq!(exported_input.digest(), input_member.digest());
+    assert_eq!(
+        fs::read(published_path.join(exported_input.path().as_str())).unwrap(),
+        input_bytes
+    );
+    assert!(
+        !published_path
+            .join("project")
+            .join(format!("{input_path}.meta"))
+            .exists()
     );
     let published_bytes = published
         .plan()
@@ -376,16 +442,35 @@ fn cyclic_scene_dependencies_export_exact_sources_and_check_after_relocation() {
     }
     drop(published);
 
-    for path in ["scenes/b.scene.json", "scenes/b.scene.json.meta"] {
-        let prepared = prepare();
+    for (path, missing) in [
+        ("scenes/b.scene.json", false),
+        ("scenes/b.scene.json.meta", false),
+        (input_path, false),
+        (input_path, true),
+    ] {
+        let prepared = prepare("published").unwrap();
         let root_entries = entries(&project.root);
         let original = fs::read(project.root.join(path)).unwrap();
-        let mut changed = original.clone();
-        *changed.iter_mut().find(|byte| **byte == b' ').unwrap() = b'\t';
-        fs::write(project.root.join(path), changed).unwrap();
+        if missing {
+            fs::remove_file(project.root.join(path)).unwrap();
+        } else {
+            let mut changed = original.clone();
+            *changed.iter_mut().find(|byte| **byte == b' ').unwrap() = b'\t';
+            if path == input_path {
+                let changed_input = ActionMapFileCandidate::decode_json_bytes(&changed).unwrap();
+                assert_eq!(changed_input.product(), input_product);
+            }
+            fs::write(project.root.join(path), changed).unwrap();
+        }
+        match prepare("rejected-before-prepare") {
+            Err(ProjectExportPlanError::ContentChanged { path: rejected, .. }) => {
+                assert_eq!(rejected.as_str(), path);
+            }
+            other => panic!("changed or missing source must refuse preparation: {other:?}"),
+        }
         let rejection = match prepared.publish() {
             super::ProjectExportOutcome::Rejected(rejection) => rejection,
-            other => panic!("changed dependency must refuse publication: {other:?}"),
+            other => panic!("changed or missing source must refuse publication: {other:?}"),
         };
         assert_eq!(
             rejection.kind(),
@@ -397,7 +482,15 @@ fn cyclic_scene_dependencies_export_exact_sources_and_check_after_relocation() {
                 source,
             }) => {
                 assert_eq!(changed.as_str(), path);
-                assert!(matches!(source, FsError::DigestMismatch { .. }));
+                if missing {
+                    assert!(matches!(
+                        source,
+                        FsError::Io { source, .. }
+                            if source.kind() == std::io::ErrorKind::NotFound
+                    ));
+                } else {
+                    assert!(matches!(source, FsError::DigestMismatch { .. }));
+                }
             }
             other => panic!("unexpected dependency source error: {other:?}"),
         }
@@ -417,6 +510,11 @@ fn cyclic_scene_dependencies_export_exact_sources_and_check_after_relocation() {
     for path in ["scenes/a.scene.json", "scenes/b.scene.json"] {
         fs::write(project.root.join(path), b"{ original Scene is unavailable").unwrap();
     }
+    fs::write(
+        project.root.join(input_path),
+        b"{ original Input is unavailable",
+    )
+    .unwrap();
     let exported_root = host_fs::readable_directory(&relocated.join("project")).unwrap();
     assert_ne!(exported_root.identity(), root.identity());
     let manifest = exported_root
@@ -426,6 +524,22 @@ fn cyclic_scene_dependencies_export_exact_sources_and_check_after_relocation() {
     let plan = resolve_product_recipe(&candidate, source_text_recipe()).unwrap();
     let loader = ProjectContentLoader::new(exported_root.share()).unwrap();
     let snapshot = loader.load(&candidate, &plan).unwrap();
+    let input = snapshot.input_action_map().unwrap();
+    assert_eq!(input.product(), input_product);
+    assert_eq!(input.path().as_str(), input_path);
+    assert_eq!(input.source_digest(), input_member.digest());
+    assert_eq!(
+        input.definition().contexts(),
+        input_file.definition().contexts()
+    );
+    assert_eq!(
+        input.definition().bindings(),
+        input_file.definition().bindings()
+    );
+    assert_eq!(
+        fs::read(relocated.join("project").join(input_path)).unwrap(),
+        input_bytes
+    );
     assert_eq!(snapshot.selected_scene_path().as_str(), "a.scene.json");
     assert_eq!(snapshot.selected_scene_product(), Some(a));
     assert_eq!(snapshot.scene(), &scene_a);
@@ -458,6 +572,11 @@ fn cyclic_scene_dependencies_export_exact_sources_and_check_after_relocation() {
     );
     assert_eq!(checked.scene_roots(), delivery.scene_roots());
     assert_eq!(checked.members(), delivery.members());
+    assert_eq!(checked.delivery_digest(), delivery.delivery_digest());
+    assert_eq!(
+        checked.startup_content().content_digest(),
+        delivery.startup_content().content_digest()
+    );
     assert_eq!(
         checked.startup_content().members(),
         delivery.startup_content().members()

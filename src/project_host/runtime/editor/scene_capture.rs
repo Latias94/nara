@@ -1175,6 +1175,9 @@ fn admission_error(
             ));
             report
         }
+        E::InputFormat { path, .. } => {
+            capture_source_error("project.editor.scene-capture-input-rejected", path.as_str())
+        }
         E::SourcePath { path, .. }
         | E::SourceHost { path, .. }
         | E::SourceIdentityKindConflict { path }
@@ -1186,6 +1189,7 @@ fn admission_error(
         ),
         E::AssetMetadataChanged { path }
         | E::AssetMetadataFormat { path, .. }
+        | E::IntrinsicSourceMetadataMismatch { path }
         | E::AssetIdentity { path, .. } => {
             capture_source_error("project.editor.scene-capture-asset-rejected", path.as_str())
         }

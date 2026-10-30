@@ -17,7 +17,8 @@ use nara::{
         PluginProductCapability,
     },
     fs::{FileCapability, TrustMode},
-    project::{ProductCapability, RuntimeConfiguration, RuntimePreset},
+    input::{INPUT_PLUGIN_ID, InputPlugin},
+    project::{ProductCapability, ProjectPath, RuntimeConfiguration, RuntimePreset},
     project_host::{
         CompositionError, ProjectCandidateErrorKind, RuntimeConfigurationPlanError,
         RuntimePlanError, ingest_project_manifest, resolve_product_recipe,
@@ -106,6 +107,8 @@ pending_capacity = 8
     let runtime = resolve_runtime_configuration(&configuration, recipe).unwrap();
 
     assert_eq!(source.lineage(), candidate.lineage());
+    assert!(candidate.input_requirement().is_none());
+    assert!(source.input_requirement().is_none());
     assert_eq!(source.settings(), runtime.settings());
     assert_eq!(
         runtime.settings().to_configuration().resolve().unwrap(),
@@ -245,6 +248,98 @@ fn probe_recipe(instances: &Arc<AtomicUsize>) -> ProductRecipe {
             FactoryProbe
         })
         .unwrap()
+}
+
+#[derive(Default)]
+struct InputCategoryOnly;
+
+impl Plugin for InputCategoryOnly {
+    fn declaration() -> &'static PluginDeclaration {
+        static DECLARATION: PluginDeclaration = PluginDeclaration::new(
+            PluginId::new("test.runtime-configuration.input-category-only"),
+            PluginCategory::Input,
+        );
+        &DECLARATION
+    }
+
+    fn build(&self, _app: &mut App) -> Result<(), PluginError> {
+        panic!("composition must finish before plugin build")
+    }
+}
+
+#[test]
+fn source_input_requires_the_actual_selected_input_plugin_before_app_creation() {
+    let manifest = TestManifest::new(
+        r#"
+schema_version = 1
+[project]
+source_universe = 'ab6dcb23-33ca-59eb-85d5-31234eb0e2ea'
+native_document_identity = 'project_location'
+name = 'Source input owner selection'
+[runtime]
+preset = 'server'
+[input]
+action_map = 'input/game.actions.json'
+[profiles.without_input.input]
+clear_action_map = true
+"#,
+    );
+    let candidate = ingest_project_manifest(&manifest.capability(), None).unwrap();
+    let input_path = ProjectPath::new("input/game.actions.json").unwrap();
+    assert_eq!(candidate.input_requirement(), Some(&input_path));
+    let instances = Arc::new(AtomicUsize::new(0));
+    for recipe in [
+        probe_recipe(&instances),
+        probe_recipe(&instances)
+            .add_plugin::<InputCategoryOnly>()
+            .unwrap(),
+    ] {
+        let error = resolve_product_recipe(&candidate, recipe).unwrap_err();
+        assert_eq!(
+            error,
+            RuntimePlanError::Composition(CompositionError::InputOwnerRequired)
+        );
+        assert_eq!(instances.load(Ordering::SeqCst), 0);
+    }
+
+    let source = resolve_product_recipe(
+        &candidate,
+        probe_recipe(&instances)
+            .add_plugin::<InputPlugin>()
+            .unwrap(),
+    )
+    .unwrap();
+    assert_eq!(source.input_requirement(), Some(&input_path));
+    assert!(
+        source
+            .plugin_plan()
+            .entries()
+            .iter()
+            .any(|entry| entry.plugin_id() == INPUT_PLUGIN_ID)
+    );
+    assert_eq!(instances.load(Ordering::SeqCst), 0);
+
+    let runtime =
+        resolve_runtime_configuration(candidate.runtime_configuration(), probe_recipe(&instances))
+            .unwrap();
+    assert_eq!(source.settings(), runtime.settings());
+    assert!(
+        !runtime
+            .plugin_plan()
+            .entries()
+            .iter()
+            .any(|entry| entry.plugin_id() == INPUT_PLUGIN_ID)
+    );
+
+    let cleared = ingest_project_manifest(&manifest.capability(), Some("without_input")).unwrap();
+    assert!(cleared.input_requirement().is_none());
+    let cleared_source = resolve_product_recipe(&cleared, probe_recipe(&instances)).unwrap();
+    assert!(cleared_source.input_requirement().is_none());
+    assert_eq!(
+        cleared_source.plugin_plan().fingerprint(),
+        runtime.plugin_plan().fingerprint()
+    );
+    assert_eq!(instances.load(Ordering::SeqCst), 0);
 }
 
 #[test]

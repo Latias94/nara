@@ -1633,7 +1633,10 @@ fn vec2_is_finite(value: Vec2) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{ActionId, ActionMap};
+    use crate::{
+        ActionBinding, ActionContext, ActionId, ActionMap, ActionMapBuilder, ActionMapLimits,
+    };
+    use nara_core::ByteLimit;
 
     fn slot_generation(value: u64) -> InputSlotGeneration {
         InputSlotGeneration::new(value).unwrap()
@@ -2474,9 +2477,27 @@ mod tests {
         let window = InputWindowId::new(1);
         let seat = InputSeatId::PRIMARY;
         let pointer = InputPointerId::PRIMARY;
-        let mut actions = ActionMap::default();
-        actions.bind_key(ActionId::new("confirm").unwrap(), KeyCode::Enter);
-        actions.bind_mouse(ActionId::new("fire").unwrap(), MouseButton::Left);
+        let mut builder = ActionMapBuilder::new(ActionMapLimits::default());
+        builder
+            .declare_context(ActionContext::gameplay(), true)
+            .unwrap();
+        builder
+            .bind(ActionBinding::key(
+                ActionId::new("confirm").unwrap(),
+                KeyCode::Enter,
+            ))
+            .unwrap();
+        builder
+            .bind(ActionBinding::mouse(
+                ActionId::new("fire").unwrap(),
+                MouseButton::Left,
+            ))
+            .unwrap();
+        let actions = ActionMap::new(
+            builder.compile().unwrap().into_bindings(),
+            ByteLimit::new(ActionMap::required_state_bytes()).unwrap(),
+        )
+        .unwrap();
 
         let mut gameplay_owned = published_timeline();
         let gameplay_route = gameplay_owned.pointer_route(window, seat, None);
@@ -2839,8 +2860,21 @@ mod tests {
     #[test]
     fn independent_cursors_and_ui_consumption_preserve_paused_action_edges() {
         let mut timeline = published_timeline();
-        let mut actions = ActionMap::default();
-        actions.bind_key(ActionId::new("confirm").unwrap(), KeyCode::Enter);
+        let mut builder = ActionMapBuilder::new(ActionMapLimits::default());
+        builder
+            .declare_context(ActionContext::gameplay(), true)
+            .unwrap();
+        builder
+            .bind(ActionBinding::key(
+                ActionId::new("confirm").unwrap(),
+                KeyCode::Enter,
+            ))
+            .unwrap();
+        let actions = ActionMap::new(
+            builder.compile().unwrap().into_bindings(),
+            ByteLimit::new(ActionMap::required_state_bytes()).unwrap(),
+        )
+        .unwrap();
         timeline
             .apply_pointer(
                 InputWindowId::new(1),

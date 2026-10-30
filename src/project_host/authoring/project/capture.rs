@@ -2,6 +2,7 @@
 
 use super::*;
 
+mod input;
 pub(super) mod prefabs;
 pub(super) mod scenes;
 #[cfg(any(feature = "tooling", test))]
@@ -10,6 +11,10 @@ pub(crate) use prefabs::AuthoringPrefabSourceCapture;
 
 #[cfg(all(test, any(windows, target_os = "linux")))]
 mod tests;
+
+#[cfg(all(test, any(windows, target_os = "linux")))]
+#[path = "capture/tests/input.rs"]
+mod input_tests;
 
 /// An immutable working copy paired with its last accepted file receipt.
 ///
@@ -269,6 +274,7 @@ impl OwnedAuthoringSceneCapture {
             &self.open_prefabs,
             &self.open_scenes,
             AuthoringCapturePreview::Prepare,
+            None,
         )?;
         // Selected documents transfer into composition ownership during loading. The other
         // working copies remain request inputs until preparation physically returns. Host
@@ -539,6 +545,11 @@ impl AuthoringSourceValidation {
         for source in self.sources.iter() {
             revalidate_source_fact(&self.schema.project_root, source, budget)?;
         }
+        input::revalidate_metadata_absence(
+            &self.schema.project_root,
+            self.sources.iter().map(Arc::as_ref),
+            budget,
+        )?;
         for source in schema_source_facts(&self.schema) {
             revalidate_source_fact(&self.schema.project_root, &source, budget)?;
         }
@@ -691,6 +702,7 @@ pub(super) fn capture_scene(
     open_prefabs: &[AuthoringPrefabSessionSnapshot],
     open_scenes: &[AuthoringSceneSessionSnapshot],
     preview: AuthoringCapturePreview,
+    project_input: Option<&ProjectPath>,
 ) -> Result<AuthoringDocumentCapture, AuthoringProjectSourceAdmissionError> {
     let mut acquisition = prefabs::AuthoringPrefabAcquisition::new(
         schema,
@@ -757,6 +769,11 @@ pub(super) fn capture_scene(
             }
             captured_scenes.insert(canonical.as_str().to_owned(), compiled.source);
         }
+    }
+    // Only project startup capture activates global project inputs. Ordinary document capture
+    // remains driven by its selected Scene and actual dependencies.
+    if let Some(path) = project_input {
+        input::capture(&mut acquisition, path, &mut asset_database)?;
     }
     let prefabs::AuthoringPrefabAcquisition {
         budget,
@@ -842,6 +859,11 @@ pub(super) fn capture_scene(
         &mut identities,
         &mut source_facts,
         &catalogue,
+        budget,
+    )?;
+    input::revalidate_metadata_absence(
+        &schema.project_root,
+        source_facts.values().map(Arc::as_ref),
         budget,
     )?;
     for scene in captured_scenes.values() {

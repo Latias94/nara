@@ -445,6 +445,7 @@ impl EditorProjectSession {
             | ProjectContentErrorKind::InvalidLogicalPath
             | ProjectContentErrorKind::ClosurePathCollision
             | ProjectContentErrorKind::SceneFormat
+            | ProjectContentErrorKind::InputDefinition
             | ProjectContentErrorKind::ScenePublication
             | ProjectContentErrorKind::PrefabExpansion
             | ProjectContentErrorKind::AssetReference

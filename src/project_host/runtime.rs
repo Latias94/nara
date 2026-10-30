@@ -907,6 +907,16 @@ impl ProjectHost {
                 "Project content was not admitted against the selected runtime schema owners",
             )));
         }
+        if snapshot
+            .input_action_map()
+            .map(|input| input.path().as_str())
+            != plan.input_requirement().map(|path| path.as_str())
+        {
+            return Err(HostFault::new(single_error(
+                "project.run.input-selection-mismatch",
+                "Captured global Input does not fulfill the source plan selection",
+            )));
+        }
         self.begin_start_inputs(
             RuntimeStartContent::Source { snapshot, plan },
             startup_scene,
@@ -995,6 +1005,40 @@ impl ProjectHost {
         let materialization = Arc::new(OnceLock::new());
         let command_result = Arc::clone(&materialization);
         let admission = candidate.with_admission_scope(move |scope| {
+            let input_selection = match &admission_content {
+                RuntimeStartContent::Source { snapshot, .. } => snapshot
+                    .input_action_map()
+                    .map(|input| input.prepare_state())
+                    .transpose()
+                    .map_err(|error| HostFault::new(error.diagnostics().clone())),
+                RuntimeStartContent::Processed { .. } => Ok(None),
+            };
+            let input_selection = input_selection.and_then(|selection| {
+                if admission_plan
+                    .plugin_plan()
+                    .entries()
+                    .iter()
+                    .any(|entry| entry.plugin_id() == nara_input::INPUT_PLUGIN_ID)
+                {
+                    nara_input::finalize_input_selection(scope, selection).map_err(|_| {
+                        HostFault::new(single_error(
+                            "project.run.input-selection-rejected",
+                            "Runtime Input owner refused the global selection",
+                        ))
+                    })
+                } else if selection.is_some() {
+                    Err(HostFault::new(single_error(
+                        "project.run.input-owner-missing",
+                        "Runtime global Input selection has no selected Input owner",
+                    )))
+                } else {
+                    Ok(())
+                }
+            });
+            if let Err(error) = input_selection {
+                assert!(command_result.set(Err(error)).is_ok());
+                return;
+            }
             scope.apply_command(move |world: &mut World| {
                 let value = materialize_runtime(
                     world,
@@ -1005,12 +1049,13 @@ impl ProjectHost {
                 )
                 .and_then(|diagnostics| {
                     let context = match &admission_content {
-                        RuntimeStartContent::Source { plan, .. } => match scene_preparation {
+                        RuntimeStartContent::Source { plan, snapshot } => match scene_preparation {
                             Some((candidate, loader)) => scene_requests::install_context(
                                 world,
                                 candidate,
                                 plan.clone(),
                                 loader,
+                                snapshot.input_action_map().cloned(),
                             ),
                             None => Ok(()),
                         },
@@ -1909,6 +1954,7 @@ fn runtime_plan_failure_report(error: &RuntimePlanError) -> DiagnosticReport {
 fn composition_failure_report(error: &CompositionError) -> DiagnosticReport {
     let reason = match error {
         CompositionError::ProjectLineageMismatch => "project-lineage-mismatch",
+        CompositionError::InputOwnerRequired => "input-owner-required",
         CompositionError::UnsupportedDefaultConfiguration { .. } => {
             "unsupported-default-configuration"
         }
@@ -1980,6 +2026,7 @@ fn composition_failure_report(error: &CompositionError) -> DiagnosticReport {
             diagnostic = attach_identifier(diagnostic, "second_owner", second_owner.as_str());
         }
         CompositionError::ProjectLineageMismatch
+        | CompositionError::InputOwnerRequired
         | CompositionError::SchemaFreezeRejected { .. }
         | CompositionError::SceneBindingsRejected { .. }
         | CompositionError::SchemaAuthorityPublicationFailed => {}
