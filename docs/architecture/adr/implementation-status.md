@@ -45,7 +45,7 @@ preserve semantic lifetimes. Its [qualification](../../knowledge/engineering/ver
 records final source/Authoring/Export105, independent physical5, owner17, Reference179, samples34,
 native3, full workspace check and correctness Clippy, with broad predecessor failure history and
 focused repairs. The subsequent [processed Input unit](../../plans/2026-10-30-processed-input-startup-and-process-proof-plan.md)
-is qualified through its [own evidence](../../knowledge/engineering/verification/2026-10/2026-10-30T100534Z-processed-startup-input-ownership-and-prebuilt-source-free-physical-process-qualification-35c2432f89d04982b10d2be3fa0f9d12.md):
+is qualified at `ffa5795` through its [own evidence](../../knowledge/engineering/verification/2026-10/2026-10-30T100534Z-processed-startup-input-ownership-and-prebuilt-source-free-physical-process-qualification-35c2432f89d04982b10d2be3fa0f9d12.md):
 primary Product configuration, strict Runtime codec, actual selected typed acquisition, independent
 World state and pre-Startup installation. Root1113, final Input126, source5/runner3, Reference179
 and final affected7, final native3, workspace/minimal/Clippy/format checks pass within the recorded

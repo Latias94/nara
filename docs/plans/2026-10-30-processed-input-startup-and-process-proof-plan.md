@@ -67,6 +67,8 @@ Editor remain separate ordered work.
 
 ## Qualified Outcome
 
+Implementation: `ffa5795` (`feat(input)!: retain processed startup definitions through original ownership`).
+
 The [qualification record](../knowledge/engineering/verification/2026-10/2026-10-30T100534Z-processed-startup-input-ownership-and-prebuilt-source-free-physical-process-qualification-35c2432f89d04982b10d2be3fa0f9d12.md)
 records actual primary Product admission, strict codec, original selected implementation/frozen
 limits, retained acquisition, independently charged state, first Startup and complete cleanup.
