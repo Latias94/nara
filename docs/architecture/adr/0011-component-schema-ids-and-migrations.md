@@ -2,7 +2,7 @@
 
 **Status**: Accepted
 **Date**: 2026-07-08
-**Last Revised**: 2026-10-27
+**Last Revised**: 2026-10-30
 **Amended**: 2026-07-12 by RGF-U1 for stable field identity and registry freeze; 2026-10-24 by
 R5a for scoped Schema-relative property selectors; 2026-10-27 for caller-owned property value budgets
 **Refined By**: ADR 0043: Scene, Prefab, and Patch Document Migration Policy; ADR 0045: Component
@@ -32,6 +32,15 @@ Rules:
   records, lists, string-key maps, optional values and typed reference leaves share that authority.
   Opaque Map/List leaves explicitly retain manual-codec semantics without declaring nested
   reference authority. Enum/tuple shapes and a general Rust reflection/type registry are deferred.
+- An AssetRef leaf explicitly declares Immediate or Deferred load demand, independently of
+  optional/null shape and field presence. The canonical Schema representation includes demand;
+  fingerprints and the existing bounded nested/default/property reference visitor preserve it.
+  Rust AssetRef fields construct Immediate unless explicitly declared otherwise. A field-wide
+  derive override applies to its actual asset leaves; it cannot annotate a scalar or discover
+  references inside Opaque data. Manual nested declarations can mix demand. The
+  [selected demand design](../reference-validity-and-load-demand-design.md) and
+  [plan](../../plans/2026-10-30-reference-validity-and-load-demand-plan.md) own this unqualified
+  replacement; existing reference-addressing evidence does not prove demand-aware preparation.
 - Root fields retain component-wide stable `ComponentFieldId` values. A nested Record member may
   opt into a sibling-scoped stable `ComponentFieldId`, addressed through its complete stable
   ancestor chain. Reusable nested shapes do not allocate different member IDs at every use site.

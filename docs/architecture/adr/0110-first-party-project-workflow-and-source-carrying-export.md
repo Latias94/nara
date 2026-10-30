@@ -240,6 +240,15 @@ the same retained cleanup owner. This does not change Editor exact-step semantic
 
 ### Evidence authority
 
+The [selected reference-demand successor](../reference-validity-and-load-demand-design.md)
+distinguishes current startup preparation from strict saved-source validation/delivery. Both
+Immediate and Deferred mandatory references participate in complete Check/Export, including
+dependency-only targets. A resolved Deferred source binding alone cannot certify its payload or
+auxiliary Products. Retain separate immediate startup and full delivery observations, actual
+production compiler/importer checks, bounded disposal and exact receipt revalidation. This is
+unqualified work under the [CP3 plan](../../plans/2026-10-30-reference-validity-and-load-demand-plan.md);
+the preceding finite eager-source evidence keeps its original scope.
+
 Product validation uses one parent-owned machine-readable trajectory. The parent workflow issues
 one trajectory identity and predecessor-bound attempt identity for each child process, then accepts
 an observation only when it matches the exact executable digest, manifest digest, product profile

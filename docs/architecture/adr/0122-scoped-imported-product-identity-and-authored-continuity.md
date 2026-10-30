@@ -132,6 +132,15 @@ proof that it retained every retired ID.
 
 ## Operation And Publication Boundaries
 
+Deferred reference resolution under the
+[selected demand design](../reference-validity-and-load-demand-design.md) proves the actual
+source/catalogue binding only. Generic metadata cannot prove that an auxiliary Product exists
+inside the current compound payload. Strict saved-source Check/Export and actual acquisition
+still execute the domain's real importer/codec and membership query before their respective
+success/publication. Do not expose resolved targets as validated decoded Products or inspect
+domain-private settings in the Host. This unqualified successor is separate from the current
+eager preparation contract; no default-success target validator is selected.
+
 `AssetDomain` identifies a typed CPU product family. Source/import and processed Runtime codec
 facets are independently implemented and selected under ADR 0103. The family marker alone
 installs neither. A Runtime-only package does not implement an importer merely to name its product,

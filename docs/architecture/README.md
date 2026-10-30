@@ -107,6 +107,14 @@ completion and concrete Editor/tool consumers inside the existing rebaseline pla
 research keeps its original revision and evidence limits; this integration does not qualify
 those replacements or promote Proposed ADRs.
 
+Its CP3 successor now has a [selected reference/demand design](reference-validity-and-load-demand-design.md)
+and [complete consumer plan](../plans/2026-10-30-reference-validity-and-load-demand-plan.md).
+Per-leaf Immediate/Deferred meaning, actual dependency equality and strict saved-source/deep
+validation separate target resolution from current resource preparation. The
+[pinned Bevy/Godot comparison](../research/2026-10-30-reference-validity-and-current-demand.md)
+supplies source constraints; implementation and qualification remain outstanding. Immutable
+encoded backing/residency is a separate CP4 comparison.
+
 ## Background Designs
 
 The [Tasks activity-custody design](task-activity-scope-design.md) separates optional Host-owned

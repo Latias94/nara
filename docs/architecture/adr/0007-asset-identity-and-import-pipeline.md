@@ -167,6 +167,18 @@ weak handle identity alone cannot authorize loading or residency.
 
 ### Verified Local Runtime Bases
 
+The [reference-demand successor](../reference-validity-and-load-demand-design.md) selects separate
+Immediate/Deferred payload semantics before target/package contract freeze. Required catalogue
+edges represent current demand; Reference edges require membership without propagating current
+preparation; existing Soft retains missing-allowed semantics. Actual normalized Schema/codec
+dependencies must exactly match mandatory declarations before outgoing traversal, with Immediate
+precedence for duplicate actual uses. Deep validation follows both mandatory roles through the
+production decoders without publishing native residency. Ordinary source Deferred resolution is
+a binding observation, not proof of arbitrary compound payload membership. This selected
+replacement is not yet implemented or qualified; eager-closure evidence below retains its
+original scope until the [owning plan](../../plans/2026-10-30-reference-validity-and-load-demand-plan.md)
+qualifies its successor. Immutable backing/capture guarantees remain separate.
+
 The root content Host owns a concrete `runtime_content_catalog`, canonical version 1, and an
 immutable local encoded base. The Host supplies the expected catalog content digest and selected
 target/profile independently of package bytes. Catalog data cannot select Rust code or authorize
@@ -200,8 +212,13 @@ views can share the same admitted acquisition. In one prepared generation, decod
 member once per exact family/definition and map all its complete Products to that retained owner.
 Several codecs serving one family aggregate into one typed collection. Independent public
 acquisitions remain independently charged; this does not introduce a global cache.
-Family preparation follows canonical definition order and members follow canonical catalog order,
-so equivalent recipe selections do not change shared-budget admission through insertion order.
+The existing eager implementation follows canonical definition/member order. The selected
+actual-first demand successor replaces that global decode sequence with a private canonical
+pending-set priority over verified discovered work: pending Scenes by member order, then Assets
+by definition/member order. A dependency cannot be decoded before its parent's actual admission
+reveals it, even if its definition sorts earlier. Final collections remain canonically ordered.
+Equivalent recipe insertion order must preserve discovery/admission and shared-budget outcomes;
+the CP3 qualification includes this dependency-order/overlap control.
 
 Each complete `AssetProductRef` maps to exactly one bounded member and its declared Runtime
 format. Several products may share one compound member. Member paths, encoded digests, logical

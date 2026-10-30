@@ -64,6 +64,13 @@ neutral examples, four selected Windows/DX12 trajectories and the formal Referen
 observation path. The record retains broad-run failure/correction history and precise limits.
 Seat/analog/replay, full editable text, target-build and packaged delivery remain separate.
 
+The [reference-validity/current-demand design](../reference-validity-and-load-demand-design.md)
+and its [unit plan](../../plans/2026-10-30-reference-validity-and-load-demand-plan.md) select the
+next CP3 contract under ADRs0007/0011/0033/0047/0110/0122. Actual mandatory dependency equality,
+per-leaf demand and distinct strict validation replace the eager-reference assumption. This is
+design only; no demand-aware source/processed Runtime or deep-validation successor is qualified.
+The pinned reference study and prior finite closure evidence retain their separate scopes.
+
 The [October 29 rendering review](../../research/2026-10-29-render-architecture-and-refactor-plan-review.md)
 and long-horizon refinement prefer a finite explicit resource graph, typed contributions and
 runner-owned execution in Proposed 0121. Design covers foreseeable shared/cross-view output,

@@ -346,6 +346,13 @@ Rules:
   is materialized. The accepted capture retains the actual raw and effective dependency data
   through preview publication, replacement and retirement; an accounting allowance alone cannot
   substitute for custody of those documents.
+- The [selected demand successor](../reference-validity-and-load-demand-design.md) refines
+  "demands" to Immediate value/structural use. A Deferred target's binding observation does not
+  make its dirty document or native resources a current preview participant. If a separate deep
+  working-copy validation is advertised, it captures/fences every actual participating dirty
+  Session/revision/Schema. Saved-source Check cannot certify that result. This replacement is
+  unqualified under its [plan](../../plans/2026-10-30-reference-validity-and-load-demand-plan.md);
+  the existing finite eager-capture evidence retains its original scope.
 - File-backed Check, source-carrying Export/delivery and Runtime capture retain their saved-source
   policies. Ordinary supervised Play retains ADR 0116's saved-source policy; this Authoring capture
   contract does not redefine trusted compiled Play source selection or ADR 0114's separate

@@ -91,6 +91,14 @@ Rules:
 
 ### Source-Independent Image Content
 
+The [selected reference-demand successor](../reference-validity-and-load-demand-design.md)
+separates a future valid target from current decoded/native preparation. Immediate payload
+dependencies still require actual values and the same typed publication owner; Deferred targets
+do not become native residency inputs merely because they are deliverable catalogue members.
+Check/Export and explicit deep validation retain real importer/codec membership checks. This is
+planned under [CP3](../../plans/2026-10-30-reference-validity-and-load-demand-plan.md), not new
+Image/TileSet qualification or a change to independent native validation and pixel custody.
+
 `ImageAsset::new` accepts extent, format, color interpretation and pixel bytes without persistent
 identity. `from_product` explicitly associates content with a complete Product. `from_import`
 derives the PRIMARY Product and color from actual admitted import provenance.
