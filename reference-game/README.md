@@ -94,6 +94,11 @@ an isolated extraction, home, working-directory, and temporary root beneath the 
 safe work parent. The archive consumer verifies the fixed entry table, regular-file modes, byte
 budgets, manifest, and every file digest before extraction.
 
+UI correlation compares the source document/entity and control facts. The emitted expanded Scene
+`entity_id` is diagnostic and is excluded from normalized authoring equality; independent Hosts
+need not allocate the same projection identifiers. Presented UI/GPU correlation still requires the
+exact accepted frame, receipt and backend generation.
+
 No public candidate has been published yet. A local archive is preparation evidence only until the
 documented hosted Windows and Linux candidate and no-checkout consumer jobs pass.
 

@@ -800,7 +800,7 @@ def ui_observation(presented):
         "surface_id": 1,
         "authored_size": [960.0, 540.0],
         "retry": {
-            "entity_id": "reference-ui/retry-button",
+            "entity_id": "prefab_12" if presented else "prefab_7",
             "source_document": "reference-ui.prefab.json",
             "source_entity": "retry-button",
             "action": "reference-game.retry",
@@ -837,6 +837,16 @@ def ui_observation(presented):
             "paint_primitives": 32,
         }
     return observation
+
+for field in ("source_document", "source_entity"):
+    wrong_source = ui_observation(False)
+    wrong_source["retry"][field] = "unrelated-source"
+    try:
+        smoke.validate_ui_observation(wrong_source, field, require_presentation=False)
+    except smoke.ArtifactError:
+        pass
+    else:
+        raise AssertionError(f"different authored source was accepted: {field}")
 
 def headless_output():
     records = [

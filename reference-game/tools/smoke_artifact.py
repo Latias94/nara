@@ -656,6 +656,7 @@ def run_bounded(
             command,
             cwd=cwd,
             env=environment,
+            stdin=subprocess.DEVNULL,
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
             start_new_session=os.name == "posix",
@@ -775,7 +776,8 @@ def validate_ui_observation(
             "enabled",
             "authored_size",
         }
-        or retry.get("entity_id") != "reference-ui/retry-button"
+        or not isinstance(retry.get("entity_id"), str)
+        or not retry["entity_id"]
         or retry.get("source_document") != "reference-ui.prefab.json"
         or retry.get("source_entity") != "retry-button"
         or not isinstance(retry.get("action"), str)
@@ -865,7 +867,6 @@ def validate_ui_observation(
     return {
         "surface_id": value["surface_id"],
         "authored_size": value["authored_size"],
-        "retry_entity_id": retry["entity_id"],
         "retry_source_document": retry["source_document"],
         "retry_source_entity": retry["source_entity"],
         "retry_action": retry["action"],
