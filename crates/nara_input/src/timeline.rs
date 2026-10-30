@@ -15,6 +15,10 @@ use crate::{
 #[path = "timeline/types.rs"]
 mod types;
 
+#[cfg(test)]
+#[path = "timeline/capacity.rs"]
+mod capacity;
+
 #[doc(hidden)]
 pub use types::{__InputDriverEvent, __InputDriverOutput};
 pub use types::{
