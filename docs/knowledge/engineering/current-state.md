@@ -3,7 +3,7 @@ type: "Current State"
 title: "Current Engineering State"
 description: "Derived summary of immutable engineering-memory shards."
 tags: ["engineering-memory", "derived"]
-source_fingerprint: "4d40aa8742f001705e937369b5c2f749e32bd61da4c37f2de618cbe74ed5cbb7"
+source_fingerprint: "295ccc1ab8a7c793a2132c71be1aaceacef42ac2e1783d6d463ea980b2e980ec"
 ---
 
 # Current State
@@ -12,8 +12,8 @@ source_fingerprint: "4d40aa8742f001705e937369b5c2f749e32bd61da4c37f2de618cbe74ed
 
 This file is derived from immutable shards. Record new facts in shards, then render during integration.
 
-- Source fingerprint: `4d40aa8742f001705e937369b5c2f749e32bd61da4c37f2de618cbe74ed5cbb7`
-- Immutable records: 1086
+- Source fingerprint: `295ccc1ab8a7c793a2132c71be1aaceacef42ac2e1783d6d463ea980b2e980ec`
+- Immutable records: 1089
 - Active lane heads: 2
 
 # Active Registrations
@@ -51,7 +51,7 @@ This file is derived from immutable shards. Record new facts in shards, then ren
 - [Editor foundation U9 and U1-U8 complete with exact-source external acceptance](registry/2026-10/2026-10-17T102710Z-nara-editor-foundation-implementation-codex-root-76fa1ccb656c4ebd8c2b5f77f83287f7.md): `completed` (nara-editor-foundation-implementation-codex-root; producer `codex-root`)
 - [Editor foundation research and refactor planning complete](registry/2026-10/2026-10-16T044159Z-nara-editor-foundation-planning-codex-root-d0e8f37adfd54751b67d7ae647f06d83.md): `completed` (nara-editor-foundation-planning-codex-root; producer `codex-root`)
 - [First 2D author workflow complete with clean committed-source acceptance](registry/2026-10/2026-10-16T025148Z-nara-first-2d-author-workflow-codex-root-fe7312236c5d4906b8e950d366111171.md): `completed` (nara-first-2d-author-workflow-codex-root; producer `codex-root`)
-- [Foundation source recipes and CPU Image cook qualified; durable groups next](registry/2026-10/2026-10-30T205413Z-nara-foundation-rebaseline-codex-main-3a33523640aa4d568b3041b26199741b.md): `active` (nara-foundation-rebaseline-codex-main; producer `codex-foundation-main`)
+- [Foundation finite local artifact builds qualified; target delivery and remaining waves open](registry/2026-10/2026-10-30T232921Z-nara-foundation-rebaseline-codex-main-df3cc019087541f9a65ba97996e39b64.md): `active` (nara-foundation-rebaseline-codex-main; producer `codex-foundation-main`)
 - [Ordinary structural authoring qualified](registry/2026-10/2026-10-20T053614Z-ordinary-authoring-codex-root-ac405c79936d43b09f6cfb4197d747ed.md): `completed` (ordinary-authoring-codex-root; producer `codex-root`)
 - [Persistent checkpoint consumer qualified on Windows](registry/2026-10/2026-10-21T032628Z-persistent-two-level-game-codex-root-1ac997abdab142e590af8a6c21f9f443.md): `complete` (persistent-two-level-game-codex-root; producer `codex-root`)
 - [N05 plugin failure facts qualified](registry/2026-10/2026-10-19T172945Z-plugin-error-facts-codex-root-c20974513f104398967edbed73efccaa.md): `completed` (plugin-error-facts-codex-root; producer `codex-root`)
@@ -70,6 +70,8 @@ This file is derived from immutable shards. Record new facts in shards, then ren
 
 # Recent Evidence
 
+- **Verification Evidence**: [Tracked local artifact builds and complete-group publication qualification](verification/2026-10/2026-10-30T231610Z-tracked-local-artifact-builds-and-complete-group-publication-qualification-d3fcd08e15e04d45812ae09d7c81e944.md) - Finite typed compound and Image execution, current-input reuse, whole-group publication and original Runtime custody.
+- **Work Progress**: [Tracked local artifact execution and complete-group store implementation in progress](progress/2026-10/2026-10-30T213010Z-tracked-local-artifact-execution-and-complete-group-store-implementation-in-progress-610ba9175c1b41bebdaa3f8f0c86bd79.md) - Work Progress for Tracked local artifact execution and complete-group store implementation in progress.
 - **Verification Evidence**: [Source import recipes and target-sensitive CPU Image cook prerequisite qualification](verification/2026-10/2026-10-30T201802Z-source-import-recipes-and-target-sensitive-cpu-image-cook-prerequisite-qualification-462c0179d20b44fd8545d4c135e814f9.md) - Verification Evidence for Source import recipes and target-sensitive CPU Image cook prerequisite qualification.
 - **Work Progress**: [Durable build recipe successor and source provenance replacement in progress](progress/2026-10/2026-10-30T193104Z-durable-build-recipe-successor-and-source-provenance-replacement-in-progress-d866a6d48d1c440e802557c7954186ec.md) - Work Progress for Durable build recipe successor and source provenance replacement in progress.
 - **Verification Evidence**: [Retained Runtime pack and independent encoded residency qualification](verification/2026-10/2026-10-30T184847Z-retained-runtime-pack-and-independent-encoded-residency-qualification-386d2e5e9c124b66bc4390f69b796053.md) - Verification Evidence for Retained Runtime pack and independent encoded residency qualification.
@@ -80,8 +82,6 @@ This file is derived from immutable shards. Record new facts in shards, then ren
 - **Work Progress**: [Reference validity and current load demand design selected after pinned source review](progress/2026-10/2026-10-30T145320Z-reference-validity-and-current-load-demand-design-selected-after-pinned-source-review-33a51556e0074d0180f63ff2eacb189a.md) - Records the CP3 owning design, compound/Authoring proof limits, exact-set admission and deterministic discovered-work scheduling before implementation.
 - **Verification Evidence**: [Bounded Input ownership and total UI presentation qualification](verification/2026-10/2026-10-30T140508Z-bounded-input-ownership-and-total-ui-presentation-qualification-b97643044e4a4f92b892a3539d2ad415.md) - Qualifies finite ingress/member ownership, exact endpoint claims, total UI completion, explicit candidate queries and the real Reference desktop observation path.
 - **Work Progress**: [Explicit UI candidate API and Runtime-bound Reference presentation observation](progress/2026-10/2026-10-30T133904Z-explicit-ui-candidate-api-and-runtime-bound-reference-presentation-observation-4ac94530888142ae8d956f4172287842.md) - Reference consumer failures reveal ambiguous candidate lookup and a real post-commit production observation defect; direct API replacement and exact owner/session repair are frozen for final qualification.
-- **Work Progress**: [Bounded Input final owner and native qualification before Reference Game completion](progress/2026-10/2026-10-30T132119Z-bounded-input-final-owner-and-native-qualification-before-reference-game-completion-3e6f71eb12e94826a83c0938e275993a.md) - Final endpoint-claim repair, frozen source, actual owner/root/native evidence, and the remaining real consumer run.
-- **Work Progress**: [Bounded Input review fixes and exact UI endpoint claims in progress](progress/2026-10/2026-10-30T122704Z-bounded-input-review-fixes-and-exact-ui-endpoint-claims-in-progress-c2ed3f627bb247e7af1dc960a3acb659.md) - Independent review corrections, current owning test evidence, and active UI connection-claim integration; replacement remains uncommitted.
 
 # Integration Notes
 
