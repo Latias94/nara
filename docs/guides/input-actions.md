@@ -45,7 +45,7 @@ observations or semantic outcomes for recording instead of copying the runtime r
 ## Context Changes And Rebinding
 
 Enable and disable only declared contexts. Both operations report whether the state changed and
-reject an unknown name. Disabling a held context emits one semantic release with
+borrow the context identity, rejecting an unknown name. Disabling a held context emits one semantic release with
 `SemanticActionCause::ContextChanged` and no physical provenance. Re-enabling that context does
 not synthesize a press: release the physical input and press it again.
 
@@ -89,6 +89,42 @@ restoring the original admitted source permits a retry. Once a target is Ready, 
 uses its captured facts. Check and source Export include the selected file in the same content
 receipt as the actual Scene closure.
 
+## Processed Runtime Selection
+
+Source-independent Runtime configuration selects a complete primary Product through
+`RuntimeConfiguration::input.action_map`. This is a global startup root, independent of Scene
+roots and travel permissions. The executable recipe must select both `InputPlugin` and an actual
+`ActionMapDomain` decoder through `add_runtime_asset_codec`. The first-party codec is
+`ActionMapRuntimeCodec`; a recipe may explicitly select another implementation of the same
+typed family and format. The base preserves the actual selected implementation and its frozen
+limits. Product data cannot choose a different decoder.
+
+Cook an admitted source definition by consuming it into the processed CPU asset:
+
+```rust
+use nara_asset::RuntimeAssetCodec;
+use nara_input::{ActionMapAsset, ActionMapFileCandidate, ActionMapRuntimeCodec};
+
+let source = ActionMapFileCandidate::decode_json_bytes(source_bytes)?;
+let (product, definition) = source.into_parts();
+let asset = ActionMapAsset::new(product, definition)?;
+let processed_bytes = ActionMapRuntimeCodec::encode_runtime(&asset)?;
+```
+
+The processed envelope uses kind `runtime_action_map`, version one. Source and processed readers
+reject each other's kinds; both use the same finite declaration compiler. The processed asset
+has no Required dependencies, filesystem capability or mutable World state. See the
+[processed golden](../../crates/nara_input/tests/fixtures/formats/v1/runtime-action-map.json).
+Construct the verified catalog and independent expectation as described in the
+[Runtime base guide](runtime-content-base.md#global-startup-input).
+
+`HeadlessRun::from_runtime_content` and `DesktopRun::from_runtime_content` install the global
+selection before Scene materialization and Startup, with the same explicit-code conflict rule
+as the source path. Scene travel preserves its actual acquisition, context state and held mapping
+lifetimes. A Scene may independently read the same Product as Required typed CPU data, with its
+own acquisition charge; that read cannot install or reconfigure global Input. With no selected
+Product, code-first Input remains valid.
+
 ## Ownership And Scope
 
 `ProjectContentSnapshot::input_action_map()` borrows the source owner. Its `bindings()` handle
@@ -96,12 +132,21 @@ retains actual compiled data and the original reservation after the snapshot is 
 last escaped handle releases that custody. World-local context/revision state has a separate
 reservation; queued lifetime observations can retain it after a resource is replaced.
 
+`RuntimeContentBase::acquire_startup_input()` returns the optional `RuntimeInputContent` owner.
+Its `bindings()` handle retains the actual typed acquisition and original base reservation after
+the content handle or base variable is dropped. A second acquisition of equal Product data has
+its own charge and owner identity. First-party startup separately reserves World-local state
+from that same base; replacing Scene collections does not release or recreate that state.
+
 Independent Hosts install a prepared global selection through `finalize_input_selection` and the
 existing `RuntimeCandidateScope`. This receiving operation finalizes once, distinguishes pristine
 Input defaults from explicit configuration, and is unavailable through a post-Startup runtime
 scope. Ordinary source Hosts perform this step as part of startup.
 
-Current action bindings cover keys and mouse buttons. Analog bindings, chords, a visual action-map
-editor and processed startup Input delivery remain separate workflows. See [ADR 0041](../architecture/adr/0041-input-routing-actions-text-focus-and-accessibility.md)
-for the owning contracts and the [Input plan](../plans/2026-10-30-input-definition-and-source-admission-plan.md)
-for actual qualification scope.
+Current action bindings cover keys and mouse buttons. Analog bindings, chords and a visual
+action-map editor remain separate workflows. The current state allowance does not bound all
+physical endpoint or semantic-contribution growth; that mutation-boundary correction remains
+open under foundation R10. See [ADR 0041](../architecture/adr/0041-input-routing-actions-text-focus-and-accessibility.md)
+for the owning contracts, the [source plan](../plans/2026-10-30-input-definition-and-source-admission-plan.md)
+and [processed plan](../plans/2026-10-30-processed-input-startup-and-process-proof-plan.md) for their
+actual qualification scopes. Target-build selection and complete packaged delivery remain separate.

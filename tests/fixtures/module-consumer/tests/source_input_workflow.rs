@@ -549,7 +549,7 @@ fn advance(world: &mut World) {
             assert!(
                 world
                     .resource_mut::<ActionMap>()
-                    .disable_context(ActionContext::gameplay())
+                    .disable_context(&ActionContext::gameplay())
                     .unwrap()
             );
             world.resource_mut::<Outcome>().phase = Phase::Cancelled;
@@ -559,7 +559,7 @@ fn advance(world: &mut World) {
             assert_eq!(world.resource::<Outcome>().semantic.len(), 4);
             {
                 let mut map = world.resource_mut::<ActionMap>();
-                assert!(!map.disable_context(ActionContext::gameplay()).unwrap());
+                assert!(!map.disable_context(&ActionContext::gameplay()).unwrap());
                 assert!(map.enable_context(&ActionContext::gameplay()).unwrap());
                 assert!(map.enable_context(&menu()).unwrap());
             }

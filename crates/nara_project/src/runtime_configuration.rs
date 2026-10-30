@@ -1,6 +1,7 @@
 use std::time::Duration;
 
 use nara_app::{FixedCatchUpPolicy, FixedTime, RuntimeTimeSettings};
+use nara_asset::{AssetProductRef, ImportedProductId};
 use nara_diagnostic::DiagnosticReport;
 use nara_window::{PresentMode, WindowMode};
 use serde::{Deserialize, Serialize};
@@ -157,11 +158,38 @@ mod duration_serde {
     }
 }
 
+/// Processed startup Input selection, independent of source action-map paths.
+///
+/// Admission through [`RuntimeConfiguration::resolve`] requires a complete primary Product.
+/// The catalogue and compiled recipe separately prove membership, the typed codec and Input owner.
+#[derive(Debug, Clone, Default, PartialEq, Deserialize, Serialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct RuntimeInputConfiguration {
+    pub action_map: Option<AssetProductRef>,
+}
+
+impl RuntimeInputConfiguration {
+    fn validate_into(&self, diagnostics: &mut DiagnosticReport, prefix: &str) {
+        if self
+            .action_map
+            .is_some_and(|reference| reference.product() != ImportedProductId::PRIMARY)
+        {
+            diagnostics.push(with_field_path(
+                error(
+                    "runtime.configuration.input-primary-required",
+                    "Runtime input action-map selection requires a primary product",
+                ),
+                &format!("{prefix}.action_map"),
+            ));
+        }
+    }
+}
+
 /// Serializable runtime values, independent of project source and profile selection.
 ///
 /// Deserialization produces an untrusted record. Call [`Self::resolve`] to validate and admit
 /// these values before runtime composition. This record neither selects executable code nor
-/// carries project paths, content, source identity, or an external Play execution contract.
+/// carries project paths, source authority, Scene selection, or an external Play execution contract.
 #[derive(Debug, Clone, Default, PartialEq, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct RuntimeConfiguration {
@@ -178,6 +206,8 @@ pub struct RuntimeConfiguration {
     #[serde(default)]
     pub window: ProjectWindowManifest,
     #[serde(default)]
+    pub input: RuntimeInputConfiguration,
+    #[serde(default)]
     pub diagnostics: ProjectDiagnosticsManifest,
 }
 
@@ -192,6 +222,7 @@ impl RuntimeConfiguration {
         self.render.validate_into(&mut diagnostics, "render");
         self.ui.validate_into(&mut diagnostics, "ui");
         self.window.validate_into(&mut diagnostics, "window");
+        self.input.validate_into(&mut diagnostics, "input");
         self.diagnostics
             .validate_into(&mut diagnostics, "diagnostics");
         if diagnostics.has_errors() {
@@ -221,6 +252,7 @@ impl RuntimeConfiguration {
             render: self.render.into(),
             ui: EffectiveUiSettings::from_manifest(self.ui.clone()),
             window,
+            input: self.input.clone(),
             diagnostics,
         })
     }
@@ -240,6 +272,11 @@ impl RuntimeConfiguration {
 /// let mut effective = nara_project::RuntimeConfiguration::default().resolve().unwrap();
 /// effective.window().width = 0;
 /// ```
+///
+/// ```compile_fail
+/// let effective = nara_project::RuntimeConfiguration::default().resolve().unwrap();
+/// effective.input().action_map = None;
+/// ```
 #[derive(Debug, Clone, PartialEq)]
 pub struct EffectiveRuntimeConfiguration {
     runtime_preset: RuntimePreset,
@@ -249,6 +286,7 @@ pub struct EffectiveRuntimeConfiguration {
     render: EffectiveRenderSettings,
     ui: EffectiveUiSettings,
     window: EffectiveWindowSettings,
+    input: RuntimeInputConfiguration,
     diagnostics: EffectiveDiagnosticsSettings,
 }
 
@@ -288,6 +326,12 @@ impl EffectiveRuntimeConfiguration {
         &self.window
     }
 
+    /// Returns the admitted processed startup Input selection.
+    #[must_use]
+    pub const fn input(&self) -> &RuntimeInputConfiguration {
+        &self.input
+    }
+
     #[must_use]
     pub const fn diagnostics(&self) -> &EffectiveDiagnosticsSettings {
         &self.diagnostics
@@ -306,6 +350,7 @@ impl EffectiveRuntimeConfiguration {
             &self.render,
             &self.ui,
             &self.window,
+            &self.input,
             &self.diagnostics,
         )
     }
@@ -323,7 +368,7 @@ pub struct SourceRuntimeProjection {
 }
 
 impl SourceRuntimeProjection {
-    /// Returns the independently admitted runtime values.
+    /// Returns the independently admitted runtime values with no processed Input selection.
     #[must_use]
     pub const fn runtime(&self) -> &EffectiveRuntimeConfiguration {
         &self.runtime
@@ -382,6 +427,7 @@ impl EffectiveProjectSettings {
             &self.render,
             &self.ui,
             &self.window,
+            &RuntimeInputConfiguration::default(),
             &self.diagnostics,
         );
         let effective = configuration.resolve()?;
@@ -413,6 +459,7 @@ impl EffectiveProjectSettings {
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 fn configuration_record(
     requested_capabilities: ProductCapabilitySet,
     runtime: RuntimeTimeConfiguration,
@@ -420,6 +467,7 @@ fn configuration_record(
     render: &EffectiveRenderSettings,
     ui: &EffectiveUiSettings,
     window: &EffectiveWindowSettings,
+    input: &RuntimeInputConfiguration,
     diagnostics: &EffectiveDiagnosticsSettings,
 ) -> RuntimeConfiguration {
     RuntimeConfiguration {
@@ -468,6 +516,7 @@ fn configuration_record(
             },
             resizable: window.resizable,
         },
+        input: input.clone(),
         diagnostics: ProjectDiagnosticsManifest {
             runtime_capacity: diagnostics.runtime.entry_limit().get(),
         },

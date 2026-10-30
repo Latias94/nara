@@ -187,6 +187,7 @@ enum RuntimeStartContent {
     Processed {
         base: RuntimeContentBase,
         content: Arc<ProcessedSceneContent>,
+        input: Option<crate::runtime_content::RuntimeInputContent>,
     },
 }
 
@@ -209,6 +210,7 @@ enum RuntimeStartStamp {
     Processed {
         base: RuntimeContentBase,
         content: Weak<ProcessedSceneContent>,
+        input: Option<crate::runtime_content::RuntimeInputObservation>,
         bindings: SceneComponentBindings,
     },
 }
@@ -222,9 +224,14 @@ impl RuntimeStartStamp {
                 schema_fingerprint: snapshot.schema_fingerprint(),
                 bindings: plan.schema_validation().bindings().clone(),
             },
-            RuntimeStartContent::Processed { base, content } => Self::Processed {
+            RuntimeStartContent::Processed {
+                base,
+                content,
+                input,
+            } => Self::Processed {
                 base: base.clone(),
                 content: Arc::downgrade(content),
+                input: input.as_ref().map(|input| input.observe()),
                 bindings: base.plan().schema_validation().bindings().clone(),
             },
         }
@@ -254,14 +261,26 @@ impl RuntimeStartStamp {
                 Self::Processed {
                     base,
                     content: original,
+                    input: original_input,
                     bindings,
                 },
                 RuntimeStartContent::Processed {
                     base: selected,
                     content,
+                    input,
                 },
             ) => {
                 base.same_base(selected)
+                    && match (original_input, input) {
+                        (Some(original), Some(selected)) => {
+                            original.matches(selected)
+                                && base.same_base(selected.base())
+                                && Some(selected.product())
+                                    == base.plan().settings().input().action_map
+                        }
+                        (None, None) => true,
+                        _ => false,
+                    }
                     && base.same_base(content.base())
                     && Weak::ptr_eq(original, &Arc::downgrade(content))
                     && content.product() == base.catalog().startup_scene()
@@ -839,6 +858,9 @@ impl ProjectHost {
             )));
         }
         verify_processed_runtime_plan(base.plan())?;
+        let input = base
+            .acquire_startup_input()
+            .map_err(|error| processed_content_fault(&error))?;
         let content = base
             .prepare_scene_content(base.catalog().startup_scene())
             .map_err(|error| processed_content_fault(&error))?;
@@ -857,7 +879,11 @@ impl ProjectHost {
         }
         let startup_scene = SceneSource::from_hosted_runtime_content(content.scene.clone());
         self.begin_start_inputs(
-            RuntimeStartContent::Processed { base, content },
+            RuntimeStartContent::Processed {
+                base,
+                content,
+                input,
+            },
             startup_scene,
             commands,
         )
@@ -1011,7 +1037,11 @@ impl ProjectHost {
                     .map(|input| input.prepare_state())
                     .transpose()
                     .map_err(|error| HostFault::new(error.diagnostics().clone())),
-                RuntimeStartContent::Processed { .. } => Ok(None),
+                RuntimeStartContent::Processed { input, .. } => input
+                    .as_ref()
+                    .map(|input| input.prepare_state())
+                    .transpose()
+                    .map_err(|error| processed_content_fault(&error)),
             };
             let input_selection = input_selection.and_then(|selection| {
                 if admission_plan
@@ -1908,6 +1938,8 @@ impl HostFault {
 }
 
 fn processed_content_fault(error: &RuntimeContentError) -> HostFault {
+    use crate::runtime_content::RuntimeContentBudgetKind;
+
     let reason = match error {
         RuntimeContentError::Host(_) => "capability-read-failed",
         RuntimeContentError::Catalog(_) => "catalog-rejected",
@@ -1937,11 +1969,34 @@ fn processed_content_fault(error: &RuntimeContentError) -> HostFault {
         RuntimeContentError::Budget { .. } => "budget-exceeded",
         RuntimeContentError::BudgetOverflow { .. } => "budget-overflow",
     };
-    HostFault::new(single_diagnostic(failure_diagnostic(
+    let mut diagnostic = failure_diagnostic(
         "project.run.runtime-content-rejected",
         "Runtime content was rejected before startup",
         reason,
-    )))
+    );
+    if let RuntimeContentError::Budget { kind, .. } | RuntimeContentError::BudgetOverflow { kind } =
+        error
+    {
+        let kind = match kind {
+            RuntimeContentBudgetKind::MemberEncodedBytes => "member-encoded-bytes",
+            RuntimeContentBudgetKind::TotalEncodedBytes => "total-encoded-bytes",
+            RuntimeContentBudgetKind::RetainedBytes => "retained-bytes",
+            RuntimeContentBudgetKind::WorkBytes => "work-bytes",
+        };
+        diagnostic = attach_identifier(diagnostic, "budget-kind", kind);
+    }
+    if let RuntimeContentError::Budget {
+        required, limit, ..
+    } = error
+    {
+        diagnostic = attach_u64(diagnostic, "required", *required);
+        diagnostic = attach_u64(diagnostic, "limit", *limit);
+    }
+    let mut diagnostics = single_diagnostic(diagnostic);
+    if let RuntimeContentError::Asset(error) = error {
+        diagnostics.push(error.diagnostic().clone());
+    }
+    HostFault::new(diagnostics)
 }
 
 fn runtime_plan_failure_report(error: &RuntimePlanError) -> DiagnosticReport {
@@ -1955,6 +2010,7 @@ fn composition_failure_report(error: &CompositionError) -> DiagnosticReport {
     let reason = match error {
         CompositionError::ProjectLineageMismatch => "project-lineage-mismatch",
         CompositionError::InputOwnerRequired => "input-owner-required",
+        CompositionError::InputCodecRequired => "input-codec-required",
         CompositionError::UnsupportedDefaultConfiguration { .. } => {
             "unsupported-default-configuration"
         }
@@ -2027,6 +2083,7 @@ fn composition_failure_report(error: &CompositionError) -> DiagnosticReport {
         }
         CompositionError::ProjectLineageMismatch
         | CompositionError::InputOwnerRequired
+        | CompositionError::InputCodecRequired
         | CompositionError::SchemaFreezeRejected { .. }
         | CompositionError::SceneBindingsRejected { .. }
         | CompositionError::SchemaAuthorityPublicationFailed => {}

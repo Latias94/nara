@@ -2,7 +2,7 @@
 
 **Status**: Accepted
 **Date**: 2026-07-09
-**Last Revised**: 2026-10-29
+**Last Revised**: 2026-10-30
 **Refines**: ADR 0020: Project Source Layout
 **Refined By**: ADR 0039: Main Loop, Time Domains, Pause, and Runtime State; ADR 0041: Input Routing,
 Actions, Text Input, UI Focus, and Accessibility; ADR 0046: Plugin Metadata and Default Plugin
@@ -43,10 +43,14 @@ fields. Both paths use the same time and fixed-work admission rules. Projection 
 effective task and diagnostic policies that their selected raw section codecs cannot express,
 rather than truncating timeouts or silently discarding policy.
 
-Source-relative `input.action_map` has no admitted processed Runtime representation yet. A
-remaining path explicitly refuses Runtime projection; selecting a profile that explicitly clears
-it is valid. Projection must not silently discard a requested input map. A concrete input-resource
-delivery workflow can replace this restriction later through its own owner.
+`RuntimeInputConfiguration` selects an optional complete primary action-map Product for processed
+startup. It contains no source path and grants no decoder or executable-selection authority.
+Admission rejects auxiliary selections; the actual catalogue and original compiled recipe must
+prove the selected runtime member, typed codec and Input owner before startup. Source-relative
+`input.action_map` remains a separate obligation: strict Runtime projection refuses a remaining
+path, and a profile may explicitly clear it. No projection silently discards that request or
+guesses a processed Product. The [processed Input plan](../../plans/2026-10-30-processed-input-startup-and-process-proof-plan.md)
+owns implementation and qualification of the new Runtime selection.
 
 Source-backed composition uses an explicit `SourceRuntimeProjection` containing admitted shared
 Runtime values and the remaining Input selection obligation. This projection does not make a

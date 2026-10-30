@@ -154,6 +154,28 @@ captured facts rather than discovering or installing another map at commit. The 
 are selected contracts; their implementation and actual qualification belong in the
 [Input plan](../../plans/2026-10-30-input-definition-and-source-admission-plan.md) and ledger.
 
+### Processed Startup Input
+
+The `ActionMapAsset` CPU family carries a complete primary Product and immutable definition.
+Its concrete `runtime_action_map` version-one codec shares finite declaration admission with
+the source format but accepts only its own envelope kind. It explicitly declares no Required
+references. The original compiled recipe selects the actual codec and frozen limits; no source
+importer or Input registry is needed for this Runtime-only operation facet.
+
+An optional Product in admitted Runtime configuration is a startup root independent of Scene
+and addressable roots. The catalogue verifies its membership and format; composition requires
+the actual Input plugin and selected typed decoder. Startup acquires through the original base,
+retains the actual typed acquisition, separately admits mutable state and finalizes selection
+through the existing candidate scope. Global startup Input is acquired and installed once for
+the receiving World. Scene collection replacement cannot own its only custody or recreate that
+World-local state. Explicit Scene Required references may independently acquire ActionMap products
+as typed CPU data, retaining their own acquisition charges from the original base. These reads
+grant no authority to reinstall or reconfigure global Input. When no Product is selected, explicit
+code-first Input remains valid. An explicitly installed code map, including empty, competes with
+a selected processed map.
+Actual implementation and source-free physical process evidence follow the
+[processed Input plan](../../plans/2026-10-30-processed-input-startup-and-process-proof-plan.md).
+
 ## Alternatives Considered
 
 ### Option A: Gameplay systems read raw keys and mouse state directly

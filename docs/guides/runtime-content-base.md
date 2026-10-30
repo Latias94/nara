@@ -23,6 +23,7 @@ CPU collections and keep concrete native publication with their consuming owner.
 | `RuntimeCodecDefinitionId` | Package author's versioned declaration of one compiled family/codec binding |
 | `RuntimeContentBase` | Shared immutable encoded snapshot plus its original configuration plan |
 | `RuntimeContentAsset<P>` / `RuntimeContentScene` | Admitted decoded output retaining its base and reservation |
+| `RuntimeInputContent` | Global startup definition retaining its actual typed acquisition independently of Scene collections |
 | Native handle and residency | Separately admitted and published state in a receiving Runtime |
 
 The Host supplies `RuntimeContentExpectation` with the expected catalog digest and target/profile.
@@ -111,6 +112,36 @@ the concrete consuming owner still admits those facts.
 The concrete [Runtime Image guide](runtime-images.md) describes `ImageDomain` and
 `ImageRuntimeCodec`, source-independent pixels and the original decode reservation retained by
 escaped CPU/native/prepared captures. Image membership is one complete Product per member.
+
+## Global Startup Input
+
+Select an optional complete primary Product in `RuntimeConfiguration::input.action_map` and
+register the executable decoder with the recipe:
+
+```rust,ignore
+configuration.input.action_map = Some(action_map_product);
+let recipe = game_recipe()?.add_runtime_asset_codec::<ActionMapDomain, ActionMapRuntimeCodec>(
+    RuntimeCodecDefinitionId::new("studio.input.runtime", 1),
+)?;
+```
+
+The selected configuration must include the actual Input plugin. Catalog admission requires one
+`runtime_action_map` version-one member containing exactly that primary Product. This startup
+selection does not grant Scene or addressable-root permissions. Source projection retains its
+path obligation separately; it does not silently convert an authored path into this Product.
+
+The first-party runs acquire and install global Input once before Scene materialization and
+Startup. `RuntimeContentBase::acquire_startup_input()` exposes the optional retained CPU owner for
+inspection. Its bindings preserve the actual `RuntimeContentAsset<ActionMapAsset>`, original
+base and decoded-output reservation. Mutable context and mapping state receives a separate
+reservation from that base. Explicit code configuration, including an empty map, competes with
+the selected Product and refuses before Startup.
+
+Scene travel preserves the global owner and mutable state. An explicit Scene Required reference
+may independently acquire the same Product as typed CPU data and pay its own decode/output
+charge; it gains no installation authority. Failure or cancellation preserves the original
+running World, and an escaped bindings handle retains its acquisition until its last owner drops.
+The [Input guide](input-actions.md) describes cooking, contexts and the distinct file kinds.
 
 ## Materialization And Retention
 
@@ -202,7 +233,7 @@ separate decodes of one Product remain independently charged.
 
 These are modeled content-owner costs, not allocator capacity or RSS. Compiled plugin/Schema
 construction and allocations inside trusted native code retain their existing owner contracts.
-Native GPU/device objects, additional concrete family residency, input-map representation, the
+Native GPU/device objects, additional concrete family residency, broader Input device/replay workflows, the
 complete packaged Player/build entry, target stripping/build selection, CAS, patch/DLC and remote authenticity
 remain separate work in the [ordered delivery plan](../plans/2026-10-29-asset-import-and-runtime-delivery-plan.md).
 The current local base neither adds a universal decoder registry nor implements a second asset

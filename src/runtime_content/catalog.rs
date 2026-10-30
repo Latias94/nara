@@ -642,6 +642,22 @@ impl RuntimeContentCatalog {
                 product: self.startup_scene,
             });
         }
+        if let Some(product) = self.configuration.input.action_map {
+            use nara_asset::RuntimeAssetCodec;
+            let expected_kind = nara_input::ActionMapRuntimeCodec::RUNTIME_KIND;
+            let expected_version = nara_input::ActionMapRuntimeCodec::RUNTIME_VERSION;
+            let member = self.member_for_product(product);
+            if product.product() != nara_asset::ImportedProductId::PRIMARY
+                || member.is_none_or(|member| member.products() != &[product])
+                || !matches!(
+                    member.map(RuntimeContentMember::kind),
+                    Some(RuntimeContentMemberKind::Asset { format, version })
+                        if format.as_str() == expected_kind && version.get() == expected_version
+                )
+            {
+                return Err(RuntimeContentCatalogError::InvalidStartupInput { product });
+            }
+        }
         for product in &self.addressable_roots {
             if self.member_for_product(*product).is_none() {
                 return Err(RuntimeContentCatalogError::MissingAddressableProduct {
@@ -810,6 +826,9 @@ pub enum RuntimeContentCatalogError {
     MissingAddressableProduct {
         product: AssetProductRef,
     },
+    InvalidStartupInput {
+        product: AssetProductRef,
+    },
     NonfiniteConfiguration,
     Shape(SerdeShapeError),
     Contract(PersistentFileContractError),
@@ -881,6 +900,10 @@ impl fmt::Display for RuntimeContentCatalogError {
             Self::MissingAddressableProduct { product } => write!(
                 formatter,
                 "Runtime catalog addressable root {product} has no member"
+            ),
+            Self::InvalidStartupInput { product } => write!(
+                formatter,
+                "Runtime catalog startup Input {product} requires one complete primary runtime_action_map member"
             ),
             Self::NonfiniteConfiguration => formatter.write_str(
                 "Runtime catalog configuration cannot encode nonfinite floating-point values",

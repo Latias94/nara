@@ -266,8 +266,15 @@ publishes nothing and cannot borrow capacity after allocation. Shared acquisitio
 retain the same admitted charge through their existing custody; independent decodes are charged
 independently even when they select the same logical Product. Cost queries grant no I/O,
 dependency acquisition, publication or native residency authority.
-This adopts only local capture/acquisition and shared composition/Scene retention. Automatic
-resource residency, a packaged Player entry, target cooking/stripping, input-map delivery, CAS,
+Processed startup Input follows ADR 0041's concrete CPU family and selected Runtime codec.
+The optional configured complete Product is an independent startup root with catalogue membership
+and format validation. A captured bindings owner retains its actual typed acquisition and original
+base; mutable context/revision state has a separate allowance. Global Input selection is independent
+of Scene residency and is not reinstalled during travel. The processed Input plan owns actual
+implementation and source-free physical process qualification.
+
+This adopts local capture/acquisition, shared composition/Scene retention and the concrete Input
+startup contract above. Automatic resource residency, a packaged Player entry, target cooking/stripping, CAS,
 resolver replacement, patch/DLC and remote trust still need their complete workflows and evidence
 under the ordered delivery plan. Proposed ADR 0088 is not accepted wholesale.
 

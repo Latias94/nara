@@ -9,10 +9,13 @@
 mod budget;
 mod catalog;
 mod codecs;
+mod input;
 mod prepared;
 
 pub use codecs::{RuntimeCodecDefinitionId, RuntimeCodecSelectionError, RuntimeCodecsFingerprint};
 pub(crate) use codecs::{RuntimeCodecRole, RuntimeCodecs};
+pub use input::RuntimeInputContent;
+pub(crate) use input::RuntimeInputObservation;
 pub(crate) use prepared::ProcessedSceneContent;
 
 use std::{

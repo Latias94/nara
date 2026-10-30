@@ -492,7 +492,7 @@ mod tests {
         .unwrap();
         let mut staging = ActionStaging::default();
         staging.observe(&map);
-        map.disable_context(context.clone()).unwrap();
+        map.disable_context(&context).unwrap();
         map.enable_context(&context).unwrap();
         let revision = staging.observe(&map);
         assert!(revision.contexts[0].is_some());

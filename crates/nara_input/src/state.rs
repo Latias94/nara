@@ -140,8 +140,8 @@ impl ActionMap {
         self.explicit = true;
     }
 
-    pub fn disable_context(&mut self, context: ActionContext) -> Result<bool, ActionMapError> {
-        self.set_context_enabled(&context, false)
+    pub fn disable_context(&mut self, context: &ActionContext) -> Result<bool, ActionMapError> {
+        self.set_context_enabled(context, false)
     }
 
     pub fn enable_context(&mut self, context: &ActionContext) -> Result<bool, ActionMapError> {

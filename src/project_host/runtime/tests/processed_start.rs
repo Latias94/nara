@@ -419,14 +419,17 @@ fn processed_start_stamp_rejects_an_equal_catalog_base_and_reprepared_scene() {
         RuntimeStartContent::Processed {
             base: foreign.clone(),
             content: foreign.prepare_scene_content(startup()).unwrap(),
+            input: None,
         },
         RuntimeStartContent::Processed {
             base: base.clone(),
             content: base.prepare_scene_content(startup()).unwrap(),
+            input: None,
         },
         RuntimeStartContent::Processed {
             base: base.clone(),
             content: base.prepare_scene_content(later()).unwrap(),
+            input: None,
         },
     ] {
         attempt.inputs.as_mut().unwrap().content = replacement;

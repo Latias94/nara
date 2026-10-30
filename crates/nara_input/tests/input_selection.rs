@@ -300,7 +300,11 @@ fn no_selection_preserves_explicit_code_state_and_finalizes_once() {
             action_map("code.confirm", KeyCode::Enter)
         };
         if !empty {
-            assert!(code_map.disable_context(ActionContext::gameplay()).unwrap());
+            assert!(
+                code_map
+                    .disable_context(&ActionContext::gameplay())
+                    .unwrap()
+            );
         }
         let expected = code_map.bindings_handle();
         with_scope(&mut candidate, |scope| {
@@ -325,7 +329,9 @@ fn no_selection_preserves_explicit_code_state_and_finalizes_once() {
 fn failed_selection_preserves_configuration_and_can_retry_in_the_same_scope() {
     let mut candidate = candidate(true);
     let mut code_map = action_map("code.confirm", KeyCode::Enter);
-    code_map.disable_context(ActionContext::gameplay()).unwrap();
+    code_map
+        .disable_context(&ActionContext::gameplay())
+        .unwrap();
     let code_bindings = code_map.bindings_handle();
     let original_bindings = candidate.world().resource::<ActionMap>().bindings_handle();
     let selected = action_map("file.jump", KeyCode::Space);

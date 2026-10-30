@@ -2283,6 +2283,7 @@ dependencies = [
  "nara_app",
  "nara_asset",
  "nara_core",
+ "nara_diagnostic",
  "nara_ecs",
  "serde",
  "serde_json",
@@ -2304,6 +2305,7 @@ name = "nara_project"
 version = "0.1.0"
 dependencies = [
  "nara_app",
+ "nara_asset",
  "nara_core",
  "nara_diagnostic",
  "nara_ecs",

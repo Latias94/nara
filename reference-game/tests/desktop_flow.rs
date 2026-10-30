@@ -60,7 +60,7 @@ impl Plugin for InputContextProbe {
                 if enabled.load(Ordering::Relaxed) {
                     actions.enable_context(&ActionContext::gameplay()).unwrap();
                 } else {
-                    actions.disable_context(ActionContext::gameplay()).unwrap();
+                    actions.disable_context(&ActionContext::gameplay()).unwrap();
                 }
             })
             .before(nara::input::__private::InputSet::StageActions),

@@ -141,6 +141,41 @@ impl RuntimeCodecs {
         self.definitions.is_empty()
     }
 
+    pub(crate) fn has_family_format<D: AssetDomain>(&self, format: &str, version: u32) -> bool {
+        self.definitions.iter().any(|definition| {
+            definition.family == TypeId::of::<D>()
+                && definition.format == format
+                && definition.version == version
+        })
+    }
+
+    /// Uses the original selected decoder for this actual family and member. Product data
+    /// chooses no Rust implementation; the immutable executable plan already selected it.
+    pub(crate) fn acquire_selected<D: AssetDomain>(
+        &self,
+        base: &RuntimeContentBase,
+        product: AssetProductRef,
+    ) -> Result<RuntimeContentAsset<D::Product>, RuntimeContentError> {
+        let member = base
+            .member(product)
+            .ok_or(RuntimeContentError::UndeclaredProduct)?;
+        let family = self
+            .families
+            .iter()
+            .find(|family| family.family_type() == TypeId::of::<D>())
+            .and_then(|family| family.as_any().downcast_ref::<TypedFamily<D>>())
+            .ok_or(RuntimeContentError::CodecNotSelected)?;
+        let RuntimeContentMemberKind::Asset { format, version } = member.kind() else {
+            return Err(RuntimeContentError::NotAsset);
+        };
+        let selected = family
+            .codecs
+            .iter()
+            .find(|codec| codec.format == format.as_str() && codec.version == version.get())
+            .ok_or(RuntimeContentError::CodecNotSelected)?;
+        (selected.acquire)(base, product)
+    }
+
     pub(crate) fn add<D, C>(
         &mut self,
         id: RuntimeCodecDefinitionId,

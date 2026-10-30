@@ -521,7 +521,8 @@ native trust. Delete duplicate root/domain registrations and incorrect recipe/co
 ## R7: Target Build And Base Source-Free Delivery
 
 **Design:** D12. **State:** in progress; immutable local base and bounded first-party startup/travel
-qualified, including finite source Scene references; input, target-build selection and packaged delivery remain open.
+qualified, including finite source Scene references and global source/processed Input;
+target-build selection and packaged delivery remain open.
 **Owners:** Cargo tooling, Host capture/cook and Runtime loader.
 
 Separate Host tool selection, target executable artifacts, content cook, release candidate and
@@ -552,8 +553,11 @@ live definitions and detached retention with immutable actual owners, move-only 
 scope-only startup selection under amended ADRs 0035/0041/0051. Its
 [qualification](../knowledge/engineering/verification/2026-10/2026-10-30T083131Z-immutable-input-definitions-and-global-source-workflow-qualification-f8db4628f79943ac94a90593cef6c736.md)
 records actual-file, independent physical travel, Editor receipts and relocated source Export.
-Continue processed
-input and target delivery after that complete source workflow. Future third-party native families
+The [processed Input unit](2026-10-30-processed-input-startup-and-process-proof-plan.md) now owns
+the independent Runtime Product selection, actual acquisition custody and prebuilt source-free
+physical process proof. Its [qualification](../knowledge/engineering/verification/2026-10/2026-10-30T100534Z-processed-startup-input-ownership-and-prebuilt-source-free-physical-process-qualification-35c2432f89d04982b10d2be3fa0f9d12.md)
+records the complete bounded owner/public process and selected Windows/DX12 results. It does not
+close R10 endpoint/contribution admission or general target-build/package delivery. Future third-party native families
 need a typed publication facet through the same owner before their Material/render interface
 freezes; CPU decode alone grants no residency.
 
@@ -767,6 +771,16 @@ establishes global immutable ownership and independent World state first. Its fi
 workflow does not qualify the seat/gamepad/replay requirements above. Keep the existing endpoint
 and semantic-contribution growth finding visible and repair it in the Input admission owner;
 context/revision costs alone are not a bound for the whole physical pipeline.
+
+The [endpoint admission review](../research/2026-10-30-input-endpoint-admission-and-retirement-review.md)
+traces historical empty rows, live cross-frame memberships and platform-observed cancellation
+that can clear ingress state without admitting terminal events. Its
+[successor plan](2026-10-30-input-endpoint-admission-and-retirement-plan.md) compares finite
+raw-ID admission with lifecycle/member pools and checked generations, including terminal capacity,
+paused consumers, synthetic writers and actual adapter incarnation facts. These are proposed
+owner replacements with source-derived counterexamples; execute the red cases and bounded
+comparison before adopting the concrete contract. Do not qualify complete Input boundedness
+from the preceding source/processed definition work.
 
 ## R11: UI Content Association, Text Admission And Platform Qualification
 

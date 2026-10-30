@@ -18,6 +18,8 @@ use nara_ecs::{Res, ResMut, Resource, bevy_ecs::error::BevyError, schedule::Into
 mod definition;
 #[cfg(feature = "serde")]
 mod format;
+#[cfg(feature = "serde")]
+mod runtime;
 mod schedule;
 mod semantic;
 mod state;
@@ -30,6 +32,8 @@ pub use definition::{
 };
 #[cfg(feature = "serde")]
 pub use format::{ActionMapFileCandidate, ActionMapFileError, ActionMapFileLimits};
+#[cfg(feature = "serde")]
+pub use runtime::{ActionMapAsset, ActionMapDomain, ActionMapRuntimeCodec};
 use schedule::InputSet;
 use semantic::{ActionStaging, StagedActionRevision};
 pub use semantic::{SemanticActionCause, SemanticActionOutcome, SemanticActions};
@@ -1856,7 +1860,7 @@ mod tests {
         app.world_mut()
             .unwrap()
             .resource_mut::<ActionMap>()
-            .disable_context(menu)
+            .disable_context(&menu)
             .unwrap();
         app.world_mut()
             .unwrap()
@@ -2055,7 +2059,7 @@ mod tests {
         )
         .unwrap();
         action_map
-            .disable_context(ActionContext::gameplay())
+            .disable_context(&ActionContext::gameplay())
             .unwrap();
         let bindings = action_map.bindings_handle();
         let revision = Arc::clone(&action_map.revision);

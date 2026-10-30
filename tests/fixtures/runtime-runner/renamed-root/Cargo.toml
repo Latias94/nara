@@ -9,5 +9,11 @@ publish = false
 [workspace]
 resolver = "3"
 
+[[bin]]
+name = "processed_input_player"
+path = "tests/support/processed_input_main.rs"
+test = false
+bench = false
+
 [dependencies]
 engine = { package = "nara", path = "../../../..", default-features = false, features = ["runtime-2d", "serde"] }

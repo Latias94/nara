@@ -5,6 +5,7 @@ use crate::{
     ProductCapability, ProjectManifest, ProjectPath, ProjectTaskPoolManifest,
 };
 use nara_app::{FixedTime, RuntimeTimeSettings};
+use nara_asset::StableAssetId;
 use nara_core::{ByteLimit, TimeLimit};
 use nara_diagnostic::{DiagnosticValueRef, MAX_RUNTIME_DIAGNOSTIC_ENTRIES};
 use nara_tasks::{
@@ -62,6 +63,11 @@ scale_factor = 1.25
 mode = "borderless-fullscreen"
 present_mode = "mailbox"
 resizable = false
+
+[input.action_map]
+source = "919617ea-c89c-4f83-9cce-b084de435a83"
+[input.action_map.product]
+kind = "primary"
 
 [diagnostics]
 runtime_capacity = 37
@@ -140,6 +146,14 @@ fn complete_configuration() -> RuntimeConfiguration {
     toml::from_str(COMPLETE_CONFIGURATION).unwrap()
 }
 
+fn primary_action_map() -> AssetProductRef {
+    AssetProductRef::new(
+        StableAssetId::parse_str("919617ea-c89c-4f83-9cce-b084de435a83").unwrap(),
+        ImportedProductId::PRIMARY,
+    )
+    .unwrap()
+}
+
 fn project_manifest() -> ProjectManifest {
     let load = ProjectManifest::parse_toml_str(PROJECT_SOURCE);
     assert!(!load.has_errors(), "{:?}", load.diagnostics);
@@ -197,10 +211,14 @@ fn defaults_resolve_without_a_source_project() {
     assert!(effective.render().world_canvas.is_none());
     assert!(effective.ui().primary_surface.is_none());
     assert!(effective.window().enabled);
+    assert_eq!(effective.input(), &RuntimeInputConfiguration::default());
     assert_round_trip(&effective);
     for raw in [
         serde_json::from_str::<RuntimeConfiguration>("{}").unwrap(),
+        serde_json::from_str::<RuntimeConfiguration>(r#"{"input":{}}"#).unwrap(),
+        serde_json::from_str::<RuntimeConfiguration>(r#"{"input":{"action_map":null}}"#).unwrap(),
         toml::from_str::<RuntimeConfiguration>("").unwrap(),
+        toml::from_str::<RuntimeConfiguration>("[input]").unwrap(),
     ] {
         assert_eq!(raw.resolve().unwrap(), effective);
     }
@@ -271,8 +289,131 @@ fn complete_configuration_lowers_every_runtime_section() {
             resizable: false,
         }
     );
+    assert_eq!(effective.input().action_map, Some(primary_action_map()));
     assert_eq!(effective.diagnostics().runtime.entry_limit().get(), 37);
     assert_round_trip(&effective);
+}
+
+#[test]
+fn primary_input_selection_exports_the_complete_reference_exactly() {
+    let input = crate::RuntimeInputConfiguration {
+        action_map: Some(primary_action_map()),
+    };
+    let mut raw = RuntimeConfiguration {
+        input: input.clone(),
+        ..Default::default()
+    };
+    let effective = raw.resolve().unwrap();
+    assert_eq!(effective.input(), &input);
+    assert!(effective.requested_capabilities().is_empty());
+    assert_eq!(effective.to_configuration(), raw);
+    assert_round_trip(&effective);
+
+    raw.input.action_map = None;
+    assert_eq!(effective.input(), &input);
+    assert_eq!(effective.to_configuration().input, input);
+}
+
+#[test]
+fn auxiliary_input_products_are_rejected_by_admission() {
+    let mut raw = complete_configuration();
+    raw.input.action_map = Some(
+        AssetProductRef::new(
+            primary_action_map().source(),
+            ImportedProductId::parse_subproduct("011a8cc0-343a-4b95-8adb-3aa6d81977ed").unwrap(),
+        )
+        .unwrap(),
+    );
+    for configuration in [
+        raw.clone(),
+        serde_json::from_str(&serde_json::to_string(&raw).unwrap()).unwrap(),
+        toml::from_str(&toml::to_string(&raw).unwrap()).unwrap(),
+    ] {
+        assert_diagnostic(
+            &configuration.resolve().unwrap_err(),
+            "runtime.configuration.input-primary-required",
+            "input.action_map",
+        );
+    }
+}
+
+#[test]
+fn runtime_input_rejects_source_paths_and_incomplete_or_nil_references() {
+    let source = primary_action_map().source().to_string();
+    for input in [
+        serde_json::json!({"action_map": "source/input.actions.json"}),
+        serde_json::json!({"action_map": {}}),
+        serde_json::json!({"action_map": {"source": source}}),
+        serde_json::json!({"action_map": {"product": {"kind": "primary"}}}),
+        serde_json::json!({"action_map": {
+            "source": "00000000-0000-0000-0000-000000000000",
+            "product": {"kind": "primary"},
+        }}),
+    ] {
+        let record = serde_json::json!({"input": input});
+        let json = serde_json::to_string(&record).unwrap();
+        assert!(
+            serde_json::from_str::<RuntimeConfiguration>(&json).is_err(),
+            "JSON accepted {json}"
+        );
+        let toml = toml::to_string(&record).unwrap();
+        assert!(
+            toml::from_str::<RuntimeConfiguration>(&toml).is_err(),
+            "TOML accepted {toml}"
+        );
+    }
+}
+
+#[test]
+fn json_input_rejects_duplicate_fields() {
+    let reference = serde_json::to_string(&primary_action_map()).unwrap();
+    for json in [
+        r#"{"input":{},"input":{}}"#.to_owned(),
+        r#"{"input":{"action_map":null,"action_map":null}}"#.to_owned(),
+        format!(r#"{{"input":{{"action_map":{reference},"action_map":{reference}}}}}"#),
+    ] {
+        assert!(
+            serde_json::from_str::<RuntimeConfiguration>(&json).is_err(),
+            "JSON accepted {json}"
+        );
+    }
+
+    let source = format!(r#""source":"{}""#, primary_action_map().source());
+    let product = r#"{"kind":"primary"}"#;
+    for fields in [
+        format!(r#"{source},{source},"product":{product}"#),
+        format!(r#"{source},"product":{product},"product":{product}"#),
+        format!(r#"{source},"product":{{"kind":"primary","kind":"primary"}}"#),
+    ] {
+        let reference = format!("{{{fields}}}");
+        let json = format!(r#"{{"input":{{"action_map":{reference}}}}}"#);
+        assert!(
+            serde_json::from_str::<RuntimeConfiguration>(&json).is_err(),
+            "JSON accepted {json}"
+        );
+    }
+}
+
+#[test]
+fn toml_input_rejects_duplicate_fields() {
+    let source = format!(r#"source = "{}""#, primary_action_map().source());
+    let product = r#"{ kind = "primary" }"#;
+    let reference = format!("{{ {source}, product = {product} }}");
+    for toml in [
+        "[input]\n[input]\n".to_owned(),
+        format!("[input]\naction_map = {reference}\naction_map = {reference}\n"),
+        format!("[input.action_map]\n{source}\n{source}\nproduct = {product}\n"),
+        format!("[input.action_map]\n{source}\nproduct = {product}\nproduct = {product}\n"),
+        format!(
+            "[input.action_map]\n{source}\n\
+             [input.action_map.product]\nkind = 'primary'\nkind = 'primary'\n"
+        ),
+    ] {
+        assert!(
+            toml::from_str::<RuntimeConfiguration>(&toml).is_err(),
+            "TOML accepted {toml}"
+        );
+    }
 }
 
 #[test]
@@ -527,6 +668,9 @@ fn json_and_toml_reject_unknown_fields_at_every_runtime_boundary() {
         &["ui", "primary_surface"][..],
         &["ui", "primary_surface", "safe_area"][..],
         &["window"][..],
+        &["input"][..],
+        &["input", "action_map"][..],
+        &["input", "action_map", "product"][..],
         &["diagnostics"][..],
     ] {
         let mut json = serde_json::to_value(&raw).unwrap();
@@ -571,7 +715,6 @@ fn source_fields_are_not_part_of_the_runtime_record() {
         "startup",
         "content",
         "authoring",
-        "input",
         "execution",
         "schema_version",
     ] {
@@ -726,7 +869,8 @@ fn source_input_requires_an_explicit_profile_clear_and_does_not_leak_its_path() 
     source.input.action_map = Some(ProjectPath::new("private-canary/actions.json").unwrap());
     let failure = source.runtime_configuration().unwrap_err();
     assert!(!format!("{failure:?}").contains("private-canary"));
-    assert!(project_settings().runtime_configuration().is_ok());
+    let cleared = project_settings().runtime_configuration().unwrap();
+    assert!(cleared.input().action_map.is_none());
 }
 
 #[test]
@@ -740,7 +884,15 @@ fn source_projection_retains_an_owned_unfulfilled_input_requirement() {
     let projection: crate::SourceRuntimeProjection = source.source_runtime_projection().unwrap();
     assert_eq!(source, original);
     assert_eq!(projection.runtime(), &expected_runtime);
+    assert!(projection.runtime().input().action_map.is_none());
     assert_eq!(projection.input_requirement(), Some(&input_path));
+    assert_diagnostic(
+        &source.runtime_configuration().unwrap_err(),
+        "runtime.configuration.source-input-required",
+        "input.action_map",
+    );
+    assert_round_trip(projection.runtime());
+    assert!(projection.input_requirement().is_some());
 
     source.input.action_map = Some(ProjectPath::new("other/input.actions.json").unwrap());
     drop(source);
@@ -773,6 +925,7 @@ fn source_projection_preserves_profile_input_selection_and_clear() {
             projection.input_requirement(),
             settings.input.action_map.as_ref(),
         );
+        assert!(projection.runtime().input().action_map.is_none());
         if expected_path.is_none() {
             assert_eq!(
                 projection.runtime(),
@@ -802,6 +955,7 @@ fn resolved_profile_exports_all_values_without_source_or_profile_dependencies() 
     assert_eq!(effective.render(), &settings.render);
     assert_eq!(effective.ui(), &settings.ui);
     assert_eq!(effective.window(), &settings.window);
+    assert!(effective.input().action_map.is_none());
     assert_eq!(effective.diagnostics(), &settings.diagnostics);
     assert_eq!(effective.window().title, "Resolved profile");
     assert_eq!(effective.diagnostics().runtime.entry_limit().get(), 41);
@@ -819,7 +973,7 @@ fn resolved_profile_exports_all_values_without_source_or_profile_dependencies() 
     assert_eq!(different_source.runtime_configuration().unwrap(), effective);
     let json = serde_json::to_value(effective.to_configuration()).unwrap();
     let fields = json.as_object().unwrap();
-    assert_eq!(fields.len(), 7);
+    assert_eq!(fields.len(), 8);
     for field in [
         "capabilities",
         "runtime",
@@ -827,6 +981,7 @@ fn resolved_profile_exports_all_values_without_source_or_profile_dependencies() 
         "render",
         "ui",
         "window",
+        "input",
         "diagnostics",
     ] {
         assert!(fields.contains_key(field));

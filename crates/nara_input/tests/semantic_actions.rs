@@ -72,7 +72,7 @@ fn apply_mapping_changes(
     for change in changes.0.lock().unwrap().drain(..) {
         match change {
             MappingChange::Disable => {
-                map.disable_context(ActionContext::gameplay()).unwrap();
+                map.disable_context(&ActionContext::gameplay()).unwrap();
             }
             MappingChange::Enable => {
                 map.enable_context(&ActionContext::gameplay()).unwrap();

@@ -31,6 +31,7 @@ mod owned_reopen;
 mod owned_save;
 #[cfg(all(feature = "tooling", feature = "runtime-ui"))]
 mod prefab_revert;
+mod processed_input;
 mod project_scene_requests;
 #[cfg(feature = "tooling")]
 mod source_import_refresh;

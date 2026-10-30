@@ -423,7 +423,7 @@ now records actual file capture, Editor source receipts, independent physical/tr
 Export alongside affected games/native checks. Continue the processed startup successor below;
 the source unit does not establish the packaged source-free process or target-build support.
 
-The candidate processed design uses an explicit complete action-map Product in admitted Runtime
+The adopted processed design uses an explicit complete action-map Product in admitted Runtime
 configuration as a startup root, independent of Scene roots. `nara_input` owns strict version-one
 format, finite immutable definition, compilation costs and receiving semantics; the selected
 family/codec participates in the existing original-plan agreement. Retain the actual acquisition
@@ -437,8 +437,13 @@ Scene-owned context definition needs its own concrete publication contract.
 Qualify actual physical-input-to-semantic-action behavior, held-action/context cancellation,
 failed Scene preservation and successful travel. A prebuilt process must run with only processed
 members and its executable, with source/metadata/cache/manifest and Cargo unavailable. Input
-codec success or a fabricated semantic command cannot prove this behavior. This is the current
-successor design candidate, not an implemented or independently qualified input format.
+codec success or a fabricated semantic command cannot prove this behavior. The
+[processed Input qualification](../knowledge/engineering/verification/2026-10/2026-10-30T100534Z-processed-startup-input-ownership-and-prebuilt-source-free-physical-process-qualification-35c2432f89d04982b10d2be3fa0f9d12.md)
+now records the implemented configuration/codec/actual owner, strict source-free physical process,
+failed-start cleanup, original selected alternative decoder and affected source/native consumers.
+The complete [processed unit](2026-10-30-processed-input-startup-and-process-proof-plan.md) is
+qualified in that scope. Physical endpoint/contribution growth remains a separate R10 correction;
+this Input result does not complete target delivery or the packaged Player.
 
 Target-build selection remains separate: current export adapters hardcode starter bins,
 release/dev assumptions, desktop features and the Host triple. Select package/bin/profile,

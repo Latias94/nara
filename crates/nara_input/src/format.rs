@@ -1,4 +1,4 @@
-//! Strict, bounded source action-map JSON files. Runtime state is never persisted.
+//! Strict, bounded action-map JSON files. Runtime state is never persisted.
 
 use std::{
     error::Error,
@@ -20,7 +20,7 @@ use nara_core::{
 use serde::{
     Deserialize, Serialize, Serializer,
     de::{self, DeserializeSeed, IgnoredAny, MapAccess, SeqAccess, Visitor},
-    ser::SerializeSeq,
+    ser::{SerializeSeq, SerializeStruct},
 };
 
 use crate::{
@@ -148,55 +148,8 @@ impl ActionMapFileCandidate {
         input: &[u8],
         limits: ActionMapFileLimits,
     ) -> Result<Self, ActionMapFileError> {
-        let contract = PersistentFileContract::canonical_v1(
-            format_kind()?,
-            engine_version(env!("CARGO_PKG_VERSION"))?,
-        );
-        let envelope = decode_persistent_file_with_preflight(
-            input,
-            limits.encoded_bytes(),
-            &contract,
-            |bytes| {
-                let mut parser = serde_json::Deserializer::from_slice(bytes);
-                preflight_serde_shape(&mut parser, limits.shape()).map_err(
-                    |error| match error {
-                        SerdeShapePreflightError::Shape(error) => ActionMapFileError::Shape(error),
-                        SerdeShapePreflightError::Parse(error) => {
-                            ActionMapFileError::JsonParse(error)
-                        }
-                    },
-                )?;
-                parser.end().map_err(ActionMapFileError::JsonParse)
-            },
-            |bytes| {
-                serde_json::from_slice::<ObjectOnly<PersistentFileHeader>>(bytes)
-                    .map(|record| record.0)
-                    .map_err(ActionMapFileError::JsonParse)
-            },
-            |bytes| {
-                let mut builder = ActionMapBuilder::new(limits.definition());
-                // Declare every context first, regardless of JSON member order. The second
-                // pass streams bindings straight into the same compiler, without raw Vecs.
-                decode_pass(bytes, limits.definition(), Pass::Contexts, &mut builder)?;
-                let envelope =
-                    decode_pass(bytes, limits.definition(), Pass::Bindings, &mut builder)?;
-                let definition = builder.compile().map_err(ActionMapFileError::Definition)?;
-                Ok(envelope.map_payload(|product| Self {
-                    product,
-                    definition,
-                }))
-            },
-        )
-        .map_err(|error| match error {
-            PersistentFileDecodeError::EncodedBytesExceeded { observed, maximum } => {
-                ActionMapFileError::EncodedBytesExceeded { observed, maximum }
-            }
-            PersistentFileDecodeError::Shape(error)
-            | PersistentFileDecodeError::Header(error)
-            | PersistentFileDecodeError::Payload(error) => error,
-            PersistentFileDecodeError::Contract(error) => ActionMapFileError::Contract(error),
-        })?;
-        Ok(envelope.into_payload())
+        let (product, definition) = decode_action_map(input, limits, ACTION_MAP_FORMAT_KIND)?;
+        Self::new(product, definition)
     }
 
     #[must_use]
@@ -223,34 +176,183 @@ impl ActionMapFileCandidate {
         &self,
         limits: ActionMapFileLimits,
     ) -> Result<String, ActionMapFileError> {
-        let envelope = PersistentFileEnvelope::canonical_v1(
-            format_kind()?,
-            engine_version(ENGINE_MIN_VERSION)?,
-            FormatGenerator::new("nara", engine_version(env!("CARGO_PKG_VERSION"))?)
-                .map_err(ActionMapFileError::Generator)?,
-            PayloadRef {
-                product: self.product,
-                contexts: ContextsRef(self.definition.contexts()),
-                bindings: self.definition.bindings(),
-            },
-        );
-        let mut output = BoundedOutput {
-            bytes: Vec::new(),
-            maximum: limits.encoded_bytes().get(),
-            exceeded: None,
-        };
-        if let Err(error) = serde_json::to_writer_pretty(&mut output, &envelope) {
-            return Err(match output.exceeded {
-                Some(observed) => ActionMapFileError::EncodedBytesExceeded {
-                    observed,
-                    maximum: output.maximum,
-                },
-                None => ActionMapFileError::Encode(error),
-            });
-        }
-        Self::decode_json_bytes_with_limits(&output.bytes, limits)?;
-        String::from_utf8(output.bytes).map_err(ActionMapFileError::EncodedUtf8)
+        let bytes = encode_action_map(
+            self.product,
+            &self.definition,
+            limits,
+            ACTION_MAP_FORMAT_KIND,
+        )?;
+        String::from_utf8(bytes).map_err(ActionMapFileError::EncodedUtf8)
     }
+}
+
+// Both file owners enter the same strict shape/header admission and finite compiler. The kind
+// is supplied by compiled code, never inferred from input or obtained by rewriting its bytes.
+pub(super) fn decode_action_map(
+    input: &[u8],
+    limits: ActionMapFileLimits,
+    admitted_kind: &str,
+) -> Result<(AssetProductRef, ActionMapDefinition), ActionMapFileError> {
+    let contract = PersistentFileContract::canonical_v1(
+        FormatKind::new(admitted_kind).map_err(ActionMapFileError::FormatKind)?,
+        engine_version(env!("CARGO_PKG_VERSION"))?,
+    );
+    let envelope = decode_persistent_file_with_preflight(
+        input,
+        limits.encoded_bytes(),
+        &contract,
+        |bytes| {
+            let mut parser = serde_json::Deserializer::from_slice(bytes);
+            preflight_serde_shape(&mut parser, limits.shape()).map_err(|error| match error {
+                SerdeShapePreflightError::Shape(error) => ActionMapFileError::Shape(error),
+                SerdeShapePreflightError::Parse(error) => ActionMapFileError::JsonParse(error),
+            })?;
+            parser.end().map_err(ActionMapFileError::JsonParse)
+        },
+        |bytes| {
+            serde_json::from_slice::<ObjectOnly<PersistentFileHeader>>(bytes)
+                .map(|record| record.0)
+                .map_err(ActionMapFileError::JsonParse)
+        },
+        |bytes| {
+            let mut builder = ActionMapBuilder::new(limits.definition());
+            // Declare contexts before streaming bindings, independent of JSON member order.
+            decode_pass(bytes, limits.definition(), Pass::Contexts, &mut builder)?;
+            let envelope = decode_pass(bytes, limits.definition(), Pass::Bindings, &mut builder)?;
+            let definition = builder.compile().map_err(ActionMapFileError::Definition)?;
+            Ok(envelope.map_payload(|product| (product, definition)))
+        },
+    )
+    .map_err(|error| match error {
+        PersistentFileDecodeError::EncodedBytesExceeded { observed, maximum } => {
+            ActionMapFileError::EncodedBytesExceeded { observed, maximum }
+        }
+        PersistentFileDecodeError::Shape(error)
+        | PersistentFileDecodeError::Header(error)
+        | PersistentFileDecodeError::Payload(error) => error,
+        PersistentFileDecodeError::Contract(error) => ActionMapFileError::Contract(error),
+    })?;
+    Ok(envelope.into_payload())
+}
+
+pub(super) fn encode_action_map(
+    product: AssetProductRef,
+    definition: &ActionMapDefinition,
+    limits: ActionMapFileLimits,
+    admitted_kind: &str,
+) -> Result<Vec<u8>, ActionMapFileError> {
+    let envelope = envelope_ref(product, definition, admitted_kind);
+    let length = encoded_action_map_bytes(product, definition, limits, admitted_kind)?;
+    let mut output = BoundedOutput {
+        bytes: Vec::with_capacity(length),
+        maximum: limits.encoded_bytes().get(),
+        exceeded: None,
+    };
+    if let Err(error) = serde_json::to_writer_pretty(&mut output, &envelope) {
+        return Err(match output.exceeded {
+            Some(observed) => ActionMapFileError::EncodedBytesExceeded {
+                observed,
+                maximum: output.maximum,
+            },
+            None => ActionMapFileError::Encode(error),
+        });
+    }
+    // Validate the actual output through this exact format, including shape and compiler limits.
+    decode_action_map(&output.bytes, limits, admitted_kind)?;
+    Ok(output.bytes)
+}
+
+/// Counts the same borrowed wire representation without allocating output or compiler scratch.
+pub(super) fn encoded_action_map_bytes(
+    product: AssetProductRef,
+    definition: &ActionMapDefinition,
+    limits: ActionMapFileLimits,
+    admitted_kind: &str,
+) -> Result<usize, ActionMapFileError> {
+    let mut counter = EncodedCounter {
+        length: 0,
+        maximum: limits.encoded_bytes().get(),
+        exceeded: None,
+    };
+    serde_json::to_writer_pretty(
+        &mut counter,
+        &envelope_ref(product, definition, admitted_kind),
+    )
+    .map_err(|error| match counter.exceeded {
+        Some(observed) => ActionMapFileError::EncodedBytesExceeded {
+            observed,
+            maximum: counter.maximum,
+        },
+        None => ActionMapFileError::Encode(error),
+    })?;
+    Ok(counter.length)
+}
+
+/// Decoded string bytes in the canonical writer, including repeated record keys. The compiler's
+/// fixed count/identifier caps bound this arithmetic. This is wire budgeting, not semantic
+/// compilation; the actual input still passes Core's full structural preflight on decode.
+pub(super) fn action_map_string_bytes(
+    definition: &ActionMapDefinition,
+    admitted_kind: &str,
+) -> usize {
+    use crate::{KeyCode, MouseButton};
+
+    let header = [
+        "kind",
+        "format_version",
+        "engine_min_version",
+        "generator",
+        "payload",
+        "name",
+        "version",
+        "nara",
+        ENGINE_MIN_VERSION,
+        env!("CARGO_PKG_VERSION"),
+        "product",
+        "contexts",
+        "bindings",
+        "source",
+        "product",
+        "kind",
+        "primary",
+        admitted_kind,
+    ];
+    let mut bytes = 36 + header.iter().map(|value| value.len()).sum::<usize>();
+    for context in definition.contexts() {
+        bytes += "context".len() + "enabled".len() + context.context.as_str().len();
+    }
+    for binding in definition.bindings() {
+        bytes += "action".len()
+            + "input".len()
+            + "context".len()
+            + binding.action.as_str().len()
+            + binding.context.as_str().len();
+        bytes += match binding.input {
+            InputBinding::Key(key) => {
+                "Key".len()
+                    + match key {
+                        KeyCode::Escape => "Escape".len(),
+                        KeyCode::Space => "Space".len(),
+                        KeyCode::Enter => "Enter".len(),
+                        KeyCode::ArrowUp => "ArrowUp".len(),
+                        KeyCode::ArrowDown => "ArrowDown".len(),
+                        KeyCode::ArrowLeft => "ArrowLeft".len(),
+                        KeyCode::ArrowRight => "ArrowRight".len(),
+                        KeyCode::Character(character) => "Character".len() + character.len_utf8(),
+                    }
+            }
+            InputBinding::Mouse(button) => {
+                "Mouse".len()
+                    + match button {
+                        MouseButton::Left => "Left".len(),
+                        MouseButton::Right => "Right".len(),
+                        MouseButton::Middle => "Middle".len(),
+                        MouseButton::Other(_) => "Other".len(),
+                    }
+            }
+        };
+    }
+    bytes
 }
 
 /// Concrete failures survive the serde visitor boundary; only JSON grammar errors use serde's
@@ -332,15 +434,11 @@ impl Error for ActionMapFileError {
     }
 }
 
-fn format_kind() -> Result<FormatKind, ActionMapFileError> {
-    FormatKind::new(ACTION_MAP_FORMAT_KIND).map_err(ActionMapFileError::FormatKind)
-}
-
 fn engine_version(value: &str) -> Result<EngineVersion, ActionMapFileError> {
     EngineVersion::parse(value).map_err(ActionMapFileError::EngineVersion)
 }
 
-fn require_primary(product: AssetProductRef) -> Result<(), ActionMapFileError> {
+pub(super) fn require_primary(product: AssetProductRef) -> Result<(), ActionMapFileError> {
     if product.product() != ImportedProductId::PRIMARY {
         return Err(ActionMapFileError::PrimaryProductRequired { product });
     }
@@ -348,10 +446,67 @@ fn require_primary(product: AssetProductRef) -> Result<(), ActionMapFileError> {
 }
 
 #[derive(Serialize)]
-struct PayloadRef<'a> {
+struct EnvelopeRef<'a> {
+    kind: &'a str,
+    format_version: u32,
+    engine_min_version: &'a str,
+    generator: GeneratorRef<'a>,
+    payload: PayloadRef<'a>,
+}
+
+#[derive(Serialize)]
+struct GeneratorRef<'a> {
+    name: &'a str,
+    version: &'a str,
+}
+
+fn envelope_ref<'a>(
     product: AssetProductRef,
+    definition: &'a ActionMapDefinition,
+    admitted_kind: &'a str,
+) -> EnvelopeRef<'a> {
+    EnvelopeRef {
+        kind: admitted_kind,
+        format_version: 1,
+        engine_min_version: ENGINE_MIN_VERSION,
+        generator: GeneratorRef {
+            name: "nara",
+            version: env!("CARGO_PKG_VERSION"),
+        },
+        payload: PayloadRef {
+            product: ProductRef(product),
+            contexts: ContextsRef(definition.contexts()),
+            bindings: definition.bindings(),
+        },
+    }
+}
+
+#[derive(Serialize)]
+struct PayloadRef<'a> {
+    product: ProductRef,
     contexts: ContextsRef<'a>,
     bindings: &'a [ActionBinding],
+}
+
+// StableAssetId's general serde implementation formats an owned String. JSON's collect_str
+// writes Display directly, so the borrowed counting query allocates neither UUID text nor output.
+struct ProductRef(AssetProductRef);
+
+impl Serialize for ProductRef {
+    fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        struct SourceRef(nara_asset::StableAssetId);
+
+        impl Serialize for SourceRef {
+            fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+                serializer.collect_str(&self.0)
+            }
+        }
+
+        let mut record = serializer.serialize_struct("AssetProductRef", 2)?;
+        record.serialize_field("source", &SourceRef(self.0.source()))?;
+        record.serialize_field("product", &self.0.product())?;
+        record.end()
+    }
 }
 
 struct ContextsRef<'a>(&'a [ActionContextDefinition]);
@@ -379,6 +534,28 @@ struct BoundedOutput {
     bytes: Vec<u8>,
     maximum: usize,
     exceeded: Option<usize>,
+}
+
+struct EncodedCounter {
+    length: usize,
+    maximum: usize,
+    exceeded: Option<usize>,
+}
+
+impl Write for EncodedCounter {
+    fn write(&mut self, bytes: &[u8]) -> io::Result<usize> {
+        let observed = self.length.saturating_add(bytes.len());
+        if observed > self.maximum {
+            self.exceeded = Some(observed);
+            return Err(io::Error::other("action-map encoded byte limit exceeded"));
+        }
+        self.length = observed;
+        Ok(bytes.len())
+    }
+
+    fn flush(&mut self) -> io::Result<()> {
+        Ok(())
+    }
 }
 
 impl Write for BoundedOutput {

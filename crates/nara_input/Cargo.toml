@@ -10,6 +10,7 @@ bevy_ecs.workspace = true
 nara_app.workspace = true
 nara_asset = { workspace = true, optional = true }
 nara_core.workspace = true
+nara_diagnostic = { workspace = true, optional = true }
 nara_ecs.workspace = true
 serde = { workspace = true, optional = true }
 serde_json = { workspace = true, optional = true }
@@ -19,4 +20,4 @@ serde_json.workspace = true
 
 [features]
 default = []
-serde = ["dep:serde", "dep:serde_json", "dep:nara_asset", "nara_asset/serde", "nara_core/serde"]
+serde = ["dep:serde", "dep:serde_json", "dep:nara_asset", "dep:nara_diagnostic", "nara_asset/serde", "nara_core/serde"]

@@ -449,13 +449,13 @@ fn unknown_context_operations_cannot_grow_or_reset_world_state() {
     .unwrap();
     let gameplay = ActionContext::gameplay();
     let menu = ActionContext::new("menu").unwrap();
-    assert!(map.disable_context(gameplay.clone()).unwrap());
+    assert!(map.disable_context(&gameplay).unwrap());
     assert!(map.enable_context(&menu).unwrap());
     for index in 0..=MAX_ACTION_CONTEXTS {
         let unknown = ActionContext::new(format!("unknown-{index}")).unwrap();
         let error = Err(ActionMapError::UnknownContext(unknown.clone()));
         assert_eq!(map.enable_context(&unknown), error);
-        assert_eq!(map.disable_context(unknown.clone()), error);
+        assert_eq!(map.disable_context(&unknown), error);
         assert_eq!(map.set_context_enabled(&unknown, true), error);
         assert_eq!(map.set_context_enabled(&unknown, false), error);
         assert!(!map.is_context_enabled(&unknown));
@@ -468,10 +468,10 @@ fn unknown_context_operations_cannot_grow_or_reset_world_state() {
     assert_eq!(map.definition().contexts().len(), 2);
     assert!(!map.is_context_enabled(&gameplay));
     assert!(map.is_context_enabled(&menu));
-    assert!(!map.disable_context(gameplay.clone()).unwrap());
+    assert!(!map.disable_context(&gameplay).unwrap());
     assert!(!map.enable_context(&menu).unwrap());
     assert!(map.enable_context(&gameplay).unwrap());
-    assert!(map.disable_context(menu).unwrap());
+    assert!(map.disable_context(&menu).unwrap());
 }
 
 struct DefinitionOwner {
@@ -631,7 +631,7 @@ fn state_constructor_retains_each_original_owner_without_mutating_other_world_st
     .unwrap();
     let gameplay = ActionContext::gameplay();
     let menu = ActionContext::new("menu").unwrap();
-    first.disable_context(gameplay.clone()).unwrap();
+    first.disable_context(&gameplay).unwrap();
     first.enable_context(&menu).unwrap();
 
     let second_drops = Arc::new(AtomicUsize::new(0));
@@ -691,7 +691,9 @@ fn failed_state_admission_releases_its_owner_and_preserves_existing_state() {
         .into_bindings();
     let required = ActionMap::required_state_bytes();
     let mut existing = ActionMap::new(bindings.clone(), ByteLimit::new(required).unwrap()).unwrap();
-    existing.disable_context(ActionContext::gameplay()).unwrap();
+    existing
+        .disable_context(&ActionContext::gameplay())
+        .unwrap();
     let drops = Arc::new(AtomicUsize::new(0));
     let owner = Arc::new(StateRetention {
         drops: Arc::clone(&drops),

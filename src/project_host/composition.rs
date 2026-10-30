@@ -519,8 +519,10 @@ impl RuntimePlan {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum CompositionError {
     ProjectLineageMismatch,
-    /// A source input selection has no actual Input plugin in the resolved plan.
+    /// A selected global action map has no actual Input plugin in the resolved plan.
     InputOwnerRequired,
+    /// Processed startup Input requires a selected decoder for the actual typed family and format.
+    InputCodecRequired,
     UnsupportedDefaultConfiguration {
         plugin: PluginId,
     },
@@ -582,7 +584,8 @@ impl fmt::Display for CompositionError {
             Self::ProjectLineageMismatch => {
                 "project runtime request lineage does not match candidate"
             }
-            Self::InputOwnerRequired => "source input action map requires the Input plugin",
+            Self::InputOwnerRequired => "selected input action map requires the Input plugin",
+            Self::InputCodecRequired => "processed input action map requires its selected typed Runtime codec",
             Self::UnsupportedDefaultConfiguration { .. } => {
                 "product recipe configures a default absent from the selected profile"
             }
@@ -912,6 +915,29 @@ fn resolve_runtime_composition(
             &snapshot_cell,
         )));
     let plugin_plan = PluginPlan::resolve(request)?;
+    if settings.input().action_map.is_some() {
+        if !plugin_plan
+            .entries()
+            .iter()
+            .any(|entry| entry.plugin_id() == nara_input::INPUT_PLUGIN_ID)
+        {
+            return Err(CompositionError::InputOwnerRequired.into());
+        }
+        #[cfg(all(feature = "runtime-2d", feature = "serde"))]
+        let input_codec_selected = runtime_codecs.has_family_format::<nara_input::ActionMapDomain>(
+            <nara_input::ActionMapRuntimeCodec as nara_asset::RuntimeAssetCodec<
+                nara_input::ActionMapAsset,
+            >>::RUNTIME_KIND,
+            <nara_input::ActionMapRuntimeCodec as nara_asset::RuntimeAssetCodec<
+                nara_input::ActionMapAsset,
+            >>::RUNTIME_VERSION,
+        );
+        #[cfg(not(all(feature = "runtime-2d", feature = "serde")))]
+        let input_codec_selected = false;
+        if !input_codec_selected {
+            return Err(CompositionError::InputCodecRequired.into());
+        }
+    }
     if let Some(plugin) =
         crate::product::data_contributor_mismatch(&data_contributors, plugin_plan.entries())
     {
