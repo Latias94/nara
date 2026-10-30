@@ -42,7 +42,7 @@ use nara_engine::{
         SpriteRenderStats,
     },
 };
-use nara_fs::ContentDigest;
+use nara_fs::{ContentDigest, RelativePath};
 use nara_identity::{EntityLookup, SpawnedSceneInstance, WorldIdentityDomain};
 use nara_image::{
     ImageAsset, ImageBytesImportRequest, ImageColorSpace, ImageContentSnapshot, ImageDomain,
@@ -87,6 +87,7 @@ const PRIMARY_TILESET_FILE: &str = "primary.runtime.tileset";
 const AUXILIARY_TILESET_FILE: &str = "auxiliary.runtime.tileset";
 const STARTUP_FILE: &str = "startup.runtime.json";
 const LATER_FILE: &str = "later.runtime.json";
+const PACK_FILE: &str = "runtime-content.pack";
 const RETENTION_PROBE_FILE: &str = "retention.probe";
 const RETENTION_PROBE_BYTES: &[u8] = b"runtime-native-retention-probe";
 const SOURCE_PNG: &[u8] =
@@ -592,6 +593,23 @@ impl Fixture {
         base
     }
 
+    fn open_pack_from(&self, captured: &RuntimeContentBase) -> RuntimeContentBase {
+        let mut output = fs::File::create(self.directory.path().join(PACK_FILE)).unwrap();
+        captured.write_pack(&mut output).unwrap();
+        drop(output);
+        let root = open_explicit_product_project_root(self.directory.path()).unwrap();
+        let file = root
+            .open_file(&RelativePath::new(PACK_FILE).unwrap())
+            .unwrap();
+        RuntimeContentBase::open_pack(
+            file,
+            &self.expected,
+            self.recipe.clone(),
+            RuntimeContentLimits::default(),
+        )
+        .unwrap()
+    }
+
     fn remove_outputs(&self) {
         assert!(!self.directory.path().join(SOURCE_FILE).exists());
         for path in [
@@ -995,29 +1013,27 @@ fn observe_headless_tile_frame(world: &mut World) {
     }
 }
 
-#[test]
-fn first_party_headless_run_publishes_and_travels_stock_tilesets_without_source_facets() {
-    let recipe = recipe()
+fn headless_recipe() -> ProductRecipe {
+    recipe()
         .add_plugin::<HeadlessTileConsumerPlugin>()
         .unwrap()
         .add_runtime_asset_codec::<RetentionProbeDomain, RetentionProbeCodec>(
             RuntimeCodecDefinitionId::new("consumer.runtime-tileset.retention-probe", 1),
         )
-        .unwrap();
-    let fixture = Fixture::with_recipe(FixtureCase::Valid, recipe, true);
-    let base = fixture.capture();
+        .unwrap()
+}
+
+fn run_headless_tile_travel(base: RuntimeContentBase) -> HeadlessTileOutcome {
     for entry in base.plan().plugin_plan().entries() {
         assert_ne!(entry.plugin_id(), nara_asset::ASSET_SOURCE_PLUGIN_ID);
         assert_ne!(entry.plugin_id(), nara_image::IMAGE_SOURCE_PLUGIN_ID);
     }
-    assert_eq!(fs::read_dir(fixture.directory.path()).unwrap().count(), 0);
-    let baseline = retained_requirement(&base);
     let execution =
         HeadlessRunOptions::frames(NonZeroU32::new(4_000).unwrap(), Duration::from_millis(1))
             .stop_when(|outcome: &HeadlessTileOutcome| outcome.done);
-    let mut run = HeadlessRun::from_runtime_content(base.clone(), execution, Vec::new());
+    let mut run = HeadlessRun::from_runtime_content(base, execution, Vec::new());
     let deadline = Instant::now() + Duration::from_secs(15);
-    let mut outcome = loop {
+    let outcome = loop {
         let report = run.execute_bounded();
         assert!(report.startup_content_closure().is_none());
         match report.outcome() {
@@ -1049,6 +1065,10 @@ fn first_party_headless_run_publishes_and_travels_stock_tilesets_without_source_
     assert!(outcome.inspected_prepared);
     assert!(outcome.primary_presented);
     assert!(outcome.auxiliary_presented);
+    outcome
+}
+
+fn assert_headless_tile_pixels(fixture: &Fixture, outcome: &HeadlessTileOutcome) {
     let primary = outcome.primary_image.as_ref().unwrap();
     let auxiliary = outcome.auxiliary_image.as_ref().unwrap();
     assert_eq!(primary.resource().pixels(), fixture.primary_pixels);
@@ -1077,6 +1097,16 @@ fn first_party_headless_run_publishes_and_travels_stock_tilesets_without_source_
             .pixels()
             .as_ptr()
     );
+}
+
+#[test]
+fn first_party_headless_run_publishes_and_travels_stock_tilesets_without_source_facets() {
+    let fixture = Fixture::with_recipe(FixtureCase::Valid, headless_recipe(), true);
+    let base = fixture.capture();
+    assert_eq!(fs::read_dir(fixture.directory.path()).unwrap().count(), 0);
+    let baseline = retained_requirement(&base);
+    let mut outcome = run_headless_tile_travel(base.clone());
+    assert_headless_tile_pixels(&fixture, &outcome);
     let escaped = outcome.primary_tileset_image.take().unwrap();
     let last = escaped.clone();
     drop(outcome);
@@ -1091,6 +1121,31 @@ fn first_party_headless_run_publishes_and_travels_stock_tilesets_without_source_
     assert!(last.resource().has_retention_owner());
     drop(last);
     assert_eq!(retained_requirement(&base), baseline);
+}
+
+#[test]
+fn retained_pack_matches_captured_native_tileset_travel_and_escaped_prepared_images() {
+    let fixture = Fixture::with_recipe(FixtureCase::Valid, headless_recipe(), true);
+    let captured = fixture.open(RuntimeContentLimits::default());
+    let packed = fixture.open_pack_from(&captured);
+    assert_eq!(captured.catalog_digest(), packed.catalog_digest());
+    fixture.remove_outputs();
+
+    for base in [captured, packed] {
+        let mut outcome = run_headless_tile_travel(base);
+        assert_headless_tile_pixels(&fixture, &outcome);
+        let escaped = outcome.primary_tileset_image.take().unwrap();
+        let escaped_later = outcome.auxiliary_tileset_image.take().unwrap();
+        drop(outcome);
+        assert_eq!(escaped.resource().pixels(), fixture.primary_pixels);
+        assert_eq!(escaped_later.resource().pixels(), fixture.auxiliary_pixels);
+        assert!(escaped.resource().has_retention_owner());
+        assert!(escaped_later.resource().has_retention_owner());
+        let last = escaped.clone();
+        drop(escaped);
+        assert_eq!(last.resource().pixels(), fixture.primary_pixels);
+        assert_eq!(escaped_later.resource().pixels(), fixture.auxiliary_pixels);
+    }
 }
 
 /// Deliberately trusts file-local identity; the concrete native owner must check full cardinality.
@@ -1942,6 +1997,84 @@ fn real_import_reaches_source_free_primary_and_auxiliary_tilemap_publication_and
     assert!(products.tilesets.get(auxiliary.tileset).is_none());
     assert!(products.images.get(auxiliary.image).is_none());
     assert!(!world.contains_resource::<ProjectAssetDatabase>());
+}
+
+#[test]
+fn retained_pack_member_mutation_rejects_new_tileset_and_image_reads_but_preserves_publication() {
+    let fixture = Fixture::new();
+    let captured = fixture.open(RuntimeContentLimits::default());
+    let base = fixture.open_pack_from(&captured);
+    fixture.remove_outputs();
+    drop(captured);
+    let (mut world, current, handles) = initial_world(&base);
+    let entity = resolve(&world, &current);
+    let products = world.resource::<TileProducts>();
+    let baseline = products.capture_baseline();
+    let receipt = products.receipt(handles.tileset);
+    let content = products.capture_image(world.resource::<AssetServer>(), handles.image);
+    let tile_content = products
+        .tilesets
+        .get(handles.tileset)
+        .unwrap()
+        .image_content()
+        .unwrap()
+        .clone();
+    assert!(content.same_allocation(&tile_content));
+    let prepared = content.prepared_snapshot();
+    let prepared_tile = tile_content.prepared_snapshot();
+
+    let path = fixture.directory.path().join(PACK_FILE);
+    let mut encoded = fs::read(&path).unwrap();
+    // The transport header is the eight-byte magic, u32 version and u64 catalogue length.
+    let mut offset = 20 + base.catalog_digest().length();
+    let mut changed_members = 0;
+    for member in base.catalog().members() {
+        offset += member.digest().length();
+        if matches!(member.path(), PRIMARY_TILESET_FILE | PRIMARY_IMAGE_FILE) {
+            encoded[usize::try_from(offset - 1).unwrap()] ^= 1;
+            changed_members += 1;
+        }
+    }
+    assert_eq!(changed_members, 2);
+    fs::write(&path, encoded).unwrap();
+    assert!(matches!(
+        base.acquire_asset::<TileSetDomain, TileSetRuntimeCodec>(tileset_product(false)),
+        Err(RuntimeContentError::MemberDigestMismatch)
+    ));
+    assert!(matches!(
+        base.acquire_asset::<ImageDomain, ImageRuntimeCodec>(image_product(false)),
+        Err(RuntimeContentError::MemberDigestMismatch)
+    ));
+    assert_eq!(
+        acquire_image(&base, true).product().pixels(),
+        fixture.auxiliary_pixels
+    );
+    assert_eq!(
+        acquire_descriptor(&base, true).image_product(),
+        image_product(true)
+    );
+    assert_current(&world, &current, entity, handles, &baseline);
+    assert_eq!(content.pixels(), fixture.primary_pixels);
+    assert_eq!(prepared_tile.resource().pixels(), fixture.primary_pixels);
+
+    retire_and_despawn_scene_instance(&mut world, &current).unwrap();
+    let mut products = world.remove_resource::<TileProducts>().unwrap();
+    let mut server = world.remove_resource::<AssetServer>().unwrap();
+    products.retire(&server, &[receipt]).unwrap();
+    products.remove_image(handles.image);
+    products.reconcile(&mut server);
+    assert!(products.owner.is_empty());
+    assert!(products.tilesets.get(handles.tileset).is_none());
+    assert!(products.images.get(handles.image).is_none());
+    assert!(!content.is_authorized(&server, &products.states, &products.images));
+    drop((products, server, world, current, base));
+    assert_eq!(content.pixels(), fixture.primary_pixels);
+    assert_eq!(tile_content.pixels(), fixture.primary_pixels);
+    drop((content, tile_content));
+    for escaped in [&prepared, &prepared_tile] {
+        assert_eq!(escaped.resource().pixels(), fixture.primary_pixels);
+        assert!(escaped.resource().has_retention_owner());
+    }
 }
 
 #[test]

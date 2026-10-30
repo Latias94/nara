@@ -115,6 +115,13 @@ validation separate target resolution from current resource preparation. The
 supplies source constraints. The [production qualification](../knowledge/engineering/verification/2026-10/2026-10-30T172312Z-reference-validity-and-current-demand-production-replacement-qualification-b16511fa33a74c2b808270394b28bf62.md)
 records the owning replacement, public source/processed travel, strict source Export and selected
 native scope. Immutable encoded backing/residency is a separate CP4 comparison.
+Its [retained-pack source study](../research/2026-10-31-retained-pack-and-resource-lifetimes.md),
+[selected design](runtime-content-backing-and-residency-design.md) and
+[complete plan](../plans/2026-10-31-retained-runtime-pack-plan.md) compare complete memory capture
+with one original file and authenticated temporary member reads. The
+[production qualification](../knowledge/engineering/verification/2026-10/2026-10-30T184847Z-retained-runtime-pack-and-independent-encoded-residency-qualification-386d2e5e9c124b66bc4390f69b796053.md)
+records complete owner/public Headless workflows; the file's continued availability is distinct
+from immutable admitted meaning. GPU/streaming performance and general providers remain separate.
 
 ## Background Designs
 

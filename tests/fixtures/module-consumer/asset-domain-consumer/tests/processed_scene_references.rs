@@ -8,8 +8,8 @@ use std::{
     num::NonZeroU32,
     path::{Path, PathBuf},
     sync::{
-        Arc, Mutex,
-        atomic::{AtomicU64, Ordering},
+        Arc, Condvar, Mutex,
+        atomic::{AtomicBool, AtomicU64, Ordering},
     },
     time::{Duration, Instant},
 };
@@ -27,7 +27,7 @@ use nara::{
     },
     core::{ByteLimit, FormatKind, FormatVersion, ItemLimit},
     ecs::{Component, Entity, Resource, World},
-    fs::ContentDigest,
+    fs::{ContentDigest, FileCapability, TrustMode},
     identity::{EntityLookup, SpawnedSceneInstance},
     image::{
         ImageAsset, ImageColorSpace, ImageDomain, ImageExtent, ImageFormat, ImageRuntimeCodec,
@@ -612,6 +612,45 @@ impl Fixture {
         base
     }
 
+    fn capture_pack(&self) -> RuntimeContentBase {
+        let captured = RuntimeContentBase::open(
+            &open_explicit_product_project_root(&self.root).unwrap(),
+            &self.expected,
+            self.recipe.clone(),
+            RuntimeContentLimits::default(),
+        )
+        .unwrap();
+        let path = self.root.join("content.pack");
+        {
+            let mut output = fs::File::create(&path).unwrap();
+            captured.write_pack(&mut output).unwrap();
+        }
+        for member in captured.catalog().members() {
+            fs::remove_file(self.root.join(member.path())).unwrap();
+        }
+        fs::remove_file(self.root.join(RUNTIME_CONTENT_CATALOG_FILE)).unwrap();
+        if self.demand_configuration.is_some() {
+            for input in ["input.bundle.json", "input.bundle.json.meta", "suffix.txt"] {
+                fs::remove_file(self.root.join(input)).unwrap();
+            }
+        }
+        drop(captured);
+        assert_eq!(fs::read_dir(&self.root).unwrap().count(), 1);
+        let file = FileCapability::from_host_handle(
+            fs::File::open(path).unwrap(),
+            TrustMode::TrustedLocal,
+            0,
+        )
+        .unwrap();
+        RuntimeContentBase::open_pack(
+            file,
+            &self.expected,
+            self.recipe.clone(),
+            RuntimeContentLimits::default(),
+        )
+        .unwrap()
+    }
+
     fn remove_inputs(&self) {
         if self.root.exists() {
             let root = self.root.canonicalize().unwrap();
@@ -775,6 +814,18 @@ impl DemandConfiguration {
 // Codec callbacks execute on preparation workers. Complete fixture-specific Product identities
 // isolate observations even when this test binary runs several independent Hosts concurrently.
 static DEMAND_DECODES: Mutex<BTreeMap<AssetProductRef, usize>> = Mutex::new(BTreeMap::new());
+static DEMAND_DECODE_GATES: Mutex<BTreeMap<AssetProductRef, Arc<DemandDecodeGate>>> =
+    Mutex::new(BTreeMap::new());
+
+#[derive(Default)]
+struct DemandDecodeGate {
+    started: AtomicBool,
+    released: Mutex<bool>,
+    wake: Condvar,
+}
+
+#[derive(Resource)]
+struct HeldDemandDecode(Arc<DemandDecodeGate>);
 
 fn record_demand_decode(product: AssetProductRef) {
     *DEMAND_DECODES.lock().unwrap().entry(product).or_default() += 1;
@@ -849,9 +900,24 @@ impl RuntimeAssetCodec<TextBundle> for DemandBundleCodec {
 
     fn decode_runtime(encoded: &[u8]) -> Result<TextBundle, AssetRuntimeError> {
         let bundle = TextBundleDomain::decode_runtime(encoded)?;
-        record_demand_decode(
-            AssetProductRef::new(bundle.source(), ImportedProductId::PRIMARY).unwrap(),
-        );
+        let product = AssetProductRef::new(bundle.source(), ImportedProductId::PRIMARY).unwrap();
+        record_demand_decode(product);
+        let gate = DEMAND_DECODE_GATES.lock().unwrap().remove(&product);
+        if let Some(gate) = gate {
+            gate.started.store(true, Ordering::Release);
+            let (released, _) = gate
+                .wake
+                .wait_timeout_while(
+                    gate.released.lock().unwrap(),
+                    Duration::from_secs(10),
+                    |released| !*released,
+                )
+                .unwrap();
+            assert!(
+                *released,
+                "the held pack decoder must be explicitly released"
+            );
+        }
         Ok(bundle)
     }
 
@@ -1166,6 +1232,14 @@ impl Plugin for DemandProbePlugin {
     fn build(&self, app: &mut App) -> Result<(), PluginError> {
         app.insert_resource(self.0)?
             .init_resource::<DemandOutcome>()?;
+        let gate = DEMAND_DECODE_GATES
+            .lock()
+            .unwrap()
+            .get(&self.0.product(CPU))
+            .cloned();
+        if let Some(gate) = gate {
+            app.insert_resource(HeldDemandDecode(gate))?;
+        }
         add_startup_scene_activation_systems(app, inspect_demand_startup)?;
         app.add_systems(CoreStage::Update, demand_travel)?;
         Ok(())
@@ -1195,6 +1269,7 @@ struct DemandOutcome {
     prepared_pixels: [usize; 2],
     prepared_spawn_count: Option<u32>,
     rejected_b: bool,
+    held_cancellation_frames: u8,
 }
 
 fn demand_products(
@@ -1400,6 +1475,19 @@ fn demand_travel(world: &mut World) {
         DemandPhase::Preparing => {
             let request = world.resource::<DemandOutcome>().request.unwrap();
             let state = ProjectScenes::scope(world, |scenes| scenes.state(request)).unwrap();
+            if leg == 1
+                && let Some(held) = world.get_resource::<HeldDemandDecode>()
+            {
+                assert_eq!(state, ProjectSceneRequestState::Preparing);
+                if !held.0.started.load(Ordering::Acquire) {
+                    std::thread::sleep(Duration::from_millis(1));
+                    return;
+                }
+                assert_eq!(demand_decodes(configuration), [3, 1, 1]);
+                ProjectScenes::scope(world, |scenes| assert!(scenes.cancel(request)));
+                world.resource_mut::<DemandOutcome>().phase = DemandPhase::Cancelling;
+                return;
+            }
             if state == ProjectSceneRequestState::Preparing {
                 std::thread::sleep(Duration::from_millis(1));
                 return;
@@ -1462,6 +1550,33 @@ fn demand_travel(world: &mut World) {
         DemandPhase::Cancelling => {
             let request = world.resource::<DemandOutcome>().request.unwrap();
             let state = ProjectScenes::scope(world, |scenes| scenes.state(request)).unwrap();
+            if leg == 1
+                && let Some(gate) = world
+                    .get_resource::<HeldDemandDecode>()
+                    .map(|held| Arc::clone(&held.0))
+            {
+                let mut released = gate.released.lock().unwrap();
+                if !*released {
+                    assert_eq!(state, ProjectSceneRequestState::Cancelling);
+                    ProjectScenes::scope(world, |scenes| {
+                        assert!(scenes.prepared(request).is_none());
+                        assert!(!scenes.acknowledge(request));
+                        assert_eq!(
+                            scenes.request(configuration.product(B)),
+                            Err(ProjectSceneRequestError::Busy)
+                        );
+                    });
+                    assert_eq!(live_demand_door(world, configuration, active).2, receipt);
+                    assert_eq!(demand_decodes(configuration), [3, 1, 1]);
+                    let mut outcome = world.resource_mut::<DemandOutcome>();
+                    outcome.held_cancellation_frames += 1;
+                    if outcome.held_cancellation_frames == 3 {
+                        *released = true;
+                        gate.wake.notify_all();
+                    }
+                    return;
+                }
+            }
             if state == ProjectSceneRequestState::Cancelling {
                 std::thread::sleep(Duration::from_millis(1));
                 return;
@@ -1548,6 +1663,46 @@ fn completed_demand(report: HeadlessRunReport<DemandOutcome>) -> DemandOutcome {
     };
     assert_eq!(outcome.phase, DemandPhase::Done);
     outcome
+}
+
+#[test]
+fn retained_pack_deferred_travel_waits_for_held_cancellation_then_commits_current_demand() {
+    let fixture = Fixture::new(Case::DeferredTravel);
+    let configuration = fixture.demand_configuration.unwrap();
+    let gate = Arc::new(DemandDecodeGate::default());
+    assert!(
+        DEMAND_DECODE_GATES
+            .lock()
+            .unwrap()
+            .insert(configuration.product(CPU), Arc::clone(&gate))
+            .is_none()
+    );
+    let base = fixture.capture_pack();
+    assert_eq!(base.catalog_digest(), fixture.expected.catalog_digest());
+    assert_eq!(demand_decodes(configuration), [0, 0, 0]);
+    let outcome = completed_demand(execute_demand(base));
+    assert_eq!(outcome.ready, [A, B, C, C]);
+    assert_eq!(outcome.held_cancellation_frames, 3);
+    assert_eq!(outcome.cancellations, 3);
+    assert_eq!(outcome.commits, 2);
+    assert_eq!(outcome.prepared_spawn_count, Some(17));
+    assert!(!outcome.rejected_b);
+    assert_eq!(outcome.receipts.len(), 3);
+    for pair in [(0, 1), (1, 2), (0, 2)] {
+        assert_ne!(
+            outcome.receipts[pair.0].instance_id(),
+            outcome.receipts[pair.1].instance_id()
+        );
+    }
+    assert_eq!(demand_decodes(configuration), [6, 2, 2]);
+    assert!(*gate.released.lock().unwrap());
+    assert_eq!(Arc::strong_count(&gate), 1);
+    assert!(
+        !DEMAND_DECODE_GATES
+            .lock()
+            .unwrap()
+            .contains_key(&configuration.product(CPU))
+    );
 }
 
 #[test]

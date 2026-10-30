@@ -118,3 +118,15 @@ backing owners under R6/R7; Schema/address/history under R5; execution/finalizat
 0003/0008/0039/0057/0097/0100; UI completion under 0041/0102/0108/0112 and Proposed 0121;
 command/tool lifetime under 0118; rebuild/resume under 0093/0116. The implementation ledger must
 retain the distinction between selected contracts, implemented replacements and actual evidence.
+
+## Implemented Successors
+
+As of 2026-10-31, CP3 has its
+[qualified reference/demand replacement](../knowledge/engineering/verification/2026-10/2026-10-30T172312Z-reference-validity-and-current-demand-production-replacement-qualification-b16511fa33a74c2b808270394b28bf62.md),
+and CP4 has its
+[qualified retained-pack comparison](../knowledge/engineering/verification/2026-10/2026-10-30T184847Z-retained-runtime-pack-and-independent-encoded-residency-qualification-386d2e5e9c124b66bc4390f69b796053.md).
+The latter separates original catalogue/plan authority from encoded residency without changing
+CP3 demand. It preserves complete captured availability and adds original-file authenticated
+temporary reads with actual public travel/cancellation, exact budgets and escaped pixel evidence.
+These successors do not rewrite this report's receiving snapshot or imported studies, qualify
+general streaming/GPU performance, or close the remaining R5/R6/R8/R11/Editor workflows above.

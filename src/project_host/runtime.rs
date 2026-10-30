@@ -1950,6 +1950,8 @@ fn processed_content_fault(error: &RuntimeContentError) -> HostFault {
         RuntimeContentError::RecipeMismatch => "recipe-mismatch",
         RuntimeContentError::SchemaMismatch => "schema-mismatch",
         RuntimeContentError::CodecsMismatch => "codecs-mismatch",
+        RuntimeContentError::InvalidPackHeader => "invalid-pack-header",
+        RuntimeContentError::PackExtentMismatch => "pack-extent-mismatch",
         RuntimeContentError::MemberDigestMismatch => "member-digest-mismatch",
         RuntimeContentError::UndeclaredProduct => "undeclared-product",
         RuntimeContentError::UndeclaredScene => "undeclared-scene",

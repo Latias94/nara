@@ -1,11 +1,13 @@
 //! Verified immutable Runtime content, independent of authoring source and import caches.
 //!
 //! The Host supplies the expected catalog digest and target independently of the directory.
-//! Opening a base captures every declared member's verified bytes once. Subsequent acquisition
-//! retains that exact base and its original executable composition; it never reopens a mutable
-//! member or searches a source database. Integrity, typed decode and native residency are distinct
-//! operations. This module does not install decoded products into a World or replace a resolver.
+//! A base retains either complete captured bytes or one exact local pack with authenticated
+//! member reads. Subsequent acquisition retains that base and its original executable composition;
+//! it never reopens member paths or searches a source database. Integrity, typed decode and native
+//! residency are distinct operations. This module does not install decoded products into a World.
 
+mod admission;
+mod backing;
 mod budget;
 mod catalog;
 mod codecs;
@@ -36,7 +38,7 @@ use nara_asset::{
     RuntimeAssetCodec,
 };
 use nara_core::ByteLimit;
-use nara_fs::{ContentDigest, DirectoryCapability, FsError, RelativePath};
+use nara_fs::{ContentDigest, DirectoryCapability, FileCapability, FsError, RelativePath};
 use nara_project::RuntimeConfigurationError;
 use nara_reflect::{
     __private::{
@@ -55,6 +57,7 @@ use crate::{
     },
     startup_scene::SceneSource,
 };
+use backing::EncodedBacking;
 use budget::{DecodeBudget, DecodeLease};
 use dependencies::DependencyInventory;
 
@@ -99,9 +102,10 @@ impl RuntimeContentExpectation {
 
 /// Bounds owned by content capture and concurrent typed acquisition.
 ///
-/// Encoded bytes include the catalog and all retained members. Retained bytes additionally count
-/// the catalog's logical model, the base's indices and admitted decoder output. Work reservations
-/// cover trusted codec promises and the Scene owner's allocation model. Compiled recipe/plugin
+/// Encoded limits bound the declared catalog and all member extents for either backing. Retained
+/// bytes count the catalog, backing metadata, captured member bytes and admitted decoder output.
+/// Pack member reads are temporary work, overlapping trusted codec promises and the Scene owner's
+/// allocation model. Compiled recipe/plugin
 /// and Schema construction retain their existing owner limits; this is not allocator/RSS or an
 /// interception of arbitrary native code allocations.
 #[derive(Debug, Clone, Copy)]
@@ -204,6 +208,8 @@ pub enum RuntimeContentError {
     RecipeMismatch,
     SchemaMismatch,
     CodecsMismatch,
+    InvalidPackHeader,
+    PackExtentMismatch,
     MemberDigestMismatch,
     UndeclaredProduct,
     UndeclaredScene,
@@ -243,7 +249,7 @@ impl fmt::Display for RuntimeContentError {
 impl RuntimeContentError {
     pub(crate) const fn summary(&self) -> &'static str {
         match self {
-            Self::Host(_) => "Runtime content capability read failed",
+            Self::Host(_) => "Runtime content I/O failed",
             Self::Catalog(_) => "Runtime content catalog was rejected",
             Self::Configuration(_) => "Runtime configuration was rejected",
             Self::Composition(_) => "Runtime executable composition was rejected",
@@ -252,6 +258,12 @@ impl RuntimeContentError {
             Self::RecipeMismatch => "Runtime catalog differs from the executable recipe",
             Self::SchemaMismatch => "Runtime catalog differs from the executable Schema",
             Self::CodecsMismatch => "Runtime catalog differs from the executable codec selection",
+            Self::InvalidPackHeader => {
+                "Runtime pack header differs from the selected format or catalog length"
+            }
+            Self::PackExtentMismatch => {
+                "Runtime pack extent differs from its admitted member layout"
+            }
             Self::MemberDigestMismatch => "Runtime member differs from its admitted catalog digest",
             Self::UndeclaredProduct => "Runtime product is absent from the admitted catalog",
             Self::UndeclaredScene => "Runtime Scene is not a declared acquisition root",
@@ -297,10 +309,11 @@ impl Error for RuntimeContentError {
     }
 }
 
-/// A complete immutable encoded base and its original executable composition.
+/// Immutable content meaning, its original executable composition and exact encoded backing.
 ///
-/// Clones share captured bytes. Replacing files, opening another directory, or admitting another
-/// base cannot redirect an existing acquisition. No filesystem capability remains in this owner.
+/// Clones share backing authority. A captured base survives complete input removal. A pack retains
+/// one original file and authenticates requested member bytes; mutation can cause later reads to
+/// fail. Replacing paths or admitting another base cannot redirect an existing acquisition.
 #[derive(Clone)]
 pub struct RuntimeContentBase {
     inner: Arc<RuntimeContentBaseInner>,
@@ -310,7 +323,8 @@ struct RuntimeContentBaseInner {
     catalog_digest: ContentDigest,
     catalog: RuntimeContentCatalog,
     plan: RuntimeConfigurationPlan,
-    members: Box<[Vec<u8>]>,
+    catalog_bytes: Vec<u8>,
+    backing: EncodedBacking,
     budget: Arc<DecodeBudget>,
     limits: RuntimeContentLimits,
 }
@@ -326,7 +340,7 @@ impl fmt::Debug for RuntimeContentBase {
         formatter
             .debug_struct("RuntimeContentBase")
             .field("catalog_digest", &self.inner.catalog_digest)
-            .field("members", &self.inner.members.len())
+            .field("members", &self.inner.catalog.members().len())
             .finish_non_exhaustive()
     }
 }
@@ -342,58 +356,7 @@ impl RuntimeContentBase {
         recipe: ProductRecipe,
         limits: RuntimeContentLimits,
     ) -> Result<Self, RuntimeContentError> {
-        let catalog_limit = limits.catalog.encoded_bytes().get();
-        let expected_length = usize::try_from(expected.catalog_digest.length()).map_err(|_| {
-            budget_error(
-                RuntimeContentBudgetKind::TotalEncodedBytes,
-                usize::MAX,
-                limits.total_encoded_bytes.get(),
-            )
-        })?;
-        check(
-            RuntimeContentBudgetKind::TotalEncodedBytes,
-            expected_length,
-            catalog_limit.min(limits.total_encoded_bytes.get()),
-        )?;
-        // Bound the raw input before opening it and pass the actual root residual into the
-        // catalog owner. A small Host cap must constrain allocation, not merely reject a fully
-        // decoded catalog afterwards. Recipe/Schema construction has its separate owner limits.
-        check(
-            RuntimeContentBudgetKind::RetainedBytes,
-            expected_length,
-            limits.retained_bytes.get(),
-        )?;
-        let catalog_retained = limits
-            .retained_bytes
-            .get()
-            .checked_sub(expected_length)
-            .and_then(ByteLimit::new)
-            .ok_or_else(|| {
-                budget_error(
-                    RuntimeContentBudgetKind::RetainedBytes,
-                    expected_length.saturating_add(1),
-                    limits.retained_bytes.get(),
-                )
-            })?;
-        let catalog_limits = limits
-            .catalog
-            .with_retained_bytes(
-                ByteLimit::new(
-                    catalog_retained
-                        .get()
-                        .min(limits.catalog.retained_bytes().get()),
-                )
-                .expect("nonzero admitted catalog residual"),
-            )
-            .with_working_bytes(
-                ByteLimit::new(
-                    limits
-                        .work_bytes
-                        .get()
-                        .min(limits.catalog.working_bytes().get()),
-                )
-                .expect("nonzero catalog work bound"),
-            );
+        let (_, catalog_limits) = admission::input_limits(expected, limits)?;
         let path =
             RelativePath::new(RUNTIME_CONTENT_CATALOG_FILE).expect("fixed valid catalog path");
         let catalog_bytes = directory
@@ -401,90 +364,16 @@ impl RuntimeContentBase {
             .map_err(RuntimeContentError::Host)?
             .read_to_end_bounded(expected.catalog_digest.length())
             .map_err(RuntimeContentError::Host)?;
-        if ContentDigest::of_bytes(&catalog_bytes) != expected.catalog_digest {
-            return Err(RuntimeContentError::CatalogDigestMismatch);
-        }
-        let catalog = RuntimeContentCatalog::from_json_bytes(&catalog_bytes, catalog_limits)
-            .map_err(RuntimeContentError::Catalog)?;
-        if catalog.target() != &expected.target {
-            return Err(RuntimeContentError::TargetMismatch);
-        }
-        let configuration = catalog
-            .configuration()
-            .clone()
-            .resolve()
-            .map_err(RuntimeContentError::Configuration)?;
-        let plan = resolve_runtime_configuration(&configuration, recipe)
-            .map_err(RuntimeContentError::Composition)?;
-        if plan.plugin_plan().fingerprint().as_bytes() != catalog.plugin_plan_fingerprint() {
-            return Err(RuntimeContentError::RecipeMismatch);
-        }
-        if plan
-            .schema_validation()
-            .composition_fingerprint()
-            .as_bytes()
-            != catalog.schema_fingerprint()
-        {
-            return Err(RuntimeContentError::SchemaMismatch);
-        }
-        if plan.runtime_codecs_fingerprint().as_bytes() != catalog.runtime_codecs_fingerprint() {
-            return Err(RuntimeContentError::CodecsMismatch);
-        }
-        for member in catalog.members() {
-            plan.runtime_codecs().validate_member(member)?;
-        }
-
-        let mut encoded = catalog_bytes.len();
-        for member in catalog.members() {
-            let size = usize::try_from(member.digest().length()).map_err(|_| {
-                budget_error(
-                    RuntimeContentBudgetKind::MemberEncodedBytes,
-                    usize::MAX,
-                    limits.member_encoded_bytes.get(),
-                )
-            })?;
-            check(
-                RuntimeContentBudgetKind::MemberEncodedBytes,
-                size,
-                limits.member_encoded_bytes.get(),
-            )?;
-            encoded = checked_add(RuntimeContentBudgetKind::TotalEncodedBytes, encoded, size)?;
-        }
-        check(
-            RuntimeContentBudgetKind::TotalEncodedBytes,
-            encoded,
-            limits.total_encoded_bytes.get(),
+        let admitted = admission::AdmittedCatalog::new(
+            catalog_bytes,
+            expected,
+            recipe,
+            limits,
+            catalog_limits,
         )?;
-        let member_bytes = catalog
-            .members()
-            .len()
-            .checked_mul(size_of::<Vec<u8>>())
-            .ok_or_else(|| {
-                budget_error(
-                    RuntimeContentBudgetKind::RetainedBytes,
-                    usize::MAX,
-                    limits.retained_bytes.get(),
-                )
-            })?;
-        let retained = [
-            encoded,
-            catalog.retained_bytes(),
-            member_bytes,
-            size_of::<RuntimeContentBaseInner>(),
-            2 * crate::scene_retention::ARC_CONTROL_BLOCK_BYTES,
-        ]
-        .into_iter()
-        .try_fold(0, |total, bytes| {
-            checked_add(RuntimeContentBudgetKind::RetainedBytes, total, bytes)
-        })?;
-        check(
-            RuntimeContentBudgetKind::RetainedBytes,
-            retained,
-            limits.retained_bytes.get(),
-        )?;
-
-        let mut members = Vec::with_capacity(catalog.members().len());
-        for member in catalog.members() {
+        let retained = admitted.retained_bytes(true)?;
+        let mut members = Vec::with_capacity(admitted.catalog.members().len());
+        for member in admitted.catalog.members() {
             let path = RelativePath::new(member.path())
                 .expect("catalog admits portable relative member paths");
             let bytes = directory
@@ -497,23 +386,35 @@ impl RuntimeContentBase {
             }
             members.push(bytes);
         }
-        // The retained plan conservatively includes the raw catalog input. It is released here;
-        // the parsed catalog and member snapshot remain the only content owners.
-        drop(catalog_bytes);
-        Ok(Self {
-            inner: Arc::new(RuntimeContentBaseInner {
-                catalog_digest: expected.catalog_digest,
-                catalog,
-                plan,
-                members: members.into_boxed_slice(),
-                budget: DecodeBudget::new(
-                    retained,
-                    limits.retained_bytes.get(),
-                    limits.work_bytes.get(),
-                ),
-                limits,
-            }),
-        })
+        Ok(admitted.publish(
+            EncodedBacking::Captured(members.into_boxed_slice()),
+            retained,
+        ))
+    }
+
+    /// Admits one original local pack without retaining or decoding its member payloads.
+    ///
+    /// Catalogue bytes, extent and executable agreement are checked now. Each acquisition reads
+    /// and authenticates its selected member from this exact file. Mutation or I/O failure can
+    /// reject a later read; existing decoded values remain valid. This never reopens a pathname.
+    pub fn open_pack(
+        file: FileCapability,
+        expected: &RuntimeContentExpectation,
+        recipe: ProductRecipe,
+        limits: RuntimeContentLimits,
+    ) -> Result<Self, RuntimeContentError> {
+        let (length, catalog_limits) = admission::input_limits(expected, limits)?;
+        let catalog_bytes = backing::read_catalog(&file, length)?;
+        let admitted = admission::AdmittedCatalog::new(
+            catalog_bytes,
+            expected,
+            recipe,
+            limits,
+            catalog_limits,
+        )?;
+        let retained = admitted.retained_bytes(false)?;
+        let backing = backing::open_pack(file, &admitted.catalog, admitted.bytes.len())?;
+        Ok(admitted.publish(backing, retained))
     }
 
     #[must_use]
@@ -582,14 +483,14 @@ impl RuntimeContentBase {
             + 2 * crate::scene_retention::ARC_CONTROL_BLOCK_BYTES;
         let promised = checked_add(RuntimeContentBudgetKind::RetainedBytes, work, metadata)?;
         let mut lease = self.inner.budget.reserve(promised, work)?;
-        let candidate = RuntimeSceneDocumentCandidate::from_json_bytes(
-            &self.inner.members[index],
-            scene_limits,
-        )
-        .and_then(|candidate| {
-            candidate.admit(source, self.inner.plan.schema_validation().bindings())
-        })
-        .map_err(RuntimeContentError::Scene)?;
+        let encoded = self.encoded_member(index)?;
+        let candidate =
+            RuntimeSceneDocumentCandidate::from_json_bytes(encoded.as_ref(), scene_limits)
+                .and_then(|candidate| {
+                    candidate.admit(source, self.inner.plan.schema_validation().bindings())
+                })
+                .map_err(RuntimeContentError::Scene)?;
+        drop(encoded);
         let retained = crate::scene_retention::runtime_startup_scene_retained_bytes(&candidate)
             .map_err(|_| {
                 budget_error(
@@ -642,7 +543,8 @@ impl RuntimeContentBase {
         catch_unwind(AssertUnwindSafe(|| {
             check(
                 RuntimeContentBudgetKind::MemberEncodedBytes,
-                self.inner.members[index].len(),
+                usize::try_from(member.digest().length())
+                    .expect("admitted member length fits the host"),
                 limits.encoded_bytes().get(),
             )?;
             check(
@@ -665,8 +567,9 @@ impl RuntimeContentBase {
                 .budget
                 .reserve(promised, limits.work_bytes().get())?;
             let mut dependencies = DependencyInventory::new(self, member)?;
-            let value = C::decode_runtime(&self.inner.members[index])
-                .map_err(RuntimeContentError::Asset)?;
+            let encoded = self.encoded_member(index)?;
+            let value = C::decode_runtime(encoded.as_ref()).map_err(RuntimeContentError::Asset)?;
+            drop(encoded);
             for reference in member.products() {
                 if !D::contains_product(&value, reference.product())
                     || !C::contains_runtime_product(&value, *reference)

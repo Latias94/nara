@@ -5,10 +5,11 @@
 
 use std::{
     fs,
+    io::{Seek, SeekFrom, Write},
     mem::size_of,
-    path::PathBuf,
+    path::{Path, PathBuf},
     sync::{
-        Arc, Mutex,
+        Arc, Barrier, Mutex,
         atomic::{AtomicU64, Ordering},
         mpsc,
     },
@@ -31,7 +32,7 @@ use nara::{
     },
     core::{ByteLimit, FormatKind, FormatVersion, ItemLimit},
     ecs::{Component, Entity, Resource, World},
-    fs::ContentDigest,
+    fs::{ContentDigest, FileCapability, TrustMode},
     identity::{EntityLookup, SpawnedSceneInstance, WorldIdentityDomain},
     project::{ProductCapability, RuntimeConfiguration, RuntimePreset},
     project_host::{open_explicit_product_project_root, resolve_runtime_configuration},
@@ -71,6 +72,7 @@ const ABSENT: &str = "4d42363d-ea9f-4920-b3c7-b141a7b15d98";
 const STARTUP_FILE: &str = "startup.runtime.json";
 const LATER_FILE: &str = "later.runtime.json";
 const BUNDLE_FILE: &str = "bundle.runtime.json";
+const PACK_HEADER_BYTES: u64 = 20;
 const CAPTION: &str = "consumer.runtime-base.Caption";
 const RAW: &[u8] = br#"{"suffix":"suffix.txt","entries":[{"name":"Opening","text":"Hello"},{"name":"Ending","text":"Goodbye"}]}"#;
 const SINGLE_RAW: &[u8] =
@@ -399,6 +401,37 @@ impl Fixture {
         RuntimeContentBase::open(&directory, &self.expected, self.recipe.clone(), limits)
     }
 
+    fn write_pack(&self, name: &str) -> PathBuf {
+        let captured = self.open(RuntimeContentLimits::default()).unwrap();
+        let path = self.root.join(name);
+        let mut output = fs::File::create(&path).unwrap();
+        captured.write_pack(&mut output).unwrap();
+        path
+    }
+
+    fn open_pack(&self, path: &Path) -> RuntimeContentBase {
+        let file = FileCapability::from_host_handle(
+            fs::File::open(path).unwrap(),
+            TrustMode::TrustedLocal,
+            0,
+        )
+        .unwrap();
+        RuntimeContentBase::open_pack(
+            file,
+            &self.expected,
+            self.recipe.clone(),
+            RuntimeContentLimits::default(),
+        )
+        .unwrap()
+    }
+
+    fn remove_loose_inputs(&self) {
+        for member in self.catalog.members() {
+            fs::remove_file(self.root.join(member.path())).unwrap();
+        }
+        fs::remove_file(self.root.join(RUNTIME_CONTENT_CATALOG_FILE)).unwrap();
+    }
+
     fn reopen_with_codec<D, C>(&mut self, definition: &'static str) -> RuntimeContentBase
     where
         D: AssetDomain<Product = TextBundle>,
@@ -608,6 +641,185 @@ fn captured_base_runs_two_managed_scenes_and_compound_products_after_all_files_c
     let fixture = Fixture::new();
     let base = fixture.open(RuntimeContentLimits::default()).unwrap();
     let independently_opened = fixture.open(RuntimeContentLimits::default()).unwrap();
+    assert_eq!(fs::read_dir(&fixture.root).unwrap().count(), 4);
+    for path in [RUNTIME_CONTENT_CATALOG_FILE, STARTUP_FILE, BUNDLE_FILE] {
+        fs::remove_file(fixture.root.join(path)).unwrap();
+    }
+    fs::write(fixture.root.join(LATER_FILE), b"not a Scene or a catalog").unwrap();
+    run_two_managed_scenes(base, independently_opened);
+}
+
+#[test]
+fn retained_pack_runs_two_managed_scenes_and_compound_products_without_loose_inputs() {
+    let fixture = Fixture::new();
+    let path = fixture.write_pack("content.pack");
+    fixture.remove_loose_inputs();
+    assert_eq!(fs::read_dir(&fixture.root).unwrap().count(), 1);
+    let base = fixture.open_pack(&path);
+    let independently_opened = fixture.open_pack(&path);
+    assert_eq!(base.catalog_digest(), fixture.expected.catalog_digest());
+    assert!(base.validate_deep().is_ok());
+    run_two_managed_scenes(base, independently_opened);
+}
+
+#[test]
+fn retained_pack_concurrent_scene_acquisitions_keep_independent_member_positions() {
+    let fixture = Fixture::new();
+    let path = fixture.write_pack("content.pack");
+    fixture.remove_loose_inputs();
+    let file =
+        FileCapability::from_host_handle(fs::File::open(path).unwrap(), TrustMode::TrustedLocal, 0)
+            .unwrap();
+    let limits = RuntimeContentLimits::default()
+        .with_scene(RuntimeSceneLimits::default().with_working_bytes(bytes(1024 * 1024)));
+    let base =
+        RuntimeContentBase::open_pack(file, &fixture.expected, fixture.recipe.clone(), limits)
+            .unwrap();
+    let start = Barrier::new(2);
+    std::thread::scope(|scope| {
+        let workers: Vec<_> = [
+            (startup_product(), FIRST, STARTUP_SOURCE),
+            (later_product(), SECOND, LATER_SOURCE),
+        ]
+        .into_iter()
+        .map(|(product, selection, source)| {
+            let base = &base;
+            let start = &start;
+            scope.spawn(move || {
+                start.wait();
+                for _ in 0..16 {
+                    std::thread::yield_now();
+                    let scene = base.acquire_scene(product).unwrap();
+                    assert_eq!(
+                        scene.candidate().source_key(),
+                        &SourceDocumentKey::stable_asset(stable(source), SourceDocumentKind::Scene,)
+                    );
+                    let record = &scene.candidate().document().entities[0].components
+                        [&ComponentTypeId::new(CAPTION)];
+                    let caption = Caption::__decode_persistent_component(&record.value).unwrap();
+                    assert_eq!(caption.product.as_product(), Some(selected(selection)));
+                    assert!(std::ptr::eq(scene.base().plan(), base.plan()));
+                }
+            })
+        })
+        .collect();
+        for worker in workers {
+            worker.join().unwrap();
+        }
+    });
+}
+
+#[test]
+fn retained_pack_generations_never_retarget_and_reauthenticate_after_each_acquisition() {
+    let mut fixture = Fixture::new();
+    let mut catalog_bytes = fs::read(fixture.root.join(RUNTIME_CONTENT_CATALOG_FILE)).unwrap();
+    catalog_bytes.push(b'\n');
+    fs::write(
+        fixture.root.join(RUNTIME_CONTENT_CATALOG_FILE),
+        &catalog_bytes,
+    )
+    .unwrap();
+    fixture.expected =
+        RuntimeContentExpectation::new(ContentDigest::of_bytes(&catalog_bytes), target());
+    let old_expected = fixture.expected.catalog_digest();
+    assert_ne!(
+        old_expected,
+        ContentDigest::of_bytes(&fixture.catalog.to_json_bytes().unwrap())
+    );
+    let original_bundle = fs::read(fixture.root.join(BUNDLE_FILE)).unwrap();
+    let current_path = fixture.write_pack("current.pack");
+    let old_base = fixture.open_pack(&current_path);
+    let old_scene = old_base.acquire_startup_scene().unwrap();
+    let escaped = old_base
+        .acquire_asset::<TextBundleDomain, TextBundleDomain>(selected(FIRST))
+        .unwrap();
+    assert_eq!(escaped.base().catalog_digest(), old_expected);
+
+    let retired_path = fixture.root.join("retired.pack");
+    fs::rename(&current_path, &retired_path).unwrap();
+    let replacement = bundle_bytes(
+        BUNDLE_SOURCE,
+        br#"{"suffix":"suffix.txt","entries":[{"name":"Opening","text":"Howdy"},{"name":"Ending","text":"Farewell"}]}"#,
+        &[auxiliary(FIRST), auxiliary(SECOND)],
+    );
+    fixture.replace_bundle(&replacement);
+    assert_eq!(fixture.write_pack("current.pack"), current_path);
+    let new_base = fixture.open_pack(&current_path);
+    fixture.remove_loose_inputs();
+    assert_ne!(old_base.catalog_digest(), new_base.catalog_digest());
+    assert!(
+        !old_base
+            .plan()
+            .schema_validation()
+            .bindings()
+            .same_definitions(new_base.plan().schema_validation().bindings())
+    );
+    assert!(
+        old_scene
+            .candidate()
+            .definitions()
+            .matches(old_base.plan().schema_validation().bindings())
+    );
+    let original = escaped
+        .base()
+        .acquire_asset::<TextBundleDomain, TextBundleDomain>(selected(SECOND))
+        .unwrap();
+    assert_eq!(
+        original.product().get(&selected(SECOND)).unwrap().text,
+        "Goodbye world"
+    );
+    let successor = new_base
+        .acquire_asset::<TextBundleDomain, TextBundleDomain>(selected(SECOND))
+        .unwrap();
+    assert_eq!(
+        successor.product().get(&selected(SECOND)).unwrap().text,
+        "Farewell world"
+    );
+    assert!(std::ptr::eq(escaped.base().plan(), old_base.plan()));
+    assert!(!std::ptr::eq(escaped.base().plan(), new_base.plan()));
+
+    let offset = PACK_HEADER_BYTES
+        + old_expected.length()
+        + old_base
+            .catalog()
+            .members()
+            .iter()
+            .take_while(|member| member.path() != BUNDLE_FILE)
+            .map(|member| member.digest().length())
+            .sum::<u64>();
+    let mut writer = fs::OpenOptions::new()
+        .write(true)
+        .open(&retired_path)
+        .unwrap();
+    writer.seek(SeekFrom::Start(offset)).unwrap();
+    writer.write_all(&[original_bundle[0] ^ 1]).unwrap();
+    drop(writer);
+    drop((old_base, old_scene, original));
+    for _ in 0..2 {
+        assert!(matches!(
+            escaped
+                .base()
+                .acquire_asset::<TextBundleDomain, TextBundleDomain>(selected(SECOND)),
+            Err(RuntimeContentError::MemberDigestMismatch)
+        ));
+        assert_eq!(
+            escaped.product().get(&selected(FIRST)).unwrap().text,
+            "Hello world"
+        );
+        assert_eq!(
+            new_base
+                .acquire_asset::<TextBundleDomain, TextBundleDomain>(selected(FIRST))
+                .unwrap()
+                .product()
+                .get(&selected(FIRST))
+                .unwrap()
+                .text,
+            "Howdy world"
+        );
+    }
+}
+
+fn run_two_managed_scenes(base: RuntimeContentBase, independently_opened: RuntimeContentBase) {
     let plan = base.plan().clone();
     assert_eq!(
         plan.plugin_plan().fingerprint(),
@@ -619,12 +831,6 @@ fn captured_base_runs_two_managed_scenes_and_compound_products_after_all_files_c
             .bindings()
             .same_definitions(independently_opened.plan().schema_validation().bindings(),),
     );
-    assert_eq!(fs::read_dir(&fixture.root).unwrap().count(), 4);
-    for path in [RUNTIME_CONTENT_CATALOG_FILE, STARTUP_FILE, BUNDLE_FILE] {
-        fs::remove_file(fixture.root.join(path)).unwrap();
-    }
-    fs::write(fixture.root.join(LATER_FILE), b"not a Scene or a catalog").unwrap();
-
     let startup = base.acquire_startup_scene().unwrap();
     let later = base.acquire_scene(later_product()).unwrap();
     let bundle = base

@@ -26,7 +26,7 @@ use nara_engine::{
         App, Plugin, PluginCategory, PluginDeclaration, PluginError, PluginId,
         PluginSchemaProviderId,
     },
-    fs::ContentDigest,
+    fs::{ContentDigest, RelativePath},
     project::{ProductCapability, RuntimeConfiguration, RuntimePreset},
     project_host::{open_explicit_product_project_root, resolve_runtime_configuration},
     runtime_content::{
@@ -75,6 +75,7 @@ const PRIMARY_FILE: &str = "primary.runtime.image";
 const AUXILIARY_FILE: &str = "auxiliary.runtime.image";
 const STARTUP_FILE: &str = "startup.runtime.json";
 const LATER_FILE: &str = "later.runtime.json";
+const PACK_FILE: &str = "runtime-content.pack";
 const SOURCE_PNG: &[u8] = include_bytes!("../../../../reference-game/assets/textures/player.png");
 const AUXILIARY_PIXELS: &[u8] = &[19, 37, 53, 255, 71, 89, 101, 127];
 
@@ -548,6 +549,23 @@ impl Fixture {
         .unwrap()
     }
 
+    fn open_pack_from(&self, captured: &RuntimeContentBase) -> RuntimeContentBase {
+        let mut output = fs::File::create(self.directory.path().join(PACK_FILE)).unwrap();
+        captured.write_pack(&mut output).unwrap();
+        drop(output);
+        let root = open_explicit_product_project_root(self.directory.path()).unwrap();
+        let file = root
+            .open_file(&RelativePath::new(PACK_FILE).unwrap())
+            .unwrap();
+        RuntimeContentBase::open_pack(
+            file,
+            &self.expected,
+            self.recipe.clone(),
+            RuntimeContentLimits::default(),
+        )
+        .unwrap()
+    }
+
     /// Includes the captured base and one complete maximum codec/Host output reservation.
     fn one_image_retained_limit<C: RuntimeAssetCodec<ImageAsset>>(&self) -> usize {
         let limits = RuntimeContentLimits::default()
@@ -813,6 +831,192 @@ fn imported_pixels_reach_source_free_native_scenes_and_prepared_packets_from_one
     *encoded.last_mut().unwrap() ^= 1;
     let changed = ImageRuntimeCodec::decode_runtime(&encoded).unwrap();
     assert_ne!(changed.content_hash(), roundtrip.content_hash());
+}
+
+#[test]
+fn retained_pack_matches_captured_image_publication_and_escaped_pixels_after_scene_retirement() {
+    let fixture = Fixture::new();
+    let captured = fixture.open(RuntimeContentLimits::default()).unwrap();
+    let packed = fixture.open_pack_from(&captured);
+    assert_eq!(captured.catalog_digest(), packed.catalog_digest());
+    fixture.remove_files();
+
+    for base in [captured, packed] {
+        let scene = base.acquire_startup_scene().unwrap();
+        let value = Arc::new(
+            base.acquire_asset::<ImageDomain, ImageRuntimeCodec>(primary())
+                .unwrap(),
+        );
+        assert_eq!(value.product().pixels(), fixture.primary_pixels);
+        assert_eq!(value.product().extent(), fixture.primary_extent);
+        assert_eq!(value.product().content_hash(), fixture.primary_hash);
+        assert!(value.product().source().is_none());
+        let owner = Arc::downgrade(&value);
+        let digest = base.catalog_digest();
+        let pixels = value.product().pixels().as_ptr();
+        let (mut world, handle) = initial_world(&value);
+        let current = base
+            .plan()
+            .schema_validation()
+            .bindings()
+            .prepare_runtime_scene(&mut world, scene.candidate(), &occurrence())
+            .unwrap()
+            .commit(&mut world)
+            .instance
+            .unwrap();
+        assert_eq!(
+            world.get::<Portrait>(resolve(&world, &current)).unwrap().0,
+            handle
+        );
+        let content = world.resource::<ImageProducts>().capture(&world, handle);
+        let prepared = content.prepared_snapshot();
+        assert_prepared(&prepared, &content);
+        retire_and_despawn_scene_instance(&mut world, &current).unwrap();
+        let ImageProducts {
+            mut images,
+            mut states,
+            mut events,
+            ..
+        } = world.remove_resource::<ImageProducts>().unwrap();
+        drop(
+            images
+                .remove_with_state(handle, &mut states, &mut events)
+                .unwrap()
+                .unwrap(),
+        );
+        assert!(!content.is_authorized(world.resource::<AssetServer>(), &states, &images));
+        drop((world, images, states, events, current, scene, value, base));
+
+        {
+            let original = owner
+                .upgrade()
+                .expect("escaped pixels retain their acquisition");
+            assert_eq!(original.base().catalog_digest(), digest);
+            assert_eq!(original.product().pixels().as_ptr(), pixels);
+        }
+        assert_eq!(content.pixels(), fixture.primary_pixels);
+        drop(content);
+        assert!(owner.upgrade().is_some());
+        assert_eq!(prepared.resource().pixels().as_ptr(), pixels);
+        assert_eq!(prepared.resource().pixels(), fixture.primary_pixels);
+        assert!(prepared.resource().has_retention_owner());
+        drop(prepared);
+        assert!(owner.upgrade().is_none());
+    }
+}
+
+#[test]
+fn retained_pack_image_generations_keep_original_pixels_after_path_replacement_and_mutation() {
+    let first = Fixture::small_images(recipe());
+    let second = Fixture::with_primary_image(
+        ImageAsset::from_product(
+            primary(),
+            ImageExtent::new(2, 1),
+            ImageFormat::Rgba8,
+            ImageColorSpace::Srgb,
+            vec![23, 29, 31, 255, 37, 41, 43, 127],
+        )
+        .unwrap(),
+        recipe(),
+    );
+    let captured_first = first.open(RuntimeContentLimits::default()).unwrap();
+    let original = first.open_pack_from(&captured_first);
+    let first_value = Arc::new(
+        original
+            .acquire_asset::<ImageDomain, ImageRuntimeCodec>(primary())
+            .unwrap(),
+    );
+    let (mut world, handle) = initial_world(&first_value);
+    let first_content = world.resource::<ImageProducts>().capture(&world, handle);
+    let first_prepared = first_content.prepared_snapshot();
+
+    let original_path = first.directory.path().join("original.pack");
+    fs::rename(first.directory.path().join(PACK_FILE), &original_path).unwrap();
+    let captured_second = second.open(RuntimeContentLimits::default()).unwrap();
+    let mut output = fs::File::create(first.directory.path().join(PACK_FILE)).unwrap();
+    captured_second.write_pack(&mut output).unwrap();
+    drop(output);
+    let replacement_file = open_explicit_product_project_root(first.directory.path())
+        .unwrap()
+        .open_file(&RelativePath::new(PACK_FILE).unwrap())
+        .unwrap();
+    let replacement = RuntimeContentBase::open_pack(
+        replacement_file,
+        &second.expected,
+        second.recipe.clone(),
+        RuntimeContentLimits::default(),
+    )
+    .unwrap();
+    assert_ne!(original.catalog_digest(), replacement.catalog_digest());
+    first.remove_files();
+    second.remove_files();
+    drop((captured_first, captured_second));
+
+    for _ in 0..2 {
+        let next = Arc::new(
+            replacement
+                .acquire_asset::<ImageDomain, ImageRuntimeCodec>(primary())
+                .unwrap(),
+        );
+        assert_eq!(next.product().pixels(), second.primary_pixels);
+        assert_eq!(next.base().catalog_digest(), replacement.catalog_digest());
+        world
+            .resource_mut::<ImageProducts>()
+            .publish(handle, retained_image(&next));
+        let previous = original
+            .acquire_asset::<ImageDomain, ImageRuntimeCodec>(primary())
+            .unwrap();
+        assert_eq!(previous.product().pixels(), first.primary_pixels);
+        assert_eq!(previous.base().catalog_digest(), original.catalog_digest());
+    }
+    let second_content = world.resource::<ImageProducts>().capture(&world, handle);
+    assert_eq!(second_content.pixels(), second.primary_pixels);
+    let products = world.resource::<ImageProducts>();
+    assert!(!first_content.is_current(
+        world.resource::<AssetServer>(),
+        &products.states,
+        &products.images,
+    ));
+    assert_eq!(first_content.pixels(), first.primary_pixels);
+    assert_prepared(&first_prepared, &first_content);
+
+    let mut encoded = fs::read(&original_path).unwrap();
+    let preceding: u64 = original
+        .catalog()
+        .members()
+        .iter()
+        .take_while(|member| member.path() != PRIMARY_FILE)
+        .map(|member| member.digest().length())
+        .sum();
+    let member = original
+        .catalog()
+        .members()
+        .iter()
+        .find(|member| member.path() == PRIMARY_FILE)
+        .unwrap();
+    // The transport header is the eight-byte magic, u32 version and u64 catalogue length.
+    let last_pixel = usize::try_from(
+        20 + original.catalog_digest().length() + preceding + member.digest().length() - 1,
+    )
+    .unwrap();
+    encoded[last_pixel] ^= 1;
+    fs::write(&original_path, encoded).unwrap();
+    assert!(matches!(
+        original.acquire_asset::<ImageDomain, ImageRuntimeCodec>(primary()),
+        Err(RuntimeContentError::MemberDigestMismatch)
+    ));
+    assert_eq!(
+        replacement
+            .acquire_asset::<ImageDomain, ImageRuntimeCodec>(primary())
+            .unwrap()
+            .product()
+            .pixels(),
+        second.primary_pixels
+    );
+    drop((world, first_value, original, replacement));
+    assert_eq!(first_content.pixels(), first.primary_pixels);
+    assert_eq!(first_prepared.resource().pixels(), first.primary_pixels);
+    assert_eq!(second_content.pixels(), second.primary_pixels);
 }
 
 fn replacement_products(

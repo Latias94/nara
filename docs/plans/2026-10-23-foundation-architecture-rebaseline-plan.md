@@ -666,7 +666,8 @@ supplies source constraints; the [production qualification](../knowledge/enginee
 records the implemented successor, actual source/processed travel, strict validation/Export,
 ownership budgets and selected native scope. It does not claim performance or CP4 backing results.
 
-Separately compare the qualified eager base with a concrete immutable retained-pack backing before
+Separately compare the qualified eager base with a concrete retained local pack and immutable
+expected member meaning before
 claiming larger content-store suitability. Immutable catalogue/codec authority, encoded member
 backing and decoded/native residency have different lifetimes. A lazy acquisition retains its
 original backing and needed data, never a newly opened mutable directory or current global base.
@@ -675,6 +676,14 @@ backend's availability guarantee; retain the eager backend's captured-file-remov
 Lazy backing alone does not reduce a Required preparation closure, and selective demand alone
 does not release an eager base's encoded bytes. These are separate experiments within R6/R7,
 not prerequisites to requalify the completed bounded source-free startup/Input units.
+The [selected backing design](../architecture/runtime-content-backing-and-residency-design.md)
+and [retained-pack plan](2026-10-31-retained-runtime-pack-plan.md) make this comparison concrete:
+keep complete memory capture and compare one retained file with authenticated temporary member
+reads, without claiming portable OS byte freezing or adding a general provider/cache framework.
+Its [production qualification](../knowledge/engineering/verification/2026-10/2026-10-30T184847Z-retained-runtime-pack-and-independent-encoded-residency-qualification-386d2e5e9c124b66bc4390f69b796053.md)
+now records Root1022, independent50, real travel/physical cancellation, exact overlapping work,
+original generations and escaped prepared pixels. This closes the bounded CP4 comparison, with
+no GPU/large-game streaming performance or general-provider claim.
 
 Acceptance: two clean content builds, a different host/target selection, source/cache inaccessible
 and no Cargo on the runtime machine, server stripping, wrong target/schema/digest rejection,

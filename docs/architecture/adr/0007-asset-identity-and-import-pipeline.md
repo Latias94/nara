@@ -227,12 +227,19 @@ Reference edges must close within the base; Soft metadata does not trigger acqui
 later Scene roots and explicitly addressable roots are declared, rather than inferred from file
 names. Duplicate mappings, incompatible path aliases and invalid roots reject admission.
 
-Opening the base captures and verifies every declared member before publishing the immutable
-base. Later acquisition uses only those captured bytes and the original exact executable plan;
-it does not reopen changed files, create a source database, import metadata or fall back to cache.
-Content mutation after capture cannot redirect an existing base. This eager local capture is an
-implementation policy, not a requirement that future container or streaming providers merge
-membership, readiness and residency.
+The base fixes admitted catalogue/member meaning and the original exact executable plan.
+Encoded backing and decoded/native residency have distinct ownership. The captured-directory
+policy verifies and retains every declared member before publication, so acquisitions survive
+complete input-file removal. The selected retained-pack policy consumes one exact opened file,
+admits its catalogue and bounded member extents, and verifies a privately read member against
+its original digest before decoding. It retains no encoded member cache. An open handle is not
+a portable proof of immutable bytes: mutation or I/O failure can make a later pack acquisition
+fail, but cannot redirect its admitted meaning or change already decoded results. Neither policy
+reopens member paths, creates a source database, imports metadata or falls back to another base.
+The [backing design](../runtime-content-backing-and-residency-design.md) owns the concrete local
+format, availability distinction and pre-allocation accounting. Its
+[production qualification](../../knowledge/engineering/verification/2026-10/2026-10-30T184847Z-retained-runtime-pack-and-independent-encoded-residency-qualification-386d2e5e9c124b66bc4390f69b796053.md)
+compares actual public travel/cancellation, budgets and escaped pixels against complete capture.
 Startup and later first-party Scene preparation retain the original base and plan. Equal catalog
 bytes or fingerprints from a separately opened base do not establish that same owner or exact
 executable selection.
@@ -242,7 +249,8 @@ never becomes a package/mount key. A later provider or composition creates a sep
 immutable content-set context with a complete selected membership/dependency closure; it cannot
 mutate a live base or retarget its acquisitions, decoded owners or recovery inputs. Equal catalog
 bytes alone do not substitute the original base/plan instance. The first directory-backed capture
-remains the only qualified provider. Provider transport, overlay precedence, patching and remote
+and retained local pack are qualified in their recorded scopes. General provider
+transport, overlay precedence, patching and remote
 authenticity are separate work, with no new VFS, source resolver or package executor selected here.
 
 Immediate closure distinguishes data readiness from Scene instantiation. A persistent reference

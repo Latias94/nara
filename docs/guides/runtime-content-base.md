@@ -26,7 +26,7 @@ performance qualification.
 | Catalog digest | Exact catalog bytes selected independently by the Host |
 | `RuntimeConfigurationPlan` | Original compiled plugin, native/data Schema and Runtime codec selection |
 | `RuntimeCodecDefinitionId` | Package author's versioned declaration of one compiled family/codec binding |
-| `RuntimeContentBase` | Shared immutable encoded snapshot plus its original configuration plan |
+| `RuntimeContentBase` | Admitted immutable content meaning, exact encoded backing and original configuration plan |
 | `RuntimeContentAsset<P>` / `RuntimeContentScene` | Admitted decoded output retaining its base and reservation |
 | `RuntimeContentValidationReport` | Catalog digest and counts from strict mandatory payload validation |
 | `RuntimeInputContent` | Global startup definition retaining its actual typed acquisition independently of Scene collections |
@@ -102,6 +102,47 @@ or overlay contributes a separately admitted set or composed successor; it canno
 base, change an authored Product's meaning or redirect existing acquisition/recovery leases.
 Original base/plan identity remains distinct from equality of catalog bytes. This is an evolution
 constraint, not an implemented provider, overlay precedence or package-resolution API.
+
+### Retained Local Pack
+
+Use a local pack when encoded payloads should be read temporarily instead of retained for the
+whole base lifetime. Produce it from the exact admitted base through a standard byte sink:
+
+```rust,ignore
+captured_base.write_pack(&mut fresh_destination)?;
+// Publish and synchronize the destination through its actual filesystem owner.
+let packed_base = RuntimeContentBase::open_pack(
+    published_pack_file,
+    &expected_base,
+    game_recipe()?,
+    RuntimeContentLimits::default(),
+)?;
+let scene = packed_base.acquire_startup_scene()?;
+```
+
+`write_pack` writes from the sink's current position. Supply a fresh destination and handle
+publication/durability separately; failure may leave partial output. It preserves the original
+catalogue bytes and authenticates every copied member, without decoding domain products or
+exporting only the current Scene closure. The pack uses canonical transport version 1; it does
+not change the catalogue or member formats.
+
+`open_pack` consumes one exact `FileCapability`, verifies the bounded original catalogue and
+compiled agreement, derives member extents and checks total file length. It does not eagerly
+verify every payload or retain a parent directory. Ordinary Scene/asset acquisition and strict
+`validate_deep` then use the same production decoders as captured bases.
+
+Each acquisition reserves its selected encoded range as temporary shared work, reads it through
+an independent positional cursor, checks the original digest and passes that same private buffer
+to the decoder. The buffer is dropped before its reservation returns. There is no encoded cache;
+reacquisition performs another authenticated read. Decoded values retain their original base,
+plan and output reservation, while unrelated encoded members do not become resident.
+
+An open file binds an object, not portable immutable bytes. Path replacement cannot redirect
+this base, but mutation/truncation or I/O failure on the original object can reject later affected
+reads. Already decoded resources remain usable. An earlier deep report does not guarantee later
+backing availability. Use complete captured mode when acquisitions must survive removal of all
+input files. The [backing design](../architecture/runtime-content-backing-and-residency-design.md)
+defines the two availability guarantees; neither selects a general VFS, cache or package overlay.
 
 Scene acquisition uses the expected containing identity in the member description and the
 original plan's exact definitions. It traverses actual recursive Schema asset leaves, including
@@ -284,7 +325,9 @@ resource writer policy or a requirement to wrap ordinary ECS access in document 
 
 Catalog decoding enforces encoded, structural, count, string/path and modeled work bounds before
 publishing a catalog. Base capture separately bounds each member, total encoded bytes and logical
-retained storage. Typed acquisition reserves trusted codec work and retained-output promises
+retained storage. Pack mode applies the same declared member/total encoding limits, while only
+catalogue/backing metadata stays retained. Its selected encoded buffer overlaps the decoder,
+dependency and parser work reservations. Typed acquisition reserves trusted codec work and retained-output promises
 before calling the codec. After checking decoded membership, it calls the codec's bounded
 `runtime_retained_bytes` query over that actual value. The query includes the inline product and
 owned allocations, excludes encoded/base/wrapper storage and allocates no product/query scratch.

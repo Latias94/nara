@@ -75,6 +75,14 @@ source/processed A-B-C/D travel. It includes strict source Export/relocation, in
 defenses, root/owner regressions and two selected Windows/DX12 trajectories, with broad-run failure
 and correction history retained. The eager encoded base, target cooking and packaged Player
 remain separate. The pinned study and prior finite closure evidence keep their original scopes.
+The [retained-pack successor](../runtime-content-backing-and-residency-design.md) under ADR0007
+is implemented and qualified. It preserves complete captured
+availability and compares one exact file plus authenticated temporary member reads without a
+general provider/cache framework. Its [plan](../../plans/2026-10-31-retained-runtime-pack-plan.md)
+has [production evidence](../../knowledge/engineering/verification/2026-10/2026-10-30T184847Z-retained-runtime-pack-and-independent-encoded-residency-qualification-386d2e5e9c124b66bc4390f69b796053.md):
+Root1022, independent50, actual travel/held cancellation, escaped pixels, original generations,
+exact raw/decode budgets, corruption/refund and relevant feature/Clippy checks. GPU/streaming
+performance, general providers/cache, target cooking and the packaged Player remain separate.
 
 The [October 29 rendering review](../../research/2026-10-29-render-architecture-and-refactor-plan-review.md)
 and long-horizon refinement prefer a finite explicit resource graph, typed contributions and

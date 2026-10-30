@@ -13,7 +13,7 @@ use nara_asset::{
 };
 use nara_core::{ByteLimit, FormatKind, FormatVersion};
 use nara_diagnostic::{Diagnostic, DiagnosticCode, SafeSummary};
-use nara_fs::ContentDigest;
+use nara_fs::{ContentDigest, RelativePath};
 use nara_identity::SceneEntityId;
 use nara_image::{ImageColorSpace, ImageExtent, ImageFormat, ImageRuntimeCodec};
 use nara_project::{ProductCapability, RuntimeConfiguration, RuntimePreset};
@@ -64,12 +64,14 @@ struct Observations {
 thread_local! {
     static OBSERVED: RefCell<Observations> = RefCell::new(Observations::default());
     static REFUSE_Y: Cell<bool> = const { Cell::new(false) };
+    static PANIC_Y: Cell<bool> = const { Cell::new(false) };
     static REQUIRE_PREVIOUS_DROP: Cell<bool> = const { Cell::new(false) };
 }
 
 fn reset_observations() {
     OBSERVED.with(|observed| *observed.borrow_mut() = Observations::default());
     REFUSE_Y.with(|refuse| refuse.set(false));
+    PANIC_Y.with(|panic| panic.set(false));
     REQUIRE_PREVIOUS_DROP.with(|require| require.set(false));
 }
 
@@ -204,6 +206,10 @@ fn decode_product(tag: u8, bytes: &[u8]) -> Result<ProbeProduct, AssetRuntimeErr
         payload: vec![tag; payload_bytes].into_boxed_slice(),
         instance,
     };
+    assert!(
+        tag != Y || !PANIC_Y.with(Cell::get),
+        "fixture decoder panic after allocating its product"
+    );
     if tag == Y && REFUSE_Y.with(Cell::get) {
         return Err(codec_error());
     }
@@ -595,6 +601,29 @@ impl Fixture {
         )
         .unwrap()
     }
+
+    fn write_pack(&self) -> PathBuf {
+        let path = self.root.join(format!(
+            "content-{}.pack",
+            NEXT_FIXTURE.fetch_add(1, Ordering::Relaxed),
+        ));
+        self.open(false, content_limits())
+            .write_pack(&mut fs::File::create_new(&path).unwrap())
+            .unwrap();
+        path
+    }
+
+    fn open_pack(
+        &self,
+        path: &std::path::Path,
+        limits: RuntimeContentLimits,
+    ) -> Result<RuntimeContentBase, RuntimeContentError> {
+        let directory = open_explicit_product_project_root(&self.root).unwrap();
+        let file = directory
+            .open_file(&RelativePath::new(path.file_name().unwrap().to_str().unwrap()).unwrap())
+            .unwrap();
+        RuntimeContentBase::open_pack(file, &self.expected, self.recipes[0].clone(), limits)
+    }
 }
 
 impl Drop for Fixture {
@@ -649,6 +678,208 @@ fn assert_refunded(base: &RuntimeContentBase, baseline: usize) {
         baseline
     );
     assert_eq!(charge(base, RuntimeContentBudgetKind::WorkBytes), 0);
+}
+
+#[test]
+fn retained_pack_releases_member_encoding_and_overlaps_exact_decode_work() {
+    let fixture = Fixture::new();
+    let path = fixture.write_pack();
+    let captured = fixture.open(false, content_limits());
+    let pack = fixture.open_pack(&path, content_limits()).unwrap();
+    let captured_charge = charge(&captured, RuntimeContentBudgetKind::RetainedBytes);
+    let pack_charge = charge(&pack, RuntimeContentBudgetKind::RetainedBytes);
+    let member_bytes: usize = captured
+        .catalog()
+        .members()
+        .iter()
+        .map(|member| member.digest().length() as usize)
+        .sum();
+    assert_eq!(
+        captured_charge - pack_charge,
+        member_bytes
+            + captured.catalog().members().len() * (size_of::<Vec<u8>>() - size_of::<u64>()),
+    );
+    let member = pack.member(product(Y)).unwrap();
+    let exact = Y_WORK
+        + member.dependencies().len() * size_of::<Option<AssetReferenceDemand>>()
+        + member.digest().length() as usize;
+    drop((captured, pack));
+    reset_observations();
+    for allowance in [exact - 1, exact] {
+        let base = fixture
+            .open_pack(
+                &path,
+                content_limits().with_work_bytes(ByteLimit::new(allowance).unwrap()),
+            )
+            .unwrap();
+        let baseline = charge(&base, RuntimeContentBudgetKind::RetainedBytes);
+        if allowance < exact {
+            assert!(matches!(
+                base.acquire_asset::<ProbeDomain, YCodec>(product(Y)),
+                Err(RuntimeContentError::Budget {
+                    kind: RuntimeContentBudgetKind::WorkBytes,
+                    required,
+                    limit,
+                }) if required == exact && limit == allowance
+            ));
+            assert!(decoded().is_empty());
+        } else {
+            let first = base
+                .acquire_asset::<ProbeDomain, YCodec>(product(Y))
+                .unwrap();
+            assert_eq!(charge(&base, RuntimeContentBudgetKind::WorkBytes), 0);
+            assert_eq!(
+                charge(&base, RuntimeContentBudgetKind::RetainedBytes),
+                baseline + first.retained_bytes(),
+            );
+            let second = base
+                .acquire_asset::<ProbeDomain, YCodec>(product(Y))
+                .unwrap();
+            assert_eq!(decoded(), [Y, Y]);
+            assert_eq!(
+                charge(&base, RuntimeContentBudgetKind::RetainedBytes),
+                baseline + first.retained_bytes() + second.retained_bytes(),
+            );
+            drop((first, second));
+        }
+        assert_refunded(&base, baseline);
+    }
+}
+
+#[test]
+fn retained_pack_decode_failure_and_later_mutation_keep_refund_and_decoded_owners() {
+    let fixture = Fixture::new();
+    let path = fixture.write_pack();
+    let base = fixture.open_pack(&path, content_limits()).unwrap();
+    let baseline = charge(&base, RuntimeContentBudgetKind::RetainedBytes);
+    reset_observations();
+    REFUSE_Y.with(|refuse| refuse.set(true));
+    assert!(matches!(
+        base.acquire_asset::<ProbeDomain, YCodec>(product(Y)),
+        Err(RuntimeContentError::Asset(_))
+    ));
+    assert_eq!(decoded(), [Y]);
+    assert_refunded(&base, baseline);
+    REFUSE_Y.with(|refuse| refuse.set(false));
+    PANIC_Y.with(|panic| panic.set(true));
+    assert!(matches!(
+        base.acquire_asset::<ProbeDomain, YCodec>(product(Y)),
+        Err(RuntimeContentError::CodecPanicked)
+    ));
+    PANIC_Y.with(|panic| panic.set(false));
+    assert_eq!(decoded(), [Y, Y]);
+    assert_refunded(&base, baseline);
+    let original = base
+        .acquire_asset::<ProbeDomain, YCodec>(product(Y))
+        .unwrap();
+    let mut changed = fs::read(&path).unwrap();
+    *changed.last_mut().unwrap() ^= 1;
+    fs::write(&path, &changed).unwrap();
+    let last = base.catalog().members().last().unwrap().products()[0];
+    assert_eq!(last, product(Z));
+    assert!(matches!(
+        base.acquire_asset::<ProbeDomain, ZCodec>(last),
+        Err(RuntimeContentError::MemberDigestMismatch)
+    ));
+    fs::OpenOptions::new()
+        .write(true)
+        .open(&path)
+        .unwrap()
+        .set_len(changed.len() as u64 - 1)
+        .unwrap();
+    assert!(matches!(
+        base.acquire_asset::<ProbeDomain, ZCodec>(last),
+        Err(RuntimeContentError::Host(_))
+    ));
+    assert_eq!(decoded(), [Y, Y, Y]);
+    assert_eq!(original.product().payload[0], Y);
+    assert_eq!(charge(&base, RuntimeContentBudgetKind::WorkBytes), 0);
+    assert_eq!(
+        charge(&base, RuntimeContentBudgetKind::RetainedBytes),
+        baseline + original.retained_bytes()
+    );
+    drop(original);
+    assert_refunded(&base, baseline);
+}
+
+#[test]
+fn retained_pack_rejects_bad_header_extent_and_catalog_before_domain_decode() {
+    let fixture = Fixture::new();
+    let path = fixture.write_pack();
+    let original = fs::read(&path).unwrap();
+    reset_observations();
+    for byte in [0, 8, 12] {
+        let mut changed = original.clone();
+        changed[byte] ^= 1;
+        fs::write(&path, changed).unwrap();
+        assert!(matches!(
+            fixture.open_pack(&path, content_limits()),
+            Err(RuntimeContentError::InvalidPackHeader)
+        ));
+    }
+    let mut changed = original.clone();
+    changed[20] ^= 1;
+    fs::write(&path, changed).unwrap();
+    assert!(matches!(
+        fixture.open_pack(&path, content_limits()),
+        Err(RuntimeContentError::CatalogDigestMismatch)
+    ));
+    for length in [original.len() - 1, original.len() + 1] {
+        let mut changed = original.clone();
+        changed.resize(length, 0);
+        fs::write(&path, changed).unwrap();
+        assert!(matches!(
+            fixture.open_pack(&path, content_limits()),
+            Err(RuntimeContentError::PackExtentMismatch)
+        ));
+    }
+    fs::write(&path, &original[..10]).unwrap();
+    assert!(matches!(
+        fixture.open_pack(&path, content_limits()),
+        Err(RuntimeContentError::Host(_))
+    ));
+    assert!(decoded().is_empty());
+}
+
+#[test]
+fn retained_pack_partial_sink_failure_releases_selected_raw_work_without_decoding() {
+    struct RefusingSink {
+        remaining: usize,
+    }
+    impl std::io::Write for RefusingSink {
+        fn write(&mut self, bytes: &[u8]) -> std::io::Result<usize> {
+            if self.remaining == 0 {
+                return Err(std::io::Error::other("fixture sink refused further bytes"));
+            }
+            let written = self.remaining.min(bytes.len());
+            self.remaining -= written;
+            Ok(written)
+        }
+        fn flush(&mut self) -> std::io::Result<()> {
+            Ok(())
+        }
+    }
+    let fixture = Fixture::new();
+    let path = fixture.write_pack();
+    let captured = fixture.open(false, content_limits());
+    let pack = fixture.open_pack(&path, content_limits()).unwrap();
+    reset_observations();
+    for base in [captured, pack] {
+        let baseline = charge(&base, RuntimeContentBudgetKind::RetainedBytes);
+        for remaining in [3, 24, 20 + base.catalog_digest().length() as usize + 1] {
+            let mut sink = RefusingSink { remaining };
+            assert!(matches!(
+                base.write_pack(&mut sink),
+                Err(RuntimeContentError::Host(nara_fs::FsError::Io {
+                    operation: nara_fs::FsOperation::Write,
+                    ..
+                }))
+            ));
+            assert_eq!(sink.remaining, 0);
+            assert_refunded(&base, baseline);
+            assert!(decoded().is_empty());
+        }
+    }
 }
 
 struct Peak {
@@ -707,6 +938,55 @@ fn discovery_peak(fixture: &Fixture) -> Peak {
     assert_refunded(&base, baseline);
     reset_observations();
     peak
+}
+
+#[test]
+fn retained_pack_complete_preparation_and_deep_validation_admit_raw_decode_overlap() {
+    let fixture = Fixture::new();
+    let path = fixture.write_pack();
+    let peak = discovery_peak(&fixture);
+    let base = fixture.open_pack(&path, content_limits()).unwrap();
+    let y_encoded = base.member(product(Y)).unwrap().digest().length() as usize;
+    drop(base);
+    for deep in [false, true] {
+        let exact = if deep { peak.deep_work } else { peak.work } + y_encoded;
+        for short in [true, false] {
+            let limit = exact - usize::from(short);
+            let base = fixture
+                .open_pack(
+                    &path,
+                    content_limits().with_work_bytes(ByteLimit::new(limit).unwrap()),
+                )
+                .unwrap();
+            let baseline = charge(&base, RuntimeContentBudgetKind::RetainedBytes);
+            reset_observations();
+            let result = if deep {
+                REQUIRE_PREVIOUS_DROP.with(|require| require.set(true));
+                base.validate_deep().map(|_| ())
+            } else {
+                base.prepare_scene_content(product(0)).map(|content| {
+                    assert_prepared_once(&content);
+                    drop(content);
+                })
+            };
+            REQUIRE_PREVIOUS_DROP.with(|require| require.set(false));
+            if short {
+                assert!(matches!(
+                    result,
+                    Err(RuntimeContentError::Budget {
+                        kind: RuntimeContentBudgetKind::WorkBytes, required, limit: actual
+                    }) if required == exact && actual == limit
+                ));
+                assert_eq!(decoded(), [X]);
+                assert_eq!(dropped(), [X]);
+            } else {
+                result.unwrap();
+                assert_eq!(decoded(), [X, Y, Z]);
+                assert_eq!(dropped(), [X, Y, Z]);
+            }
+            assert_refunded(&base, baseline);
+        }
+    }
 }
 
 fn assert_prepared_once(content: &ProcessedSceneContent) {
