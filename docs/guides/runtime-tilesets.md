@@ -5,6 +5,19 @@ It carries a complete TileSet Product, its complete required Image Product, exac
 and sampler/alpha/tint policy. Both Products can be primary or auxiliary. A source-side
 `TileSetSource` remains the adapter for authoring files and real Image import provenance.
 
+Source `TileSetContent::request` also receives the actual `&AssetPathScope`. It binds the Image
+alias once and retains that canonical dependency with the desired declaration. Dropping the
+requesting scope does not stop automatic Image reconciliation; `reconcile()` needs no scope
+argument or World-wide default. Binding an equal source under a different scope is a new
+declaration when it selects another Image, so old prepared publication claims reject. Direct
+`TileSetPublicationInput::from_source` takes the same scope and an explicit bounded canonical
+reference allowance; preparation also checks the receiving owner's limit.
+
+The native `TileSetAssetPlugin` reconciles dependencies during ordinary Runtime frames. A Host
+using driver-only Image publication must explicitly advance that same `TileSetContent::reconcile`
+owner after publication or revocation, including when no simulation frame or visible preview runs.
+That maintenance uses the retained declaration and performs no source I/O or alias rebinding.
+
 ## Decode The Actual Dependency
 
 With `serde`, `TileSetRuntimeCodec` implements `RuntimeAssetCodec<TileSetDescriptor>` using

@@ -2,7 +2,7 @@
 
 **Status**: Accepted
 **Date**: 2026-07-09
-**Last Revised**: 2026-10-28
+**Last Revised**: 2026-10-30
 **Amended**: 2026-08-15 to make selection single-owner and separate monotonic revision from
 receipt-backed content state
 **Amended**: 2026-10-27 to capture actual open Prefab working copies for authoring Scene preview
@@ -19,6 +19,8 @@ management facts do not recover creation or deletion authority on Open
 with separate in-memory facts and receipt-backed publication evidence
 **Amended**: 2026-10-28 to replace mixed installed/project-content protection with managed
 artifacts and explicit project-owned template import, removing optional-ledger persistence gates
+**Amended**: 2026-10-30 to extend the working-copy contract to demanded open Scene dependencies
+under the exact nominal Schema basis; implementation and qualification remain outstanding
 **Refined By**: [ADR 0104](0104-host-owned-editor-workspace-installation.md): Host-Owned Editor
 Workspace Installation
 
@@ -246,6 +248,8 @@ Rules:
   Workspace, source allocator or publication guard and creates no new source/content identity.
   Returned preparation pins original source snapshots for actual Host capture; those snapshots
   do not observe subsequent live edits or replace the original whole-set publication check.
+  Dependency capture passes the corresponding prepared Scene and Prefab snapshots through the
+  same source capture path under that exact nominal successor Schema basis.
   This source proof does not grant file publication, executable approval or current effective
   dependency validity. The Project Session must prepare those facts and its matching receipt
   before publishing, then adopt project and Workspace in the same owner turn. A known published
@@ -330,12 +334,20 @@ Rules:
   Failed source publication removes only its candidate and restores the document active
   immediately before publication, without routing that rollback through explicit Scene selection.
   Preview selection never chooses executable startup or a retained Play source.
-- Authoring Scene preview composes the selected Scene with open Prefab working copies only when
-  the shared Scene compiler actually demands their canonical sources. An unrelated open document
-  does not become a dependency. A selected working copy carries its exact session lineage,
-  revision, canonical source and accepted file receipt; ambiguous or unavailable source ownership
-  rejects the capture. Disk-backed dependencies retain their own immutable source evidence.
-  This is the Editor preview policy, not a change to Check, external Play or Export inputs.
+- Authoring Scene capture selects open Scene and Prefab working copies only when the shared
+  source/compiler path actually demands their canonical sources. Unrelated open documents do not
+  participate. Each selected working copy retains its exact session lineage, source
+  incarnation/revision, canonical source identity, accepted file receipt and current Save/persistence
+  observation, independently of its unsaved document bytes. It must share the root's exact nominal
+  `AuthoringSchemaBasis`; equal Schema content alone is insufficient. Ambiguous, unavailable,
+  stale or Schema-incompatible selected working-copy ownership rejects the capture without disk
+  fallback. Disk-backed dependencies retain their own immutable source/metadata evidence. A Scene
+  self-reference reuses the captured root. Dependency Scenes remain data; only the selected root
+  is materialized.
+- File-backed Check, source-carrying Export/delivery and Runtime capture retain their saved-source
+  policies. Ordinary supervised Play retains ADR 0116's saved-source policy; this Authoring capture
+  contract does not redefine trusted compiled Play source selection or ADR 0114's separate
+  Authoring and Runtime admission products.
 - Preview composition and source revalidation run as bounded background work. Before first
   materialization, verify the captured source and Schema evidence; the owner also checks the
   selected root and participating sessions before publication. A cancelled task remains owned
@@ -343,17 +355,19 @@ Rules:
   detect external changes; its private scheduling policy is not a filesystem-watcher or latency
   guarantee.
 - The complete preview content stamp includes actual dependency selection independently of the
-  root Scene revision. Opening or closing a demanded Prefab, editing it, Save or Reopen can revoke
-  that stamp without changing the root. Pending and terminal results must have distinct
+  root Scene revision. Opening or closing a demanded Scene or Prefab, editing it, Save or a change
+  to its persistence observation, Reopen or Schema-basis replacement invalidates the dependent
+  capture and stamp even when the root is unchanged. Pending and terminal results must have distinct
   authorization. Native presentation, candidate consumption and picking require the same current
   stamp; last-good pixels may remain visible after revocation without retaining input authority.
   Preview assets resolve against the database admitted with that capture. Successful Image
   publication or retirement invalidates its prior captured asset evidence as well as the native
   content stamp; prepare and validate a successor capture before authorizing its projection.
-- Previewing unsaved dependencies neither dirties nor saves the containing Scene. Saving the
-  Scene does not save those Prefabs. The frontend exposes the number of unsaved dependencies in
-  the accepted capture; source Save, instance override, Apply and preview refresh retain their
-  distinct owners. The [Unity/Godot study](../../research/2026-10-26-unity-godot-prefab-editor-ownership.md#5-follow-up-working-copies-save-and-preview-dependencies)
+- Previewing unsaved dependencies neither dirties nor saves the containing Scene. Saving Scene A
+  persists only A's authored document and references; it does not save dependency B, whether Scene
+  or Prefab. The frontend exposes the number of unsaved dependencies in the accepted capture;
+  source Save, instance override, Apply and preview refresh retain their distinct owners. The
+  [Unity/Godot study](../../research/2026-10-26-unity-godot-prefab-editor-ownership.md#5-follow-up-working-copies-save-and-preview-dependencies)
   records the saved-only alternative and the tradeoff behind this policy, without claiming the
   same working-copy behavior in either upstream.
 - Prefab Save/Reopen source observations use the configured Prefab-domain path derived from the

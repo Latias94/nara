@@ -461,7 +461,8 @@ success; Prefab creation also returns `PrefabCompositionOutcome::Created { entit
 actual results instead of constructing names such as `editor_entity_1`.
 
 Direct native Scene/Prefab sessions use `create_entity_with_registry`, or
-`create_entity_with_asset_database` when their codecs/references require project asset admission.
+`create_entity_with_asset_resolution` with an `AssetReferenceResolver` from the actual catalogue
+and admitted alias scope when their codecs/references require project asset admission.
 They receive `CreatedSourceEntity` with the exact stored ID and ordinary patch report. Data-only
 Published sessions use `create_authoring_entity` for empty creation; component templates retain
 their existing admission policy. Raw native component records are not a Published escape hatch.

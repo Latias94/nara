@@ -12,6 +12,12 @@ verifies one component recipe across native composition, Editor authoring and st
 The filesystem, project-workflow, asset-domain, material and editor-panel members exercise their own declared
 public surfaces. The project-workflow member consumes that workflow through the root facade.
 
+`tests/source_locations.rs` exercises canonical source locations and scoped authored aliases
+through public `nara_asset` APIs. It covers three same-named document/resource roots, a second
+resource root of the same role, overlapping scopes, Path/StableId/Product equivalence, reverse
+Path export and save/reopen, narrow Image directory reads, wrong-scope refusal, and duplicate
+UUID/case/sidecar rejection. It does not exercise Source Scene dependency loading or Door travel.
+
 The [asset-domain consumer](asset-domain-consumer/README.md) contributes a text resource through
 public product composition. It checks exact auxiliary-source receipts, reads typed products during
 headless Play, and qualifies Scene replacement and retained-generation behavior. Source Export

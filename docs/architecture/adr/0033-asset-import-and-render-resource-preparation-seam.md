@@ -3,7 +3,8 @@
 **Status**: Accepted
 **Date**: 2026-07-08
 **Amended**: 2026-10-23 for Image-owned immutable prepared captures; 2026-10-29 for
-source-independent Image/TileSet content and neutral prepared-content hashes
+source-independent Image/TileSet content and neutral prepared-content hashes; 2026-10-30 for
+scope-bound source declarations and frame-independent dependency maintenance
 **Refined By**: ADR 0037: Runtime Asset Acquisition, Reload, and Lifetime Policy; ADR 0040:
 Render Resource Lifetime and Submitter Ownership; ADR 0054: GPU Upload Budget and Buffer
 Allocation Policy; ADR 0080: Domain-Owned TaskUpdate Integration Sets;
@@ -146,6 +147,13 @@ exact declared Product. It does not reconstruct a source declaration or manufact
 `AssetRecord`, `SourceHash` or `ProjectAssetDatabase`. Source-only primary-selection restrictions
 remain in that adapter. Native Runtime decode can look up already bound auxiliary TileSets;
 persisted cell membership consumes the concrete owner's complete-reference-to-atlas proof.
+
+A Source declaration binds its authored Image reference through the requesting scope once and
+retains the resulting canonical dependency. Reconciliation consumes that bound declaration without
+another scope or source read. The native plugin advances it during ordinary Runtime frames;
+Hosts that publish or revoke Images through driver ports must also advance this same owner when
+no Runtime frame or visible preview runs. Content dependency progress cannot depend on a render
+extent, simulation tick or active document. This adds no second publication or discovery owner.
 
 Both declarations use the same publication claims, value/state baselines, actual Image snapshot,
 exact extent arithmetic, atlas rebuild barrier, retained pixels and prepare/commit/retire path.

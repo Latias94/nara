@@ -79,6 +79,12 @@ The returned base retains no filesystem capability. Replacing or deleting files 
 change its acquisitions. Reopening another base creates another snapshot; it does not redirect
 work already using the first one.
 
+Future container/package providers must preserve this immutable content-set boundary. A provider
+or overlay contributes a separately admitted set or composed successor; it cannot mutate a live
+base, change an authored Product's meaning or redirect existing acquisition/recovery leases.
+Original base/plan identity remains distinct from equality of catalog bytes. This is an evolution
+constraint, not an implemented provider, overlay precedence or package-resolution API.
+
 Scene acquisition uses the expected containing identity in the member description and the
 original plan's exact definitions. It also traverses actual Schema asset leaves and requires each
 complete Product to be present and declared as a required dependency of that Scene member. It

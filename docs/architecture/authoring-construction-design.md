@@ -47,8 +47,8 @@ Two real admission contracts remain distinct:
 - Registry-backed native authoring accepts its existing finite component records and uses its
   existing registry/codec validation and history. It must not be relabeled Published, nor removed
   merely to make one new construction path easier to qualify.
-  `create_entity_with_asset_database` retains the existing project-database-aware codec and
-  reference validation path for both retained and newly created records; the registry-only
+  `create_entity_with_asset_resolution` retains the explicit scoped codec and reference
+  validation path for both retained and newly created records; the registry-only
   entry does not manufacture that context.
 
 Both call the same private source-ID generator. Native domain recipes may select components and

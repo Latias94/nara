@@ -37,6 +37,13 @@ It does not infer a handler from file extensions or crate presence. Two selected
 same kind reject; a referenced kind without an owner fails Check/Play. Unreferenced files need no
 handler and are not rewritten.
 
+The identity sidecar's `AssetPath` is local to the actual configured source directory. The Host
+binds it through an explicit `AssetPathScope` to the catalogue's `AssetSourcePath`; directory role
+and source kind never choose that location. For example, a sidecar path `dialogue.txt` under
+`content/text` becomes the canonical record location `content/text/dialogue.txt`. Collection
+`get(&AssetRef::Path(..))` still takes the authored local alias. `source_records()` exposes real
+canonical locations; do not prepend Assets again or save them as local aliases.
+
 `AssetImportSource::metadata()` returns an identity-first candidate. Admit the package's settings
 with `admit::<Self::Settings>()` and validate only domain invariants. Source-only settings need
 deserialization; serialization and editable defaults belong to the optional Editor facet.

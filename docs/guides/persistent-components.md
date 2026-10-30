@@ -136,15 +136,21 @@ alongside the native registry plugin. Obtain `scene_component_bindings(world)` a
 at seal. Independently re-admitted catalogs with the same bytes cannot replace that installed
 authority. Several engine domain guards coexist at the existing App/runtime boundaries.
 
+Source-aware Scene operations accept an `AssetReferenceResolver` from the actual catalogue and
+the Host's admitted `AssetPathScope`. In these examples, `asset_scope` is that borrowed scope;
+standalone consumers explicitly select `&AssetPathScope::ROOT`. The catalogue owns no default
+alias namespace. Optional resolver arguments use `None` when no source catalogue is needed.
+
 ```rust,ignore
 let bindings = scene_component_bindings(world).ok_or(MissingSceneDefinitions)?.clone();
-let report = bindings.prepare_scene(world, candidate, occurrence, database)?.commit(world);
+let asset_resolution = Some(database.resolver(asset_scope));
+let report = bindings.prepare_scene(world, candidate, occurrence, asset_resolution)?.commit(world);
 let current = report.instance.ok_or(report.diagnostics)?;
 
 for (component, record) in bindings.data_components(world, entity)? {
     inspect(component, record);
 }
-bindings.set_data_component(world, entity, component, value, database, limits)?;
+bindings.set_data_component(world, entity, component, value, asset_resolution, limits)?;
 bindings.remove_data_component(world, entity, component)?;
 ```
 
@@ -155,12 +161,18 @@ change the live carrier, not source documents or authoring history. Access and c
 currently at carrier granularity; this is not per-Schema ECS query/scheduler presence.
 
 `bindings.export_scene` snapshots all current live registered Scene identities, flattening Prefabs.
-`export_scene_with_options` additionally accepts explicit project metadata for `Path` or
+`export_scene_with_options` additionally accepts an explicit scoped resolver for `Path` or
 `StableIdWhenKnown` asset lowering. Native free functions reject encountered data members rather
-than omit them; `export_scene_with_asset_database` provides the same metadata lowering for a
+than omit them; `export_scene_with_asset_resolution` provides the same metadata lowering for a
 native-only caller, including assets supplied by defaults after encoding. Managed native export
 uses the installed native definition. The independent preview publication exception does not
 transfer managed export authority. Source Save remains the authoring document owner's operation.
+
+The default export policy requests Path spelling. Converting a Schema-declared StableId into a
+Path requires the actual scoped resolver, even when the native component stores `AssetRef`
+directly. Choose `StableIdWhenKnown` explicitly to retain those stable selectors without a
+source catalogue. Existing complete Product selections keep their Product meaning under either
+policy; policy selection never proves that the referenced content exists.
 
 The carrier retains only data and exact owner-local Schema snapshots. Strict entity/instance
 retirement releases it without a hook exemption. A product owning native retirement work can use
@@ -179,7 +191,7 @@ it does not load a Runtime catalog, select products or prove asset residency.
 let cooked = RuntimeSceneCandidate::cook(
     &expanded,
     &bindings,
-    &project_assets,
+    project_assets.resolver(asset_scope),
     RuntimeSceneLimits::default(),
 )?;
 let bytes = cooked.to_json_bytes()?;
@@ -193,8 +205,9 @@ let report = prepared.commit(world);
 
 Cook materializes defaults, remaps hierarchy and declared Scene-local references, and converts
 declared `Path`/`StableId` asset leaves to complete primary Product references through the real
-project database. Existing Product references preserve their subproduct selection and require
-their enclosing source in that database. Ordinary strings do not become references. Product
+catalogue and its explicitly bound alias scope. Existing Product references preserve their
+subproduct selection and require their enclosing source in that catalogue. Ordinary strings do
+not become references. Product
 existence and receiving-World resources still belong to the content owner.
 That owner can bind complete primary/auxiliary products with `AssetServer::reserve_product::<T>`
 and publish the actual typed values through its own resource transaction. Native Runtime codecs
@@ -239,16 +252,18 @@ separate work in the [ordered delivery plan](../plans/2026-10-29-asset-import-an
 
 ## Prepare And Materialize A Scene
 
-`spawn_scene(world, registry, candidate, occurrence, database)` is the immediate convenience. Use
-`prepare_scene` when a caller needs to hold actual native values before deciding to publish:
+`spawn_scene(world, registry, candidate, occurrence, asset_resolution)` is the immediate
+convenience. Use `prepare_scene` when a caller needs to hold actual native values before deciding
+to publish:
 
 ```rust,ignore
-let prepared = prepare_scene(world, registry, candidate, occurrence, database)?;
+let asset_resolution = Some(database.resolver(asset_scope));
+let prepared = prepare_scene(world, registry, candidate, occurrence, asset_resolution)?;
 // Keep preparation across other compatible World work, or cancel with drop(prepared).
 let report = prepared.commit(world);
 let current = report.instance.ok_or(report.diagnostics)?;
 
-let replacement = prepare_scene_replacement(world, registry, successor, &current, database)?;
+let replacement = prepare_scene_replacement(world, registry, successor, &current, asset_resolution)?;
 let report = replacement.commit(world);
 ```
 

@@ -1,6 +1,8 @@
 # Asset Import Ownership And Processed Runtime Delivery
 
-**Date:** 2026-10-29. **Status:** Source/import, compound identity, immutable base and bounded first-party processed startup/travel qualified; source Scene references, input and target/package delivery open.
+**Date:** 2026-10-29. **Status:** Source/import, compound identity, immutable base and bounded
+first-party processed startup/travel and canonical source-location replacement qualified;
+source Scene references, input and target/package delivery open.
 **Baseline:** `13a2744`.
 **Parent:** [Foundation rebaseline](2026-10-23-foundation-architecture-rebaseline-plan.md), R6/R7.
 
@@ -306,8 +308,8 @@ catalogue discovers Assets/Prefabs and its resource queue rejects Scene kind. Co
 identity, preparation, request authority and content receipts together; adding another scan root
 alone is insufficient.
 
-Before implementation, settle source-location indexing against its actual consumers. The existing
-database uses a root-relative `AssetPath` as a global path key across different roots. Challenge it
+The source-location prerequisite replaces the baseline's root-relative `AssetPath` global key
+against its actual consumers. Challenge it
 with an Assets file, Prefab and Scene sharing the same relative name. Compare canonical
 project-relative locations, scoped relative locations and a separate document-source index;
 preserve global UUID uniqueness and the current Assets-relative meaning of a bare asset Path.
@@ -320,11 +322,35 @@ The preferred successor is a canonical logical source locator bound by the Host,
 aliases and capability-relative read paths kept distinct. The
 [source-location design](../architecture/source-location-and-reference-resolution-design.md)
 compares all three alternatives, traces actual consumers and defines the independent comparison.
-It is not an Accepted or implemented contract. A scoped namespace needs its own equality and
-capability proof; a second document index alone cannot satisfy existing Scene validation/cook.
-Migrate the complete read/export/watch contract before adding source Scene dependencies.
+ADRs 0007/0038 adopt the canonical locator, explicit scope and borrowed resolver contract;
+the [qualification](../knowledge/engineering/verification/2026-10/2026-10-30T015832Z-canonical-source-locations-and-typed-ui-image-binding-qualification-0ce5bafdc65f4893aa0079009668e41a.md)
+records implementation, actual source/Export/watch consumers and the affected typed UI boundary.
+The distinct scoped-namespace
+alternative would need its own equality and capability proof; a second document index alone cannot
+satisfy existing Scene validation/cook. Finish the complete read/export/watch replacement before
+adding source Scene dependencies. TileSet source requests bind their actual Image dependency once;
+automatic reconciliation must continue after the requesting scope is dropped, without a Host
+supplying a default root each frame. A change to that binding invalidates the previous declaration
+claim even when authored source bytes and source identity are unchanged.
+
+The replacement also reopens UI Image identity under
+[ADR 0102](../architecture/adr/0102-renderer-neutral-ui-text-widget-and-presented-frame-topology.md#image-identity-and-typed-asset-binding).
+Do not copy longer canonical locators into bounded widget names or infer persistent asset selection
+from opaque ID spelling. The adapter retains its typed Image handle, the kernel carries a separate
+process-local External identity, and the renderer joins it to the actual prepared snapshot.
+The linked qualification covers source/processed native UI, pure manual IDs and the real Canvas
+Host with its current catalogue/scope. The source-contract consumer is complete; the final
+custom-drawn Editor toolkit and Source Scene dependency successor remain implementation work.
 
 Use these workflow constraints for that choice:
+
+Replace the source owner's private two-root/Prefab-boolean query model at this boundary. A query
+must retain its actual directory binding, expected source kind and canonical result independently
+of its authored selection. Keep raw authored and effective compiled Scene data together with
+their admitted source identity. A flat immutable captured Scene collection must retain the actual
+dependency documents through escaped `SceneSource` owners; retaining an accounting lease alone
+is insufficient. Rewrite the owning capture/publication path where required and delete the
+superseded mechanism rather than preserve it behind compatibility branches.
 
 - Resolve a Scene Product through an actual primary Scene sidecar and the original source
   candidate/plan. Keep `StableMetadata` and `ProjectLocation` source keys distinct under ADR 0038;
@@ -348,6 +374,19 @@ Use these workflow constraints for that choice:
   admitted dependent data, not merely a UUID in a catalogue. Save/content refresh must invalidate
   the dependent Scene obligations while persisting only the authored document and its references.
   Export continues to verify and copy the exact receipt without a second dependency discoverer.
+
+Extend the Authoring capture's explicit working set to demanded open Scenes as well as Prefabs.
+Use a selected working copy only under the same exact nominal Schema basis, retaining its session
+lineage, revision, source identity and relevant persistence observation. Unrelated open documents
+do not become dependencies. A self-edge reuses the captured root; a stale or incompatible selected
+working copy refuses rather than silently falling back to disk. Opening/closing, editing, Save,
+Reopen or basis replacement of a demanded Scene invalidates the dependent capture/content stamp.
+Schema-owner successor preparation must pass the corresponding prepared Scene snapshots through
+that same capture path. Saving A still saves only A's authored document and references, not B.
+Reconcile ADR 0047's existing open-Prefab rules for this expanded working-set contract before
+publishing the capability; do not add a temporary saved-only Authoring dependency model. File-backed
+Check, delivery and Runtime capture retain their saved-source boundaries, and ordinary supervised
+Play retains its existing source policy. This does not redefine trusted compiled Play selection.
 
 Qualify an independent source consumer with real sidecars and Door-driven A-to-B-to-A travel,
 dependency-only travel refusal, schema defaults and overlay-discarded references, malformed or

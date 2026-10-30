@@ -1,12 +1,13 @@
 # Source Locations And Reference Resolution
 
-**Status:** Preferred successor design; not implemented or an Accepted contract.
+**Status:** Source addressing/resolution implemented and qualified under ADRs 0007/0038;
+Source Scene dependencies remain the next implementation unit.
 **Date:** 2026-10-29.
 **Owner plan:** [Asset import and Runtime delivery](../plans/2026-10-29-asset-import-and-runtime-delivery-plan.md#source-scene-reference-successor).
 
 ## Problem
 
-The current source catalogue uses a root-relative `AssetPath` as a global database key across
+The predecessor source catalogue uses a root-relative `AssetPath` as a global database key across
 Assets and Prefabs. Adding Scenes to the same scanner would make another document kind visible,
 but would preserve the location ambiguity. `assets/shared.json`, `prefabs/shared.json` and
 `scenes/shared.json` are different source locations with the same local spelling. A kind-based
@@ -24,7 +25,7 @@ Relevant current owners are the [database](../../crates/nara_asset/src/database.
 [delivery union](../../src/project_content/delivery.rs) and
 [Authoring catalogue](../../src/project_host/authoring/project/catalogue.rs).
 
-## Preferred Representation
+## Selected Representation
 
 Separate three facts before implementing the Source Scene dependency consumer:
 
@@ -34,7 +35,7 @@ Separate three facts before implementing the Source Scene dependency consumer:
 | Authored reference alias | `textures/player.png` in an asset field; `player.prefab.json` in a Prefab declaration | Explicit reference-resolution context |
 | Read path relative to a particular capability | `textures/player.png` under the Assets directory | Concrete admitted source reader |
 
-`nara_asset` should own a validated lexical locator and its indices without depending on
+`nara_asset` owns a validated lexical locator and its indices without depending on
 `nara_project::ProjectPath`, a manifest or filesystem capabilities. The project Host binds actual
 roots and sidecar-relative paths to canonical project-relative locations. The low-level meaning
 is a canonical logical location in an admitted catalogue, not an enum of Assets/Prefabs/Scenes.
@@ -44,7 +45,11 @@ changing Product identity or requiring the record to know package execution poli
 The selected contract must keep standalone source consumers usable with one explicitly bound
 logical directory. It must not require a project manifest to resolve an ordinary local asset.
 No mount registry, URI grammar, virtual filesystem or new dependency executor is selected here.
-Public type names and resolver arguments remain subject to the complete consumer comparison.
+The selected owner API uses `AssetSourcePath`, an owned `AssetPathScope` and a borrowed
+`AssetReferenceResolver`. The catalogue owns no default reference root; callers bind that context
+explicitly. Standalone callers use `AssetPathScope::ROOT`. The
+[source/UI qualification](../knowledge/engineering/verification/2026-10/2026-10-30T015832Z-canonical-source-locations-and-typed-ui-image-binding-qualification-0ce5bafdc65f4893aa0079009668e41a.md)
+records the public consumer, source loaders, watch/reload, Export and typed UI results.
 
 Sidecar paths can remain relative to their authored source directory. Converting metadata into a
 catalogue record needs the actual binding; an unconditional `From<AssetMetaIdentity>` cannot
@@ -81,7 +86,11 @@ importer products. A closed directory-role enum is not the second candidate's co
   explicitly forced Path policy. Never strip a string prefix without a bound directory relation.
 - Prefab loading resolves the declaration in the Prefabs context, then locates the actual document
   by its bound canonical location. Its source key remains supplied by the document owner. Direct
-  and snapshot resolvers must agree.
+  and snapshot resolvers must agree. Primary Product selection uses the resolver's admitted
+  source-asset association, not an inferred change to the document identity policy.
+  `ResolvedPrefabSource::with_source_asset` validates the actual Prefab record against the key;
+  file and metadata receipts remain the Host's authority. A location-authored document keeps its
+  original key for Path, StableId and an associated primary Product lookup.
 - Image source readers retain the narrow directory capability and convert an admitted locator to
   a local read path. Do not widen their authority to the project directory to accommodate strings.
 - Watchers bind a native watch root and logical prefix once, then emit canonical source changes.
@@ -116,6 +125,9 @@ Use one independent source consumer to challenge the complete representation bef
    A-to-B-to-A travel. Preserve caller selection, declared-root authority, effective Prefab demand,
    flat dependent Scene retention, last-good publication and physical cancellation.
 
-The dependency algorithm, root admission, retention and Save/Export requirements continue in the
-owner plan. This design records the source-contract correction; it does not qualify implementation
-or broaden the preceding processed Host's actual delivery claim.
+The source-contract qualification covers canonical/scoped identities, separated and nested real
+source roots, the independent consumer, watch/reload owners and source-carrying CLI Export. Its
+exact public UI inventory also qualifies manual image IDs, native asset bindings, Runtime/Canvas
+and retained presentation packets. Step 5's authored Door travel, dependent Scene data retention,
+root admission and dependent working-copy Save/refresh remain in the owner plan. Earlier processed
+Scene dependency evidence does not establish that source-backed successor.

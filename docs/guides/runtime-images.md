@@ -76,6 +76,29 @@ Its authorization can be revoked while its old immutable pixels remain readable.
 Editor metadata and source-backed TileSet publication separately require real source metadata and
 refuse source-free values where that contract needs provenance.
 
+Real import provenance stores the catalogue's canonical `AssetSourcePath`. A source reader binds
+its narrow directory and an explicit `AssetPathScope` in `ImageSourceDirectory::new`; it validates
+that location and derives a local read path before opening source or metadata. The sidecar keeps
+its local `AssetPath`. A caller that reads the path from `ImageSourceMetadata` must not prepend
+the Assets directory again. Standalone readers explicitly select `AssetPathScope::ROOT`; a
+project reader uses its actual configured prefix. Processed and anonymous Images need neither.
+
+## Use Images In UI
+
+The Scene/ECS UI adapter binds an Image explicitly with
+`nara_ui::UiVisual::image_asset(handle, tint)`. It uses the actual `Handle<ImageAsset>` for
+projection and reverse export under the selected AssetRef policy. Source-backed handles can
+export local aliases or stable identities; source-free primary and auxiliary Products keep their
+complete Product reference. Anonymous Images remain usable at runtime but need a persistent
+association before asset-reference export can succeed.
+
+`UiVisual::image(id, tint)` instead accepts an opaque manual `UiImageId`. A manual provider joins
+that identity to a snapshot through `UiPreparedImages::insert`; its spelling has no asset meaning.
+The kernel also accepts provider-scoped `UiImageId::external::<T>(token)` without depending on
+the Asset owner. These process-local keys are never persistent references. Replacing a visual's
+background clears its previous typed asset binding, even when the new opaque ID compares equal.
+The rendering packet retains the exact prepared snapshot independently of the live catalogue.
+
 The [independent consumer](../../tests/fixtures/module-consumer/tests/runtime_image_delivery.rs)
 uses actual primary/auxiliary images, native Scene handles, exact definitions, failure/discard/
 successful product transactions and escaped CPU/prepared lifetime checks. First-party processed

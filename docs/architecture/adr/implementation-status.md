@@ -22,7 +22,16 @@ records final root/owner1082, public80, independent84, Source/Editor55, Referenc
 native DX12 trajectories, strict consumer Clippy and minimal features. Source-authored Door
 dependencies, processed input, target selection and the packaged Player remain ordered work.
 The [source-location successor](../source-location-and-reference-resolution-design.md) is a
-preferred design; it has not changed the implemented source identity contract.
+implemented as `a56a1d3` under ADRs 0007/0038. Its
+[qualification](../../knowledge/engineering/verification/2026-10/2026-10-30T015832Z-canonical-source-locations-and-typed-ui-image-binding-qualification-0ce5bafdc65f4893aa0079009668e41a.md)
+records canonical/scoped source identities, source-asset/document association, real separated and
+nested source roots, independent consumers, watch/reload and actual source CLI Export. The same
+unit refreezes ADR 0102's public Image inventory: typed asset bindings and process-local opaque
+identities replace string-based inference, with Runtime/Canvas, independent manual/provider IDs,
+all three neutral examples and four selected actual Windows/DX12 trajectories. It also qualifies
+frame-independent Editor TileSet maintenance after Image publication/revocation. Source-authored
+Door dependencies and the complete custom-drawn Editor remain unimplemented. ADR 0047 adopts the
+next demanded open-Scene working-copy contract without claiming that implementation.
 
 The [October 29 rendering review](../../research/2026-10-29-render-architecture-and-refactor-plan-review.md)
 and long-horizon refinement prefer a finite explicit resource graph, typed contributions and

@@ -2,7 +2,7 @@
 
 **Status**: Accepted
 **Date**: 2026-08-04
-**Last Revised**: 2026-10-26
+**Last Revised**: 2026-10-30
 **Amended**: 2026-08-05 by the NUI-U8 post-decision checkpoint; 2026-08-06 by the NUI-U17 pre-implementation ownership checkpoint; 2026-08-07 by the NUI-U15A example-first interface-proof checkpoint; 2026-08-08 by the focused U15A focus-identity refreeze and UI Foundation rebaseline; 2026-08-10 by the UIF-U5 public-inventory and Host-authority audit; 2026-08-12 by the UIFD immutable dynamic-text projection correction; 2026-10-25 by the complete source/occurrence/placement key adoption
 **Owner**: UI authoring, text, widget behavior, input routing, presentation packets, and platform adapters
 **Refines**: [ADR 0012](0012-render-crate-boundaries.md),
@@ -226,6 +226,54 @@ flowchart LR
   enter the kernel, widget, packet, or headless contracts.
 - Open-GPUI and other engines are behavioral evidence only. Nara does not adopt their App/Window/
   Entity/Element lifecycle or copy source without explicit provenance and license review.
+
+### Image Identity And Typed Asset Binding
+
+The canonical source-location replacement reopened the image-identity part of the shared UI
+checkpoint. A complete source locator is not a widget key, and an opaque image name cannot prove
+an authored asset selection. The replacement below is implemented. Its
+[source/UI qualification](../../knowledge/engineering/verification/2026-10/2026-10-30T015832Z-canonical-source-locations-and-typed-ui-image-binding-qualification-0ce5bafdc65f4893aa0079009668e41a.md)
+refreezes the exact public image inventory and neutral assertions with independent manual,
+Runtime, Canvas, retained-packet and selected Windows/DX12 consumer evidence. The preceding
+conformance evidence retains its original scope.
+
+`UiImageId` distinguishes a bounded Named identity from an exact External identity. `new` always
+constructs Named, regardless of spelling. External identity contains a process-local provider type
+domain and that provider's exact non-reused numeric resource token. It is an equality key, not a
+resource lease, native handle cast, persistent asset identity or authorization. Providers own token
+uniqueness and incarnation within their domain. The first-party Image adapter uses the actual
+`ImageAsset` domain and process-unique `AssetId`; it introduces no allocator, registry, reflected
+payload or asset dependency in the kernel. Rust type identity and these tokens never enter files.
+
+The ECS/Scene adapter retains a private `Handle<ImageAsset>` binding for a persistent Image visual.
+Its explicit asset constructor establishes that selection; the ordinary constructor taking an
+opaque image ID does not. Replacing an image brush clears the old binding, including when the new
+ID compares equal. Export uses that typed binding, the actual `AssetServer` and the explicit encode
+scope/policy. A Named or manually supplied External identity without this binding refuses asset
+persistence; no diagnostic-string or path-shaped-name inference is permitted. Asset selection is
+distinct from actual content/type/residency admission, which remains with its concrete owners.
+
+Native decoding and authoring Canvas compilation use the same prepared Image resolution under
+the actual source scope/catalogue or an existing pathless Product binding. Pure authoring edits
+preserve typed `AssetRef` leaves rather than manufacturing runtime images. Canvas uses current
+admitted Image identities, including later imports, without mutating live asset bindings during
+candidate preparation. Complete primary/auxiliary Product selection survives source-free Runtime
+decode and reverse export. Canonical paths remain in the Asset owner and are not truncated, hashed
+or constrained by the widget-key ceiling.
+
+Immutable kernel frames carry only the selected image identity. The presentation adapter joins
+External identities to actual prepared Image keys; explicit `UiPreparedImages::insert` continues
+to serve arbitrary opaque/manual consumers. Packets retain the exact snapshot and physical custody
+under the existing presentation rules. No path, UUID or Product string alias search participates in
+this join. Unsupported image text/borders still refuse at the owning codec/kernel boundary.
+
+The refrozen consumer assertions cover the pure-kernel manual-image consumer and real
+Runtime/Canvas paths: a manual Product-shaped ID remains drawable but cannot masquerade as a
+persistent asset; long canonical
+paths remain usable; same-named roots remain distinct; source-free primary/auxiliary Products
+retain actual pixels; changing a brush cannot reuse the previous binding. Shared layout,
+interaction, packet and presentation authority contracts remain intact. The linked evidence records
+the public image identity inventory. This does not qualify a complete custom-drawn Editor toolkit.
 
 ## Alternatives Considered
 

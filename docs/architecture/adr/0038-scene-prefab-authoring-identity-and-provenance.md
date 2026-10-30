@@ -2,6 +2,7 @@
 
 **Status**: Accepted
 **Date**: 2026-07-09
+**Last Revised**: 2026-10-30
 **Amended**: 2026-10-24 by production source admission, required Prefab/containing-source binding
 and Scene-owned logical occurrence
 **Amended**: 2026-10-25 by owned unbound ordinary Scene preparation
@@ -227,6 +228,18 @@ flowchart TD
   location identity. Adjacent metadata does not silently promote a location-authored source.
   Stable native Prefab admission uses the existing catalogue's duplicate-identity rejection;
   partial catalogue discovery is not complete asset-reference admission.
+- A primary Product lookup requires an explicit matching source-asset association, independently
+  of the document's canonical source key. A StableAsset key already carries that association;
+  a location-authored resolver attaches its actually admitted Prefab record without changing
+  ProjectLocation identity. Reject wrong source kind, a conflicting stable key, a mismatched
+  canonical location or nil source ID. The association is source-owner evidence, not another
+  persistent origin or permission to open a source. Host receipts still prove actual metadata
+  and file admission. Do not require Product spelling to change the project's identity policy.
+- Canonical source locations, authored Path aliases and capability-relative read paths retain
+  distinct meanings under ADR 0007. A Prefab resolver binds its declaration's path scope explicitly;
+  component asset fields use their admitted asset-reference context. Both resolve through the
+  common identity catalogue without assigning a new source key. Encoding reverses the actual
+  scope relation and cannot copy a canonical catalogue locator into a different local namespace.
 - Native admission verifies stored path spelling through filesystem capabilities before assigning
   a location key. Content delivery checks stable source identities across its admitted union using
   full project-relative paths; a distinct path cannot silently claim an already admitted identity.

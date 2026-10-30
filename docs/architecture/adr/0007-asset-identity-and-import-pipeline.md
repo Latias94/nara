@@ -2,7 +2,7 @@
 
 **Status**: Accepted
 **Date**: 2026-07-08
-**Last Revised**: 2026-10-29
+**Last Revised**: 2026-10-30
 **Refined By**: ADR 0049: Untrusted Project Input and Parse Budget Policy; ADR 0050: Asset Root,
 Symlink, Junction, and Package Trust Policy; ADR 0051: Persistent File Envelope, Migration, and
 Golden Fixtures; ADR 0080: Domain-Owned TaskUpdate Integration Sets;
@@ -65,6 +65,44 @@ Core rules:
   publication remain the concrete content owner's responsibility.
 - Hot reload changes asset versions behind stable handles; it should not require all scenes to rewrite references.
 - Source assets and imported artifacts are distinct concepts.
+
+### Canonical source locations and scoped references
+
+A source catalogue indexes complete canonical logical locations, independently of authored
+reference aliases and capability-relative read paths. The current project Host binds these
+locations to actual project-relative paths. Directory roles and source kinds do not form a
+namespace; two directories of the same role can contain different same-named sources. Stable
+source/Product identity remains independent of location. Repeated observation of the same
+actual source may share its record, while different locations cannot claim the same UUID.
+
+`AssetSourcePath` identifies a canonical location; `AssetPath` remains an authored relative alias.
+`AssetPathScope` binds aliases to a logical prefix, including an explicit catalogue-root scope for
+standalone consumers. `AssetReferenceResolver` borrows the catalogue and that scope. The index
+does not contain a hidden default root or infer resolution from file kind. Metadata becomes a
+record only through an explicit scope binding after its actual local path is checked. Remove the
+unconditional metadata-to-record conversion. None of these lexical values grants file access.
+
+Source-bound runtime aliases and source-change queues use canonical locations. Reference decoding
+resolves an authored alias through the explicit context before reserving the same primary Product
+as a stable selector. Reference encoding reverses that binding; it cannot persist a canonical
+location as an unrelated local alias. A preferred Path policy preserves a complete Product when
+the source lies outside that scope; an unbound path-only handle must refuse an unrepresentable
+alias. Product-only Runtime bindings keep their existing pathless meaning.
+
+Concrete readers bind their narrow directory capability and logical scope together, validate
+prefix boundaries and derive a local read path before access. Watchers emit changes in that same
+canonical scope, including both rename endpoints and metadata changes. Do not widen directory
+authority or prepend a guessed Assets directory to a canonical location. Export uses exact
+project-relative source receipts and retains its existing revalidation owner.
+
+This adopts source addressing and resolution only. The
+[source-location design](../source-location-and-reference-resolution-design.md) records the complete
+consumer and alternatives; Source Scene dependency loading, package providers and mount execution
+retain their separate implementation and qualification. The
+[canonical source/UI qualification](../../knowledge/engineering/verification/2026-10/2026-10-30T015832Z-canonical-source-locations-and-typed-ui-image-binding-qualification-0ce5bafdc65f4893aa0079009668e41a.md)
+records the implemented source-contract replacement, independent consumers, scoped readers,
+watch/reload, exact source Export and affected Runtime/Canvas Image bindings. It does not qualify
+Source Scene dependency loading or a package provider.
 
 ### Explicit Source Execution Facets
 
@@ -181,6 +219,14 @@ membership, readiness and residency.
 Startup and later first-party Scene preparation retain the original base and plan. Equal catalog
 bytes or fingerprints from a separately opened base do not establish that same owner or exact
 executable selection.
+
+This is also the boundary for foreseeable package or overlay delivery. Logical Product identity
+never becomes a package/mount key. A later provider or composition creates a separately admitted
+immutable content-set context with a complete selected membership/dependency closure; it cannot
+mutate a live base or retarget its acquisitions, decoded owners or recovery inputs. Equal catalog
+bytes alone do not substitute the original base/plan instance. The first directory-backed capture
+remains the only qualified provider. Provider transport, overlay precedence, patching and remote
+authenticity are separate work, with no new VFS, source resolver or package executor selected here.
 
 Required closure distinguishes data readiness from Scene instantiation. A persistent Door or
 similar reference can require another Scene member; that member is admitted against the original
