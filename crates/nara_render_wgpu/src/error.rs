@@ -22,6 +22,8 @@ pub enum WgpuRenderError {
     TelemetryCompletionWaitFailed,
     #[error("wgpu telemetry completion poll failed")]
     TelemetryCompletionPollFailed,
+    #[error("the original GPU retirement could not advance: {message}")]
+    RetirementPollFailed { message: String },
     #[error("render frame generation {actual:?} does not match active generation {expected:?}")]
     StaleFrameGeneration {
         expected: RenderFrameSourceGeneration,

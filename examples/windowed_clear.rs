@@ -1,10 +1,10 @@
 use std::error::Error;
 
+use nara::project_host::{DesktopRun, DesktopRunOptions};
 use nara::{backend_prelude::*, prelude::*};
 
-#[path = "support/runtime_retirement.rs"]
-mod runtime_retirement;
-use runtime_retirement::finish_runtime_after_winit;
+#[path = "support/desktop_run.rs"]
+mod desktop_run;
 
 fn main() -> Result<(), Box<dyn Error>> {
     let mut app = App::new();
@@ -19,9 +19,9 @@ fn main() -> Result<(), Box<dyn Error>> {
         WgpuBackendPlugins,
     ))?;
     app.add_systems(StartupStage::Scene, setup_scene)?;
-    let mut runtime = nara::app::RuntimeInstance::start(app)?;
-    let run_result = WinitRunner::default().run(&mut runtime);
-    finish_runtime_after_winit(run_result, runtime)
+    let runtime = nara::app::RuntimeInstance::start(app)?;
+    desktop_run::finish_desktop_run(DesktopRun::from_runtime(runtime, DesktopRunOptions::new()))?;
+    Ok(())
 }
 
 fn setup_scene(mut commands: Commands) {

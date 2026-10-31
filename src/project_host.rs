@@ -1,6 +1,19 @@
 mod composition;
 mod ingest;
 mod product_launch;
+#[cfg(any(
+    all(feature = "runtime-2d", feature = "serde"),
+    all(feature = "desktop-winit", feature = "render-wgpu")
+))]
+mod runtime_diagnostics;
+
+#[cfg(all(feature = "desktop-winit", feature = "render-wgpu"))]
+mod desktop_run;
+#[cfg(all(feature = "desktop-winit", feature = "render-wgpu"))]
+pub use desktop_run::{
+    DesktopPresentationControl, DesktopPresentationObservation, DesktopRun, DesktopRunOptions,
+    DesktopRunOutcome, DesktopRunReport, DesktopTelemetrySealOutcome, DesktopTelemetrySealReport,
+};
 
 #[cfg(windows)]
 #[doc(hidden)]
@@ -96,10 +109,24 @@ pub use runtime_pack::open_executable_relative_runtime_pack;
 #[cfg(feature = "runtime-ui")]
 #[doc(hidden)]
 pub const PROJECT_PRIMARY_UI_SURFACE_ID: u64 = crate::product::PROJECT_PRIMARY_UI_SURFACE_ID;
+#[cfg(all(
+    feature = "runtime-2d",
+    feature = "serde",
+    feature = "desktop-winit",
+    feature = "render-wgpu"
+))]
+pub use desktop_run::DesktopPresentationVerificationReceipt;
 #[cfg(all(feature = "runtime-2d", feature = "serde"))]
 pub(crate) use ingest::{
     ingest_project_manifest_bytes, ingest_project_manifest_with_expected_digest,
 };
+#[cfg(all(
+    feature = "runtime-2d",
+    feature = "serde",
+    feature = "desktop-winit",
+    feature = "render-wgpu"
+))]
+pub use runtime::DesktopRunIntent;
 #[cfg(all(
     feature = "runtime-2d",
     feature = "serde",
@@ -108,16 +135,6 @@ pub(crate) use ingest::{
 ))]
 #[doc(hidden)]
 pub use runtime::EditorUiPreviewCandidate;
-#[cfg(all(
-    feature = "runtime-2d",
-    feature = "serde",
-    feature = "desktop-winit",
-    feature = "render-wgpu"
-))]
-pub use runtime::{
-    DesktopPresentationVerificationReceipt, DesktopRun, DesktopRunIntent, DesktopRunOptions,
-    DesktopRunOutcome, DesktopRunReport,
-};
 #[cfg(all(
     feature = "runtime-2d",
     feature = "serde",

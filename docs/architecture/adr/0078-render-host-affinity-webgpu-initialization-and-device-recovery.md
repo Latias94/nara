@@ -111,12 +111,19 @@ Early EventLoop return or close deadline expiry returns a move-only incomplete o
 poll/retry under its original affinity. It cannot drop unfinished dependencies or rely on Runtime-only
 quarantine to adopt external GPU/platform state. Terminal cleanup errors remain distinct from
 physical completion. The [production ownership design](../render-host-ownership-design.md) selects
-the concrete transition; the implementation ledger records its still-open qualification scope.
+the concrete transition; the implementation ledger records its actual qualification scope.
 
 Returned original CPU results join UI completion and first-present/READY at the post-Host boundary.
 Every maintenance service advances deadlines and pending publication with an optional None result
 and arranges its next required wake. This boundary neither reruns arbitrary Last systems nor drives
 an extra simulation frame to publish readiness.
+
+Connection authentication precedes one-shot collection, not just native transfer or result return.
+Direct Drop settles the original completion obligations before releasing the logical in-flight
+barrier. Cancelling a capture cannot reset the last observed native backend state or manufacture a
+new GPU observation. A Wait-mode maintenance wake services this boundary independently of ordinary
+frame demand. Native destruction is expected only after the particular target's provider release;
+requesting logical shutdown alone does not authorize early destruction or erase its failure.
 
 ### Initialization state machine
 

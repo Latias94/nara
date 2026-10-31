@@ -11,10 +11,11 @@ use nara_render::{ExtractedViews, RenderFramePacket, RenderFramePacketError};
 use nara_render::{RenderTarget, ViewportRect};
 #[cfg(feature = "sprite-submitter")]
 use nara_sprite_render::__private::SpriteBatches;
+#[cfg(all(test, feature = "ui-submitter"))]
+use nara_ui_render::__private::UiPresentationOutcomes;
 #[cfg(feature = "ui-submitter")]
 use nara_ui_render::__private::{
-    UiBackendSubmission, UiCompletedBackendOutcome, UiPresentationOutcomes,
-    UiSubmittedBackendSubmission,
+    UiBackendSubmission, UiCompletedBackendOutcome, UiSubmittedBackendSubmission,
 };
 #[cfg(feature = "ui-submitter")]
 use nara_ui_render::{
@@ -38,8 +39,6 @@ pub(crate) enum WgpuFrameSet {
     CollectSprite,
     CollectUi,
     Seal,
-    Submit,
-    CompleteUi,
 }
 
 #[derive(Debug, Default)]
@@ -97,6 +96,13 @@ pub(crate) enum WgpuUiSubmissionState {
 
 #[cfg(feature = "ui-submitter")]
 impl WgpuUiSubmissionState {
+    pub(crate) fn submission_count(&self) -> usize {
+        match self {
+            Self::Prepared(submissions) => submissions.len(),
+            Self::Submitted(submissions) => submissions.len(),
+        }
+    }
+
     pub(crate) fn validate_backend_generation(
         &self,
         backend_generation: UiPresentationBackendGeneration,
@@ -199,58 +205,74 @@ pub(crate) fn complete_ui_submissions(
     submissions: WgpuUiSubmissionState,
     completion: WgpuUiCompletion,
 ) -> Vec<UiCompletedBackendOutcome> {
+    let mut completed = Vec::with_capacity(submissions.submission_count());
+    complete_ui_submissions_into(submissions, completion, &mut completed);
+    completed
+}
+
+/// Appends one outcome per original submission without growing the output allocation.
+///
+/// The caller must reserve room for the complete batch before calling. Runtime captures reserve
+/// this storage before native execution begins.
+#[cfg(feature = "ui-submitter")]
+pub(crate) fn complete_ui_submissions_into(
+    submissions: WgpuUiSubmissionState,
+    completion: WgpuUiCompletion,
+    completed: &mut Vec<UiCompletedBackendOutcome>,
+) {
+    assert!(
+        completed.capacity() - completed.len() >= submissions.submission_count(),
+        "UI completion storage must be reserved for the complete batch"
+    );
     match (submissions, completion) {
         (WgpuUiSubmissionState::Submitted(submissions), WgpuUiCompletion::Presented) => {
-            submissions
-                .into_iter()
-                .map(UiSubmittedBackendSubmission::presented)
-                .collect()
+            for submission in submissions {
+                completed.push(submission.presented());
+            }
         }
-        (WgpuUiSubmissionState::Prepared(submissions), WgpuUiCompletion::Presented) => submissions
-            .into_iter()
-            .map(|submission| {
-                submission.backend_fault(
+        (WgpuUiSubmissionState::Prepared(submissions), WgpuUiCompletion::Presented) => {
+            for submission in submissions {
+                completed.push(submission.backend_fault(
                     None,
                     UiPresentationBackendFaultDomain::Target,
-                    "the Editor window reached a composite without binding Runtime UI to a live backend generation"
+                    "the target reached presentation without binding UI to a live backend generation"
                         .to_owned(),
-                )
-            })
-            .collect(),
+                ));
+            }
+        }
         (WgpuUiSubmissionState::Submitted(submissions), WgpuUiCompletion::Deferred(message)) => {
-            submissions
-                .into_iter()
-                .map(|submission| submission.deferred(message.clone()))
-                .collect()
+            for submission in submissions {
+                completed.push(submission.deferred(message.clone()));
+            }
         }
         (WgpuUiSubmissionState::Prepared(submissions), WgpuUiCompletion::Deferred(message)) => {
-            submissions
-                .into_iter()
-                .map(|submission| {
-                    submission.backend_fault(
-                        None,
-                        UiPresentationBackendFaultDomain::Target,
-                        message.clone(),
-                    )
-                })
-                .collect()
+            for submission in submissions {
+                completed.push(submission.backend_fault(
+                    None,
+                    UiPresentationBackendFaultDomain::Target,
+                    message.clone(),
+                ));
+            }
         }
         (
             WgpuUiSubmissionState::Prepared(submissions),
             WgpuUiCompletion::ContentRejected(message),
-        ) => submissions
-            .into_iter()
-            .map(|submission| submission.content_rejected(message.clone()))
-            .collect(),
+        ) => {
+            for submission in submissions {
+                completed.push(submission.content_rejected(message.clone()));
+            }
+        }
         (
             WgpuUiSubmissionState::Submitted(submissions),
             WgpuUiCompletion::ContentRejected(message),
-        ) => submissions
-            .into_iter()
-            .map(|submission| {
-                submission.backend_fault(UiPresentationBackendFaultDomain::Attempt, message.clone())
-            })
-            .collect(),
+        ) => {
+            for submission in submissions {
+                completed.push(
+                    submission
+                        .backend_fault(UiPresentationBackendFaultDomain::Attempt, message.clone()),
+                );
+            }
+        }
         (
             WgpuUiSubmissionState::Prepared(submissions),
             WgpuUiCompletion::BackendFault {
@@ -258,46 +280,42 @@ pub(crate) fn complete_ui_submissions(
                 domain,
                 message,
             },
-        ) => submissions
-            .into_iter()
-            .map(|submission| {
-                submission.backend_fault(backend_generation, domain, message.clone())
-            })
-            .collect(),
+        ) => {
+            for submission in submissions {
+                completed.push(submission.backend_fault(
+                    backend_generation,
+                    domain,
+                    message.clone(),
+                ));
+            }
+        }
         (
             WgpuUiSubmissionState::Submitted(submissions),
             WgpuUiCompletion::BackendFault {
                 domain, message, ..
             },
-        ) => submissions
-            .into_iter()
-            .map(|submission| submission.backend_fault(domain, message.clone()))
-            .collect(),
+        ) => {
+            for submission in submissions {
+                completed.push(submission.backend_fault(domain, message.clone()));
+            }
+        }
         (
             WgpuUiSubmissionState::Prepared(submissions),
             WgpuUiCompletion::Superseded { successor, message },
-        ) => submissions
-            .into_iter()
-            .map(|submission| submission.superseded(successor, message.clone()))
-            .collect(),
+        ) => {
+            for submission in submissions {
+                completed.push(submission.superseded(successor, message.clone()));
+            }
+        }
         (
             WgpuUiSubmissionState::Submitted(submissions),
             WgpuUiCompletion::Superseded { successor, message },
-        ) => submissions
-            .into_iter()
-            .map(|submission| submission.superseded(successor, message.clone()))
-            .collect(),
+        ) => {
+            for submission in submissions {
+                completed.push(submission.superseded(successor, message.clone()));
+            }
+        }
     }
-}
-
-#[cfg(feature = "ui-submitter")]
-#[derive(Debug)]
-pub(crate) struct WgpuUiTerminal {
-    submissions: WgpuUiSubmissionState,
-    result: Result<(), WgpuRenderError>,
-    frame_state: RenderFrameState,
-    device_fault_generation: Option<UiPresentationBackendGeneration>,
-    skip_message: Option<String>,
 }
 
 #[derive(Debug, Default, Resource)]
@@ -307,8 +325,6 @@ pub(crate) struct WgpuFramePacketSlot {
     current: Option<Result<Option<WgpuCapturedFrame>, WgpuFrameCaptureError>>,
     #[cfg(feature = "ui-submitter")]
     ui_submissions: Option<WgpuUiSubmissionState>,
-    #[cfg(feature = "ui-submitter")]
-    ui_terminal: Option<WgpuUiTerminal>,
 }
 
 impl WgpuFramePacketSlot {
@@ -321,13 +337,12 @@ impl WgpuFramePacketSlot {
         #[cfg(feature = "ui-submitter")]
         {
             self.ui_submissions = None;
-            self.ui_terminal = None;
         }
     }
 
     pub(crate) fn reset(&mut self) {
         #[cfg(feature = "ui-submitter")]
-        if self.ui_submissions.is_some() || self.ui_terminal.is_some() {
+        if self.ui_submissions.is_some() {
             self.payload = WgpuFramePayload::default();
             self.current = None;
             self.collection_error = Some(WgpuFrameCaptureError::IncompleteUiTransaction);
@@ -339,7 +354,6 @@ impl WgpuFramePacketSlot {
         #[cfg(feature = "ui-submitter")]
         {
             self.ui_submissions = None;
-            self.ui_terminal = None;
         }
     }
 
@@ -358,9 +372,7 @@ impl WgpuFramePacketSlot {
 
     #[cfg(feature = "ui-submitter")]
     pub(crate) fn accepts_ui_collection(&self) -> bool {
-        self.collection_error.is_none()
-            && self.ui_submissions.is_none()
-            && self.ui_terminal.is_none()
+        self.collection_error.is_none() && self.ui_submissions.is_none()
     }
 
     #[cfg(feature = "ui-submitter")]
@@ -434,39 +446,6 @@ impl WgpuFramePacketSlot {
     #[cfg(feature = "ui-submitter")]
     pub(crate) fn take_ui_submissions(&mut self) -> Option<WgpuUiSubmissionState> {
         self.ui_submissions.take()
-    }
-
-    #[cfg(feature = "ui-submitter")]
-    pub(crate) fn finish_ui(
-        &mut self,
-        submissions: WgpuUiSubmissionState,
-        result: Result<(), WgpuRenderError>,
-        frame_state: RenderFrameState,
-        device_fault_generation: Option<UiPresentationBackendGeneration>,
-        skip_message: Option<String>,
-    ) {
-        self.ui_terminal = Some(WgpuUiTerminal {
-            submissions,
-            result,
-            frame_state,
-            device_fault_generation,
-            skip_message,
-        });
-    }
-
-    #[cfg(feature = "ui-submitter")]
-    pub(crate) fn complete_ui(&mut self, outcomes: &mut UiPresentationOutcomes) {
-        let Some(terminal) = self.ui_terminal.take() else {
-            return;
-        };
-        publish_ui_outcomes(
-            outcomes,
-            terminal.submissions,
-            &terminal.result,
-            terminal.frame_state,
-            terminal.device_fault_generation,
-            terminal.skip_message.as_deref(),
-        );
     }
 }
 
@@ -649,15 +628,14 @@ pub(crate) fn render_targets_match(
 }
 
 #[cfg(feature = "ui-submitter")]
-pub(crate) fn publish_ui_outcomes(
-    outcomes: &mut UiPresentationOutcomes,
-    submissions: WgpuUiSubmissionState,
+pub(crate) fn ui_completion(
+    submissions: &WgpuUiSubmissionState,
     result: &Result<(), WgpuRenderError>,
     frame_state: RenderFrameState,
     device_fault_generation: Option<UiPresentationBackendGeneration>,
     skip_message: Option<&str>,
-) {
-    let completion = match (&submissions, result) {
+) -> WgpuUiCompletion {
+    match (submissions, result) {
         (WgpuUiSubmissionState::Submitted(_), Ok(()))
             if frame_state == RenderFrameState::Submitted =>
         {
@@ -696,7 +674,25 @@ pub(crate) fn publish_ui_outcomes(
                 message: error.to_string(),
             }
         }
-    };
+    }
+}
+
+#[cfg(all(test, feature = "ui-submitter"))]
+pub(crate) fn publish_ui_outcomes(
+    outcomes: &mut UiPresentationOutcomes,
+    submissions: WgpuUiSubmissionState,
+    result: &Result<(), WgpuRenderError>,
+    frame_state: RenderFrameState,
+    device_fault_generation: Option<UiPresentationBackendGeneration>,
+    skip_message: Option<&str>,
+) {
+    let completion = ui_completion(
+        &submissions,
+        result,
+        frame_state,
+        device_fault_generation,
+        skip_message,
+    );
     for completed in complete_ui_submissions(submissions, completion) {
         outcomes.commit_backend(completed);
     }
@@ -752,16 +748,19 @@ mod tests {
         slot.reset();
 
         assert!(slot.take_ui_submissions().is_none());
-        assert!(slot.ui_terminal.is_none());
+        assert!(slot.accepts_ui_collection());
+        assert!(slot.payload.ui_packets.is_empty());
+        assert!(slot.take_capture().is_none());
     }
 
     #[cfg(feature = "ui-submitter")]
     #[test]
     fn reset_rejects_without_overwriting_an_incomplete_ui_transaction() {
-        let mut slot = WgpuFramePacketSlot {
-            ui_submissions: Some(WgpuUiSubmissionState::Prepared(Vec::new())),
-            ..Default::default()
-        };
+        let packet = ui_packet();
+        let mut outcomes = UiPresentationOutcomes::default();
+        let submissions = prepare_ui_submissions(&mut outcomes, &packet, 1);
+        let mut slot = WgpuFramePacketSlot::default();
+        slot.collect_ui(vec![packet], submissions);
 
         slot.reset();
 
@@ -771,5 +770,216 @@ mod tests {
             slot.collection_error,
             Some(WgpuFrameCaptureError::IncompleteUiTransaction)
         ));
+        let submissions = slot.take_ui_submissions().unwrap();
+        assert_eq!(submissions.submission_count(), 1);
+        slot.close();
+
+        let mut world = nara_ecs::World::new();
+        world.insert_resource(outcomes);
+        assert!(matches!(
+            nara_ui_render::drain_ui_presentation_outcomes(&mut world),
+            Err(UiPresentationIntegrationError::OutstandingBackendOutcomeReservations { count: 1 })
+        ));
+
+        drop(submissions);
+
+        let published = nara_ui_render::drain_ui_presentation_outcomes(&mut world).unwrap();
+        assert!(matches!(
+            published.as_slice(),
+            [nara_ui_render::UiPresentationOutcome::Aborted { attempt, .. }]
+                if attempt.admission_id().unwrap().get() == 1
+        ));
+    }
+
+    #[cfg(feature = "ui-submitter")]
+    #[test]
+    fn close_returns_untransferred_ui_permissions_to_the_original_owner_once() {
+        let packet = ui_packet();
+        let mut outcomes = UiPresentationOutcomes::default();
+        let submissions = prepare_ui_submissions(&mut outcomes, &packet, 2);
+        let mut slot = WgpuFramePacketSlot::default();
+        slot.collect_ui(vec![packet], submissions);
+
+        slot.close();
+        slot.close();
+
+        assert!(slot.take_ui_submissions().is_none());
+        assert!(slot.take_capture().is_none());
+        assert!(slot.payload.ui_packets.is_empty());
+        let mut world = nara_ecs::World::new();
+        world.insert_resource(outcomes);
+        let published = nara_ui_render::drain_ui_presentation_outcomes(&mut world).unwrap();
+        assert_eq!(published.len(), 2);
+        for (index, outcome) in published.iter().enumerate() {
+            assert!(matches!(
+                outcome,
+                nara_ui_render::UiPresentationOutcome::Aborted { attempt, .. }
+                    if attempt.admission_id().unwrap().get() == u64::try_from(index + 1).unwrap()
+            ));
+        }
+        assert!(
+            nara_ui_render::drain_ui_presentation_outcomes(&mut world)
+                .unwrap()
+                .is_empty()
+        );
+    }
+
+    #[cfg(feature = "ui-submitter")]
+    #[test]
+    fn completion_appends_to_reserved_storage_and_preserves_exact_submission_authority() {
+        use nara_ui_render::UiPresentationOutcome;
+
+        let packet = ui_packet();
+        let packet_identity = packet.identity();
+        let backend_generation = UiPresentationBackendGeneration::new(17, 3).unwrap();
+        let mut outcomes = UiPresentationOutcomes::default();
+        let submissions = prepare_ui_submissions(&mut outcomes, &packet, 3);
+        let mut submitted = nara_ui_render::__private::bind_backend_submission_batch(
+            submissions,
+            backend_generation,
+        )
+        .unwrap();
+        let deferred = WgpuUiSubmissionState::Submitted(submitted.split_off(1));
+        let presented = WgpuUiSubmissionState::Submitted(submitted);
+        let mut completed = Vec::with_capacity(3);
+        let original_allocation = completed.as_ptr();
+        let original_capacity = completed.capacity();
+
+        let presentation =
+            ui_completion(&presented, &Ok(()), RenderFrameState::Submitted, None, None);
+        complete_ui_submissions_into(presented, presentation, &mut completed);
+        let deferral = ui_completion(
+            &deferred,
+            &Err(WgpuRenderError::UploadDeferred {
+                message: "the shared upload budget is exhausted".to_owned(),
+            }),
+            RenderFrameState::Skipped,
+            None,
+            None,
+        );
+        complete_ui_submissions_into(deferred, deferral, &mut completed);
+
+        assert_eq!(completed.len(), 3);
+        assert_eq!(completed.as_ptr(), original_allocation);
+        assert_eq!(completed.capacity(), original_capacity);
+        for completion in completed {
+            outcomes.commit_backend(completion);
+        }
+        let mut world = nara_ecs::World::new();
+        world.insert_resource(outcomes);
+        let published = nara_ui_render::drain_ui_presentation_outcomes(&mut world).unwrap();
+        assert_eq!(published.len(), 3);
+        let UiPresentationOutcome::Presented(commit) = &published[0] else {
+            panic!("the first reserved result must retain its original presentation authority");
+        };
+        assert_eq!(commit.attempt().admission_id().unwrap().get(), 1);
+        assert_eq!(commit.backend_generation(), backend_generation);
+        assert_eq!(commit.packet().identity(), packet_identity);
+        for (index, outcome) in published.iter().enumerate().skip(1) {
+            let UiPresentationOutcome::Deferred { retry, .. } = outcome else {
+                panic!("appending a deferral must not replace the original completed result");
+            };
+            assert_eq!(
+                retry.attempt().admission_id().unwrap().get(),
+                u64::try_from(index + 1).unwrap()
+            );
+            assert_eq!(retry.backend_generation(), backend_generation);
+            assert_eq!(retry.packet().identity(), packet_identity);
+        }
+    }
+
+    #[cfg(feature = "ui-submitter")]
+    #[test]
+    fn dropping_completed_storage_returns_every_original_permission_as_aborted() {
+        let packet = ui_packet();
+        let mut outcomes = UiPresentationOutcomes::default();
+        let submissions = prepare_ui_submissions(&mut outcomes, &packet, 2);
+        let mut submissions = WgpuUiSubmissionState::Prepared(submissions);
+        submissions
+            .bind_backend(UiPresentationBackendGeneration::new(17, 3).unwrap())
+            .unwrap();
+        let mut completed = Vec::with_capacity(submissions.submission_count());
+
+        complete_ui_submissions_into(submissions, WgpuUiCompletion::Presented, &mut completed);
+        drop(completed);
+
+        let mut world = nara_ecs::World::new();
+        world.insert_resource(outcomes);
+        let published = nara_ui_render::drain_ui_presentation_outcomes(&mut world).unwrap();
+        assert_eq!(published.len(), 2);
+        for (index, outcome) in published.iter().enumerate() {
+            assert!(matches!(
+                outcome,
+                nara_ui_render::UiPresentationOutcome::Aborted { attempt, .. }
+                    if attempt.admission_id().unwrap().get() == u64::try_from(index + 1).unwrap()
+            ));
+        }
+    }
+
+    #[cfg(feature = "ui-submitter")]
+    fn prepare_ui_submissions(
+        outcomes: &mut UiPresentationOutcomes,
+        packet: &Arc<UiPaintPacket>,
+        count: usize,
+    ) -> Vec<UiBackendSubmission> {
+        use nara_ui_render::{
+            UiPresentationAttemptId, UiPresentationCapabilityGeneration, UiPresentationEpoch,
+            UiPresentationRuntimeGeneration,
+        };
+
+        let submissions: Vec<_> = (1..=count)
+            .map(|admission_id| {
+                nara_ui_render::__private::prepare_backend_submission(
+                    UiPresentationAttemptId::new(u64::try_from(admission_id).unwrap()).unwrap(),
+                    Arc::clone(packet),
+                    UiPresentationEpoch::new(3).unwrap(),
+                    UiPresentationRuntimeGeneration::new(7).unwrap(),
+                    UiPresentationCapabilityGeneration::new(11).unwrap(),
+                )
+            })
+            .collect();
+        let permits = outcomes.reserve_backend(&submissions).unwrap();
+        submissions
+            .into_iter()
+            .zip(permits)
+            .map(|(submission, permit)| UiBackendSubmission::pair(submission, permit).unwrap())
+            .collect()
+    }
+
+    #[cfg(feature = "ui-submitter")]
+    fn ui_packet() -> Arc<UiPaintPacket> {
+        use nara_ui_kernel::{
+            UiAuthoringSnapshotBuilder, UiColor, UiCompiler, UiEnvironment, UiLayer, UiLocalKey,
+            UiNode, UiRoot, UiRootKey, UiStyle, UiSurfaceId, UiTheme, UiVisual,
+        };
+
+        let snapshot = UiAuthoringSnapshotBuilder::new(1)
+            .with_root(
+                UiRoot::new(
+                    UiRootKey::runtime("wgpu-frame-completion", "root").unwrap(),
+                    UiLayer::Base,
+                    UiStyle::fill(),
+                )
+                .with_child(
+                    UiNode::new(UiStyle::absolute(0.0, 0.0, 16.0, 16.0))
+                        .with_key(UiLocalKey::runtime("wgpu-frame-completion", "panel").unwrap())
+                        .with_visual(UiVisual::solid(UiColor::rgba(1.0, 1.0, 1.0, 1.0))),
+                ),
+            )
+            .build()
+            .unwrap();
+        let environment =
+            UiEnvironment::new(UiSurfaceId::new(1).unwrap(), 16.0, 16.0, 1.0, 1, 1, 1, 1).unwrap();
+        let frame = UiCompiler::new(nara_text::bundled_font_face().unwrap(), Default::default())
+            .unwrap()
+            .compile(&snapshot, environment, UiTheme::default())
+            .unwrap();
+        nara_ui_render::UiPresentationPlanner::default()
+            .plan(
+                frame,
+                RenderTarget::Window(WindowId::PRIMARY),
+                &nara_ui_render::UiPreparedImages::default(),
+            )
+            .unwrap()
     }
 }

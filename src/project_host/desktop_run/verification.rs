@@ -4,35 +4,19 @@ use std::{
     time::{Duration, Instant},
 };
 
-use nara_app::{
-    App, AppExitRequests, CoreStage, Plugin, PluginCategory, PluginDeclaration, PluginDefinition,
-    PluginDefinitionId, PluginError, PluginId, PluginProductCapability, RuntimeGeneration,
-};
-use nara_ecs::{Res, ResMut, Resource};
+use nara_app::{AppExit, RuntimeGeneration};
 use nara_fs::DirectoryCapability;
-use nara_render_wgpu::{WGPU_RENDER_PLUGIN_ID, WgpuRenderObservation};
 
 use super::super::{
     ProductSupervisedDesktopReadyAdvance, ProductSupervisedDesktopReadyPublication,
     ProductSupervisedDesktopSession, StartupContentClosureReceipt,
     SupervisedDesktopProductIdentity, SupervisedDesktopRuntimeClosureFacts,
     SupervisedDesktopWireError,
-    composition::{RuntimeHostPolicyContribution, runtime_host_policy_contribution},
 };
 
-pub(super) const DEFAULT_FIRST_PRESENT_TIMEOUT: Duration = Duration::from_secs(10);
+pub(in crate::project_host) const DEFAULT_FIRST_PRESENT_TIMEOUT: Duration = Duration::from_secs(10);
 
-const DESKTOP_FIRST_PRESENT_PLUGIN_ID: PluginId =
-    PluginId::new("nara.project-host.desktop-first-present-verification");
-const DESKTOP_FIRST_PRESENT_DEFINITION_ID: PluginDefinitionId =
-    PluginDefinitionId::new("nara.project-host.desktop-first-present-verification", 1);
-const DESKTOP_FIRST_PRESENT_PLUGIN_REQUIREMENTS: &[PluginId] = &[WGPU_RENDER_PLUGIN_ID];
-const DESKTOP_FIRST_PRESENT_PRODUCT_REQUIREMENTS: &[PluginProductCapability] =
-    &[PluginProductCapability::new("render-wgpu")];
-const DESKTOP_FIRST_PRESENT_PLUGIN_DECLARATION: PluginDeclaration =
-    PluginDeclaration::new(DESKTOP_FIRST_PRESENT_PLUGIN_ID, PluginCategory::Runtime)
-        .requires_plugins(DESKTOP_FIRST_PRESENT_PLUGIN_REQUIREMENTS)
-        .requires_product_capabilities(DESKTOP_FIRST_PRESENT_PRODUCT_REQUIREMENTS);
+const READY_PUBLICATION_POLL_INTERVAL: Duration = Duration::from_millis(2);
 
 /// Product-level proof that one checked startup closure reached the real desktop presentation path.
 ///
@@ -46,7 +30,7 @@ pub struct DesktopPresentationVerificationReceipt {
 }
 
 impl DesktopPresentationVerificationReceipt {
-    pub(super) const fn new(
+    pub(in crate::project_host) const fn new(
         startup_content_closure: StartupContentClosureReceipt,
         presented_frame: nara_render_wgpu::__private::WgpuPresentedFrameReceipt,
     ) -> Self {
@@ -73,7 +57,7 @@ impl fmt::Debug for DesktopPresentationVerificationReceipt {
 }
 
 #[derive(Debug)]
-pub(super) enum DesktopFirstPresentRequest {
+pub(in crate::project_host) enum DesktopFirstPresentRequest {
     VerificationCanary,
     SupervisedActivation {
         session: ProductSupervisedDesktopSession,
@@ -82,21 +66,17 @@ pub(super) enum DesktopFirstPresentRequest {
 }
 
 impl DesktopFirstPresentRequest {
-    const fn mode_tag(&self) -> u8 {
-        match self {
-            Self::VerificationCanary => 0,
-            Self::SupervisedActivation { .. } => 1,
-        }
-    }
-
-    pub(super) const fn label(&self) -> &'static str {
+    pub(in crate::project_host) const fn label(&self) -> &'static str {
         match self {
             Self::VerificationCanary => "verification-canary",
             Self::SupervisedActivation { .. } => "supervised-activation",
         }
     }
 
-    pub(super) fn is_bound_to_project_root(&self, project_root: &DirectoryCapability) -> bool {
+    pub(in crate::project_host) fn is_bound_to_project_root(
+        &self,
+        project_root: &DirectoryCapability,
+    ) -> bool {
         match self {
             Self::VerificationCanary => true,
             Self::SupervisedActivation { session, .. } => {
@@ -106,38 +86,43 @@ impl DesktopFirstPresentRequest {
     }
 }
 
-pub(super) struct DesktopFirstPresentVerification {
+#[derive(Clone)]
+pub(in crate::project_host) struct DesktopFirstPresentVerification {
     shared: Arc<Mutex<DesktopFirstPresentState>>,
-    mode_tag: u8,
 }
 
 impl DesktopFirstPresentVerification {
-    pub(super) fn new(request: DesktopFirstPresentRequest) -> Self {
-        let mode_tag = request.mode_tag();
+    pub(in crate::project_host) fn new(request: DesktopFirstPresentRequest) -> Self {
         Self {
             shared: Arc::new(Mutex::new(DesktopFirstPresentState::Unarmed(request))),
-            mode_tag,
         }
     }
 
-    pub(super) fn host_policy(&self) -> RuntimeHostPolicyContribution {
-        let shared = Arc::clone(&self.shared);
-        let mut definition_config = [0_u8; 17];
-        definition_config[0] = self.mode_tag;
-        definition_config[1..]
-            .copy_from_slice(&DEFAULT_FIRST_PRESENT_TIMEOUT.as_nanos().to_le_bytes());
-        runtime_host_policy_contribution(
-            PluginDefinition::infallible::<DesktopFirstPresentPlugin, _>(
-                DESKTOP_FIRST_PRESENT_DEFINITION_ID,
-                definition_config,
-                move || DesktopFirstPresentPlugin {
-                    shared: Arc::clone(&shared),
-                },
+    /// Advances only presentation verification and READY I/O, including idle maintenance.
+    pub(in crate::project_host) fn observe(
+        &self,
+        runtime_generation: RuntimeGeneration,
+        presented: Option<nara_render_wgpu::__private::WgpuPresentedFrameReceipt>,
+        now: Instant,
+    ) -> DesktopFirstPresentProgress {
+        let exit = match advance(&self.shared, runtime_generation, presented, now) {
+            DesktopFirstPresentAction::None => None,
+            DesktopFirstPresentAction::RequestSuccess => Some(AppExit::Success),
+            DesktopFirstPresentAction::RequestExit => Some(AppExit::Requested),
+        };
+        let next_wake = match &*lock(&self.shared) {
+            DesktopFirstPresentState::Awaiting { deadline, .. } => Some(*deadline),
+            DesktopFirstPresentState::Publishing { publication, .. } => Some(
+                now.checked_add(READY_PUBLICATION_POLL_INTERVAL)
+                    .unwrap_or(now)
+                    .min(publication.deadline()),
             ),
-        )
+            _ => None,
+        };
+        DesktopFirstPresentProgress { exit, next_wake }
     }
 
-    pub(super) fn arm(
+    pub(in crate::project_host) fn arm(
         &self,
         startup_content_closure: &StartupContentClosureReceipt,
     ) -> Result<(), SupervisedDesktopWireError> {
@@ -180,7 +165,7 @@ impl DesktopFirstPresentVerification {
         Ok(())
     }
 
-    pub(super) fn outcome(&self) -> DesktopFirstPresentOutcome {
+    pub(in crate::project_host) fn outcome(&self) -> DesktopFirstPresentOutcome {
         match &*lock(&self.shared) {
             DesktopFirstPresentState::Unarmed(_) => DesktopFirstPresentOutcome::Unarmed,
             DesktopFirstPresentState::Awaiting { .. } => DesktopFirstPresentOutcome::Awaiting,
@@ -199,14 +184,19 @@ impl DesktopFirstPresentVerification {
     }
 }
 
+pub(in crate::project_host) struct DesktopFirstPresentProgress {
+    pub(in crate::project_host) exit: Option<AppExit>,
+    pub(in crate::project_host) next_wake: Option<Instant>,
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(super) enum DesktopFirstPresentFailure {
+pub(in crate::project_host) enum DesktopFirstPresentFailure {
     RuntimeClosure,
     ReadyPublication,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(super) enum DesktopFirstPresentOutcome {
+pub(in crate::project_host) enum DesktopFirstPresentOutcome {
     Unarmed,
     Awaiting,
     Publishing,
@@ -256,54 +246,6 @@ fn runtime_closure_facts(
         receipt.content_digest(),
         receipt.closure_plan_digest(),
     )
-}
-
-#[derive(Resource)]
-struct DesktopFirstPresentResource {
-    shared: Arc<Mutex<DesktopFirstPresentState>>,
-}
-
-struct DesktopFirstPresentPlugin {
-    shared: Arc<Mutex<DesktopFirstPresentState>>,
-}
-
-impl Plugin for DesktopFirstPresentPlugin {
-    fn declaration() -> &'static PluginDeclaration {
-        &DESKTOP_FIRST_PRESENT_PLUGIN_DECLARATION
-    }
-
-    fn build(&self, app: &mut App) -> Result<(), PluginError> {
-        app.insert_resource(DesktopFirstPresentResource {
-            shared: Arc::clone(&self.shared),
-        })?;
-        app.add_systems(CoreStage::Last, verify_first_present)?;
-        Ok(())
-    }
-}
-
-fn verify_first_present(
-    runtime_generation: Res<RuntimeGeneration>,
-    observation: Res<WgpuRenderObservation>,
-    verification: Res<DesktopFirstPresentResource>,
-    mut exit_requests: ResMut<AppExitRequests>,
-) {
-    let presented = nara_render_wgpu::__private::presented_frame_this_transaction(&observation);
-    let action = advance(
-        &verification.shared,
-        *runtime_generation,
-        presented,
-        Instant::now(),
-    );
-    match action {
-        DesktopFirstPresentAction::None => {}
-        DesktopFirstPresentAction::RequestSuccess if exit_requests.requested().is_none() => {
-            exit_requests.request_success();
-        }
-        DesktopFirstPresentAction::RequestExit if exit_requests.requested().is_none() => {
-            exit_requests.request_exit();
-        }
-        DesktopFirstPresentAction::RequestSuccess | DesktopFirstPresentAction::RequestExit => {}
-    }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -475,6 +417,29 @@ mod tests {
     }
 
     #[test]
+    fn idle_post_host_maintenance_wakes_at_deadline_and_exits_once() {
+        let now = Instant::now();
+        let deadline = now + Duration::from_secs(1);
+        let generation = runtime_generation();
+        let verification = DesktopFirstPresentVerification {
+            shared: Arc::new(Mutex::new(DesktopFirstPresentState::Awaiting {
+                deadline,
+                behavior: DesktopFirstPresentBehavior::ExitAfterAcceptedPresentation,
+            })),
+        };
+
+        let waiting = verification.observe(generation, None, now);
+        assert_eq!(waiting.exit, None);
+        assert_eq!(waiting.next_wake, Some(deadline));
+        let timed_out = verification.observe(generation, None, deadline);
+        assert_eq!(timed_out.exit, Some(AppExit::Requested));
+        assert_eq!(timed_out.next_wake, None);
+        let settled = verification.observe(generation, None, deadline);
+        assert_eq!(settled.exit, None);
+        assert_eq!(settled.next_wake, None);
+    }
+
+    #[test]
     fn presentation_at_first_present_deadline_is_rejected() {
         let deadline = Instant::now();
 
@@ -517,7 +482,6 @@ mod tests {
     fn supervised_activation_has_a_distinct_non_canary_mode() {
         let canary = DesktopFirstPresentRequest::VerificationCanary;
 
-        assert_eq!(canary.mode_tag(), 0);
         assert_eq!(canary.label(), "verification-canary");
     }
 }

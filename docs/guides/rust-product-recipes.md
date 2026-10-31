@@ -399,6 +399,44 @@ same owner for explicit retirement retry. A terminal plugin shutdown failure is 
 after physical retirement completes. Embedded UI hosts request Stop and advance close progress
 without waiting for completion on their UI thread.
 
+### Native desktop execution
+
+With `desktop-winit` and `render-wgpu`, transfer the started Runtime into the ordinary desktop
+owner. Code-first clear-only, 2D and UI-only products use this same entry without requiring Scene
+serialization or a project file:
+
+```rust
+use nara::project_host::{DesktopRun, DesktopRunOptions, DesktopRunOutcome};
+
+let mut desktop = DesktopRun::from_runtime(runtime, DesktopRunOptions::new());
+let report = desktop.execute();
+match report.outcome() {
+    DesktopRunOutcome::Completed(exit) => { /* inspect the final exit */ }
+    DesktopRunOutcome::Failed => { /* inspect report.diagnostics() */ }
+    DesktopRunOutcome::CleanupIncomplete => {
+        // Retain desktop. Another execute() advances this same native retirement owner.
+    }
+}
+```
+
+The desktop owner retains Runtime, the local GPU executor, original native target registry, windows
+and event pump through incomplete retirement. `with_native_retirement_budget` bounds one native
+retirement drive; it does not change an already-started Runtime's logical close policy. Keep an
+incomplete owner on its construction thread. Dropping it attempts finite retirement and cannot
+silently release unfinished native responsibilities.
+
+`with_presentation_observer` receives read-only CPU facts after actual native execution, including
+maintenance without a new capture. Use its exact `presented_frame()` for startup or presentation
+measurements. The current World `RenderFrame` describes simulation capture and can already be newer
+than a completed result. GPU objects and polling belong to the local executor. For a finite
+measurement, request `SealTelemetryAndExit` and inspect the final telemetry seal, including pending,
+lost and epoch facts, before treating its samples as complete. An ordinary observer failure can veto
+a scheduled successful exit.
+
+File-backed and processed product constructors add their content/configuration custody to this
+same native owner. Explicit platform-only consumers use owned `WinitRunner::run(runtime)` and retain
+its `WinitSession`; that entry rejects a Runtime expecting a presentation backend.
+
 Ordinary headless and desktop binaries delegate source opening and process cleanup to the product
 Host:
 

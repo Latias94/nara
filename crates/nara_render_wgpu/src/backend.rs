@@ -1,7 +1,6 @@
 use std::{collections::BTreeMap, time::Duration};
 
 use nara_app::RuntimeGeneration;
-use nara_ecs::Resource;
 #[cfg(all(test, any(feature = "sprite-submitter", feature = "ui-submitter")))]
 use nara_material::AlphaMode2d;
 #[cfg(test)]
@@ -367,7 +366,8 @@ impl WgpuCachedQuadPipeline {
     }
 }
 
-#[derive(Debug, Default, Resource)]
+/// Concrete GPU execution owner. Runners and Editor Hosts retain it outside gameplay World.
+#[derive(Debug, Default)]
 pub struct WgpuRenderBackend {
     // Rust drops fields in declaration order. Retire surfaces while their GPU owners are live.
     surfaces: BTreeMap<WindowId, WgpuSurfaceState>,
@@ -395,6 +395,9 @@ pub struct WgpuRenderBackend {
     #[cfg(any(feature = "sprite-submitter", feature = "ui-submitter"))]
     instance_budget: InstanceBudget,
     last_error: Option<String>,
+    runtime_execution: bool,
+    runtime_close_started: bool,
+    runtime_retirement: Option<crate::retirement::WgpuGpuRetirement>,
     // Keep the device domain alive through surface/cache field destruction on direct Drop too.
     device_owner: WgpuDeviceOwner,
 }
@@ -418,6 +421,39 @@ pub(super) struct WgpuEditorAcquiredSurface {
 }
 
 impl WgpuRenderBackend {
+    pub(super) fn begin_runtime_execution(&mut self) {
+        self.runtime_execution = true;
+    }
+
+    pub(super) const fn runtime_close_started(&self) -> bool {
+        self.runtime_close_started
+    }
+
+    /// Stops this Runtime execution owner and advances its original queue and surface retirement.
+    /// A retry retains the same drain even after namespace invalidation or a native poll error.
+    #[doc(hidden)]
+    pub fn poll_runtime_retirement(
+        &mut self,
+        window_ids: &[WindowId],
+    ) -> Result<bool, WgpuRenderError> {
+        self.runtime_close_started = true;
+        let discard = self.state() == WgpuBackendState::Unavailable;
+        if let Some(retirement) = self.runtime_retirement.as_mut() {
+            retirement.begin(discard);
+            if !retirement
+                .poll()
+                .map_err(|error| WgpuRenderError::RetirementPollFailed {
+                    message: error.to_string(),
+                })?
+            {
+                return Ok(false);
+            }
+        }
+        self.retire_targets(window_ids, SurfaceDropReason::TargetShutdown)?;
+        self.clear_gpu_resources(SurfaceDropReason::BackendCleanup)?;
+        Ok(true)
+    }
+
     /// Process-local non-reused identity of this backend owner.
     ///
     /// Together with [`Self::device_epoch`], this identifies one device namespace. The value is
@@ -488,7 +524,10 @@ impl WgpuRenderBackend {
 
     /// Transfers already admitted CPU facts to the World without exposing native execution.
     pub(crate) fn take_observation(&mut self) -> crate::WgpuRenderObservation {
-        crate::WgpuRenderObservation::from_parts(
+        let extent = self
+            .presented_frame_this_transaction
+            .and_then(|receipt| self.configured_surface_extent(receipt.window_id()));
+        let mut observation = crate::WgpuRenderObservation::from_parts(
             self.instance_id(),
             self.device_epoch(),
             self.state(),
@@ -496,7 +535,9 @@ impl WgpuRenderBackend {
             self.presented_frame_this_transaction,
             #[cfg(feature = "ui-submitter")]
             std::mem::take(&mut self.submitted_ui_facts),
-        )
+        );
+        observation.record_presented_surface_extent(extent);
+        observation
     }
 
     #[cfg(test)]
@@ -1159,6 +1200,18 @@ impl WgpuRenderBackend {
             self.telemetry.begin_device_epoch(epoch);
             self.last_error = None;
         }
+        self.retain_runtime_retirement()
+    }
+
+    fn retain_runtime_retirement(&mut self) -> Result<(), WgpuRenderError> {
+        if self.runtime_execution && self.runtime_retirement.is_none() {
+            let (device, queue) = self
+                .device_owner
+                .device_queue()
+                .ok_or(WgpuRenderError::BackendNotReady)?;
+            self.runtime_retirement =
+                Some(crate::retirement::WgpuGpuRetirement::new(device, queue));
+        }
         Ok(())
     }
 
@@ -1483,19 +1536,19 @@ impl WgpuRenderBackend {
         self.device_owner.retire_editor_presentation(view);
     }
 
-    pub(super) fn validate_world_presentation_current<'a>(
+    pub(super) fn validate_world_presentation_current(
         &mut self,
-        windows: impl IntoIterator<Item = &'a nara_window::Window>,
+        current: Option<RenderWindowPacket>,
         canvas: Option<nara_render::WorldCanvas>,
     ) {
         let Some((presented, captured_canvas)) = self.world_presentation_target else {
             return;
         };
-        let current = windows.into_iter().find(|window| window.id == presented.id);
         let captured_canvas = captured_canvas.map(|frame| (frame.extent(), frame.bar_color()));
         let current_canvas = canvas.map(|canvas| (canvas.extent(), canvas.bar_color()));
-        if current.is_none_or(|window| window.resolution != presented.resolution)
-            || captured_canvas != current_canvas
+        if current.is_none_or(|window| {
+            window.id != presented.id || window.resolution != presented.resolution
+        }) || captured_canvas != current_canvas
         {
             self.world_presentation_guard = None;
             self.world_presentation_target = None;
@@ -2538,7 +2591,6 @@ mod tests {
             stale_error,
             12,
             &mut RenderBackendStatus::default(),
-            None,
         );
         assert_eq!(
             backend.frame_transaction_stats(),
@@ -2569,7 +2621,6 @@ mod tests {
             repeat_error,
             10,
             &mut RenderBackendStatus::default(),
-            None,
         );
         assert_eq!(
             backend.frame_transaction_stats(),
@@ -2767,5 +2818,50 @@ mod tests {
         );
         assert_eq!(backend.state(), WgpuBackendState::Unavailable);
         assert_eq!(backend.last_error(), Some("device lost"));
+    }
+
+    #[test]
+    #[ignore = "requires an explicitly selected native GPU; acquisition failure is a failed prerequisite"]
+    fn original_runtime_queue_retires_after_namespace_cleanup_without_telemetry() {
+        for destroy_device in [false, true] {
+            let mut backend = WgpuRenderBackend::default();
+            backend.begin_runtime_execution();
+            let epoch = backend.device_owner.acquire(None).unwrap().unwrap();
+            backend.telemetry.begin_device_epoch(epoch);
+            // This is the same pre-upload custody operation used by ensure_device.
+            backend.retain_runtime_retirement().unwrap();
+            assert!(backend.runtime_retirement.is_some());
+            assert!(!backend.frame_completion_stats().enabled());
+            let (device, queue) = backend.device_owner.device_queue().unwrap();
+            let buffer = device.create_buffer(&wgpu::BufferDescriptor {
+                label: Some("original-runtime-retirement-work"),
+                size: 4096,
+                usage: wgpu::BufferUsages::COPY_DST,
+                mapped_at_creation: false,
+            });
+            queue.write_buffer(&buffer, 0, &[1; 16]);
+            let mut encoder =
+                device.create_command_encoder(&wgpu::CommandEncoderDescriptor::default());
+            encoder.clear_buffer(&buffer, 16, None);
+            queue.submit([encoder.finish()]);
+            if destroy_device {
+                device.destroy();
+            }
+            backend.mark_error(&WgpuRenderError::DeviceLost);
+            assert!(backend.device_owner.device_queue().is_none());
+            assert!(backend.runtime_retirement.is_some());
+            assert!(!backend.frame_completion_stats().enabled());
+
+            let deadline = std::time::Instant::now() + Duration::from_secs(5);
+            while !backend.poll_runtime_retirement(&[]).unwrap() {
+                assert!(
+                    std::time::Instant::now() < deadline,
+                    "the original accepted prefix did not drain"
+                );
+                std::thread::sleep(Duration::from_millis(1));
+            }
+            assert!(backend.runtime_close_started());
+            assert_eq!(backend.surface_count(), 0);
+        }
     }
 }

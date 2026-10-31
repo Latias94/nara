@@ -5,6 +5,15 @@ pub fn product_groups() -> (RuntimeUiPlugins, PresentationUiPlugins) {
     (RuntimeUiPlugins, PresentationUiPlugins)
 }
 
+/// UI-only products share the same native execution owner without Scene serialization.
+#[cfg(feature = "desktop")]
+pub fn desktop_run(runtime: engine::app::RuntimeInstance) -> engine::project_host::DesktopRun {
+    engine::project_host::DesktopRun::from_runtime(
+        runtime,
+        engine::project_host::DesktopRunOptions::new(),
+    )
+}
+
 /// The same pure recipe is accepted by file-backed Hosts and direct composition.
 pub fn product_recipe(font: engine::ui::FontFace) -> Result<ProductRecipe, ProductRecipeError> {
     ProductRecipe::new().with_ui_font(font)

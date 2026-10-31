@@ -7,27 +7,27 @@ use std::{
 };
 
 pub(crate) use super::composition::{RuntimeHostPolicyContribution, RuntimePluginOverlay};
+use super::runtime_diagnostics::*;
 use super::{
     CompositionError, ProjectContentRevision, ProjectContentSnapshot, ProjectSettingsLineage,
     RuntimePlan, RuntimePlanError,
 };
+#[cfg(all(test, feature = "desktop-winit", feature = "render-wgpu"))]
+use super::{DesktopRun, DesktopRunOutcome};
+#[cfg(test)]
+use nara_app::RuntimeCloseCause;
 use nara_app::{
-    AppExit, PluginFailureReport, PluginHook, PluginHookMutation, PluginPlanError,
-    RuntimeAdmissionError, RuntimeAdmissionReservation, RuntimeCandidateFailure,
-    RuntimeCandidateRetirementState, RuntimeCloseCause, RuntimeCloseErrorDisposition,
-    RuntimeCloseEvidence, RuntimeCloseParticipantPhase, RuntimeClosePolicy,
-    RuntimeConstructionFailure, RuntimeControl, RuntimeControlRequestResult, RuntimeControlStatus,
-    RuntimeControlTicket, RuntimeFault, RuntimeFaultDetail, RuntimeFaultKind, RuntimeFaultReporter,
-    RuntimeGeneration, RuntimeInstance, RuntimeObligationLedger, RuntimePublicationFailure,
-    RuntimePublicationSlot, RuntimeRetirement, RuntimeState,
+    AppExit, PluginFailureReport, PluginPlanError, RuntimeAdmissionReservation,
+    RuntimeCandidateFailure, RuntimeCandidateRetirementState, RuntimeCloseEvidence,
+    RuntimeClosePolicy, RuntimeConstructionFailure, RuntimeControl, RuntimeControlRequestResult,
+    RuntimeControlStatus, RuntimeControlTicket, RuntimeFault, RuntimeFaultKind,
+    RuntimeFaultReporter, RuntimeGeneration, RuntimeInstance, RuntimeObligationLedger,
+    RuntimePublicationFailure, RuntimePublicationSlot, RuntimeRetirement, RuntimeState,
 };
 use nara_asset::{
     AssetEvents, AssetRecord, AssetServer, AssetSourceKind, AssetStates, Assets, SourceHash,
 };
-use nara_diagnostic::{
-    Diagnostic, DiagnosticCode, DiagnosticField, DiagnosticFieldKey, DiagnosticReport,
-    PublicDiagnosticIdentifier, SafeSummary,
-};
+use nara_diagnostic::{Diagnostic, DiagnosticField, DiagnosticReport, PublicDiagnosticIdentifier};
 use nara_ecs::{Mut, Resource, World};
 use nara_gameplay::{GameplayCommandQueue, GameplayCommandSubmission};
 use nara_image::ImageAsset;
@@ -39,7 +39,6 @@ use nara_scene::{
 };
 use nara_tasks::TaskShutdownReport;
 use nara_tilemap::TileSet;
-use plugin_diagnostics::{append_plugin_shutdown_diagnostics, runtime_construction_failure_report};
 
 use super::composition::RuntimeConfigurationPlan;
 use crate::runtime_content::{ProcessedSceneContent, RuntimeContentBase, RuntimeContentError};
@@ -64,9 +63,6 @@ pub use scene_requests::{
     ProjectSceneRequestState, ProjectSceneSelection, ProjectScenes,
     begin_prepared_project_scene_travel, commit_prepared_project_scene,
 };
-
-#[cfg(all(feature = "desktop-winit", feature = "render-wgpu"))]
-mod desktop_verification;
 
 #[cfg(feature = "tooling")]
 mod editor;
@@ -93,17 +89,13 @@ pub use editor::{
     PreparedEditorSourceToolWithdrawal,
 };
 
-mod plugin_diagnostics;
-
 #[cfg(all(feature = "desktop-winit", feature = "render-wgpu"))]
-pub use action::{
-    DesktopRun, DesktopRunIntent, DesktopRunOptions, DesktopRunOutcome, DesktopRunReport,
-};
+pub(super) use action::DesktopRunInputs;
+#[cfg(all(feature = "desktop-winit", feature = "render-wgpu"))]
+pub use action::DesktopRunIntent;
 pub use action::{
     HeadlessRun, HeadlessRunIntent, HeadlessRunOptions, HeadlessRunOutcome, HeadlessRunReport,
 };
-#[cfg(all(feature = "desktop-winit", feature = "render-wgpu"))]
-pub use desktop_verification::DesktopPresentationVerificationReceipt;
 #[cfg(all(feature = "tooling", feature = "presentation-ui"))]
 pub use editor::EditorUiPreviewCandidate;
 #[cfg(all(feature = "tooling", feature = "presentation-2d"))]
@@ -400,7 +392,7 @@ impl Drop for RuntimeStartAttempt {
     }
 }
 
-struct ProjectHost {
+pub(super) struct ProjectHost {
     start_claim: Arc<HostStartClaim>,
     next_epoch: u64,
     cleanup_policy: RuntimeClosePolicy,
@@ -434,6 +426,14 @@ enum PublishedRuntimeContent {
     Processed {
         _base: RuntimeContentBase,
     },
+}
+
+/// Retains the original source/processed and configuration owners after one-time publication take.
+#[cfg(all(feature = "desktop-winit", feature = "render-wgpu"))]
+pub(super) struct DesktopRuntimeContext {
+    _epoch: u64,
+    _content: PublishedRuntimeContent,
+    _configuration: RuntimeConfigurationPlan,
 }
 
 impl PublishedProjectRuntime {
@@ -624,6 +624,37 @@ impl ProjectHost {
         }
     }
 
+    #[cfg(all(feature = "desktop-winit", feature = "render-wgpu"))]
+    fn take_desktop_runtime(
+        &mut self,
+    ) -> Result<(RuntimeInstance, DesktopRuntimeContext), HostFault> {
+        let slot = std::mem::replace(&mut self.slot, ProjectHostSlot::Empty);
+        let ProjectHostSlot::Running(published) = slot else {
+            self.slot = slot;
+            return Err(HostFault::new(single_error(
+                "project.desktop.runtime-unavailable",
+                "Desktop startup did not publish a Runtime for native ownership transfer",
+            )));
+        };
+        let PublishedProjectRuntime {
+            epoch,
+            mut runtime,
+            content,
+            _plan,
+        } = *published;
+        let runtime = runtime
+            .take()
+            .expect("a published Runtime is transferred exactly once");
+        Ok((
+            runtime,
+            DesktopRuntimeContext {
+                _epoch: epoch,
+                _content: content,
+                _configuration: _plan,
+            },
+        ))
+    }
+
     fn running_runtime_state(&self) -> Option<RuntimeState> {
         match &self.slot {
             ProjectHostSlot::Running(published) => Some(published.runtime().state()),
@@ -631,29 +662,13 @@ impl ProjectHost {
         }
     }
 
+    #[cfg(test)]
     fn running_runtime_close_evidence(&self) -> Option<RuntimeCloseEvidence> {
         match &self.slot {
             ProjectHostSlot::Running(published) => {
                 Some(published.runtime().close_evidence().clone())
             }
             ProjectHostSlot::Empty | ProjectHostSlot::Cleaning { .. } => None,
-        }
-    }
-
-    #[cfg(all(feature = "desktop-winit", feature = "render-wgpu"))]
-    fn running_runtime_fault(&self) -> Option<&RuntimeFault> {
-        match &self.slot {
-            ProjectHostSlot::Running(published) => published.runtime().fault(),
-            ProjectHostSlot::Empty | ProjectHostSlot::Cleaning { .. } => None,
-        }
-    }
-
-    #[cfg(all(feature = "desktop-winit", feature = "render-wgpu"))]
-    fn acknowledge_running_runtime_fault(&mut self) {
-        if let ProjectHostSlot::Running(published) = &self.slot
-            && published.runtime().fault().is_some()
-        {
-            self.delivered_runtime_fault = Some(published.runtime().generation());
         }
     }
 
@@ -679,14 +694,6 @@ impl ProjectHost {
                 published.runtime().close_evidence().has_terminal_failure()
             }
             ProjectHostSlot::Empty | ProjectHostSlot::Cleaning { .. } => false,
-        }
-    }
-
-    #[cfg(all(feature = "desktop-winit", feature = "render-wgpu"))]
-    fn running_runtime_plugin_failure_report(&self) -> Option<&PluginFailureReport> {
-        match &self.slot {
-            ProjectHostSlot::Running(published) => published.runtime().plugin_failure_report(),
-            ProjectHostSlot::Empty | ProjectHostSlot::Cleaning { .. } => None,
         }
     }
 
@@ -2208,328 +2215,6 @@ fn runtime_plan_selected_report(plan: &RuntimeConfigurationPlan) -> DiagnosticRe
     ))
     .expect("the selected-plan diagnostic has one bounded field");
     single_diagnostic(diagnostic)
-}
-
-fn admission_failure_report(error: &RuntimeAdmissionError) -> DiagnosticReport {
-    let reason = match error {
-        RuntimeAdmissionError::AppNotReady { .. } => "app-not-ready",
-        RuntimeAdmissionError::GenerationExhausted => "generation-exhausted",
-        RuntimeAdmissionError::Obligation(_) => "obligation-invalid",
-    };
-    single_diagnostic(failure_diagnostic(
-        "project.run.admission-failed",
-        "Project runtime candidate admission failed",
-        reason,
-    ))
-}
-
-fn runtime_scope_failure_report(fault: &RuntimeFault) -> DiagnosticReport {
-    let (code, summary) = if fault.kind() == RuntimeFaultKind::RuntimeAuthority {
-        (
-            "project.run.runtime-authority-invalid",
-            "Project runtime authority is invalid",
-        )
-    } else {
-        (
-            "project.run.runtime-faulted",
-            "Project runtime reported a fault before product completion",
-        )
-    };
-    runtime_fault_report(fault, code, summary)
-}
-
-fn runtime_fault_report(
-    fault: &RuntimeFault,
-    code: &'static str,
-    summary: &'static str,
-) -> DiagnosticReport {
-    let diagnostic = runtime_fault_diagnostic(fault.detail(), code, summary);
-    let diagnostic = attach_identifier(
-        diagnostic,
-        "fault-kind",
-        runtime_fault_kind_id(fault.kind()),
-    );
-    let diagnostic = attach_identifier(diagnostic, "fault-source", fault.source());
-    single_diagnostic(diagnostic)
-}
-
-pub(super) const fn runtime_fault_kind_id(kind: RuntimeFaultKind) -> &'static str {
-    match kind {
-        RuntimeFaultKind::AppFrame => "app-frame",
-        RuntimeFaultKind::FaultReporterAuthority => "fault-reporter-authority",
-        RuntimeFaultKind::RuntimeAuthority => "runtime-authority",
-        RuntimeFaultKind::System => "system",
-        RuntimeFaultKind::RunCondition => "run-condition",
-        RuntimeFaultKind::Command => "command",
-        RuntimeFaultKind::Observer => "observer",
-        RuntimeFaultKind::GameplayLifecycle => "gameplay-lifecycle",
-        RuntimeFaultKind::LocalIntentLoss => "local-intent-loss",
-        RuntimeFaultKind::RequiredTask => "required-task",
-        RuntimeFaultKind::RequiredService => "required-service",
-    }
-}
-
-fn runtime_startup_failure_report(fault: &RuntimeFault) -> DiagnosticReport {
-    if fault.kind() == RuntimeFaultKind::RuntimeAuthority {
-        return runtime_authority_invalid_report();
-    }
-    let diagnostic = runtime_fault_diagnostic(
-        fault.detail(),
-        "project.run.startup-failed",
-        "Project runtime startup failed",
-    );
-    let diagnostic = attach_identifier(
-        diagnostic,
-        "fault-kind",
-        runtime_fault_kind_id(fault.kind()),
-    );
-    let diagnostic = attach_identifier(diagnostic, "fault-source", fault.source());
-    single_diagnostic(diagnostic)
-}
-
-fn runtime_fault_diagnostic(
-    detail: Option<RuntimeFaultDetail>,
-    fallback_code: &'static str,
-    fallback_summary: &'static str,
-) -> Diagnostic {
-    let Some(detail) = detail else {
-        return Diagnostic::error(
-            diagnostic_code(fallback_code),
-            safe_summary(fallback_summary),
-        );
-    };
-    let Ok(code) = DiagnosticCode::new(detail.code()) else {
-        return Diagnostic::error(
-            diagnostic_code(fallback_code),
-            safe_summary(fallback_summary),
-        );
-    };
-    let Ok(summary) = SafeSummary::new(detail.summary()) else {
-        return Diagnostic::error(
-            diagnostic_code(fallback_code),
-            safe_summary(fallback_summary),
-        );
-    };
-    let Ok(origin) = PublicDiagnosticIdentifier::new(detail.origin()) else {
-        return Diagnostic::error(
-            diagnostic_code(fallback_code),
-            safe_summary(fallback_summary),
-        );
-    };
-    Diagnostic::error(code, summary)
-        .try_with_field(DiagnosticField::public_identifier(
-            field_key("fault-origin"),
-            origin,
-        ))
-        .expect("one classified runtime fault has one bounded origin")
-}
-
-fn runtime_authority_invalid_report() -> DiagnosticReport {
-    single_error(
-        "project.run.runtime-authority-invalid",
-        "Project runtime authority is invalid",
-    )
-}
-
-fn cleanup_incomplete_report(
-    evidence: &RuntimeCloseEvidence,
-    plugins: Option<&PluginFailureReport>,
-) -> DiagnosticReport {
-    let mut report = single_warning(
-        "project.run.cleanup-incomplete",
-        "Project runtime cleanup is incomplete",
-    );
-    append_close_cause_diagnostics(&mut report, evidence);
-    append_plugin_shutdown_diagnostics(&mut report, plugins);
-    report
-}
-
-fn cleanup_failed_report(
-    evidence: &RuntimeCloseEvidence,
-    plugins: Option<&PluginFailureReport>,
-) -> DiagnosticReport {
-    let mut report = single_error(
-        "project.run.cleanup-failed",
-        "Project runtime cleanup reported a terminal failure",
-    );
-    append_close_cause_diagnostics(&mut report, evidence);
-    append_plugin_shutdown_diagnostics(&mut report, plugins);
-    report
-}
-
-fn append_close_cause_diagnostics(report: &mut DiagnosticReport, evidence: &RuntimeCloseEvidence) {
-    for pending in evidence.pending_participants() {
-        let diagnostic = Diagnostic::warning(
-            diagnostic_code("project.run.cleanup-participant-pending"),
-            safe_summary("Project runtime cleanup participant remains unfinished"),
-        );
-        let diagnostic =
-            attach_identifier(diagnostic, "participant", pending.participant().as_str());
-        report.push(attach_identifier(
-            diagnostic,
-            "phase",
-            close_phase_id(pending.phase()),
-        ));
-    }
-    for cause in evidence.causes() {
-        let diagnostic = match cause {
-            RuntimeCloseCause::PluginShutdown => Diagnostic::error(
-                diagnostic_code("project.run.cleanup-plugin-shutdown"),
-                safe_summary("Project plugin shutdown failed"),
-            ),
-            RuntimeCloseCause::ParticipantError {
-                participant,
-                phase,
-                code,
-                disposition,
-            } => {
-                let diagnostic = match disposition {
-                    RuntimeCloseErrorDisposition::Retryable => Diagnostic::warning(
-                        diagnostic_code("project.run.cleanup-participant-error"),
-                        safe_summary("Project runtime cleanup participant can be retried"),
-                    ),
-                    RuntimeCloseErrorDisposition::Terminal => Diagnostic::error(
-                        diagnostic_code("project.run.cleanup-participant-error"),
-                        safe_summary("Project runtime cleanup participant failed terminally"),
-                    ),
-                };
-                let diagnostic = attach_identifier(diagnostic, "participant", participant.as_str());
-                let diagnostic = attach_identifier(diagnostic, "phase", close_phase_id(*phase));
-                let diagnostic = attach_identifier(diagnostic, "failure-code", code);
-                attach_identifier(
-                    diagnostic,
-                    "disposition",
-                    close_disposition_id(*disposition),
-                )
-            }
-            RuntimeCloseCause::DeadlineExceeded => Diagnostic::warning(
-                diagnostic_code("project.run.cleanup-deadline-exceeded"),
-                safe_summary("Project runtime cleanup exceeded its bounded deadline"),
-            ),
-        };
-        report.push(diagnostic);
-    }
-}
-
-fn failure_diagnostic(
-    code: &'static str,
-    summary: &'static str,
-    reason: &'static str,
-) -> Diagnostic {
-    attach_identifier(
-        Diagnostic::error(diagnostic_code(code), safe_summary(summary)),
-        "reason",
-        reason,
-    )
-}
-
-fn attach_identifier(diagnostic: Diagnostic, key: &'static str, value: &str) -> Diagnostic {
-    let field = PublicDiagnosticIdentifier::new(value).map_or_else(
-        |_| DiagnosticField::sensitive(field_key(key)),
-        |value| DiagnosticField::public_identifier(field_key(key), value),
-    );
-    diagnostic
-        .try_with_field(field)
-        .expect("project Host diagnostics use unique bounded fields")
-}
-
-fn attach_u64(diagnostic: Diagnostic, key: &'static str, value: usize) -> Diagnostic {
-    diagnostic
-        .try_with_field(DiagnosticField::public_u64(
-            field_key(key),
-            u64::try_from(value).unwrap_or(u64::MAX),
-        ))
-        .expect("project Host diagnostics use unique bounded fields")
-}
-
-const fn plugin_hook_id(hook: PluginHook) -> &'static str {
-    match hook {
-        PluginHook::Preflight => "preflight",
-        PluginHook::Build => "build",
-        PluginHook::Finish => "finish",
-        PluginHook::Shutdown => "shutdown",
-    }
-}
-
-const fn plugin_mutation_id(mutation: PluginHookMutation) -> &'static str {
-    match mutation {
-        PluginHookMutation::PluginMembership => "plugin-membership",
-    }
-}
-
-const fn close_phase_id(phase: RuntimeCloseParticipantPhase) -> &'static str {
-    match phase {
-        RuntimeCloseParticipantPhase::Begin => "begin",
-        RuntimeCloseParticipantPhase::Poll => "poll",
-    }
-}
-
-const fn close_disposition_id(disposition: RuntimeCloseErrorDisposition) -> &'static str {
-    match disposition {
-        RuntimeCloseErrorDisposition::Retryable => "retryable",
-        RuntimeCloseErrorDisposition::Terminal => "terminal",
-    }
-}
-
-fn single_error(code: &'static str, summary: &'static str) -> DiagnosticReport {
-    single_diagnostic(Diagnostic::error(
-        diagnostic_code(code),
-        safe_summary(summary),
-    ))
-}
-
-fn single_warning(code: &'static str, summary: &'static str) -> DiagnosticReport {
-    single_diagnostic(Diagnostic::warning(
-        diagnostic_code(code),
-        safe_summary(summary),
-    ))
-}
-
-fn single_warning_with_project_relative(
-    code: &'static str,
-    summary: &'static str,
-    key: &'static str,
-    value: &str,
-) -> DiagnosticReport {
-    let Ok(field) = DiagnosticField::project_relative(field_key(key), value) else {
-        return single_warning(code, summary);
-    };
-    let Ok(diagnostic) =
-        Diagnostic::warning(diagnostic_code(code), safe_summary(summary)).try_with_field(field)
-    else {
-        return single_warning(code, summary);
-    };
-    single_diagnostic(diagnostic)
-}
-
-fn single_error_with_u64(
-    code: &'static str,
-    summary: &'static str,
-    key: &'static str,
-    value: u64,
-) -> DiagnosticReport {
-    let diagnostic = Diagnostic::error(diagnostic_code(code), safe_summary(summary))
-        .try_with_field(DiagnosticField::public_u64(field_key(key), value))
-        .expect("project Host diagnostics use unique bounded fields");
-    single_diagnostic(diagnostic)
-}
-
-fn single_diagnostic(diagnostic: Diagnostic) -> DiagnosticReport {
-    let mut report = DiagnosticReport::default();
-    report.push(diagnostic);
-    report
-}
-
-fn diagnostic_code(code: &'static str) -> DiagnosticCode {
-    DiagnosticCode::new(code).expect("project Host diagnostic codes are engine-owned")
-}
-
-fn safe_summary(summary: &'static str) -> SafeSummary {
-    SafeSummary::new(summary).expect("project Host summaries are engine-owned")
-}
-
-fn field_key(key: &'static str) -> DiagnosticFieldKey {
-    DiagnosticFieldKey::new(key).expect("project Host diagnostic field keys are engine-owned")
 }
 
 #[cfg(test)]

@@ -13,11 +13,15 @@ use winit::{
     dpi::PhysicalSize,
     event::WindowEvent as WinitWindowEvent,
     event_loop::{ActiveEventLoop, ControlFlow, EventLoop},
+    platform::pump_events::{EventLoopExtPumpEvents, PumpStatus},
     platform::windows::EventLoopBuilderExtWindows,
     window::{Fullscreen, Window as WinitWindow, WindowId as WinitWindowId},
 };
 
-use crate::{WinitApp, WinitUserEvent};
+use crate::{
+    DEFAULT_NATIVE_RETIREMENT_BUDGET, NoPresentationDriver, WinitApp, WinitControlFlow,
+    WinitSession, WinitShutdownState, WinitUserEvent,
+};
 
 #[test]
 #[ignore = "requires an interactive Windows desktop; run in its own process"]
@@ -46,7 +50,7 @@ fn native_unsupported_exclusive_rejects_before_creation() {
 fn run_native_mode(mode: WindowMode, unsupported: bool) {
     let mut builder = EventLoop::<WinitUserEvent>::with_user_event();
     builder.with_any_thread(true);
-    let event_loop = builder.build().unwrap();
+    let mut event_loop = builder.build().unwrap();
     event_loop.set_control_flow(ControlFlow::Poll);
 
     let mut window = Window::new(
@@ -59,8 +63,14 @@ fn run_native_mode(mode: WindowMode, unsupported: bool) {
         primary_window: Some(window),
     })
     .unwrap();
-    let mut runtime = RuntimeInstance::start(app).unwrap();
-    let state = WinitApp::with_event_proxy(&mut runtime, event_loop.create_proxy()).unwrap();
+    let runtime = RuntimeInstance::start(app).unwrap();
+    let mut state = WinitApp::new(
+        runtime,
+        Box::new(NoPresentationDriver),
+        WinitControlFlow::Poll,
+        DEFAULT_NATIVE_RETIREMENT_BUDGET,
+    );
+    state.event_proxy = Some(event_loop.create_proxy());
     let mut probe = NativeModeProbe {
         state,
         mode,
@@ -74,14 +84,25 @@ fn run_native_mode(mode: WindowMode, unsupported: bool) {
         deadline: Instant::now() + Duration::from_secs(15),
     };
 
-    let run_result = event_loop.run_app(&mut probe);
-    probe.state.finish_after_event_loop();
-    let runner_failure = probe.state.take_failure();
+    loop {
+        if let PumpStatus::Exit(_) =
+            event_loop.pump_app_events(Some(Duration::from_millis(10)), &mut probe)
+        {
+            break;
+        }
+        if probe.state.retirement_drive_incomplete(Instant::now()) {
+            break;
+        }
+    }
+    let mut session = WinitSession {
+        app: Some(probe.state),
+        event_loop: Some(event_loop),
+        executed: true,
+    };
+    session.execute();
+    let state = session.app.as_ref().unwrap();
+    let runner_failure = state.failure();
 
-    assert!(
-        run_result.is_ok(),
-        "native event loop failed: {run_result:?}"
-    );
     assert!(
         probe.failure.is_none(),
         "native mode observation failed: {:?}",
@@ -92,19 +113,16 @@ fn run_native_mode(mode: WindowMode, unsupported: bool) {
         "native shutdown failed: {runner_failure:?}"
     );
     assert!(probe.observed, "the requested native mode was not observed");
-    assert_eq!(probe.state.runtime.state(), RuntimeState::Stopped);
-    assert!(probe.state.platform_windows.is_empty());
+    assert_eq!(state.runtime.state(), RuntimeState::Stopped);
+    assert_eq!(state.shutdown, WinitShutdownState::Complete);
+    assert!(state.platform_windows.is_empty());
 
     if unsupported {
-        assert!(!probe.state.backend_windows.is_registered(WindowId::PRIMARY));
-        assert!(probe.state.owned_window_ids.is_empty());
+        assert!(!state.backend_windows.is_registered(WindowId::PRIMARY));
+        assert!(state.owned_window_ids.is_empty());
         assert!(probe.native_window.is_none());
     } else {
-        let target = probe
-            .state
-            .backend_windows
-            .snapshot(WindowId::PRIMARY)
-            .unwrap();
+        let target = state.backend_windows.snapshot(WindowId::PRIMARY).unwrap();
         assert_eq!(target.phase, WindowTargetPhase::NativeDestroyed);
         assert_eq!(target.fault, None);
         assert!(!target.provider_present);
@@ -113,8 +131,8 @@ fn run_native_mode(mode: WindowMode, unsupported: bool) {
     }
 }
 
-struct NativeModeProbe<'runtime> {
-    state: WinitApp<'runtime>,
+struct NativeModeProbe {
+    state: WinitApp,
     mode: WindowMode,
     unsupported: bool,
     started: bool,
@@ -126,7 +144,7 @@ struct NativeModeProbe<'runtime> {
     deadline: Instant,
 }
 
-impl NativeModeProbe<'_> {
+impl NativeModeProbe {
     fn create_and_observe(&mut self, event_loop: &ActiveEventLoop) -> Result<(), String> {
         let monitor = event_loop
             .primary_monitor()
@@ -210,7 +228,7 @@ impl NativeModeProbe<'_> {
     }
 }
 
-impl ApplicationHandler<WinitUserEvent> for NativeModeProbe<'_> {
+impl ApplicationHandler<WinitUserEvent> for NativeModeProbe {
     fn resumed(&mut self, event_loop: &ActiveEventLoop) {
         if self.started {
             return;

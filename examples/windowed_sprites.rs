@@ -4,14 +4,14 @@ use nara::ecs::{With, schedule::IntoScheduleConfigs};
 use nara::hierarchy::{
     HierarchyCommandsExt, HierarchyOperation, HierarchyPlacement, HierarchyPlacementOwner,
 };
+use nara::project_host::{DesktopRun, DesktopRunOptions};
 use nara::{advanced_prelude::*, backend_prelude::*};
 
 #[path = "support/procedural_image.rs"]
 mod procedural_image;
 
-#[path = "support/runtime_retirement.rs"]
-mod runtime_retirement;
-use runtime_retirement::finish_runtime_after_winit;
+#[path = "support/desktop_run.rs"]
+mod desktop_run;
 
 fn main() -> Result<(), Box<dyn Error>> {
     let mut app = App::new();
@@ -34,9 +34,9 @@ fn main() -> Result<(), Box<dyn Error>> {
         rotate_demo_sprite.in_set(nara::app::FixedUpdateSet::Simulate),
     )?;
     app.world_mut()?.insert_resource(AssetServer::new());
-    let mut runtime = nara::app::RuntimeInstance::start(app)?;
-    let run_result = WinitRunner::default().run(&mut runtime);
-    finish_runtime_after_winit(run_result, runtime)
+    let runtime = nara::app::RuntimeInstance::start(app)?;
+    desktop_run::finish_desktop_run(DesktopRun::from_runtime(runtime, DesktopRunOptions::new()))?;
+    Ok(())
 }
 
 #[derive(Component)]

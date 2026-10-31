@@ -1,17 +1,18 @@
 use std::{fmt, num::NonZeroU32, time::Duration};
 
-#[cfg(all(feature = "desktop-winit", feature = "render-wgpu"))]
-use nara_app::{
-    AppExit, AppRunError, RuntimeCloseCause, RuntimeFault, RuntimeFaultKind, RuntimeState,
-};
 use nara_app::{RuntimeCloseEvidence, RuntimeClosePolicy};
 use nara_diagnostic::DiagnosticReport;
 use nara_ecs::Resource;
 use nara_fs::DirectoryCapability;
 use nara_gameplay::GameplayCommandSubmission;
 #[cfg(all(feature = "desktop-winit", feature = "render-wgpu"))]
-use nara_winit::{WinitControlFlow, WinitRunner};
+use nara_winit::WinitControlFlow;
 
+#[cfg(all(feature = "desktop-winit", feature = "render-wgpu"))]
+use super::super::desktop_run::{
+    DesktopRun, DesktopRunOptions, DesktopRunState, PendingDesktopTerminal,
+    verification::{DesktopFirstPresentRequest, DesktopFirstPresentVerification},
+};
 #[cfg(all(feature = "desktop-winit", feature = "render-wgpu"))]
 use super::super::{ProductSupervisedDesktopSession, SupervisedDesktopProductIdentity};
 use super::super::{
@@ -21,20 +22,10 @@ use super::super::{
         check_project_source_with_overlay,
     },
 };
-#[cfg(all(feature = "desktop-winit", feature = "render-wgpu"))]
-use super::desktop_verification::{
-    DesktopFirstPresentFailure, DesktopFirstPresentOutcome, DesktopFirstPresentRequest,
-    DesktopFirstPresentVerification, DesktopPresentationVerificationReceipt,
-};
 use super::{
     CleanupDriveOutcome, HostFault, ProjectHost, RuntimeHostPolicyContribution,
     RuntimePluginOverlay, RuntimeStartAttempt, runtime_plan_failure_report,
     runtime_plan_selected_report, single_error,
-};
-#[cfg(all(feature = "desktop-winit", feature = "render-wgpu"))]
-use super::{
-    append_plugin_shutdown_diagnostics, attach_identifier, runtime_fault_diagnostic,
-    runtime_fault_kind_id, runtime_fault_report, single_diagnostic,
 };
 use crate::ProductRecipe;
 
@@ -252,34 +243,6 @@ impl<O> HeadlessRunReport<O> {
 }
 
 #[cfg(all(feature = "desktop-winit", feature = "render-wgpu"))]
-/// Event-loop and cleanup policy, independently of the selected content input.
-#[derive(Debug, Default)]
-pub struct DesktopRunOptions {
-    cleanup_policy: RuntimeClosePolicy,
-    runner: WinitRunner,
-}
-
-#[cfg(all(feature = "desktop-winit", feature = "render-wgpu"))]
-impl DesktopRunOptions {
-    #[must_use]
-    pub fn new() -> Self {
-        Self::default()
-    }
-
-    #[must_use]
-    pub fn with_cleanup_timeout(mut self, timeout: Duration) -> Self {
-        self.cleanup_policy = RuntimeClosePolicy::new(timeout);
-        self
-    }
-
-    #[must_use]
-    pub fn with_control_flow(mut self, control_flow: WinitControlFlow) -> Self {
-        self.runner = WinitRunner::new(control_flow);
-        self
-    }
-}
-
-#[cfg(all(feature = "desktop-winit", feature = "render-wgpu"))]
 /// File-backed desktop run intent for the concrete first-party Winit product path.
 pub struct DesktopRunIntent {
     profile: Option<String>,
@@ -386,81 +349,6 @@ impl DesktopRunIntent {
 }
 
 #[cfg(all(feature = "desktop-winit", feature = "render-wgpu"))]
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum DesktopRunOutcome {
-    Completed(AppExit),
-    Failed,
-    CleanupIncomplete,
-}
-
-#[cfg(all(feature = "desktop-winit", feature = "render-wgpu"))]
-#[derive(Debug, Clone)]
-pub struct DesktopRunReport {
-    outcome: DesktopRunOutcome,
-    diagnostics: DiagnosticReport,
-    startup_content_closure: Option<StartupContentClosureReceipt>,
-    presentation_verification: Option<DesktopPresentationVerificationReceipt>,
-}
-
-#[cfg(all(feature = "desktop-winit", feature = "render-wgpu"))]
-impl DesktopRunReport {
-    #[must_use]
-    pub const fn outcome(&self) -> DesktopRunOutcome {
-        self.outcome
-    }
-
-    #[must_use]
-    pub const fn diagnostics(&self) -> &DiagnosticReport {
-        &self.diagnostics
-    }
-
-    /// Returns the exact startup source closure once project checking succeeded.
-    ///
-    /// Runtime startup, presentation, shutdown, or cleanup may still have failed. `None` means the
-    /// manifest, product composition, or startup content check itself did not publish a closure.
-    #[must_use]
-    pub const fn startup_content_closure(&self) -> Option<&StartupContentClosureReceipt> {
-        self.startup_content_closure.as_ref()
-    }
-
-    /// Returns the first-party desktop presentation proof when verification was requested and
-    /// accepted before shutdown.
-    #[must_use]
-    pub const fn presentation_verification(
-        &self,
-    ) -> Option<&DesktopPresentationVerificationReceipt> {
-        self.presentation_verification.as_ref()
-    }
-}
-
-#[cfg(all(feature = "desktop-winit", feature = "render-wgpu"))]
-pub struct DesktopRun {
-    state: DesktopRunState,
-    diagnostics: DiagnosticReport,
-    startup_content_closure: Option<StartupContentClosureReceipt>,
-    presentation_verification: Option<DesktopPresentationVerificationReceipt>,
-}
-
-#[cfg(all(feature = "desktop-winit", feature = "render-wgpu"))]
-impl fmt::Debug for DesktopRun {
-    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-        formatter
-            .debug_struct("DesktopRun")
-            .field("state", &self.state.label())
-            .field("diagnostics", &self.diagnostics)
-            .field(
-                "startup_content_closure_present",
-                &self.startup_content_closure.is_some(),
-            )
-            .field(
-                "presentation_verification_present",
-                &self.presentation_verification.is_some(),
-            )
-            .finish_non_exhaustive()
-    }
-}
-
-#[cfg(all(feature = "desktop-winit", feature = "render-wgpu"))]
 impl DesktopRun {
     /// Creates the ordinary desktop product action from one recipe.
     #[must_use]
@@ -486,6 +374,7 @@ impl DesktopRun {
             diagnostics: DiagnosticReport::default(),
             startup_content_closure: None,
             presentation_verification: None,
+            telemetry_seal: None,
         }
     }
 
@@ -503,6 +392,7 @@ impl DesktopRun {
             diagnostics: DiagnosticReport::default(),
             startup_content_closure: None,
             presentation_verification: None,
+            telemetry_seal: None,
         }
     }
 
@@ -514,26 +404,7 @@ impl DesktopRun {
         Self::new_inner(project_root, intent, Some(overlay))
     }
 
-    /// Runs the event loop once, or advances only retained cleanup after an incomplete close.
-    pub fn execute(&mut self) -> DesktopRunReport {
-        let state = std::mem::replace(&mut self.state, DesktopRunState::Executing);
-        self.state = match state {
-            DesktopRunState::Fresh(inputs) => self.execute_fresh(inputs),
-            DesktopRunState::Cleaning { hosts, terminal } => self.drive_cleanup(hosts, terminal),
-            DesktopRunState::Completed(exit) => DesktopRunState::Completed(exit),
-            DesktopRunState::Failed => DesktopRunState::Failed,
-            DesktopRunState::Executing => {
-                self.diagnostics.extend(single_error(
-                    "project.desktop.reentered",
-                    "Desktop project run was reentered",
-                ));
-                DesktopRunState::Failed
-            }
-        };
-        self.report()
-    }
-
-    fn drive_cleanup(
+    pub(in crate::project_host) fn drive_cleanup(
         &mut self,
         hosts: Vec<ProjectHost>,
         terminal: PendingDesktopTerminal,
@@ -567,8 +438,11 @@ impl DesktopRun {
         }
     }
 
-    fn execute_fresh(&mut self, inputs: DesktopRunInputs) -> DesktopRunState {
-        let (prepared, runner, verification) = match inputs {
+    pub(in crate::project_host) fn execute_fresh(
+        &mut self,
+        inputs: DesktopRunInputs,
+    ) -> DesktopRunState {
+        let (prepared, execution, verification) = match inputs {
             DesktopRunInputs::Source {
                 project_root,
                 intent,
@@ -591,23 +465,20 @@ impl DesktopRun {
                     return DesktopRunState::Failed;
                 }
                 let verification = first_present.map(DesktopFirstPresentVerification::new);
-                let host_policy = verification
-                    .as_ref()
-                    .map(DesktopFirstPresentVerification::host_policy);
                 let prepared = prepare_project_start(
                     project_root,
                     profile,
                     execution.cleanup_policy,
                     recipe,
                     overlay,
-                    host_policy,
+                    None,
                     Vec::new(),
                 );
-                (prepared, execution.runner, verification)
+                (prepared, execution, verification)
             }
             DesktopRunInputs::Processed { base, execution } => (
                 prepare_runtime_content_start(base, execution.cleanup_policy, Vec::new()),
-                execution.runner,
+                execution,
                 None,
             ),
         };
@@ -650,120 +521,21 @@ impl DesktopRun {
             }
         }
 
-        let run_result = {
-            let runtime = host
-                .running_runtime_mut()
-                .expect("a completed desktop start publishes one runtime");
-            runner.run(runtime)
-        };
-        let runtime_state = host
-            .running_runtime_state()
-            .expect("the desktop Host retains its published runtime until terminal lowering");
-        let close_evidence = host
-            .running_runtime_close_evidence()
-            .expect("the desktop Host retains close evidence until terminal lowering");
-        let active_fault = host.running_runtime_fault();
-        let runtime_fault_delivered = active_fault.is_some_and(|fault| match &run_result {
-            Err(error) => {
-                runtime_fault(error) == Some((fault.kind(), fault.source()))
-                    && error.runtime_fault_detail() == fault.detail()
+        match host.take_desktop_runtime() {
+            Ok((runtime, context)) => {
+                self.start_native(runtime, Some(context), execution, verification)
             }
-            Ok(_) => runtime_state == RuntimeState::Stopped,
-        });
-        let mut terminal = desktop_terminal_after_runner(
-            run_result,
-            runtime_state,
-            &close_evidence,
-            active_fault,
-            &mut self.diagnostics,
-        );
-        if runtime_fault_delivered {
-            host.acknowledge_running_runtime_fault();
-        }
-        if let Some(report) = host.running_runtime_close_failure_report() {
-            self.diagnostics.extend(report);
-        } else {
-            append_plugin_shutdown_diagnostics(
-                &mut self.diagnostics,
-                host.running_runtime_plugin_failure_report(),
-            );
-        }
-        if let Some(verification) = verification {
-            match verification.outcome() {
-                DesktopFirstPresentOutcome::Accepted(presented_frame) => {
-                    let startup_content_closure = self
-                        .startup_content_closure
-                        .clone()
-                        .expect("desktop verification starts only after project checking succeeds");
-                    self.presentation_verification =
-                        Some(DesktopPresentationVerificationReceipt::new(
-                            startup_content_closure,
-                            presented_frame,
-                        ));
-                }
-                DesktopFirstPresentOutcome::TimedOut => {
-                    self.diagnostics.extend(single_error(
-                        "project.desktop.presentation-timeout",
-                        "Desktop first presentation exceeded its bounded deadline",
-                    ));
-                    terminal = PendingDesktopTerminal::Failed;
-                }
-                DesktopFirstPresentOutcome::Awaiting => {
-                    self.diagnostics.extend(single_error(
-                        "project.desktop.presentation-missing",
-                        "Desktop runner exited before the first presentation was verified",
-                    ));
-                    terminal = PendingDesktopTerminal::Failed;
-                }
-                DesktopFirstPresentOutcome::Unarmed => {
-                    self.diagnostics.extend(single_error(
-                        "project.desktop.presentation-unarmed",
-                        "Desktop first-presentation verification was not armed",
-                    ));
-                    terminal = PendingDesktopTerminal::Failed;
-                }
-                DesktopFirstPresentOutcome::Publishing => {
-                    self.diagnostics.extend(single_error(
-                        "project.desktop.supervised-ready-incomplete",
-                        "Desktop runner exited before supervised READY publication completed",
-                    ));
-                    terminal = PendingDesktopTerminal::Failed;
-                }
-                DesktopFirstPresentOutcome::Failed(DesktopFirstPresentFailure::RuntimeClosure) => {
-                    self.diagnostics.extend(single_error(
-                        "project.desktop.supervised-runtime-closure-invalid",
-                        "Desktop supervised activation did not publish a strict Runtime closure",
-                    ));
-                    terminal = PendingDesktopTerminal::Failed;
-                }
-                DesktopFirstPresentOutcome::Failed(
-                    DesktopFirstPresentFailure::ReadyPublication,
-                ) => {
-                    self.diagnostics.extend(single_error(
-                        "project.desktop.supervised-ready-failed",
-                        "Desktop supervised READY publication failed closed",
-                    ));
-                    terminal = PendingDesktopTerminal::Failed;
-                }
-            }
-        }
-        host.retire_running();
-        let mut cleanup_hosts = Vec::with_capacity(1);
-        if host.has_cleanup_owner() {
-            cleanup_hosts.push(host);
-        }
-        if cleanup_hosts.is_empty() {
-            terminal.finish()
-        } else {
-            DesktopRunState::Cleaning {
-                hosts: cleanup_hosts,
-                terminal,
+            Err(fault) => {
+                self.diagnostics.extend(fault.diagnostics);
+                desktop_state_after_failure(host)
             }
         }
     }
 
-    pub(crate) fn incomplete_cleanup_diagnostics(&self) -> DiagnosticReport {
-        let mut diagnostics = DiagnosticReport::default();
+    pub(in crate::project_host) fn append_startup_cleanup_diagnostics(
+        &self,
+        diagnostics: &mut DiagnosticReport,
+    ) {
         if let DesktopRunState::Cleaning { hosts, .. } = &self.state {
             for host in hosts {
                 if let super::ProjectHostSlot::Cleaning { owner, .. } = &host.slot {
@@ -775,28 +547,11 @@ impl DesktopRun {
                 }
             }
         }
-        diagnostics
-    }
-
-    fn report(&self) -> DesktopRunReport {
-        let outcome = match &self.state {
-            DesktopRunState::Completed(exit) => DesktopRunOutcome::Completed(*exit),
-            DesktopRunState::Cleaning { .. } | DesktopRunState::Executing => {
-                DesktopRunOutcome::CleanupIncomplete
-            }
-            DesktopRunState::Fresh(_) | DesktopRunState::Failed => DesktopRunOutcome::Failed,
-        };
-        DesktopRunReport {
-            outcome,
-            diagnostics: self.diagnostics.clone(),
-            startup_content_closure: self.startup_content_closure.clone(),
-            presentation_verification: self.presentation_verification.clone(),
-        }
     }
 }
 
 #[cfg(all(feature = "desktop-winit", feature = "render-wgpu"))]
-enum DesktopRunInputs {
+pub(in crate::project_host) enum DesktopRunInputs {
     Source {
         project_root: DirectoryCapability,
         intent: DesktopRunIntent,
@@ -809,109 +564,6 @@ enum DesktopRunInputs {
 }
 
 #[cfg(all(feature = "desktop-winit", feature = "render-wgpu"))]
-enum DesktopRunState {
-    Fresh(DesktopRunInputs),
-    Executing,
-    Cleaning {
-        hosts: Vec<ProjectHost>,
-        terminal: PendingDesktopTerminal,
-    },
-    Completed(AppExit),
-    Failed,
-}
-
-#[cfg(all(feature = "desktop-winit", feature = "render-wgpu"))]
-impl DesktopRunState {
-    const fn label(&self) -> &'static str {
-        match self {
-            Self::Fresh(_) => "fresh",
-            Self::Executing => "executing",
-            Self::Cleaning { .. } => "cleaning",
-            Self::Completed(_) => "completed",
-            Self::Failed => "failed",
-        }
-    }
-}
-
-#[cfg(all(feature = "desktop-winit", feature = "render-wgpu"))]
-#[derive(Debug, Clone, Copy)]
-enum PendingDesktopTerminal {
-    Completed(AppExit),
-    Failed,
-}
-
-#[cfg(all(feature = "desktop-winit", feature = "render-wgpu"))]
-fn desktop_terminal_after_runner(
-    run_result: Result<AppExit, AppRunError>,
-    runtime_state: RuntimeState,
-    close_evidence: &RuntimeCloseEvidence,
-    runtime_fault: Option<&RuntimeFault>,
-    diagnostics: &mut DiagnosticReport,
-) -> PendingDesktopTerminal {
-    if runtime_state == RuntimeState::CloseIncomplete {
-        if close_evidence
-            .causes()
-            .contains(&RuntimeCloseCause::DeadlineExceeded)
-        {
-            diagnostics.extend(single_error(
-                "project.desktop.shutdown-timeout",
-                "Desktop runtime shutdown exceeded its bounded deadline",
-            ));
-        }
-        match run_result {
-            Err(error) => diagnostics.extend(desktop_runner_failure_report(&error)),
-            Ok(_) => diagnostics.extend(single_error(
-                "project.desktop.runtime-not-stopped",
-                "Desktop runner returned before the managed runtime stopped",
-            )),
-        };
-        return PendingDesktopTerminal::Failed;
-    }
-
-    match run_result {
-        Ok(exit) if runtime_state == RuntimeState::Stopped => {
-            if let Some(fault) = runtime_fault {
-                diagnostics.extend(runtime_fault_report(
-                    fault,
-                    "project.desktop.runtime-faulted",
-                    "Desktop runtime retained a runtime fault after stopping",
-                ));
-                PendingDesktopTerminal::Failed
-            } else if close_evidence.has_terminal_failure() {
-                diagnostics.extend(single_error(
-                    "project.desktop.cleanup-failed",
-                    "Desktop runtime cleanup retained a terminal failure",
-                ));
-                PendingDesktopTerminal::Failed
-            } else {
-                PendingDesktopTerminal::Completed(exit)
-            }
-        }
-        Ok(_) => {
-            diagnostics.extend(single_error(
-                "project.desktop.runtime-not-stopped",
-                "Desktop runner returned before the managed runtime stopped",
-            ));
-            PendingDesktopTerminal::Failed
-        }
-        Err(error) => {
-            diagnostics.extend(desktop_runner_failure_report(&error));
-            PendingDesktopTerminal::Failed
-        }
-    }
-}
-
-#[cfg(all(feature = "desktop-winit", feature = "render-wgpu"))]
-impl PendingDesktopTerminal {
-    fn finish(self) -> DesktopRunState {
-        match self {
-            Self::Completed(exit) => DesktopRunState::Completed(exit),
-            Self::Failed => DesktopRunState::Failed,
-        }
-    }
-}
-
-#[cfg(all(feature = "desktop-winit", feature = "render-wgpu"))]
 fn desktop_state_after_failure(host: ProjectHost) -> DesktopRunState {
     if host.has_cleanup_owner() {
         DesktopRunState::Cleaning {
@@ -920,479 +572,6 @@ fn desktop_state_after_failure(host: ProjectHost) -> DesktopRunState {
         }
     } else {
         DesktopRunState::Failed
-    }
-}
-
-#[cfg(all(feature = "desktop-winit", feature = "render-wgpu"))]
-fn desktop_runner_failure_report(error: &AppRunError) -> DiagnosticReport {
-    let reason = match error {
-        AppRunError::Plugin { .. } => "plugin",
-        AppRunError::Runner { .. } => "runner",
-        AppRunError::RunnerTeardown { .. } => "runner-teardown",
-        AppRunError::Time { .. } => "time",
-        AppRunError::ManagedRuntime { .. } => "managed-runtime",
-    };
-    let diagnostic = runtime_fault_diagnostic(
-        error.runtime_fault_detail(),
-        "project.desktop.runner-failed",
-        "Desktop project runner failed",
-    );
-    let diagnostic = attach_identifier(diagnostic, "reason", reason);
-    let diagnostic = match runtime_fault(error) {
-        Some((kind, source)) => {
-            let diagnostic =
-                attach_identifier(diagnostic, "fault-kind", runtime_fault_kind_id(kind));
-            attach_identifier(diagnostic, "fault-source", source)
-        }
-        None => diagnostic,
-    };
-    single_diagnostic(diagnostic)
-}
-
-#[cfg(all(feature = "desktop-winit", feature = "render-wgpu"))]
-fn runtime_fault(error: &AppRunError) -> Option<(RuntimeFaultKind, &'static str)> {
-    match error {
-        AppRunError::ManagedRuntime {
-            kind, fault_source, ..
-        } => Some((*kind, *fault_source)),
-        AppRunError::RunnerTeardown { prior, teardown } => {
-            runtime_fault(prior).or_else(|| runtime_fault(teardown))
-        }
-        AppRunError::Plugin { .. } | AppRunError::Runner { .. } | AppRunError::Time { .. } => None,
-    }
-}
-
-#[cfg(all(test, feature = "desktop-winit", feature = "render-wgpu"))]
-mod desktop_terminal_tests {
-    use super::*;
-    use std::sync::{
-        Arc,
-        atomic::{AtomicBool, Ordering},
-    };
-
-    use nara_app::{
-        App, RuntimeAdmissionReservation, RuntimeCloseParticipant, RuntimeCloseParticipantError,
-        RuntimeCloseParticipantId, RuntimeClosePolicy, RuntimeCloseProgress, RuntimeControl,
-        RuntimeControlRequestResult, RuntimeInstance, RuntimeObligationLedger,
-    };
-
-    #[derive(Clone, Copy)]
-    enum CloseFailureMode {
-        Pending,
-        RetryableParticipant,
-        CompletedWithError,
-    }
-
-    struct ControlledCloseParticipant {
-        released: Arc<AtomicBool>,
-        mode: CloseFailureMode,
-    }
-
-    impl RuntimeCloseParticipant for ControlledCloseParticipant {
-        fn begin_close(
-            &mut self,
-            _context: &mut nara_app::RuntimeCloseContext<'_>,
-        ) -> Result<RuntimeCloseProgress, RuntimeCloseParticipantError> {
-            self.close_once()
-        }
-
-        fn poll_close(
-            &mut self,
-            _context: &mut nara_app::RuntimeCloseContext<'_>,
-        ) -> Result<RuntimeCloseProgress, RuntimeCloseParticipantError> {
-            self.close_once()
-        }
-    }
-
-    impl ControlledCloseParticipant {
-        fn close_once(&self) -> Result<RuntimeCloseProgress, RuntimeCloseParticipantError> {
-            if self.released.load(Ordering::Acquire) {
-                return Ok(RuntimeCloseProgress::Complete);
-            }
-            match self.mode {
-                CloseFailureMode::Pending => Ok(RuntimeCloseProgress::Pending),
-                CloseFailureMode::RetryableParticipant => Err(
-                    RuntimeCloseParticipantError::retryable("nara.test.desktop-close-participant"),
-                ),
-                CloseFailureMode::CompletedWithError => {
-                    Ok(RuntimeCloseProgress::CompleteWithError {
-                        code: "nara.test.desktop-close-terminal",
-                    })
-                }
-            }
-        }
-    }
-
-    fn has_code(report: &DiagnosticReport, code: &str) -> bool {
-        report
-            .iter()
-            .any(|diagnostic| diagnostic.code().as_str() == code)
-    }
-
-    fn diagnostic_field(report: &DiagnosticReport, code: &str, key: &str) -> Option<String> {
-        report
-            .iter()
-            .find(|diagnostic| diagnostic.code().as_str() == code)
-            .and_then(|diagnostic| {
-                diagnostic
-                    .fields()
-                    .iter()
-                    .find(|field| field.key().as_str() == key)
-            })
-            .map(|field| field.display_value().into_owned())
-    }
-
-    fn actual_close_evidence(mode: CloseFailureMode) -> RuntimeCloseEvidence {
-        let released = Arc::new(AtomicBool::new(false));
-        let mut obligations = RuntimeObligationLedger::new();
-        obligations
-            .register(
-                RuntimeCloseParticipantId::new("nara.test.desktop-close-evidence"),
-                ControlledCloseParticipant {
-                    released: Arc::clone(&released),
-                    mode,
-                },
-            )
-            .unwrap();
-        let policy = match mode {
-            CloseFailureMode::Pending => RuntimeClosePolicy::new(Duration::ZERO),
-            CloseFailureMode::RetryableParticipant | CloseFailureMode::CompletedWithError => {
-                RuntimeClosePolicy::default()
-            }
-        };
-        let mut runtime = RuntimeAdmissionReservation::try_acquire()
-            .unwrap()
-            .admit(App::new().seal().unwrap(), obligations, policy)
-            .unwrap()
-            .complete_startup()
-            .unwrap()
-            .promote();
-        assert!(matches!(
-            runtime.request_control(RuntimeControl::Stop),
-            RuntimeControlRequestResult::Accepted(_)
-        ));
-        drive_until_state(&mut runtime, RuntimeState::CloseIncomplete);
-        let evidence = runtime.close_evidence().clone();
-
-        released.store(true, Ordering::Release);
-        assert!(matches!(
-            runtime.request_control(RuntimeControl::RetryClose),
-            RuntimeControlRequestResult::Accepted(_)
-        ));
-        drive_until_state(&mut runtime, RuntimeState::Stopped);
-        evidence
-    }
-
-    fn drive_until_state(runtime: &mut RuntimeInstance, expected: RuntimeState) {
-        for _ in 0..8 {
-            if runtime.state() == expected {
-                return;
-            }
-            runtime.drive(Duration::ZERO).unwrap();
-        }
-        panic!(
-            "runtime remained in {:?} instead of reaching {expected:?}",
-            runtime.state()
-        );
-    }
-
-    fn deadline_close_evidence() -> RuntimeCloseEvidence {
-        let evidence = actual_close_evidence(CloseFailureMode::Pending);
-        assert!(
-            evidence
-                .causes()
-                .contains(&RuntimeCloseCause::DeadlineExceeded)
-        );
-        evidence
-    }
-
-    fn participant_close_evidence() -> RuntimeCloseEvidence {
-        let evidence = actual_close_evidence(CloseFailureMode::RetryableParticipant);
-        assert!(
-            evidence
-                .causes()
-                .iter()
-                .any(|cause| matches!(cause, RuntimeCloseCause::ParticipantError { .. }))
-        );
-        assert!(
-            !evidence
-                .causes()
-                .contains(&RuntimeCloseCause::DeadlineExceeded)
-        );
-        evidence
-    }
-
-    #[test]
-    fn deadline_close_incomplete_reports_shutdown_timeout() {
-        let mut diagnostics = DiagnosticReport::default();
-
-        let terminal = desktop_terminal_after_runner(
-            Err(AppRunError::runner("managed runtime close is incomplete")),
-            RuntimeState::CloseIncomplete,
-            &deadline_close_evidence(),
-            None,
-            &mut diagnostics,
-        );
-
-        assert!(matches!(terminal, PendingDesktopTerminal::Failed));
-        assert!(has_code(&diagnostics, "project.desktop.shutdown-timeout"));
-        assert!(has_code(&diagnostics, "project.desktop.runner-failed"));
-
-        let report = DesktopRun {
-            state: DesktopRunState::Cleaning {
-                hosts: vec![ProjectHost::new(RuntimeClosePolicy::default())],
-                terminal,
-            },
-            diagnostics,
-            startup_content_closure: None,
-            presentation_verification: None,
-        }
-        .report();
-        assert_eq!(report.outcome(), DesktopRunOutcome::CleanupIncomplete);
-        assert!(has_code(
-            report.diagnostics(),
-            "project.desktop.shutdown-timeout"
-        ));
-        assert!(has_code(
-            report.diagnostics(),
-            "project.desktop.runner-failed"
-        ));
-    }
-
-    #[test]
-    fn participant_close_incomplete_is_not_misclassified_as_timeout() {
-        let mut diagnostics = DiagnosticReport::default();
-
-        let terminal = desktop_terminal_after_runner(
-            Err(AppRunError::runner(
-                "managed runtime close participant failed",
-            )),
-            RuntimeState::CloseIncomplete,
-            &participant_close_evidence(),
-            None,
-            &mut diagnostics,
-        );
-
-        assert!(matches!(terminal, PendingDesktopTerminal::Failed));
-        assert!(!has_code(&diagnostics, "project.desktop.shutdown-timeout"));
-        assert!(has_code(&diagnostics, "project.desktop.runner-failed"));
-
-        let report = DesktopRun {
-            state: terminal.finish(),
-            diagnostics,
-            startup_content_closure: None,
-            presentation_verification: None,
-        }
-        .report();
-        assert_eq!(report.outcome(), DesktopRunOutcome::Failed);
-        assert!(!has_code(
-            report.diagnostics(),
-            "project.desktop.shutdown-timeout"
-        ));
-        assert!(has_code(
-            report.diagnostics(),
-            "project.desktop.runner-failed"
-        ));
-    }
-
-    #[test]
-    fn only_a_stopped_runtime_can_complete_the_desktop_product_action() {
-        let mut stopped_diagnostics = DiagnosticReport::default();
-        assert!(matches!(
-            desktop_terminal_after_runner(
-                Ok(AppExit::Success),
-                RuntimeState::Stopped,
-                &RuntimeCloseEvidence::default(),
-                None,
-                &mut stopped_diagnostics,
-            ),
-            PendingDesktopTerminal::Completed(AppExit::Success)
-        ));
-        assert!(stopped_diagnostics.is_empty());
-
-        let mut running_diagnostics = DiagnosticReport::default();
-        assert!(matches!(
-            desktop_terminal_after_runner(
-                Ok(AppExit::Success),
-                RuntimeState::Running,
-                &RuntimeCloseEvidence::default(),
-                None,
-                &mut running_diagnostics,
-            ),
-            PendingDesktopTerminal::Failed
-        ));
-        assert!(has_code(
-            &running_diagnostics,
-            "project.desktop.runtime-not-stopped"
-        ));
-    }
-
-    #[test]
-    fn stopped_runtime_with_close_error_or_fault_is_not_reported_as_completed() {
-        let mut close_error_diagnostics = DiagnosticReport::default();
-        let terminal_evidence = terminal_close_evidence();
-        assert!(matches!(
-            desktop_terminal_after_runner(
-                Ok(AppExit::Success),
-                RuntimeState::Stopped,
-                &terminal_evidence,
-                None,
-                &mut close_error_diagnostics,
-            ),
-            PendingDesktopTerminal::Failed
-        ));
-        assert!(has_code(
-            &close_error_diagnostics,
-            "project.desktop.cleanup-failed"
-        ));
-
-        let mut fault_diagnostics = DiagnosticReport::default();
-        assert!(matches!(
-            desktop_terminal_after_runner(
-                Ok(AppExit::Success),
-                RuntimeState::Stopped,
-                &RuntimeCloseEvidence::default(),
-                Some(&RuntimeFault::engine(
-                    RuntimeFaultKind::System,
-                    "nara.test.desktop-stopped-fault"
-                )),
-                &mut fault_diagnostics,
-            ),
-            PendingDesktopTerminal::Failed
-        ));
-        assert!(has_code(
-            &fault_diagnostics,
-            "project.desktop.runtime-faulted"
-        ));
-    }
-
-    fn terminal_close_evidence() -> RuntimeCloseEvidence {
-        let released = Arc::new(AtomicBool::new(false));
-        let mut obligations = RuntimeObligationLedger::new();
-        obligations
-            .register(
-                RuntimeCloseParticipantId::new("nara.test.desktop-terminal-evidence"),
-                ControlledCloseParticipant {
-                    released,
-                    mode: CloseFailureMode::CompletedWithError,
-                },
-            )
-            .unwrap();
-        stopped_runtime(App::new(), obligations)
-            .close_evidence()
-            .clone()
-    }
-
-    fn stopped_runtime(app: App, obligations: RuntimeObligationLedger) -> RuntimeInstance {
-        let mut runtime = RuntimeAdmissionReservation::try_acquire()
-            .unwrap()
-            .admit(
-                app.seal().unwrap(),
-                obligations,
-                RuntimeClosePolicy::default(),
-            )
-            .unwrap()
-            .complete_startup()
-            .unwrap()
-            .promote();
-        assert!(matches!(
-            runtime.request_control(RuntimeControl::Stop),
-            RuntimeControlRequestResult::Accepted(_)
-        ));
-        drive_until_state(&mut runtime, RuntimeState::Stopped);
-        runtime
-    }
-
-    #[test]
-    fn stopped_desktop_fault_keeps_the_real_close_time_identity() {
-        struct ShutdownFault;
-        impl nara_app::Plugin for ShutdownFault {
-            fn declaration() -> &'static nara_app::PluginDeclaration {
-                static DECLARATION: nara_app::PluginDeclaration = nara_app::PluginDeclaration::new(
-                    nara_app::PluginId::new("nara.test.desktop-close-fault"),
-                    nara_app::PluginCategory::Runtime,
-                );
-                &DECLARATION
-            }
-            fn build(&self, _app: &mut App) -> Result<(), nara_app::PluginError> {
-                Ok(())
-            }
-            fn shutdown(
-                &self,
-                context: &mut nara_app::PluginShutdownContext<'_>,
-            ) -> Result<(), nara_app::PluginError> {
-                context
-                    .world()
-                    .resource::<nara_app::RuntimeFaultReporter>()
-                    .report(nara_app::RuntimeFault::engine(
-                        RuntimeFaultKind::RequiredService,
-                        "nara.test.desktop-close-fault",
-                    ));
-                Ok(())
-            }
-        }
-        let mut app = App::new();
-        app.add_plugin(ShutdownFault).unwrap();
-        let runtime = stopped_runtime(app, RuntimeObligationLedger::new());
-        assert!(runtime.close_evidence().is_empty());
-        let mut diagnostics = DiagnosticReport::default();
-        assert!(matches!(
-            desktop_terminal_after_runner(
-                Ok(AppExit::Success),
-                runtime.state(),
-                runtime.close_evidence(),
-                runtime.fault(),
-                &mut diagnostics
-            ),
-            PendingDesktopTerminal::Failed
-        ));
-        assert_eq!(
-            diagnostic_field(
-                &diagnostics,
-                "project.desktop.runtime-faulted",
-                "fault-source"
-            )
-            .as_deref(),
-            Some("nara.test.desktop-close-fault")
-        );
-        assert_eq!(
-            diagnostics
-                .iter()
-                .filter(|diagnostic| diagnostic.severity()
-                    == nara_diagnostic::DiagnosticSeverity::Error)
-                .count(),
-            1
-        );
-    }
-
-    #[test]
-    fn desktop_runner_failure_preserves_managed_runtime_fault_identity() {
-        let managed =
-            AppRunError::managed_runtime(RuntimeFaultKind::System, "nara.ecs.fallible-execution");
-        let report = desktop_runner_failure_report(&managed);
-        assert_eq!(
-            diagnostic_field(&report, "project.desktop.runner-failed", "reason").as_deref(),
-            Some("managed-runtime")
-        );
-        assert_eq!(
-            diagnostic_field(&report, "project.desktop.runner-failed", "fault-kind").as_deref(),
-            Some("system")
-        );
-        assert_eq!(
-            diagnostic_field(&report, "project.desktop.runner-failed", "fault-source").as_deref(),
-            Some("nara.ecs.fallible-execution")
-        );
-
-        let wrapped = AppRunError::runner_teardown(managed, AppRunError::runner("teardown"));
-        let report = desktop_runner_failure_report(&wrapped);
-        assert_eq!(
-            diagnostic_field(&report, "project.desktop.runner-failed", "reason").as_deref(),
-            Some("runner-teardown")
-        );
-        assert_eq!(
-            diagnostic_field(&report, "project.desktop.runner-failed", "fault-kind").as_deref(),
-            Some("system")
-        );
     }
 }
 

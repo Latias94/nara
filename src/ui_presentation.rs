@@ -13,6 +13,8 @@ mod accessibility;
 mod attempts;
 mod close;
 mod observation;
+#[cfg(feature = "render-wgpu")]
+pub(crate) mod post_host;
 mod surfaces;
 
 use attempts::{UiPresentationAttempt, UiPresentationAttemptLedger};
@@ -84,6 +86,8 @@ impl Plugin for UiPresentationBridgePlugin {
         app.init_resource::<UiPresentationAttemptLedger>()?;
         app.init_resource::<observation::PresentedUiObservationStore>()?;
         close::install(app)?;
+        #[cfg(feature = "render-wgpu")]
+        post_host::install(app)?;
         app.add_systems(
             CoreStage::First,
             surfaces::synchronize_runtime_ui_surface_metrics
@@ -91,6 +95,8 @@ impl Plugin for UiPresentationBridgePlugin {
                 .before(nara_input::__private::InputSet::RouteUi),
         )?;
         app.add_systems(CoreStage::Queue, compile_runtime_ui_packets)?;
+        // CPU backends may return during the managed frame. Native WGPU results return later
+        // and use the concrete post-Host port immediately, before another frame can run.
         app.add_systems(CoreStage::Cleanup, commit_runtime_ui_presentations)?;
         Ok(())
     }

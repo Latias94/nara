@@ -22,6 +22,13 @@ fn executable_owners_are_bound_to_their_construction_thread() {
     static_assertions::assert_not_impl_any!(RuntimeCandidateFailure: Send, Sync);
     static_assertions::assert_not_impl_any!(RuntimePublicationFailure: Send, Sync);
     static_assertions::assert_not_impl_any!(RuntimeStartFailure: Send, Sync);
+    #[cfg(feature = "desktop-winit")]
+    {
+        static_assertions::assert_not_impl_any!(nara::winit::WinitSession: Send, Sync);
+        static_assertions::assert_not_impl_any!(nara::winit::WinitRetiredSession: Send, Sync);
+    }
+    #[cfg(all(feature = "desktop-winit", feature = "render-wgpu"))]
+    static_assertions::assert_not_impl_any!(nara::project_host::DesktopRun: Send, Sync);
 }
 
 #[test]
@@ -89,8 +96,22 @@ fn managed_world_access_is_read_only_and_scopes_do_not_escape() {
 #[cfg(feature = "desktop-winit")]
 #[test]
 fn platform_runner_consumes_the_managed_runtime_contract() {
+    let _: fn(nara::winit::WinitRunner, RuntimeInstance) -> nara::winit::WinitSession =
+        nara::winit::WinitRunner::run;
+    let _: fn(&mut nara::winit::WinitSession) -> nara::winit::WinitRunProgress =
+        nara::winit::WinitSession::execute;
+    let _: fn(&nara::winit::WinitSession) -> &RuntimeInstance = nara::winit::WinitSession::runtime;
     let _: fn(
-        nara::winit::WinitRunner,
-        &mut RuntimeInstance,
-    ) -> Result<nara::app::AppExit, nara::app::AppRunError> = nara::winit::WinitRunner::run;
+        nara::winit::WinitSession,
+    ) -> Result<nara::winit::WinitRetiredSession, nara::winit::WinitSession> =
+        nara::winit::WinitSession::into_retired;
+}
+
+#[cfg(all(feature = "desktop-winit", feature = "render-wgpu"))]
+#[test]
+fn desktop_action_consumes_an_existing_runtime_with_its_native_owner() {
+    let _: fn(
+        RuntimeInstance,
+        nara::project_host::DesktopRunOptions,
+    ) -> nara::project_host::DesktopRun = nara::project_host::DesktopRun::from_runtime;
 }

@@ -1,56 +1,111 @@
 use std::error::Error;
 use std::io;
 use std::process::{Child, Command, ExitStatus};
-use std::sync::{
-    Arc,
-    atomic::{AtomicBool, Ordering},
-};
+use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
+use nara::project_host::{
+    DesktopPresentationControl, DesktopPresentationObservation, DesktopRun, DesktopRunOptions,
+    DesktopRunOutcome,
+};
+use nara::render_wgpu::{
+    __private::{WgpuPresentedFrameReceipt, WgpuRuntimeConnection},
+    WgpuRenderObservation,
+};
+use nara::window::backend::{BackendWindowHandles, WindowTargetPhase};
 use nara::{advanced_prelude::*, backend_prelude::*};
 
-#[path = "support/runtime_retirement.rs"]
-mod runtime_retirement;
-use runtime_retirement::finish_runtime_after_winit;
+#[path = "support/desktop_run.rs"]
+mod desktop_run;
+
+const INITIAL_EXTENT: Extent2d = Extent2d {
+    width: 320,
+    height: 180,
+};
+const RESIZED_EXTENT: Extent2d = Extent2d {
+    width: 400,
+    height: 240,
+};
 
 fn main() -> Result<(), Box<dyn Error>> {
     let invocation = SmokeInvocation::from_args(std::env::args().skip(1))?;
     if invocation.child {
-        return run_smoke_child(invocation.drop_backend_before_exit);
+        return run_smoke_child(invocation);
     }
-    run_smoke_parent(invocation.drop_backend_before_exit)
+    run_smoke_parent(invocation)
 }
 
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
 struct SmokeInvocation {
     child: bool,
-    drop_backend_before_exit: bool,
+    mutation: RetirementMutation,
+}
+
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
+enum RetirementMutation {
+    #[default]
+    None,
+    RemoveRenderIngress,
+    ReplaceRenderIngress,
+    ReplaceObservation,
+    ReplaceWindowRegistry,
+}
+
+impl RetirementMutation {
+    const fn argument(self) -> Option<&'static str> {
+        match self {
+            Self::None => None,
+            Self::RemoveRenderIngress => Some("--remove-render-ingress-before-exit"),
+            Self::ReplaceRenderIngress => Some("--replace-render-ingress-before-exit"),
+            Self::ReplaceObservation => Some("--replace-observation-before-exit"),
+            Self::ReplaceWindowRegistry => Some("--replace-window-registry-before-exit"),
+        }
+    }
+
+    const fn refuses_capture(self) -> bool {
+        matches!(self, Self::RemoveRenderIngress | Self::ReplaceRenderIngress)
+    }
 }
 
 impl SmokeInvocation {
     fn from_args(args: impl IntoIterator<Item = String>) -> Result<Self, io::Error> {
         let mut invocation = Self::default();
         for argument in args {
-            match argument.as_str() {
-                "--smoke-child" => invocation.child = true,
-                "--drop-backend-before-exit" => invocation.drop_backend_before_exit = true,
+            let mutation = match argument.as_str() {
+                "--smoke-child" => {
+                    invocation.child = true;
+                    continue;
+                }
+                "--remove-render-ingress-before-exit" => RetirementMutation::RemoveRenderIngress,
+                "--replace-render-ingress-before-exit" => RetirementMutation::ReplaceRenderIngress,
+                "--replace-observation-before-exit" => RetirementMutation::ReplaceObservation,
+                "--replace-window-registry-before-exit" => {
+                    RetirementMutation::ReplaceWindowRegistry
+                }
                 _ => {
                     return Err(io::Error::new(
                         io::ErrorKind::InvalidInput,
                         "the surface retirement smoke received an unsupported argument",
                     ));
                 }
+            };
+            if invocation.mutation != RetirementMutation::None {
+                return Err(io::Error::new(
+                    io::ErrorKind::InvalidInput,
+                    "the surface retirement smoke accepts one endpoint mutation per run",
+                ));
             }
+            invocation.mutation = mutation;
         }
         Ok(invocation)
     }
 }
 
-fn run_smoke_parent(drop_backend_before_exit: bool) -> Result<(), Box<dyn Error>> {
+fn run_smoke_parent(invocation: SmokeInvocation) -> Result<(), Box<dyn Error>> {
     let mut command = Command::new(std::env::current_exe()?);
     command.arg("--smoke-child");
-    if drop_backend_before_exit {
-        command.arg("--drop-backend-before-exit");
+    if let Some(argument) = invocation.mutation.argument() {
+        command.arg(argument);
     }
     let mut child = command.spawn()?;
     let deadline = Instant::now() + Duration::from_secs(45);
@@ -113,18 +168,16 @@ fn finish_smoke_child(status: ExitStatus) -> Result<(), Box<dyn Error>> {
     }
 }
 
-fn run_smoke_child(drop_backend_before_exit: bool) -> Result<(), Box<dyn Error>> {
-    let resize_observed = Arc::new(AtomicBool::new(false));
-    let backend_removed = Arc::new(AtomicBool::new(false));
-    let timed_out = Arc::new(AtomicBool::new(false));
+fn run_smoke_child(invocation: SmokeInvocation) -> Result<(), Box<dyn Error>> {
+    let evidence = Arc::new(Mutex::new(SmokeEvidence::default()));
+    let replacement_registry = BackendWindowHandles::default();
+    let deadline = Instant::now() + Duration::from_secs(15);
     let mut app = App::new();
     app.insert_resource(SmokeState {
-        drop_backend_before_exit,
+        mutation: invocation.mutation,
         resize_requested: false,
-        deadline: Instant::now() + Duration::from_secs(15),
-        resize_observed: Arc::clone(&resize_observed),
-        backend_removed: Arc::clone(&backend_removed),
-        timed_out: Arc::clone(&timed_out),
+        evidence: Arc::clone(&evidence),
+        replacement_registry: replacement_registry.clone(),
     })?;
     app.add_plugins((
         MinimalPlugins,
@@ -137,10 +190,11 @@ fn run_smoke_child(drop_backend_before_exit: bool) -> Result<(), Box<dyn Error>>
         WgpuBackendPlugins,
     ))?;
     app.add_systems(StartupStage::Scene, setup_scene)?
-        .add_systems(CoreStage::Last, verify_resize_then_exit)?;
-    let mut runtime = nara::app::RuntimeInstance::start(app)?;
+        .add_systems(CoreStage::Last, advance_smoke)?;
+    let runtime = nara::app::RuntimeInstance::start(app)?;
 
-    assert!(runtime.world().contains_resource::<WgpuRenderBackend>());
+    assert!(runtime.world().contains_resource::<WgpuRuntimeConnection>());
+    assert!(runtime.world().contains_resource::<WgpuRenderObservation>());
     assert!(
         runtime
             .world()
@@ -156,40 +210,99 @@ fn run_smoke_child(drop_backend_before_exit: bool) -> Result<(), Box<dyn Error>>
         .world()
         .resource::<nara::window::backend::BackendWindowHandles>()
         .clone();
-    let run_result = WinitRunner::default().run(&mut runtime);
-    finish_runtime_after_winit(run_result, runtime)?;
+    let observer_evidence = Arc::clone(&evidence);
+    let observer_authority = target_authority.clone();
+    let options = DesktopRunOptions::new()
+        .with_native_retirement_budget(Duration::from_secs(5))
+        .with_presentation_observer(move |observation| {
+            observe_smoke(
+                observation,
+                deadline,
+                &observer_authority,
+                &observer_evidence,
+                invocation.mutation,
+            )
+        });
+    let mut run = DesktopRun::from_runtime(runtime, options);
+    let report = run.execute();
+    match report.outcome() {
+        DesktopRunOutcome::Completed(_) if !invocation.mutation.refuses_capture() => {}
+        DesktopRunOutcome::Failed if invocation.mutation.refuses_capture() => {
+            assert!(
+                report.diagnostics().iter().any(|diagnostic| {
+                    diagnostic.code().as_str() == "project.desktop.runner-failed"
+                }),
+                "an ingress refusal must retain the native runner failure: {:?}",
+                report.diagnostics(),
+            );
+        }
+        // Preserve incomplete native custody in the typed example error. An expected ingress
+        // refusal is successful only after physical retirement, never on CleanupIncomplete.
+        _ => {
+            let report = desktop_run::finish_desktop_run(run)?;
+            return Err(io::Error::other(format!(
+                "unexpected surface smoke outcome: {:?}; diagnostics={:?}",
+                report.outcome(),
+                report.diagnostics(),
+            ))
+            .into());
+        }
+    }
+    let evidence = evidence.lock().unwrap();
     assert!(
-        !timed_out.load(Ordering::SeqCst),
+        !evidence.timed_out,
         "surface retirement smoke exceeded its deadline"
     );
+    let initial = evidence
+        .initial
+        .expect("the configured native window must present before mutation");
+    let resized = evidence
+        .resized
+        .expect("the configured native surface must present its resized extent");
+    assert!(resized.render_transaction_frame_index() > initial.render_transaction_frame_index());
+    assert_eq!(initial.window_id(), WindowId::PRIMARY);
+    assert_eq!(resized.window_id(), WindowId::PRIMARY);
+    assert_eq!(resized.backend_instance_id(), initial.backend_instance_id());
+    assert_eq!(resized.device_epoch(), initial.device_epoch());
     let target = target_authority
         .snapshot(WindowId::PRIMARY)
-        .expect("the primary target should remain observable after shutdown");
-    assert_eq!(
-        target.phase,
-        nara::window::backend::WindowTargetPhase::NativeDestroyed
-    );
+        .expect("the original target must remain observable after shutdown");
+    assert_eq!(target.phase, WindowTargetPhase::NativeDestroyed);
     assert_eq!(target.fault, None);
-    assert!(
-        resize_observed.load(Ordering::SeqCst),
-        "the configured surface did not observe the resized window extent"
-    );
+    assert!(!target.surface_active);
+    assert!(!target.provider_present);
+    assert!(target.native_destroyed);
+    if invocation.mutation == RetirementMutation::ReplaceWindowRegistry {
+        assert!(!replacement_registry.is_registered(WindowId::PRIMARY));
+    }
     assert_eq!(
-        backend_removed.load(Ordering::SeqCst),
-        drop_backend_before_exit,
-        "the backend-drop mode did not execute its distinct resource-removal path"
+        evidence.mutation_applied,
+        invocation.mutation != RetirementMutation::None
     );
+    if invocation.mutation != RetirementMutation::None && !invocation.mutation.refuses_capture() {
+        assert!(
+            evidence.post_mutation_presented,
+            "replacing a CPU observation or registry must retain actual native presentation",
+        );
+    }
     Ok(())
 }
 
 #[derive(Debug, Resource)]
 struct SmokeState {
-    drop_backend_before_exit: bool,
+    mutation: RetirementMutation,
     resize_requested: bool,
-    deadline: Instant,
-    resize_observed: Arc<AtomicBool>,
-    backend_removed: Arc<AtomicBool>,
-    timed_out: Arc<AtomicBool>,
+    evidence: Arc<Mutex<SmokeEvidence>>,
+    replacement_registry: BackendWindowHandles,
+}
+
+#[derive(Debug, Default)]
+struct SmokeEvidence {
+    initial: Option<WgpuPresentedFrameReceipt>,
+    resized: Option<WgpuPresentedFrameReceipt>,
+    mutation_applied: bool,
+    post_mutation_presented: bool,
+    timed_out: bool,
 }
 
 fn setup_scene(mut commands: Commands) {
@@ -203,33 +316,90 @@ fn setup_scene(mut commands: Commands) {
     ));
 }
 
-fn verify_resize_then_exit(
+fn advance_smoke(
     mut commands: Commands,
-    frame: Res<RenderFrame>,
-    backend: Res<WgpuRenderBackend>,
     mut windows: Query<&mut Window>,
     mut state: ResMut<SmokeState>,
     mut exit: ResMut<AppExitRequests>,
 ) {
-    if enforce_smoke_deadline(Instant::now(), state.deadline, &state.timed_out, &mut exit) {
-        eprintln!(
-            "surface smoke timeout: frame={:?}, backend_state={:?}, backend_error={:?}, configured_extent={:?}, resize_requested={}",
-            frame.state,
-            backend.state(),
-            backend.last_error(),
-            backend.configured_surface_extent(WindowId::PRIMARY),
-            state.resize_requested,
-        );
+    let evidence = Arc::clone(&state.evidence);
+    let evidence = evidence.lock().unwrap();
+    if evidence.initial.is_none() {
         return;
     }
+    if !state.resize_requested {
+        let mut window = windows
+            .iter_mut()
+            .find(|window| window.id == WindowId::PRIMARY)
+            .expect("the smoke window must have its configured entity");
+        window.resolution.physical_width = RESIZED_EXTENT.width;
+        window.resolution.physical_height = RESIZED_EXTENT.height;
+        state.resize_requested = true;
+        return;
+    }
+    if evidence.resized.is_none() {
+        return;
+    }
+    if state.mutation != RetirementMutation::None && !evidence.mutation_applied {
+        let mutation = state.mutation;
+        let replacement_registry = state.replacement_registry.clone();
+        let evidence = Arc::clone(&state.evidence);
+        commands.queue(move |world: &mut World| {
+            match mutation {
+                RetirementMutation::None => unreachable!("only a selected mutation is queued"),
+                RetirementMutation::RemoveRenderIngress => {
+                    assert!(world.remove_resource::<WgpuRuntimeConnection>().is_some());
+                }
+                RetirementMutation::ReplaceRenderIngress => {
+                    assert!(world.remove_resource::<WgpuRuntimeConnection>().is_some());
+                    world.insert_resource(WgpuRuntimeConnection::default());
+                }
+                RetirementMutation::ReplaceObservation => {
+                    assert!(world.remove_resource::<WgpuRenderObservation>().is_some());
+                    world.insert_resource(WgpuRenderObservation::default());
+                }
+                RetirementMutation::ReplaceWindowRegistry => {
+                    assert!(world.remove_resource::<BackendWindowHandles>().is_some());
+                    world.insert_resource(replacement_registry);
+                }
+            }
+            evidence.lock().unwrap().mutation_applied = true;
+        });
+    }
+    exit.request_exit();
+}
 
-    if frame.state != RenderFrameState::Submitted {
-        return;
+fn observe_smoke(
+    observation: DesktopPresentationObservation<'_>,
+    deadline: Instant,
+    target_authority: &BackendWindowHandles,
+    evidence: &Mutex<SmokeEvidence>,
+    mutation: RetirementMutation,
+) -> DesktopPresentationControl {
+    let mut evidence = evidence.lock().unwrap();
+    if observation.now() >= deadline {
+        evidence.timed_out = true;
+        return DesktopPresentationControl::Exit(AppExit::Requested);
     }
+    let Some(presented) = observation.presented_frame() else {
+        return DesktopPresentationControl::Continue;
+    };
+    assert_eq!(presented.window_id(), WindowId::PRIMARY);
+    assert_eq!(
+        presented.runtime_generation(),
+        observation.runtime_generation()
+    );
+    let backend = observation.wgpu();
+    assert_eq!(presented.backend_instance_id(), backend.instance_id());
+    assert_eq!(presented.device_epoch(), backend.device_epoch());
     let transaction = backend.frame_transaction_stats();
     assert_eq!(
+        transaction.app_frame_index(),
+        Some(presented.app_frame_index())
+    );
+    assert_eq!(
         transaction.render_transaction_frame_index(),
-        Some(frame.index)
+        Some(presented.render_transaction_frame_index())
     );
     assert_eq!(transaction.packet_admissions(), 1);
     assert_eq!(transaction.packet_rejections(), 0);
@@ -237,76 +407,62 @@ fn verify_resize_then_exit(
     assert_eq!(transaction.surface_acquires(), 1);
     assert_eq!(transaction.queue_submissions(), 1);
     assert_eq!(transaction.presents(), 1);
-
-    let resized = Extent2d::new(400, 240).expect("smoke extent is non-zero");
-    if !state.resize_requested {
-        if let Some(mut window) = windows.iter_mut().next() {
-            window.resolution.physical_width = resized.width;
-            window.resolution.physical_height = resized.height;
-            state.resize_requested = true;
+    let world = observation
+        .world()
+        .expect("a presentation requires a live Runtime");
+    let frame = world.resource::<RenderFrame>();
+    assert_eq!(frame.index, presented.render_transaction_frame_index());
+    assert_eq!(frame.state, RenderFrameState::Submitted);
+    if evidence.mutation_applied {
+        assert!(
+            !mutation.refuses_capture(),
+            "a foreign or missing ingress must refuse capture"
+        );
+        evidence.post_mutation_presented = true;
+        let published = world.resource::<WgpuRenderObservation>();
+        assert_eq!(published.instance_id(), backend.instance_id());
+        assert_eq!(published.device_epoch(), backend.device_epoch());
+        assert_eq!(published.frame_transaction_stats(), transaction);
+        if mutation == RetirementMutation::ReplaceWindowRegistry {
+            assert!(
+                !world
+                    .resource::<BackendWindowHandles>()
+                    .shares_authority_with(target_authority)
+            );
         }
-        return;
     }
-
-    if backend.configured_surface_extent(WindowId::PRIMARY) == Some(resized) {
-        state.resize_observed.store(true, Ordering::SeqCst);
-        if state.drop_backend_before_exit {
-            let backend_removed = Arc::clone(&state.backend_removed);
-            commands.queue(move |world: &mut World| {
-                backend_removed.store(
-                    world.remove_resource::<WgpuRenderBackend>().is_some(),
-                    Ordering::SeqCst,
-                );
-            });
+    let target = target_authority.snapshot(presented.window_id()).unwrap();
+    assert_eq!(target.phase, WindowTargetPhase::Active);
+    assert_eq!(
+        target.surface_generation,
+        Some(presented.surface_generation())
+    );
+    assert!(target.surface_active);
+    assert!(target.provider_present);
+    assert!(!target.native_destroyed);
+    assert_eq!(target.fault, None);
+    // This is a fact copied from the actual surface owner, not the next requested ECS extent.
+    match backend.configured_surface_extent(presented.window_id()) {
+        Some(INITIAL_EXTENT) if evidence.initial.is_none() => {
+            evidence.initial = Some(presented);
         }
-        exit.request_exit();
+        Some(RESIZED_EXTENT) => {
+            assert!(
+                evidence.initial.is_some(),
+                "resize cannot replace the first native presentation"
+            );
+            if evidence.resized.is_none() {
+                evidence.resized = Some(presented);
+            }
+        }
+        _ => {}
     }
-}
-
-fn enforce_smoke_deadline(
-    now: Instant,
-    deadline: Instant,
-    timed_out: &AtomicBool,
-    exit: &mut AppExitRequests,
-) -> bool {
-    if now < deadline {
-        return false;
-    }
-    timed_out.store(true, Ordering::SeqCst);
-    exit.request_exit();
-    true
+    DesktopPresentationControl::Continue
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn timeout_before_first_submission_requests_failure_exit() {
-        let now = Instant::now();
-        let timed_out = AtomicBool::new(false);
-        let mut exit = AppExitRequests::default();
-
-        assert!(enforce_smoke_deadline(now, now, &timed_out, &mut exit));
-        assert!(timed_out.load(Ordering::SeqCst));
-        assert_eq!(exit.requested(), Some(AppExit::Requested));
-    }
-
-    #[test]
-    fn active_deadline_does_not_request_exit() {
-        let now = Instant::now();
-        let timed_out = AtomicBool::new(false);
-        let mut exit = AppExitRequests::default();
-
-        assert!(!enforce_smoke_deadline(
-            now,
-            now + Duration::from_secs(1),
-            &timed_out,
-            &mut exit
-        ));
-        assert!(!timed_out.load(Ordering::SeqCst));
-        assert_eq!(exit.requested(), None);
-    }
 
     #[test]
     fn invocation_routes_parent_and_child_modes_without_recursion() {
@@ -317,14 +473,22 @@ mod tests {
         assert_eq!(
             SmokeInvocation::from_args([
                 "--smoke-child".to_owned(),
-                "--drop-backend-before-exit".to_owned(),
+                "--remove-render-ingress-before-exit".to_owned(),
             ])
             .unwrap(),
             SmokeInvocation {
                 child: true,
-                drop_backend_before_exit: true,
+                mutation: RetirementMutation::RemoveRenderIngress,
             }
         );
         assert!(SmokeInvocation::from_args(["--unknown".to_owned()]).is_err());
+        assert!(
+            SmokeInvocation::from_args([
+                "--remove-render-ingress-before-exit".to_owned(),
+                "--replace-render-ingress-before-exit".to_owned(),
+            ])
+            .is_err()
+        );
+        assert!(SmokeInvocation::from_args(["--drop-backend-before-exit".to_owned()]).is_err());
     }
 }

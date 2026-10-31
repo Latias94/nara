@@ -6,7 +6,6 @@ use std::{
     sync::{Arc, Mutex, MutexGuard},
 };
 
-use nara_app::RuntimeDriverScope;
 use nara_ecs::Resource;
 use raw_window_handle::{
     DisplayHandle, HandleError, HasDisplayHandle, HasWindowHandle, WindowHandle,
@@ -196,52 +195,24 @@ pub enum WindowTargetError {
     ProviderReleaseBeforeSurfaceRetirement { window_id: WindowId },
 }
 
-#[derive(Debug, Error, Clone, Copy, PartialEq, Eq)]
-pub enum WindowSurfaceRetirementError {
-    #[error("window surface retirement driver {driver} failed")]
-    DriverFailed { driver: &'static str },
+/// Declares that this product requires a concrete native presentation owner.
+///
+/// Platform-only runners reject this requirement. It grants no backend access or retirement
+/// operation; only the original native session can establish physical completion.
+#[derive(Debug, Clone, Copy, Resource)]
+pub struct WindowPresentationRequirement {
+    backend: &'static str,
 }
 
-/// Backend-neutral bridge used by a platform adapter to retire selected surfaces.
-#[derive(Clone, Copy, Resource)]
-pub struct WindowSurfaceRetirementDriver {
-    driver: &'static str,
-    retire:
-        fn(&mut RuntimeDriverScope<'_>, &[WindowId]) -> Result<(), WindowSurfaceRetirementError>,
-}
-
-impl WindowSurfaceRetirementDriver {
+impl WindowPresentationRequirement {
     #[must_use]
-    pub const fn new(
-        driver: &'static str,
-        retire: fn(
-            &mut RuntimeDriverScope<'_>,
-            &[WindowId],
-        ) -> Result<(), WindowSurfaceRetirementError>,
-    ) -> Self {
-        Self { driver, retire }
+    pub const fn new(backend: &'static str) -> Self {
+        Self { backend }
     }
 
     #[must_use]
-    pub const fn driver(self) -> &'static str {
-        self.driver
-    }
-
-    pub fn retire_targets(
-        self,
-        scope: &mut RuntimeDriverScope<'_>,
-        window_ids: &[WindowId],
-    ) -> Result<(), WindowSurfaceRetirementError> {
-        (self.retire)(scope, window_ids)
-    }
-}
-
-impl fmt::Debug for WindowSurfaceRetirementDriver {
-    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-        formatter
-            .debug_struct("WindowSurfaceRetirementDriver")
-            .field("driver", &self.driver)
-            .finish_non_exhaustive()
+    pub const fn backend(self) -> &'static str {
+        self.backend
     }
 }
 

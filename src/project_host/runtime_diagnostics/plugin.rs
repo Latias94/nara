@@ -1,17 +1,16 @@
 //! Product lowering for typed plugin failures. App retains invocation and cleanup authority.
 
-use nara_app::{
-    PluginDomainError, PluginError, PluginFailure, PluginFailureReport, PluginInstantiationError,
-    PluginPrepareError, RuntimeConstructionError,
-};
+use nara_app::{PluginDomainError, PluginError, PluginFailure, PluginFailureReport};
+#[cfg(all(feature = "runtime-2d", feature = "serde"))]
+use nara_app::{PluginInstantiationError, PluginPrepareError, RuntimeConstructionError};
 use nara_diagnostic::{Diagnostic, DiagnosticCode, DiagnosticReport, SafeSummary};
 
-use super::{
-    admission_failure_report, attach_identifier, failure_diagnostic, plugin_hook_id,
-    plugin_mutation_id, single_diagnostic,
-};
+#[cfg(all(feature = "runtime-2d", feature = "serde"))]
+use super::{admission_failure_report, single_diagnostic};
+use super::{attach_identifier, failure_diagnostic, plugin_hook_id, plugin_mutation_id};
 
-pub(super) fn runtime_construction_failure_report(
+#[cfg(all(feature = "runtime-2d", feature = "serde"))]
+pub(in crate::project_host) fn runtime_construction_failure_report(
     error: &RuntimeConstructionError,
     failure: Option<&PluginFailure>,
 ) -> DiagnosticReport {
@@ -54,6 +53,7 @@ fn domain_diagnostic(
     }
 }
 
+#[cfg(all(feature = "runtime-2d", feature = "serde"))]
 fn plugin_prepare_failure_report(error: &PluginPrepareError) -> DiagnosticReport {
     let (reason, plugin, domain) = match error {
         PluginPrepareError::Failed { plugin, source } => ("failed", *plugin, Some(*source)),
@@ -156,7 +156,7 @@ fn plugin_hook_failure_diagnostic(
     diagnostic
 }
 
-pub(super) fn append_plugin_shutdown_diagnostics(
+pub(in crate::project_host) fn append_plugin_shutdown_diagnostics(
     diagnostics: &mut DiagnosticReport,
     report: Option<&PluginFailureReport>,
 ) {

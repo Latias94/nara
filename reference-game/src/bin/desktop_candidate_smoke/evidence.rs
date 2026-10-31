@@ -1,6 +1,8 @@
 use nara::{
     prelude::World,
-    render_wgpu::WgpuRenderBackend,
+    project_host::{
+        DesktopPresentationObservation, DesktopTelemetrySealOutcome, DesktopTelemetrySealReport,
+    },
     ui_render::advanced::{PresentedUiObservation, PresentedUiWgpuFacts},
 };
 use nara_reference_game::ReferenceUiObservation;
@@ -26,14 +28,14 @@ impl CandidateSmokeEvidence {
     }
 
     pub(super) fn capture(
-        backend: &WgpuRenderBackend,
+        report: &DesktopTelemetrySealReport,
         armed: ArmedCandidate,
         presented_completion: CandidateCompletionSample,
         completion_samples: &[CandidateCompletionSample],
     ) -> Result<Self, &'static str> {
         Ok(Self {
             backend: CandidateBackendObservation::capture(
-                backend,
+                report,
                 &armed,
                 presented_completion,
                 completion_samples,
@@ -69,6 +71,7 @@ impl ArmedCandidate {
     pub(super) fn capture(
         world: &World,
         presented: PresentedUiObservation,
+        observation: &DesktopPresentationObservation<'_>,
     ) -> Result<Option<Self>, &'static str> {
         let Some(wgpu) = presented.wgpu() else {
             return Ok(None);
@@ -88,13 +91,24 @@ impl ArmedCandidate {
             return Ok(None);
         }
 
-        let backend = world.resource::<WgpuRenderBackend>();
-        if backend.frame_completion_stats().lost_samples() != 0 {
+        let Some(frame) = observation.presented_frame() else {
+            return Ok(None);
+        };
+        if frame.runtime_generation() != observation.runtime_generation()
+            || frame.app_frame_index() != wgpu.app_frame_index()
+            || frame.render_transaction_frame_index() != wgpu.render_transaction_frame_index()
+        {
+            return Ok(None);
+        }
+        let backend = observation.wgpu();
+        if observation.frame_completion_stats().lost_samples() != 0 {
             return Err("desktop candidate lost a GPU completion before measurement armed");
         }
         let backend_generation = presented.backend_generation();
         if backend.instance_id() != backend_generation.backend_instance_id()
             || backend.device_epoch() != backend_generation.device_epoch()
+            || frame.backend_instance_id() != backend_generation.backend_instance_id()
+            || frame.device_epoch() != backend_generation.device_epoch()
         {
             return Err(
                 "desktop candidate presented observation belongs to a retired WGPU generation",
@@ -115,21 +129,27 @@ impl ArmedCandidate {
 
 impl CandidateBackendObservation {
     fn capture(
-        backend: &WgpuRenderBackend,
+        report: &DesktopTelemetrySealReport,
         armed: &ArmedCandidate,
         presented_completion: CandidateCompletionSample,
         completion_samples: &[CandidateCompletionSample],
     ) -> Result<Self, &'static str> {
-        let completion = backend.frame_completion_stats();
-        let resources = backend.gpu_resource_stats();
-        if backend.instance_id() != armed.identity.backend_instance_id()
-            || backend.device_epoch() != armed.identity.device_epoch()
+        if report.outcome() != DesktopTelemetrySealOutcome::Complete {
+            return Err(
+                "desktop candidate GPU telemetry did not seal before its original deadline",
+            );
+        }
+        let completion = report.frame_completion_stats();
+        let resources = report.gpu_resource_stats();
+        if report.backend_instance_id() != armed.identity.backend_instance_id()
+            || report.device_epoch() != armed.identity.device_epoch()
             || completion.device_epoch() != armed.identity.device_epoch()
             || resources.device_epoch() != armed.identity.device_epoch()
         {
             return Err("desktop candidate WGPU generation changed during measurement");
         }
-        if completion.lost_samples() != 0
+        if !completion.enabled()
+            || completion.lost_samples() != 0
             || completion.pending_samples() != 0
             || completion.buffered_samples() != 0
         {

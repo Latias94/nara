@@ -2,6 +2,8 @@
 
 #[cfg(feature = "accessibility")]
 mod accessibility;
+#[cfg(all(test, target_os = "windows"))]
+mod native_tests;
 mod window_mode;
 
 #[cfg(feature = "accessibility")]
@@ -12,11 +14,43 @@ pub use accessibility::{
     WinitAccessibilitySuspensionReceipt, WinitAccessibilityUpdate,
 };
 
-#[cfg(feature = "platform-accessibility")]
 #[doc(hidden)]
 pub mod __private {
+    #[cfg(feature = "platform-accessibility")]
     pub use super::accessibility::__private::*;
+
+    use super::{AppExit, AppRunError, BackendWindowHandles, Instant, RuntimeInstance, WindowId};
+
+    /// Local presentation custody supplied by the concrete desktop assembly.
+    ///
+    /// Implementations retain refused owned results and continue servicing logical close after
+    /// capture admission stops. Physical retirement must remain driveable after Runtime Stop.
+    pub trait __WinitPresentationDriver {
+        fn maintain(
+            &mut self,
+            runtime: &mut RuntimeInstance,
+            handles: &BackendWindowHandles,
+            now: Instant,
+        ) -> Result<__WinitPresentationProgress, AppRunError>;
+
+        /// `true` acknowledges actual graphics, submission and surface retirement.
+        fn retire(
+            &mut self,
+            runtime: &mut RuntimeInstance,
+            handles: &BackendWindowHandles,
+            window_ids: &[WindowId],
+            now: Instant,
+        ) -> Result<bool, AppRunError>;
+    }
+
+    #[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
+    pub struct __WinitPresentationProgress {
+        pub exit: Option<AppExit>,
+        pub next_wake: Option<Instant>,
+    }
 }
+
+use __private::{__WinitPresentationDriver, __WinitPresentationProgress};
 
 #[cfg(feature = "platform-accessibility")]
 use accessibility::WinitPlatformAccessibilitySession;
@@ -39,7 +73,10 @@ use nara_input::{
 };
 use nara_window::{
     Window, WindowEvent, WindowId, WindowResolution,
-    backend::{BackendWindowHandles, WindowHandleProvider, WindowSurfaceRetirementDriver},
+    backend::{
+        BackendWindowHandles, WindowHandleProvider, WindowPresentationRequirement,
+        WindowTargetPhase,
+    },
     push_window_driver_event,
 };
 use winit::{
@@ -53,19 +90,26 @@ use winit::{
     window::{Window as WinitWindow, WindowId as WinitWindowId},
 };
 
-const NATIVE_DESTROY_TIMEOUT: Duration = Duration::from_secs(5);
-const RUNTIME_CLOSE_POLL_INTERVAL: Duration = Duration::from_millis(10);
+#[cfg(any(
+    target_os = "windows",
+    target_os = "macos",
+    target_os = "linux",
+    target_os = "android",
+    target_os = "freebsd",
+    target_os = "dragonfly",
+    target_os = "netbsd",
+    target_os = "openbsd"
+))]
+use winit::platform::pump_events::{EventLoopExtPumpEvents, PumpStatus};
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum NativeShutdownAction {
-    WaitUntil(Instant),
-    Complete,
-    TimedOut,
-}
+const DEFAULT_NATIVE_RETIREMENT_BUDGET: Duration = Duration::from_secs(5);
+const RUNTIME_CLOSE_POLL_INTERVAL: Duration = Duration::from_millis(10);
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum EventLoopDirective {
     None,
+    Poll,
+    Wait,
     WaitUntil(Instant),
     Exit,
 }
@@ -73,15 +117,16 @@ enum EventLoopDirective {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum WinitShutdownState {
     Running,
-    WaitingForNative { deadline: Instant },
+    Retiring,
     Complete,
-    Aborted,
 }
 
 #[derive(Debug)]
 enum WinitUserEvent {
     #[cfg(feature = "platform-accessibility")]
     AccessibilityWake(WindowId),
+    #[cfg(all(test, target_os = "windows"))]
+    NativeTest(native_tests::NativeTestEvent),
 }
 
 impl WinitShutdownState {
@@ -102,34 +147,291 @@ impl WinitRunner {
         Self { control_flow }
     }
 
-    /// Drives one managed runtime from the native event loop.
-    pub fn run(self, runtime: &mut RuntimeInstance) -> Result<AppExit, AppRunError> {
-        let event_loop = EventLoop::<WinitUserEvent>::with_user_event()
-            .build()
-            .map_err(|error| {
-                AppRunError::runner(format!("failed to create winit event loop: {error}"))
-            })?;
-        event_loop.set_control_flow(self.control_flow.into_winit());
-
-        let mut state = WinitApp::with_event_proxy(runtime, event_loop.create_proxy())?;
-        let run_result = event_loop.run_app(&mut state);
-        if let Err(error) = run_result {
-            state.record_primary_failure(AppRunError::runner(format!(
-                "winit event loop failed: {error}"
-            )));
-        }
-        state.finish_after_event_loop();
-
-        if let Some(error) = state.take_failure() {
-            return Err(error);
-        }
-        if state.runtime.state() != RuntimeState::Stopped {
-            return Err(AppRunError::runner(
-                "winit event loop ended before managed runtime shutdown completed",
+    /// Runs an explicit platform-only session with no presentation owner.
+    ///
+    /// A Runtime declaring a presentation requirement needs concrete presentation assembly
+    /// instead. An incomplete return retains all owners and must be driven again with `execute`.
+    #[must_use]
+    pub fn run(self, runtime: RuntimeInstance) -> WinitSession {
+        let expects_presentation = runtime
+            .world()
+            .contains_resource::<WindowPresentationRequirement>();
+        let mut app = WinitApp::new(
+            runtime,
+            Box::new(NoPresentationDriver),
+            self.control_flow,
+            DEFAULT_NATIVE_RETIREMENT_BUDGET,
+        );
+        if expects_presentation {
+            app.record_primary_failure(AppRunError::runner(
+                "platform-only Winit run cannot own an expected presentation backend",
             ));
         }
+        WinitSession::start(app)
+    }
 
-        Ok(state.exit)
+    #[doc(hidden)]
+    #[must_use]
+    pub fn __run_with_presentation(
+        self,
+        runtime: RuntimeInstance,
+        driver: Box<dyn __WinitPresentationDriver>,
+        native_retirement_budget: Duration,
+    ) -> WinitSession {
+        WinitSession::start(WinitApp::new(
+            runtime,
+            driver,
+            self.control_flow,
+            native_retirement_budget,
+        ))
+    }
+}
+
+/// The result of one finite retirement drive, or of the initial native run.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum WinitRunProgress {
+    Retired,
+    Incomplete,
+}
+
+/// A thread-bound native aggregate retaining the original event pump and target authority.
+///
+/// `execute` runs the application initially. After an incomplete exit it only advances retirement;
+/// it never recreates a window or resumes simulation. Dropping an unfinished session makes one
+/// finite close attempt, then aborts if native or Runtime custody still cannot be released.
+#[must_use = "an incomplete native session must retain and retire its owners"]
+pub struct WinitSession {
+    app: Option<WinitApp>,
+    event_loop: Option<EventLoop<WinitUserEvent>>,
+    executed: bool,
+}
+
+/// Terminal result and stopped Runtime, available only after all native owners have retired.
+#[derive(Debug)]
+pub struct WinitRetiredSession {
+    pub runtime: RuntimeInstance,
+    pub result: Result<AppExit, AppRunError>,
+}
+
+impl std::fmt::Debug for WinitSession {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter
+            .debug_struct("WinitSession")
+            .field("runtime", &self.app.as_ref().map(|app| &app.runtime))
+            .field("retired", &self.is_retired())
+            .field("retains_event_loop", &self.event_loop.is_some())
+            .finish_non_exhaustive()
+    }
+}
+
+impl WinitSession {
+    fn start(mut app: WinitApp) -> Self {
+        let event_loop = if app.primary_failure.is_none() {
+            match EventLoop::<WinitUserEvent>::with_user_event().build() {
+                Ok(event_loop) => {
+                    event_loop.set_control_flow(app.control_flow.into_winit());
+                    app.event_proxy = Some(event_loop.create_proxy());
+                    Some(event_loop)
+                }
+                Err(error) => {
+                    app.record_primary_failure(AppRunError::runner(format!(
+                        "failed to create winit event loop: {error}"
+                    )));
+                    None
+                }
+            }
+        } else {
+            None
+        };
+        let mut session = Self {
+            app: Some(app),
+            event_loop,
+            executed: false,
+        };
+        session.execute();
+        session
+    }
+
+    #[must_use]
+    pub fn runtime(&self) -> &RuntimeInstance {
+        // The extraction slot is emptied only while consuming a retired session.
+        &self
+            .app
+            .as_ref()
+            .expect("live session owns its Runtime")
+            .runtime
+    }
+
+    #[must_use]
+    pub fn is_retired(&self) -> bool {
+        self.app
+            .as_ref()
+            .is_none_or(|app| app.shutdown == WinitShutdownState::Complete)
+    }
+
+    /// Starts the initial run, or retries retirement under the original native affinity.
+    pub fn execute(&mut self) -> WinitRunProgress {
+        let Some(app) = self.app.as_mut() else {
+            return WinitRunProgress::Retired;
+        };
+        if app.shutdown == WinitShutdownState::Complete {
+            return WinitRunProgress::Retired;
+        }
+        if self.executed {
+            app.prepare_retirement_retry(Instant::now());
+        } else if app.primary_failure.is_some()
+            || !matches!(
+                app.runtime.state(),
+                RuntimeState::Running | RuntimeState::Paused
+            )
+        {
+            app.begin_shutdown_transition(Instant::now());
+        }
+        self.executed = true;
+
+        loop {
+            if let Some(event_loop) = self.event_loop.as_mut() {
+                #[cfg(any(
+                    target_os = "windows",
+                    target_os = "macos",
+                    target_os = "linux",
+                    target_os = "android",
+                    target_os = "freebsd",
+                    target_os = "dragonfly",
+                    target_os = "netbsd",
+                    target_os = "openbsd"
+                ))]
+                {
+                    app.boundary_serviced = false;
+                    let status = event_loop.pump_app_events(app.pump_timeout(Instant::now()), app);
+                    if !app.boundary_serviced {
+                        if app.shutdown.is_started() {
+                            app.poll_native_shutdown_once(Instant::now());
+                        } else {
+                            match app.maintain_transition(Instant::now()) {
+                                EventLoopDirective::Poll => {
+                                    event_loop.set_control_flow(ControlFlow::Poll)
+                                }
+                                EventLoopDirective::Wait => {
+                                    event_loop.set_control_flow(ControlFlow::Wait)
+                                }
+                                EventLoopDirective::WaitUntil(wake) => {
+                                    event_loop.set_control_flow(ControlFlow::WaitUntil(wake))
+                                }
+                                EventLoopDirective::None | EventLoopDirective::Exit => {}
+                            }
+                        }
+                    }
+                    if let PumpStatus::Exit(code) = status
+                        && app.shutdown != WinitShutdownState::Complete
+                    {
+                        app.record_primary_failure(AppRunError::runner(format!(
+                            "winit event pump exited before controlled retirement (code {code})"
+                        )));
+                        app.begin_shutdown_transition(Instant::now());
+                        return if app.shutdown == WinitShutdownState::Complete {
+                            WinitRunProgress::Retired
+                        } else {
+                            WinitRunProgress::Incomplete
+                        };
+                    }
+                }
+                #[cfg(not(any(
+                    target_os = "windows",
+                    target_os = "macos",
+                    target_os = "linux",
+                    target_os = "android",
+                    target_os = "freebsd",
+                    target_os = "dragonfly",
+                    target_os = "netbsd",
+                    target_os = "openbsd"
+                )))]
+                {
+                    let _ = event_loop;
+                    app.record_primary_failure(AppRunError::runner(
+                        "retained Winit event pumping is unavailable on this platform",
+                    ));
+                    app.begin_shutdown_transition(Instant::now());
+                    self.event_loop = None;
+                }
+            } else {
+                app.begin_shutdown_transition(Instant::now());
+                app.poll_native_shutdown_once(Instant::now());
+            }
+
+            if app.shutdown == WinitShutdownState::Complete {
+                return WinitRunProgress::Retired;
+            }
+            if app.retirement_drive_incomplete(Instant::now()) {
+                return WinitRunProgress::Incomplete;
+            }
+            if self.event_loop.is_none() {
+                std::thread::sleep(
+                    app.pump_timeout(Instant::now())
+                        .unwrap_or(RUNTIME_CLOSE_POLL_INTERVAL),
+                );
+            }
+        }
+    }
+
+    /// Extracts the final result without exposing an unfinished Runtime/native aggregate.
+    pub fn into_retired(mut self) -> Result<WinitRetiredSession, Self> {
+        if !self.is_retired() {
+            return Err(self);
+        }
+        let Some(app) = self.app.take() else {
+            return Err(self);
+        };
+        let result = app.failure().map_or(Ok(app.exit), Err);
+        Ok(WinitRetiredSession {
+            runtime: app.runtime,
+            result,
+        })
+    }
+}
+
+impl Drop for WinitSession {
+    fn drop(&mut self) {
+        if self.is_retired() {
+            return;
+        }
+        // Runtime quarantine cannot adopt this local driver, original pump and native owners.
+        if std::thread::panicking() {
+            std::process::abort();
+        }
+        let attempt = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            if let Some(app) = self.app.as_mut() {
+                app.begin_shutdown_transition(Instant::now());
+            }
+            self.execute()
+        }));
+        if attempt.is_err() || !self.is_retired() {
+            std::process::abort();
+        }
+    }
+}
+
+/// An explicit platform-only control, never selected by inspecting missing render resources.
+struct NoPresentationDriver;
+
+impl __WinitPresentationDriver for NoPresentationDriver {
+    fn maintain(
+        &mut self,
+        _runtime: &mut RuntimeInstance,
+        _handles: &BackendWindowHandles,
+        _now: Instant,
+    ) -> Result<__WinitPresentationProgress, AppRunError> {
+        Ok(__WinitPresentationProgress::default())
+    }
+
+    fn retire(
+        &mut self,
+        _runtime: &mut RuntimeInstance,
+        _handles: &BackendWindowHandles,
+        _window_ids: &[WindowId],
+        _now: Instant,
+    ) -> Result<bool, AppRunError> {
+        Ok(true)
     }
 }
 
@@ -144,7 +446,9 @@ impl Default for WinitRunner {
 /// Event-loop scheduling mode exposed without leaking winit types into nara APIs.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum WinitControlFlow {
+    /// Drive Runtime frames continuously at native service boundaries.
     Poll,
+    /// Drive frames for native window/input demand; service presentation wakes without a frame.
     Wait,
 }
 
@@ -157,18 +461,28 @@ impl WinitControlFlow {
     }
 }
 
-struct WinitApp<'runtime> {
-    runtime: &'runtime mut RuntimeInstance,
+struct WinitApp {
+    runtime: RuntimeInstance,
+    presentation: Box<dyn __WinitPresentationDriver>,
     nara_windows_by_winit: HashMap<WinitWindowId, WindowId>,
     platform_windows: HashMap<WindowId, Arc<WinitWindow>>,
     owned_window_ids: BTreeSet<WindowId>,
     last_frame: Instant,
+    frame_requested: bool,
     exit: AppExit,
     primary_failure: Option<AppRunError>,
+    presentation_failure: Option<AppRunError>,
     runtime_close_failure: Option<AppRunError>,
     native_retirement_failure: Option<AppRunError>,
     backend_windows: BackendWindowHandles,
     shutdown: WinitShutdownState,
+    control_flow: WinitControlFlow,
+    native_retirement_budget: Duration,
+    retirement_deadline: Option<Instant>,
+    presentation_next_wake: Option<Instant>,
+    presentation_retired: bool,
+    providers_released: bool,
+    boundary_serviced: bool,
     runtime_close_incomplete_observed: bool,
     input_gate: WinitInputGate,
     input_window_id: WindowId,
@@ -262,21 +576,23 @@ impl WinitInputGate {
     }
 }
 
-impl<'runtime> WinitApp<'runtime> {
-    #[cfg(test)]
-    fn new(runtime: &'runtime mut RuntimeInstance) -> Result<Self, AppRunError> {
-        Self::with_session(runtime)
-    }
-
-    fn with_session(runtime: &'runtime mut RuntimeInstance) -> Result<Self, AppRunError> {
+impl WinitApp {
+    fn new(
+        runtime: RuntimeInstance,
+        presentation: Box<dyn __WinitPresentationDriver>,
+        control_flow: WinitControlFlow,
+        native_retirement_budget: Duration,
+    ) -> Self {
+        let mut primary_failure = None;
         #[cfg(feature = "platform-accessibility")]
         let accessibility_activation =
             match accessibility::__private::capture_winit_accessibility_activation(runtime.world())
             {
                 accessibility::__private::WinitAccessibilityActivation::Partial(error) => {
-                    return Err(AppRunError::runner(format!(
+                    primary_failure = Some(AppRunError::runner(format!(
                         "Winit accessibility contribution is partial: {error}"
                     )));
+                    accessibility::__private::WinitAccessibilityActivation::Disabled
                 }
                 activation => activation,
             };
@@ -284,19 +600,36 @@ impl<'runtime> WinitApp<'runtime> {
             .world()
             .get_resource::<BackendWindowHandles>()
             .cloned()
-            .ok_or_else(|| AppRunError::runner("backend window authority is missing"))?;
-        Ok(Self {
+            .unwrap_or_else(|| {
+                primary_failure.get_or_insert_with(|| {
+                    AppRunError::runner("backend window authority is missing")
+                });
+                // No native target exists at construction. This private empty authority cannot
+                // replace a registered authority or establish presentation retirement.
+                BackendWindowHandles::default()
+            });
+        Self {
             runtime,
+            presentation,
             nara_windows_by_winit: HashMap::new(),
             platform_windows: HashMap::new(),
             owned_window_ids: BTreeSet::new(),
             last_frame: Instant::now(),
+            frame_requested: true,
             exit: AppExit::Success,
-            primary_failure: None,
+            primary_failure,
+            presentation_failure: None,
             runtime_close_failure: None,
             native_retirement_failure: None,
             backend_windows,
             shutdown: WinitShutdownState::Running,
+            control_flow,
+            native_retirement_budget,
+            retirement_deadline: None,
+            presentation_next_wake: None,
+            presentation_retired: false,
+            providers_released: false,
+            boundary_serviced: false,
             runtime_close_incomplete_observed: false,
             input_gate: WinitInputGate::default(),
             input_window_id: WindowId::PRIMARY,
@@ -305,23 +638,14 @@ impl<'runtime> WinitApp<'runtime> {
             accessibility_activation,
             #[cfg(feature = "platform-accessibility")]
             accessibility_sessions: HashMap::new(),
-        })
-    }
-
-    fn with_event_proxy(
-        runtime: &'runtime mut RuntimeInstance,
-        event_proxy: EventLoopProxy<WinitUserEvent>,
-    ) -> Result<Self, AppRunError> {
-        let mut app = Self::with_session(runtime)?;
-        app.event_proxy = Some(event_proxy);
-        Ok(app)
+        }
     }
 
     fn with_driver_scope<R: Copy, E>(
         &mut self,
         operation: impl FnOnce(&mut RuntimeDriverScope<'_>) -> Result<R, E>,
     ) -> Result<R, AppRunError> {
-        with_runtime_driver_scope(self.runtime, operation)
+        with_runtime_driver_scope(&mut self.runtime, operation)
     }
 
     fn create_primary_window(&mut self, event_loop: &ActiveEventLoop) -> Result<(), AppRunError> {
@@ -329,7 +653,7 @@ impl<'runtime> WinitApp<'runtime> {
             return Ok(());
         }
 
-        let window = configured_primary_window(self.runtime)?;
+        let window = configured_primary_window(&self.runtime)?;
         let window_id = window.id;
         if self.backend_windows.is_registered(window_id) {
             return Err(AppRunError::runner(
@@ -358,6 +682,19 @@ impl<'runtime> WinitApp<'runtime> {
             AppRunError::runner(format!("failed to create native window: {error}"))
         })?;
         let platform_window = Arc::new(platform_window);
+        // Retain every created native target even if a subsequent registration or input operation
+        // fails. Its mapping survives until the actual Destroyed callback on this pump.
+        self.nara_windows_by_winit
+            .insert(platform_window.id(), window_id);
+        self.platform_windows
+            .insert(window_id, platform_window.clone());
+        self.backend_windows
+            .insert(
+                window_id,
+                WindowHandleProvider::new(platform_window.clone()),
+            )
+            .map_err(|_| AppRunError::runner("native window target is already registered"))?;
+        self.owned_window_ids.insert(window_id);
         #[cfg(feature = "platform-accessibility")]
         if self.accessibility_activation.is_enabled() {
             let event_proxy = self
@@ -374,16 +711,6 @@ impl<'runtime> WinitApp<'runtime> {
             self.accessibility_sessions.insert(window_id, session);
             platform_window.set_visible(true);
         }
-        let provider = WindowHandleProvider::new(platform_window.clone());
-
-        self.backend_windows
-            .insert(window_id, provider)
-            .map_err(|_| AppRunError::runner("native window target is already registered"))?;
-        self.owned_window_ids.insert(window_id);
-        self.nara_windows_by_winit
-            .insert(platform_window.id(), window_id);
-        self.platform_windows
-            .insert(window_id, platform_window.clone());
         self.connect_window_input(window_id)?;
         self.with_driver_scope(|scope| {
             push_window_driver_event(scope, WindowEvent::Created { window_id })
@@ -406,39 +733,99 @@ impl<'runtime> WinitApp<'runtime> {
     }
 
     fn run_frame(&mut self, delta: Duration, event_loop: &ActiveEventLoop) {
-        let outcome = match self.runtime.drive(delta) {
+        let directive = self.run_frame_transition(delta);
+        apply_event_loop_directive(event_loop, directive);
+    }
+
+    fn run_frame_transition(&mut self, delta: Duration) -> EventLoopDirective {
+        self.frame_requested = false;
+        let outcome = self.runtime.drive(delta);
+        let now = Instant::now();
+        // Return original presentation/UI facts before interpreting success, failure or exit.
+        let presentation_shutdown = self.maintain_presentation(now);
+        let outcome = match outcome {
             Ok(outcome) => outcome,
             Err(error) => {
-                self.fail(event_loop, runtime_drive_error(error));
-                return;
+                self.record_primary_failure(runtime_drive_error(error));
+                return self.begin_shutdown_transition(now);
             }
         };
 
-        #[cfg(feature = "platform-accessibility")]
-        if let Err(error) = self.synchronize_platform_accessibility() {
-            self.fail(event_loop, error);
-            return;
+        if presentation_shutdown {
+            return self.begin_shutdown_transition(now);
         }
 
         if let Some(exit) = outcome.frame().and_then(|frame| frame.exit) {
             self.exit = exit;
-            self.begin_shutdown(event_loop);
-            return;
+            return self.begin_shutdown_transition(now);
         }
 
         if matches!(
             outcome.state(),
             RuntimeState::Stopping | RuntimeState::CloseIncomplete | RuntimeState::Stopped
         ) {
-            if outcome.state() == RuntimeState::CloseIncomplete {
-                self.record_runtime_close_incomplete();
-            }
-            self.begin_shutdown(event_loop);
-            return;
+            return self.begin_shutdown_transition(now);
         }
 
-        for window in self.platform_windows.values() {
-            window.request_redraw();
+        #[cfg(feature = "platform-accessibility")]
+        if let Err(error) = self.synchronize_platform_accessibility() {
+            self.record_primary_failure(error);
+            return self.begin_shutdown_transition(now);
+        }
+
+        if self.control_flow == WinitControlFlow::Poll {
+            for window in self.platform_windows.values() {
+                window.request_redraw();
+            }
+        }
+        self.running_directive()
+    }
+
+    fn maintain_transition(&mut self, now: Instant) -> EventLoopDirective {
+        let shutdown_requested = self.maintain_presentation(now);
+        if self.runtime.state() == RuntimeState::Faulted
+            && let Some(fault) = self.runtime.fault()
+        {
+            self.record_primary_failure(runtime_fault_error(fault));
+        }
+        if shutdown_requested
+            || !matches!(
+                self.runtime.state(),
+                RuntimeState::Running | RuntimeState::Paused
+            )
+        {
+            self.begin_shutdown_transition(now)
+        } else {
+            self.running_directive()
+        }
+    }
+
+    fn maintain_presentation(&mut self, now: Instant) -> bool {
+        self.boundary_serviced = true;
+        match self
+            .presentation
+            .maintain(&mut self.runtime, &self.backend_windows, now)
+        {
+            Ok(progress) => {
+                self.presentation_next_wake = progress.next_wake;
+                if let Some(exit) = progress.exit {
+                    self.exit = exit;
+                    return true;
+                }
+                false
+            }
+            Err(error) => {
+                self.presentation_failure.get_or_insert(error);
+                true
+            }
+        }
+    }
+
+    fn running_directive(&self) -> EventLoopDirective {
+        match (self.control_flow, self.presentation_next_wake) {
+            (WinitControlFlow::Poll, _) => EventLoopDirective::Poll,
+            (WinitControlFlow::Wait, Some(wake)) => EventLoopDirective::WaitUntil(wake),
+            (WinitControlFlow::Wait, None) => EventLoopDirective::Wait,
         }
     }
 
@@ -535,6 +922,7 @@ impl<'runtime> WinitApp<'runtime> {
         if !should_process_window_event_during_shutdown(self.shutdown, &event) {
             return Ok(());
         }
+        self.frame_requested |= window_event_requests_frame(&event);
         self.input_window_id = window_id;
 
         match event {
@@ -789,30 +1177,53 @@ impl<'runtime> WinitApp<'runtime> {
         let Some(window_id) = self.nara_windows_by_winit.get(&winit_window_id).copied() else {
             return Ok(EventLoopDirective::None);
         };
-        let externally_destroyed = !self.shutdown.is_started();
-        self.backend_windows
-            .mark_native_destroyed(window_id)
-            .map_err(|_| AppRunError::runner("native window target is not registered"))?;
+        let registered = self.owned_window_ids.contains(&window_id);
+        let externally_destroyed = if registered {
+            self.backend_windows
+                .snapshot(window_id)
+                .map_err(|_| AppRunError::runner("native window target is not registered"))?
+                .phase
+                != WindowTargetPhase::ProviderReleased
+        } else {
+            true
+        };
+        if registered {
+            self.backend_windows
+                .mark_native_destroyed(window_id)
+                .map_err(|_| AppRunError::runner("native window target is not registered"))?;
+        }
         if externally_destroyed {
-            if self.input_timeline_installed() {
-                self.with_driver_scope(|scope| retire_window_input(scope, window_id))?;
+            let error =
+                AppRunError::runner("native window was destroyed before controlled retirement");
+            if self.shutdown.is_started() {
+                self.record_native_retirement_failure(error);
+            } else {
+                self.record_primary_failure(error);
             }
-            self.with_driver_scope(|scope| {
+        }
+        if externally_destroyed && !self.shutdown.is_started() {
+            if self.input_timeline_installed() {
+                if let Err(error) =
+                    self.with_driver_scope(|scope| retire_window_input(scope, window_id))
+                {
+                    self.record_primary_failure(error);
+                }
+            }
+            if let Err(error) = self.with_driver_scope(|scope| {
                 push_window_driver_event(scope, WindowEvent::Closed { window_id })
-            })?;
+            }) {
+                self.record_primary_failure(error);
+            }
         }
         self.platform_windows.remove(&window_id);
         self.nara_windows_by_winit.remove(&winit_window_id);
         #[cfg(feature = "platform-accessibility")]
         self.accessibility_sessions.remove(&window_id);
 
-        if externally_destroyed {
-            self.record_primary_failure(AppRunError::runner(
-                "native window was destroyed before controlled retirement",
-            ));
-            Ok(self.begin_shutdown_transition(now))
-        } else {
+        if self.shutdown.is_started() {
             Ok(self.poll_native_shutdown_transition(now))
+        } else {
+            Ok(self.begin_shutdown_transition(now))
         }
     }
 
@@ -833,11 +1244,17 @@ impl<'runtime> WinitApp<'runtime> {
         self.native_retirement_failure.get_or_insert(error);
     }
 
-    fn take_failure(&mut self) -> Option<AppRunError> {
+    fn failure(&self) -> Option<AppRunError> {
+        let terminal_close_failure = self
+            .runtime_close_result()
+            .err()
+            .filter(|error| self.runtime_close_failure.as_ref() != Some(error));
         [
-            self.primary_failure.take(),
-            self.runtime_close_failure.take(),
-            self.native_retirement_failure.take(),
+            self.primary_failure.clone(),
+            self.presentation_failure.clone(),
+            self.runtime_close_failure.clone(),
+            terminal_close_failure,
+            self.native_retirement_failure.clone(),
         ]
         .into_iter()
         .flatten()
@@ -851,37 +1268,53 @@ impl<'runtime> WinitApp<'runtime> {
 
     fn begin_shutdown_transition(&mut self, now: Instant) -> EventLoopDirective {
         match self.shutdown {
-            WinitShutdownState::Complete | WinitShutdownState::Aborted => {
-                return EventLoopDirective::Exit;
-            }
-            WinitShutdownState::WaitingForNative { .. } => {}
+            WinitShutdownState::Complete => return EventLoopDirective::Exit,
+            WinitShutdownState::Retiring => return self.poll_native_shutdown_transition(now),
             WinitShutdownState::Running => {
-                match retire_runtime_targets(
-                    self.runtime,
-                    &self.backend_windows,
-                    &self.owned_window_ids,
-                ) {
-                    Ok(Some(fault)) => self.record_primary_failure(runtime_fault_error(&fault)),
-                    Ok(None) => {}
-                    Err(error) => {
-                        self.record_native_retirement_failure(error);
-                        self.shutdown = WinitShutdownState::Aborted;
-                        return EventLoopDirective::Exit;
-                    }
+                self.shutdown = WinitShutdownState::Retiring;
+                self.retirement_deadline = Some(
+                    now.checked_add(self.native_retirement_budget)
+                        .unwrap_or(now),
+                );
+                let window_ids = self.owned_window_ids.iter().copied().collect::<Vec<_>>();
+                if self
+                    .backend_windows
+                    .request_retirements(&window_ids)
+                    .is_err()
+                {
+                    self.record_native_retirement_failure(AppRunError::runner(
+                        "owned native window target is not registered",
+                    ));
                 }
-
-                #[cfg(feature = "platform-accessibility")]
-                self.accessibility_sessions.clear();
-                self.platform_windows.clear();
+                if let Err(error) = retire_runtime_input(&mut self.runtime, &window_ids) {
+                    self.record_primary_failure(error);
+                }
                 if let Err(error) = self.begin_runtime_close() {
                     self.record_runtime_close_failure(error);
                 }
-                self.shutdown = WinitShutdownState::WaitingForNative {
-                    deadline: now + NATIVE_DESTROY_TIMEOUT,
-                };
             }
         }
-        self.poll_native_shutdown_transition(now)
+        self.poll_native_shutdown_once(now)
+    }
+
+    fn prepare_retirement_retry(&mut self, now: Instant) {
+        if self.shutdown == WinitShutdownState::Running {
+            self.begin_shutdown_transition(now);
+        }
+        self.retirement_deadline = Some(
+            now.checked_add(self.native_retirement_budget)
+                .unwrap_or(now),
+        );
+        if self.runtime.state() == RuntimeState::CloseIncomplete {
+            match self.runtime.request_control(RuntimeControl::RetryClose) {
+                RuntimeControlRequestResult::Accepted(_) => {
+                    self.runtime_close_incomplete_observed = false;
+                }
+                RuntimeControlRequestResult::Rejected(_) => self.record_runtime_close_failure(
+                    AppRunError::runner("managed runtime rejected explicit close retry"),
+                ),
+            }
+        }
     }
 
     fn poll_native_shutdown(&mut self, event_loop: &ActiveEventLoop, now: Instant) {
@@ -890,112 +1323,127 @@ impl<'runtime> WinitApp<'runtime> {
     }
 
     fn poll_native_shutdown_once(&mut self, now: Instant) -> EventLoopDirective {
-        if matches!(
-            self.shutdown,
-            WinitShutdownState::Complete | WinitShutdownState::Aborted
-        ) {
+        if self.shutdown == WinitShutdownState::Complete {
             return EventLoopDirective::Exit;
         }
-        if let Err(error) = self.poll_runtime_close() {
+        if self.shutdown == WinitShutdownState::Running {
+            return EventLoopDirective::None;
+        }
+        if let Err(error) = self.poll_runtime_close(now) {
             self.record_runtime_close_failure(error);
+        }
+        if !self.presentation_retired {
+            let window_ids = self.owned_window_ids.iter().copied().collect::<Vec<_>>();
+            match self.presentation.retire(
+                &mut self.runtime,
+                &self.backend_windows,
+                &window_ids,
+                now,
+            ) {
+                Ok(retired) => self.presentation_retired = retired,
+                Err(error) => self.record_native_retirement_failure(error),
+            }
+        }
+        if self.presentation_retired && !self.providers_released {
+            self.release_native_providers();
         }
         self.poll_native_shutdown_transition(now)
     }
 
+    fn release_native_providers(&mut self) {
+        let mut released = true;
+        for window_id in self.owned_window_ids.iter().copied().collect::<Vec<_>>() {
+            if self.backend_windows.release_provider(window_id).is_ok() {
+                #[cfg(feature = "platform-accessibility")]
+                self.accessibility_sessions.remove(&window_id);
+                // On Windows the last Arc Drop posts a destruction message. The Winit mapping
+                // deliberately survives this point until that message has actually been pumped.
+                self.platform_windows.remove(&window_id);
+            } else {
+                released = false;
+                self.record_native_retirement_failure(AppRunError::runner(
+                    "presentation driver acknowledged retirement before surface owner release",
+                ));
+            }
+        }
+        // A native creation followed by registration refusal still belongs to this session, but
+        // must never retire or acknowledge another adapter's registry entry.
+        self.platform_windows
+            .retain(|window_id, _| self.owned_window_ids.contains(window_id));
+        self.providers_released = released;
+    }
+
     fn poll_native_shutdown_transition(&mut self, now: Instant) -> EventLoopDirective {
-        let deadline = match self.shutdown {
-            WinitShutdownState::WaitingForNative { deadline } => deadline,
-            WinitShutdownState::Complete | WinitShutdownState::Aborted => {
+        if self.shutdown == WinitShutdownState::Complete {
+            return EventLoopDirective::Exit;
+        }
+        if self.shutdown == WinitShutdownState::Running {
+            return EventLoopDirective::None;
+        }
+        let native_destroyed = self
+            .backend_windows
+            .all_native_destroyed(self.owned_window_ids.iter().copied());
+        match native_destroyed {
+            Ok(true)
+                if self.nara_windows_by_winit.is_empty()
+                    && self.presentation_retired
+                    && self.providers_released
+                    && self.runtime.state() == RuntimeState::Stopped =>
+            {
+                if let Err(error) = self.runtime_close_result() {
+                    self.record_runtime_close_failure(error);
+                }
+                self.shutdown = WinitShutdownState::Complete;
                 return EventLoopDirective::Exit;
             }
-            WinitShutdownState::Running => return EventLoopDirective::None,
-        };
-        match native_shutdown_action(&self.backend_windows, &self.owned_window_ids, now, deadline) {
-            Ok(NativeShutdownAction::WaitUntil(deadline)) => {
-                let runtime_poll = now
-                    .checked_add(RUNTIME_CLOSE_POLL_INTERVAL)
-                    .unwrap_or(deadline);
-                EventLoopDirective::WaitUntil(deadline.min(runtime_poll))
-            }
-            Ok(NativeShutdownAction::Complete) => match self.runtime.state() {
-                RuntimeState::Stopped => {
-                    if let Err(error) = self.runtime_close_result() {
-                        self.record_runtime_close_failure(error);
-                    }
-                    self.shutdown = WinitShutdownState::Complete;
-                    EventLoopDirective::Exit
-                }
-                RuntimeState::Stopping => EventLoopDirective::WaitUntil(
-                    now.checked_add(RUNTIME_CLOSE_POLL_INTERVAL).unwrap_or(now),
-                ),
-                RuntimeState::CloseIncomplete => {
-                    self.record_runtime_close_incomplete();
-                    self.shutdown = WinitShutdownState::Aborted;
-                    EventLoopDirective::Exit
-                }
-                state => {
-                    self.record_runtime_close_failure(AppRunError::runner(format!(
-                        "managed runtime remained in {state:?} during platform shutdown"
-                    )));
-                    self.shutdown = WinitShutdownState::Aborted;
-                    EventLoopDirective::Exit
-                }
-            },
-            Ok(NativeShutdownAction::TimedOut) => {
-                self.record_native_retirement_failure(AppRunError::runner(
-                    "timed out waiting for native window destruction",
-                ));
-                self.shutdown = WinitShutdownState::Aborted;
-                EventLoopDirective::Exit
-            }
-            Err(_) => {
-                self.record_native_retirement_failure(AppRunError::runner(
-                    "native window target disappeared during shutdown",
-                ));
-                self.shutdown = WinitShutdownState::Aborted;
-                EventLoopDirective::Exit
+            Err(_) => self.record_native_retirement_failure(AppRunError::runner(
+                "native window target disappeared during shutdown",
+            )),
+            Ok(_) => {}
+        }
+        EventLoopDirective::WaitUntil(self.retirement_wake(now))
+    }
+
+    fn retirement_wake(&self, now: Instant) -> Instant {
+        let mut wake = now.checked_add(RUNTIME_CLOSE_POLL_INTERVAL).unwrap_or(now);
+        if let Some(deadline) = self.retirement_deadline {
+            wake = wake.min(deadline);
+        }
+        if let Some(presentation_wake) = self.presentation_next_wake {
+            wake = wake.min(presentation_wake);
+        }
+        wake
+    }
+
+    fn pump_timeout(&self, now: Instant) -> Option<Duration> {
+        if self.shutdown.is_started() {
+            Some(self.retirement_wake(now).saturating_duration_since(now))
+        } else {
+            match (self.control_flow, self.presentation_next_wake) {
+                (WinitControlFlow::Poll, _) => Some(Duration::ZERO),
+                (WinitControlFlow::Wait, Some(wake)) => Some(wake.saturating_duration_since(now)),
+                (WinitControlFlow::Wait, None) => None,
             }
         }
     }
 
-    fn finish_after_event_loop(&mut self) {
-        if self.shutdown == WinitShutdownState::Complete {
-            return;
+    fn retirement_drive_incomplete(&mut self, now: Instant) -> bool {
+        if self.shutdown != WinitShutdownState::Retiring {
+            return false;
         }
-
-        let retirement_result =
-            retire_runtime_targets(self.runtime, &self.backend_windows, &self.owned_window_ids);
-        self.platform_windows.clear();
-        self.nara_windows_by_winit.clear();
-        self.shutdown = WinitShutdownState::Aborted;
-        match self.runtime.state() {
-            RuntimeState::Stopping => {}
-            RuntimeState::CloseIncomplete => self.record_runtime_close_incomplete(),
-            RuntimeState::Stopped => {
-                if let Err(error) = self.runtime_close_result() {
-                    self.record_runtime_close_failure(error);
-                }
-            }
-            RuntimeState::Running | RuntimeState::Paused | RuntimeState::Faulted => {
-                if let Err(error) = self.begin_runtime_close() {
-                    self.record_runtime_close_failure(error);
-                }
-            }
-            RuntimeState::Stepping => self.record_runtime_close_failure(AppRunError::runner(
-                "managed runtime remained in an in-flight step after the event loop ended",
-            )),
+        let expired = self
+            .retirement_deadline
+            .is_some_and(|deadline| now >= deadline);
+        if expired {
+            self.record_native_retirement_failure(AppRunError::runner(
+                "native session retirement budget expired",
+            ));
         }
-        match retirement_result {
-            Ok(fault) => {
-                if let Some(fault) = fault {
-                    self.record_primary_failure(runtime_fault_error(&fault));
-                }
-                self.record_native_retirement_failure(AppRunError::runner(
-                    "winit event loop ended before controlled window retirement",
-                ));
-            }
-            Err(error) => self.record_native_retirement_failure(error),
+        let close_incomplete = self.runtime.state() == RuntimeState::CloseIncomplete;
+        if close_incomplete {
+            self.record_runtime_close_incomplete();
         }
+        expired || close_incomplete
     }
 
     fn begin_runtime_close(&mut self) -> Result<(), AppRunError> {
@@ -1003,8 +1451,11 @@ impl<'runtime> WinitApp<'runtime> {
             self.record_runtime_close_incomplete();
             return Ok(());
         }
+        if self.runtime.state() == RuntimeState::Stopping {
+            return Ok(());
+        }
         match self.runtime.request_control(RuntimeControl::Stop) {
-            RuntimeControlRequestResult::Accepted(_) => self.poll_runtime_close(),
+            RuntimeControlRequestResult::Accepted(_) => Ok(()),
             RuntimeControlRequestResult::Rejected(_)
                 if self.runtime.state() == RuntimeState::Stopped =>
             {
@@ -1016,20 +1467,28 @@ impl<'runtime> WinitApp<'runtime> {
         }
     }
 
-    fn poll_runtime_close(&mut self) -> Result<(), AppRunError> {
-        if self.runtime_close_incomplete_observed {
-            return Ok(());
-        }
+    fn poll_runtime_close(&mut self, now: Instant) -> Result<(), AppRunError> {
         if matches!(
             self.runtime.state(),
             RuntimeState::Stopping
                 | RuntimeState::Running
                 | RuntimeState::Paused
                 | RuntimeState::Faulted
+                | RuntimeState::CloseIncomplete
         ) {
-            self.runtime
-                .drive(Duration::ZERO)
-                .map_err(runtime_drive_error)?;
+            // CloseIncomplete is driven only after an explicit RetryClose request. Without that
+            // request it remains observational; maintenance still runs through the local driver.
+            if self.runtime.state() != RuntimeState::CloseIncomplete
+                || !self.runtime_close_incomplete_observed
+            {
+                let outcome = self.runtime.drive(Duration::ZERO);
+                self.maintain_presentation(Instant::now());
+                outcome.map_err(runtime_drive_error)?;
+            } else {
+                self.maintain_presentation(now);
+            }
+        } else {
+            self.maintain_presentation(now);
         }
         if self.runtime.state() == RuntimeState::CloseIncomplete {
             self.record_runtime_close_incomplete();
@@ -1066,6 +1525,8 @@ impl<'runtime> WinitApp<'runtime> {
 fn apply_event_loop_directive(event_loop: &ActiveEventLoop, directive: EventLoopDirective) {
     match directive {
         EventLoopDirective::None => {}
+        EventLoopDirective::Poll => event_loop.set_control_flow(ControlFlow::Poll),
+        EventLoopDirective::Wait => event_loop.set_control_flow(ControlFlow::Wait),
         EventLoopDirective::WaitUntil(deadline) => {
             event_loop.set_control_flow(ControlFlow::WaitUntil(deadline));
         }
@@ -1073,8 +1534,11 @@ fn apply_event_loop_directive(event_loop: &ActiveEventLoop, directive: EventLoop
     }
 }
 
-impl ApplicationHandler<WinitUserEvent> for WinitApp<'_> {
+impl ApplicationHandler<WinitUserEvent> for WinitApp {
     fn resumed(&mut self, event_loop: &ActiveEventLoop) {
+        if !self.shutdown.is_started() {
+            self.frame_requested = true;
+        }
         if let Err(error) = self.create_primary_window(event_loop) {
             self.fail(event_loop, error);
         }
@@ -1095,9 +1559,16 @@ impl ApplicationHandler<WinitUserEvent> for WinitApp<'_> {
         match event {
             #[cfg(feature = "platform-accessibility")]
             WinitUserEvent::AccessibilityWake(window_id) => {
+                if !self.shutdown.is_started() {
+                    self.frame_requested = true;
+                }
                 if let Err(error) = self.handle_accessibility_wake(window_id) {
                     self.fail(_event_loop, error);
                 }
+            }
+            #[cfg(all(test, target_os = "windows"))]
+            WinitUserEvent::NativeTest(event) => {
+                native_tests::handle_event(self, _event_loop, event)
             }
         }
     }
@@ -1108,25 +1579,30 @@ impl ApplicationHandler<WinitUserEvent> for WinitApp<'_> {
             return;
         }
         let now = Instant::now();
+        if self.control_flow == WinitControlFlow::Wait && !self.frame_requested {
+            let directive = self.maintain_transition(now);
+            apply_event_loop_directive(event_loop, directive);
+            return;
+        }
         let delta = now.saturating_duration_since(self.last_frame);
         self.last_frame = now;
         self.run_frame(delta, event_loop);
     }
 }
 
-fn native_shutdown_action(
-    backend_windows: &BackendWindowHandles,
-    owned_window_ids: &BTreeSet<WindowId>,
-    now: Instant,
-    deadline: Instant,
-) -> Result<NativeShutdownAction, nara_window::backend::WindowTargetError> {
-    if backend_windows.all_native_destroyed(owned_window_ids.iter().copied())? {
-        Ok(NativeShutdownAction::Complete)
-    } else if now >= deadline {
-        Ok(NativeShutdownAction::TimedOut)
-    } else {
-        Ok(NativeShutdownAction::WaitUntil(deadline))
-    }
+fn window_event_requests_frame(event: &WinitWindowEvent) -> bool {
+    matches!(
+        event,
+        WinitWindowEvent::CloseRequested
+            | WinitWindowEvent::Resized(_)
+            | WinitWindowEvent::Focused(_)
+            | WinitWindowEvent::ScaleFactorChanged { .. }
+            | WinitWindowEvent::RedrawRequested
+            | WinitWindowEvent::KeyboardInput { .. }
+            | WinitWindowEvent::MouseInput { .. }
+            | WinitWindowEvent::CursorMoved { .. }
+            | WinitWindowEvent::CursorLeft { .. }
+    )
 }
 
 fn should_process_window_event_during_shutdown(
@@ -1156,17 +1632,13 @@ fn retire_window_input(
     }
 }
 
-fn retire_runtime_targets(
+fn retire_runtime_input(
     runtime: &mut RuntimeInstance,
-    backend_windows: &BackendWindowHandles,
-    owned_window_ids: &BTreeSet<WindowId>,
-) -> Result<Option<RuntimeFault>, AppRunError> {
-    let owned_window_ids = owned_window_ids.iter().copied().collect::<Vec<_>>();
-    backend_windows
-        .request_retirements(&owned_window_ids)
-        .map_err(|_| AppRunError::runner("owned native window target is not registered"))?;
-    let mut post_operation_fault = None;
-    if runtime.world().contains_resource::<InputTimeline>() {
+    owned_window_ids: &[WindowId],
+) -> Result<(), AppRunError> {
+    if runtime.state() != RuntimeState::Stopped
+        && runtime.world().contains_resource::<InputTimeline>()
+    {
         let outcome = runtime
             .with_driver_scope(|scope| {
                 for window_id in owned_window_ids.iter().copied() {
@@ -1178,27 +1650,11 @@ fn retire_runtime_targets(
         outcome
             .output
             .map_err(|_| AppRunError::runner("input route retirement failed"))?;
-        post_operation_fault = outcome.post_operation_fault;
+        if let Some(fault) = outcome.post_operation_fault {
+            return Err(runtime_fault_error(&fault));
+        }
     }
-    let retirement_driver = runtime
-        .world()
-        .get_resource::<WindowSurfaceRetirementDriver>()
-        .copied();
-    if let Some(retirement_driver) = retirement_driver {
-        let outcome = runtime
-            .with_driver_scope(|scope| retirement_driver.retire_targets(scope, &owned_window_ids))
-            .map_err(runtime_scope_error)?;
-        outcome
-            .output
-            .map_err(|_| AppRunError::runner("renderer failed to retire owned window surfaces"))?;
-        post_operation_fault = post_operation_fault.or(outcome.post_operation_fault);
-    }
-    backend_windows
-        .release_retired_providers(owned_window_ids.iter().copied())
-        .map_err(|_| {
-            AppRunError::runner("renderer did not retire every surface before shutdown")
-        })?;
-    Ok(post_operation_fault)
+    Ok(())
 }
 
 fn configured_primary_window(runtime: &RuntimeInstance) -> Result<Window, AppRunError> {

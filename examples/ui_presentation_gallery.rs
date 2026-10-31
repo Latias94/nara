@@ -5,6 +5,7 @@ use nara::input::{
     ButtonTransitionPhase, InputPointerId, InputSeatId, InputWindowId,
     apply_gamepad_driver_input_at,
 };
+use nara::project_host::{DesktopRun, DesktopRunOptions};
 use nara::ui_render::advanced::{UiPreparedImages, UiPresentationPlanner};
 use nara::{advanced_prelude::*, backend_prelude::*};
 
@@ -17,14 +18,13 @@ mod presenter;
 #[path = "ui_presentation_gallery/probes.rs"]
 mod probes;
 
-#[path = "support/runtime_retirement.rs"]
-mod runtime_retirement;
+#[path = "support/desktop_run.rs"]
+mod desktop_run;
 
 use driver::{GalleryDriverInput, GalleryDriverOutput, GalleryDriverPort};
 use fixture::{GalleryImage, capture_prepared_image, setup_gallery, surface_id};
 use presenter::HeadlessTestPresenter;
 use probes::assert_owned_packet;
-use runtime_retirement::finish_runtime_after_winit;
 
 const DOMAIN: &str = "nara.example.ui-presentation-gallery";
 const UI_TEXTURE_STABLE_ID: &str = "f7d2d9c7-2b13-49fe-8b89-83d0f98f0c3f";
@@ -325,9 +325,9 @@ fn run_windowed() -> Result<(), Box<dyn Error>> {
             content_transform(480.0, 270.0, 960.0, 540.0, 1.0)?,
         )?,
     )?;
-    let mut runtime = RuntimeInstance::start(app)?;
-    let run_result = WinitRunner::default().run(&mut runtime);
-    finish_runtime_after_winit(run_result, runtime)
+    let runtime = RuntimeInstance::start(app)?;
+    desktop_run::finish_desktop_run(DesktopRun::from_runtime(runtime, DesktopRunOptions::new()))?;
+    Ok(())
 }
 
 fn content_transform(

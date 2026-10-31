@@ -96,7 +96,7 @@ model.
 | Text | font refs, text runs, shaping intent | font cache, shaping cache, atlas state | glyph runs / prepared resources |
 | Scripting | script refs, exported component data, commands | VM/runtime, module cache, sandboxes | validated commands/events |
 | Networking | replication components, channels, snapshots | sockets, protocol sessions, buffers | received commands/state reconciliation |
-| Rendering target | window/target identity, retirement intent, scoped retirement driver | platform provider, non-cloneable surface owner, surface, acquired texture | owner-Drop acknowledgement before provider/native teardown |
+| Rendering target | window/target identity, retirement intent, CPU presentation requirement | platform provider, non-cloneable surface owner, surface, acquired texture, concrete session retirement owner | actual submitted-work completion and owner-Drop acknowledgement before provider/native teardown |
 
 ## Alternatives Considered
 

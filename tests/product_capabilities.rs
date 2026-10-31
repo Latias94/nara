@@ -47,14 +47,39 @@ fn server_bundle_stays_free_of_raw_client_resources() {
     assert!(!app.world().contains_resource::<PointerState>());
     assert!(!app.world().contains_resource::<WindowEvents>());
     #[cfg(feature = "render-wgpu")]
-    assert!(
-        !app.world()
-            .contains_resource::<nara::render_wgpu::WgpuRenderBackend>()
-    );
+    {
+        assert!(
+            !app.world()
+                .contains_resource::<nara::render_wgpu::__private::WgpuRuntimeConnection>()
+        );
+        assert!(
+            !app.world()
+                .contains_resource::<nara::render_wgpu::WgpuRenderObservation>()
+        );
+    }
     #[cfg(feature = "asset-watch")]
     assert!(
         !app.world()
             .contains_resource::<nara::asset_watch::AssetWatcher>()
+    );
+}
+
+#[cfg(feature = "render-wgpu")]
+#[test]
+fn wgpu_bundle_installs_cpu_exchange_without_making_the_gpu_owner_a_resource() {
+    static_assertions::assert_not_impl_any!(nara::render_wgpu::WgpuRenderBackend: nara::ecs::Resource);
+
+    let mut app = App::new();
+    app.add_plugins((nara::MinimalPlugins, nara::WgpuBackendPlugins))
+        .unwrap();
+
+    assert!(
+        app.world()
+            .contains_resource::<nara::render_wgpu::__private::WgpuRuntimeConnection>()
+    );
+    assert!(
+        app.world()
+            .contains_resource::<nara::render_wgpu::WgpuRenderObservation>()
     );
 }
 

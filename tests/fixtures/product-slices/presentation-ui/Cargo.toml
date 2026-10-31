@@ -11,3 +11,6 @@ resolver = "3"
 
 [dependencies]
 engine = { package = "nara", path = "../../../..", default-features = false, features = ["presentation-ui"] }
+
+[features]
+desktop = ["engine/desktop-winit", "engine/render-wgpu"]

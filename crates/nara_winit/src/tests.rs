@@ -1,12 +1,7 @@
 use super::*;
 use nara_app::{
-    __RuntimeDriverPort, App, Plugin, PluginCategory, PluginDeclaration, PluginError, PluginId,
-    PluginShutdownContext, RuntimeAdmissionReservation, RuntimeCandidateRetirementState,
-    RuntimeCloseCause, RuntimeCloseContext, RuntimeCloseParticipant, RuntimeCloseParticipantError,
-    RuntimeCloseParticipantId, RuntimeCloseParticipantPhase, RuntimeClosePolicy,
-    RuntimeCloseProgress, RuntimeDriverScope, RuntimeFaultKind, RuntimeObligationLedger,
+    App, RuntimeAdmissionReservation, RuntimeClosePolicy, RuntimeFaultKind, RuntimeObligationLedger,
 };
-use nara_ecs::Resource;
 use nara_gameplay::{
     ActionCommandBinding, ActionCommandMap, GameplayCommandPlugin, GameplayCommandQueue,
     GameplayCommandTypeId,
@@ -14,38 +9,63 @@ use nara_gameplay::{
 use nara_input::{
     ActionBinding, ActionContext, ActionId, ActionMap, ActionMapBuilder, ActionMapLimits,
     ActionPhase, ButtonInput, InputEventKind, InputEventOrigin, InputGeometryGeneration,
-    InputInvalidationReason, InputLimits, InputPlugin, InputPresentationEpoch, InputPresentedRoute,
-    InputRouteGeneration, InputSeatId, InputSlotGeneration, InputSurfaceId, InputTimeline,
-    InputWindowId, PointerState,
+    InputInvalidationReason, InputPlugin, InputPresentationEpoch, InputPresentedRoute,
+    InputRouteGeneration, InputSlotGeneration, InputSurfaceId, PointerState,
 };
-use nara_window::{
-    WindowEvents, WindowPlugin,
-    backend::{WindowSurfaceHandleSource, WindowSurfaceLease, WindowSurfaceRetirementError},
-};
-use raw_window_handle::{
-    DisplayHandle, HandleError, HasDisplayHandle, HasWindowHandle, WindowHandle,
-};
-use std::{
-    collections::BTreeMap,
-    sync::{
-        Arc, Mutex,
-        atomic::{AtomicUsize, Ordering},
-    },
-};
+use nara_window::{WindowEvents, WindowPlugin};
 
-#[derive(Debug)]
-struct TestWindowSource {
-    events: Arc<Mutex<Vec<&'static str>>>,
+mod owned_session;
+
+fn start_runtime(app: App) -> RuntimeInstance {
+    RuntimeAdmissionReservation::try_acquire()
+        .unwrap()
+        .admit(
+            app.seal().unwrap(),
+            RuntimeObligationLedger::new(),
+            RuntimeClosePolicy::default(),
+        )
+        .unwrap()
+        .complete_startup()
+        .unwrap()
+        .promote()
+}
+
+fn platform_app(runtime: RuntimeInstance) -> WinitApp {
+    WinitApp::new(
+        runtime,
+        Box::new(NoPresentationDriver),
+        WinitControlFlow::Poll,
+        DEFAULT_NATIVE_RETIREMENT_BUDGET,
+    )
+}
+
+fn finish_unit_app(mut app: WinitApp) {
+    app.begin_shutdown_transition(Instant::now());
+    for _ in 0..8 {
+        if app.shutdown == WinitShutdownState::Complete {
+            break;
+        }
+        app.poll_native_shutdown_once(Instant::now());
+    }
+    assert_eq!(app.shutdown, WinitShutdownState::Complete);
+    assert_eq!(app.runtime.state(), RuntimeState::Stopped);
+}
+
+fn window_app() -> App {
+    let mut app = App::new();
+    app.add_plugin(WindowPlugin::default()).unwrap();
+    app
 }
 
 #[test]
 fn runtime_scope_fault_preserves_managed_runtime_identity() {
-    let error = runtime_scope_error(RuntimeScopeError::Faulted {
-        fault: RuntimeFault::engine(RuntimeFaultKind::RequiredService, "nara.test.winit-service"),
-    });
-
     assert!(matches!(
-        error,
+        runtime_scope_error(RuntimeScopeError::Faulted {
+            fault: RuntimeFault::engine(
+                RuntimeFaultKind::RequiredService,
+                "nara.test.winit-service"
+            ),
+        }),
         AppRunError::ManagedRuntime {
             kind: RuntimeFaultKind::RequiredService,
             fault_source: "nara.test.winit-service",
@@ -56,339 +76,103 @@ fn runtime_scope_fault_preserves_managed_runtime_identity() {
 
 #[test]
 fn unavailable_runtime_scope_remains_a_runner_error() {
-    let error = runtime_scope_error(RuntimeScopeError::Unavailable {
-        state: RuntimeState::Stopped,
-    });
-
-    assert!(matches!(error, AppRunError::Runner { .. }));
-}
-
-impl Drop for TestWindowSource {
-    fn drop(&mut self) {
-        self.events.lock().unwrap().push("provider");
-    }
-}
-
-impl HasWindowHandle for TestWindowSource {
-    fn window_handle(&self) -> Result<WindowHandle<'_>, HandleError> {
-        Err(HandleError::NotSupported)
-    }
-}
-
-impl HasDisplayHandle for TestWindowSource {
-    fn display_handle(&self) -> Result<DisplayHandle<'_>, HandleError> {
-        Err(HandleError::NotSupported)
-    }
-}
-
-#[derive(Debug)]
-struct FakeSurfaceOwner {
-    _handle_source: WindowSurfaceHandleSource,
-    events: Arc<Mutex<Vec<&'static str>>>,
-}
-
-impl Drop for FakeSurfaceOwner {
-    fn drop(&mut self) {
-        self.events.lock().unwrap().push("surface");
-    }
-}
-
-#[derive(Debug)]
-struct FakeSurfaceState {
-    owner: FakeSurfaceOwner,
-    lease: WindowSurfaceLease,
-}
-
-#[derive(Debug, Default, Resource)]
-struct FakeSurfaceBackend {
-    surfaces: BTreeMap<WindowId, FakeSurfaceState>,
-    retirement_calls: usize,
-}
-
-impl __RuntimeDriverPort for FakeSurfaceBackend {
-    type Input = Vec<WindowId>;
-    type Output = Result<(), WindowSurfaceRetirementError>;
-
-    fn accepts_driver_state(state: RuntimeState) -> bool {
-        matches!(
-            state,
-            RuntimeState::Running
-                | RuntimeState::Paused
-                | RuntimeState::Faulted
-                | RuntimeState::Stopping
-                | RuntimeState::CloseIncomplete
-        )
-    }
-
-    fn apply_driver_input(&mut self, window_ids: Self::Input) -> Self::Output {
-        self.retirement_calls += 1;
-        let mut first_error = None;
-        for window_id in window_ids {
-            let Some(FakeSurfaceState { owner, lease }) = self.surfaces.remove(&window_id) else {
-                continue;
-            };
-            drop(owner);
-            if lease.confirm_owner_dropped().is_err() {
-                first_error.get_or_insert(WindowSurfaceRetirementError::DriverFailed {
-                    driver: "test.surface",
-                });
-            }
-        }
-        first_error.map_or(Ok(()), Err)
-    }
-}
-
-#[derive(Debug, Clone, Copy)]
-struct FailingShutdownPlugin;
-
-const FAILING_SHUTDOWN_PLUGIN_ID: PluginId = PluginId::new("test.shutdown-failure");
-const FAILING_SHUTDOWN_PLUGIN_DECLARATION: PluginDeclaration =
-    PluginDeclaration::new(FAILING_SHUTDOWN_PLUGIN_ID, PluginCategory::Backend);
-
-impl Plugin for FailingShutdownPlugin {
-    fn declaration() -> &'static PluginDeclaration {
-        &FAILING_SHUTDOWN_PLUGIN_DECLARATION
-    }
-
-    fn build(&self, _app: &mut App) -> Result<(), PluginError> {
-        Ok(())
-    }
-
-    fn shutdown(&self, _context: &mut PluginShutdownContext<'_>) -> Result<(), PluginError> {
-        Err(PluginError::SetupFailed {
-            plugin: FAILING_SHUTDOWN_PLUGIN_ID,
-            message: "injected shutdown failure".to_owned(),
-        })
-    }
-}
-
-fn start_runtime(app: App) -> RuntimeInstance {
-    let candidate = RuntimeAdmissionReservation::try_acquire()
-        .unwrap()
-        .admit(
-            app.seal().unwrap(),
-            RuntimeObligationLedger::new(),
-            RuntimeClosePolicy::default(),
-        )
-        .unwrap();
-    match candidate.complete_startup() {
-        Ok(ready) => ready.promote(),
-        Err(failure) => {
-            panic!("candidate startup failed: {:?}", failure.fault())
-        }
-    }
-}
-
-struct PendingCloseParticipant {
-    released: Arc<std::sync::atomic::AtomicBool>,
-    polls: Arc<AtomicUsize>,
-}
-
-struct CompletedCloseErrorParticipant(RuntimeCloseParticipantPhase);
-
-impl RuntimeCloseParticipant for CompletedCloseErrorParticipant {
-    fn begin_close(
-        &mut self,
-        _context: &mut RuntimeCloseContext<'_>,
-    ) -> Result<RuntimeCloseProgress, RuntimeCloseParticipantError> {
-        Ok(match self.0 {
-            RuntimeCloseParticipantPhase::Begin => RuntimeCloseProgress::CompleteWithError {
-                code: "nara.test.winit-completed-close-error",
-            },
-            RuntimeCloseParticipantPhase::Poll => RuntimeCloseProgress::Pending,
-        })
-    }
-
-    fn poll_close(
-        &mut self,
-        _context: &mut RuntimeCloseContext<'_>,
-    ) -> Result<RuntimeCloseProgress, RuntimeCloseParticipantError> {
-        Ok(RuntimeCloseProgress::CompleteWithError {
-            code: "nara.test.winit-completed-close-error",
-        })
-    }
-}
-
-impl RuntimeCloseParticipant for PendingCloseParticipant {
-    fn begin_close(
-        &mut self,
-        _context: &mut RuntimeCloseContext<'_>,
-    ) -> Result<RuntimeCloseProgress, RuntimeCloseParticipantError> {
-        Ok(RuntimeCloseProgress::Pending)
-    }
-
-    fn poll_close(
-        &mut self,
-        _context: &mut RuntimeCloseContext<'_>,
-    ) -> Result<RuntimeCloseProgress, RuntimeCloseParticipantError> {
-        self.polls.fetch_add(1, Ordering::SeqCst);
-        Ok(if self.released.load(std::sync::atomic::Ordering::SeqCst) {
-            RuntimeCloseProgress::Complete
-        } else {
-            RuntimeCloseProgress::Pending
-        })
-    }
-}
-
-fn start_runtime_with_pending_close(
-    app: App,
-    released: Arc<std::sync::atomic::AtomicBool>,
-    close_timeout: Duration,
-) -> RuntimeInstance {
-    start_runtime_with_counted_pending_close(
-        app,
-        released,
-        Arc::new(AtomicUsize::new(0)),
-        close_timeout,
-    )
-}
-
-fn start_runtime_with_counted_pending_close(
-    app: App,
-    released: Arc<std::sync::atomic::AtomicBool>,
-    polls: Arc<AtomicUsize>,
-    close_timeout: Duration,
-) -> RuntimeInstance {
-    let mut obligations = RuntimeObligationLedger::new();
-    obligations
-        .register(
-            RuntimeCloseParticipantId::new("nara.test.winit-pending"),
-            PendingCloseParticipant { released, polls },
-        )
-        .unwrap();
-    let candidate = RuntimeAdmissionReservation::try_acquire()
-        .unwrap()
-        .admit(
-            app.seal().unwrap(),
-            obligations,
-            RuntimeClosePolicy::new(close_timeout),
-        )
-        .unwrap();
-    candidate.complete_startup().unwrap().promote()
-}
-
-fn stop_runtime(runtime: &mut RuntimeInstance) {
     assert!(matches!(
-        runtime.request_control(RuntimeControl::Stop),
-        RuntimeControlRequestResult::Accepted(_)
+        runtime_scope_error(RuntimeScopeError::Unavailable {
+            state: RuntimeState::Stopped
+        }),
+        AppRunError::Runner { .. }
     ));
-    runtime.drive(Duration::ZERO).unwrap();
-    if runtime.state() == RuntimeState::Stopping {
-        runtime.drive(Duration::ZERO).unwrap();
-    }
-}
-
-fn install_fake_surface_driver(app: &mut App) {
-    let world = app.world_mut().unwrap();
-    world.insert_resource(FakeSurfaceBackend::default());
-    world.insert_resource(WindowSurfaceRetirementDriver::new(
-        "test.surface",
-        retire_fake_surfaces,
-    ));
-}
-
-fn add_fake_surface(
-    app: &mut App,
-    handles: &BackendWindowHandles,
-    window_id: WindowId,
-    events: Arc<Mutex<Vec<&'static str>>>,
-) {
-    let (handle_source, lease) = handles.acquire_surface(window_id).unwrap().into_parts();
-    app.world_mut()
-        .unwrap()
-        .resource_mut::<FakeSurfaceBackend>()
-        .surfaces
-        .insert(
-            window_id,
-            FakeSurfaceState {
-                owner: FakeSurfaceOwner {
-                    _handle_source: handle_source,
-                    events,
-                },
-                lease,
-            },
-        );
-}
-
-fn retire_fake_surfaces(
-    scope: &mut RuntimeDriverScope<'_>,
-    window_ids: &[WindowId],
-) -> Result<(), WindowSurfaceRetirementError> {
-    scope
-        .__apply_port::<FakeSurfaceBackend>(window_ids.to_vec())
-        .map_err(|_| WindowSurfaceRetirementError::DriverFailed {
-            driver: "test.surface",
-        })?
 }
 
 #[test]
-fn converts_common_keyboard_codes() {
-    assert_eq!(
-        convert_key_code(WinitKeyCode::Escape),
-        Some(KeyCode::Escape)
-    );
-    assert_eq!(convert_key_code(WinitKeyCode::Enter), Some(KeyCode::Enter));
-    assert_eq!(convert_key_code(WinitKeyCode::Space), Some(KeyCode::Space));
-    assert_eq!(
-        convert_key_code(WinitKeyCode::ArrowLeft),
-        Some(KeyCode::ArrowLeft)
-    );
-    assert_eq!(
-        convert_key_code(WinitKeyCode::KeyA),
-        Some(KeyCode::Character('a'))
-    );
-    assert_eq!(
-        convert_key_code(WinitKeyCode::Digit1),
-        Some(KeyCode::Character('1'))
-    );
+fn converts_common_keyboard_codes_and_physical_keys() {
+    for (code, key) in [
+        (WinitKeyCode::Escape, KeyCode::Escape),
+        (WinitKeyCode::Enter, KeyCode::Enter),
+        (WinitKeyCode::Space, KeyCode::Space),
+        (WinitKeyCode::ArrowLeft, KeyCode::ArrowLeft),
+        (WinitKeyCode::KeyA, KeyCode::Character('a')),
+        (WinitKeyCode::Digit1, KeyCode::Character('1')),
+    ] {
+        assert_eq!(convert_key_code(code), Some(key));
+        assert_eq!(convert_physical_key(PhysicalKey::Code(code)), Some(key));
+    }
+    assert_eq!(convert_key_code(WinitKeyCode::F1), None);
+}
+
+#[test]
+fn converts_mouse_buttons() {
+    for (native, button) in [
+        (WinitMouseButton::Left, MouseButton::Left),
+        (WinitMouseButton::Right, MouseButton::Right),
+        (WinitMouseButton::Middle, MouseButton::Middle),
+        (WinitMouseButton::Back, MouseButton::Other(4)),
+        (WinitMouseButton::Other(9), MouseButton::Other(9)),
+    ] {
+        assert_eq!(convert_mouse_button(native), button);
+    }
 }
 
 #[test]
 fn focus_gate_rejects_repeats_and_requires_a_fresh_press_after_regain() {
     let key = KeyCode::Character('w');
     let mut gate = WinitInputGate::default();
-
     assert_eq!(
         gate.keyboard_input(key, ElementState::Pressed, false),
         Some(ButtonDriverInput::Press(key))
     );
     assert_eq!(gate.keyboard_input(key, ElementState::Pressed, true), None);
-
-    gate.lose_focus([key], []);
+    gate.lose_focus([key], [MouseButton::Left]);
     gate.gain_focus();
     assert_eq!(gate.keyboard_input(key, ElementState::Pressed, false), None);
+    assert_eq!(
+        gate.mouse_input(MouseButton::Left, ElementState::Pressed),
+        None
+    );
     assert_eq!(
         gate.keyboard_input(key, ElementState::Released, false),
         Some(ButtonDriverInput::Release(key))
     );
     assert_eq!(
+        gate.mouse_input(MouseButton::Left, ElementState::Released),
+        Some(ButtonDriverInput::Release(MouseButton::Left))
+    );
+    assert_eq!(
         gate.keyboard_input(key, ElementState::Pressed, false),
         Some(ButtonDriverInput::Press(key))
     );
-
-    let mouse_button = MouseButton::Left;
     assert_eq!(
-        gate.mouse_input(mouse_button, ElementState::Pressed),
-        Some(ButtonDriverInput::Press(mouse_button))
-    );
-    gate.suppress_mouse_buttons([mouse_button]);
-    assert_eq!(gate.mouse_input(mouse_button, ElementState::Pressed), None);
-    assert_eq!(
-        gate.mouse_input(mouse_button, ElementState::Released),
-        Some(ButtonDriverInput::Release(mouse_button))
-    );
-    assert_eq!(
-        gate.mouse_input(mouse_button, ElementState::Pressed),
-        Some(ButtonDriverInput::Press(mouse_button))
+        gate.mouse_input(MouseButton::Left, ElementState::Pressed),
+        Some(ButtonDriverInput::Press(MouseButton::Left))
     );
 }
 
 #[test]
+fn initial_focus_state_is_applied_to_the_input_gate() {
+    let mut gate = WinitInputGate::reset_for_focus(false);
+    assert_eq!(
+        gate.keyboard_input(KeyCode::Enter, ElementState::Pressed, false),
+        None
+    );
+    gate.gain_focus();
+    assert_eq!(
+        gate.keyboard_input(KeyCode::Enter, ElementState::Pressed, false),
+        Some(ButtonDriverInput::Press(KeyCode::Enter))
+    );
+}
+
+fn raw_key_event(code: WinitKeyCode, state: ElementState) -> RawKeyEvent {
+    RawKeyEvent {
+        physical_key: PhysicalKey::Code(code),
+        state,
+    }
+}
+
+#[test]
 fn focus_event_wiring_releases_input_and_lowers_a_semantic_stop_command() {
-    let mut app = App::new();
+    let mut app = window_app();
     app.add_plugin(InputPlugin).unwrap();
     app.add_plugin(GameplayCommandPlugin::default()).unwrap();
-    app.add_plugin(WindowPlugin::default()).unwrap();
     let action = ActionId::new("test.move-up").unwrap();
     let mut bindings = ActionMapBuilder::new(ActionMapLimits::default());
     bindings
@@ -405,32 +189,27 @@ fn focus_event_wiring_releases_input_and_lowers_a_semantic_stop_command() {
         .unwrap(),
     )
     .unwrap();
-    {
-        let mut commands = app.world_mut().unwrap().resource_mut::<ActionCommandMap>();
-        commands
+    for (phase, command) in [
+        (ActionPhase::Started, "test.move.started"),
+        (ActionPhase::Released, "test.move.stop"),
+    ] {
+        app.world_mut()
+            .unwrap()
+            .resource_mut::<ActionCommandMap>()
             .bind(ActionCommandBinding::new(
                 action.clone(),
-                ActionPhase::Started,
-                GameplayCommandTypeId::new("test.move.started").unwrap(),
-            ))
-            .unwrap();
-        commands
-            .bind(ActionCommandBinding::new(
-                action,
-                ActionPhase::Released,
-                GameplayCommandTypeId::new("test.move.stop").unwrap(),
+                phase,
+                GameplayCommandTypeId::new(command).unwrap(),
             ))
             .unwrap();
     }
-    let mut runtime = start_runtime(app);
-    let mut state = WinitApp::new(&mut runtime).unwrap();
+    let mut state = platform_app(start_runtime(app));
     state.connect_window_input(WindowId::PRIMARY).unwrap();
-    let key = convert_key_code(WinitKeyCode::KeyW).unwrap();
     assert!(
         state
             .apply_physical_keyboard_driver_event(
                 raw_key_event(WinitKeyCode::KeyW, ElementState::Pressed),
-                false,
+                false
             )
             .unwrap()
     );
@@ -444,7 +223,6 @@ fn focus_event_wiring_releases_input_and_lowers_a_semantic_stop_command() {
             .accepted,
         1
     );
-
     state
         .apply_focus_driver_event(WindowId::PRIMARY, false)
         .unwrap();
@@ -456,17 +234,15 @@ fn focus_event_wiring_releases_input_and_lowers_a_semantic_stop_command() {
             .resource::<GameplayCommandQueue>()
             .stats()
             .accepted,
-        2,
-        "focus loss must lower the released action into its semantic stop command",
+        2
     );
     assert!(
         !state
             .runtime
             .world()
             .resource::<ButtonInput<KeyCode>>()
-            .pressed(key)
+            .pressed(KeyCode::Character('w'))
     );
-
     state
         .apply_focus_driver_event(WindowId::PRIMARY, true)
         .unwrap();
@@ -474,7 +250,7 @@ fn focus_event_wiring_releases_input_and_lowers_a_semantic_stop_command() {
         !state
             .apply_physical_keyboard_driver_event(
                 raw_key_event(WinitKeyCode::KeyW, ElementState::Pressed),
-                true,
+                true
             )
             .unwrap()
     );
@@ -482,16 +258,15 @@ fn focus_event_wiring_releases_input_and_lowers_a_semantic_stop_command() {
         !state
             .apply_physical_keyboard_driver_event(
                 raw_key_event(WinitKeyCode::KeyW, ElementState::Pressed),
-                false,
+                false
             )
-            .unwrap(),
-        "the pre-focus-loss held key remains suppressed until its physical release"
+            .unwrap()
     );
     assert!(
         state
             .apply_physical_keyboard_driver_event(
                 raw_key_event(WinitKeyCode::KeyW, ElementState::Released),
-                false,
+                false
             )
             .unwrap()
     );
@@ -499,7 +274,7 @@ fn focus_event_wiring_releases_input_and_lowers_a_semantic_stop_command() {
         state
             .apply_physical_keyboard_driver_event(
                 raw_key_event(WinitKeyCode::KeyW, ElementState::Pressed),
-                false,
+                false
             )
             .unwrap()
     );
@@ -513,18 +288,15 @@ fn focus_event_wiring_releases_input_and_lowers_a_semantic_stop_command() {
             .accepted,
         3
     );
-
-    drop(state);
-    stop_runtime(&mut runtime);
+    finish_unit_app(state);
 }
 
 #[test]
 fn winit_ingress_captures_the_exact_route_before_focus_loss_invalidation() {
-    let mut app = App::new();
+    let mut app = window_app();
     app.add_plugin(InputPlugin).unwrap();
-    app.add_plugin(WindowPlugin::default()).unwrap();
+    let window = InputWindowId::new(WindowId::PRIMARY.get());
     {
-        let window = InputWindowId::new(WindowId::PRIMARY.get());
         let mut timeline = app.world_mut().unwrap().resource_mut::<InputTimeline>();
         timeline
             .connect_endpoint(window, InputSeatId::PRIMARY)
@@ -544,9 +316,7 @@ fn winit_ingress_captures_the_exact_route_before_focus_loss_invalidation() {
             ))
             .unwrap();
     }
-    let mut runtime = start_runtime(app);
-    let mut state = WinitApp::new(&mut runtime).unwrap();
-
+    let mut state = platform_app(start_runtime(app));
     state
         .apply_focus_driver_event(WindowId::PRIMARY, true)
         .unwrap();
@@ -554,14 +324,13 @@ fn winit_ingress_captures_the_exact_route_before_focus_loss_invalidation() {
         state
             .apply_physical_keyboard_driver_event(
                 raw_key_event(WinitKeyCode::Enter, ElementState::Pressed),
-                false,
+                false
             )
             .unwrap()
     );
     state
         .apply_focus_driver_event(WindowId::PRIMARY, false)
         .unwrap();
-
     let entries = state
         .runtime
         .world()
@@ -609,59 +378,39 @@ fn winit_ingress_captures_the_exact_route_before_focus_loss_invalidation() {
         Some(InputInvalidationReason::FocusLost)
     );
     assert_eq!(focus_loss.route(), pressed.route());
-
-    drop(state);
-    stop_runtime(&mut runtime);
+    finish_unit_app(state);
 }
 
 #[test]
 fn window_input_activation_without_input_plugin_keeps_input_optional() {
-    let mut app = App::new();
-    app.add_plugin(WindowPlugin::default()).unwrap();
-    let mut runtime = start_runtime(app);
-    let mut state = WinitApp::new(&mut runtime).unwrap();
-
+    let mut state = platform_app(start_runtime(window_app()));
     state.connect_window_input(WindowId::PRIMARY).unwrap();
     assert!(!state.input_timeline_installed());
     assert!(
         !state
             .apply_physical_keyboard_driver_event(
                 raw_key_event(WinitKeyCode::Enter, ElementState::Pressed),
-                false,
+                false
             )
             .unwrap()
     );
     state
         .apply_focus_driver_event(WindowId::PRIMARY, true)
         .unwrap();
-
-    drop(state);
-    stop_runtime(&mut runtime);
+    finish_unit_app(state);
 }
 
 #[test]
 fn window_input_activation_connects_pointer_and_retirement_rejects_late_input() {
-    let mut app = App::new();
+    let mut app = window_app();
     app.add_plugin(InputPlugin).unwrap();
-    app.add_plugin(WindowPlugin::default()).unwrap();
-    let handles = app.world().resource::<BackendWindowHandles>().clone();
-    handles
-        .insert(
-            WindowId::PRIMARY,
-            WindowHandleProvider::new(Arc::new(TestWindowSource {
-                events: Arc::new(Mutex::new(Vec::new())),
-            })),
-        )
-        .unwrap();
-    let mut runtime = start_runtime(app);
-    let mut state = WinitApp::new(&mut runtime).unwrap();
-    state.owned_window_ids.insert(WindowId::PRIMARY);
+    let mut state = platform_app(start_runtime(app));
     state.connect_window_input(WindowId::PRIMARY).unwrap();
     assert!(
         state
             .apply_physical_keyboard_driver_event(
                 raw_key_event(WinitKeyCode::Enter, ElementState::Pressed),
-                false,
+                false
             )
             .unwrap()
     );
@@ -677,7 +426,7 @@ fn window_input_activation_connects_pointer_and_retirement_rejects_late_input() 
             .map(|_| ())
         })
         .unwrap();
-    retire_runtime_targets(state.runtime, &handles, &state.owned_window_ids).unwrap();
+    retire_runtime_input(&mut state.runtime, &[WindowId::PRIMARY]).unwrap();
     let entries = state
         .runtime
         .world()
@@ -705,7 +454,7 @@ fn window_input_activation_connects_pointer_and_retirement_rejects_late_input() 
         state
             .apply_physical_keyboard_driver_event(
                 raw_key_event(WinitKeyCode::KeyW, ElementState::Pressed),
-                false,
+                false
             )
             .is_err()
     );
@@ -716,149 +465,15 @@ fn window_input_activation_connects_pointer_and_retirement_rejects_late_input() 
             .resource::<InputTimeline>()
             .entries()
             .count(),
-        entries.len(),
-        "late input must not reconnect the retired native endpoint",
+        entries.len()
     );
-
-    drop(state);
-    stop_runtime(&mut runtime);
-}
-
-#[test]
-fn input_connection_refusal_preserves_native_provider_retirement() {
-    for (endpoints, pointers) in [(1, 2), (2, 1)] {
-        let mut app = App::new();
-        app.insert_resource(
-            InputTimeline::with_limits(InputLimits::new(16, endpoints, pointers, 1).unwrap())
-                .unwrap(),
-        )
-        .unwrap();
-        app.add_plugin(InputPlugin).unwrap();
-        app.add_plugin(WindowPlugin::default()).unwrap();
-        let handles = app.world().resource::<BackendWindowHandles>().clone();
-        let events = Arc::new(Mutex::new(Vec::new()));
-        handles
-            .insert(
-                WindowId::PRIMARY,
-                WindowHandleProvider::new(Arc::new(TestWindowSource {
-                    events: Arc::clone(&events),
-                })),
-            )
-            .unwrap();
-        let mut runtime = start_runtime(app);
-        let mut state = WinitApp::new(&mut runtime).unwrap();
-        state.owned_window_ids.insert(WindowId::PRIMARY);
-
-        assert!(state.connect_window_input(WindowId::PRIMARY).is_err());
-        retire_runtime_targets(state.runtime, &handles, &state.owned_window_ids).unwrap();
-        assert_eq!(*events.lock().unwrap(), vec!["provider"]);
-        assert_eq!(
-            handles.snapshot(WindowId::PRIMARY).unwrap().phase,
-            nara_window::backend::WindowTargetPhase::ProviderReleased
-        );
-
-        drop(state);
-        stop_runtime(&mut runtime);
-    }
-}
-
-#[test]
-fn keyboard_input_arm_delegates_to_the_tested_physical_event_path() {
-    let source = include_str!("lib.rs");
-    let handler = source
-        .split_once("    fn handle_window_event(")
-        .and_then(|(_, source)| {
-            source
-                .split_once("    fn apply_physical_keyboard_driver_event(")
-                .map(|(handler, _)| handler)
-        })
-        .expect("the production window-event handler must remain inspectable");
-    let keyboard_arm = handler
-        .split_once("WinitWindowEvent::KeyboardInput")
-        .and_then(|(_, source)| {
-            source
-                .split_once("WinitWindowEvent::MouseInput")
-                .map(|(keyboard_arm, _)| keyboard_arm)
-        })
-        .expect("the production handler must retain one KeyboardInput arm");
-    assert!(
-        keyboard_arm.contains("self.apply_physical_keyboard_driver_event("),
-        "the KeyboardInput arm must delegate to the tested physical-event path"
-    );
-    let compact = keyboard_arm
-        .chars()
-        .filter(|character| !character.is_whitespace())
-        .collect::<String>();
-    assert!(
-        compact.contains(
-            "self.apply_physical_keyboard_driver_event(RawKeyEvent{physical_key:event.physical_key,state:event.state,},event.repeat,)?;"
-        ),
-        "the KeyboardInput arm must forward physical_key, state, and repeat without substitution"
-    );
-}
-
-fn raw_key_event(code: WinitKeyCode, state: ElementState) -> RawKeyEvent {
-    RawKeyEvent {
-        physical_key: PhysicalKey::Code(code),
-        state,
-    }
-}
-
-#[test]
-fn initial_focus_state_is_applied_to_the_input_gate() {
-    let key = KeyCode::Character('w');
-    let mut gate = WinitInputGate::reset_for_focus(false);
-
-    assert_eq!(gate.keyboard_input(key, ElementState::Pressed, false), None);
-    gate.gain_focus();
-    assert_eq!(
-        gate.keyboard_input(key, ElementState::Pressed, false),
-        Some(ButtonDriverInput::Press(key))
-    );
-}
-
-#[test]
-fn ignores_unmapped_keyboard_codes() {
-    assert_eq!(convert_key_code(WinitKeyCode::F1), None);
-}
-
-#[test]
-fn converts_physical_keys() {
-    assert_eq!(
-        convert_physical_key(PhysicalKey::Code(WinitKeyCode::KeyW)),
-        Some(KeyCode::Character('w'))
-    );
-}
-
-#[test]
-fn converts_mouse_buttons() {
-    assert_eq!(
-        convert_mouse_button(WinitMouseButton::Left),
-        MouseButton::Left
-    );
-    assert_eq!(
-        convert_mouse_button(WinitMouseButton::Right),
-        MouseButton::Right
-    );
-    assert_eq!(
-        convert_mouse_button(WinitMouseButton::Middle),
-        MouseButton::Middle
-    );
-    assert_eq!(
-        convert_mouse_button(WinitMouseButton::Back),
-        MouseButton::Other(4)
-    );
-    assert_eq!(
-        convert_mouse_button(WinitMouseButton::Other(9)),
-        MouseButton::Other(9)
-    );
+    finish_unit_app(state);
 }
 
 #[test]
 fn runner_configuration_does_not_install_runtime_prerequisites() {
     let app = App::new();
     let _runner = WinitRunner::default();
-
     assert!(!app.world().contains_resource::<WindowEvents>());
     assert!(!app.world().contains_resource::<BackendWindowHandles>());
     assert!(!app.world().contains_resource::<ButtonInput<KeyCode>>());
@@ -866,1017 +481,54 @@ fn runner_configuration_does_not_install_runtime_prerequisites() {
     assert!(!app.world().contains_resource::<PointerState>());
 }
 
-#[cfg(feature = "platform-accessibility")]
-#[test]
-fn compiled_platform_accessibility_without_contribution_stays_disabled() {
-    let mut app = App::new();
-    app.add_plugin(WindowPlugin::default()).unwrap();
-    let mut runtime = start_runtime(app);
-    {
-        let state = WinitApp::new(&mut runtime).unwrap();
-        assert_eq!(
-            state.accessibility_activation,
-            accessibility::__private::WinitAccessibilityActivation::Disabled
-        );
-        assert!(state.accessibility_sessions.is_empty());
-    }
-    stop_runtime(&mut runtime);
-}
-
-#[cfg(feature = "platform-accessibility")]
-#[test]
-fn installed_platform_accessibility_contribution_is_captured_as_enabled() {
-    let mut app = App::new();
-    app.add_plugin(WindowPlugin::default()).unwrap();
-    accessibility::__private::install_winit_accessibility_contribution(&mut app).unwrap();
-    let mut runtime = start_runtime(app);
-    {
-        let state = WinitApp::new(&mut runtime).unwrap();
-        assert!(state.accessibility_activation.is_enabled());
-        assert!(state.accessibility_sessions.is_empty());
-    }
-    stop_runtime(&mut runtime);
-}
-
-#[cfg(feature = "platform-accessibility")]
-#[test]
-fn partial_platform_accessibility_contribution_rejects_before_window_startup() {
-    let mut app = App::new();
-    app.add_plugin(WindowPlugin::default()).unwrap();
-    accessibility::__private::install_partial_winit_accessibility_contribution(&mut app).unwrap();
-    let mut runtime = start_runtime(app);
-
-    let error = match WinitApp::new(&mut runtime) {
-        Ok(_) => panic!("partial accessibility contribution must reject runner startup"),
-        Err(error) => error,
-    };
-    assert!(
-        error
-            .to_string()
-            .contains("Winit accessibility contribution is partial")
-    );
-    stop_runtime(&mut runtime);
-}
-
 #[test]
 fn configured_window_requires_exactly_one_runtime_target() {
-    let mut missing = start_runtime(App::new());
+    let missing = start_runtime(App::new());
     assert!(configured_primary_window(&missing).is_err());
-    stop_runtime(&mut missing);
-
-    let mut one_app = App::new();
-    one_app.add_plugin(WindowPlugin::default()).unwrap();
-    let mut one = start_runtime(one_app);
+    finish_unit_app(platform_app(missing));
+    let one = start_runtime(window_app());
     assert_eq!(
         configured_primary_window(&one).unwrap().id,
         WindowId::PRIMARY
     );
-    stop_runtime(&mut one);
-
-    let mut multiple_app = App::new();
-    multiple_app.add_plugin(WindowPlugin::default()).unwrap();
-    multiple_app
-        .world_mut()
+    finish_unit_app(platform_app(one));
+    let mut app = window_app();
+    app.world_mut()
         .unwrap()
         .spawn(Window::default().with_id(WindowId::new(2)));
-    let mut multiple = start_runtime(multiple_app);
+    let multiple = start_runtime(app);
     assert!(configured_primary_window(&multiple).is_err());
-    stop_runtime(&mut multiple);
+    finish_unit_app(platform_app(multiple));
 }
 
+#[cfg(feature = "platform-accessibility")]
 #[test]
-fn post_retirement_fault_still_waits_for_native_destruction_and_pending_runtime_close() {
-    fn retire_then_fault(
-        world: &mut nara_ecs::World,
-        input: Vec<WindowId>,
-    ) -> Result<
-        Result<(), WindowSurfaceRetirementError>,
-        (nara_app::RuntimeWorldAccessError, Vec<WindowId>),
-    > {
-        let output = world
-            .resource_mut::<FakeSurfaceBackend>()
-            .apply_driver_input(input);
-        world
-            .resource::<nara_app::RuntimeFaultReporter>()
-            .report(RuntimeFault::engine(
-                RuntimeFaultKind::RequiredService,
-                "nara.test.post-retirement-fault",
-            ));
-        Ok(output)
-    }
-
-    let mut app = App::new();
-    app.add_plugin(WindowPlugin::default()).unwrap();
-    let handles = app.world().resource::<BackendWindowHandles>().clone();
-    let events = Arc::new(Mutex::new(Vec::new()));
-    handles
-        .insert(
-            WindowId::PRIMARY,
-            WindowHandleProvider::new(Arc::new(TestWindowSource {
-                events: events.clone(),
-            })),
-        )
-        .unwrap();
-    install_fake_surface_driver(&mut app);
-    add_fake_surface(&mut app, &handles, WindowId::PRIMARY, events.clone());
-    app.__register_driver_port::<FakeSurfaceBackend>(retire_then_fault)
-        .unwrap();
-    let released = Arc::new(std::sync::atomic::AtomicBool::new(false));
-    let polls = Arc::new(AtomicUsize::new(0));
-    let mut runtime = start_runtime_with_counted_pending_close(
-        app,
-        released.clone(),
-        polls.clone(),
-        Duration::from_secs(2),
-    );
-    let mut state = WinitApp::new(&mut runtime).unwrap();
-    state.owned_window_ids.insert(WindowId::PRIMARY);
-
-    assert!(matches!(
-        state.begin_shutdown_transition(Instant::now()),
-        EventLoopDirective::WaitUntil(_)
-    ));
-    assert_eq!(state.runtime.state(), RuntimeState::Stopping);
-    assert_eq!(*events.lock().unwrap(), vec!["surface", "provider"]);
-    assert_eq!(
-        handles.snapshot(WindowId::PRIMARY).unwrap().phase,
-        nara_window::backend::WindowTargetPhase::ProviderReleased
-    );
-    handles.mark_native_destroyed(WindowId::PRIMARY).unwrap();
-    assert!(matches!(
-        state.poll_native_shutdown_once(Instant::now()),
-        EventLoopDirective::WaitUntil(_)
-    ));
-    assert!(matches!(
-        state.shutdown,
-        WinitShutdownState::WaitingForNative { .. }
-    ));
-    assert!(polls.load(Ordering::SeqCst) > 0);
-
-    released.store(true, Ordering::SeqCst);
-    assert_eq!(
-        state.poll_native_shutdown_once(Instant::now()),
-        EventLoopDirective::Exit
-    );
-    assert_eq!(state.shutdown, WinitShutdownState::Complete);
-    assert_eq!(state.runtime.state(), RuntimeState::Stopped);
-    assert_eq!(
-        state
-            .runtime
-            .world()
-            .resource::<FakeSurfaceBackend>()
-            .retirement_calls,
-        1
-    );
-    assert!(matches!(
-        state.take_failure(),
-        Some(AppRunError::ManagedRuntime {
-            kind: RuntimeFaultKind::RequiredService,
-            fault_source: "nara.test.post-retirement-fault",
-            ..
-        })
-    ));
+fn platform_accessibility_activation_is_captured_without_borrowing_runtime() {
+    let state = platform_app(start_runtime(window_app()));
+    assert!(!state.accessibility_activation.is_enabled());
+    assert!(state.accessibility_sessions.is_empty());
+    finish_unit_app(state);
+    let mut app = window_app();
+    accessibility::__private::install_winit_accessibility_contribution(&mut app).unwrap();
+    let state = platform_app(start_runtime(app));
+    assert!(state.accessibility_activation.is_enabled());
+    assert!(state.accessibility_sessions.is_empty());
+    finish_unit_app(state);
 }
 
+#[cfg(feature = "platform-accessibility")]
 #[test]
-fn runner_shutdown_retires_surface_before_releasing_provider() {
-    let mut app = App::new();
-    app.add_plugin(WindowPlugin::default()).unwrap();
-    let handles = app.world().resource::<BackendWindowHandles>().clone();
-    let events = Arc::new(Mutex::new(Vec::new()));
-    handles
-        .insert(
-            WindowId::PRIMARY,
-            WindowHandleProvider::new(Arc::new(TestWindowSource {
-                events: Arc::clone(&events),
-            })),
-        )
-        .unwrap();
-    install_fake_surface_driver(&mut app);
-    add_fake_surface(&mut app, &handles, WindowId::PRIMARY, Arc::clone(&events));
-
-    let mut runtime = start_runtime(app);
-    let owned_window_ids = BTreeSet::from([WindowId::PRIMARY]);
-    retire_runtime_targets(&mut runtime, &handles, &owned_window_ids).unwrap();
-    retire_runtime_targets(&mut runtime, &handles, &owned_window_ids).unwrap();
-    stop_runtime(&mut runtime);
-
-    assert_eq!(*events.lock().unwrap(), vec!["surface", "provider"]);
-    assert_eq!(
-        handles.snapshot(WindowId::PRIMARY).unwrap().phase,
-        nara_window::backend::WindowTargetPhase::ProviderReleased
-    );
-}
-
-#[test]
-fn pending_stop_preserves_surface_retirement_authority_until_the_runner_barrier() {
-    let mut app = App::new();
-    app.add_plugin(WindowPlugin::default()).unwrap();
-    let handles = app.world().resource::<BackendWindowHandles>().clone();
-    let events = Arc::new(Mutex::new(Vec::new()));
-    handles
-        .insert(
-            WindowId::PRIMARY,
-            WindowHandleProvider::new(Arc::new(TestWindowSource {
-                events: Arc::clone(&events),
-            })),
-        )
-        .unwrap();
-    install_fake_surface_driver(&mut app);
-    add_fake_surface(&mut app, &handles, WindowId::PRIMARY, Arc::clone(&events));
-
-    let mut runtime = start_runtime(app);
-    let owned_window_ids = BTreeSet::from([WindowId::PRIMARY]);
-    assert!(matches!(
-        runtime.request_control(RuntimeControl::Stop),
-        RuntimeControlRequestResult::Accepted(_)
-    ));
-
-    let stopping = runtime.drive(Duration::ZERO).unwrap();
-    assert_eq!(stopping.state(), RuntimeState::Stopping);
-    retire_runtime_targets(&mut runtime, &handles, &owned_window_ids).unwrap();
-    let stopped = runtime.drive(Duration::ZERO).unwrap();
-
-    assert_eq!(stopped.state(), RuntimeState::Stopped);
-    assert_eq!(*events.lock().unwrap(), vec!["surface", "provider"]);
-    assert_eq!(
-        handles.snapshot(WindowId::PRIMARY).unwrap().phase,
-        nara_window::backend::WindowTargetPhase::ProviderReleased
-    );
-}
-
-#[test]
-fn runner_shutdown_does_not_retire_targets_owned_by_another_adapter() {
-    let mut app = App::new();
-    app.add_plugin(WindowPlugin::default()).unwrap();
-    let handles = app.world().resource::<BackendWindowHandles>().clone();
-    let owned_events = Arc::new(Mutex::new(Vec::new()));
-    let foreign_events = Arc::new(Mutex::new(Vec::new()));
-    handles
-        .insert(
-            WindowId::PRIMARY,
-            WindowHandleProvider::new(Arc::new(TestWindowSource {
-                events: Arc::clone(&owned_events),
-            })),
-        )
-        .unwrap();
-    handles
-        .insert(
-            WindowId::new(2),
-            WindowHandleProvider::new(Arc::new(TestWindowSource {
-                events: Arc::clone(&foreign_events),
-            })),
-        )
-        .unwrap();
-    install_fake_surface_driver(&mut app);
-    add_fake_surface(
-        &mut app,
-        &handles,
-        WindowId::PRIMARY,
-        Arc::clone(&owned_events),
-    );
-    add_fake_surface(
-        &mut app,
-        &handles,
-        WindowId::new(2),
-        Arc::clone(&foreign_events),
-    );
-
-    let mut runtime = start_runtime(app);
-    let owned_window_ids = BTreeSet::from([WindowId::PRIMARY]);
-    retire_runtime_targets(&mut runtime, &handles, &owned_window_ids).unwrap();
-
-    assert_eq!(
-        handles.snapshot(WindowId::PRIMARY).unwrap().phase,
-        nara_window::backend::WindowTargetPhase::ProviderReleased
-    );
-    assert_eq!(
-        handles.snapshot(WindowId::new(2)).unwrap().phase,
-        nara_window::backend::WindowTargetPhase::Active
-    );
-    assert!(handles.snapshot(WindowId::new(2)).unwrap().surface_active);
-    assert_eq!(*owned_events.lock().unwrap(), vec!["surface", "provider"]);
-    assert!(foreign_events.lock().unwrap().is_empty());
-}
-
-#[test]
-fn shutdown_failure_does_not_block_safe_target_retirement() {
-    let mut app = App::new();
-    app.add_plugin(WindowPlugin::default()).unwrap();
-    let handles = app.world().resource::<BackendWindowHandles>().clone();
-    let events = Arc::new(Mutex::new(Vec::new()));
-    handles
-        .insert(
-            WindowId::PRIMARY,
-            WindowHandleProvider::new(Arc::new(TestWindowSource {
-                events: Arc::clone(&events),
-            })),
-        )
-        .unwrap();
-    install_fake_surface_driver(&mut app);
-    add_fake_surface(&mut app, &handles, WindowId::PRIMARY, Arc::clone(&events));
-    app.add_plugin(FailingShutdownPlugin).unwrap();
-
-    let mut runtime = start_runtime(app);
-    let mut state = WinitApp::new(&mut runtime).unwrap();
-    state.owned_window_ids.insert(WindowId::PRIMARY);
-    let now = Instant::now();
-
-    assert!(matches!(
-        state.begin_shutdown_transition(now),
-        EventLoopDirective::WaitUntil(_)
-    ));
-    assert_eq!(state.runtime.state(), RuntimeState::Stopping);
-    assert_eq!(*events.lock().unwrap(), vec!["surface", "provider"]);
-    assert_eq!(
-        handles.snapshot(WindowId::PRIMARY).unwrap().phase,
-        nara_window::backend::WindowTargetPhase::ProviderReleased
-    );
-
-    let close_failure = state.poll_runtime_close().unwrap_err();
-    assert_eq!(
-        close_failure,
-        AppRunError::runner("managed runtime close failed")
-    );
-    state.record_runtime_close_failure(close_failure.clone());
-    assert_eq!(state.runtime.state(), RuntimeState::Stopped);
-    assert!(state.runtime.close_evidence().plugin_shutdown_failed());
-
-    handles.mark_native_destroyed(WindowId::PRIMARY).unwrap();
-    assert_eq!(
-        state.poll_native_shutdown_transition(Instant::now()),
-        EventLoopDirective::Exit
-    );
-    assert_eq!(state.shutdown, WinitShutdownState::Complete);
-    assert_eq!(state.take_failure(), Some(close_failure));
-    drop(state);
-
-    assert_eq!(runtime.state(), RuntimeState::Stopped);
-}
-
-#[test]
-fn completed_participant_error_fails_runner_after_physical_close() {
-    for phase in [
-        RuntimeCloseParticipantPhase::Begin,
-        RuntimeCloseParticipantPhase::Poll,
-    ] {
-        let mut app = App::new();
-        app.add_plugin(WindowPlugin::default()).unwrap();
-        let mut obligations = RuntimeObligationLedger::new();
-        obligations
-            .register(
-                RuntimeCloseParticipantId::new("nara.test.winit-completed-close-error"),
-                CompletedCloseErrorParticipant(phase),
-            )
-            .unwrap();
-        let mut runtime =
-            RuntimeInstance::start_with_options(app, obligations, RuntimeClosePolicy::default())
-                .unwrap();
-        let mut state = WinitApp::new(&mut runtime).unwrap();
-        let now = Instant::now();
-        assert!(matches!(
-            state.begin_shutdown_transition(now),
-            EventLoopDirective::WaitUntil(_)
-        ));
-        assert_eq!(state.runtime.state(), RuntimeState::Stopping);
-        assert_eq!(
-            state.poll_native_shutdown_once(Instant::now()),
-            EventLoopDirective::Exit
-        );
-        assert_eq!(state.runtime.state(), RuntimeState::Stopped);
-        assert_eq!(state.shutdown, WinitShutdownState::Complete);
-        assert!(!state.runtime.close_evidence().plugin_shutdown_failed());
-        assert!(state.runtime.close_evidence().has_terminal_failure());
-        assert!(
-            state
-                .runtime
-                .close_evidence()
-                .pending_participants()
-                .is_empty()
-        );
-        assert_eq!(
-            state.take_failure(),
-            Some(AppRunError::runner("managed runtime close failed"))
-        );
-    }
-}
-
-#[test]
-fn event_loop_finish_does_not_replace_the_primary_failure() {
-    let mut app = App::new();
-    app.add_plugin(WindowPlugin::default()).unwrap();
-    let handles = app.world().resource::<BackendWindowHandles>().clone();
-    let events = Arc::new(Mutex::new(Vec::new()));
-    handles
-        .insert(
-            WindowId::PRIMARY,
-            WindowHandleProvider::new(Arc::new(TestWindowSource {
-                events: Arc::clone(&events),
-            })),
-        )
-        .unwrap();
-    install_fake_surface_driver(&mut app);
-    add_fake_surface(&mut app, &handles, WindowId::PRIMARY, Arc::clone(&events));
-    let mut runtime = start_runtime(app);
-    let mut state = WinitApp::new(&mut runtime).unwrap();
-    state.owned_window_ids.insert(WindowId::PRIMARY);
-    let primary = AppRunError::runner("primary runner failure");
-    state.record_primary_failure(primary.clone());
-
-    state.finish_after_event_loop();
-
-    assert_eq!(
-        state.take_failure(),
-        Some(AppRunError::runner_teardown(
-            primary,
-            AppRunError::runner("winit event loop ended before controlled window retirement")
-        ))
-    );
-    assert_eq!(state.shutdown, WinitShutdownState::Aborted);
-    assert_eq!(*events.lock().unwrap(), vec!["surface", "provider"]);
-    assert_eq!(
-        handles.snapshot(WindowId::PRIMARY).unwrap().phase,
-        nara_window::backend::WindowTargetPhase::ProviderReleased
-    );
+fn partial_platform_accessibility_contribution_retains_runtime_for_close() {
+    let mut app = window_app();
+    accessibility::__private::install_partial_winit_accessibility_contribution(&mut app).unwrap();
+    let state = platform_app(start_runtime(app));
     assert!(
-        !handles
-            .snapshot(WindowId::PRIMARY)
+        state
+            .failure()
             .unwrap()
-            .provider_present
+            .to_string()
+            .contains("Winit accessibility contribution is partial")
     );
-}
-
-#[test]
-fn event_loop_finish_does_not_redrive_an_already_stopping_runtime() {
-    let mut app = App::new();
-    app.add_plugin(WindowPlugin::default()).unwrap();
-    let released = Arc::new(std::sync::atomic::AtomicBool::new(false));
-    let polls = Arc::new(AtomicUsize::new(0));
-    let mut runtime = start_runtime_with_counted_pending_close(
-        app,
-        released.clone(),
-        polls.clone(),
-        Duration::from_secs(5),
-    );
-    assert!(matches!(
-        runtime.request_control(RuntimeControl::Stop),
-        RuntimeControlRequestResult::Accepted(_)
-    ));
-    runtime.drive(Duration::ZERO).unwrap();
-    assert_eq!(runtime.state(), RuntimeState::Stopping);
-    let polls_before_finish = polls.load(Ordering::SeqCst);
-
-    let mut state = WinitApp::new(&mut runtime).unwrap();
-    state.shutdown = WinitShutdownState::Aborted;
-    state.finish_after_event_loop();
-
-    assert_eq!(state.runtime.state(), RuntimeState::Stopping);
-    assert_eq!(polls.load(Ordering::SeqCst), polls_before_finish);
-    assert!(state.runtime_close_failure.is_none());
-    drop(state);
-
-    released.store(true, Ordering::SeqCst);
-    let mut retirement = runtime.begin_retirement();
-    assert_eq!(
-        retirement.drive_retirement(),
-        RuntimeCandidateRetirementState::Retired
-    );
-}
-
-#[test]
-fn event_loop_finish_records_close_incomplete_without_retrying_it() {
-    let mut app = App::new();
-    app.add_plugin(WindowPlugin::default()).unwrap();
-    let released = Arc::new(std::sync::atomic::AtomicBool::new(false));
-    let polls = Arc::new(AtomicUsize::new(0));
-    let mut runtime = start_runtime_with_counted_pending_close(
-        app,
-        released.clone(),
-        polls.clone(),
-        Duration::ZERO,
-    );
-    stop_runtime(&mut runtime);
-    assert_eq!(runtime.state(), RuntimeState::CloseIncomplete);
-    let polls_before_finish = polls.load(Ordering::SeqCst);
-
-    let mut state = WinitApp::new(&mut runtime).unwrap();
-    state.shutdown = WinitShutdownState::Aborted;
-    state.finish_after_event_loop();
-
-    assert_eq!(state.runtime.state(), RuntimeState::CloseIncomplete);
-    assert_eq!(polls.load(Ordering::SeqCst), polls_before_finish);
-    assert!(state.runtime_close_incomplete_observed);
-    drop(state);
-
-    released.store(true, Ordering::SeqCst);
-    let mut retirement = runtime.begin_retirement();
-    assert_eq!(
-        retirement.drive_retirement(),
-        RuntimeCandidateRetirementState::Retired
-    );
-}
-
-#[test]
-fn aborted_native_shutdown_poll_does_not_drive_the_running_app_again() {
-    let mut app = App::new();
-    app.add_plugin(WindowPlugin::default()).unwrap();
-    let mut runtime = start_runtime(app);
-    let frame_before = runtime
-        .world()
-        .resource::<nara_app::RuntimeFrameStatus>()
-        .frame;
-    let primary = AppRunError::runner("injected native retirement failure");
-
-    {
-        let mut state = WinitApp::new(&mut runtime).unwrap();
-        state.shutdown = WinitShutdownState::Aborted;
-        state.record_primary_failure(primary.clone());
-
-        assert_eq!(
-            state.poll_native_shutdown_once(Instant::now()),
-            EventLoopDirective::Exit
-        );
-        assert_eq!(state.primary_failure, Some(primary));
-    }
-
-    assert_eq!(runtime.state(), RuntimeState::Running);
-    assert_eq!(
-        runtime
-            .world()
-            .resource::<nara_app::RuntimeFrameStatus>()
-            .frame,
-        frame_before
-    );
-    stop_runtime(&mut runtime);
-    assert_eq!(runtime.state(), RuntimeState::Stopped);
-}
-
-#[test]
-fn runner_failure_and_native_teardown_failure_remain_distinct() {
-    let mut app = App::new();
-    app.add_plugin(WindowPlugin::default()).unwrap();
-    let mut runtime = start_runtime(app);
-    let mut state = WinitApp::new(&mut runtime).unwrap();
-    let primary = AppRunError::runner("winit event loop failed: os failure");
-    let teardown = AppRunError::runner("timed out waiting for native window destruction");
-
-    state.record_native_retirement_failure(teardown.clone());
-    state.record_primary_failure(primary.clone());
-
-    assert_eq!(
-        state.take_failure(),
-        Some(AppRunError::runner_teardown(primary, teardown))
-    );
-}
-
-#[test]
-fn external_destroyed_event_faults_and_retires_the_owned_target_once() {
-    let mut app = App::new();
-    app.add_plugin(WindowPlugin::default()).unwrap();
-    let handles = app.world().resource::<BackendWindowHandles>().clone();
-    let events = Arc::new(Mutex::new(Vec::new()));
-    handles
-        .insert(
-            WindowId::PRIMARY,
-            WindowHandleProvider::new(Arc::new(TestWindowSource {
-                events: Arc::clone(&events),
-            })),
-        )
-        .unwrap();
-    install_fake_surface_driver(&mut app);
-    add_fake_surface(&mut app, &handles, WindowId::PRIMARY, Arc::clone(&events));
-    let mut runtime = start_runtime(app);
-    let mut state = WinitApp::new(&mut runtime).unwrap();
-    let winit_window_id = WinitWindowId::dummy();
-    state
-        .nara_windows_by_winit
-        .insert(winit_window_id, WindowId::PRIMARY);
-    state.owned_window_ids.insert(WindowId::PRIMARY);
-
-    let now = Instant::now();
-    assert!(matches!(
-        state.handle_destroyed_window(winit_window_id, now).unwrap(),
-        EventLoopDirective::WaitUntil(_)
-    ));
-    assert_eq!(state.runtime.state(), RuntimeState::Stopping);
-
-    state.poll_runtime_close().unwrap();
-    assert_eq!(
-        state.poll_native_shutdown_transition(now),
-        EventLoopDirective::Exit
-    );
-
-    assert_eq!(state.shutdown, WinitShutdownState::Complete);
-    assert_eq!(
-        state.primary_failure,
-        Some(AppRunError::runner(
-            "native window was destroyed before controlled retirement"
-        ))
-    );
-    assert_eq!(state.runtime_close_failure, None);
-    assert_eq!(state.native_retirement_failure, None);
-    assert!(!state.nara_windows_by_winit.contains_key(&winit_window_id));
-    assert_eq!(
-        state.runtime.world().resource::<WindowEvents>().as_slice(),
-        &[WindowEvent::Closed {
-            window_id: WindowId::PRIMARY,
-        }]
-    );
-    assert_eq!(*events.lock().unwrap(), vec!["surface", "provider"]);
-    let snapshot = handles.snapshot(WindowId::PRIMARY).unwrap();
-    assert_eq!(
-        snapshot.phase,
-        nara_window::backend::WindowTargetPhase::NativeDestroyed
-    );
-    assert_eq!(
-        snapshot.fault,
-        Some(nara_window::backend::WindowTargetFault::ExternallyDestroyed)
-    );
-    assert!(!snapshot.provider_present);
-
-    assert_eq!(
-        state
-            .handle_destroyed_window(winit_window_id, Instant::now())
-            .unwrap(),
-        EventLoopDirective::None
-    );
-    assert_eq!(
-        state
-            .runtime
-            .world()
-            .resource::<WindowEvents>()
-            .as_slice()
-            .len(),
-        1
-    );
-    assert_eq!(*events.lock().unwrap(), vec!["surface", "provider"]);
-}
-
-#[test]
-fn shutdown_ignores_repeated_close_but_accepts_destroyed() {
-    let deadline = Instant::now() + Duration::from_secs(1);
-    assert!(should_process_window_event_during_shutdown(
-        WinitShutdownState::Running,
-        &WinitWindowEvent::CloseRequested
-    ));
-    assert!(!should_process_window_event_during_shutdown(
-        WinitShutdownState::WaitingForNative { deadline },
-        &WinitWindowEvent::CloseRequested
-    ));
-    assert!(!should_process_window_event_during_shutdown(
-        WinitShutdownState::Aborted,
-        &WinitWindowEvent::CloseRequested
-    ));
-    assert!(should_process_window_event_during_shutdown(
-        WinitShutdownState::WaitingForNative { deadline },
-        &WinitWindowEvent::Destroyed
-    ));
-    assert!(should_process_window_event_during_shutdown(
-        WinitShutdownState::Aborted,
-        &WinitWindowEvent::Destroyed
-    ));
-}
-
-#[test]
-fn native_shutdown_waits_for_destroyed_and_has_a_finite_timeout() {
-    let handles = BackendWindowHandles::default();
-    let events = Arc::new(Mutex::new(Vec::new()));
-    handles
-        .insert(
-            WindowId::PRIMARY,
-            WindowHandleProvider::new(Arc::new(TestWindowSource {
-                events: Arc::clone(&events),
-            })),
-        )
-        .unwrap();
-    handles.request_retirement(WindowId::PRIMARY).unwrap();
-    handles.release_provider(WindowId::PRIMARY).unwrap();
-
-    let now = Instant::now();
-    let deadline = now + Duration::from_secs(1);
-    let owned_window_ids = BTreeSet::from([WindowId::PRIMARY]);
-    assert_eq!(
-        native_shutdown_action(&handles, &owned_window_ids, now, deadline),
-        Ok(NativeShutdownAction::WaitUntil(deadline))
-    );
-
-    handles.mark_native_destroyed(WindowId::PRIMARY).unwrap();
-    assert_eq!(
-        native_shutdown_action(&handles, &owned_window_ids, now, deadline),
-        Ok(NativeShutdownAction::Complete)
-    );
-
-    let pending = BackendWindowHandles::default();
-    pending
-        .insert(
-            WindowId::PRIMARY,
-            WindowHandleProvider::new(Arc::new(TestWindowSource { events })),
-        )
-        .unwrap();
-    pending.request_retirement(WindowId::PRIMARY).unwrap();
-    pending.release_provider(WindowId::PRIMARY).unwrap();
-    assert_eq!(
-        native_shutdown_action(&pending, &owned_window_ids, deadline, deadline),
-        Ok(NativeShutdownAction::TimedOut)
-    );
-}
-
-#[test]
-fn native_completion_waits_for_runtime_close_before_success() {
-    let mut app = App::new();
-    app.add_plugin(WindowPlugin::default()).unwrap();
-    let released = Arc::new(std::sync::atomic::AtomicBool::new(false));
-    let mut runtime =
-        start_runtime_with_pending_close(app, released.clone(), Duration::from_secs(5));
-    assert!(matches!(
-        runtime.request_control(RuntimeControl::Stop),
-        RuntimeControlRequestResult::Accepted(_)
-    ));
-    runtime.drive(Duration::ZERO).unwrap();
-    assert_eq!(runtime.state(), RuntimeState::Stopping);
-
-    let mut state = WinitApp::new(&mut runtime).unwrap();
-    let now = Instant::now();
-    state.shutdown = WinitShutdownState::WaitingForNative {
-        deadline: now + Duration::from_secs(5),
-    };
-    assert!(matches!(
-        state.poll_native_shutdown_transition(now),
-        EventLoopDirective::WaitUntil(_)
-    ));
-    assert_eq!(
-        state.shutdown,
-        WinitShutdownState::WaitingForNative {
-            deadline: now + Duration::from_secs(5),
-        }
-    );
-
-    released.store(true, std::sync::atomic::Ordering::SeqCst);
-    state.poll_runtime_close().unwrap();
-    assert_eq!(state.runtime.state(), RuntimeState::Stopped);
-    assert_eq!(
-        state.poll_native_shutdown_transition(Instant::now()),
-        EventLoopDirective::Exit
-    );
-    assert_eq!(state.shutdown, WinitShutdownState::Complete);
-}
-
-#[test]
-fn native_completion_aborts_on_incomplete_runtime_close_and_preserves_retirement_owner() {
-    let mut app = App::new();
-    app.add_plugin(WindowPlugin::default()).unwrap();
-    let released = Arc::new(std::sync::atomic::AtomicBool::new(false));
-    let mut runtime = start_runtime_with_pending_close(app, released.clone(), Duration::ZERO);
-    stop_runtime(&mut runtime);
-    assert_eq!(runtime.state(), RuntimeState::CloseIncomplete);
-
-    let mut state = WinitApp::new(&mut runtime).unwrap();
-    let now = Instant::now();
-    state.shutdown = WinitShutdownState::WaitingForNative {
-        deadline: now + Duration::from_secs(5),
-    };
-
-    assert_eq!(
-        state.poll_native_shutdown_transition(now),
-        EventLoopDirective::Exit
-    );
-    assert_eq!(state.shutdown, WinitShutdownState::Aborted);
-    assert_eq!(state.runtime.state(), RuntimeState::CloseIncomplete);
-    assert!(
-        state
-            .runtime
-            .close_evidence()
-            .causes()
-            .contains(&RuntimeCloseCause::DeadlineExceeded)
-    );
-    assert_eq!(
-        state.take_failure(),
-        Some(AppRunError::runner("managed runtime close is incomplete"))
-    );
-    drop(state);
-
-    let mut retirement = runtime.begin_retirement();
-    assert_eq!(
-        retirement.retirement_state(),
-        RuntimeCandidateRetirementState::RetirementIncomplete
-    );
-    assert!(
-        retirement
-            .close_evidence()
-            .causes()
-            .contains(&RuntimeCloseCause::DeadlineExceeded)
-    );
-    released.store(true, std::sync::atomic::Ordering::SeqCst);
-    assert_eq!(
-        retirement.drive_retirement(),
-        RuntimeCandidateRetirementState::Retired
-    );
-}
-
-#[test]
-fn native_timeout_preserves_combined_failure_without_false_runtime_stop() {
-    let mut app = App::new();
-    app.add_plugin(WindowPlugin::default()).unwrap();
-    let handles = app.world().resource::<BackendWindowHandles>().clone();
-    let events = Arc::new(Mutex::new(Vec::new()));
-    handles
-        .insert(
-            WindowId::PRIMARY,
-            WindowHandleProvider::new(Arc::new(TestWindowSource { events })),
-        )
-        .unwrap();
-    let released = Arc::new(std::sync::atomic::AtomicBool::new(false));
-    let mut runtime =
-        start_runtime_with_pending_close(app, released.clone(), Duration::from_secs(5));
-    stop_runtime(&mut runtime);
-    assert_eq!(runtime.state(), RuntimeState::Stopping);
-
-    let mut state = WinitApp::new(&mut runtime).unwrap();
-    state.owned_window_ids.insert(WindowId::PRIMARY);
-    let now = Instant::now();
-    state.shutdown = WinitShutdownState::WaitingForNative { deadline: now };
-    let primary = AppRunError::runner("primary runner failure");
-    state.record_primary_failure(primary.clone());
-
-    assert_eq!(
-        state.poll_native_shutdown_transition(now),
-        EventLoopDirective::Exit
-    );
-    assert_eq!(state.shutdown, WinitShutdownState::Aborted);
-    assert_eq!(state.runtime.state(), RuntimeState::Stopping);
-    assert_eq!(
-        state.take_failure(),
-        Some(AppRunError::runner_teardown(
-            primary,
-            AppRunError::runner("timed out waiting for native window destruction")
-        ))
-    );
-    drop(state);
-
-    assert_eq!(runtime.state(), RuntimeState::Stopping);
-    released.store(true, std::sync::atomic::Ordering::SeqCst);
-    let mut retirement = runtime.begin_retirement();
-    assert_eq!(
-        retirement.drive_retirement(),
-        RuntimeCandidateRetirementState::Retired
-    );
-}
-
-#[test]
-fn close_incomplete_then_native_timeout_preserves_both_failures() {
-    let mut app = App::new();
-    app.add_plugin(WindowPlugin::default()).unwrap();
-    let handles = app.world().resource::<BackendWindowHandles>().clone();
-    handles
-        .insert(
-            WindowId::PRIMARY,
-            WindowHandleProvider::new(Arc::new(TestWindowSource {
-                events: Arc::new(Mutex::new(Vec::new())),
-            })),
-        )
-        .unwrap();
-    let released = Arc::new(std::sync::atomic::AtomicBool::new(false));
-    let mut runtime = start_runtime_with_pending_close(app, released.clone(), Duration::ZERO);
-    stop_runtime(&mut runtime);
-    assert_eq!(runtime.state(), RuntimeState::CloseIncomplete);
-
-    let mut state = WinitApp::new(&mut runtime).unwrap();
-    state.owned_window_ids.insert(WindowId::PRIMARY);
-    let now = Instant::now();
-    state.shutdown = WinitShutdownState::WaitingForNative { deadline: now };
-
-    state.poll_runtime_close().unwrap();
-    assert_eq!(
-        state.poll_native_shutdown_transition(now),
-        EventLoopDirective::Exit
-    );
-    assert_eq!(
-        state.take_failure(),
-        Some(AppRunError::runner_teardown(
-            AppRunError::runner("managed runtime close is incomplete"),
-            AppRunError::runner("timed out waiting for native window destruction")
-        ))
-    );
-    drop(state);
-
-    released.store(true, Ordering::SeqCst);
-    let mut retirement = runtime.begin_retirement();
-    assert_eq!(
-        retirement.drive_retirement(),
-        RuntimeCandidateRetirementState::Retired
-    );
-}
-
-#[test]
-fn close_incomplete_then_missing_target_preserves_both_failures() {
-    let mut app = App::new();
-    app.add_plugin(WindowPlugin::default()).unwrap();
-    let released = Arc::new(std::sync::atomic::AtomicBool::new(false));
-    let mut runtime = start_runtime_with_pending_close(app, released.clone(), Duration::ZERO);
-    stop_runtime(&mut runtime);
-    assert_eq!(runtime.state(), RuntimeState::CloseIncomplete);
-
-    let mut state = WinitApp::new(&mut runtime).unwrap();
-    state.owned_window_ids.insert(WindowId::PRIMARY);
-    let now = Instant::now();
-    state.shutdown = WinitShutdownState::WaitingForNative {
-        deadline: now + Duration::from_secs(5),
-    };
-
-    state.poll_runtime_close().unwrap();
-    assert_eq!(
-        state.poll_native_shutdown_transition(now),
-        EventLoopDirective::Exit
-    );
-    assert_eq!(
-        state.take_failure(),
-        Some(AppRunError::runner_teardown(
-            AppRunError::runner("managed runtime close is incomplete"),
-            AppRunError::runner("native window target disappeared during shutdown")
-        ))
-    );
-    drop(state);
-
-    released.store(true, Ordering::SeqCst);
-    let mut retirement = runtime.begin_retirement();
-    assert_eq!(
-        retirement.drive_retirement(),
-        RuntimeCandidateRetirementState::Retired
-    );
-}
-
-#[test]
-fn close_incomplete_is_recorded_once_while_native_retirement_continues() {
-    let mut app = App::new();
-    app.add_plugin(WindowPlugin::default()).unwrap();
-    let handles = app.world().resource::<BackendWindowHandles>().clone();
-    let events = Arc::new(Mutex::new(Vec::new()));
-    handles
-        .insert(
-            WindowId::PRIMARY,
-            WindowHandleProvider::new(Arc::new(TestWindowSource { events })),
-        )
-        .unwrap();
-    let released = Arc::new(std::sync::atomic::AtomicBool::new(false));
-    let polls = Arc::new(AtomicUsize::new(0));
-    let mut runtime = start_runtime_with_counted_pending_close(
-        app,
-        released.clone(),
-        polls.clone(),
-        Duration::ZERO,
-    );
-    assert!(matches!(
-        runtime.request_control(RuntimeControl::Stop),
-        RuntimeControlRequestResult::Accepted(_)
-    ));
-
-    let mut state = WinitApp::new(&mut runtime).unwrap();
-    state.owned_window_ids.insert(WindowId::PRIMARY);
-    let now = Instant::now();
-    state.shutdown = WinitShutdownState::WaitingForNative {
-        deadline: now + Duration::from_secs(5),
-    };
-
-    state.poll_runtime_close().unwrap();
-    assert_eq!(state.runtime.state(), RuntimeState::Stopping);
-    assert_eq!(polls.load(Ordering::SeqCst), 0);
-
-    state.poll_runtime_close().unwrap();
-    assert_eq!(state.runtime.state(), RuntimeState::CloseIncomplete);
-    assert_eq!(polls.load(Ordering::SeqCst), 1);
-    let first_failure = state
-        .runtime_close_failure
-        .as_ref()
-        .expect("the first incomplete close records teardown evidence")
-        as *const AppRunError;
-    assert!(matches!(
-        state.poll_native_shutdown_transition(now),
-        EventLoopDirective::WaitUntil(_)
-    ));
-
-    state.poll_runtime_close().unwrap();
-    assert_eq!(polls.load(Ordering::SeqCst), 1);
-    let retained_failure = state
-        .runtime_close_failure
-        .as_ref()
-        .expect("repeated polling keeps the original close failure")
-        as *const AppRunError;
-    assert_eq!(retained_failure, first_failure);
-
-    handles.mark_native_destroyed(WindowId::PRIMARY).unwrap();
-    assert_eq!(
-        state.poll_native_shutdown_transition(Instant::now()),
-        EventLoopDirective::Exit
-    );
-    assert_eq!(state.shutdown, WinitShutdownState::Aborted);
-    assert_eq!(state.runtime.state(), RuntimeState::CloseIncomplete);
-    assert_eq!(polls.load(Ordering::SeqCst), 1);
-    drop(state);
-
-    released.store(true, std::sync::atomic::Ordering::SeqCst);
-    let mut retirement = runtime.begin_retirement();
-    assert_eq!(
-        retirement.drive_retirement(),
-        RuntimeCandidateRetirementState::Retired
-    );
+    assert!(state.owned_window_ids.is_empty());
+    finish_unit_app(state);
 }

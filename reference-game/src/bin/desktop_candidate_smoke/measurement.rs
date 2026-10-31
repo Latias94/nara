@@ -417,6 +417,32 @@ mod tests {
     }
 
     #[test]
+    fn the_sealing_tail_still_rejects_duplicate_and_foreign_completions() {
+        let mut measurement = CandidateMeasurement::arm(test_identity());
+        measurement.observe(sample(11, 10, 100)).unwrap();
+        for offset in 1..=(WARMUP_SAMPLE_COUNT + MEASUREMENT_SAMPLE_COUNT) as u64 {
+            measurement
+                .admit_product_frame(product(11 + offset, 10 + offset))
+                .unwrap();
+            measurement
+                .observe(sample(11 + offset, 10 + offset, 100 + offset))
+                .unwrap();
+        }
+        assert!(measurement.seal_input().is_some());
+
+        assert!(measurement.observe(sample(31, 30, 120)).is_err());
+        assert!(measurement.observe(sample(11, 10, 100)).is_err());
+        assert!(
+            measurement
+                .observe(CandidateCompletionSample::new(4, 32, 31, 121))
+                .is_err()
+        );
+        let (exact, samples) = measurement.seal_input().unwrap();
+        assert_eq!(exact, sample(11, 10, 100));
+        assert_eq!(samples.len(), MEASUREMENT_SAMPLE_COUNT);
+    }
+
+    #[test]
     fn foreign_device_mismatched_exact_and_zero_duration_fail_closed() {
         let mut foreign = CandidateMeasurement::arm(test_identity());
         assert!(

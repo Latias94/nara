@@ -4,7 +4,7 @@ Date: 2026-10-31. Status: selected implementation direction for the
 [R8/R9a unit](../plans/2026-10-31-render-composition-and-host-execution-plan.md), subject to its
 complete consumer qualification. Public API names below are sketches. This design does not
 promote Proposed [ADR0121](adr/0121-composable-render-programs-and-host-execution.md) or claim
-that the production renderer has moved out of the World.
+the complete immutable-output, producer-prefix or public Feature workflow is qualified.
 
 ## Problem And Owners
 
@@ -69,8 +69,16 @@ Keep the current guarded owned driver ports for taking captures and returning ex
 The result operation coordinates the domain's existing frame/status/UI owners without granting
 an arbitrary caller a mutable World callback.
 
-Current desktop first-present verification runs in `CoreStage::Last` and reads the backend ECS
-resource. After Host relocation it must observe the exact returned presentation result at the
+Authenticate the original connection before collection as well as at Take and Return. A replacement
+CPU ingress must never acquire the original queue's one-shot permissions and then strand them in a
+buffer the original close owner cannot reach. The original shared connection retains its buffered
+capture and in-flight barrier independently of World membership. On direct Drop, original UI
+permissions settle before that barrier releases, including when another CPU thread drops a transfer.
+Cancellation carries no invented native observation: it records the skipped capture while preserving
+the last native backend state and error.
+
+At the transition baseline, desktop first-present verification ran in `CoreStage::Last` and read
+the backend ECS resource. The replacement observes the exact returned presentation result at the
 post-Host boundary. Do not drive another simulation frame or rerun arbitrary Last systems merely
 to publish READY. UI acceptance similarly joins returned original submission facts before its
 existing one-shot commit; an absent GPU resource cannot suppress required facts. Root observers
@@ -82,8 +90,10 @@ still advances the first-present deadline and an already-started asynchronous RE
 Occlusion, pending initialization or a producer pause cannot stall those protocols indefinitely.
 Maintenance observes time/results without minting a presentation or advancing simulation.
 
-Old World-based surface retirement currently treats missing `WgpuRenderBackend` as completed
-surface release. Delete that inference in the same consumer migration. Surface owner Drop still
+The old World-based surface retirement treated missing `WgpuRenderBackend` as completed
+surface release. Delete that inference and its obsolete World retirement callback in the same
+consumer migration. Use a plain CPU `WindowPresentationRequirement` for platform-only admission;
+it declares an expected backend and has no operation that could impersonate retirement. Surface owner Drop still
 acknowledges actual native release, but missing World endpoints or removed namespaces do not prove
 submitted work completion. A runner must continue driving retained GPU retirement after Runtime
 fault, Stop or endpoint revocation, before releasing its actual registered platform providers.
@@ -140,6 +150,13 @@ message. A retry must dispatch that message rather than immediately exiting agai
 Exit, budget expiry and actual destruction with this adapter; this source finding does not grant
 other-platform or panic-recovery guarantees.
 
+Distinguish ordinary frame demand from a maintenance deadline in the retained pump. A Wait-mode
+maintenance wake advances the presentation/READY/telemetry owner directly; it does not run gameplay,
+fixed updates or Last to obtain that progress. Poll-driven frames and actual frame/input demand keep
+their ordinary execution path. A native Destroyed event is expected only after that target's provider
+release, rather than merely after logical close was requested; earlier destruction remains a terminal
+failure even when the same session subsequently completes its actual cleanup.
+
 Establish original Device/Queue retirement custody while the device is Ready and before its first
 accepted submission. Existing backend error handling can clear the device namespace before
 `render_packet` returns; capturing retirement only on that error path is too late. Share the
@@ -148,9 +165,15 @@ resource membership are independent of that custody. Consumer telemetry configur
 initialization input, and bounded samples/statistics return as observations; GPU polling is not
 reintroduced as a World operation.
 
+The same Root native action accepts a code-first Runtime under just the platform/backend features.
+Source/processed construction, source-closure attestation and retained project configuration are
+conditional consumers of that owner. They must not force Scene serialization or the full 2D project
+loader into a clear-only or UI-only native product, and they must not introduce a second native
+execution facade to evade that dependency pressure.
+
 ### Existing Product Observers And Code-First Runs
 
-The actual Reference Game candidate/measurement and render-probe consumers currently read the
+At the transition baseline, Reference Game candidate/measurement and render-probe consumers read the
 backend and current `RenderFrame` from Last, and poll/drain GPU telemetry there. Moving execution
 after managed drive makes that schedule precede the current native result. Migrate those consumers
 to the last completed CPU observation, with its own exact app/render/capture identities and bounded

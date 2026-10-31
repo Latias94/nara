@@ -30,17 +30,17 @@ pub use super::runtime::{
     begin_prepared_project_scene_travel, commit_prepared_project_scene,
 };
 
+#[cfg(all(feature = "runtime-2d", feature = "serde", feature = "tooling"))]
+use super::runtime::{
+    EditorProjectOpenError, EditorProjectSession, TrustedCompiledEditorProjectIntent,
+};
 #[cfg(all(
     feature = "runtime-2d",
     feature = "serde",
     feature = "desktop-winit",
     feature = "render-wgpu"
 ))]
-use super::runtime::{DesktopRun, DesktopRunIntent};
-#[cfg(all(feature = "runtime-2d", feature = "serde", feature = "tooling"))]
-use super::runtime::{
-    EditorProjectOpenError, EditorProjectSession, TrustedCompiledEditorProjectIntent,
-};
+use super::{DesktopRun, DesktopRunIntent};
 
 /// One non-replayable plugin installed over an ordinary file-backed product recipe.
 ///

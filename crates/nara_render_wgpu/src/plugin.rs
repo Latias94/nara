@@ -84,10 +84,7 @@ impl Plugin for WgpuUiSubmitterPlugin {
     fn build(&self, app: &mut App) -> Result<(), PluginError> {
         app.add_systems(
             CoreStage::Render,
-            (
-                crate::collect_wgpu_ui_payload.in_set(WgpuFrameSet::CollectUi),
-                crate::complete_wgpu_ui_presentation.in_set(WgpuFrameSet::CompleteUi),
-            ),
+            crate::collect_wgpu_ui_payload.in_set(WgpuFrameSet::CollectUi),
         )?;
         Ok(())
     }

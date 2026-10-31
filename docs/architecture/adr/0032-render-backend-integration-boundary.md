@@ -32,7 +32,7 @@ authority, windows and the event pump. An incomplete exit returns that owner for
 retirement under the original affinity. Root assembles the Winit and WGPU participants through a
 narrow frame-maintenance/target-retirement/wake boundary; this is not a universal Runner or GPU
 service interface. [Implementation evidence](implementation-status.md) distinguishes the qualified
-original-result prerequisite from the still-unimplemented complete native transition.
+native transition from the remaining complete output, producer and Feature replacement.
 
 ## Context
 
@@ -62,7 +62,7 @@ Rules:
   ownership only after actual graphics retirement. An external Platform/Runner may use another platform stack or a future public
   exact-version `nara_winit` bridge. The first docking/multi-viewport or external-winit tracer decides
   whether an exact direct dependency is also required; external runner reachability is not a
-  first-party reservation. Each runner calls the backend-neutral retirement driver and waits only
+  first-party reservation. Each native session drives its concrete presentation retirement owner and waits only
   for targets it successfully registered. It does not invoke global plugin cleanup to drive a local
   target transition.
 - `nara_render` owns graph-ready render targets, viewport rectangles, extracted views, render phase labels, and frame lifecycle data, but no `wgpu` types.
@@ -76,12 +76,16 @@ Rules:
   authority requires its own admitted trust, version, ordering, epoch, target, and teardown
   contract under ADR 0094; dependency isolation alone does not promise such a public API.
 - The stock `nara_render_wgpu` Adapter consumes `nara_window::backend` non-cloneable surface handle
-  sources by value through wgpu's safe owning surface path, registers the scoped retirement driver,
+  sources by value through wgpu's safe owning surface path, declares its native presentation requirement,
   and returns wgpu skipped-frame/backend-error facts to `RenderBackendStatus`. The actual handle
   owner acknowledges from `Drop`; the paired lease then verifies that surface transition. Missing
   or replaced World resources cannot establish native submitted-work completion. Native surface
   and retirement operations belong to the retained local owner; placement remains governed by
   ADR 0078.
+- A CPU `WindowPresentationRequirement` declares that a platform-only run cannot satisfy the
+  configured product. It has no World callback or retirement operation. Concrete presentation
+  maintenance and retirement belong to the original native session driver; declaring a requirement
+  cannot acknowledge physical work or authorize an automatic no-render fallback.
 - The root `nara` facade keeps `winit` and `wgpu` behind explicit optional features. Default `MinimalPlugins` stays headless and backend-free.
 
 wgpu initialization may use `pollster` for the first native-desktop slice.

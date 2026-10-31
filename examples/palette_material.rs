@@ -3,13 +3,14 @@ use nara::hierarchy::{
     HierarchyCommandsExt, HierarchyOperation, HierarchyPlacement, HierarchyPlacementOwner,
 };
 use nara::material::{Material2dDefinition, Material2dDefinitions, Material2dInput};
+use nara::project_host::{DesktopRun, DesktopRunOptions};
 use nara::{advanced_prelude::*, backend_prelude::*};
 use std::error::Error;
 
+#[path = "support/desktop_run.rs"]
+mod desktop_run;
 #[path = "support/procedural_image.rs"]
 mod procedural_image;
-#[path = "support/runtime_retirement.rs"]
-mod runtime_retirement;
 
 static MATERIALS: [Material2dDefinition; 1] = [Material2dDefinition {
     id: "example.palette",
@@ -39,9 +40,9 @@ fn main() -> Result<(), Box<dyn Error>> {
         CoreStage::FixedUpdate,
         rotate_palette_sprites.in_set(nara::app::FixedUpdateSet::Simulate),
     )?;
-    let mut runtime = nara::app::RuntimeInstance::start(app)?;
-    let result = WinitRunner::default().run(&mut runtime);
-    runtime_retirement::finish_runtime_after_winit(result, runtime)
+    let runtime = nara::app::RuntimeInstance::start(app)?;
+    desktop_run::finish_desktop_run(DesktopRun::from_runtime(runtime, DesktopRunOptions::new()))?;
+    Ok(())
 }
 
 #[derive(Component)]

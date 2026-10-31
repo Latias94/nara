@@ -21,6 +21,7 @@ pub struct WgpuRenderObservation {
     state: WgpuBackendState,
     transaction: WgpuFrameTransactionStats,
     presented: Option<WgpuPresentedFrameReceipt>,
+    presented_surface_extent: Option<nara_render::Extent2d>,
     #[cfg(feature = "ui-submitter")]
     facts: Vec<WgpuSubmittedUiFacts>,
 }
@@ -88,6 +89,7 @@ impl WgpuRenderObservation {
             state,
             transaction,
             presented,
+            presented_surface_extent: None,
             #[cfg(feature = "ui-submitter")]
             facts,
         }
@@ -113,6 +115,25 @@ impl WgpuRenderObservation {
     #[must_use]
     pub const fn frame_transaction_stats(&self) -> WgpuFrameTransactionStats {
         self.transaction
+    }
+
+    /// Returns the configured physical extent of this transaction's exact presented surface.
+    /// Other targets and transactions without an issued presentation have no such observation.
+    #[must_use]
+    pub fn configured_surface_extent(
+        &self,
+        window: nara_window::WindowId,
+    ) -> Option<nara_render::Extent2d> {
+        self.presented
+            .filter(|receipt| receipt.window_id() == window)?;
+        self.presented_surface_extent
+    }
+
+    pub(crate) fn record_presented_surface_extent(
+        &mut self,
+        extent: Option<nara_render::Extent2d>,
+    ) {
+        self.presented_surface_extent = self.presented.and(extent);
     }
 
     pub(crate) const fn presented_frame_this_transaction(

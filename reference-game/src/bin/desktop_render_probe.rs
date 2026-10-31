@@ -13,17 +13,19 @@ use nara::{
         PluginDefinitionId, PluginError, PluginId, RuntimeGeneration, StartupStage,
     },
     asset::{AssetEvents, AssetStates, Assets},
-    ecs::{Entity, Query, With, schedule::IntoScheduleConfigs, system::SystemParam},
+    ecs::{Entity, With, schedule::IntoScheduleConfigs},
     gameplay::{GameplayCommandQueue, GameplayCommandSet},
     image::{ImageAsset, PreparedImages},
-    prelude::{App, CoreStage, FixedTime, Plugin, Res, ResMut, Resource},
+    prelude::{App, CoreStage, FixedTime, Plugin, ResMut, Resource, World},
     project_host::{
+        DesktopPresentationControl, DesktopPresentationObservation, DesktopRunOptions,
         DesktopRunOutcome,
         advanced::{RuntimeProbe, desktop_run_with_probe},
     },
     render::RenderFrame,
-    render_wgpu::WgpuRenderBackend,
+    render_wgpu::{__private::presented_frame_this_transaction, WgpuRenderObservation},
     sprite_render::__private::SpriteBatches,
+    ui_render::advanced::latest_presented_ui_observation,
     window::{
         Window, WindowId,
         backend::{BackendWindowHandles, WindowTargetSnapshot},
@@ -63,16 +65,23 @@ fn main() -> ExitCode {
     };
     let evidence = Arc::new(ProductRenderEvidence::default());
     let plugin_evidence = Arc::clone(&evidence);
-    let plugin_marker = Arc::clone(&marker);
     let probe = PluginDefinition::infallible::<ProductRenderProbePlugin, _>(
         PRODUCT_RENDER_PROBE_DEFINITION_ID,
         b"reference-game-product-render-probe-v1",
         move || ProductRenderProbePlugin {
             evidence: Arc::clone(&plugin_evidence),
-            marker: Arc::clone(&plugin_marker),
         },
     );
-    let mut run = desktop_run_with_probe(root, wave_desktop_intent(), RuntimeProbe::new(probe));
+    let observer_evidence = Arc::clone(&evidence);
+    let observer_marker = Arc::clone(&marker);
+    let execution = DesktopRunOptions::new().with_presentation_observer(move |observation| {
+        observe_startup_present(observation, &observer_marker, &observer_evidence)
+    });
+    let mut run = desktop_run_with_probe(
+        root,
+        wave_desktop_intent().with_execution(execution),
+        RuntimeProbe::new(probe),
+    );
     let mut cleanup_deadline = None;
 
     let report = loop {
@@ -146,7 +155,6 @@ struct ProductRenderEvidence {
 #[derive(Debug)]
 struct ProductRenderProbePlugin {
     evidence: Arc<ProductRenderEvidence>,
-    marker: Arc<StartupMarker>,
 }
 
 impl Plugin for ProductRenderProbePlugin {
@@ -157,7 +165,6 @@ impl Plugin for ProductRenderProbePlugin {
     fn build(&self, app: &mut App) -> Result<(), PluginError> {
         app.insert_resource(ProductRenderProbe {
             evidence: Arc::clone(&self.evidence),
-            marker: Arc::clone(&self.marker),
             deadline: Instant::now() + PRODUCT_RENDER_EVIDENCE_TIMEOUT,
             phase: ProductProbePhase::InitialFrame,
             baseline: None,
@@ -171,7 +178,6 @@ impl Plugin for ProductRenderProbePlugin {
             CoreStage::FixedUpdate,
             observe_product_render.in_set(GameplayCommandSet::Capture),
         )?
-        .add_systems(CoreStage::Cleanup, observe_startup_present)?
         .add_systems(StartupStage::Tooling, fail_retry_before_first_image_prepare)?;
         Ok(())
     }
@@ -202,7 +208,6 @@ fn fail_retry_before_first_image_prepare(
 #[derive(Debug, Resource)]
 struct ProductRenderProbe {
     evidence: Arc<ProductRenderEvidence>,
-    marker: Arc<StartupMarker>,
     deadline: Instant,
     phase: ProductProbePhase,
     baseline: Option<ProductContinuity>,
@@ -248,82 +253,75 @@ impl ProductContinuity {
     }
 }
 
-#[derive(SystemParam)]
-struct ProductRenderInputs<'w, 's> {
-    prepared: Res<'w, PreparedImages>,
-    batches: Res<'w, SpriteBatches>,
-    frame: Res<'w, RenderFrame>,
-    backend: Res<'w, WgpuRenderBackend>,
-    runtime_generation: Res<'w, RuntimeGeneration>,
-    wave_generation: Res<'w, WaveRunGeneration>,
-    snapshot: Res<'w, WaveSnapshot>,
-    fixed_time: Res<'w, FixedTime>,
-    handles: Res<'w, BackendWindowHandles>,
-    service: Res<'w, ProductServiceSentinel>,
-    windows: Query<'w, 's, Entity, With<Window>>,
-}
-
-#[derive(SystemParam)]
-struct StartupPresentInputs<'w> {
-    prepared: Res<'w, PreparedImages>,
-    batches: Res<'w, SpriteBatches>,
-    frame: Res<'w, RenderFrame>,
-    backend: Res<'w, WgpuRenderBackend>,
-}
-
-fn observe_product_render(
-    inputs: ProductRenderInputs<'_, '_>,
-    mut probe: ResMut<ProductRenderProbe>,
-    mut commands: ResMut<GameplayCommandQueue>,
-    mut exit: ResMut<AppExitRequests>,
-) {
-    let prepared_image = !inputs.prepared.is_empty();
-    let textured_batch = inputs
-        .batches
+fn observe_product_render(world: &mut World) {
+    let prepared_image = !world.resource::<PreparedImages>().is_empty();
+    let textured_batch = world
+        .resource::<SpriteBatches>()
         .as_slice()
         .iter()
         .any(|batch| batch.image.is_some());
-    let submitted_frame = submitted_product_frame(&inputs.frame, &inputs.backend);
+    let observation = world.resource::<WgpuRenderObservation>();
+    let submitted_frame = submitted_product_frame(observation);
+    let completed_frame = observation
+        .frame_transaction_stats()
+        .render_transaction_frame_index();
+    let observed_ui_glyph_texture = latest_presented_ui_observation(world)
+        .is_some_and(|presented| resident_product_glyphs(observation, &presented));
     let product_frame_ready = prepared_image && textured_batch && submitted_frame;
-    match probe.phase {
+    let phase = world.resource::<ProductRenderProbe>().phase;
+    match phase {
         ProductProbePhase::InitialFrame if product_frame_ready => {
-            if let Some(continuity) = capture_continuity(&inputs) {
-                let Some(tick) = inputs.fixed_time.tick().checked_add(1) else {
-                    probe.evidence.timed_out.store(true, Ordering::SeqCst);
-                    exit.request_exit();
+            if let Some(continuity) = capture_continuity(world) {
+                let Some(tick) = world.resource::<FixedTime>().tick().checked_add(1) else {
+                    fail_product_probe(world);
                     return;
                 };
                 let submission = movement_command(tick, 9_000, MovementDirection::Left)
                     .expect("the engine-owned product movement command is valid");
-                if commands.submit(submission).is_err() {
-                    probe.evidence.timed_out.store(true, Ordering::SeqCst);
-                    exit.request_exit();
+                if world
+                    .resource_mut::<GameplayCommandQueue>()
+                    .submit(submission)
+                    .is_err()
+                {
+                    fail_product_probe(world);
                     return;
                 }
+                let mut probe = world.resource_mut::<ProductRenderProbe>();
                 probe.baseline = Some(continuity);
                 probe.phase = ProductProbePhase::Terminal;
             }
         }
-        ProductProbePhase::Terminal if inputs.snapshot.is_terminal() => {
-            let Some(tick) = inputs.fixed_time.tick().checked_add(1) else {
-                probe.evidence.timed_out.store(true, Ordering::SeqCst);
-                exit.request_exit();
+        ProductProbePhase::Terminal if world.resource::<WaveSnapshot>().is_terminal() => {
+            let Some(tick) = world.resource::<FixedTime>().tick().checked_add(1) else {
+                fail_product_probe(world);
                 return;
             };
             let submission = retry_command(tick, 9_001)
                 .expect("the engine-owned product Retry command is valid");
-            if commands.submit(submission).is_err() {
-                probe.evidence.timed_out.store(true, Ordering::SeqCst);
-                exit.request_exit();
+            if world
+                .resource_mut::<GameplayCommandQueue>()
+                .submit(submission)
+                .is_err()
+            {
+                fail_product_probe(world);
                 return;
             }
-            probe.phase = ProductProbePhase::ResetFrame;
+            world.resource_mut::<ProductRenderProbe>().phase = ProductProbePhase::ResetFrame;
         }
-        ProductProbePhase::ResetFrame if inputs.wave_generation.get() >= 2 => {
-            let floor = *probe.reset_frame_floor.get_or_insert(inputs.frame.index);
-            let observed_ui_glyph_texture = resident_product_glyphs(&inputs.backend);
-            if inputs.frame.index > floor && product_frame_ready && observed_ui_glyph_texture {
-                let continuity = capture_continuity(&inputs);
+        ProductProbePhase::ResetFrame if world.resource::<WaveRunGeneration>().get() >= 2 => {
+            // The current simulation capture clock is only a lower bound here. Submission and
+            // glyph evidence below must belong to a later, actually completed transaction.
+            let capture_floor = world.resource::<RenderFrame>().index;
+            let floor = *world
+                .resource_mut::<ProductRenderProbe>()
+                .reset_frame_floor
+                .get_or_insert(capture_floor);
+            if completed_frame.is_some_and(|frame| frame > floor)
+                && product_frame_ready
+                && observed_ui_glyph_texture
+            {
+                let continuity = capture_continuity(world);
+                let probe = world.resource::<ProductRenderProbe>();
                 let preserved = probe
                     .baseline
                     .as_ref()
@@ -349,74 +347,98 @@ fn observe_product_render(
                     .evidence
                     .retry_continuity
                     .store(preserved, Ordering::SeqCst);
-                exit.request_exit();
+                world.resource_mut::<AppExitRequests>().request_exit();
             }
         }
         _ => {}
     }
-    if Instant::now() >= probe.deadline {
-        probe.evidence.timed_out.store(true, Ordering::SeqCst);
-        exit.request_exit();
+    if Instant::now() >= world.resource::<ProductRenderProbe>().deadline {
+        fail_product_probe(world);
     }
 }
 
-/// Emits the measurement marker after the complete Render stage has submitted and presented the
-/// same frame. The gameplay probe remains in FixedUpdate because it drives command semantics;
-/// startup timing must not wait for the next fixed tick merely to observe a prior present.
+fn fail_product_probe(world: &mut World) {
+    world
+        .resource::<ProductRenderProbe>()
+        .evidence
+        .timed_out
+        .store(true, Ordering::SeqCst);
+    world.resource_mut::<AppExitRequests>().request_exit();
+}
+
+/// Emits the marker at the actual native present callback. Maintenance advances the same finite
+/// timeout without another gameplay tick or an artificial invocation of Last.
 fn observe_startup_present(
-    inputs: StartupPresentInputs<'_>,
-    probe: Res<ProductRenderProbe>,
-    mut exit: ResMut<AppExitRequests>,
-) {
-    let prepared_image = !inputs.prepared.is_empty();
-    let textured_batch = inputs
-        .batches
+    observation: DesktopPresentationObservation<'_>,
+    marker: &StartupMarker,
+    evidence: &ProductRenderEvidence,
+) -> DesktopPresentationControl {
+    let Some(world) = observation.world() else {
+        return DesktopPresentationControl::Continue;
+    };
+    if observation.now() >= world.resource::<ProductRenderProbe>().deadline {
+        evidence.timed_out.store(true, Ordering::SeqCst);
+        return DesktopPresentationControl::Exit(AppExit::Requested);
+    }
+    let Some(presented_frame) = observation.presented_frame() else {
+        return DesktopPresentationControl::Continue;
+    };
+    if presented_frame.runtime_generation() != observation.runtime_generation()
+        || presented_frame_this_transaction(observation.wgpu()) != Some(presented_frame)
+    {
+        return DesktopPresentationControl::Continue;
+    }
+    let prepared_image = !world.resource::<PreparedImages>().is_empty();
+    let textured_batch = world
+        .resource::<SpriteBatches>()
         .as_slice()
         .iter()
         .any(|batch| batch.image.is_some());
-    let ui_glyph_texture = resident_product_glyphs(&inputs.backend);
-    let submitted_frame = submitted_product_frame(&inputs.frame, &inputs.backend);
-    probe
-        .evidence
+    let ui_glyph_texture = latest_presented_ui_observation(world)
+        .is_some_and(|presented| resident_product_glyphs(observation.wgpu(), &presented));
+    let submitted_frame = submitted_product_frame(observation.wgpu());
+    evidence
         .prepared_image
         .fetch_or(prepared_image, Ordering::SeqCst);
-    probe
-        .evidence
+    evidence
         .textured_batch
         .fetch_or(textured_batch, Ordering::SeqCst);
-    probe
-        .evidence
+    evidence
         .ui_glyph_texture
         .fetch_or(ui_glyph_texture, Ordering::SeqCst);
-    probe
-        .evidence
+    evidence
         .submitted_frame
         .fetch_or(submitted_frame, Ordering::SeqCst);
     if prepared_image
         && textured_batch
         && ui_glyph_texture
         && submitted_frame
-        && probe.marker.emit().is_err()
+        && marker.emit().is_err()
     {
-        probe.evidence.timed_out.store(true, Ordering::SeqCst);
-        exit.request_exit();
+        evidence.timed_out.store(true, Ordering::SeqCst);
+        return DesktopPresentationControl::Exit(AppExit::Requested);
     }
+    DesktopPresentationControl::Continue
 }
 
-fn capture_continuity(inputs: &ProductRenderInputs<'_, '_>) -> Option<ProductContinuity> {
-    let mut windows = inputs.windows.iter();
+fn capture_continuity(world: &mut World) -> Option<ProductContinuity> {
+    let mut query = world.query_filtered::<Entity, With<Window>>();
+    let mut windows = query.iter(world);
     let window_entity = windows.next()?;
     if windows.next().is_some() {
         return None;
     }
     Some(ProductContinuity {
-        runtime_generation: inputs.runtime_generation.get(),
+        runtime_generation: world.resource::<RuntimeGeneration>().get(),
         window_entity,
-        handles: (*inputs.handles).clone(),
-        target: inputs.handles.snapshot(WindowId::PRIMARY).ok()?,
-        backend_instance_id: inputs.backend.instance_id(),
-        device_epoch: inputs.backend.device_epoch(),
-        service_identity: Arc::clone(&inputs.service.identity),
-        service_value: inputs.service.value,
+        handles: world.resource::<BackendWindowHandles>().clone(),
+        target: world
+            .resource::<BackendWindowHandles>()
+            .snapshot(WindowId::PRIMARY)
+            .ok()?,
+        backend_instance_id: world.resource::<WgpuRenderObservation>().instance_id(),
+        device_epoch: world.resource::<WgpuRenderObservation>().device_epoch(),
+        service_identity: Arc::clone(&world.resource::<ProductServiceSentinel>().identity),
+        service_value: world.resource::<ProductServiceSentinel>().value,
     })
 }
