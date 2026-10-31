@@ -504,7 +504,10 @@ pub(crate) fn commit_runtime_ui_presentations(world: &mut World) {
         );
         return;
     };
-    if ledger.is_closing() {
+    if ledger.is_closing()
+        || nara_ui_render::__private::backend_outcome_receiver(world)
+            .is_none_or(|receiver| receiver.is_closing())
+    {
         return;
     }
     let outcomes = match nara_ui_render::drain_ui_presentation_outcomes(world) {

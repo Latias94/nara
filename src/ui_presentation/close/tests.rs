@@ -799,3 +799,63 @@ fn logical_close_does_not_require_the_optional_statistics_observer() {
     drop(stats);
     runtime.finish().unwrap();
 }
+
+#[test]
+fn late_presented_result_cannot_publish_while_the_original_close_port_is_unavailable() {
+    let mut runtime = fixture();
+    let submissions = take(&mut runtime);
+    let CloseFixtureOutput::Detached(port) = apply(
+        &mut runtime,
+        CloseFixtureInput::Detach(DetachKind::ClosePort),
+    ) else {
+        unreachable!()
+    };
+    stop(&mut runtime);
+    assert_eq!(
+        runtime.drive(Duration::ZERO).unwrap().state(),
+        RuntimeState::CloseIncomplete
+    );
+    let completed = bind_backend_submission_batch(
+        submissions,
+        UiPresentationBackendGeneration::new(507, 1).unwrap(),
+    )
+    .unwrap()
+    .pop()
+    .unwrap()
+    .presented();
+    let CloseFixtureOutput::Committed(result) =
+        apply(&mut runtime, CloseFixtureInput::Commit(completed))
+    else {
+        unreachable!()
+    };
+    result.unwrap();
+    apply(&mut runtime, CloseFixtureInput::CommitPresentations);
+    let presented_during_close = runtime
+        .world()
+        .resource::<UiPresentationBridgeStats>()
+        .presented_packets;
+    let interaction_published =
+        crate::ui_presentation::latest_presented_ui_observation(runtime.world()).is_some();
+
+    apply(&mut runtime, CloseFixtureInput::Restore(port));
+    assert!(matches!(
+        runtime.request_control(RuntimeControl::RetryClose),
+        RuntimeControlRequestResult::Accepted(_)
+    ));
+    assert_eq!(
+        runtime.drive(Duration::ZERO).unwrap().state(),
+        RuntimeState::Stopping
+    );
+    assert_eq!(
+        drive_after_logical_settlement(&mut runtime),
+        RuntimeState::Stopped
+    );
+    let aborted = runtime
+        .world()
+        .resource::<UiPresentationBridgeStats>()
+        .aborted_packets;
+    runtime.finish().unwrap();
+    assert_eq!(presented_during_close, 0);
+    assert!(!interaction_published);
+    assert_eq!(aborted, 1);
+}

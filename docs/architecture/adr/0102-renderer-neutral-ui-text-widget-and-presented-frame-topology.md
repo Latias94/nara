@@ -71,6 +71,19 @@ prefix retirement is a separate owner and may continue after logical settlement.
 Statistics and diagnostic observations do not own those obligations; their absence cannot prevent
 original UI/Input settlement or manufacture completion.
 
+Ordinary presentation commit also observes the original receiver's close fence, before draining
+returned outcomes. A temporarily unavailable close port must not leave a late Presented outcome
+free to consume Input authority or revive interaction. Concrete completion entry points derive
+presentation versus retirement admission from the exclusively borrowed Runtime on each invocation:
+Stopping, CloseIncomplete or Faulted may settle original transport without publishing UI interaction
+or world-presentation authority. Invocation refusal returns the original completion, and retry
+derives the current lifecycle again. This rule applies before close participants get their first
+poll, as well as after their ledger is fenced.
+The concrete result distinguishes normal presentation handling from retirement settlement after
+transport consumption. A Session clears the matching in-flight claim once; a retired result cannot
+report a pending Step as presented or requeue it. Post-operation faults preserve that consumed
+result and do not authorize replay.
+
 These are backend lifecycle semantics, not a new ordinary UI authoring/presenter API. The owning,
 independent hidden-exchange and actual Root/Editor consumers must qualify them; result-storage
 tests alone do not establish interaction settlement or the complete runner-local Host transition.

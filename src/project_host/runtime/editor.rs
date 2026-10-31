@@ -2254,12 +2254,11 @@ impl EditorProjectSession {
             return Err(completion);
         }
         let identity = completion.identity();
-        let disposition = completion.disposition();
         let Some(runtime) = lane.runtime_host.running_runtime_mut() else {
             return Err(completion);
         };
         match game_view::complete_candidate(runtime, completion) {
-            Ok(()) => {
+            Ok(outcome) => {
                 let EditorRuntimeOwnerState::Active {
                     game: Some(game), ..
                 } = &mut lane.runtime_owner
@@ -2273,22 +2272,29 @@ impl EditorProjectSession {
                         identity: expected
                     }) if expected == identity
                 ) {
-                    match disposition {
-                        EditorGameViewCompletionDisposition::Presented => {
+                    match outcome {
+                        game_view::GameViewCompletionOutcome::Presentation(
+                            EditorGameViewCompletionDisposition::Presented,
+                        ) => {
                             lane.pending_step_presentation = None;
                             self.play_result = Some(EditorPlayOperationResult::Applied {
                                 operation: EditorPlayOperation::StepFixedTick,
                                 generation: Some(identity.runtime_generation().get()),
                             });
                         }
-                        EditorGameViewCompletionDisposition::Deferred => {
+                        game_view::GameViewCompletionOutcome::Presentation(
+                            EditorGameViewCompletionDisposition::Deferred,
+                        ) => {
                             lane.pending_step_presentation =
                                 Some(EditorStepPresentationState::AwaitingCandidate {
                                     generation: identity.runtime_generation().get(),
                                 });
                         }
-                        EditorGameViewCompletionDisposition::ContentRejected
-                        | EditorGameViewCompletionDisposition::Failed => {
+                        game_view::GameViewCompletionOutcome::Presentation(
+                            EditorGameViewCompletionDisposition::ContentRejected
+                            | EditorGameViewCompletionDisposition::Failed,
+                        )
+                        | game_view::GameViewCompletionOutcome::Retired => {
                             lane.pending_step_presentation = None;
                             self.play_result = Some(EditorPlayOperationResult::Failed {
                                 operation: EditorPlayOperation::StepFixedTick,

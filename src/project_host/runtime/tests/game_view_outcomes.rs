@@ -575,3 +575,82 @@ fn lower_runtime_close_waits_for_the_original_game_view_ui_completion() {
     );
     drive_editor_close_to_completion(&mut editor);
 }
+
+#[cfg(feature = "presentation-ui")]
+#[test]
+fn game_completion_after_the_first_stop_drive_cannot_publish_interaction_or_world_presentation() {
+    let project = TestProject::new("game-view-first-stop-late-presented");
+    project.write_ui_authoring_documents(None, None);
+    let mut editor = open_game(&project, true);
+    let initial = take_candidate(&mut editor);
+    editor
+        .complete_game_view_candidate(initial.content_rejected("settle before Pause"))
+        .unwrap();
+    assert_eq!(
+        editor.request_play(EditorPlayCommand::Pause),
+        EditorPlayRequestResult::Accepted
+    );
+    let deadline = Instant::now() + Duration::from_secs(5);
+    while editor.play_view().state() != EditorPlayState::Paused {
+        editor.drive_editor_frame(Duration::ZERO);
+        assert!(Instant::now() < deadline);
+    }
+    assert_eq!(
+        editor.request_play(EditorPlayCommand::StepFixedTick),
+        EditorPlayRequestResult::Accepted
+    );
+    let deadline = Instant::now() + Duration::from_secs(5);
+    let mut candidate = loop {
+        editor.drive_editor_frame(Duration::ZERO);
+        if let Some(candidate) = editor.take_game_view_candidate().unwrap() {
+            break candidate.into_parts();
+        }
+        assert!(Instant::now() < deadline);
+    };
+    let identity = candidate.identity();
+    let (_, submissions) = candidate.take_ui_frame().unwrap().into_parts();
+    assert!(!submissions.is_empty());
+    let outcomes = nara_ui_render::__private::bind_backend_submission_batch(
+        submissions,
+        nara_ui_render::UiPresentationBackendGeneration::new(509, 1).unwrap(),
+    )
+    .unwrap()
+    .into_iter()
+    .map(|submission| submission.presented())
+    .collect();
+    let completion = EditorGameViewCompletion::with_ui(identity, outcomes);
+    {
+        let runtime = editor.test_game_view_runtime();
+        assert!(matches!(
+            runtime.request_control(RuntimeControl::Stop),
+            RuntimeControlRequestResult::Accepted(_)
+        ));
+        assert_eq!(
+            runtime.drive(Duration::ZERO).unwrap().state(),
+            RuntimeState::Stopping
+        );
+    }
+    editor
+        .complete_game_view_candidate(completion)
+        .expect("closing must settle the original transport without republishing authority");
+    let step_result = editor.play_view().result();
+    let interaction_published = crate::ui_presentation::latest_presented_ui_observation(
+        editor.test_game_view_runtime().world(),
+    )
+    .is_some();
+    let world_published = editor
+        .test_game_view_runtime()
+        .world()
+        .contains_resource::<nara_render::__private::PresentedWorldFrame>();
+    stop_lower_runtime(&mut editor);
+    drive_editor_close_to_completion(&mut editor);
+    assert!(!interaction_published);
+    assert!(!world_published);
+    assert!(matches!(
+        step_result,
+        Some(nara_tooling::EditorPlayOperationResult::Failed {
+            operation: nara_tooling::EditorPlayOperation::StepFixedTick,
+            failure: nara_tooling::EditorPlayFailure::Presentation,
+        })
+    ));
+}

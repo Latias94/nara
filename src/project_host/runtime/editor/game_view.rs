@@ -911,13 +911,24 @@ impl EditorGameViewBridge {
     }
 }
 
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum GameViewCompletionAdmission {
+    Present,
+    Retire,
+}
+
+pub(super) enum GameViewCompletionOutcome {
+    Presentation(EditorGameViewCompletionDisposition),
+    Retired,
+}
+
 enum EditorGameViewBridgeInput {
     TakeCandidate,
     RetirementBlocked,
     SetCaptureEnabled(bool),
     InvalidateWorldPresentation,
     Reconfigure(EditorGameViewCaptureConfig),
-    Complete(EditorGameViewCompletion),
+    Complete(EditorGameViewCompletion, GameViewCompletionAdmission),
 }
 
 enum EditorGameViewBridgeOutput {
@@ -926,7 +937,7 @@ enum EditorGameViewBridgeOutput {
     Busy,
     RetirementBlocked(bool),
     Updated(Result<(), EditorGameViewBridgeFailure>),
-    Completed(Result<(), EditorGameViewCompletion>),
+    Completed(Result<GameViewCompletionOutcome, EditorGameViewCompletion>),
     Failed(EditorGameViewBridgeFailure),
 }
 
@@ -954,14 +965,15 @@ impl __RuntimeDriverPort for EditorGameViewBridge {
             EditorGameViewBridgeInput::Reconfigure(_) => {
                 matches!(state, RuntimeState::Running | RuntimeState::Paused)
             }
-            EditorGameViewBridgeInput::Complete(_) => matches!(
-                state,
-                RuntimeState::Running
-                    | RuntimeState::Paused
-                    | RuntimeState::Faulted
-                    | RuntimeState::Stopping
-                    | RuntimeState::CloseIncomplete
-            ),
+            EditorGameViewBridgeInput::Complete(_, GameViewCompletionAdmission::Present) => {
+                matches!(state, RuntimeState::Running | RuntimeState::Paused)
+            }
+            EditorGameViewBridgeInput::Complete(_, GameViewCompletionAdmission::Retire) => {
+                matches!(
+                    state,
+                    RuntimeState::Faulted | RuntimeState::Stopping | RuntimeState::CloseIncomplete
+                )
+            }
         }
     }
 
@@ -982,7 +994,7 @@ impl __RuntimeDriverPort for EditorGameViewBridge {
             EditorGameViewBridgeInput::Reconfigure(config) => {
                 EditorGameViewBridgeOutput::Updated(self.reconfigure(config))
             }
-            EditorGameViewBridgeInput::Complete(completion) => {
+            EditorGameViewBridgeInput::Complete(completion, _) => {
                 EditorGameViewBridgeOutput::Completed(Err(completion))
             }
         }
@@ -1002,15 +1014,28 @@ impl EditorGameViewBridge {
                 #[cfg(not(feature = "presentation-ui"))]
                 let _ = &world;
                 match input {
-                    EditorGameViewBridgeInput::Complete(completion) => {
+                    EditorGameViewBridgeInput::Complete(completion, admission) => {
                         let runtime_identity = completion.identity.runtime;
                         if !bridge.accepts_completion(runtime_identity) {
                             return EditorGameViewBridgeOutput::Completed(Err(completion));
                         }
-                        let world_disposition = completion.disposition;
+                        let world_disposition = match admission {
+                            GameViewCompletionAdmission::Present => completion.disposition,
+                            GameViewCompletionAdmission::Retire => {
+                                EditorGameViewCompletionDisposition::Failed
+                            }
+                        };
 
                         #[cfg(feature = "presentation-ui")]
                         {
+                            if admission == GameViewCompletionAdmission::Retire
+                                && let Some(receiver) =
+                                    nara_ui_render::__private::backend_outcome_receiver(world)
+                            {
+                                // A closing Runtime may receive its original transport, but
+                                // cannot republish interaction before close participants run.
+                                receiver.begin_close();
+                            }
                             let EditorGameViewCompletion {
                                 identity: candidate_identity,
                                 disposition,
@@ -1041,7 +1066,12 @@ impl EditorGameViewBridge {
 
                         bridge.complete_world_presentation(world, world_disposition);
                         bridge.finish_completion(runtime_identity);
-                        EditorGameViewBridgeOutput::Completed(Ok(()))
+                        EditorGameViewBridgeOutput::Completed(Ok(match admission {
+                            GameViewCompletionAdmission::Present => {
+                                GameViewCompletionOutcome::Presentation(world_disposition)
+                            }
+                            GameViewCompletionAdmission::Retire => GameViewCompletionOutcome::Retired,
+                        }))
                     }
                     EditorGameViewBridgeInput::Reconfigure(config) => {
                         let result = bridge.reconfigure(config);
@@ -1277,9 +1307,19 @@ pub(super) fn retirement_blocked(runtime: &mut nara_app::RuntimeInstance) -> boo
 pub(super) fn complete_candidate(
     runtime: &mut nara_app::RuntimeInstance,
     completion: EditorGameViewCompletion,
-) -> Result<(), EditorGameViewCompletion> {
+) -> Result<GameViewCompletionOutcome, EditorGameViewCompletion> {
+    // The exclusive Runtime owner supplies this invocation's lifecycle admission. Rejected
+    // input retains its original completion; a later retry derives the current state again.
+    let admission = if matches!(
+        runtime.state(),
+        RuntimeState::Running | RuntimeState::Paused
+    ) {
+        GameViewCompletionAdmission::Present
+    } else {
+        GameViewCompletionAdmission::Retire
+    };
     let output = match runtime.__with_owned_driver_port::<EditorGameViewBridge>(
-        EditorGameViewBridgeInput::Complete(completion),
+        EditorGameViewBridgeInput::Complete(completion, admission),
     ) {
         // The Runtime retains the sticky fault. The Session must reconcile the completion before
         // observing it; an already-consumed native completion must never be retried.
@@ -1288,7 +1328,7 @@ pub(super) fn complete_candidate(
     };
     match output {
         Ok(EditorGameViewBridgeOutput::Completed(result)) => result,
-        Err(EditorGameViewBridgeInput::Complete(completion)) => Err(completion),
+        Err(EditorGameViewBridgeInput::Complete(completion, _)) => Err(completion),
         Err(_) => unreachable!("the owned completion port returns its original input on rejection"),
         Ok(
             EditorGameViewBridgeOutput::Candidate(_)
@@ -1507,7 +1547,7 @@ mod completion_test_support {
             &mut self,
             completion: EditorGameViewCompletion,
         ) -> Result<(), EditorGameViewCompletion> {
-            complete_candidate(self.test_game_view_runtime(), completion)
+            complete_candidate(self.test_game_view_runtime(), completion).map(|_| ())
         }
     }
 

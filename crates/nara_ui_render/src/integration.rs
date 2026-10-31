@@ -135,6 +135,14 @@ pub struct UiBackendOutcomeReceiver {
 }
 
 impl UiBackendOutcomeReceiver {
+    #[must_use]
+    pub fn is_closing(&self) -> bool {
+        self.tracking
+            .lock()
+            .unwrap_or_else(|error| error.into_inner())
+            .closing
+    }
+
     pub fn begin_close(&self) {
         self.tracking
             .lock()
