@@ -8,15 +8,18 @@ mod canvas;
 mod device;
 mod error;
 mod frame;
+mod graph;
 mod host;
 mod observation;
 mod output;
 mod plugin;
 mod presented;
+mod program;
 #[cfg(any(feature = "sprite-submitter", feature = "ui-submitter"))]
 mod quad;
 #[cfg(all(test, any(feature = "sprite-submitter", feature = "ui-submitter")))]
 mod readback_tests;
+mod requirements;
 mod retirement;
 mod runtime;
 #[cfg(feature = "sprite-submitter")]
@@ -60,6 +63,9 @@ use nara_window::{
 
 pub use crate::backend::{WgpuBackendState, WgpuFrameTransactionStats, WgpuRenderBackend};
 pub use crate::error::WgpuRenderError;
+pub use crate::graph::{
+    AccessRole, GraphError, GraphLimits, LimitKind, TextureAlpha, TextureTransfer,
+};
 pub use crate::host::{
     WgpuImageTargetActivation, WgpuImageTargetIdentity, WgpuImageTargetReservation, WgpuRenderHost,
     WgpuRenderHostError, WgpuRenderProducer, WgpuRenderProducerId,
@@ -76,6 +82,14 @@ pub use crate::plugin::{
     WGPU_UI_SUBMITTER_PLUGIN_DECLARATION, WGPU_UI_SUBMITTER_PLUGIN_ID, WgpuUiSubmitterPlugin,
 };
 pub use crate::presented::WgpuSubmittedImageReceipt;
+pub use crate::program::{
+    WgpuFeatureAllocation, WgpuFeatureDefinition, WgpuFeatureEncodeContext, WgpuFeatureInstance,
+    WgpuFeaturePrepareContext, WgpuNativeResources, WgpuOperationResources, WgpuProgramBuffer,
+    WgpuProgramBufferOutput, WgpuProgramOutput, WgpuProgramOutputs, WgpuProgramRead,
+    WgpuProgramTexture, WgpuProgramTextureDescriptor, WgpuProgramTextureOutput, WgpuProgramWrite,
+    WgpuRenderFeature, WgpuRenderProgram, WgpuRenderProgramBuilder, WgpuRenderProgramError,
+};
+pub use crate::requirements::{WgpuDeviceRequirements, WgpuDeviceRequirementsError};
 pub use crate::submission::{WgpuSubmissionPrefix, WgpuSubmissionPrefixError};
 pub use crate::telemetry::{
     MAX_ADAPTER_SUMMARY_FIELD_BYTES, MAX_BUFFERED_FRAME_COMPLETIONS, MAX_PENDING_FRAME_COMPLETIONS,

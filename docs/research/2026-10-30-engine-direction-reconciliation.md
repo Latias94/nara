@@ -189,3 +189,12 @@ producer admission, borrowed activation, native-use/prefix custody, original inp
 M-before-D UI completion have independent public and selected native evidence. This implements
 the next F2/F3 ownership consumer; graph/Feature, full history groups and the editable Nara-drawn
 Editor retain their existing gates. The research still requires no roadmap reset or toolkit adoption.
+
+The next [finite production-program prerequisite](../knowledge/engineering/verification/2026-10/2026-10-31T133536Z-finite-typed-render-programs-through-the-original-host-production-qualification-a32bacec9d8b4572801df1f79fc31c01.md)
+implements typed texture/buffer graph operations through that original Host. Its independent public
+package executes the complete blur/effect/raw-count/normalize/vertex-histogram workload with exact
+old outputs and producer-local retirement. Four concrete review corrections replace incomplete
+metadata admission, partial known-resource reservations, hard-limit deferral and recursive submission
+cleanup. The stock migration adds an explicit complete Image preflight barrier before uploads;
+View/history, policy and custom composition remain in the current R8 unit. This is development
+against the imported F1/F3 direction, not another research-only roadmap or a full0121 completion claim.

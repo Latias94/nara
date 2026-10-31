@@ -9,6 +9,13 @@ Candidate: Proposed [ADR0121](../architecture/adr/0121-composable-render-program
 Current Accepted authority remains ADRs0017/0032/0040/0078/0094/0105/0111 until explicitly reconciled
 for a selected production replacement.
 
+ADR0094 now explicitly admits the finite captured texture/buffer program prerequisite through the
+existing Host, with exact typed definition/instance/capture pairing and original submission custody.
+The [production integration design](../architecture/render-program-production-design.md) orders its
+stock migration, complete Image preflight barrier, history/policy and custom composition. The
+[public guide](../guides/render-programs.md) describes the implemented prerequisite only; it does
+not promote Proposed0121 or replace the complete outcome below.
+
 ## Complete Outcome
 
 An independently authored typed Feature renders the same separable Scene-color blur in Runtime,

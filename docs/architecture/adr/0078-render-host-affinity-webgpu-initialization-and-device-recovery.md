@@ -215,6 +215,11 @@ stateDiagram-v2
   exact capability snapshot only after device creation. Logical admission may reason about the
   closed request and declared fallbacks, but executable pipeline publication cannot assume an
   enabled capability before the latter snapshot is current.
+- The [finite captured-program refinement](0094-minimal-render-execution-boundary-and-evidence-gated-extensions.md#finite-captured-wgpu-programs)
+  accepts exact Feature requirements before acquisition and bounded prepare/encode inside the same
+  Host. WGPU's own limit ordering aggregates the request; actual enabled capabilities are checked
+  before Ready. Refusing a late contribution cannot clear a healthy device or turn that local
+  admission failure into an existing producer's device fault. Recovery retains the original request.
 - A structural composition change whose request is not satisfied by the live Device requires an
   explicitly constructed Host/device candidate or typed rejection. Device recovery reuses the
   admitted request-plan fingerprint; a changed request is replacement, not recovery.
@@ -240,8 +245,10 @@ stateDiagram-v2
 
 ### Future wgpu/native integration
 
-This ADR does not accept a public raw-wgpu callback, interop session, queue mode, native-handle
-carrier, or replacement Render Host contract. ADR 0094 keeps those as evidence-gated candidates.
+ADR0094's finite typed program accepts scoped exact-native preparation/encoding with original
+Host custody and no ordinary submit/present entry. Broader public raw-wgpu callbacks, interop
+sessions, queue modes, external native-handle carriers and replacement Render Host contracts
+remain evidence-gated candidates under ADR0094.
 The first production compute, video, XR, vendor, or external-resource workflow must compare a
 stock-Host feature path, a scoped exact-GPU path, and whole-Host ownership as applicable. Any
 accepted successor must define pre-device requirements, trust, resource and submission ordering,

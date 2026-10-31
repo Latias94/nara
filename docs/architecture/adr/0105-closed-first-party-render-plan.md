@@ -2,7 +2,7 @@
 
 **Status**: Accepted
 **Date**: 2026-08-04
-**Last Revised**: 2026-08-16
+**Last Revised**: 2026-10-31 (finite native program successor)
 **Owner**: Renderer-neutral presentation planning, owned submitter packets, and concrete render backends
 **Refines**: [ADR 0012](0012-render-crate-boundaries.md),
 [ADR 0017](0017-render-graph-policy.md),
@@ -28,6 +28,13 @@ mutable asset state during submission can silently combine geometry from one fra
 glyph data from another. A wider public render graph would not solve that ownership error.
 
 ## Decision
+
+The [finite captured WGPU program refinement in ADR0094](0094-minimal-render-execution-boundary-and-evidence-gated-extensions.md#finite-captured-wgpu-programs)
+now admits the resource/typed Feature successor selected by actual texture/buffer and retained-version
+workflows. The closed stock plan below is the current transition implementation; its domain-owned
+immutable capture requirements remain. Its former topology restriction does not prohibit the admitted
+native program or create a permanent alternate draw path. Stock Runtime, Editor and image consumers
+must migrate together, preserving exact generation, ordering, UI completion and native custody.
 
 Nara's stock render plan is a closed, private first-party implementation. Public domains provide
 content and owned backend-neutral packets; they do not construct render topology or invoke internal

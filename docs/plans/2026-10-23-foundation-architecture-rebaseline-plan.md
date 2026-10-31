@@ -753,6 +753,13 @@ activation, original reconstruction and submitted-prefix responsibility through 
 independent public consumers. Continue the production graph/typed Feature and alternate-policy
 transition through these owners. Proposed0121 and the complete foundation Goal stay open.
 
+Accepted ADR0094 now selects the finite typed texture/buffer program prerequisite through that same
+Host. Follow its [production design](../architecture/render-program-production-design.md) for actual
+stock adapters, including a whole-candidate Image preflight before any upload/state creation,
+shared native realization and submission-boundary instance accounting. A public offscreen Feature
+is evidence for this prerequisite; stock Runtime/Editor, policy, View/history and custom composition
+still close the complete R8 outcome rather than becoming parallel permanent render paths.
+
 ADR 0121's [identity, wiring and candidate boundaries](../architecture/adr/0121-composable-render-programs-and-host-execution.md#identity-wiring-and-candidate-boundaries)
 close three remaining shared contracts before interface freeze: stable Feature-instance and
 candidate-local resource identities, explicit semantic-output/resource compatibility, and output

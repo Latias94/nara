@@ -2,7 +2,7 @@
 
 **Status**: Accepted
 **Date**: 2026-07-16
-**Last Revised**: 2026-08-16
+**Last Revised**: 2026-10-31 (finite captured WGPU program prerequisite)
 **Supersedes**: [ADR 0077](0077-render-pipeline-recipes-graph-compilation-and-backend-encoding.md)
 **Refines**: [ADR 0012](0012-render-crate-boundaries.md),
 [ADR 0016](0016-extension-seams-for-backends-and-domain-modules.md),
@@ -87,6 +87,10 @@ flowchart LR
 
 ### Static planning and graph admission
 
+- The finite captured WGPU program refinement below admits the first measured resource graph and
+  typed native contribution path. The existing closed stock plan remains a transition consumer
+  until Sprite/UI, Runtime and Editor migrate through that same owner. Its historical restrictions
+  cannot prohibit the explicitly admitted successor or justify a second native execution loop.
 - `RenderPassPlan` is the current engine-owned static stock-phase order contract. It must not grow
   into an ad hoc partial resource graph, persistent project recipe, or arbitrary external-pass API.
 - Views, targets, viewport/scissor semantics, phases, and target-frame lifecycle remain explicit
@@ -126,6 +130,73 @@ flowchart LR
   admitted. Equality of every hypothetical future role is a validation target, not a current
   compatibility promise.
 
+### Finite Captured WGPU Programs
+
+The [complete comparison](../../benchmarks/2026-10-31-render-composition.md) executes branching
+texture dependencies, preserved originals, compute statistics, storage-to-vertex drawing and
+temporal controls against viable ordered, slot and schedule alternatives. It does not establish
+a stable performance winner. Those dependency and retained-version workflows select a finite
+resource graph with typed Features as the production replacement, under the
+[implementation design](../render-program-production-design.md) and
+[complete unit](../../plans/2026-10-31-render-composition-and-host-execution-plan.md).
+
+This revision accepts the bounded program prerequisite, with implementation and qualification
+tracked separately. Proposed0121 retains complete stock-policy, View/history, custom-Editor and
+cross-owner composition work; this subsection does not promote that entire proposal.
+
+- `nara_render_wgpu` owns the exact native program. `nara_render` continues to own backend-neutral
+  Views, targets and mappings. WGPU descriptors, features and limits remain the native vocabulary;
+  resource versions and semantic ports are ownership/dependency facts, not another RHI.
+- A candidate owns unforgeable resource versions. Every local version has one writer, explicit
+  whole-resource initialization and a stored postcondition. Read and preservation edges determine
+  execution; stable operation keys only break ready ties. Reject foreign handles, duplicate or
+  missing writers, cycles, feedback, invalid usages and incompatible semantic reads before native
+  work. Initial shared scope is whole single-sample, single-mip 2D color textures and aligned
+  unmapped buffers. Unsupported ranges or resolves refuse explicitly.
+- Rust semantic marker types distinguish equal-shaped Scene/composite textures and raw/normalized
+  buffers. A compatible explicit initialization copy may create a different semantic destination;
+  that copy does not relabel its immutable predecessor or prove a shader conversion.
+- An immutable Feature definition pairs a CPU capture type with its exact native adapter. One
+  producer-owned instance has a non-reused incarnation. Host/epoch-local state, prepared work,
+  capture and reports retain their original definition through actual cleanup. No current registry
+  lookup can retarget old work. Closing an instance refuses new admission without invalidating
+  another instance or releasing its submitted uses.
+- Requirements aggregate before device acquisition, using WGPU's direction for every limit.
+  Adapter support, requested and actually enabled capabilities remain distinct. A late subset may
+  fit the original enabled request; a new requirement explicitly needs Host reconstruction or
+  refuses. It cannot silently replace a healthy device or broaden recovery's original request.
+- Preparation, including state creation, runs under original pre-upload custody. Private native
+  allocations reserve the shared retained-byte budget and keep their guards with the allocation.
+  Scoped uploads retain their actual destinations before enqueue. Encoding receives declared
+  resources and a command encoder; ordinary Feature methods have no Queue, acquire, submit or
+  present entry. Exact native Rust is trusted code, not a sandbox against handle cloning.
+- Imports require exact Host-issued initialized output leases, checked against original Host,
+  epoch, native shape, interpretation and usages before realization. No caller boolean or raw
+  native handle establishes initialization. A successor allocates distinct storage while a
+  predecessor remains leased. CPU inputs and reconstruction availability stay independent of
+  published pixels/bytes.
+- Each candidate has one complete output group and one independently validated native submission.
+  Failed preparation, encoding or submission publishes none of it and leaves its successful
+  capture watermark unchanged. Even failures flush and retain original uploads through the
+  original prefix. Output and typed reports become visible only after native admission and epoch
+  revalidation; physical completion, presentation and UI settlement remain separate facts.
+- Graph and derived scratch have checked finite metadata/count/resource allowances before growth.
+  Host local allocations, adapter-private native payloads, retained outputs and submitted uses share
+  explicit logical-byte accounting. These bounds exclude allocator/driver overhead and are not
+  RSS or measured GPU-residency claims. After physical completion, published outputs retain only
+  selected versions and reports, rather than all scratch or the original reconstruction input.
+- Original submitted custody is a bounded flat container. It releases later prepared/native work
+  before earlier capture/definition dependencies, without destructor recursion proportional to
+  candidate size. Retention admission precedes each upload; a refused entry returns its original
+  value outside the custody lock. A hard entry limit is a deterministic refusal, separately from
+  temporary allocation pressure.
+
+Static definitions and installed instances do not establish dynamic code unload, runtime policy
+replacement or a public backend-neutral Feature ABI. The complete stock migration must preserve
+cross-View/UI/material working-set preflight, replay packets versus one-shot UI permits, logical
+target routing, full-resolution HUD and the existing native/READY/input/close consumers. These
+remain explicit subsequent implementation work, not compatibility routes to retain permanently.
+
 ## Candidate Extensions, Not Accepted Decisions
 
 The following remain non-normative hypotheses in the render pressure matrix, render Interface
@@ -133,14 +204,14 @@ harness, and inactive render tracer plan:
 
 | Candidate | Evidence required before admission |
 |---|---|
-| Render Feature or public pass/provider catalog | A production post-process, overlay, or custom pass that static domain submitters cannot express cleanly |
+| General provider catalog or dynamic contribution replacement | Beyond the admitted finite typed program: explicit withdrawal, retained-work and replacement ownership |
 | Pipeline Family, Renderer Profile, or persistent Pipeline Recipe | A second materially different complete renderer plus an ordinary author selection workflow |
-| Logical RenderGraph, compiler, `CompiledPipelineTemplate`, or `FrameExecutionPlan` | At least one concrete logical-resource lifetime/dependency workflow and an alternatives comparison against static phases and a minimal execution kernel |
+| Persistent pipeline templates or general execution kernel | Beyond the finite candidate graph: a concrete persistent authoring or scheduling workflow |
 | Retained logical render scene/update protocol | Two production consumers that need persistent render-domain state and prove bounded gap/resync behavior |
 | ViewFamily, auxiliary views, and history identity | A temporal, stereo, reflection, portal, or related-view workflow with explicit invalidation pressure |
 | Shader artifact/interface, Material Technique, or Shader Graph convergence | Reusable materials plus two independent shader frontends or authoring routes |
 | Editor semantic outputs, picking, and capture catalog | A real editor viewport whose tooling requirements cannot be met by the minimal target/output contract |
-| Scoped encoding or exact wgpu/native interop | A compute, video, XR, vendor, or external-resource integration with pre-device, ordering, epoch, trust, and teardown evidence |
+| External raw resources, vendor or whole-device integration | Beyond admitted Feature encoding of declared resources: original authority, initialization and teardown evidence |
 | Replacement Render Host or alternate renderer runner | A production integration that must own target, submission, presentation, recovery, or placement and cannot fit an admitted lower-authority path |
 
 No candidate in this table may be cited as current implementation authority. A tracer may compare

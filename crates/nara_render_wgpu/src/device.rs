@@ -10,7 +10,10 @@ use std::{
 };
 
 use crate::{
-    WgpuRenderError, backend::WgpuBackendState, host::WgpuRenderProducerId,
+    WgpuRenderError,
+    backend::WgpuBackendState,
+    host::WgpuRenderProducerId,
+    requirements::{WgpuDeviceRequirements, WgpuDeviceRequirementsError},
     telemetry::WgpuAdapterSummary,
 };
 
@@ -152,6 +155,9 @@ pub(super) struct WgpuDeviceOwner {
     domain: DeviceDomain,
     instance: Option<wgpu::Instance>,
     last_epoch: u64,
+    // Once a device epoch exists this is the original closed request, including across clear.
+    // Late subset admission cannot change the request used to recover that device domain.
+    requirements: WgpuDeviceRequirements,
 }
 
 impl WgpuDeviceOwner {
@@ -216,6 +222,60 @@ impl WgpuDeviceOwner {
         ))
     }
 
+    /// Contributes before the first device, or admits a subset of the original enabled request.
+    ///
+    /// No native acquisition, epoch transition or healthy-device replacement occurs here.
+    pub(super) fn request_device_requirements(
+        &mut self,
+        requirements: &WgpuDeviceRequirements,
+    ) -> Result<(), WgpuDeviceRequirementsError> {
+        requirements.validate_request()?;
+        match &self.domain {
+            DeviceDomain::Uninitialized if self.last_epoch == 0 => {
+                self.requirements = self.requirements.union(requirements);
+                return Ok(());
+            }
+            DeviceDomain::Ready(ready) => {
+                if ready.loss.is_lost() {
+                    return Err(WgpuDeviceRequirementsError::ReconstructionRequired);
+                }
+                requirements.validate_late_request(
+                    ready.adapter.features(),
+                    &ready.adapter.limits(),
+                    ready.device.features(),
+                    &ready.device.limits(),
+                )?;
+            }
+            DeviceDomain::Unavailable => {
+                return Err(WgpuDeviceRequirementsError::BackendUnavailable);
+            }
+            DeviceDomain::Initializing => {
+                return Err(WgpuDeviceRequirementsError::ReconstructionRequired);
+            }
+            DeviceDomain::Uninitialized => {}
+            #[cfg(test)]
+            DeviceDomain::Probe { device_queue, loss } => {
+                let Some((device, _)) = device_queue else {
+                    return Err(WgpuDeviceRequirementsError::ReconstructionRequired);
+                };
+                if loss.is_lost()
+                    || !requirements.is_satisfied_by(device.features(), &device.limits())
+                {
+                    return Err(WgpuDeviceRequirementsError::ReconstructionRequired);
+                }
+            }
+        }
+        // Recovery is the same admitted request. Even an implementation exposing capabilities
+        // beyond the request cannot promise them for a later epoch of this original owner.
+        if !requirements.is_satisfied_by(
+            self.requirements.required_features(),
+            self.requirements.required_limits(),
+        ) {
+            return Err(WgpuDeviceRequirementsError::ReconstructionRequired);
+        }
+        Ok(())
+    }
+
     pub(super) fn ensure_instance(&mut self) -> Result<(), WgpuRenderError> {
         if self.state() == WgpuBackendState::Unavailable {
             return Err(WgpuRenderError::BackendUnavailable);
@@ -266,11 +326,19 @@ impl WgpuDeviceOwner {
             .map_err(|error| WgpuRenderError::AdapterUnavailable {
                 message: error.to_string(),
             })?;
+            self.requirements
+                .validate_adapter(adapter.features(), &adapter.limits())
+                .map_err(WgpuRenderError::DeviceRequirements)?;
+            let descriptor = self.requirements.descriptor();
             let (device, queue) =
-                pollster::block_on(adapter.request_device(&wgpu::DeviceDescriptor::default()))
-                    .map_err(|error| WgpuRenderError::DeviceUnavailable {
+                pollster::block_on(adapter.request_device(&descriptor)).map_err(|error| {
+                    WgpuRenderError::DeviceUnavailable {
                         message: error.to_string(),
-                    })?;
+                    }
+                })?;
+            self.requirements
+                .validate_enabled(device.features(), &device.limits())
+                .map_err(WgpuRenderError::DeviceRequirements)?;
             let loss = Arc::new(DeviceLossSignal::default());
             let callback_signal = Arc::clone(&loss);
             device.set_device_lost_callback(move |_reason, _message| callback_signal.mark_lost());
@@ -345,7 +413,7 @@ impl WgpuDeviceOwner {
         }
     }
 
-    /// Releases native state without rewinding the namespace or reopening terminal failure.
+    /// Releases native state without changing the original request, namespace or terminal failure.
     pub(super) fn clear(&mut self) {
         self.invalidate_presentations();
         let unavailable = self.state() == WgpuBackendState::Unavailable;
@@ -464,6 +532,170 @@ mod tests {
             force_fallback_adapter_from_value(Some(OsStr::new("true"))),
             Err(INVALID_FALLBACK_ADAPTER_ENV)
         );
+    }
+
+    #[test]
+    fn pre_device_requirements_aggregate_without_native_acquisition() {
+        let mut owner = WgpuDeviceOwner::default();
+        let first = WgpuDeviceRequirements::new(
+            wgpu::Features::TIMESTAMP_QUERY,
+            wgpu::Limits {
+                max_buffer_size: 512 * 1024 * 1024,
+                ..Default::default()
+            },
+        );
+        let second = WgpuDeviceRequirements::new(
+            wgpu::Features::TEXTURE_COMPRESSION_BC,
+            wgpu::Limits {
+                min_storage_buffer_offset_alignment: 64,
+                ..Default::default()
+            },
+        );
+        owner.request_device_requirements(&first).unwrap();
+        owner.request_device_requirements(&second).unwrap();
+        assert_eq!(owner.requirements, first.union(&second));
+        assert_eq!(owner.state(), WgpuBackendState::Uninitialized);
+        assert_eq!(owner.device_epoch(), 0);
+        assert!(owner.instance().is_err());
+        assert!(owner.ready().is_err());
+        owner.clear();
+        assert_eq!(owner.requirements, first.union(&second));
+    }
+
+    #[test]
+    fn retired_epoch_keeps_its_request_and_refuses_new_recovery_capabilities() {
+        let original =
+            WgpuDeviceRequirements::new(wgpu::Features::TIMESTAMP_QUERY, wgpu::Limits::default());
+        let mut owner = WgpuDeviceOwner::with_retired_epoch(std::num::NonZeroU64::new(7).unwrap());
+        owner.requirements = original.clone();
+        owner.clear();
+        assert_eq!(owner.request_device_requirements(&original), Ok(()));
+        assert_eq!(
+            owner.request_device_requirements(&WgpuDeviceRequirements::default()),
+            Ok(())
+        );
+        let added_feature = WgpuDeviceRequirements::new(
+            wgpu::Features::TEXTURE_COMPRESSION_BC,
+            wgpu::Limits::default(),
+        );
+        assert_eq!(
+            owner.request_device_requirements(&added_feature),
+            Err(WgpuDeviceRequirementsError::ReconstructionRequired)
+        );
+        let added_limit = WgpuDeviceRequirements::new(
+            wgpu::Features::empty(),
+            wgpu::Limits {
+                min_storage_buffer_offset_alignment: 64,
+                ..Default::default()
+            },
+        );
+        assert_eq!(
+            owner.request_device_requirements(&added_limit),
+            Err(WgpuDeviceRequirementsError::ReconstructionRequired)
+        );
+        assert_eq!(owner.requirements, original);
+        assert_eq!(owner.device_epoch(), 7);
+        assert!(owner.instance().is_err());
+        assert!(owner.ready().is_err());
+    }
+
+    #[test]
+    fn rejected_requirements_do_not_change_or_reopen_the_owner() {
+        let mut owner = WgpuDeviceOwner::default();
+        let experimental = WgpuDeviceRequirements::new(
+            wgpu::Features::all_experimental_mask(),
+            wgpu::Limits::default(),
+        );
+        assert!(matches!(
+            owner.request_device_requirements(&experimental),
+            Err(WgpuDeviceRequirementsError::ExperimentalFeaturesUnsupported { .. })
+        ));
+        assert_eq!(owner.requirements, WgpuDeviceRequirements::default());
+        assert!(owner.instance().is_err());
+        owner.mark_unavailable();
+        assert_eq!(
+            owner.request_device_requirements(&WgpuDeviceRequirements::default()),
+            Err(WgpuDeviceRequirementsError::BackendUnavailable)
+        );
+        assert_eq!(owner.state(), WgpuBackendState::Unavailable);
+        assert_eq!(owner.requirements, WgpuDeviceRequirements::default());
+        assert_eq!(owner.device_epoch(), 0);
+    }
+
+    #[test]
+    #[ignore = "requires a native GPU with timestamp queries and another stable feature; acquisition failure is a failed prerequisite"]
+    fn private_device_requirements_enable_exact_features_and_survive_original_epoch_recovery() {
+        let mut owner = WgpuDeviceOwner::default();
+        let original =
+            WgpuDeviceRequirements::new(wgpu::Features::TIMESTAMP_QUERY, wgpu::Limits::default());
+        owner.request_device_requirements(&original).unwrap();
+        assert_eq!(owner.acquire(None).unwrap(), Some(1));
+        let ready = owner.ready().unwrap();
+        let old_device = ready.device.clone();
+        assert_eq!(ready.device.features(), original.required_features());
+        assert!(
+            original
+                .required_limits()
+                .check_limits(&ready.device.limits())
+        );
+        let supported_extras = ready.adapter.features()
+            - ready.device.features()
+            - wgpu::Features::all_experimental_mask();
+        assert!(
+            !supported_extras.is_empty(),
+            "the selected native adapter must expose an additional stable feature"
+        );
+        let supported_size = ready.adapter.limits().max_buffer_size;
+        let unsupported_size = supported_size.checked_add(1).unwrap();
+        assert_eq!(
+            owner.request_device_requirements(&WgpuDeviceRequirements::default()),
+            Ok(())
+        );
+        assert_eq!(
+            owner.request_device_requirements(&WgpuDeviceRequirements::new(
+                supported_extras,
+                wgpu::Limits::default(),
+            )),
+            Err(WgpuDeviceRequirementsError::ReconstructionRequired)
+        );
+        assert_eq!(
+            owner.request_device_requirements(&WgpuDeviceRequirements::new(
+                wgpu::Features::empty(),
+                wgpu::Limits {
+                    max_buffer_size: unsupported_size,
+                    ..Default::default()
+                },
+            )),
+            Err(WgpuDeviceRequirementsError::UnsupportedLimit {
+                name: "max_buffer_size",
+                required: unsupported_size,
+                supported: supported_size,
+            })
+        );
+        assert_eq!(owner.requirements, original);
+        assert_eq!(owner.ready().unwrap().device, old_device);
+        assert_eq!(owner.acquire(None).unwrap(), None);
+        assert_eq!(owner.device_epoch(), 1);
+
+        old_device.destroy();
+        assert_eq!(
+            owner.fail_if_device_lost(),
+            Err(WgpuRenderError::DeviceLost)
+        );
+        owner.clear();
+        assert_eq!(owner.requirements, original);
+        assert_eq!(owner.acquire(None).unwrap(), Some(2));
+        assert_eq!(
+            owner.ready().unwrap().device.features(),
+            original.required_features()
+        );
+        assert!(
+            original
+                .required_limits()
+                .check_limits(&owner.ready().unwrap().device.limits())
+        );
+        assert_eq!(owner.requirements, original);
+        assert_eq!(owner.device_epoch(), 2);
     }
 
     #[test]

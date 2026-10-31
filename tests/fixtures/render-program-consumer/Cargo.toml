@@ -1,0 +1,17 @@
+[package]
+name = "nara-render-program-consumer"
+version = "0.0.0"
+edition = "2024"
+rust-version = "1.95"
+license = "MIT OR Apache-2.0"
+publish = false
+
+[workspace]
+resolver = "3"
+
+[dependencies]
+nara_render = { path = "../../../crates/nara_render", default-features = false }
+nara_render_wgpu = { path = "../../../crates/nara_render_wgpu", default-features = false }
+
+[dev-dependencies]
+wgpu = "=30.0.1"

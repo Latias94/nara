@@ -62,7 +62,10 @@ Host close, with an explicitly reported uncertainty fallback for an un-waitable 
 
 These accepted responsibilities are being implemented under the
 [render ownership design](../render-host-ownership-design.md). Their current evidence belongs in
-the implementation ledger; they do not accept the Proposed0121 graph/Feature interface.
+the implementation ledger. The subsequent
+[finite captured-program refinement in ADR0094](0094-minimal-render-execution-boundary-and-evidence-gated-extensions.md#finite-captured-wgpu-programs)
+accepts typed texture/buffer programs through this same original Host custody. The complete
+Proposed0121 stock-policy, View/history and Editor composition contract remains separate.
 
 ## Context
 

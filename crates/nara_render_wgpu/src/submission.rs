@@ -34,9 +34,46 @@ enum PrefixState {
 
 struct RetainedState {
     state: PrefixState,
-    keep_alive: Option<Arc<dyn SubmissionResources>>,
+    keep_alive: Option<RetainedResourceSet>,
     callback_abandoned: bool,
     uncertain_index: bool,
+}
+
+pub(crate) const MAX_SUBMISSION_RESOURCES: usize = 65_536;
+
+#[derive(Debug)]
+pub(crate) enum SubmissionCapacity {
+    Limit,
+    Allocation,
+}
+
+/// Flat original custody. Releasing a large valid graph must not recurse once per resource.
+struct RetainedResourceSet(Vec<Box<dyn SubmissionResources>>);
+
+impl RetainedResourceSet {
+    fn new<T: SubmissionResources>(value: T) -> Self {
+        Self(vec![Box::new(value)])
+    }
+
+    fn retain<T: SubmissionResources>(&mut self, value: T) -> Result<(), (SubmissionCapacity, T)> {
+        if self.0.len() >= MAX_SUBMISSION_RESOURCES {
+            return Err((SubmissionCapacity::Limit, value));
+        }
+        if self.0.try_reserve_exact(1).is_err() {
+            return Err((SubmissionCapacity::Allocation, value));
+        }
+        self.0.push(Box::new(value));
+        Ok(())
+    }
+}
+
+impl Drop for RetainedResourceSet {
+    fn drop(&mut self) {
+        // Prepared/native work retires before earlier captures and definition dependencies.
+        while let Some(value) = self.0.pop() {
+            drop(value);
+        }
+    }
 }
 
 struct RetainedResources {
@@ -203,6 +240,18 @@ pub(crate) struct WgpuSubmissionReservation {
 }
 
 impl WgpuSubmissionReservation {
+    pub(crate) fn modeled_metadata_bytes<T: SubmissionResources>() -> usize {
+        std::mem::size_of::<OriginalSubmissionOwner>()
+            + std::mem::size_of::<RetainedResources>()
+            + std::mem::size_of::<T>()
+            + std::mem::size_of::<Box<dyn SubmissionResources>>()
+            + 4 * std::mem::size_of::<usize>()
+    }
+
+    pub(crate) fn modeled_retain_bytes<T: SubmissionResources>() -> usize {
+        std::mem::size_of::<T>() + std::mem::size_of::<Box<dyn SubmissionResources>>()
+    }
+
     pub(crate) fn new<T: SubmissionResources>(
         device: &wgpu::Device,
         queue: &wgpu::Queue,
@@ -214,7 +263,7 @@ impl WgpuSubmissionReservation {
                 retained: Arc::new(RetainedResources {
                     inner: Mutex::new(RetainedState {
                         state: PrefixState::Pending,
-                        keep_alive: Some(Arc::new(keep_alive)),
+                        keep_alive: Some(RetainedResourceSet::new(keep_alive)),
                         callback_abandoned: false,
                         uncertain_index: false,
                     }),
@@ -227,13 +276,19 @@ impl WgpuSubmissionReservation {
 
     /// Adds prepared resources to the original pre-upload custody before native submission.
     ///
-    /// The private nested Arc retains every earlier value without exposing a resource registry.
-    /// Use a finite aggregate for a preparation attempt; this is not a pending-work queue. Bind
+    /// A bounded flat container retains every earlier value without recursive destruction.
+    /// Admit this entry before enqueuing its native use. Bind
     /// the original prefix even when preparation or SDK execution fails after enqueuing writes.
-    pub(crate) fn retain<T: SubmissionResources>(&mut self, value: T) {
+    pub(crate) fn retain<T: SubmissionResources>(
+        &mut self,
+        value: T,
+    ) -> Result<(), (SubmissionCapacity, T)> {
         let mut state = self.original.retained.state();
-        let previous = Arc::clone(state.keep_alive.as_ref().expect("reservation is retained"));
-        state.keep_alive = Some(Arc::new((previous, value)));
+        state
+            .keep_alive
+            .as_mut()
+            .expect("reservation is retained")
+            .retain(value)
     }
 
     /// Binds the original Queue's just-returned submission attempt, exactly once.
@@ -269,7 +324,6 @@ impl WgpuSubmissionReservation {
     /// callback; if abandoned, explicit recovery requires QueueEmpty on the original device. This
     /// resource settlement says nothing about SDK validation, actual presentation, output, or UI
     /// success. Retain the returned token with all other outstanding prefixes until it settles.
-    #[cfg(any(feature = "editor-imgui", test))]
     pub(crate) fn bind_current_prefix(self) -> WgpuSubmissionPrefix {
         self.bind(None)
     }
@@ -459,6 +513,45 @@ mod tests {
         fn drop(&mut self) {
             self.0.fetch_add(1, Ordering::AcqRel);
         }
+    }
+
+    #[test]
+    fn flat_original_custody_releases_its_capacity_on_a_small_stack() {
+        std::thread::Builder::new()
+            .stack_size(64 * 1024)
+            .spawn(|| {
+                let drops = Arc::new(AtomicUsize::new(0));
+                let mut values = RetainedResourceSet::new(DropProbe(Arc::clone(&drops)));
+                for _ in 1..MAX_SUBMISSION_RESOURCES {
+                    assert!(values.retain(DropProbe(Arc::clone(&drops))).is_ok());
+                }
+                assert_eq!(drops.load(Ordering::Acquire), 0);
+                let (_, rejected) = values.retain(DropProbe(Arc::clone(&drops))).err().unwrap();
+                assert_eq!(values.0.len(), MAX_SUBMISSION_RESOURCES);
+                drop(rejected);
+                assert_eq!(drops.load(Ordering::Acquire), 1);
+                drop(values);
+                assert_eq!(drops.load(Ordering::Acquire), MAX_SUBMISSION_RESOURCES + 1);
+            })
+            .unwrap()
+            .join()
+            .unwrap();
+    }
+
+    #[test]
+    fn original_resources_retire_in_reverse_dependency_order() {
+        struct OrderedDrop(u8, Arc<Mutex<Vec<u8>>>);
+        impl Drop for OrderedDrop {
+            fn drop(&mut self) {
+                self.1.lock().unwrap().push(self.0);
+            }
+        }
+        let order = Arc::new(Mutex::new(Vec::new()));
+        let mut values = RetainedResourceSet::new(OrderedDrop(1, Arc::clone(&order)));
+        assert!(values.retain(OrderedDrop(2, Arc::clone(&order))).is_ok());
+        assert!(values.retain(OrderedDrop(3, Arc::clone(&order))).is_ok());
+        drop(values);
+        assert_eq!(*order.lock().unwrap(), [3, 2, 1]);
     }
 
     struct NativeGpu {
@@ -711,7 +804,11 @@ mod tests {
             .create_command_encoder(&wgpu::CommandEncoderDescriptor::default());
         encoder.clear_buffer(&buffer, 8, None);
         encoder.copy_buffer_to_buffer(&buffer, 0, &readback, 0, 16);
-        reservation.retain((readback.clone(), DropProbe(Arc::clone(&prepared_drops))));
+        assert!(
+            reservation
+                .retain((readback.clone(), DropProbe(Arc::clone(&prepared_drops))))
+                .is_ok()
+        );
         let index = gpu.queue.submit([encoder.finish()]);
         let prefix = reservation.submitted(index);
         let clone = prefix.clone();

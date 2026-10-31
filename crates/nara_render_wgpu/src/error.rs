@@ -12,6 +12,8 @@ pub enum WgpuRenderError {
     AdapterUnavailable { message: String },
     #[error("wgpu device unavailable: {message}")]
     DeviceUnavailable { message: String },
+    #[error(transparent)]
+    DeviceRequirements(#[from] crate::WgpuDeviceRequirementsError),
     #[error("wgpu device was lost")]
     DeviceLost,
     #[error("wgpu device epoch was exhausted")]

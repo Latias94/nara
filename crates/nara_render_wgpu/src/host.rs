@@ -55,6 +55,7 @@ std::thread_local! {
     };
     // Destroy an encoded attachment immediately before the real native submit validation.
     static IMAGE_SUBMISSION_FAILURE: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+    static PROGRAM_SUBMISSION_FAILURE: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
 }
 
 fn finish_viewport_allocation(
@@ -140,6 +141,10 @@ pub enum WgpuRenderHostError {
     #[error(transparent)]
     Backend(#[from] WgpuRenderError),
     #[error(transparent)]
+    Program(#[from] crate::WgpuRenderProgramError),
+    #[error("render Feature requirements were refused: {0}")]
+    FeatureRequirements(crate::WgpuDeviceRequirementsError),
+    #[error(transparent)]
     WindowTarget(#[from] WindowTargetError),
     #[error("the Editor viewport submission requires an image-target render packet")]
     ExpectedImageTarget,
@@ -207,13 +212,17 @@ impl WgpuRenderHostError {
     pub const fn is_deferred(&self) -> bool {
         matches!(
             self,
-            Self::ViewportTargetAllocationDeferred { .. } | Self::OutputCapacity
+            Self::ViewportTargetAllocationDeferred { .. }
+                | Self::OutputCapacity
+                | Self::Program(crate::WgpuRenderProgramError::ResourceCapacity)
         ) || matches!(self, Self::Backend(error) if error.is_deferred())
     }
 
     #[must_use]
     pub const fn is_content_rejected(&self) -> bool {
         matches!(self, Self::Backend(error) if error.is_content_rejection())
+            || matches!(self, Self::Program(error) if !matches!(error, crate::WgpuRenderProgramError::ResourceCapacity))
+            || matches!(self, Self::FeatureRequirements(_))
     }
 }
 
@@ -404,6 +413,8 @@ impl WgpuEditorUiSubmission {
                 UiPresentationBackendFaultDomain::Target
             }
             WgpuRenderHostError::ExpectedImageTarget
+            | WgpuRenderHostError::Program(_)
+            | WgpuRenderHostError::FeatureRequirements(_)
             | WgpuRenderHostError::TargetGenerationExhausted
             | WgpuRenderHostError::SourceHandoffGenerationExhausted
             | WgpuRenderHostError::PresentationGenerationExhausted
@@ -842,6 +853,7 @@ pub struct WgpuRenderHost {
     host_frame_index: Option<u64>,
     last_presentation_generation: u64,
     output_budget: Arc<OutputBudget>,
+    feature_states: crate::program::NativeFeatureStates,
     native_prefix: Option<WgpuSubmissionPrefix>,
     retiring_prefixes: Vec<WgpuSubmissionPrefix>,
     abandoned_submission_count: u64,
@@ -933,6 +945,7 @@ impl WgpuRenderHost {
             host_frame_index: None,
             last_presentation_generation: 0,
             output_budget: Arc::new(OutputBudget::default()),
+            feature_states: crate::program::NativeFeatureStates::default(),
             native_prefix: None,
             retiring_prefixes: Vec::new(),
             abandoned_submission_count: 0,
@@ -954,6 +967,7 @@ impl WgpuRenderHost {
             host_frame_index: None,
             last_presentation_generation: 0,
             output_budget: Arc::new(OutputBudget::default()),
+            feature_states: crate::program::NativeFeatureStates::default(),
             native_prefix: None,
             retiring_prefixes: Vec::new(),
             abandoned_submission_count: 0,
@@ -1009,6 +1023,7 @@ impl WgpuRenderHost {
     }
 
     fn maintain_producers(&mut self) -> Result<(), WgpuRenderHostError> {
+        self.feature_states.maintain(self.backend.device_epoch());
         let closed = self
             .views
             .iter()
@@ -1090,6 +1105,185 @@ impl WgpuRenderHost {
         let view_id = self.producer_id(producer)?;
         let namespace = self.prepare_namespace(None)?;
         self.submit_image_in_namespace(view_id, &namespace, &input.packet, &input.payload, None)
+    }
+
+    /// Installs an exact capture/native pair for one producer-owned instance. Requirements join
+    /// the device request before acquisition; late requirements cannot silently replace it.
+    pub fn create_feature_instance<F: crate::WgpuRenderFeature>(
+        &mut self,
+        producer: &WgpuRenderProducer,
+        definition: &crate::WgpuFeatureDefinition<F>,
+    ) -> Result<crate::WgpuFeatureInstance<F>, WgpuRenderHostError> {
+        self.maintain_producers()?;
+        let id = self.producer_id(producer)?;
+        let instance = crate::WgpuFeatureInstance::new(
+            self.backend.instance_id(),
+            id,
+            Arc::clone(&producer.closed),
+            definition,
+        )?;
+        self.backend
+            .request_device_requirements(definition.device_requirements())
+            .map_err(|error| match error {
+                crate::WgpuDeviceRequirementsError::BackendUnavailable => {
+                    WgpuRenderHostError::Backend(WgpuRenderError::BackendUnavailable)
+                }
+                error => WgpuRenderHostError::FeatureRequirements(error),
+            })?;
+        Ok(instance)
+    }
+
+    /// Executes a finite texture/buffer program through this Host's original device, queue,
+    /// producer admission and submission custody. Failure publishes none of its output group.
+    pub fn submit_program(
+        &mut self,
+        producer: &WgpuRenderProducer,
+        program: &crate::WgpuRenderProgram,
+    ) -> Result<crate::WgpuProgramOutputs, WgpuRenderHostError> {
+        let id = self.producer_id(producer)?;
+        self.validate_program_instances(id, program)?;
+        self.host_frame_index
+            .ok_or(WgpuRenderHostError::FrameTransactionUnavailable)?;
+        self.views[&id]
+            .admission
+            .admit(program.source_generation(), program.frame_index())?;
+        let namespace = self.prepare_namespace(None)?;
+
+        let mut outputs = Vec::new();
+        outputs
+            .try_reserve_exact(program.0.graph.outputs().len())
+            .map_err(|_| crate::GraphError::AllocationFailed)
+            .map_err(crate::WgpuRenderProgramError::from)?;
+
+        let validation = namespace
+            .device
+            .push_error_scope(wgpu::ErrorFilter::Validation);
+        let internal = namespace
+            .device
+            .push_error_scope(wgpu::ErrorFilter::Internal);
+        let allocation = namespace
+            .device
+            .push_error_scope(wgpu::ErrorFilter::OutOfMemory);
+        let mut reservation =
+            WgpuSubmissionReservation::new(&namespace.device, &namespace.queue, program.clone());
+        let prepared = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            crate::program::prepare_and_encode(
+                program,
+                &namespace,
+                id,
+                &mut self.feature_states,
+                &self.output_budget,
+                &mut reservation,
+            )
+        }))
+        .unwrap_or(Err(crate::WgpuRenderProgramError::FeaturePanicked));
+
+        #[cfg(test)]
+        PROGRAM_SUBMISSION_FAILURE.with(|failure| {
+            if failure.replace(false) {
+                if let Ok(encoded) = &prepared {
+                    if let Some(local) = program
+                        .0
+                        .graph
+                        .resources()
+                        .iter()
+                        .find(|resource| !resource.is_imported())
+                    {
+                        match &encoded.resources[local.version.index()].native {
+                            crate::program::NativeResource::Texture { texture, .. } => {
+                                texture.destroy()
+                            }
+                            crate::program::NativeResource::Buffer(buffer) => buffer.destroy(),
+                        }
+                    }
+                }
+            }
+        });
+
+        // Even failed preparation may have enqueued uploads. Bind this attempt's original
+        // prefix before another producer can write, including a native submit that unwinds.
+        let (commands, staged) = match prepared {
+            Ok(encoded) => (
+                Some(encoded.commands),
+                Ok((encoded.resources, encoded.reports)),
+            ),
+            Err(error) => (None, Err(error)),
+        };
+        let submitted = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            namespace.queue.submit(commands)
+        }));
+        let (prefix, submit_error) = match submitted {
+            Ok(index) => (reservation.submitted(index), None),
+            Err(_) => (
+                reservation.bind_current_prefix(),
+                Some(crate::WgpuRenderProgramError::FeaturePanicked),
+            ),
+        };
+        self.retiring_prefixes.push(prefix.clone());
+        self.views
+            .get_mut(&id)
+            .expect("the producer is retained during this submission")
+            .submitted_prefix = Some(prefix.clone());
+
+        let allocation_error = pollster::block_on(allocation.pop());
+        let internal_error = pollster::block_on(internal.pop());
+        let validation_error = pollster::block_on(validation.pop());
+        let result = (|| {
+            self.backend.check_device_health()?;
+            self.validate_program_instances(id, program)?;
+            if let Some(error) = allocation_error.or(internal_error).or(validation_error) {
+                return Err(Self::native_error(error));
+            }
+            if let Some(error) = submit_error {
+                return Err(error.into());
+            }
+            let (resources, reports) = staged?;
+            for version in program.0.graph.outputs() {
+                outputs.push((version.clone(), Arc::clone(&resources[version.index()])));
+            }
+            let admission = &mut self
+                .views
+                .get_mut(&id)
+                .expect("admitted producer")
+                .admission;
+            admission.source_generation = Some(program.source_generation());
+            admission.last_frame_index = Some(program.frame_index());
+            self.backend.record_editor_image_submission();
+            Ok(crate::WgpuProgramOutputs {
+                outputs,
+                reports,
+                prefix,
+            })
+        })();
+        if result.is_err() {
+            self.feature_states
+                .discard(program.0.operations.iter().filter_map(|operation| {
+                    operation
+                        .capture
+                        .as_ref()
+                        .map(|capture| capture.identity().id)
+                }));
+        }
+        result
+    }
+
+    fn validate_program_instances(
+        &self,
+        producer: WgpuRenderProducerId,
+        program: &crate::WgpuRenderProgram,
+    ) -> Result<(), WgpuRenderHostError> {
+        for operation in &program.0.operations {
+            if let Some(capture) = &operation.capture {
+                let identity = capture.identity();
+                if identity.is_closed()
+                    || identity.backend_instance_id != self.backend.instance_id()
+                    || identity.producer != producer
+                {
+                    return Err(crate::WgpuRenderProgramError::FeatureClosed.into());
+                }
+            }
+        }
+        Ok(())
     }
 
     /// Native interoperation borrows the exact retained output, never its producer's latest target.
@@ -1632,7 +1826,9 @@ impl WgpuRenderHost {
             let commands = encoder.finish();
             #[cfg(any(feature = "sprite-submitter", feature = "ui-submitter"))]
             draw.commit_instance_reservations();
-            reservation.retain(draw);
+            reservation
+                .retain(draw)
+                .map_err(|(error, _)| crate::WgpuRenderProgramError::from(error))?;
             Ok::<_, WgpuRenderHostError>(commands)
         })();
         // Preparation may already have queued immutable Image uploads before rejecting a later
@@ -2056,5 +2252,7 @@ impl WgpuRenderHost {
     }
 }
 
+#[cfg(test)]
+mod program_tests;
 #[cfg(test)]
 mod tests;

@@ -571,6 +571,17 @@ impl WgpuRenderBackend {
         self.device_owner.device_epoch()
     }
 
+    /// Registers immutable Feature prerequisites before the first device acquisition.
+    ///
+    /// Late contributions must fit the enabled original request. A stronger contribution returns
+    /// a reconstruction requirement and never replaces a healthy device or changes its epoch.
+    pub(crate) fn request_device_requirements(
+        &mut self,
+        requirements: &crate::requirements::WgpuDeviceRequirements,
+    ) -> Result<(), crate::requirements::WgpuDeviceRequirementsError> {
+        self.device_owner.request_device_requirements(requirements)
+    }
+
     /// Returns bounded diagnostic information for the currently selected adapter.
     ///
     /// This is backend-local observation data. It is not a persistent adapter identity and must
