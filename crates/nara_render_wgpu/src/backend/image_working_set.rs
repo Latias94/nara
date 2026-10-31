@@ -1,5 +1,5 @@
 use super::*;
-use crate::readback_tests::render_to_rgba;
+use crate::readback_tests::{ReadbackGpu, render_to_rgba};
 use nara_app::{App, RuntimeInstance};
 use nara_asset::{AssetEvents, AssetStates, Assets};
 use nara_core::Vec2;
@@ -186,14 +186,20 @@ fn complete_target_image_working_set_rejects_before_upload_across_views_and_ui()
         let captured = captured_images(editor, false);
         assert_eq!(captured.topology.views().len(), 2);
         for (versions, bytes) in [(2, 12), (3, 8)] {
-            render_to_rgba(|device, queue, format, _, _| {
+            render_to_rgba(|device, queue, format, _, _, preparation| {
                 let mut backend =
                     WgpuRenderBackend::with_probe_device(device.clone(), queue.clone());
-                backend.quad_textures =
+                *backend.stock_quad_resources().textures_mut() =
                     WgpuSpriteTextureCache::with_image_residency_limits(versions, bytes);
                 backend.begin_frame_transaction(1, None);
                 let error = backend
-                    .prepare_target_draw(format, &captured.topology, &captured.payload, 1)
+                    .prepare_target_draw(
+                        format,
+                        &captured.topology,
+                        &captured.payload,
+                        1,
+                        preparation,
+                    )
                     .unwrap_err();
                 assert!(
                     matches!(error, WgpuRenderError::ContentRejected { .. }),
@@ -219,10 +225,10 @@ fn complete_target_image_working_set_rejects_with_partial_cache() {
     for editor in [false, true] {
         let captured = captured_images(editor, false);
         for (versions, bytes) in [(2, 12), (3, 8)] {
-            render_to_rgba(|device, queue, format, _, _| {
+            render_to_rgba(|device, queue, format, _, _, preparation| {
                 let mut backend =
                     WgpuRenderBackend::with_probe_device(device.clone(), queue.clone());
-                backend.quad_textures =
+                *backend.stock_quad_resources().textures_mut() =
                     WgpuSpriteTextureCache::with_image_residency_limits(versions, bytes);
                 backend.begin_frame_transaction(1, None);
                 let first_view = &captured.topology.views()[0];
@@ -233,12 +239,19 @@ fn complete_target_image_working_set_rejects_with_partial_cache() {
                     Some(0),
                     &captured.payload,
                     1,
+                    preparation,
                 )?;
                 assert_eq!(backend.texture_stats().uploaded_images, 1);
                 drop(first);
 
                 let error = backend
-                    .prepare_target_draw(format, &captured.topology, &captured.payload, 1)
+                    .prepare_target_draw(
+                        format,
+                        &captured.topology,
+                        &captured.payload,
+                        1,
+                        preparation,
+                    )
                     .unwrap_err();
                 assert!(
                     matches!(error, WgpuRenderError::ContentRejected { .. }),
@@ -263,15 +276,30 @@ fn complete_target_image_working_set_rejects_with_partial_cache() {
 fn complete_target_image_working_set_defers_cleared_live_namespace_and_recovers() {
     for editor in [false, true] {
         let captured = captured_images(editor, true);
-        render_to_rgba(|device, queue, format, output, encoder| {
-            let mut backend = WgpuRenderBackend::with_probe_device(device.clone(), queue.clone());
-            backend.quad_textures = WgpuSpriteTextureCache::with_image_residency_limits(1, 4);
-            backend.begin_frame_transaction(1, None);
-            let old =
-                backend.prepare_target_draw(format, &captured.topology, &captured.payload, 1)?;
-            backend.quad_textures.clear();
+        let gpu = ReadbackGpu::new();
+        let format = wgpu::TextureFormat::Rgba8UnormSrgb;
+        let mut backend =
+            WgpuRenderBackend::with_probe_device(gpu.device.clone(), gpu.queue.clone());
+        *backend.stock_quad_resources().textures_mut() =
+            WgpuSpriteTextureCache::with_image_residency_limits(1, 4);
+        backend.begin_frame_transaction(1, None);
+        let (result, prefix) = gpu.with_preparation::<()>(|preparation| {
+            let old = backend.prepare_target_draw(
+                format,
+                &captured.topology,
+                &captured.payload,
+                1,
+                preparation,
+            )?;
+            backend.stock_quad_resources().textures_mut().clear();
             let error = backend
-                .prepare_target_draw(format, &captured.topology, &captured.payload, 2)
+                .prepare_target_draw(
+                    format,
+                    &captured.topology,
+                    &captured.payload,
+                    2,
+                    preparation,
+                )
                 .unwrap_err();
             assert!(
                 matches!(error, WgpuRenderError::UploadDeferred { .. }),
@@ -281,8 +309,36 @@ fn complete_target_image_working_set_defers_cleared_live_namespace_and_recovers(
             assert_eq!(backend.texture_stats().image_textures, 1);
             drop(old);
 
-            let recovered =
-                backend.prepare_target_draw(format, &captured.topology, &captured.payload, 3)?;
+            let error = backend
+                .prepare_target_draw(
+                    format,
+                    &captured.topology,
+                    &captured.payload,
+                    3,
+                    preparation,
+                )
+                .expect_err("original upload custody survives dropping the prepared draw");
+            assert_eq!(backend.texture_stats().uploaded_images, 0);
+            assert_eq!(backend.texture_stats().image_textures, 1);
+            assert!(gpu.budget.retained() > 0);
+            Err(error)
+        });
+        assert!(matches!(
+            result,
+            Err(WgpuRenderError::UploadDeferred { .. })
+        ));
+        gpu.wait_for_prefix(&prefix);
+        assert_eq!(backend.texture_stats().image_textures, 0);
+        assert_eq!(gpu.budget.retained(), 0);
+
+        gpu.render_to_rgba(|_, _, format, output, encoder, preparation| {
+            let recovered = backend.prepare_target_draw(
+                format,
+                &captured.topology,
+                &captured.payload,
+                4,
+                preparation,
+            )?;
             assert_eq!(backend.texture_stats().uploaded_images, 1);
             assert_eq!(backend.texture_stats().image_textures, 1);
             crate::encode_target_draw(encoder, output, &recovered);
@@ -296,12 +352,18 @@ fn complete_target_image_working_set_defers_cleared_live_namespace_and_recovers(
 fn complete_target_image_working_set_deduplicates_shared_exact_snapshot() {
     for editor in [false, true] {
         let captured = captured_images(editor, true);
-        render_to_rgba(|device, queue, format, output, encoder| {
+        render_to_rgba(|device, queue, format, output, encoder, preparation| {
             let mut backend = WgpuRenderBackend::with_probe_device(device.clone(), queue.clone());
-            backend.quad_textures = WgpuSpriteTextureCache::with_image_residency_limits(1, 4);
+            *backend.stock_quad_resources().textures_mut() =
+                WgpuSpriteTextureCache::with_image_residency_limits(1, 4);
             backend.begin_frame_transaction(1, None);
-            let prepared =
-                backend.prepare_target_draw(format, &captured.topology, &captured.payload, 1)?;
+            let prepared = backend.prepare_target_draw(
+                format,
+                &captured.topology,
+                &captured.payload,
+                1,
+                preparation,
+            )?;
             assert_eq!(backend.texture_stats().uploaded_images, 1);
             assert_eq!(backend.texture_stats().image_textures, 1);
             crate::encode_target_draw(encoder, output, &prepared);

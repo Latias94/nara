@@ -19,14 +19,16 @@ use crate::{
     },
 };
 
+pub use crate::preparation::WgpuFeatureAllocation;
 pub(crate) use feature::NativeFeatureStates;
 use feature::{CapturedOperation, FeatureInstanceIdentity, OperationReport};
 pub use feature::{
     WgpuFeatureDefinition, WgpuFeatureInstance, WgpuNativeResources, WgpuRenderFeature,
 };
+pub(crate) use native::FeaturePreparationAttempt;
 pub(crate) use native::prepare_and_encode;
 pub use native::{
-    WgpuFeatureAllocation, WgpuFeatureEncodeContext, WgpuFeaturePrepareContext,
+    WgpuFeatureEncodeContext, WgpuFeaturePreflightContext, WgpuFeaturePrepareContext,
     WgpuOperationResources,
 };
 #[cfg(test)]
@@ -41,6 +43,8 @@ pub use resources::{
 /// A rejected declaration or native Feature operation. No error publishes part of its group.
 #[derive(Debug, Error)]
 pub enum WgpuRenderProgramError {
+    #[error(transparent)]
+    Backend(#[from] crate::WgpuRenderError),
     #[error(transparent)]
     Graph(#[from] GraphError),
     #[error("the Feature instance is closed or belongs to another Host or producer")]
@@ -95,6 +99,18 @@ impl From<crate::submission::SubmissionCapacity> for WgpuRenderProgramError {
     }
 }
 
+impl From<crate::preparation::NativePreparationError> for WgpuRenderProgramError {
+    fn from(error: crate::preparation::NativePreparationError) -> Self {
+        match error {
+            crate::preparation::NativePreparationError::ResourceCapacity => Self::ResourceCapacity,
+            crate::preparation::NativePreparationError::SubmissionCapacity => {
+                GraphError::LimitExceeded(crate::LimitKind::SubmissionResources).into()
+            }
+            crate::preparation::NativePreparationError::Backend(error) => Self::Backend(error),
+        }
+    }
+}
+
 pub(crate) struct ProgramOperation {
     pub(crate) key: u64,
     pub(crate) capture: Option<Arc<dyn CapturedOperation>>,
@@ -118,6 +134,7 @@ pub(crate) struct CompiledProgram {
     pub(crate) operations: Vec<ProgramOperation>,
     pub(crate) imports: Vec<ProgramImport>,
     modeled_metadata_bytes: usize,
+    pub(crate) max_modeled_metadata_bytes: usize,
 }
 
 /// An immutable CPU program with exact captures and imported versions, without GPU submission
@@ -221,6 +238,7 @@ impl WgpuRenderProgramBuilder {
             size_of::<CompiledProgram>(),
             size_of::<WgpuProgramOutputs>(),
             size_of::<native::EncodedProgram>(),
+            size_of::<native::FeaturePreparationAttempt>(),
             2 * size_of::<usize>(),
             crate::submission::WgpuSubmissionReservation::modeled_metadata_bytes::<WgpuRenderProgram>(
             ),
@@ -244,6 +262,7 @@ impl WgpuRenderProgramBuilder {
                 size_of::<Arc<ProgramResourceStorage>>(),
             ),
             (limits.max_operations, size_of::<ProgramOperationReport>()),
+            (limits.max_operations, size_of::<u64>()),
             (
                 limits.max_outputs,
                 size_of::<(ResourceVersion, Arc<ProgramResourceStorage>)>(),
@@ -269,6 +288,21 @@ impl WgpuRenderProgramBuilder {
                 .ok_or(GraphError::LimitExceeded(crate::LimitKind::MetadataBytes))?;
             bytes = bytes
                 .checked_add(table)
+                .ok_or(GraphError::LimitExceeded(crate::LimitKind::MetadataBytes))?;
+        }
+        #[cfg(any(feature = "sprite-submitter", feature = "ui-submitter"))]
+        {
+            bytes = bytes
+                .checked_add(std::mem::size_of::<crate::stock_quad::StockImagePreflight>())
+                .and_then(|bytes| {
+                    limits
+                        .max_operations
+                        .checked_mul(
+                            std::mem::size_of::<Arc<[crate::quad::WgpuQuadBatch]>>()
+                                + std::mem::size_of::<crate::budget::InstanceReservation>(),
+                        )
+                        .and_then(|table| bytes.checked_add(table))
+                })
                 .ok_or(GraphError::LimitExceeded(crate::LimitKind::MetadataBytes))?;
         }
         if bytes > limits.max_modeled_metadata_bytes {
@@ -398,6 +432,7 @@ impl WgpuRenderProgramBuilder {
             operations: self.operations,
             imports: self.imports,
             modeled_metadata_bytes: self.modeled_metadata_bytes,
+            max_modeled_metadata_bytes: self.max_modeled_metadata_bytes,
         })))
     }
 }

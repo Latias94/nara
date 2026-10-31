@@ -11,7 +11,10 @@ use std::{
 
 use crate::{WgpuDeviceRequirements, WgpuRenderProducerId};
 
-use super::{WgpuFeatureEncodeContext, WgpuFeaturePrepareContext, WgpuRenderProgramError};
+use super::{
+    WgpuFeatureEncodeContext, WgpuFeaturePreflightContext, WgpuFeaturePrepareContext,
+    WgpuRenderProgramError,
+};
 
 static NEXT_FEATURE_INSTANCE: AtomicU64 = AtomicU64::new(1);
 const MAX_ACTIVE_NATIVE_FEATURE_STATES: usize = 1024;
@@ -41,6 +44,16 @@ pub trait WgpuRenderFeature: Send + Sync + 'static {
 
     fn device_requirements(&self) -> WgpuDeviceRequirements {
         WgpuDeviceRequirements::default()
+    }
+
+    /// Checks the exact capture before native resource allocation, state creation or
+    /// upload. This context grants only the actual enabled capability facts.
+    fn preflight(
+        &self,
+        _capture: &Self::Capture,
+        _context: &mut WgpuFeaturePreflightContext<'_>,
+    ) -> Result<(), WgpuRenderProgramError> {
+        Ok(())
     }
 
     /// Creates epoch-local state under the same reservation and private-allocation budget as
@@ -248,6 +261,10 @@ pub(super) fn operation_metadata_bytes<F: WgpuRenderFeature>() -> Option<usize> 
 
 pub(crate) trait CapturedOperation: Send + Sync {
     fn identity(&self) -> &Arc<FeatureInstanceIdentity>;
+    fn preflight(
+        &self,
+        context: &mut WgpuFeaturePreflightContext<'_>,
+    ) -> Result<(), WgpuRenderProgramError>;
     fn prepare(
         &self,
         states: &mut NativeFeatureStates,
@@ -286,6 +303,13 @@ struct TypedCapture<F: WgpuRenderFeature> {
 impl<F: WgpuRenderFeature> CapturedOperation for TypedCapture<F> {
     fn identity(&self) -> &Arc<FeatureInstanceIdentity> {
         &self.identity
+    }
+
+    fn preflight(
+        &self,
+        context: &mut WgpuFeaturePreflightContext<'_>,
+    ) -> Result<(), WgpuRenderProgramError> {
+        self.definition.feature.preflight(&self.capture, context)
     }
 
     fn prepare(

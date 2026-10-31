@@ -59,11 +59,24 @@ impl RetainedResourceSet {
         if self.0.len() >= MAX_SUBMISSION_RESOURCES {
             return Err((SubmissionCapacity::Limit, value));
         }
-        if self.0.try_reserve_exact(1).is_err() {
+        // Known graph/stock work reserves its complete table before native preparation.
+        // Extra adapter requests grow amortized, rather than reallocating once per entry.
+        if self.0.try_reserve(1).is_err() {
             return Err((SubmissionCapacity::Allocation, value));
         }
         self.0.push(Box::new(value));
         Ok(())
+    }
+
+    fn reserve_entries(&mut self, additional: usize) -> Result<(), SubmissionCapacity> {
+        self.0
+            .len()
+            .checked_add(additional)
+            .filter(|total| *total <= MAX_SUBMISSION_RESOURCES)
+            .ok_or(SubmissionCapacity::Limit)?;
+        self.0
+            .try_reserve_exact(additional)
+            .map_err(|_| SubmissionCapacity::Allocation)
     }
 }
 
@@ -240,6 +253,14 @@ pub(crate) struct WgpuSubmissionReservation {
 }
 
 impl WgpuSubmissionReservation {
+    pub(crate) fn reserve_entries(&mut self, additional: usize) -> Result<(), SubmissionCapacity> {
+        let mut state = self.original.retained.state();
+        state
+            .keep_alive
+            .as_mut()
+            .expect("reservation is retained")
+            .reserve_entries(additional)
+    }
     pub(crate) fn modeled_metadata_bytes<T: SubmissionResources>() -> usize {
         std::mem::size_of::<OriginalSubmissionOwner>()
             + std::mem::size_of::<RetainedResources>()

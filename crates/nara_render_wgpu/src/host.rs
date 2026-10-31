@@ -141,7 +141,7 @@ pub enum WgpuRenderHostError {
     #[error(transparent)]
     Backend(#[from] WgpuRenderError),
     #[error(transparent)]
-    Program(#[from] crate::WgpuRenderProgramError),
+    Program(crate::WgpuRenderProgramError),
     #[error("render Feature requirements were refused: {0}")]
     FeatureRequirements(crate::WgpuDeviceRequirementsError),
     #[error(transparent)]
@@ -188,7 +188,24 @@ pub enum WgpuRenderHostError {
     NativeExecution { message: String },
 }
 
+impl From<crate::WgpuRenderProgramError> for WgpuRenderHostError {
+    fn from(error: crate::WgpuRenderProgramError) -> Self {
+        match error {
+            crate::WgpuRenderProgramError::Backend(error) => Self::Backend(error),
+            error => Self::Program(error),
+        }
+    }
+}
+
 impl WgpuRenderHostError {
+    const fn backend_error(&self) -> Option<&WgpuRenderError> {
+        match self {
+            Self::Backend(error) | Self::Program(crate::WgpuRenderProgramError::Backend(error)) => {
+                Some(error)
+            }
+            _ => None,
+        }
+    }
     #[must_use]
     pub fn toolkit_paint(message: impl Into<String>) -> Self {
         Self::ToolkitPaint {
@@ -199,13 +216,13 @@ impl WgpuRenderHostError {
     #[must_use]
     pub const fn requires_owner_replacement(&self) -> bool {
         matches!(
-            self,
-            Self::Backend(
+            self.backend_error(),
+            Some(
                 WgpuRenderError::BackendUnavailable
                     | WgpuRenderError::DeviceLost
                     | WgpuRenderError::DeviceEpochExhausted
-            ) | Self::NativeExecution { .. }
-        )
+            )
+        ) || matches!(self, Self::NativeExecution { .. })
     }
 
     #[must_use]
@@ -215,13 +232,13 @@ impl WgpuRenderHostError {
             Self::ViewportTargetAllocationDeferred { .. }
                 | Self::OutputCapacity
                 | Self::Program(crate::WgpuRenderProgramError::ResourceCapacity)
-        ) || matches!(self, Self::Backend(error) if error.is_deferred())
+        ) || matches!(self.backend_error(), Some(error) if error.is_deferred())
     }
 
     #[must_use]
     pub const fn is_content_rejected(&self) -> bool {
-        matches!(self, Self::Backend(error) if error.is_content_rejection())
-            || matches!(self, Self::Program(error) if !matches!(error, crate::WgpuRenderProgramError::ResourceCapacity))
+        matches!(self.backend_error(), Some(error) if error.is_content_rejection())
+            || matches!(self, Self::Program(error) if !matches!(error, crate::WgpuRenderProgramError::ResourceCapacity | crate::WgpuRenderProgramError::Backend(_)))
             || matches!(self, Self::FeatureRequirements(_))
     }
 }
@@ -400,7 +417,10 @@ impl WgpuEditorUiSubmission {
             return self.content_rejected(error.to_string());
         }
         let domain = match error {
-            WgpuRenderHostError::Backend(error) => crate::frame::classify_ui_backend_fault(error),
+            WgpuRenderHostError::Backend(error)
+            | WgpuRenderHostError::Program(crate::WgpuRenderProgramError::Backend(error)) => {
+                crate::frame::classify_ui_backend_fault(error)
+            }
             WgpuRenderHostError::WindowTarget(_)
             | WgpuRenderHostError::StaleImageSubmission
             | WgpuRenderHostError::ViewportTargetAlreadyActive
@@ -936,6 +956,7 @@ impl WgpuRenderHost {
         handles.insert(window_id, provider)?;
         let mut backend = WgpuRenderBackend::default();
         backend.begin_runtime_execution();
+        let output_budget = Arc::clone(backend.resource_budget());
         Ok(Self {
             #[cfg(feature = "editor-imgui")]
             primary_window_id: window_id,
@@ -944,7 +965,7 @@ impl WgpuRenderHost {
             views: BTreeMap::new(),
             host_frame_index: None,
             last_presentation_generation: 0,
-            output_budget: Arc::new(OutputBudget::default()),
+            output_budget,
             feature_states: crate::program::NativeFeatureStates::default(),
             native_prefix: None,
             retiring_prefixes: Vec::new(),
@@ -958,6 +979,7 @@ impl WgpuRenderHost {
     pub fn offscreen() -> Self {
         let mut backend = WgpuRenderBackend::default();
         backend.begin_runtime_execution();
+        let output_budget = Arc::clone(backend.resource_budget());
         Self {
             #[cfg(feature = "editor-imgui")]
             primary_window_id: WindowId::PRIMARY,
@@ -966,7 +988,7 @@ impl WgpuRenderHost {
             views: BTreeMap::new(),
             host_frame_index: None,
             last_presentation_generation: 0,
-            output_budget: Arc::new(OutputBudget::default()),
+            output_budget,
             feature_states: crate::program::NativeFeatureStates::default(),
             native_prefix: None,
             retiring_prefixes: Vec::new(),
@@ -989,16 +1011,26 @@ impl WgpuRenderHost {
         Ok(())
     }
 
-    /// Restricts logical output allocations, including retained old outputs and submitted uses.
+    /// Sets the Host's shared logical native payload budget.
+    ///
+    /// Charges include inactive output reservations, retained outputs, graph allocations, and
+    /// prepared Image, glyph, fallback, instance and material allocations. Each allocation is
+    /// charged once until its last owner or submitted-use responsibility releases it.
     /// Lowering the limit preserves existing allocations and refuses growth until they retire.
+    /// Native pipeline/driver overhead and physical driver residency are outside this budget.
     #[must_use]
-    pub fn with_output_byte_limit(self, bytes: u64) -> Self {
+    pub fn with_resource_byte_limit(self, bytes: u64) -> Self {
         self.output_budget.set_limit(bytes);
         self
     }
 
+    /// Returns retained logical native payload bytes under the Host's shared resource budget.
+    ///
+    /// Reservations and allocations remain charged until their last responsibility releases,
+    /// including cached state, output leases and submitted uses. Shared guards count once.
+    /// This excludes native pipeline/driver overhead and does not measure physical driver residency.
     #[must_use]
-    pub fn retained_output_bytes(&self) -> u64 {
+    pub fn retained_resource_bytes(&self) -> u64 {
         self.output_budget.retained()
     }
 
@@ -1016,6 +1048,11 @@ impl WgpuRenderHost {
             }
             .into());
         }
+        self.retiring_prefixes.try_reserve_exact(1).map_err(|_| {
+            WgpuRenderError::UploadDeferred {
+                message: "the Host's original prefix observation could not reserve storage".into(),
+            }
+        })?;
         Ok(match window {
             Some(window) => self.backend.prepare_editor_window(&self.handles, window)?,
             None => self.backend.prepare_image_device()?,
@@ -1142,7 +1179,8 @@ impl WgpuRenderHost {
     ) -> Result<crate::WgpuProgramOutputs, WgpuRenderHostError> {
         let id = self.producer_id(producer)?;
         self.validate_program_instances(id, program)?;
-        self.host_frame_index
+        let host_frame_index = self
+            .host_frame_index
             .ok_or(WgpuRenderHostError::FrameTransactionUnavailable)?;
         self.views[&id]
             .admission
@@ -1166,6 +1204,7 @@ impl WgpuRenderHost {
             .push_error_scope(wgpu::ErrorFilter::OutOfMemory);
         let mut reservation =
             WgpuSubmissionReservation::new(&namespace.device, &namespace.queue, program.clone());
+        let mut feature_attempt = crate::program::FeaturePreparationAttempt::default();
         let prepared = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
             crate::program::prepare_and_encode(
                 program,
@@ -1174,6 +1213,10 @@ impl WgpuRenderHost {
                 &mut self.feature_states,
                 &self.output_budget,
                 &mut reservation,
+                &mut feature_attempt,
+                host_frame_index,
+                #[cfg(any(feature = "sprite-submitter", feature = "ui-submitter"))]
+                self.backend.stock_quad_resources(),
             )
         }))
         .unwrap_or(Err(crate::WgpuRenderProgramError::FeaturePanicked));
@@ -1203,10 +1246,13 @@ impl WgpuRenderHost {
         // Even failed preparation may have enqueued uploads. Bind this attempt's original
         // prefix before another producer can write, including a native submit that unwinds.
         let (commands, staged) = match prepared {
-            Ok(encoded) => (
-                Some(encoded.commands),
-                Ok((encoded.resources, encoded.reports)),
-            ),
+            Ok(encoded) => {
+                feature_attempt.commit_instance_reservations();
+                (
+                    Some(encoded.commands),
+                    Ok((encoded.resources, encoded.reports)),
+                )
+            }
             Err(error) => (None, Err(error)),
         };
         let submitted = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
@@ -1257,12 +1303,7 @@ impl WgpuRenderHost {
         })();
         if result.is_err() {
             self.feature_states
-                .discard(program.0.operations.iter().filter_map(|operation| {
-                    operation
-                        .capture
-                        .as_ref()
-                        .map(|capture| capture.identity().id)
-                }));
+                .discard(feature_attempt.touched_instances.iter().copied());
         }
         result
     }
@@ -1802,6 +1843,11 @@ impl WgpuRenderHost {
             (payload.clone(), output.clone()),
         );
         let result = (|| {
+            // Clear-only execution has no stock batch preflight, but still retains its final
+            // prepared draw. Admit that slot before any preparation or native upload.
+            reservation
+                .reserve_entries(1)
+                .map_err(crate::WgpuRenderProgramError::from)?;
             let canvas_cache = &mut self
                 .views
                 .get_mut(&view_id)
@@ -1815,6 +1861,12 @@ impl WgpuRenderHost {
                 payload,
                 host_frame_index,
                 canvas_cache,
+                &mut crate::preparation::NativePreparation::new(
+                    &namespace.device,
+                    &namespace.queue,
+                    &self.output_budget,
+                    &mut reservation,
+                ),
             )?;
             let mut encoder =
                 namespace

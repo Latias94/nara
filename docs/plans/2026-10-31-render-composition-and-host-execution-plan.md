@@ -189,6 +189,13 @@ current source/assets. Do not weaken this boundary to make a smaller tracer pass
 
 ## Private Comparison Evidence
 
+The [shared stock preparation prerequisite](../knowledge/engineering/verification/2026-10/2026-10-31T144610Z-shared-stock-native-preparation-and-whole-candidate-preflight-qualification-01b79b28279b48618dd19ec377ad2cc8.md)
+adds actual complete preflight, typed Sprite/UI adapters and one native allocation/upload owner.
+Current Runtime/Editor drawing uses its shared guards and original prefixes, and production-program
+tests execute both stock adapters. Their ordinary capture/policy consumers still require migration
+before central payloads, combined image facades and quad-only prepared containers can be deleted.
+Continue that actual replacement next; tested adapter presence does not close the complete unit.
+
 The [first executable comparison](../knowledge/engineering/verification/2026-10/2026-10-31T060722Z-private-render-graph-buffer-history-and-viable-controls-comparison-on-dx12-d6aca1996b2342659bd07933b33e0e64.md)
 records 61 unique CPU tests, seven actual DX12 tests and one subsequent actual submission-failure
 test. Image/buffer kernels, independent numeric controls, logical history groups and accepted-

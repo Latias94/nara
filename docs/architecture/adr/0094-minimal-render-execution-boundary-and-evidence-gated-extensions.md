@@ -170,6 +170,13 @@ cross-owner composition work; this subsection does not promote that entire propo
   Scoped uploads retain their actual destinations before enqueue. Encoding receives declared
   resources and a command encoder; ordinary Feature methods have no Queue, acquire, submit or
   present entry. Exact native Rust is trusted code, not a sandbox against handle cloning.
+- All captured preflight runs before local native allocations, state creation or uploads. Its
+  public context provides enabled capability facts only. First-party stock adapters join their
+  complete Image working set and known automatic custody/engine records at this barrier. The
+  native owner pre-reserves that complete table and its prefix observation; arbitrary external
+  extra retention remains fallible dynamic work. A refused untouched capture cannot evict another
+  instance's original native state. Shared cache maintenance uses the Host clock independently
+  of producer capture sequence.
 - Imports require exact Host-issued initialized output leases, checked against original Host,
   epoch, native shape, interpretation and usages before realization. No caller boolean or raw
   native handle establishes initialization. A successor allocates distinct storage while a

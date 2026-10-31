@@ -47,25 +47,6 @@ pub(crate) fn checked_resource<T>(
     Ok(resource)
 }
 
-/// Unlike DeviceExt::create_buffer_init, allocation is checked before accessing the mapping.
-#[cfg(any(feature = "sprite-submitter", feature = "ui-submitter"))]
-pub(crate) fn create_buffer_with_data(
-    device: &wgpu::Device,
-    label: &'static str,
-    contents: &[u8],
-    usage: wgpu::BufferUsages,
-) -> Result<wgpu::Buffer, WgpuTextureError> {
-    create_checked_buffer_with_data(device, label, contents, usage).map_err(|error| match error {
-        crate::WgpuRenderError::UploadDeferred { message } => {
-            WgpuTextureError::AllocationFailed { label, message }
-        }
-        error => WgpuTextureError::ResourceRejected {
-            label,
-            message: error.to_string(),
-        },
-    })
-}
-
 /// Checks allocation before accessing the initial mapping, including base-backend uniforms.
 pub(crate) fn create_checked_buffer_with_data(
     device: &wgpu::Device,

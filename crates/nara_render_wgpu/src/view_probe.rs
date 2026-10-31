@@ -148,24 +148,26 @@ fn captured_split_frame() -> crate::frame::WgpuCapturedFrame {
 #[test]
 fn native_packet_executes_split_affine_views_with_one_ui_overlay() {
     let captured = captured_split_frame();
-    let (pixels, view_count) = render_to_rgba(|device, queue, format, output, encoder| {
-        let mut backend = WgpuRenderBackend::with_probe_device(device.clone(), queue.clone());
-        backend.admit_packet(
-            captured.topology.source_generation(),
-            captured.topology.frame_index(),
-        )?;
-        let prepared = backend.prepare_target_draw(
-            format,
-            &captured.topology,
-            &captured.payload,
-            captured.topology.frame_index(),
-        )?;
-        #[cfg(feature = "ui-submitter")]
-        assert_eq!(prepared.ui_packets.len(), 1);
-        crate::encode_target_draw(encoder, output, &prepared);
-        Ok(prepared.views.len())
-    })
-    .unwrap();
+    let (pixels, view_count) =
+        render_to_rgba(|device, queue, format, output, encoder, preparation| {
+            let mut backend = WgpuRenderBackend::with_probe_device(device.clone(), queue.clone());
+            backend.admit_packet(
+                captured.topology.source_generation(),
+                captured.topology.frame_index(),
+            )?;
+            let prepared = backend.prepare_target_draw(
+                format,
+                &captured.topology,
+                &captured.payload,
+                captured.topology.frame_index(),
+                preparation,
+            )?;
+            #[cfg(feature = "ui-submitter")]
+            assert_eq!(prepared.ui_packets.len(), 1);
+            crate::encode_target_draw(encoder, output, &prepared);
+            Ok(prepared.views.len())
+        })
+        .unwrap();
     assert_eq!(view_count, 2 + usize::from(cfg!(feature = "ui-submitter")));
     assert_pixel(&pixels, 16, 32, [255, 0, 0, 255]);
     assert_pixel(&pixels, 48, 32, [0, 255, 0, 255]);
@@ -193,12 +195,18 @@ fn mixed_sprite_ui_scope_rejection_refunds_prepared_views_and_recovers() {
         .total_instances() as u64
         * instance_bytes;
     let total_bytes = sprite_bytes + instance_bytes;
-    let (pixels, ()) = render_to_rgba(|device, queue, format, output, encoder| {
+    let (pixels, ()) = render_to_rgba(|device, queue, format, output, encoder, preparation| {
         let mut backend = WgpuRenderBackend::with_probe_device(device.clone(), queue.clone());
         backend.begin_frame_transaction(1, None);
         backend.set_instance_budget_limit(sprite_bytes);
         let error = backend
-            .prepare_target_draw(format, &captured.topology, &captured.payload, 1)
+            .prepare_target_draw(
+                format,
+                &captured.topology,
+                &captured.payload,
+                1,
+                preparation,
+            )
             .expect_err("the UI overlay must share the Sprite views' scope budget");
         assert!(matches!(
             error,
@@ -221,8 +229,13 @@ fn mixed_sprite_ui_scope_rejection_refunds_prepared_views_and_recovers() {
             sprite_batches: captured.payload.sprite_batches.clone(),
             ..Default::default()
         };
-        let sprites =
-            backend.prepare_target_draw(format, &captured.topology, &sprite_payload, 1)?;
+        let sprites = backend.prepare_target_draw(
+            format,
+            &captured.topology,
+            &sprite_payload,
+            1,
+            preparation,
+        )?;
         assert_eq!(
             backend
                 .frame_transaction_stats()
@@ -238,8 +251,13 @@ fn mixed_sprite_ui_scope_rejection_refunds_prepared_views_and_recovers() {
         );
 
         backend.set_instance_budget_limit(total_bytes);
-        let recovered =
-            backend.prepare_target_draw(format, &captured.topology, &captured.payload, 1)?;
+        let recovered = backend.prepare_target_draw(
+            format,
+            &captured.topology,
+            &captured.payload,
+            1,
+            preparation,
+        )?;
         assert_eq!(recovered.instance_buffer_bytes(), total_bytes);
         assert_eq!(
             backend

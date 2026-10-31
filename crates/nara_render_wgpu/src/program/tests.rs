@@ -162,7 +162,7 @@ fn retained_cpu_program_cannot_reopen_its_dropped_instance_or_initialize_a_devic
         ))
     ));
     assert_eq!(host.device_epoch(), 0);
-    assert_eq!(host.retained_output_bytes(), 0);
+    assert_eq!(host.retained_resource_bytes(), 0);
 }
 
 #[test]
@@ -337,4 +337,20 @@ fn automatic_submission_custody_has_a_finite_preallocation_bound() {
             crate::LimitKind::SubmissionResources
         )))
     ));
+}
+
+#[test]
+fn native_feature_errors_keep_the_original_backend_fault_domain() {
+    let deferred = WgpuRenderHostError::from(WgpuRenderProgramError::from(
+        crate::WgpuRenderError::UploadDeferred {
+            message: "exact images are still retained".into(),
+        },
+    ));
+    assert!(deferred.is_deferred());
+    assert!(!deferred.is_content_rejected());
+    let lost = WgpuRenderHostError::from(WgpuRenderProgramError::from(
+        crate::WgpuRenderError::DeviceLost,
+    ));
+    assert!(lost.requires_owner_replacement());
+    assert!(!lost.is_content_rejected());
 }

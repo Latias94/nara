@@ -33,7 +33,11 @@ Two `compile_fail,E0308` examples in `src/lib.rs` check that a composite texture
 a Scene-color port and raw counts cannot enter a normalized-frequency port. Run doctests
 separately: nextest does not execute them. These probes use the actual public typed ports.
 
-`tests/offscreen.rs` contains two ignored Windows/DX12 cases:
+`tests/offscreen.rs` contains three ignored Windows/DX12 cases:
+
+- `invalid_capture_preflight_refuses_before_known_native_resource_budget` supplies invalid pixels
+  with a zero-byte native payload budget. Pure preflight returns the capture-shape refusal before
+  resource allocation or preparation, then a valid capture with the same index succeeds.
 
 - `independent_features_preserve_exact_a1_while_a2_and_b_execute` uploads a real 64-by-64
   linear premultiplied RGBA32Float image, including transparent, half-alpha and alpha-zero
@@ -94,7 +98,7 @@ cargo +1.95.0 nextest run --locked --manifest-path tests/fixtures/render-program
 cargo +1.95.0 test --locked --manifest-path tests/fixtures/render-program-consumer/Cargo.toml --doc
 ```
 
-Explicitly select DX12 and the production adapter policy before running both native cases:
+Explicitly select DX12 and the production adapter policy before running the native cases:
 
 ```powershell
 $env:WGPU_BACKEND = 'dx12'
@@ -107,7 +111,7 @@ production Host selects the concrete adapter within that policy; this consumer d
 provide a separate adapter picker. Missing explicit selection, an unsupported OS, adapter
 or device acquisition failure, validation failure, mapping failure and timeout all fail the
 native prerequisite or test. They never return a passing skip. A default test run leaves
-both native cases ignored and is not GPU qualification.
+all native cases ignored and is not GPU qualification.
 
 ## Evidence Limits
 

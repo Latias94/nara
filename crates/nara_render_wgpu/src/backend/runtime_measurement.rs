@@ -8,6 +8,9 @@ use std::{
     time::Instant,
 };
 
+use crate::{
+    output::OutputBudget, preparation::NativePreparation, submission::WgpuSubmissionReservation,
+};
 use nara_app::{App, CoreStage, RuntimeCandidateRetirementState, RuntimeInstance};
 use nara_core::{Color, Vec2};
 use nara_ecs::{Entity, Query, ResMut, Resource};
@@ -246,6 +249,7 @@ fn tilemap_and_changing_hud_costs() {
     .unwrap();
     let (device, queue) =
         pollster::block_on(adapter.request_device(&wgpu::DeviceDescriptor::default())).unwrap();
+    let native_budget = Arc::new(OutputBudget::default());
     let format = wgpu::TextureFormat::Rgba8UnormSrgb;
     let target = device.create_texture(&wgpu::TextureDescriptor {
         label: Some("runtime_cost_destination"),
@@ -314,11 +318,40 @@ fn tilemap_and_changing_hud_costs() {
                 backend
                     .admit_packet(packet.source_generation(), packet.frame_index())
                     .unwrap();
-                backend.quad_textures.begin_frame(packet.frame_index());
+                backend
+                    .stock_quad_resources()
+                    .begin_frame(packet.frame_index());
+                let mut reservation =
+                    WgpuSubmissionReservation::new(&device, &queue, Arc::clone(&native_budget));
                 let begin = Instant::now();
-                let mut prepared = backend
-                    .prepare_target_draw(format, &packet, &payload, packet.frame_index())
-                    .unwrap();
+                let preparation_result = {
+                    let mut preparation =
+                        NativePreparation::new(&device, &queue, &native_budget, &mut reservation);
+                    backend.prepare_target_draw(
+                        format,
+                        &packet,
+                        &payload,
+                        packet.frame_index(),
+                        &mut preparation,
+                    )
+                };
+                let mut prepared = match preparation_result {
+                    Ok(prepared) => prepared,
+                    Err(error) => {
+                        let prefix = reservation.submitted(queue.submit([]));
+                        device
+                            .poll(wgpu::PollType::Wait {
+                                submission_index: prefix.submission_index().cloned(),
+                                timeout: Some(Duration::from_secs(5)),
+                            })
+                            .unwrap();
+                        assert!(
+                            prefix.is_complete(),
+                            "failed preparation custody must settle"
+                        );
+                        panic!("runtime cost preparation failed: {error}");
+                    }
+                };
                 let prepare_ns = begin.elapsed().as_nanos();
                 let instance_bytes = prepared.instance_buffer_bytes();
                 backend
@@ -327,9 +360,8 @@ fn tilemap_and_changing_hud_costs() {
                 let submit_started = Instant::now();
                 let mut encoder = device.create_command_encoder(&Default::default());
                 crate::encode_target_draw(&mut encoder, &target_view, &prepared);
-                queue.submit([encoder.finish()]);
+                let prefix = reservation.submitted(queue.submit([encoder.finish()]));
                 prepared.commit_instance_reservations();
-                prepared.retain_images_until_submission_complete(&queue);
                 let token = backend
                     .telemetry
                     .begin_frame_submission(
@@ -346,6 +378,10 @@ fn tilemap_and_changing_hud_costs() {
                 backend
                     .wait_for_telemetry_completions(Duration::from_secs(5))
                     .unwrap();
+                assert!(
+                    prefix.is_complete(),
+                    "original measurement custody must settle"
+                );
                 let drain_ns = begin.elapsed().as_nanos();
                 let completions = backend.drain_frame_completion_samples();
                 assert_eq!(completions.len(), 1);

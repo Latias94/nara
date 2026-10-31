@@ -89,7 +89,7 @@ fn transient_allocations_defer_without_submission_refund_demand_and_recover() {
         "nara_material_2d_bind_group",
         "nara_wgpu_quad_instances",
     ];
-    let (pixels, ()) = render_to_rgba(|device, queue, format, output, encoder| {
+    let (pixels, ()) = render_to_rgba(|device, queue, format, output, encoder, preparation| {
         for label in labels {
             let mut backend = WgpuRenderBackend::with_probe_device(device.clone(), queue.clone());
             backend.begin_frame_transaction(1, None);
@@ -103,6 +103,7 @@ fn transient_allocations_defer_without_submission_refund_demand_and_recover() {
                     Some(0),
                     &WgpuFramePayload::default(),
                     1,
+                    preparation,
                 )
                 .unwrap_err();
             assert!(
@@ -149,6 +150,7 @@ fn transient_allocations_defer_without_submission_refund_demand_and_recover() {
                 Some(0),
                 &WgpuFramePayload::default(),
                 1,
+                preparation,
             )?;
             assert!(batches.was_consumed());
             assert_eq!(draw.buffers.len(), 1);
@@ -184,41 +186,44 @@ fn transient_allocations_defer_without_submission_refund_demand_and_recover() {
 
 #[test]
 fn invalid_buffer_is_checked_before_mapping_and_allocation_failure_takes_priority() {
-    render_to_rgba(|device, _, _, _, _| {
+    render_to_rgba(|_, _, _, _, _, preparation| {
         for allocation_failed in [false, true] {
             let failure =
                 allocation_failed.then(|| AllocationFailureGuard::at("test.invalid-buffer"));
-            let error = create_buffer_with_data(
-                device,
-                "test.invalid-buffer",
-                &[1; 16],
-                wgpu::BufferUsages::MAP_READ | wgpu::BufferUsages::UNIFORM,
-            )
-            .unwrap_err();
+            let error = preparation
+                .create_buffer_with_data(
+                    "test.invalid-buffer",
+                    &[1; 16],
+                    wgpu::BufferUsages::MAP_READ | wgpu::BufferUsages::UNIFORM,
+                )
+                .unwrap_err();
+            let error = WgpuTextureError::from(error);
             assert_eq!(error.is_deferred(), allocation_failed);
             let rendered_error = WgpuRenderError::from(error.clone());
             if let Some(failure) = failure {
                 assert!(failure.was_consumed());
-                assert!(matches!(error, WgpuTextureError::AllocationFailed { .. }));
+                assert!(matches!(
+                    error,
+                    WgpuTextureError::NativeBackend(WgpuRenderError::UploadDeferred { .. })
+                ));
                 assert!(matches!(
                     rendered_error,
                     WgpuRenderError::UploadDeferred { .. }
                 ));
             } else {
-                assert!(matches!(error, WgpuTextureError::ResourceRejected { .. }));
+                assert!(matches!(
+                    error,
+                    WgpuTextureError::NativeBackend(WgpuRenderError::ContentRejected { .. })
+                ));
                 assert!(matches!(
                     rendered_error,
                     WgpuRenderError::ContentRejected { .. }
                 ));
             }
         }
-        create_buffer_with_data(
-            device,
-            "test.valid-buffer",
-            &[1; 16],
-            wgpu::BufferUsages::UNIFORM,
-        )
-        .unwrap();
+        preparation
+            .create_buffer_with_data("test.valid-buffer", &[1; 16], wgpu::BufferUsages::UNIFORM)
+            .unwrap();
         Ok(())
     })
     .unwrap();
@@ -227,7 +232,7 @@ fn invalid_buffer_is_checked_before_mapping_and_allocation_failure_takes_priorit
 #[test]
 fn invalid_texture_binding_is_rejected_without_caching_and_valid_layout_recovers() {
     let [snapshot, _] = two_image_versions();
-    render_to_rgba(|device, queue, _, _, _| {
+    render_to_rgba(|device, _, _, _, _, preparation| {
         let mut cache = WgpuSpriteTextureCache::default();
         let texture = WgpuQuadTexture::Image(snapshot);
         let material = WgpuQuadMaterialKey {
@@ -240,7 +245,7 @@ fn invalid_texture_binding_is_rejected_without_caching_and_valid_layout_recovers
             entries: &[],
         });
         let error = cache
-            .bind_group(device, queue, &invalid_layout, material, &texture, 1)
+            .bind_group(preparation, &invalid_layout, material, &texture, 1)
             .unwrap_err();
         assert!(matches!(error, WgpuTextureError::ResourceRejected { .. }));
         assert!(!error.is_deferred());
@@ -253,7 +258,7 @@ fn invalid_texture_binding_is_rejected_without_caching_and_valid_layout_recovers
         assert_eq!(cache.stats().uploaded_images, 1);
         let layout = create_quad_texture_bind_group_layout(device)?;
         cache
-            .bind_group(device, queue, &layout, material, &texture, 1)
+            .bind_group(preparation, &layout, material, &texture, 1)
             .unwrap();
         assert_eq!(cache.stats().image_bindings, 1);
         assert_eq!(cache.stats().uploaded_images, 1);

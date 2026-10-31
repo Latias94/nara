@@ -191,7 +191,7 @@ fn retained_pixels_survive_resize_and_a_close_while_b_keeps_submitting() {
         latest_b,
         later_b,
     ));
-    assert_eq!(host.retained_output_bytes(), 0);
+    assert_eq!(host.retained_resource_bytes(), 0);
     finish(&mut host);
 }
 
@@ -199,7 +199,7 @@ fn retained_pixels_survive_resize_and_a_close_while_b_keeps_submitting() {
 #[ignore = "requires an explicitly selected native GPU; adapter failure fails the prerequisite"]
 fn exact_output_budget_preserves_leases_and_retries_the_same_refused_capture() {
     const BYTES: u64 = 16 * 16 * 4;
-    let mut host = WgpuRenderHost::offscreen().with_output_byte_limit(BYTES - 1);
+    let mut host = WgpuRenderHost::offscreen().with_resource_byte_limit(BYTES - 1);
     begin(&mut host, 1);
     let a = host
         .create_producer()
@@ -210,13 +210,13 @@ fn exact_output_budget_preserves_leases_and_retries_the_same_refused_capture() {
         host.reserve_image_target(&a, source, target),
         Err(WgpuRenderHostError::OutputCapacity)
     ));
-    assert_eq!(host.retained_output_bytes(), 0);
+    assert_eq!(host.retained_resource_bytes(), 0);
 
-    host = host.with_output_byte_limit(2 * BYTES - 1);
+    host = host.with_resource_byte_limit(2 * BYTES - 1);
     let reservation = host
         .reserve_image_target(&a, source, target)
         .expect("one output must fit the configuration reservation");
-    assert_eq!(host.retained_output_bytes(), BYTES);
+    assert_eq!(host.retained_resource_bytes(), BYTES);
     host.activate_image_target(&a, reservation)
         .expect("configuration activation must consume its admitted allocation");
     let red_input = input(source, 1, target, RED);
@@ -226,7 +226,7 @@ fn exact_output_budget_preserves_leases_and_retries_the_same_refused_capture() {
     let retained_red = host
         .display_image(red.clone())
         .expect("a display must retain the red version");
-    assert_eq!(host.retained_output_bytes(), BYTES);
+    assert_eq!(host.retained_resource_bytes(), BYTES);
 
     begin(&mut host, 2);
     let green_input = input(source, 2, target, GREEN);
@@ -234,11 +234,11 @@ fn exact_output_budget_preserves_leases_and_retries_the_same_refused_capture() {
         host.submit(&a, &green_input),
         Err(WgpuRenderHostError::OutputCapacity)
     ));
-    assert_eq!(host.retained_output_bytes(), BYTES);
+    assert_eq!(host.retained_resource_bytes(), BYTES);
     assert_pixels(&mut host, retained_red.output(), RED_BYTES);
 
     // Retry the same input object/index: a failed attempt must not consume publication admission.
-    host = host.with_output_byte_limit(2 * BYTES);
+    host = host.with_resource_byte_limit(2 * BYTES);
     let green = host
         .submit(&a, &green_input)
         .expect("the same refused capture must publish at the exact two-output budget");
@@ -247,7 +247,7 @@ fn exact_output_budget_preserves_leases_and_retries_the_same_refused_capture() {
         red.receipt().output_version(),
         green.receipt().output_version()
     );
-    assert_eq!(host.retained_output_bytes(), 2 * BYTES);
+    assert_eq!(host.retained_resource_bytes(), 2 * BYTES);
     assert_pixels(&mut host, &green, GREEN_BYTES);
     assert_pixels(&mut host, retained_red.output(), RED_BYTES);
     assert_window_free(&host);
@@ -258,13 +258,13 @@ fn exact_output_budget_preserves_leases_and_retries_the_same_refused_capture() {
             .retire_producer(&a)
             .expect("A must return its submitted prefix"),
     );
-    assert_eq!(host.retained_output_bytes(), 2 * BYTES);
+    assert_eq!(host.retained_resource_bytes(), 2 * BYTES);
     drop(red);
-    assert_eq!(host.retained_output_bytes(), 2 * BYTES);
+    assert_eq!(host.retained_resource_bytes(), 2 * BYTES);
     drop(retained_red);
-    assert_eq!(host.retained_output_bytes(), BYTES);
+    assert_eq!(host.retained_resource_bytes(), BYTES);
     drop(green);
-    assert_eq!(host.retained_output_bytes(), 0);
+    assert_eq!(host.retained_resource_bytes(), 0);
     finish(&mut host);
 }
 
@@ -336,7 +336,7 @@ fn original_cpu_input_reconstructs_after_the_original_host_has_retired() {
             .expect("the replacement producer must have its own prefix"),
     );
     drop((old_output, reconstructed));
-    assert_eq!(replacement.retained_output_bytes(), 0);
+    assert_eq!(replacement.retained_resource_bytes(), 0);
     finish(&mut replacement);
 }
 

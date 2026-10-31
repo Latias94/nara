@@ -26,6 +26,37 @@ const TIMEOUT: Duration = Duration::from_secs(10);
 
 #[test]
 #[ignore = "requires Windows and explicit WGPU_BACKEND=dx12 plus NARA_WGPU_FORCE_FALLBACK=0 or 1"]
+fn invalid_capture_preflight_refuses_before_known_native_resource_budget() {
+    require_dx12_selection();
+    let mut host = WgpuRenderHost::offscreen().with_resource_byte_limit(0);
+    let producer = host.create_producer().unwrap();
+    let installed = Installed::new(&mut host, &producer);
+    let source = source();
+    begin(&mut host, 1);
+    let invalid = workload::build(source, 1, Vec::<[f32; 4]>::new().into(), &installed);
+    let error = host
+        .submit_program(&producer, &invalid.program)
+        .unwrap_err();
+    assert!(matches!(
+        error,
+        WgpuRenderHostError::Program(WgpuRenderProgramError::Feature { .. })
+    ));
+    assert!(error.is_content_rejected());
+    assert!(
+        !error.is_deferred(),
+        "invalid captured shape precedes temporary budget pressure"
+    );
+    assert_eq!(host.retained_resource_bytes(), 0);
+    host = host.with_resource_byte_limit(4 * 1024 * 1024);
+    let valid = workload::build(source, 1, oracle::scene(0).into(), &installed);
+    let outputs = host.submit_program(&producer, &valid.program).unwrap();
+    settle(outputs.submitted_prefix());
+    drop(outputs);
+    finish(&mut host);
+}
+
+#[test]
+#[ignore = "requires Windows and explicit WGPU_BACKEND=dx12 plus NARA_WGPU_FORCE_FALLBACK=0 or 1"]
 fn independent_features_preserve_exact_a1_while_a2_and_b_execute() {
     require_dx12_selection();
     let mut host = WgpuRenderHost::offscreen();
@@ -142,7 +173,7 @@ fn independent_features_preserve_exact_a1_while_a2_and_b_execute() {
     settle(&host.retire_producer(&b).expect("freeze B's own prefix"));
     drop((a1, a2, b1, b2));
     assert_eq!(
-        host.retained_output_bytes(),
+        host.retained_resource_bytes(),
         0,
         "last output and submitted-use leases release their charges"
     );
@@ -165,12 +196,12 @@ fn private_allocation_refusal_keeps_old_outputs_and_the_same_candidate_can_retry
     settle(a1_group.submitted_prefix());
     drop(a1_group);
     let retained = 4 * IMAGE_BYTES + 2 * COUNTS_BYTES;
-    assert_eq!(host.retained_output_bytes(), retained);
+    assert_eq!(host.retained_resource_bytes(), retained);
 
     // All five local textures and both buffers fit. The private upload allocation is one
     // byte short, so refusal occurs inside Feature preparation after graph realization.
     let attempt_bytes = 6 * IMAGE_BYTES + 2 * COUNTS_BYTES;
-    host = host.with_output_byte_limit(retained + attempt_bytes - 1);
+    host = host.with_resource_byte_limit(retained + attempt_bytes - 1);
     let a2_input = workload::build(source, 2, oracle::scene(1).into(), &installed);
     begin(&mut host, 2);
     assert!(matches!(
@@ -180,7 +211,7 @@ fn private_allocation_refusal_keeps_old_outputs_and_the_same_candidate_can_retry
         ))
     ));
 
-    host = host.with_output_byte_limit(4 * 1024 * 1024);
+    host = host.with_resource_byte_limit(4 * 1024 * 1024);
     begin(&mut host, 3);
     let a2_group = host
         .submit_program(&producer, &a2_input.program)
@@ -200,7 +231,7 @@ fn private_allocation_refusal_keeps_old_outputs_and_the_same_candidate_can_retry
             .expect("the original producer retains its latest prefix"),
     );
     drop((a1, a2));
-    assert_eq!(host.retained_output_bytes(), 0);
+    assert_eq!(host.retained_resource_bytes(), 0);
     finish(&mut host);
 }
 

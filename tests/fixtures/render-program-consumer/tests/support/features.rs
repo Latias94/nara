@@ -28,6 +28,19 @@ impl WgpuRenderFeature for Upload {
     type Prepared = Uploaded;
     type Report = ();
 
+    fn preflight(
+        &self,
+        capture: &UploadCapture,
+        _context: &mut nara_render_wgpu::WgpuFeaturePreflightContext<'_>,
+    ) -> Result<(), WgpuRenderProgramError> {
+        if capture.pixels.len() != (WIDTH * HEIGHT) as usize {
+            return Err(WgpuRenderProgramError::feature(
+                "expected exactly 64 by 64 RGBA32Float pixels",
+            ));
+        }
+        Ok(())
+    }
+
     fn create_state(
         &self,
         _context: &mut WgpuFeaturePrepareContext<'_>,
@@ -41,11 +54,6 @@ impl WgpuRenderFeature for Upload {
         capture: &UploadCapture,
         context: &mut WgpuFeaturePrepareContext<'_>,
     ) -> Result<Uploaded, WgpuRenderProgramError> {
-        if capture.pixels.len() != (WIDTH * HEIGHT) as usize {
-            return Err(WgpuRenderProgramError::feature(
-                "expected exactly 64 by 64 RGBA32Float pixels",
-            ));
-        }
         let allocation = context.reserve_bytes(IMAGE_BYTES)?;
         let staging = context.device().create_texture(&wgpu::TextureDescriptor {
             label: Some("public-program-upload-private-input"),

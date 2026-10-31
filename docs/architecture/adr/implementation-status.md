@@ -144,6 +144,14 @@ storage-to-vertex histogram without a private executor. Stock Sprite/UI, Runtime
 View/history, complete content/UI interleaving and Nara-drawn composition remain open; this
 prerequisite does not promote full0121 or claim a complete R8/R9 replacement.
 
+The [stock preparation successor](../../knowledge/engineering/verification/2026-10/2026-10-31T144610Z-shared-stock-native-preparation-and-whole-candidate-preflight-qualification-01b79b28279b48618dd19ec377ad2cc8.md)
+implements whole-candidate capability/Image/custody preflight and one shared native allocation/upload
+owner. Sprite/UI typed adapters execute in production-program native tests; existing Runtime/Editor
+consumers use the shared caches, byte guards and original-prefix responsibility. Host-frame cache
+age and exact touched-instance cleanup preserve independent producer clocks. The resource-byte
+interface replaces output-only names without aliases. Ordinary capture/policy migration and
+central DTO/facade deletion remain next work; full0121 is still Proposed.
+
 The [original-result/logical-close prerequisite](../../knowledge/engineering/verification/2026-10/2026-10-31T082117Z-original-ui-result-custody-and-logical-close-qualification-6e1965c6428841ec9138088bef20f90c.md)
 is implemented at `8e9d840` under ADR0102. Nominal pre-admitted result batches, retained original
 receivers, replacement/backpressure guards and Root UI/Input close settlement now have final85,

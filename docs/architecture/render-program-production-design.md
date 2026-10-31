@@ -85,7 +85,7 @@ all Views and UI before uploads. Splitting adapters must not multiply shared bud
 rejection after partial upload merely for implementation convenience.
 
 The current per-operation prepare/encode loop cannot by itself establish this complete working-set
-barrier. Stock migration adds one preparation-free `preflight` hook and a candidate-owned private
+barrier. The preparation prerequisite adds one preparation-free `preflight` hook and a candidate-owned private
 stock Image collector before any local native allocation or state creation. Its public context
 exposes enabled limits, with no Device, Queue, state or upload entry; stock helpers privately
 register the exact already-lowered immutable batch slices. After visiting every capture, the
@@ -95,6 +95,14 @@ live-old-allocation deferral. It does not expand that method into a claim of com
 fallback or per-frame upload preflight. Collectors are rebuilt for each attempt rather than
 encoded as a persistent "checked" flag in a capture.
 
+The same borrowed stock cost calculation covers all native automatic custody entries and engine
+records for captured batches/material extensions, before any local resource allocation or upload.
+Program admission joins that cost to its remaining metadata allowance; current stock Runtime/Editor
+consumers use the same calculation during policy migration. Native preparation reserves the complete
+known custody table before work. External Features' arbitrary extra retention stays a separate
+fallible dynamic request. Prefix observation also reserves its slot before uploads/submission,
+including the window backend, so successful native work cannot precede its observer allocation.
+
 Shared quad pipeline/Image/glyph resources remain a private Host/epoch-owned realization helper.
 Actual mutable Feature state remains per instance; an adapter with no such state uses `State = ()`.
 Uploads through the common helper retain destination/guard before enqueue. Candidate instance
@@ -102,6 +110,17 @@ reservations refund on preparation/encoding failure and commit together immediat
 native submission attempt, not at the end of an individual Feature's encoding. Preserve the
 structured Backend error at the program-to-Host boundary so stock residency deferral and device
 failure do not collapse into a generic Feature content rejection.
+
+One private `NativePreparation` carries the exact native pair, retained-byte budget and original
+reservation through both paths. Image, glyph, fallback, instance and material payload allocations
+reserve before creation and keep the shared guard with actual native storage. Cache hits return an
+exact guarded binding/view and retain that use; per-Image completion callbacks are removed. The
+public Host resource-byte names describe this complete logical payload accounting. Pipeline/driver
+overhead remains excluded, and no residency/RSS improvement follows from the accounting change.
+
+Stock cache age uses the Host maintenance frame, never an independently paced producer capture
+counter. Candidate failure discards only native instance states it actually touched. A pure
+preflight refusal or failed local allocation cannot evict unrelated original instance caches.
 
 UI drawing packets remain separate from move-only backend submission permits. Replayed packets
 and new permits are not a zip relation. The UI adapter/bridge owns exact packet/target facts and

@@ -38,9 +38,13 @@ input can be retried where the error permits it. Inputs contain no Runtime UI co
 Each output owns distinct immutable texture storage and a non-reused output version. Retaining
 A1 while submitting A2 preserves A1's pixels through producer resize or close. Clone the output
 to retain that allocation, rather than looking up the producer's latest target. The default Host
-limit is 512MiB of logical RGBA8 output allocations; `with_output_byte_limit` changes it.
-`retained_output_bytes` includes inactive reservations, output leases and actual submitted uses.
-It does not report physical driver residency or all other render caches.
+limit is 512MiB of shared logical native payload; `with_resource_byte_limit` changes it.
+`retained_resource_bytes` includes inactive output reservations, retained outputs, graph allocations,
+and prepared Image, glyph, fallback, instance and material allocations. Each allocation is charged
+once until its last responsibility releases it, including cached state, output leases and submitted
+uses. Toolkit-owned storage and the fixed WorldCanvas cache retain separate accounting during
+the stock-policy transition. Native pipeline/driver overhead is excluded; the budget does not measure physical driver
+residency.
 
 `display_image(output)` selects one exact output for a new display occurrence. Clone that display
 for repaint; create a separate display for a mirror. Toolkit bindings retain the exact display.

@@ -225,5 +225,5 @@ fn actual_feature_definitions_capture_before_device_acquisition_and_close_irreve
         refused.operation(1, &instance, capture, &[], &[]),
         Err(WgpuRenderProgramError::FeatureClosed)
     ));
-    assert_eq!(host.retained_output_bytes(), 0);
+    assert_eq!(host.retained_resource_bytes(), 0);
 }

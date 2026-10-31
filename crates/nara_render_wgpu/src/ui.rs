@@ -1,4 +1,4 @@
-use std::{collections::BTreeSet, sync::Arc};
+use std::{collections::BTreeSet, marker::PhantomData, sync::Arc};
 
 use nara_material::{AlphaMode2d, SamplerDescriptor};
 use nara_render::{RenderTarget, ViewportRect};
@@ -7,10 +7,123 @@ use nara_ui_render::{
 };
 use thiserror::Error;
 
-use crate::quad::{
-    WGPU_QUAD_SHAPE_PLAIN, WGPU_QUAD_SHAPE_ROUNDED_BORDER, WGPU_QUAD_SHAPE_ROUNDED_FILL,
-    WgpuQuadBatch, WgpuQuadInstance, WgpuQuadMaterialKey, WgpuQuadTexture, WgpuScissorRect,
+use crate::{
+    WgpuFeatureEncodeContext, WgpuFeaturePreflightContext, WgpuFeaturePrepareContext,
+    WgpuProgramTexture, WgpuRenderError, WgpuRenderFeature, WgpuRenderProgramError,
+    quad::{
+        WGPU_QUAD_SHAPE_PLAIN, WGPU_QUAD_SHAPE_ROUNDED_BORDER, WGPU_QUAD_SHAPE_ROUNDED_FILL,
+        WgpuQuadBatch, WgpuQuadInstance, WgpuQuadMaterialKey, WgpuQuadTexture, WgpuScissorRect,
+    },
+    stock_quad::StockQuadPrepared,
 };
+
+/// Stock UI drawing against the policy's exact semantic texture port.
+pub(crate) struct UiFeature<S: 'static>(PhantomData<fn() -> S>);
+
+impl<S: 'static> UiFeature<S> {
+    pub(crate) const fn new() -> Self {
+        Self(PhantomData)
+    }
+}
+
+/// Drawing and exact packet facts, independent of one-shot backend submission permits.
+pub(crate) struct UiCapture<S: 'static> {
+    pub(crate) target: WgpuProgramTexture<S>,
+    pub(crate) viewport: ViewportRect,
+    pub(crate) batches: Arc<[WgpuQuadBatch]>,
+    pub(crate) packet_facts: Arc<[WgpuLoweredUiPacketFacts]>,
+}
+
+impl<S: 'static> UiCapture<S> {
+    pub(crate) fn new(
+        packets: &[Arc<UiPaintPacket>],
+        logical_target: RenderTarget,
+        primary_window_id: Option<nara_window::WindowId>,
+        target: WgpuProgramTexture<S>,
+        viewport: ViewportRect,
+    ) -> Result<Self, WgpuRenderProgramError> {
+        let lowered = lower_ui_packets(packets, logical_target, primary_window_id, viewport)
+            .map_err(|error| WgpuRenderError::UiPacketInvariant {
+                message: error.to_string(),
+            })?;
+        Ok(Self {
+            target,
+            viewport,
+            batches: lowered.batches.into(),
+            packet_facts: lowered.packet_facts.into(),
+        })
+    }
+}
+
+pub(crate) struct UiPrepared<S: 'static> {
+    target: WgpuProgramTexture<S>,
+    viewport: ViewportRect,
+    draw: StockQuadPrepared,
+    packet_facts: Arc<[WgpuLoweredUiPacketFacts]>,
+}
+
+#[derive(Clone, Debug, Default)]
+pub(crate) struct UiReport {
+    pub(crate) draw_calls: u32,
+    pub(crate) sprites: u32,
+    pub(crate) image_sprites: u32,
+    pub(crate) packet_facts: Arc<[WgpuLoweredUiPacketFacts]>,
+}
+
+impl<S: 'static> WgpuRenderFeature for UiFeature<S> {
+    type Capture = UiCapture<S>;
+    type State = ();
+    type Prepared = UiPrepared<S>;
+    type Report = UiReport;
+
+    fn preflight(
+        &self,
+        capture: &Self::Capture,
+        context: &mut WgpuFeaturePreflightContext<'_>,
+    ) -> Result<(), WgpuRenderProgramError> {
+        context.collect_stock_images(&capture.batches)
+    }
+
+    fn create_state(
+        &self,
+        _context: &mut WgpuFeaturePrepareContext<'_>,
+    ) -> Result<Self::State, WgpuRenderProgramError> {
+        Ok(())
+    }
+
+    fn prepare(
+        &self,
+        _state: &mut Self::State,
+        capture: &Self::Capture,
+        context: &mut WgpuFeaturePrepareContext<'_>,
+    ) -> Result<Self::Prepared, WgpuRenderProgramError> {
+        let draw = context
+            .prepare_stock_draw(&capture.batches, capture.target.descriptor().native.format)?;
+        Ok(UiPrepared {
+            target: capture.target.clone(),
+            viewport: capture.viewport,
+            draw,
+            packet_facts: Arc::clone(&capture.packet_facts),
+        })
+    }
+
+    fn encode(
+        &self,
+        prepared: &Self::Prepared,
+        context: &mut WgpuFeatureEncodeContext<'_>,
+    ) -> Result<Self::Report, WgpuRenderProgramError> {
+        let target = context.resources().texture(&prepared.target)?;
+        prepared
+            .draw
+            .encode(context.encoder(), target, prepared.viewport);
+        Ok(UiReport {
+            draw_calls: prepared.draw.draw_calls,
+            sprites: prepared.draw.sprites,
+            image_sprites: prepared.draw.image_sprites,
+            packet_facts: Arc::clone(&prepared.packet_facts),
+        })
+    }
+}
 
 pub(crate) fn ui_packet_targets_view(
     packet: &UiPaintPacket,
@@ -60,7 +173,7 @@ pub(crate) struct WgpuUiLowering {
     pub(crate) packet_facts: Vec<WgpuLoweredUiPacketFacts>,
 }
 
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub(crate) struct WgpuLoweredUiPacketFacts {
     pub(crate) packet: UiPaintPacketIdentity,
     pub(crate) target: RenderTarget,
@@ -361,8 +474,8 @@ mod tests {
     use nara_text::{FontFace, bundled_font_face};
     use nara_ui_kernel::{
         UiAuthoringSnapshotBuilder, UiBorder, UiBrush, UiColor, UiCompiler, UiCornerRadii,
-        UiEnvironment, UiImageId, UiLayer, UiLocalKey, UiNode, UiRoot, UiRootKey, UiStyle,
-        UiSurfaceId, UiText, UiTheme, UiVisual,
+        UiEnvironment, UiImageId, UiLayer, UiLocalKey, UiNode, UiOverflow, UiRoot, UiRootKey,
+        UiStyle, UiSurfaceId, UiText, UiTheme, UiVisual,
     };
     use nara_window::WindowId;
 
@@ -370,6 +483,144 @@ mod tests {
         READBACK_BYTES_PER_PIXEL, READBACK_EXTENT, readback_pixel, readback_viewport,
         render_batches_to_rgba,
     };
+    use crate::{
+        AccessRole, GraphLimits, TextureAlpha, TextureTransfer, WgpuFeatureDefinition,
+        WgpuProgramTextureDescriptor, WgpuRenderProgramBuilder,
+    };
+
+    #[test]
+    fn ui_capture_routes_logical_window_packets_and_retains_replayed_packet_facts() {
+        type Composite = std::rc::Rc<()>;
+        let _definition = WgpuFeatureDefinition::new(UiFeature::<Composite>::new());
+        let mut builder = capture_builder();
+        let target = builder.texture::<Composite>(capture_descriptor()).unwrap();
+        let image = image_packet();
+        let alias = text_packet_for_target(RenderTarget::PrimaryWindow);
+        let other = text_packet_for_target(RenderTarget::Image(
+            nara_render::RenderImage2d::allocate_handle().unwrap(),
+        ));
+        let expected_packets = [image.identity(), alias.identity(), image.identity()];
+        let expected_image = image.images()[0].snapshot().identity().clone();
+        let capture = UiCapture::new(
+            &[
+                Arc::clone(&image),
+                other,
+                Arc::clone(&alias),
+                Arc::clone(&image),
+            ],
+            RenderTarget::Window(WindowId::PRIMARY),
+            Some(WindowId::PRIMARY),
+            target.clone(),
+            readback_viewport(),
+        )
+        .unwrap();
+        drop(image);
+        drop(alias);
+
+        assert_eq!(
+            capture
+                .packet_facts
+                .iter()
+                .map(|facts| facts.packet)
+                .collect::<Vec<_>>(),
+            expected_packets,
+        );
+        assert_eq!(
+            capture.packet_facts[0].target,
+            RenderTarget::Window(WindowId::PRIMARY),
+        );
+        assert_eq!(capture.packet_facts[1].target, RenderTarget::PrimaryWindow);
+        assert!(
+            capture
+                .packet_facts
+                .iter()
+                .all(|facts| facts.submitted_quad_count > 0)
+        );
+        assert!(capture.batches.iter().any(|batch| {
+            matches!(&batch.texture, WgpuQuadTexture::Image(snapshot) if snapshot.identity() == &expected_image)
+        }));
+        assert!(
+            capture
+                .batches
+                .iter()
+                .any(|batch| matches!(&batch.texture, WgpuQuadTexture::Glyph(_)))
+        );
+        builder
+            .initialize(
+                1,
+                &[capture
+                    .target
+                    .clear(wgpu::Color::TRANSPARENT, AccessRole::Attachment)],
+            )
+            .unwrap();
+        builder.finish(&[target.output()]).unwrap();
+    }
+
+    #[test]
+    fn ui_capture_keeps_packet_facts_when_clipping_removes_all_draws() {
+        let child = UiNode::new(UiStyle::absolute(0.0, 0.0, 8.0, 8.0))
+            .with_key(UiLocalKey::runtime("wgpu-capture-clip", "fill").unwrap())
+            .with_visual(UiVisual::solid(UiColor::rgba(1.0, 1.0, 1.0, 1.0)));
+        let node =
+            UiNode::new(UiStyle::absolute(16.0, 16.0, 8.0, 8.0).with_overflow(UiOverflow::Clip))
+                .with_child(child);
+        let frame = compile_frame("wgpu-capture-clip", node);
+        let packet = nara_ui_render::UiPresentationPlanner::default()
+            .plan(frame, RenderTarget::PrimaryWindow, &Default::default())
+            .unwrap();
+        assert!(!packet.primitives().is_empty());
+        let mut builder = capture_builder();
+        let target = builder.texture::<()>(capture_descriptor()).unwrap();
+        let viewport = ViewportRect::new(4, 8, 8, 8).unwrap();
+        let capture = UiCapture::new(
+            &[Arc::clone(&packet)],
+            RenderTarget::Window(WindowId::PRIMARY),
+            Some(WindowId::PRIMARY),
+            target,
+            viewport,
+        )
+        .unwrap();
+
+        assert_eq!(capture.viewport, viewport);
+        assert!(capture.batches.is_empty());
+        assert_eq!(capture.packet_facts.len(), 1);
+        let facts = &capture.packet_facts[0];
+        assert_eq!(facts.packet, packet.identity());
+        assert_eq!(facts.target, RenderTarget::PrimaryWindow);
+        assert_eq!(facts.primitive_count, 1);
+        assert_eq!(facts.submitted_quad_count, 0);
+        assert!(facts.resources.is_empty());
+    }
+
+    fn capture_builder() -> WgpuRenderProgramBuilder {
+        WgpuRenderProgramBuilder::new(
+            nara_render::RenderFrameSourceGeneration::try_acquire().unwrap(),
+            1,
+            GraphLimits::default(),
+        )
+        .unwrap()
+    }
+
+    fn capture_descriptor() -> WgpuProgramTextureDescriptor {
+        WgpuProgramTextureDescriptor {
+            native: wgpu::TextureDescriptor {
+                label: Some("ui-capture"),
+                size: wgpu::Extent3d {
+                    width: READBACK_EXTENT,
+                    height: READBACK_EXTENT,
+                    depth_or_array_layers: 1,
+                },
+                mip_level_count: 1,
+                sample_count: 1,
+                dimension: wgpu::TextureDimension::D2,
+                format: wgpu::TextureFormat::Rgba8Unorm,
+                usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
+                view_formats: &[],
+            },
+            transfer: TextureTransfer::Linear,
+            alpha: TextureAlpha::Premultiplied,
+        }
+    }
 
     #[test]
     fn packet_clip_outside_the_viewport_culls_the_primitive() {

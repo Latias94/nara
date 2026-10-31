@@ -13,6 +13,7 @@ mod host;
 mod observation;
 mod output;
 mod plugin;
+mod preparation;
 mod presented;
 mod program;
 #[cfg(any(feature = "sprite-submitter", feature = "ui-submitter"))]
@@ -26,6 +27,8 @@ mod runtime;
 mod sprite;
 #[cfg(all(test, feature = "sprite-submitter"))]
 mod sprite_probe;
+#[cfg(any(feature = "sprite-submitter", feature = "ui-submitter"))]
+mod stock_quad;
 mod submission;
 mod surface;
 mod telemetry;
@@ -84,10 +87,11 @@ pub use crate::plugin::{
 pub use crate::presented::WgpuSubmittedImageReceipt;
 pub use crate::program::{
     WgpuFeatureAllocation, WgpuFeatureDefinition, WgpuFeatureEncodeContext, WgpuFeatureInstance,
-    WgpuFeaturePrepareContext, WgpuNativeResources, WgpuOperationResources, WgpuProgramBuffer,
-    WgpuProgramBufferOutput, WgpuProgramOutput, WgpuProgramOutputs, WgpuProgramRead,
-    WgpuProgramTexture, WgpuProgramTextureDescriptor, WgpuProgramTextureOutput, WgpuProgramWrite,
-    WgpuRenderFeature, WgpuRenderProgram, WgpuRenderProgramBuilder, WgpuRenderProgramError,
+    WgpuFeaturePreflightContext, WgpuFeaturePrepareContext, WgpuNativeResources,
+    WgpuOperationResources, WgpuProgramBuffer, WgpuProgramBufferOutput, WgpuProgramOutput,
+    WgpuProgramOutputs, WgpuProgramRead, WgpuProgramTexture, WgpuProgramTextureDescriptor,
+    WgpuProgramTextureOutput, WgpuProgramWrite, WgpuRenderFeature, WgpuRenderProgram,
+    WgpuRenderProgramBuilder, WgpuRenderProgramError,
 };
 pub use crate::requirements::{WgpuDeviceRequirements, WgpuDeviceRequirementsError};
 pub use crate::submission::{WgpuSubmissionPrefix, WgpuSubmissionPrefixError};
@@ -426,17 +430,6 @@ impl PreparedTargetDraw {
         }
     }
 
-    fn retain_images_until_submission_complete(&self, queue: &wgpu::Queue) {
-        #[cfg(any(feature = "sprite-submitter", feature = "ui-submitter"))]
-        for view in &self.views {
-            for buffer in &view.draw.buffers {
-                buffer.retain_images_until_submission_complete(queue);
-            }
-        }
-        #[cfg(not(any(feature = "sprite-submitter", feature = "ui-submitter")))]
-        let _ = queue;
-    }
-
     fn push(
         &mut self,
         viewport: nara_render::ViewportRect,
@@ -731,10 +724,9 @@ fn render_acquired_texture(
         label: Some("nara_wgpu_surface_encoder"),
     });
     encode_target_draw(&mut encoder, &view, draw);
-    queue.submit([encoder.finish()]);
     #[cfg(any(feature = "sprite-submitter", feature = "ui-submitter"))]
     draw.commit_instance_reservations();
-    draw.retain_images_until_submission_complete(queue);
+    queue.submit([encoder.finish()]);
     queue.present(surface_texture);
     Ok(())
 }

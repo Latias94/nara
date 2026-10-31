@@ -26,7 +26,10 @@ use nara_window::{Window, WindowId, WindowResolution};
 
 #[cfg(feature = "sprite-submitter")]
 use crate::readback_tests::{readback_pixel, render_to_rgba};
-use crate::{WgpuRenderBackend, frame::WgpuFramePayload};
+use crate::{
+    WgpuRenderBackend, frame::WgpuFramePayload, output::OutputBudget,
+    preparation::NativePreparation, submission::WgpuSubmissionReservation,
+};
 
 #[cfg(feature = "sprite-submitter")]
 struct CheckerFrame {
@@ -153,10 +156,11 @@ fn fixed_canvas_checkerboard_bars_and_native_ui_share_the_target_encoder() {
         )];
     }
     let packet = captured.packet(64, 64, 1.0, 1);
-    let (pixels, ()) = render_to_rgba(|device, queue, format, output, encoder| {
+    let (pixels, ()) = render_to_rgba(|device, queue, format, output, encoder, preparation| {
         let mut backend = WgpuRenderBackend::with_probe_device(device.clone(), queue.clone());
         backend.admit_packet(packet.source_generation(), packet.frame_index())?;
-        let prepared = backend.prepare_target_draw(format, &packet, &captured.payload, 1)?;
+        let prepared =
+            backend.prepare_target_draw(format, &packet, &captured.payload, 1, preparation)?;
         assert_eq!(prepared.canvas.as_ref().unwrap().world_view_count, 1);
         #[cfg(feature = "ui-submitter")]
         assert_eq!(prepared.ui_packets.len(), 1);
@@ -192,9 +196,10 @@ fn fixed_canvas_nearest_composite_handles_odd_fractional_and_undersized_windows(
     let captured = CheckerFrame::new();
     for (width, height, scale) in [(63, 61, 1.5), (5, 3, 1.25)] {
         let packet = captured.packet(width, height, scale, 1);
-        let (pixels, ()) = render_to_rgba(|device, queue, format, output, encoder| {
+        let (pixels, ()) = render_to_rgba(|device, queue, format, output, encoder, preparation| {
             let mut backend = WgpuRenderBackend::with_probe_device(device.clone(), queue.clone());
-            let prepared = backend.prepare_target_draw(format, &packet, &captured.payload, 1)?;
+            let prepared =
+                backend.prepare_target_draw(format, &packet, &captured.payload, 1, preparation)?;
             crate::encode_target_draw(encoder, output, &prepared);
             Ok(())
         })
@@ -246,13 +251,14 @@ fn assert_checkerboard(pixels: &[u8], frame: WorldCanvasFrame, width: u32, heigh
 #[cfg(feature = "sprite-submitter")]
 fn canvas_resize_reuses_raster_and_configuration_retirement_releases_it() {
     let captured = CheckerFrame::new();
-    render_to_rgba(|device, queue, format, _, _| {
+    render_to_rgba(|device, queue, format, _, _, preparation| {
         let mut backend = WgpuRenderBackend::with_probe_device(device.clone(), queue.clone());
         let first = backend.prepare_target_draw(
             format,
             &captured.packet(64, 64, 1.0, 1),
             &captured.payload,
             1,
+            preparation,
         )?;
         let resources = Arc::downgrade(&first.canvas.as_ref().unwrap().resources);
         let resized = backend.prepare_target_draw(
@@ -260,6 +266,7 @@ fn canvas_resize_reuses_raster_and_configuration_retirement_releases_it() {
             &captured.packet(63, 61, 1.5, 2),
             &captured.payload,
             2,
+            preparation,
         )?;
         assert!(Arc::ptr_eq(
             &first.canvas.as_ref().unwrap().resources,
@@ -279,7 +286,7 @@ fn canvas_resize_reuses_raster_and_configuration_retirement_releases_it() {
 #[cfg(feature = "sprite-submitter")]
 fn canvas_allocation_failures_do_not_submit_and_valid_retry_recovers() {
     let captured = CheckerFrame::new();
-    render_to_rgba(|device, queue, format, output, encoder| {
+    render_to_rgba(|device, queue, format, output, encoder, preparation| {
         for label in [
             "nara_world_canvas_layout",
             "nara_world_canvas_texture",
@@ -299,6 +306,7 @@ fn canvas_allocation_failures_do_not_submit_and_valid_retry_recovers() {
                 &captured.payload,
                 1,
                 &mut canvas_cache,
+                preparation,
             )?;
             let retained = Arc::clone(&baseline.canvas.as_ref().unwrap().resources);
             drop(baseline);
@@ -310,6 +318,7 @@ fn canvas_allocation_failures_do_not_submit_and_valid_retry_recovers() {
                     &captured.payload,
                     1,
                     &mut canvas_cache,
+                    preparation,
                 )
                 .unwrap_err();
             assert!(
@@ -339,6 +348,7 @@ fn canvas_allocation_failures_do_not_submit_and_valid_retry_recovers() {
                 &captured.payload,
                 1,
                 &mut canvas_cache,
+                preparation,
             )?;
             crate::encode_target_draw(encoder, output, &prepared);
         }
@@ -402,15 +412,34 @@ fn clear_only_canvas_uses_checked_base_backend_without_submitters() {
     let output = texture.create_view(&wgpu::TextureViewDescriptor::default());
     let mut backend = WgpuRenderBackend::with_probe_device(device.clone(), queue.clone());
     let mut cache = WorldCanvasCache::default();
-    let prepared = backend
-        .prepare_target_draw_with_canvas_cache(
-            format,
-            &packet,
-            &WgpuFramePayload::default(),
-            1,
-            &mut cache,
-        )
-        .unwrap();
+    let budget = Arc::new(OutputBudget::default());
+    let mut reservation = WgpuSubmissionReservation::new(&device, &queue, Arc::clone(&budget));
+    let mut preparation = NativePreparation::new(&device, &queue, &budget, &mut reservation);
+    let prepared = match backend.prepare_target_draw_with_canvas_cache(
+        format,
+        &packet,
+        &WgpuFramePayload::default(),
+        1,
+        &mut cache,
+        &mut preparation,
+    ) {
+        Ok(prepared) => prepared,
+        Err(error) => {
+            drop(preparation);
+            let prefix = reservation.submitted(queue.submit([]));
+            device
+                .poll(wgpu::PollType::Wait {
+                    submission_index: prefix.submission_index().cloned(),
+                    timeout: Some(std::time::Duration::from_secs(10)),
+                })
+                .unwrap();
+            assert!(
+                prefix.is_complete(),
+                "failed canvas preparation custody must settle"
+            );
+            panic!("canvas preparation failed: {error}");
+        }
+    };
     let retained = Arc::downgrade(&prepared.canvas.as_ref().unwrap().resources);
     let original_key = cache.resources.as_ref().unwrap().key;
     let excess = device
@@ -434,7 +463,8 @@ fn clear_only_canvas_uses_checked_base_backend_without_submitters() {
             &invalid,
             &WgpuFramePayload::default(),
             2,
-            &mut cache
+            &mut cache,
+            &mut preparation,
         ),
         Err(WgpuRenderError::ContentRejected { .. })
     ));
@@ -447,7 +477,8 @@ fn clear_only_canvas_uses_checked_base_backend_without_submitters() {
             &packet,
             &WgpuFramePayload::default(),
             3,
-            &mut empty
+            &mut empty,
+            &mut preparation,
         ),
         Err(WgpuRenderError::UploadDeferred { .. })
     ));
@@ -490,17 +521,19 @@ fn clear_only_canvas_uses_checked_base_backend_without_submitters() {
         backend.frame_transaction_stats().surface_acquire_attempts(),
         0
     );
-    queue.submit([encoder.finish()]);
+    drop(preparation);
+    let prefix = reservation.submitted(queue.submit([encoder.finish()]));
     let (sender, receiver) = std::sync::mpsc::channel();
     readback.map_async(wgpu::MapMode::Read, .., move |result| {
         let _ = sender.send(result);
     });
     device
         .poll(wgpu::PollType::Wait {
-            submission_index: None,
+            submission_index: prefix.submission_index().cloned(),
             timeout: Some(std::time::Duration::from_secs(10)),
         })
         .unwrap();
+    assert!(prefix.is_complete(), "original canvas custody must settle");
     receiver
         .recv_timeout(std::time::Duration::from_secs(10))
         .unwrap()

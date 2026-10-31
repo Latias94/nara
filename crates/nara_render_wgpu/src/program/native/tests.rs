@@ -203,21 +203,6 @@ fn local_preflight_rolls_back_refusal_and_each_guard_follows_its_last_use() {
 }
 
 #[test]
-fn private_allocation_clones_share_one_charge_until_the_last_use_releases() {
-    let budget = Arc::new(OutputBudget::new(64));
-    let allocation = WgpuFeatureAllocation {
-        _reservation: Arc::new(budget.reserve(64).unwrap()),
-    };
-    let retained_use = allocation.clone();
-    assert_eq!(budget.retained(), 64);
-    assert!(budget.reserve(1).is_none());
-    drop(allocation);
-    assert_eq!(budget.retained(), 64);
-    drop(retained_use);
-    assert_eq!(budget.retained(), 0);
-}
-
-#[test]
 fn finite_native_vectors_reject_capacity_overflow_before_allocating() {
     assert!(matches!(
         reserved::<OutputReservation>(usize::MAX),

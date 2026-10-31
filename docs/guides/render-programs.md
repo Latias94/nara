@@ -56,6 +56,16 @@ no presentation or UI-completion authority.
 
 ## Native Work And Budgets
 
+`preflight` visits every original capture before local native allocations, state creation or
+uploads. Its context exposes enabled limits/features without a Device, Queue or mutable state.
+Reject invalid captures here. Refusal preserves untouched instance caches; preparation failure
+retires only the native instances that attempt actually touched.
+
+Stock Sprite/UI lowering registers the same immutable batch slices in a private collector.
+Complete main/material Image demand and known automatic custody/engine records admit before
+native work. The shared stock cost calculation also serves existing Runtime/Editor consumers
+during policy migration. Arbitrary external extra retention remains fallible dynamic work.
+
 Both `create_state` and `prepare` receive `WgpuFeaturePrepareContext`. Use `device()` for pipelines,
 `resources()` for declared versions and scoped uploads for private inputs. Reserve native payload
 bytes with `reserve_bytes` before allocation. Keep the cloneable `WgpuFeatureAllocation` with the
@@ -85,6 +95,17 @@ pipeline/driver overhead are outside this modeled envelope. It is not RSS or mea
 All known local resource guards are acquired before creating any native local object; refusal
 releases the guards immediately. Graph allocations, retained outputs and adapter-private payloads
 share the Host logical-byte budget. Every guard follows the original allocation's last actual use.
+
+`with_resource_byte_limit` restricts that shared logical payload budget; `retained_resource_bytes`
+observes its current responsibility. Stock Image, glyph, fallback, instance and material allocations
+use the same private preparation owner as program resources. Cache hits share the original guard;
+returned native bindings/views retain their use through cache removal and physical completion.
+The former per-Image completion callbacks are removed. Shared cache age uses the Host maintenance
+frame, independently of producer capture/frame identities.
+
+Toolkit-owned resources and the current fixed WorldCanvas cache retain their separate accounting
+during the stock-policy transition. This budget covers the represented native payload owners;
+it is not a promise that every device allocation is admitted by one complete GPU-memory budget.
 
 ## Admission, Outputs And Close
 

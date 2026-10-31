@@ -1,4 +1,4 @@
-use std::{collections::BTreeMap, time::Duration};
+use std::{collections::BTreeMap, sync::Arc, time::Duration};
 
 use nara_app::RuntimeGeneration;
 #[cfg(all(test, any(feature = "sprite-submitter", feature = "ui-submitter")))]
@@ -21,17 +21,13 @@ use nara_window::{
     backend::{BackendWindowHandles, WindowTargetError},
 };
 
-#[cfg(any(feature = "sprite-submitter", feature = "ui-submitter"))]
-use crate::budget::InstanceBudget;
 use crate::device::WgpuDeviceOwner;
 use crate::frame::{WgpuCapturedFrame, WgpuFramePayload};
 use crate::presented::WgpuPresentedFrameReceipt;
+#[cfg(all(test, any(feature = "sprite-submitter", feature = "ui-submitter")))]
+use crate::quad::create_quad_texture_bind_group_layout;
 #[cfg(any(feature = "sprite-submitter", feature = "ui-submitter"))]
-use crate::quad::{
-    WgpuQuadPipeline, WgpuQuadPipelineDrawRef, WgpuQuadPipelineKey, admit_quad_instance_buffers,
-    create_material_bind_group_layout, create_quad_batch_buffers, create_quad_pipeline,
-    create_quad_texture_bind_group_layout, quad_batch_draw_stats,
-};
+use crate::stock_quad::StockQuadResources;
 use crate::surface::{
     SurfaceDropReason, WgpuConfiguredPresentMode, WgpuSurfaceState, configure_surface,
     create_surface, surface_extent,
@@ -40,7 +36,7 @@ use crate::telemetry::{
     WgpuAdapterSummary, WgpuBackendTelemetry, WgpuBackendTelemetryConfig,
     WgpuFrameCompletionSample, WgpuFrameCompletionStats, WgpuGpuResourceStats,
 };
-#[cfg(any(feature = "sprite-submitter", feature = "ui-submitter"))]
+#[cfg(all(test, any(feature = "sprite-submitter", feature = "ui-submitter")))]
 use crate::texture::WgpuSpriteTextureCache;
 use crate::{
     PreparedSubmitterDraw, PreparedTargetDraw, WGPU_RENDER_BACKEND, WgpuRenderError,
@@ -346,26 +342,6 @@ impl WgpuFrameTransactionStats {
     }
 }
 
-#[cfg(any(feature = "sprite-submitter", feature = "ui-submitter"))]
-#[derive(Debug)]
-enum WgpuCachedQuadPipeline {
-    Ready(WgpuQuadPipeline),
-    Rejected {
-        key: WgpuQuadPipelineKey,
-        message: String,
-    },
-}
-
-#[cfg(any(feature = "sprite-submitter", feature = "ui-submitter"))]
-impl WgpuCachedQuadPipeline {
-    fn key(&self) -> WgpuQuadPipelineKey {
-        match self {
-            Self::Ready(pipeline) => pipeline.key,
-            Self::Rejected { key, .. } => *key,
-        }
-    }
-}
-
 /// Concrete GPU execution owner. Runners and Editor Hosts retain it outside gameplay World.
 #[derive(Debug, Default)]
 pub struct WgpuRenderBackend {
@@ -383,21 +359,13 @@ pub struct WgpuRenderBackend {
     submitted_ui_facts: Vec<WgpuSubmittedUiFacts>,
     telemetry: WgpuBackendTelemetry,
     #[cfg(any(feature = "sprite-submitter", feature = "ui-submitter"))]
-    quad_texture_bind_group_layout: Option<wgpu::BindGroupLayout>,
-    #[cfg(any(feature = "sprite-submitter", feature = "ui-submitter"))]
-    quad_material_bind_group_layout: Option<wgpu::BindGroupLayout>,
-    #[cfg(any(feature = "sprite-submitter", feature = "ui-submitter"))]
-    quad_pipelines: Vec<WgpuCachedQuadPipeline>,
-    #[cfg(all(test, any(feature = "sprite-submitter", feature = "ui-submitter")))]
-    quad_pipeline_attempts: usize,
-    #[cfg(any(feature = "sprite-submitter", feature = "ui-submitter"))]
-    quad_textures: WgpuSpriteTextureCache,
-    #[cfg(any(feature = "sprite-submitter", feature = "ui-submitter"))]
-    instance_budget: InstanceBudget,
+    stock_quad: StockQuadResources,
     last_error: Option<String>,
     runtime_execution: bool,
     runtime_close_started: bool,
     runtime_retirement: Option<crate::retirement::WgpuGpuRetirement>,
+    resource_budget: Arc<crate::output::OutputBudget>,
+    resource_prefixes: Vec<crate::WgpuSubmissionPrefix>,
     // Keep the device domain alive through surface/cache field destruction on direct Drop too.
     device_owner: WgpuDeviceOwner,
 }
@@ -421,6 +389,31 @@ pub(super) struct WgpuEditorAcquiredSurface {
 }
 
 impl WgpuRenderBackend {
+    pub(crate) fn resource_budget(&self) -> &Arc<crate::output::OutputBudget> {
+        &self.resource_budget
+    }
+
+    fn retain_resource_prefix(&mut self, prefix: crate::WgpuSubmissionPrefix) {
+        self.resource_prefixes
+            .retain(|prefix| !prefix.is_complete());
+        self.resource_prefixes.push(prefix);
+    }
+
+    fn maintain_resource_prefixes(&mut self) -> Result<(), WgpuRenderError> {
+        for prefix in &self.resource_prefixes {
+            let result = if prefix.callback_abandoned() {
+                prefix.recover_abandoned()
+            } else {
+                prefix.poll()
+            };
+            result.map_err(|error| WgpuRenderError::RetirementPollFailed {
+                message: error.to_string(),
+            })?;
+        }
+        self.resource_prefixes
+            .retain(|prefix| !prefix.is_complete());
+        Ok(())
+    }
     pub(super) fn begin_runtime_execution(&mut self) {
         self.runtime_execution = true;
     }
@@ -448,6 +441,10 @@ impl WgpuRenderBackend {
             {
                 return Ok(false);
             }
+        }
+        self.maintain_resource_prefixes()?;
+        if !self.resource_prefixes.is_empty() {
+            return Ok(false);
         }
         self.retire_targets(window_ids, SurfaceDropReason::TargetShutdown)?;
         self.clear_gpu_resources(SurfaceDropReason::BackendCleanup)?;
@@ -516,7 +513,7 @@ impl WgpuRenderBackend {
             (
                 stats.candidate_instance_buffer_demand_bytes,
                 stats.submitted_instance_buffer_demand_bytes,
-            ) = self.instance_budget.charges();
+            ) = self.stock_quad.instance_charges();
             stats
         };
         stats
@@ -680,7 +677,7 @@ impl WgpuRenderBackend {
             WgpuFrameTransactionStats::begin(render_transaction_frame_index, app_frame_index);
         #[cfg(any(feature = "sprite-submitter", feature = "ui-submitter"))]
         {
-            self.instance_budget = InstanceBudget::default();
+            self.stock_quad.reset_instance_budget();
         }
         self.presented_frame_this_transaction = None;
         self.presented_world = None;
@@ -706,10 +703,7 @@ impl WgpuRenderBackend {
         self.world_presentation_target = None;
         #[cfg(any(feature = "sprite-submitter", feature = "ui-submitter"))]
         {
-            self.quad_texture_bind_group_layout = None;
-            self.quad_material_bind_group_layout = None;
-            self.quad_pipelines.clear();
-            self.quad_textures.clear();
+            self.stock_quad.clear();
         }
         #[cfg(feature = "ui-submitter")]
         self.clear_submitted_ui_facts();
@@ -727,13 +721,18 @@ impl WgpuRenderBackend {
     #[cfg(any(feature = "sprite-submitter", feature = "ui-submitter"))]
     #[must_use]
     pub fn texture_count(&self) -> usize {
-        self.quad_textures.image_count()
+        self.stock_quad.texture_count()
     }
 
     #[cfg(any(feature = "sprite-submitter", feature = "ui-submitter"))]
     #[must_use]
     pub fn texture_stats(&self) -> crate::WgpuRenderTextureCacheStats {
-        self.quad_textures.stats()
+        self.stock_quad.texture_stats()
+    }
+
+    #[cfg(any(feature = "sprite-submitter", feature = "ui-submitter"))]
+    pub(crate) fn stock_quad_resources(&mut self) -> &mut StockQuadResources {
+        &mut self.stock_quad
     }
 
     pub(super) fn prepare_editor_window(
@@ -996,7 +995,7 @@ impl WgpuRenderBackend {
         }
         status.mark_ready(WGPU_RENDER_BACKEND);
         #[cfg(any(feature = "sprite-submitter", feature = "ui-submitter"))]
-        self.quad_textures.begin_frame(frame.index);
+        self.stock_quad.begin_frame(frame.index);
         self.telemetry
             .observe_gpu_resources(self.logical_texture_bytes(), 0);
         self.configure_surface_if_needed(window, size)?;
@@ -1019,75 +1018,115 @@ impl WgpuRenderBackend {
             let ui = payload.ui_facts(packet.views()[0].target);
             self.frame_transaction_stats.record_ui_payload(ui);
         }
-        let mut draw = match self.prepare_target_draw(view_format, &packet, &payload, frame.index) {
-            Ok(draw) => draw,
-            Err(error) => {
-                self.telemetry
-                    .observe_gpu_resources(self.logical_texture_bytes(), 0);
-                return Err(error);
-            }
-        };
-        let submitted_texture_bytes = self.logical_texture_bytes();
-        let submitted_instance_buffer_bytes = draw.instance_buffer_bytes();
-        #[cfg(feature = "ui-submitter")]
-        let submitted_frame_facts = WgpuSubmittedFrameFacts::new(
-            app_frame_index,
-            packet.frame_index(),
-            draw.sprites,
-            draw.image_sprites,
-            submitted_texture_bytes,
-            submitted_instance_buffer_bytes,
-        );
-        #[cfg(feature = "ui-submitter")]
-        let submitted_ui_facts = ui_submissions
-            .as_deref()
-            .map(|ui_submissions| {
-                Self::prepare_submitted_ui_facts(
-                    ui_submissions.bound_submissions(),
-                    &draw.ui_packets,
-                    submitted_frame_facts,
-                )
-            })
-            .transpose()?;
-        self.telemetry
-            .observe_gpu_resources(submitted_texture_bytes, submitted_instance_buffer_bytes);
-        let presented = self.render_window(
-            window.id,
-            &mut draw,
-            runtime_generation,
-            app_frame_index,
-            packet.frame_index(),
-            work_started_at,
-        );
-        self.telemetry.finish_prepared_gpu_resources();
-        let presented = presented?;
-
-        if let Some(presented) = presented {
-            self.presented_frame_this_transaction = Some(presented);
-            self.world_presentation_guard = None;
-            if let Some((snapshot, guard)) = world_presentation {
-                self.device_owner.retain_presentation(guard.revoker());
-                guard.mark_presented();
-                self.world_presentation_guard = Some(guard);
-                self.presented_world = Some(snapshot);
-                self.world_presentation_target = Some((window, packet.world_canvas()));
-            }
-            #[cfg(feature = "ui-submitter")]
-            if let Some(facts) = submitted_ui_facts {
-                self.publish_submitted_ui_facts(facts);
-            }
-            stats.draw_calls = draw.draw_calls;
-            stats.sprites = draw.sprites;
-            frame.mark_submitted();
-        } else {
-            frame.mark_skipped();
-            status.mark_skipped_with_message(
-                frame.index,
-                RenderFrameSkipReason::SurfaceUnavailable,
-                "the admitted surface did not produce a presentable frame",
-            );
+        self.maintain_resource_prefixes()?;
+        if self.resource_prefixes.len() >= 256 {
+            return Err(WgpuRenderError::UploadDeferred {
+                message: "the original stock submission custody is at capacity".into(),
+            });
         }
-        Ok(())
+        self.resource_prefixes.try_reserve_exact(1).map_err(|_| {
+            WgpuRenderError::UploadDeferred {
+                message: "the original stock prefix observation could not reserve storage".into(),
+            }
+        })?;
+        let (device, queue) = self
+            .device_owner
+            .device_queue()
+            .ok_or(WgpuRenderError::BackendNotReady)?;
+        let (device, queue) = (device.clone(), queue.clone());
+        let resource_budget = Arc::clone(&self.resource_budget);
+        let mut reservation =
+            crate::submission::WgpuSubmissionReservation::new(&device, &queue, payload.clone());
+        let prepared = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            let mut preparation = crate::preparation::NativePreparation::new(
+                &device,
+                &queue,
+                &resource_budget,
+                &mut reservation,
+            );
+            let mut draw = match self.prepare_target_draw(
+                view_format,
+                &packet,
+                &payload,
+                frame.index,
+                &mut preparation,
+            ) {
+                Ok(draw) => draw,
+                Err(error) => {
+                    self.telemetry
+                        .observe_gpu_resources(self.logical_texture_bytes(), 0);
+                    return Err(error);
+                }
+            };
+            let submitted_texture_bytes = self.logical_texture_bytes();
+            let submitted_instance_buffer_bytes = draw.instance_buffer_bytes();
+            #[cfg(feature = "ui-submitter")]
+            let submitted_frame_facts = WgpuSubmittedFrameFacts::new(
+                app_frame_index,
+                packet.frame_index(),
+                draw.sprites,
+                draw.image_sprites,
+                submitted_texture_bytes,
+                submitted_instance_buffer_bytes,
+            );
+            #[cfg(feature = "ui-submitter")]
+            let submitted_ui_facts = ui_submissions
+                .as_deref()
+                .map(|ui_submissions| {
+                    Self::prepare_submitted_ui_facts(
+                        ui_submissions.bound_submissions(),
+                        &draw.ui_packets,
+                        submitted_frame_facts,
+                    )
+                })
+                .transpose()?;
+            self.telemetry
+                .observe_gpu_resources(submitted_texture_bytes, submitted_instance_buffer_bytes);
+            let presented = self.render_window(
+                window.id,
+                &mut draw,
+                runtime_generation,
+                app_frame_index,
+                packet.frame_index(),
+                work_started_at,
+            );
+            self.telemetry.finish_prepared_gpu_resources();
+            let presented = presented?;
+
+            if let Some(presented) = presented {
+                self.presented_frame_this_transaction = Some(presented);
+                self.world_presentation_guard = None;
+                if let Some((snapshot, guard)) = world_presentation {
+                    self.device_owner.retain_presentation(guard.revoker());
+                    guard.mark_presented();
+                    self.world_presentation_guard = Some(guard);
+                    self.presented_world = Some(snapshot);
+                    self.world_presentation_target = Some((window, packet.world_canvas()));
+                }
+                #[cfg(feature = "ui-submitter")]
+                if let Some(facts) = submitted_ui_facts {
+                    self.publish_submitted_ui_facts(facts);
+                }
+                stats.draw_calls = draw.draw_calls;
+                stats.sprites = draw.sprites;
+                frame.mark_submitted();
+            } else {
+                frame.mark_skipped();
+                status.mark_skipped_with_message(
+                    frame.index,
+                    RenderFrameSkipReason::SurfaceUnavailable,
+                    "the admitted surface did not produce a presentable frame",
+                );
+            }
+            Ok(())
+        }));
+        // The stock window route submits internally. Bind its original prefix on success and
+        // every failed/panicking preparation, including uploads before a surface became lost.
+        self.retain_resource_prefix(reservation.bind_current_prefix());
+        match prepared {
+            Ok(result) => result,
+            Err(payload) => std::panic::resume_unwind(payload),
+        }
     }
 
     #[cfg(feature = "ui-submitter")]
@@ -1193,7 +1232,7 @@ impl WgpuRenderBackend {
 
     #[cfg(any(feature = "sprite-submitter", feature = "ui-submitter"))]
     pub(super) fn begin_editor_submitter_frame(&mut self, frame_index: u64) {
-        self.quad_textures.begin_frame(frame_index);
+        self.stock_quad.begin_frame(frame_index);
     }
 
     #[cfg(any(feature = "sprite-submitter", feature = "ui-submitter"))]
@@ -1202,12 +1241,12 @@ impl WgpuRenderBackend {
         &self,
         bytes: u64,
     ) -> Result<crate::budget::InstanceReservation, crate::budget::InstanceBudgetError> {
-        self.instance_budget.reserve(bytes)
+        self.stock_quad.reserve_instance_buffer_bytes(bytes)
     }
 
     #[cfg(all(test, any(feature = "sprite-submitter", feature = "ui-submitter")))]
     pub(crate) fn set_instance_budget_limit(&mut self, maximum: u64) {
-        self.instance_budget = InstanceBudget::with_limit(maximum);
+        self.stock_quad.set_instance_budget_limit(maximum);
     }
 
     pub(super) fn record_editor_window_presentation(&mut self) {
@@ -1458,6 +1497,7 @@ impl WgpuRenderBackend {
         packet: &nara_render::RenderFramePacket,
         payload: &WgpuFramePayload,
         frame_index: u64,
+        preparation: &mut crate::preparation::NativePreparation<'_>,
     ) -> Result<PreparedTargetDraw, WgpuRenderError> {
         let mut canvas_cache = std::mem::take(&mut self.world_canvas);
         let result = self.prepare_target_draw_with_canvas_cache(
@@ -1466,6 +1506,7 @@ impl WgpuRenderBackend {
             payload,
             frame_index,
             &mut canvas_cache,
+            preparation,
         );
         self.world_canvas = canvas_cache;
         result
@@ -1478,6 +1519,7 @@ impl WgpuRenderBackend {
         payload: &WgpuFramePayload,
         frame_index: u64,
         canvas_cache: &mut crate::canvas::WorldCanvasCache,
+        preparation: &mut crate::preparation::NativePreparation<'_>,
     ) -> Result<PreparedTargetDraw, WgpuRenderError> {
         #[cfg(any(feature = "sprite-submitter", feature = "ui-submitter"))]
         let lowered_views = packet
@@ -1500,9 +1542,41 @@ impl WgpuRenderBackend {
             let draws = lowered_views.iter();
             #[cfg(feature = "ui-submitter")]
             let draws = draws.chain(std::iter::once(&lowered_ui));
-            self.quad_textures
-                .preflight_image_residency(draws.flat_map(|draw| draw.batches.iter()))
-                .map_err(WgpuRenderError::from)?;
+            self.stock_quad
+                .preflight_image_residency(draws.flat_map(|draw| draw.batches.iter()))?;
+            let draws = lowered_views.iter();
+            #[cfg(feature = "ui-submitter")]
+            let draws = draws.chain(std::iter::once(&lowered_ui));
+            let cost = crate::stock_quad::StockPreparationCost::for_batches(
+                draws.flat_map(|draw| draw.batches.iter()),
+            )
+            .map_err(|error| WgpuRenderError::ContentRejected {
+                message: error.to_string(),
+            })?;
+            let metadata = cost
+                .modeled_metadata_bytes
+                .checked_add(
+                    crate::submission::WgpuSubmissionReservation::modeled_retain_bytes::<
+                        PreparedTargetDraw,
+                    >() + std::mem::size_of::<PreparedTargetDraw>(),
+                )
+                .ok_or_else(|| WgpuRenderError::ContentRejected {
+                    message: "stock native metadata cannot be represented".into(),
+                })?;
+            if metadata > crate::GraphLimits::default().max_modeled_metadata_bytes {
+                return Err(WgpuRenderError::ContentRejected {
+                    message: "stock native metadata exceeds the candidate allowance".into(),
+                });
+            }
+            // Image execution also retains the final complete draw before its queue submit.
+            // Reserve that owning record together with all known per-batch uses, not after
+            // preparation or instance-budget commit. Window execution may leave it unused.
+            let entries = cost.custody_entries.checked_add(1).ok_or_else(|| {
+                WgpuRenderError::ContentRejected {
+                    message: "stock submission custody count cannot be represented".into(),
+                }
+            })?;
+            preparation.reserve_entries(entries)?;
         }
         let mut prepared = PreparedTargetDraw::default();
         let world_format = if let Some(canvas) = packet.world_canvas() {
@@ -1527,8 +1601,12 @@ impl WgpuRenderBackend {
         };
         #[cfg(any(feature = "sprite-submitter", feature = "ui-submitter"))]
         for (view, lowered_draw) in packet.views().iter().zip(lowered_views) {
-            let draw =
-                self.prepare_submitter_draw_lowered(world_format, lowered_draw, frame_index)?;
+            let draw = self.prepare_submitter_draw_lowered(
+                world_format,
+                lowered_draw,
+                frame_index,
+                preparation,
+            )?;
             prepared.push(view.viewport, view.load, draw);
         }
         #[cfg(not(any(feature = "sprite-submitter", feature = "ui-submitter")))]
@@ -1540,12 +1618,14 @@ impl WgpuRenderBackend {
                 Some(index),
                 payload,
                 frame_index,
+                preparation,
             )?;
             prepared.push(view.viewport, view.load, draw);
         }
         #[cfg(feature = "ui-submitter")]
         {
-            let draw = self.prepare_submitter_draw_lowered(format, lowered_ui, frame_index)?;
+            let draw =
+                self.prepare_submitter_draw_lowered(format, lowered_ui, frame_index, preparation)?;
             prepared.push(ui_viewport, nara_render::ViewLoadOp::Load, draw);
         }
         Ok(prepared)
@@ -1605,11 +1685,12 @@ impl WgpuRenderBackend {
         view_index: Option<usize>,
         payload: &WgpuFramePayload,
         frame_index: u64,
+        preparation: &mut crate::preparation::NativePreparation<'_>,
     ) -> Result<PreparedSubmitterDraw, WgpuRenderError> {
         #[cfg(any(feature = "sprite-submitter", feature = "ui-submitter"))]
         {
             let lowered = payload.lower_draw(target, viewport, view_index)?;
-            self.prepare_submitter_draw_lowered(view_format, lowered, frame_index)
+            self.prepare_submitter_draw_lowered(view_format, lowered, frame_index, preparation)
         }
         #[cfg(not(any(feature = "sprite-submitter", feature = "ui-submitter")))]
         {
@@ -1620,6 +1701,7 @@ impl WgpuRenderBackend {
                 view_index,
                 payload,
                 frame_index,
+                preparation,
             );
             Ok(PreparedSubmitterDraw::default())
         }
@@ -1631,181 +1713,24 @@ impl WgpuRenderBackend {
         view_format: wgpu::TextureFormat,
         lowered: crate::frame::WgpuLoweredFrameDraw,
         frame_index: u64,
+        preparation: &mut crate::preparation::NativePreparation<'_>,
     ) -> Result<PreparedSubmitterDraw, WgpuRenderError> {
-        #[cfg(test)]
-        let batches = crate::allocation::take_test_batches().unwrap_or(lowered.batches);
-        #[cfg(not(test))]
-        let batches = lowered.batches;
-        #[cfg(feature = "ui-submitter")]
-        let ui_packets = lowered.ui_packets;
-        let stats = quad_batch_draw_stats(&batches);
-        if batches.is_empty() {
-            return Ok(PreparedSubmitterDraw {
-                #[cfg(feature = "ui-submitter")]
-                ui_packets,
-                ..PreparedSubmitterDraw::default()
-            });
-        }
-        let required_bytes = admit_quad_instance_buffers(&batches).map_err(|error| {
-            WgpuRenderError::ContentRejected {
-                message: error.to_string(),
-            }
-        })?;
-        let instance_reservation =
-            self.instance_budget
-                .reserve(required_bytes)
-                .map_err(|error| WgpuRenderError::ContentRejected {
-                    message: error.to_string(),
-                })?;
-        let pipeline_keys = crate::required_quad_pipeline_keys(&batches, view_format);
-        let texture_layout = self.ensure_quad_texture_bind_group_layout()?;
-        let material_layout = self.ensure_quad_material_bind_group_layout()?;
-        for key in &pipeline_keys {
-            self.ensure_quad_pipeline(*key)?;
-        }
-        let pipelines = self.quad_pipeline_draw_refs(&pipeline_keys)?;
-        let (device, queue) = self
-            .device_owner
-            .device_queue()
-            .ok_or(WgpuRenderError::BackendNotReady)?;
-        let (device, queue) = (device.clone(), queue.clone());
-        let buffers = create_quad_batch_buffers(
-            &device,
-            &queue,
-            &batches,
-            &texture_layout,
-            &material_layout,
-            &mut self.quad_textures,
+        let owner = &self.device_owner;
+        self.stock_quad.prepare(
+            preparation,
+            || owner.fail_if_device_lost(),
+            view_format,
+            lowered,
             frame_index,
         )
-        .map_err(WgpuRenderError::from)?;
-        Ok(PreparedSubmitterDraw {
-            pipelines,
-            buffers,
-            #[cfg(feature = "ui-submitter")]
-            ui_packets,
-            draw_calls: stats.draw_calls,
-            sprites: stats.sprites,
-            #[cfg(feature = "ui-submitter")]
-            image_sprites: stats.image_sprites,
-            instance_reservation: Some(instance_reservation),
-        })
     }
 
     fn logical_texture_bytes(&self) -> u64 {
         #[cfg(any(feature = "sprite-submitter", feature = "ui-submitter"))]
-        let images = self.quad_textures.logical_texture_bytes();
+        let images = self.stock_quad.logical_texture_bytes();
         #[cfg(not(any(feature = "sprite-submitter", feature = "ui-submitter")))]
         let images: u64 = 0;
         images.saturating_add(self.world_canvas.logical_bytes())
-    }
-
-    #[cfg(any(feature = "sprite-submitter", feature = "ui-submitter"))]
-    fn ensure_quad_texture_bind_group_layout(
-        &mut self,
-    ) -> Result<wgpu::BindGroupLayout, WgpuRenderError> {
-        if let Some(layout) = &self.quad_texture_bind_group_layout {
-            return Ok(layout.clone());
-        }
-        let (device, _) = self
-            .device_owner
-            .device_queue()
-            .ok_or(WgpuRenderError::BackendNotReady)?;
-        let layout = create_quad_texture_bind_group_layout(device)?;
-        self.quad_texture_bind_group_layout = Some(layout.clone());
-        Ok(layout)
-    }
-
-    #[cfg(any(feature = "sprite-submitter", feature = "ui-submitter"))]
-    fn ensure_quad_material_bind_group_layout(
-        &mut self,
-    ) -> Result<wgpu::BindGroupLayout, WgpuRenderError> {
-        if let Some(layout) = &self.quad_material_bind_group_layout {
-            return Ok(layout.clone());
-        }
-        let (device, _) = self
-            .device_owner
-            .device_queue()
-            .ok_or(WgpuRenderError::BackendNotReady)?;
-        let layout = create_material_bind_group_layout(device)?;
-        self.quad_material_bind_group_layout = Some(layout.clone());
-        Ok(layout)
-    }
-
-    #[cfg(any(feature = "sprite-submitter", feature = "ui-submitter"))]
-    fn ensure_quad_pipeline(&mut self, key: WgpuQuadPipelineKey) -> Result<(), WgpuRenderError> {
-        self.fail_if_device_lost()?;
-        if let Some(cached) = self
-            .quad_pipelines
-            .iter()
-            .find(|cached| cached.key() == key)
-        {
-            return match cached {
-                WgpuCachedQuadPipeline::Ready(_) => Ok(()),
-                WgpuCachedQuadPipeline::Rejected { message, .. } => {
-                    Err(WgpuRenderError::ContentRejected {
-                        message: message.clone(),
-                    })
-                }
-            };
-        }
-        let texture_layout = self.ensure_quad_texture_bind_group_layout()?;
-        let material_layout = self.ensure_quad_material_bind_group_layout()?;
-        let (device, _) = self
-            .device_owner
-            .device_queue()
-            .ok_or(WgpuRenderError::BackendNotReady)?;
-        #[cfg(test)]
-        {
-            self.quad_pipeline_attempts += 1;
-        }
-        let result = create_quad_pipeline(device, key, &texture_layout, &material_layout);
-        // Device loss is a namespace failure even if it also invalidated a shader handle.
-        self.fail_if_device_lost()?;
-        match result {
-            Ok(pipeline) => {
-                self.quad_pipelines
-                    .push(WgpuCachedQuadPipeline::Ready(pipeline));
-                Ok(())
-            }
-            Err(WgpuRenderError::ContentRejected { message }) => {
-                self.quad_pipelines.push(WgpuCachedQuadPipeline::Rejected {
-                    key,
-                    message: message.clone(),
-                });
-                Err(WgpuRenderError::ContentRejected { message })
-            }
-            Err(error) => Err(error),
-        }
-    }
-
-    #[cfg(any(feature = "sprite-submitter", feature = "ui-submitter"))]
-    fn quad_pipeline_draw_refs(
-        &self,
-        keys: &[WgpuQuadPipelineKey],
-    ) -> Result<Vec<WgpuQuadPipelineDrawRef>, WgpuRenderError> {
-        keys.iter()
-            .map(|key| {
-                let pipeline = self
-                    .quad_pipelines
-                    .iter()
-                    .find_map(|cached| match cached {
-                        WgpuCachedQuadPipeline::Ready(pipeline) if pipeline.key == *key => {
-                            Some(pipeline)
-                        }
-                        _ => None,
-                    })
-                    .ok_or_else(|| WgpuRenderError::QuadPipelineMissing {
-                        format: format!("{:?}", key.format),
-                        alpha_mode: format!("{:?}", key.alpha_mode),
-                    })?;
-                Ok(WgpuQuadPipelineDrawRef {
-                    alpha_mode: key.alpha_mode,
-                    material: key.material,
-                    pipeline: pipeline.pipeline.clone(),
-                })
-            })
-            .collect()
     }
 
     pub(super) fn mark_error(&mut self, error: &WgpuRenderError) -> String {
@@ -1857,199 +1782,6 @@ mod tests {
     };
 
     use super::*;
-
-    #[cfg(any(feature = "sprite-submitter", feature = "ui-submitter"))]
-    #[test]
-    fn permanent_pipeline_rejection_is_cached_per_device_and_valid_material_renders() {
-        use crate::quad::{
-            WgpuMaterial2d, WgpuQuadBatch, WgpuQuadInstance, WgpuQuadMaterialKey, WgpuQuadTexture,
-            WgpuQuadTextureKey, draw_quad_batch_buffers,
-        };
-        use crate::readback_tests::{
-            image_versions, readback_pixel, readback_viewport, render_to_rgba,
-        };
-        use nara_material::{Material2dDefinition, Material2dInput, SamplerDescriptor};
-
-        let bad_material = Material2dDefinition {
-            id: "test.pipeline-rejection",
-            fragment_shader: "this is not valid WGSL",
-            input: Material2dInput::SPRITE_FRAGMENT_V1,
-            alpha_mode: AlphaMode2d::Opaque,
-        };
-        let good_material = Material2dDefinition {
-            fragment_shader: "fn material_fragment(sampled: vec4<f32>, tint: vec4<f32>, uv: vec2<f32>) -> vec4<f32> { return vec4<f32>(0.0, 1.0, 0.0, 1.0); }",
-            ..bad_material
-        };
-        let (pixels, (mut backend, bad_key)) =
-            render_to_rgba(|device, queue, format, output_view, encoder| {
-                let mut backend =
-                    WgpuRenderBackend::with_probe_device(device.clone(), queue.clone());
-                let bad_key = WgpuQuadPipelineKey {
-                    format,
-                    alpha_mode: AlphaMode2d::Opaque,
-                    material: Some(bad_material),
-                };
-                for frame in 1..=4 {
-                    backend.begin_frame_transaction(frame, None);
-                    assert!(matches!(
-                        backend.ensure_quad_pipeline(bad_key),
-                        Err(WgpuRenderError::ContentRejected { .. })
-                    ));
-                }
-                assert_eq!(backend.quad_pipeline_attempts, 1);
-                assert_eq!(backend.quad_pipelines.len(), 1);
-                let good_key = WgpuQuadPipelineKey {
-                    material: Some(good_material),
-                    ..bad_key
-                };
-                for frame in 5..=8 {
-                    backend.begin_frame_transaction(frame, None);
-                    backend.ensure_quad_pipeline(good_key)?;
-                }
-                assert_eq!(backend.quad_pipeline_attempts, 2);
-                let [image, _] = image_versions(1, 1);
-                let batches = [WgpuQuadBatch {
-                    material: WgpuQuadMaterialKey {
-                        texture: WgpuQuadTextureKey::Fallback,
-                        sampler: SamplerDescriptor::NEAREST_CLAMP,
-                        alpha_mode: AlphaMode2d::Opaque,
-                    },
-                    texture: WgpuQuadTexture::Fallback,
-                    scissor: None,
-                    instances: vec![WgpuQuadInstance {
-                        center: [0.0; 2],
-                        x_axis: [1.0, 0.0],
-                        y_axis: [0.0, 1.0],
-                        color: [1.0; 4],
-                        uv_min: [0.0; 2],
-                        uv_size: [1.0; 2],
-                        texture_mode: 0,
-                        shape_mode: 0,
-                        rect_size: [1.0; 2],
-                        corner_radius: 0.0,
-                        border_width: 0.0,
-                    }],
-                    counts_as_sprites: true,
-                    material_extension: Some(WgpuMaterial2d {
-                        definition: good_material,
-                        parameters: [0.0; 4],
-                        texture: image,
-                    }),
-                }];
-                let texture_layout = backend.ensure_quad_texture_bind_group_layout()?;
-                let material_layout = backend.ensure_quad_material_bind_group_layout()?;
-                let buffers = create_quad_batch_buffers(
-                    device,
-                    queue,
-                    &batches,
-                    &texture_layout,
-                    &material_layout,
-                    &mut backend.quad_textures,
-                    8,
-                )
-                .unwrap();
-                let pipelines = backend.quad_pipeline_draw_refs(&[good_key])?;
-                {
-                    let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
-                        label: Some("nara_pipeline_rejection_recovery"),
-                        color_attachments: &[Some(wgpu::RenderPassColorAttachment {
-                            view: output_view,
-                            depth_slice: None,
-                            resolve_target: None,
-                            ops: wgpu::Operations {
-                                load: wgpu::LoadOp::Clear(wgpu::Color::TRANSPARENT),
-                                store: wgpu::StoreOp::Store,
-                            },
-                        })],
-                        depth_stencil_attachment: None,
-                        timestamp_writes: None,
-                        occlusion_query_set: None,
-                        multiview_mask: None,
-                    });
-                    draw_quad_batch_buffers(&mut pass, &pipelines, &buffers, readback_viewport());
-                }
-                Ok((backend, bad_key))
-            })
-            .unwrap();
-        assert_eq!(readback_pixel(&pixels, 32, 32), &[0, 255, 0, 255]);
-        backend
-            .clear_gpu_resources(SurfaceDropReason::BackendCleanup)
-            .unwrap();
-        assert!(backend.quad_pipelines.is_empty());
-        render_to_rgba(|device, queue, _, _, _| {
-            backend
-                .device_owner
-                .install_probe_device(device.clone(), queue.clone());
-            for _ in 0..3 {
-                assert!(matches!(
-                    backend.ensure_quad_pipeline(bad_key),
-                    Err(WgpuRenderError::ContentRejected { .. })
-                ));
-            }
-            assert_eq!(
-                backend.quad_pipeline_attempts, 3,
-                "replacement device must revalidate once"
-            );
-            let mut replacement =
-                WgpuRenderBackend::with_probe_device(device.clone(), queue.clone());
-            assert_ne!(replacement.instance_id(), backend.instance_id());
-            assert!(matches!(
-                replacement.ensure_quad_pipeline(bad_key),
-                Err(WgpuRenderError::ContentRejected { .. })
-            ));
-            assert_eq!(
-                replacement.quad_pipeline_attempts, 1,
-                "replacement owner must revalidate"
-            );
-            Ok(())
-        })
-        .unwrap();
-    }
-
-    #[cfg(any(feature = "sprite-submitter", feature = "ui-submitter"))]
-    #[test]
-    fn pipeline_allocation_failure_is_retryable_and_device_loss_is_not_content_rejection() {
-        use crate::quad::QUAD_PIPELINE_ALLOCATION_FAILURE;
-        use nara_material::{Material2dDefinition, Material2dInput};
-
-        crate::readback_tests::render_to_rgba(|device, queue, format, _, _| {
-            let mut backend = WgpuRenderBackend::with_probe_device(device.clone(), queue.clone());
-            let key = WgpuQuadPipelineKey {
-                format,
-                alpha_mode: AlphaMode2d::Opaque,
-                material: Some(Material2dDefinition {
-                    id: "test.pipeline-allocation",
-                    fragment_shader: "invalid WGSL",
-                    input: Material2dInput::SPRITE_FRAGMENT_V1,
-                    alpha_mode: AlphaMode2d::Opaque,
-                }),
-            };
-            // Inject allocation failure alongside real WGSL validation failure. Allocation
-            // takes priority and cannot leave terminal rejection in the device cache.
-            QUAD_PIPELINE_ALLOCATION_FAILURE.with(|failure| failure.set(true));
-            assert!(matches!(
-                backend.ensure_quad_pipeline(key),
-                Err(WgpuRenderError::UploadDeferred { .. })
-            ));
-            assert!(backend.quad_pipelines.is_empty());
-            assert_eq!(backend.quad_pipeline_attempts, 1);
-            assert!(matches!(
-                backend.ensure_quad_pipeline(key),
-                Err(WgpuRenderError::ContentRejected { .. })
-            ));
-            assert_eq!(backend.quad_pipeline_attempts, 2);
-            backend.device_owner.mark_probe_lost();
-            assert_eq!(
-                backend.ensure_quad_pipeline(key),
-                Err(WgpuRenderError::DeviceLost)
-            );
-            assert_eq!(backend.quad_pipeline_attempts, 2);
-            backend.mark_error(&WgpuRenderError::DeviceLost);
-            assert!(backend.quad_pipelines.is_empty());
-            Ok(())
-        })
-        .unwrap();
-    }
 
     #[derive(Debug)]
     struct TestWindowSource;
@@ -2366,50 +2098,28 @@ mod tests {
     #[test]
     fn replacement_backend_renews_device_namespace_and_starts_with_an_empty_texture_cache() {
         use crate::quad::WgpuQuadMaterialKey;
+        use crate::readback_tests::ReadbackGpu;
         use nara_material::SamplerDescriptor;
 
-        let instance = wgpu::Instance::default();
-        let adapter = pollster::block_on(instance.request_adapter(&wgpu::RequestAdapterOptions {
-            power_preference: wgpu::PowerPreference::LowPower,
-            compatible_surface: None,
-            force_fallback_adapter: false,
-            ..Default::default()
-        }))
-        .or_else(|_| {
-            pollster::block_on(instance.request_adapter(&wgpu::RequestAdapterOptions {
-                power_preference: wgpu::PowerPreference::LowPower,
-                compatible_surface: None,
-                force_fallback_adapter: true,
-                ..Default::default()
-            }))
-        })
-        .expect("texture-cache isolation requires a wgpu adapter");
-        let (device, queue) =
-            pollster::block_on(adapter.request_device(&wgpu::DeviceDescriptor::default()))
-                .expect("texture-cache isolation requires a wgpu device");
-        let layout = create_quad_texture_bind_group_layout(&device).unwrap();
+        let gpu = ReadbackGpu::new();
+        let layout = create_quad_texture_bind_group_layout(&gpu.device).unwrap();
         let predecessor_key = WgpuQuadMaterialKey {
             texture: crate::quad::WgpuQuadTextureKey::Fallback,
             sampler: SamplerDescriptor::default(),
             alpha_mode: AlphaMode2d::Opaque,
         };
 
-        let predecessor_namespace;
-        {
+        let (predecessor_namespace, prefix) = gpu.with_preparation(|preparation| {
             let mut predecessor =
-                WgpuRenderBackend::with_probe_device(device.clone(), queue.clone());
-            let _binding = predecessor
-                .quad_textures
-                .bind_group(
-                    &device,
-                    &queue,
-                    &layout,
-                    predecessor_key,
-                    &crate::quad::WgpuQuadTexture::Fallback,
-                    7,
-                )
-                .unwrap();
-            predecessor_namespace = (predecessor.instance_id(), predecessor.device_epoch());
+                WgpuRenderBackend::with_probe_device(gpu.device.clone(), gpu.queue.clone());
+            let _binding = predecessor.stock_quad.textures_mut().bind_group(
+                preparation,
+                &layout,
+                predecessor_key,
+                &crate::quad::WgpuQuadTexture::Fallback,
+                7,
+            )?;
+            let predecessor_namespace = (predecessor.instance_id(), predecessor.device_epoch());
             assert_eq!(
                 predecessor.texture_stats(),
                 crate::WgpuRenderTextureCacheStats {
@@ -2419,11 +2129,15 @@ mod tests {
                     ..crate::WgpuRenderTextureCacheStats::default()
                 }
             );
-        }
+            Ok((predecessor_namespace, gpu.queue.submit([])))
+        });
+        gpu.wait_for_prefix(&prefix);
+        let predecessor_namespace = predecessor_namespace.unwrap();
 
         // The test-owned Device is deliberately shared. Runtime-local backend identity and cache
         // ownership must remain fresh even when a process parent outlives the predecessor.
-        let replacement = WgpuRenderBackend::with_probe_device(device.clone(), queue.clone());
+        let replacement =
+            WgpuRenderBackend::with_probe_device(gpu.device.clone(), gpu.queue.clone());
         let replacement_namespace = (replacement.instance_id(), replacement.device_epoch());
         assert_ne!(replacement_namespace, predecessor_namespace);
         assert_eq!(
@@ -2447,24 +2161,26 @@ mod tests {
             sampler: SamplerDescriptor::NEAREST_CLAMP,
             alpha_mode: AlphaMode2d::Opaque,
         };
-        let (_, (mut backend, old_binding)) = render_to_rgba(|device, queue, _, _, _| {
-            let mut backend = WgpuRenderBackend::with_probe_device(device.clone(), queue.clone());
-            let layout = backend.ensure_quad_texture_bind_group_layout()?;
-            let binding = backend
-                .quad_textures
-                .bind_group(
-                    device,
-                    queue,
-                    &layout,
-                    material,
-                    &WgpuQuadTexture::Image(snapshot.clone()),
-                    1,
-                )
-                .unwrap();
-            assert_eq!(backend.texture_stats().uploaded_images, 1);
-            Ok((backend, binding))
-        })
-        .unwrap();
+        let (_, (mut backend, old_binding)) =
+            render_to_rgba(|device, queue, _, _, _, preparation| {
+                let mut backend =
+                    WgpuRenderBackend::with_probe_device(device.clone(), queue.clone());
+                let layout = create_quad_texture_bind_group_layout(device)?;
+                let binding = backend
+                    .stock_quad
+                    .textures_mut()
+                    .bind_group(
+                        preparation,
+                        &layout,
+                        material,
+                        &WgpuQuadTexture::Image(snapshot.clone()),
+                        1,
+                    )
+                    .unwrap();
+                assert_eq!(backend.texture_stats().uploaded_images, 1);
+                Ok((backend, binding))
+            })
+            .unwrap();
         backend
             .clear_gpu_resources(SurfaceDropReason::BackendCleanup)
             .unwrap();
@@ -2475,16 +2191,16 @@ mod tests {
                 max_texture_dimension_2d: 2_048,
                 ..Default::default()
             },
-            |device, queue, _, _, _| {
+            |device, queue, _, _, _, preparation| {
                 backend
                     .device_owner
                     .install_probe_device(device.clone(), queue.clone());
-                let layout = backend.ensure_quad_texture_bind_group_layout()?;
+                let layout = create_quad_texture_bind_group_layout(device)?;
                 let error = backend
-                    .quad_textures
+                    .stock_quad
+                    .textures_mut()
                     .bind_group(
-                        device,
-                        queue,
+                        preparation,
                         &layout,
                         material,
                         &WgpuQuadTexture::Image(snapshot),
@@ -2507,8 +2223,9 @@ mod tests {
                 assert_eq!(backend.logical_texture_bytes(), 0);
                 let [legal, _] = image_versions(2_048, 1);
                 backend
-                    .quad_textures
-                    .prepared_image_view(device, queue, &legal, 2)
+                    .stock_quad
+                    .textures_mut()
+                    .prepared_image_view(preparation, &legal, 2)
                     .unwrap();
                 assert_eq!(backend.logical_texture_bytes(), 2_048 * 4);
                 assert_eq!(backend.texture_stats().uploaded_images, 1);

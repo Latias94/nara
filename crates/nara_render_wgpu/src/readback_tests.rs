@@ -1,13 +1,19 @@
 use crate::{
+    output::OutputBudget,
+    preparation::NativePreparation,
     quad::{
         WgpuQuadBatch, WgpuQuadPipelineDrawRef, create_material_bind_group_layout,
         create_quad_batch_buffers, create_quad_pipeline, create_quad_texture_bind_group_layout,
         draw_quad_batch_buffers,
     },
+    submission::{WgpuSubmissionPrefix, WgpuSubmissionReservation},
     texture::WgpuSpriteTextureCache,
 };
 use nara_render::ViewportRect;
-use std::{sync::mpsc, time::Duration};
+use std::{
+    sync::{Arc, mpsc},
+    time::Duration,
+};
 
 pub(crate) const READBACK_EXTENT: u32 = 64;
 pub(crate) const READBACK_BYTES_PER_PIXEL: u32 = 4;
@@ -64,7 +70,7 @@ fn auxiliary_image_extent_admission_rejects_device_excess_and_recovers() {
 }
 
 fn image_extent_admission_readback(auxiliary: bool) {
-    let (pixels, ()) = render_to_rgba(|device, queue, format, output_view, encoder| {
+    let (pixels, ()) = render_to_rgba(|device, _, format, output_view, encoder, preparation| {
         assert_eq!(device.limits().max_texture_dimension_2d, 8_192);
         let texture_layout = create_quad_texture_bind_group_layout(device)?;
         let material_layout = create_material_bind_group_layout(device)?;
@@ -76,8 +82,7 @@ fn image_extent_admission_readback(auxiliary: bool) {
             let batch = image_extent_admission_batch(snapshot, auxiliary);
             let before = cache.stats();
             let result = create_quad_batch_buffers(
-                device,
-                queue,
+                preparation,
                 &[batch],
                 &texture_layout,
                 &material_layout,
@@ -123,8 +128,7 @@ fn image_extent_admission_readback(auxiliary: bool) {
             })
             .collect::<Result<Vec<_>, crate::WgpuRenderError>>()?;
         let buffers = create_quad_batch_buffers(
-            device,
-            queue,
+            preparation,
             &[batch],
             &texture_layout,
             &material_layout,
@@ -253,7 +257,7 @@ fn exact_image_versions_render_together_and_repeat_without_reupload() {
         })
         .collect::<Vec<_>>();
     let (pixels, (first, repeated)) =
-        render_to_rgba(|device, queue, format, output_view, encoder| {
+        render_to_rgba(|device, _, format, output_view, encoder, preparation| {
             let texture_layout = create_quad_texture_bind_group_layout(device)?;
             let material_layout = create_material_bind_group_layout(device)?;
             let pipelines = crate::required_quad_pipeline_keys(&batches, format)
@@ -271,8 +275,7 @@ fn exact_image_versions_render_together_and_repeat_without_reupload() {
             let mut cache = WgpuSpriteTextureCache::default();
             cache.begin_frame(1);
             let first_buffers = create_quad_batch_buffers(
-                device,
-                queue,
+                preparation,
                 &batches,
                 &texture_layout,
                 &material_layout,
@@ -283,8 +286,7 @@ fn exact_image_versions_render_together_and_repeat_without_reupload() {
             let first = cache.stats();
             cache.begin_frame(2);
             let repeated_buffers = create_quad_batch_buffers(
-                device,
-                queue,
+                preparation,
                 &batches,
                 &texture_layout,
                 &material_layout,
@@ -500,14 +502,14 @@ pub(crate) fn readback_pixel(pixels: &[u8], x: u32, y: u32) -> &[u8] {
 pub(crate) fn render_batches_to_rgba(
     batches: &[WgpuQuadBatch],
 ) -> Result<Vec<u8>, crate::WgpuRenderError> {
-    render_to_rgba(|device, queue, format, output_view, encoder| {
-        let texture_layout = create_quad_texture_bind_group_layout(&device)?;
-        let material_layout = create_material_bind_group_layout(&device)?;
+    render_to_rgba(|device, _, format, output_view, encoder, preparation| {
+        let texture_layout = create_quad_texture_bind_group_layout(device)?;
+        let material_layout = create_material_bind_group_layout(device)?;
         let pipelines = crate::required_quad_pipeline_keys(batches, format)
             .into_iter()
             .map(|key| {
                 let pipeline =
-                    create_quad_pipeline(&device, key, &texture_layout, &material_layout)?;
+                    create_quad_pipeline(device, key, &texture_layout, &material_layout)?;
                 Ok(WgpuQuadPipelineDrawRef {
                     alpha_mode: key.alpha_mode,
                     material: key.material,
@@ -518,8 +520,7 @@ pub(crate) fn render_batches_to_rgba(
         let mut texture_cache = WgpuSpriteTextureCache::default();
         texture_cache.begin_frame(1);
         let buffers = create_quad_batch_buffers(
-            &device,
-            &queue,
+            preparation,
             batches,
             &texture_layout,
             &material_layout,
@@ -567,6 +568,7 @@ pub(crate) fn render_to_rgba<R>(
         wgpu::TextureFormat,
         &wgpu::TextureView,
         &mut wgpu::CommandEncoder,
+        &mut NativePreparation<'_>,
     ) -> Result<R, crate::WgpuRenderError>,
 ) -> Result<(Vec<u8>, R), crate::WgpuRenderError> {
     render_to_rgba_with_limits(wgpu::Limits::default(), render)
@@ -580,99 +582,184 @@ pub(crate) fn render_to_rgba_with_limits<R>(
         wgpu::TextureFormat,
         &wgpu::TextureView,
         &mut wgpu::CommandEncoder,
+        &mut NativePreparation<'_>,
     ) -> Result<R, crate::WgpuRenderError>,
 ) -> Result<(Vec<u8>, R), crate::WgpuRenderError> {
-    let instance = wgpu::Instance::default();
-    let adapter = pollster::block_on(instance.request_adapter(&wgpu::RequestAdapterOptions {
-        power_preference: wgpu::PowerPreference::LowPower,
-        compatible_surface: None,
-        force_fallback_adapter: false,
-        ..Default::default()
-    }))
-    .or_else(|_| {
-        pollster::block_on(instance.request_adapter(&wgpu::RequestAdapterOptions {
+    ReadbackGpu::with_limits(limits).render_to_rgba(render)
+}
+
+pub(crate) struct ReadbackGpu {
+    pub(crate) device: wgpu::Device,
+    pub(crate) queue: wgpu::Queue,
+    pub(crate) budget: Arc<OutputBudget>,
+}
+
+impl ReadbackGpu {
+    pub(crate) fn new() -> Self {
+        Self::with_limits(wgpu::Limits::default())
+    }
+
+    fn with_limits(limits: wgpu::Limits) -> Self {
+        let instance = wgpu::Instance::default();
+        let adapter = pollster::block_on(instance.request_adapter(&wgpu::RequestAdapterOptions {
             power_preference: wgpu::PowerPreference::LowPower,
             compatible_surface: None,
-            force_fallback_adapter: true,
+            force_fallback_adapter: false,
             ..Default::default()
         }))
-    })
-    .expect("quad readback requires a wgpu adapter");
-    let (device, queue) = pollster::block_on(adapter.request_device(&wgpu::DeviceDescriptor {
-        required_limits: limits,
-        ..Default::default()
-    }))
-    .expect("quad readback requires a wgpu device");
-
-    let format = wgpu::TextureFormat::Rgba8UnormSrgb;
-    let output = device.create_texture(&wgpu::TextureDescriptor {
-        label: Some("nara_wgpu_ui_readback_target"),
-        size: wgpu::Extent3d {
-            width: READBACK_EXTENT,
-            height: READBACK_EXTENT,
-            depth_or_array_layers: 1,
-        },
-        mip_level_count: 1,
-        sample_count: 1,
-        dimension: wgpu::TextureDimension::D2,
-        format,
-        usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::COPY_SRC,
-        view_formats: &[],
-    });
-    let output_view = output.create_view(&wgpu::TextureViewDescriptor::default());
-    let bytes_per_row = READBACK_EXTENT * READBACK_BYTES_PER_PIXEL;
-    assert_eq!(bytes_per_row % wgpu::COPY_BYTES_PER_ROW_ALIGNMENT, 0);
-    let readback = device.create_buffer(&wgpu::BufferDescriptor {
-        label: Some("nara_wgpu_ui_readback_buffer"),
-        size: u64::from(bytes_per_row) * u64::from(READBACK_EXTENT),
-        usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ,
-        mapped_at_creation: false,
-    });
-    let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
-        label: Some("nara_wgpu_ui_readback_encoder"),
-    });
-    let facts = render(&device, &queue, format, &output_view, &mut encoder)?;
-    encoder.copy_texture_to_buffer(
-        wgpu::TexelCopyTextureInfo {
-            texture: &output,
-            mip_level: 0,
-            origin: wgpu::Origin3d::ZERO,
-            aspect: wgpu::TextureAspect::All,
-        },
-        wgpu::TexelCopyBufferInfo {
-            buffer: &readback,
-            layout: wgpu::TexelCopyBufferLayout {
-                offset: 0,
-                bytes_per_row: Some(bytes_per_row),
-                rows_per_image: Some(READBACK_EXTENT),
-            },
-        },
-        wgpu::Extent3d {
-            width: READBACK_EXTENT,
-            height: READBACK_EXTENT,
-            depth_or_array_layers: 1,
-        },
-    );
-    queue.submit([encoder.finish()]);
-
-    let (sender, receiver) = mpsc::channel();
-    readback.map_async(wgpu::MapMode::Read, .., move |result| {
-        sender.send(result).unwrap();
-    });
-    device
-        .poll(wgpu::PollType::Wait {
-            submission_index: None,
-            timeout: Some(Duration::from_secs(10)),
+        .or_else(|_| {
+            pollster::block_on(instance.request_adapter(&wgpu::RequestAdapterOptions {
+                power_preference: wgpu::PowerPreference::LowPower,
+                compatible_surface: None,
+                force_fallback_adapter: true,
+                ..Default::default()
+            }))
         })
-        .unwrap();
-    receiver
-        .recv_timeout(Duration::from_secs(10))
-        .unwrap()
-        .unwrap();
+        .expect("quad readback requires a wgpu adapter");
+        let (device, queue) = pollster::block_on(adapter.request_device(&wgpu::DeviceDescriptor {
+            required_limits: limits,
+            ..Default::default()
+        }))
+        .expect("quad readback requires a wgpu device");
+        Self {
+            device,
+            queue,
+            budget: Arc::new(OutputBudget::default()),
+        }
+    }
 
-    let mapped = readback.get_mapped_range(..).unwrap();
-    let pixels = mapped.to_vec();
-    drop(mapped);
-    readback.unmap();
-    Ok((pixels, facts))
+    /// The successful closure submits its own encoder as its final Queue operation.
+    /// Failed preparation still flushes earlier uploads into the same original reservation.
+    pub(crate) fn with_preparation<R>(
+        &self,
+        prepare: impl FnOnce(
+            &mut NativePreparation<'_>,
+        ) -> Result<(R, wgpu::SubmissionIndex), crate::WgpuRenderError>,
+    ) -> (Result<R, crate::WgpuRenderError>, WgpuSubmissionPrefix) {
+        let mut reservation =
+            WgpuSubmissionReservation::new(&self.device, &self.queue, Arc::clone(&self.budget));
+        let result = prepare(&mut NativePreparation::new(
+            &self.device,
+            &self.queue,
+            &self.budget,
+            &mut reservation,
+        ));
+        match result {
+            Ok((facts, index)) => (Ok(facts), reservation.submitted(index)),
+            Err(error) => {
+                let index = self.queue.submit([]);
+                (Err(error), reservation.submitted(index))
+            }
+        }
+    }
+
+    pub(crate) fn wait_for_prefix(&self, prefix: &WgpuSubmissionPrefix) {
+        self.device
+            .poll(wgpu::PollType::Wait {
+                submission_index: prefix.submission_index().cloned(),
+                timeout: Some(Duration::from_secs(10)),
+            })
+            .unwrap();
+        assert!(
+            prefix.is_complete(),
+            "original readback custody must settle"
+        );
+    }
+
+    pub(crate) fn render_to_rgba<R>(
+        &self,
+        render: impl FnOnce(
+            &wgpu::Device,
+            &wgpu::Queue,
+            wgpu::TextureFormat,
+            &wgpu::TextureView,
+            &mut wgpu::CommandEncoder,
+            &mut NativePreparation<'_>,
+        ) -> Result<R, crate::WgpuRenderError>,
+    ) -> Result<(Vec<u8>, R), crate::WgpuRenderError> {
+        let device = &self.device;
+        let queue = &self.queue;
+        let format = wgpu::TextureFormat::Rgba8UnormSrgb;
+        let output = device.create_texture(&wgpu::TextureDescriptor {
+            label: Some("nara_wgpu_ui_readback_target"),
+            size: wgpu::Extent3d {
+                width: READBACK_EXTENT,
+                height: READBACK_EXTENT,
+                depth_or_array_layers: 1,
+            },
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D2,
+            format,
+            usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::COPY_SRC,
+            view_formats: &[],
+        });
+        let output_view = output.create_view(&wgpu::TextureViewDescriptor::default());
+        let bytes_per_row = READBACK_EXTENT * READBACK_BYTES_PER_PIXEL;
+        assert_eq!(bytes_per_row % wgpu::COPY_BYTES_PER_ROW_ALIGNMENT, 0);
+        let readback = device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("nara_wgpu_ui_readback_buffer"),
+            size: u64::from(bytes_per_row) * u64::from(READBACK_EXTENT),
+            usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ,
+            mapped_at_creation: false,
+        });
+        let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
+            label: Some("nara_wgpu_ui_readback_encoder"),
+        });
+        let (facts, prefix) = self.with_preparation(|preparation| {
+            let facts = render(
+                device,
+                queue,
+                format,
+                &output_view,
+                &mut encoder,
+                preparation,
+            )?;
+            encoder.copy_texture_to_buffer(
+                wgpu::TexelCopyTextureInfo {
+                    texture: &output,
+                    mip_level: 0,
+                    origin: wgpu::Origin3d::ZERO,
+                    aspect: wgpu::TextureAspect::All,
+                },
+                wgpu::TexelCopyBufferInfo {
+                    buffer: &readback,
+                    layout: wgpu::TexelCopyBufferLayout {
+                        offset: 0,
+                        bytes_per_row: Some(bytes_per_row),
+                        rows_per_image: Some(READBACK_EXTENT),
+                    },
+                },
+                wgpu::Extent3d {
+                    width: READBACK_EXTENT,
+                    height: READBACK_EXTENT,
+                    depth_or_array_layers: 1,
+                },
+            );
+            Ok((facts, queue.submit([encoder.finish()])))
+        });
+        let facts = match facts {
+            Ok(facts) => facts,
+            Err(error) => {
+                self.wait_for_prefix(&prefix);
+                return Err(error);
+            }
+        };
+
+        let (sender, receiver) = mpsc::channel();
+        readback.map_async(wgpu::MapMode::Read, .., move |result| {
+            sender.send(result).unwrap();
+        });
+        self.wait_for_prefix(&prefix);
+        receiver
+            .recv_timeout(Duration::from_secs(10))
+            .unwrap()
+            .unwrap();
+
+        let mapped = readback.get_mapped_range(..).unwrap();
+        let pixels = mapped.to_vec();
+        drop(mapped);
+        readback.unmap();
+        Ok((pixels, facts))
+    }
 }

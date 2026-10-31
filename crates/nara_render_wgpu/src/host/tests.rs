@@ -183,7 +183,7 @@ fn viewport_allocation_failure_preserves_publication_and_smaller_retry() {
         7,
     );
     let output = allocated_test_output(&execution, &namespace, receipt);
-    let retained_bytes = execution.retained_output_bytes();
+    let retained_bytes = execution.retained_resource_bytes();
     let larger = nara_render::__private::editor_viewport_image_target(
         target.image(),
         Extent2d::new(128, 128).unwrap(),
@@ -216,7 +216,7 @@ fn viewport_allocation_failure_preserves_publication_and_smaller_retry() {
                 .initial_storage
                 .is_some()
         );
-        assert_eq!(execution.retained_output_bytes(), retained_bytes);
+        assert_eq!(execution.retained_resource_bytes(), retained_bytes);
         execution
             .validate_viewport_submission(&namespace, &output)
             .unwrap();
@@ -229,7 +229,7 @@ fn viewport_allocation_failure_preserves_publication_and_smaller_retry() {
             .is_err()
     );
     assert!(!execution.views.contains_key(&unregistered));
-    assert_eq!(execution.retained_output_bytes(), retained_bytes);
+    assert_eq!(execution.retained_resource_bytes(), retained_bytes);
 
     let smaller = nara_render::__private::editor_viewport_image_target(
         target.image(),
@@ -1776,7 +1776,7 @@ fn native_failed_submission_allows_retry_of_the_same_original_input() {
 #[ignore = "requires an explicitly selected native GPU; acquisition failure is a failed prerequisite"]
 fn native_output_budget_counts_exact_storage_until_callbacks_and_last_leases_drop() {
     const BYTES: u64 = 64 * 64 * 4;
-    let mut execution = WgpuRenderHost::offscreen().with_output_byte_limit(2 * BYTES - 1);
+    let mut execution = WgpuRenderHost::offscreen().with_resource_byte_limit(2 * BYTES - 1);
     execution.begin_frame(1).unwrap();
     let frame = test_image_frame();
     let source = frame.source_generation();
@@ -1787,7 +1787,7 @@ fn native_output_budget_counts_exact_storage_until_callbacks_and_last_leases_dro
         .reserve_image_target(&producer, source, target)
         .unwrap();
     assert_eq!(
-        execution.retained_output_bytes(),
+        execution.retained_resource_bytes(),
         BYTES,
         "configuration preadmits its allocation"
     );
@@ -1802,13 +1802,13 @@ fn native_output_budget_counts_exact_storage_until_callbacks_and_last_leases_dro
     ));
     let first = execution.submit(&producer, &first_input).unwrap();
     assert_eq!(
-        execution.retained_output_bytes(),
+        execution.retained_resource_bytes(),
         BYTES,
         "first publication consumes the preadmitted storage"
     );
     drain_submission_prefix(execution.views[&view_id].submitted_prefix.as_ref().unwrap());
     assert_eq!(
-        execution.retained_output_bytes(),
+        execution.retained_resource_bytes(),
         BYTES,
         "a completed output remains leased"
     );
@@ -1824,7 +1824,7 @@ fn native_output_budget_counts_exact_storage_until_callbacks_and_last_leases_dro
         execution.submit(&producer, &second_input),
         Err(WgpuRenderHostError::OutputCapacity)
     ));
-    assert_eq!(execution.retained_output_bytes(), BYTES);
+    assert_eq!(execution.retained_resource_bytes(), BYTES);
     assert_eq!(
         execution.views[&view_id].admission.last_frame_index,
         Some(1)
@@ -1834,28 +1834,28 @@ fn native_output_budget_counts_exact_storage_until_callbacks_and_last_leases_dro
         [255, 0, 0, 255]
     );
 
-    execution = execution.with_output_byte_limit(2 * BYTES);
+    execution = execution.with_resource_byte_limit(2 * BYTES);
     let second = execution.submit(&producer, &second_input).unwrap();
-    assert_eq!(execution.retained_output_bytes(), 2 * BYTES);
+    assert_eq!(execution.retained_resource_bytes(), 2 * BYTES);
     drain_submission_prefix(execution.views[&view_id].submitted_prefix.as_ref().unwrap());
     assert_eq!(
         read_output_pixel(&mut execution, &second, 16, 16),
         [0, 255, 0, 255]
     );
     assert_eq!(
-        execution.retained_output_bytes(),
+        execution.retained_resource_bytes(),
         2 * BYTES,
         "callbacks cannot revoke retained outputs"
     );
     let last_lease = first.clone();
     drop(first);
-    assert_eq!(execution.retained_output_bytes(), 2 * BYTES);
+    assert_eq!(execution.retained_resource_bytes(), 2 * BYTES);
     drop(last_lease);
-    assert_eq!(execution.retained_output_bytes(), BYTES);
+    assert_eq!(execution.retained_resource_bytes(), BYTES);
     drop(second);
-    assert_eq!(execution.retained_output_bytes(), 0);
+    assert_eq!(execution.retained_resource_bytes(), 0);
 
-    execution = execution.with_output_byte_limit(BYTES - 1);
+    execution = execution.with_resource_byte_limit(BYTES - 1);
     execution.begin_frame(3).unwrap();
     let third_input = WgpuImageInput::new(image_frame_for(source, 3, target, Color::BLACK));
     assert!(matches!(
@@ -1866,13 +1866,13 @@ fn native_output_budget_counts_exact_storage_until_callbacks_and_last_leases_dro
         execution.views[&view_id].admission.last_frame_index,
         Some(2)
     );
-    execution = execution.with_output_byte_limit(BYTES);
+    execution = execution.with_resource_byte_limit(BYTES);
     let third = execution.submit(&producer, &third_input).unwrap();
-    assert_eq!(execution.retained_output_bytes(), BYTES);
+    assert_eq!(execution.retained_resource_bytes(), BYTES);
     drop(third);
     drain_submission_prefix(&execution.retire_producer(&producer).unwrap());
     assert_eq!(
-        execution.retained_output_bytes(),
+        execution.retained_resource_bytes(),
         0,
         "submitted use releases its charge at actual callback settlement"
     );
@@ -1908,12 +1908,12 @@ fn native_allocation_rejection_preserves_last_good_and_allows_same_capture_retry
         target,
         Color::rgba(0.0, 1.0, 0.0, 1.0),
     ));
-    let retained_bytes = execution.retained_output_bytes();
+    let retained_bytes = execution.retained_resource_bytes();
     VIEWPORT_ALLOCATION_FAILURE.with(|failure| failure.set(Some(2)));
     let error = execution.submit(&producer, &input).unwrap_err();
     assert!(error.is_deferred());
     assert!(!error.is_content_rejected());
-    assert_eq!(execution.retained_output_bytes(), retained_bytes);
+    assert_eq!(execution.retained_resource_bytes(), retained_bytes);
     assert_eq!(
         execution.views[&view_id].admission.last_frame_index,
         Some(1)
@@ -2304,7 +2304,7 @@ fn test_ui_packet() -> std::sync::Arc<UiPaintPacket> {
 }
 
 #[cfg(feature = "ui-submitter")]
-fn test_ui_image_packet(
+pub(super) fn test_ui_image_packet(
     snapshot: nara_image::PreparedImageSnapshot,
     target: RenderTarget,
 ) -> Arc<UiPaintPacket> {

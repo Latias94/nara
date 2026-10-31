@@ -14,6 +14,7 @@ use thiserror::Error;
 
 use crate::{
     allocation::checked_allocation,
+    preparation::{NativePreparation, NativePreparationError, WgpuFeatureAllocation},
     quad::{WgpuQuadBatch, WgpuQuadMaterialKey, WgpuQuadTexture, WgpuQuadTextureKey},
 };
 
@@ -137,8 +138,7 @@ impl WgpuSpriteTextureCache {
 
     pub(crate) fn bind_group(
         &mut self,
-        device: &wgpu::Device,
-        queue: &wgpu::Queue,
+        preparation: &mut NativePreparation<'_>,
         layout: &wgpu::BindGroupLayout,
         material: WgpuQuadMaterialKey,
         texture: &WgpuQuadTexture,
@@ -153,15 +153,15 @@ impl WgpuSpriteTextureCache {
         }
         let image = match texture {
             WgpuQuadTexture::Fallback => {
-                self.ensure_fallback(device, queue)?;
+                self.ensure_fallback(preparation)?;
                 None
             }
             WgpuQuadTexture::Image(snapshot) => {
-                Some(self.ensure_image(device, queue, snapshot, frame_index)?)
+                Some(self.ensure_image(preparation, snapshot, frame_index)?)
             }
             #[cfg(feature = "ui-submitter")]
             WgpuQuadTexture::Glyph(page) => {
-                self.ensure_glyph_page(device, queue, page, frame_index)?;
+                self.ensure_glyph_page(preparation, page, frame_index)?;
                 None
             }
         };
@@ -178,15 +178,15 @@ impl WgpuSpriteTextureCache {
         let binding_index = match binding_index {
             Some(index) => index,
             None => {
-                let view = match &image {
-                    Some(image) => image.texture.view.clone(),
-                    None => self.texture_view(actual)?.clone(),
+                let resource = match &image {
+                    Some(image) => image.texture.clone(),
+                    None => self.texture_resource(actual)?.clone(),
                 };
                 let mut binding = create_texture_binding(
-                    device,
+                    preparation.device(),
                     layout,
                     "nara_wgpu_quad_texture_binding",
-                    &view,
+                    resource,
                     material.sampler,
                     frame_index,
                 )?;
@@ -202,24 +202,28 @@ impl WgpuSpriteTextureCache {
             .get_mut(&material)
             .expect("binding was inserted")[binding_index];
         binding.last_used_frame = frame_index;
-        Ok(WgpuCachedTextureBinding {
+        let cached = WgpuCachedTextureBinding {
             bind_group: binding.bind_group.clone(),
-            image,
-        })
+            _image: image,
+            _texture: binding.texture.clone(),
+        };
+        preparation.retain(cached.clone())?;
+        Ok(cached)
     }
 
     pub(crate) fn prepared_image_view(
         &mut self,
-        device: &wgpu::Device,
-        queue: &wgpu::Queue,
+        preparation: &mut NativePreparation<'_>,
         snapshot: &PreparedImageSnapshot,
         frame_index: u64,
     ) -> Result<WgpuCachedImageView, WgpuTextureError> {
-        let image = self.ensure_image(device, queue, snapshot, frame_index)?;
-        Ok(WgpuCachedImageView {
+        let image = self.ensure_image(preparation, snapshot, frame_index)?;
+        let cached = WgpuCachedImageView {
             view: image.texture.view.clone(),
-            image,
-        })
+            _image: image,
+        };
+        preparation.retain(cached.clone())?;
+        Ok(cached)
     }
 
     /// Admit the complete immutable target image working set before creating any GPU texture.
@@ -300,11 +304,10 @@ impl WgpuSpriteTextureCache {
 
     fn ensure_fallback(
         &mut self,
-        device: &wgpu::Device,
-        queue: &wgpu::Queue,
+        preparation: &mut NativePreparation<'_>,
     ) -> Result<(), WgpuTextureError> {
         if self.fallback_texture.is_none() {
-            admit_texture_extent(device, WgpuQuadTextureKey::Fallback, 1, 1)?;
+            admit_texture_extent(preparation.device(), WgpuQuadTextureKey::Fallback, 1, 1)?;
             let required = RGBA8_BYTES_PER_PIXEL as usize;
             if self.upload_bytes.saturating_add(required) > MAX_TEXTURE_UPLOAD_BYTES_PER_FRAME {
                 return Err(WgpuTextureError::FallbackUploadDeferred {
@@ -313,8 +316,7 @@ impl WgpuSpriteTextureCache {
                 });
             }
             self.fallback_texture = Some(create_texture_resource(
-                device,
-                queue,
+                preparation,
                 "nara_wgpu_quad_fallback_texture",
                 &[255, 255, 255, 255],
                 1,
@@ -329,8 +331,7 @@ impl WgpuSpriteTextureCache {
 
     fn ensure_image(
         &mut self,
-        device: &wgpu::Device,
-        queue: &wgpu::Queue,
+        preparation: &mut NativePreparation<'_>,
         snapshot: &PreparedImageSnapshot,
         frame_index: u64,
     ) -> Result<Arc<WgpuImageTextureResource>, WgpuTextureError> {
@@ -344,7 +345,7 @@ impl WgpuSpriteTextureCache {
         validate_image_snapshot(snapshot)?;
         let extent = snapshot.resource().extent();
         admit_texture_extent(
-            device,
+            preparation.device(),
             WgpuQuadTextureKey::Image(key),
             extent.width,
             extent.height,
@@ -387,8 +388,7 @@ impl WgpuSpriteTextureCache {
             let image = Arc::new(WgpuImageTextureResource {
                 identity: snapshot.identity().clone(),
                 texture: create_texture_resource(
-                    device,
-                    queue,
+                    preparation,
                     "nara_wgpu_image_texture",
                     resource.pixels(),
                     resource.extent().width,
@@ -473,14 +473,13 @@ impl WgpuSpriteTextureCache {
     #[cfg(feature = "ui-submitter")]
     fn ensure_glyph_page(
         &mut self,
-        device: &wgpu::Device,
-        queue: &wgpu::Queue,
+        preparation: &mut NativePreparation<'_>,
         page: &UiGlyphAtlasPageSnapshot,
         frame_index: u64,
     ) -> Result<(), WgpuTextureError> {
         let key = page.key();
         admit_texture_extent(
-            device,
+            preparation.device(),
             WgpuQuadTextureKey::Glyph(key),
             page.width(),
             page.height(),
@@ -504,12 +503,9 @@ impl WgpuSpriteTextureCache {
                 actual: page.pixels().len(),
             });
         }
-        if self.glyph_pages.contains_key(&key) {
+        if let Some(existing) = self.glyph_pages.get_mut(&key) {
             self.stats.reused_glyph_pages = self.stats.reused_glyph_pages.saturating_add(1);
-            self.glyph_pages
-                .get_mut(&key)
-                .expect("the glyph page exists")
-                .last_used_frame = frame_index;
+            existing.last_used_frame = frame_index;
             return Ok(());
         }
         if expected > MAX_TEXTURE_UPLOAD_BYTES_PER_FRAME {
@@ -530,8 +526,7 @@ impl WgpuSpriteTextureCache {
             key,
             WgpuGlyphTextureResource {
                 texture: create_texture_resource(
-                    device,
-                    queue,
+                    preparation,
                     "nara_wgpu_ui_glyph_atlas",
                     page.pixels(),
                     page.width(),
@@ -569,22 +564,21 @@ impl WgpuSpriteTextureCache {
         Ok(())
     }
 
-    fn texture_view(
+    fn texture_resource(
         &self,
         key: WgpuQuadTextureKey,
-    ) -> Result<&wgpu::TextureView, WgpuTextureError> {
+    ) -> Result<&WgpuTextureResource, WgpuTextureError> {
         match key {
             WgpuQuadTextureKey::Fallback => self
                 .fallback_texture
                 .as_ref()
-                .map(|texture| &texture.view)
                 .ok_or(WgpuTextureError::MissingFallbackTexture),
             WgpuQuadTextureKey::Image(key) => Err(WgpuTextureError::MissingImageTexture { key }),
             #[cfg(feature = "ui-submitter")]
             WgpuQuadTextureKey::Glyph(key) => self
                 .glyph_pages
                 .get(&key)
-                .map(|page| &page.texture.view)
+                .map(|page| &page.texture)
                 .ok_or(WgpuTextureError::MissingGlyphTexture { key }),
         }
     }
@@ -720,32 +714,17 @@ struct WgpuImageTextureEntry {
     last_used_frame: u64,
 }
 
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub(crate) struct WgpuCachedTextureBinding {
     pub(crate) bind_group: wgpu::BindGroup,
-    image: Option<Arc<WgpuImageTextureResource>>,
+    _image: Option<Arc<WgpuImageTextureResource>>,
+    _texture: WgpuTextureResource,
 }
 
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub(crate) struct WgpuCachedImageView {
     pub(crate) view: wgpu::TextureView,
-    image: Arc<WgpuImageTextureResource>,
-}
-
-impl WgpuCachedTextureBinding {
-    pub(crate) fn retain_until_submission_complete(&self, queue: &wgpu::Queue) {
-        if let Some(image) = &self.image {
-            let image = Arc::clone(image);
-            queue.on_submitted_work_done(move || drop(image));
-        }
-    }
-}
-
-impl WgpuCachedImageView {
-    pub(crate) fn retain_until_submission_complete(&self, queue: &wgpu::Queue) {
-        let image = Arc::clone(&self.image);
-        queue.on_submitted_work_done(move || drop(image));
-    }
+    _image: Arc<WgpuImageTextureResource>,
 }
 
 #[cfg(feature = "ui-submitter")]
@@ -755,11 +734,12 @@ struct WgpuGlyphTextureResource {
     last_used_frame: u64,
 }
 
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 struct WgpuTextureResource {
     _texture: wgpu::Texture,
     view: wgpu::TextureView,
     logical_bytes: u64,
+    _allocation: WgpuFeatureAllocation,
 }
 
 #[derive(Debug)]
@@ -768,10 +748,52 @@ struct WgpuTextureBinding {
     _sampler: wgpu::Sampler,
     last_used_frame: u64,
     image: Option<Arc<WgpuImageTextureResource>>,
+    texture: WgpuTextureResource,
+}
+
+/// Maximum engine record model for one newly realized stock texture, without inspecting pixels.
+/// BTree keys/values count; allocator rounding, node overhead and native driver storage do not.
+/// Each independently keyed Vec may start at four elements; that also bounds its growth per
+/// admitted texture. Arc handles inside these records and both allocation counters count once
+/// per original allocation. Automatic retention payloads/slots are added by stock preflight.
+pub(crate) fn stock_texture_record_metadata_bytes() -> Option<usize> {
+    let arc_counters = std::mem::size_of::<usize>().checked_mul(2)?;
+    let image_record = std::mem::size_of::<WgpuImageTextureResource>().checked_add(arc_counters)?;
+    let resource_record = image_record.max(std::mem::size_of::<WgpuTextureResource>());
+    #[cfg(feature = "ui-submitter")]
+    let resource_record = resource_record.max(std::mem::size_of::<(
+        UiGlyphAtlasPageKey,
+        WgpuGlyphTextureResource,
+    )>());
+    let mut bytes = resource_record;
+    for (count, stride) in [
+        (
+            1_usize,
+            std::mem::size_of::<(RenderResourceKey, Vec<WgpuImageTextureEntry>)>(),
+        ),
+        (4, std::mem::size_of::<WgpuImageTextureEntry>()),
+        (4, std::mem::size_of::<ResidentImageTexture>()),
+        (
+            1,
+            std::mem::size_of::<(WgpuQuadMaterialKey, Vec<WgpuTextureBinding>)>(),
+        ),
+        (4, std::mem::size_of::<WgpuTextureBinding>()),
+        (1, std::mem::size_of::<crate::output::OutputReservation>()),
+        (1, arc_counters),
+    ] {
+        bytes = bytes.checked_add(count.checked_mul(stride)?)?;
+    }
+    Some(bytes)
 }
 
 #[derive(Debug, Error, Clone, PartialEq, Eq)]
 pub(crate) enum WgpuTextureError {
+    #[error("native render-resource reservations are at capacity")]
+    NativeResourceCapacity,
+    #[error("native submission-resource reservations are at capacity")]
+    NativeSubmissionCapacity,
+    #[error(transparent)]
+    NativeBackend(crate::WgpuRenderError),
     #[error(
         "texture {texture:?} extent {width}x{height} is unsupported by the active device; dimensions must be nonzero and at most {maximum}"
     )]
@@ -873,12 +895,16 @@ pub(crate) enum WgpuTextureError {
 
 impl WgpuTextureError {
     pub(crate) const fn is_deferred(&self) -> bool {
+        if let Self::NativeBackend(error) = self {
+            return matches!(error, crate::WgpuRenderError::UploadDeferred { .. });
+        }
         if matches!(
             self,
-            Self::FallbackUploadDeferred { .. }
+            Self::NativeResourceCapacity
+                | Self::AllocationFailed { .. }
+                | Self::FallbackUploadDeferred { .. }
                 | Self::ImageUploadDeferred { .. }
                 | Self::ImageResidencyDeferred { .. }
-                | Self::AllocationFailed { .. }
         ) {
             return true;
         }
@@ -892,6 +918,9 @@ impl WgpuTextureError {
 
 impl From<WgpuTextureError> for crate::WgpuRenderError {
     fn from(error: WgpuTextureError) -> Self {
+        if let WgpuTextureError::NativeBackend(error) = error {
+            return error;
+        }
         if error.is_deferred() {
             Self::UploadDeferred {
                 message: error.to_string(),
@@ -900,6 +929,16 @@ impl From<WgpuTextureError> for crate::WgpuRenderError {
             Self::ContentRejected {
                 message: error.to_string(),
             }
+        }
+    }
+}
+
+impl From<NativePreparationError> for WgpuTextureError {
+    fn from(error: NativePreparationError) -> Self {
+        match error {
+            NativePreparationError::ResourceCapacity => Self::NativeResourceCapacity,
+            NativePreparationError::SubmissionCapacity => Self::NativeSubmissionCapacity,
+            NativePreparationError::Backend(error) => Self::NativeBackend(error),
         }
     }
 }
@@ -956,8 +995,7 @@ fn image_texture_format(format: ImageFormat, color_space: ImageColorSpace) -> wg
 
 #[allow(clippy::too_many_arguments)]
 fn create_texture_resource(
-    device: &wgpu::Device,
-    queue: &wgpu::Queue,
+    preparation: &mut NativePreparation<'_>,
     label: &'static str,
     pixels: &[u8],
     width: u32,
@@ -965,6 +1003,12 @@ fn create_texture_resource(
     bytes_per_pixel: u32,
     format: wgpu::TextureFormat,
 ) -> Result<WgpuTextureResource, WgpuTextureError> {
+    let logical_bytes = u64::from(width)
+        .checked_mul(u64::from(height))
+        .and_then(|bytes| bytes.checked_mul(u64::from(bytes_per_pixel)))
+        .ok_or(WgpuTextureError::NativeResourceCapacity)?;
+    let allocation = preparation.reserve_bytes(logical_bytes)?;
+    let device = preparation.device();
     let texture = checked_allocation(device, label, || {
         device.create_texture(&wgpu::TextureDescriptor {
             label: Some(label),
@@ -982,7 +1026,7 @@ fn create_texture_resource(
         })
     })?;
     checked_allocation(device, "nara_wgpu_texture_upload", || {
-        queue.write_texture(
+        preparation.upload_texture(
             wgpu::TexelCopyTextureInfo {
                 texture: &texture,
                 mip_level: 0,
@@ -1001,14 +1045,15 @@ fn create_texture_resource(
                 depth_or_array_layers: 1,
             },
         )
-    })?;
+    })??;
     let view = checked_allocation(device, "nara_wgpu_texture_view", || {
         texture.create_view(&wgpu::TextureViewDescriptor::default())
     })?;
     Ok(WgpuTextureResource {
         _texture: texture,
         view,
-        logical_bytes: u64::try_from(pixels.len()).unwrap_or(u64::MAX),
+        logical_bytes,
+        _allocation: allocation,
     })
 }
 
@@ -1016,7 +1061,7 @@ fn create_texture_binding(
     device: &wgpu::Device,
     layout: &wgpu::BindGroupLayout,
     label: &'static str,
-    view: &wgpu::TextureView,
+    texture: WgpuTextureResource,
     sampler_descriptor: SamplerDescriptor,
     last_used_frame: u64,
 ) -> Result<WgpuTextureBinding, WgpuTextureError> {
@@ -1039,7 +1084,7 @@ fn create_texture_binding(
             entries: &[
                 wgpu::BindGroupEntry {
                     binding: 0,
-                    resource: wgpu::BindingResource::TextureView(view),
+                    resource: wgpu::BindingResource::TextureView(&texture.view),
                 },
                 wgpu::BindGroupEntry {
                     binding: 1,
@@ -1053,6 +1098,7 @@ fn create_texture_binding(
         _sampler: sampler,
         last_used_frame,
         image: None,
+        texture,
     })
 }
 
@@ -1085,10 +1131,37 @@ fn address_mode(address_mode: AddressMode) -> wgpu::AddressMode {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::{output::OutputBudget, submission::WgpuSubmissionReservation};
+
+    fn with_preparation<T>(
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        budget: &Arc<OutputBudget>,
+        prepare: impl FnOnce(&mut NativePreparation<'_>) -> T,
+    ) -> T {
+        let mut reservation = WgpuSubmissionReservation::new(device, queue, ());
+        let result = prepare(&mut NativePreparation::new(
+            device,
+            queue,
+            budget,
+            &mut reservation,
+        ));
+        let index = queue.submit([]);
+        let prefix = reservation.submitted(index.clone());
+        device
+            .poll(wgpu::PollType::Wait {
+                submission_index: Some(index),
+                timeout: Some(std::time::Duration::from_secs(10)),
+            })
+            .unwrap();
+        assert!(prefix.poll().unwrap());
+        result
+    }
 
     #[test]
     fn rejected_image_extent_preserves_upload_and_residency_capacity() {
-        crate::readback_tests::render_to_rgba(|device, queue, _, _, _| {
+        crate::readback_tests::render_to_rgba(|device, queue, _, _, _, _| {
+            let budget = Arc::new(OutputBudget::default());
             let mut cache = WgpuSpriteTextureCache {
                 residency_limits: WgpuImageResidencyLimits {
                     versions: 1,
@@ -1099,7 +1172,10 @@ mod tests {
             for (width, height) in [(8_193, 1), (16_384, 1), (1, 8_193), (1, 16_384)] {
                 let [snapshot, _] = crate::readback_tests::image_versions(width, height);
                 assert_eq!(
-                    cache.ensure_image(device, queue, &snapshot, 1).unwrap_err(),
+                    with_preparation(device, queue, &budget, |preparation| {
+                        cache.ensure_image(preparation, &snapshot, 1)
+                    })
+                    .unwrap_err(),
                     WgpuTextureError::TextureExtentUnsupported {
                         texture: WgpuQuadTextureKey::Image(snapshot.identity().key()),
                         width,
@@ -1112,7 +1188,10 @@ mod tests {
                 assert_eq!(cache.stats(), WgpuTextureCacheStats::default());
             }
             let [legal, _] = crate::readback_tests::image_versions(8_192, 1);
-            cache.ensure_image(device, queue, &legal, 1).unwrap();
+            with_preparation(device, queue, &budget, |preparation| {
+                cache.ensure_image(preparation, &legal, 1)
+            })
+            .unwrap();
             assert_eq!(cache.upload_bytes, 8_192 * 4);
             assert_eq!(cache.logical_texture_bytes(), 8_192 * 4);
             assert_eq!(cache.stats().image_textures, 1);
@@ -1137,6 +1216,113 @@ mod tests {
 
         assert_eq!(cache.stats(), WgpuTextureCacheStats::default());
         assert_eq!(cache.logical_texture_bytes(), 0);
+    }
+
+    #[test]
+    fn preparation_errors_preserve_capacity_classes_and_original_backend_faults() {
+        let resource = WgpuTextureError::from(NativePreparationError::ResourceCapacity);
+        assert!(resource.is_deferred());
+        assert!(matches!(
+            crate::WgpuRenderError::from(resource),
+            crate::WgpuRenderError::UploadDeferred { .. }
+        ));
+        let submission = WgpuTextureError::from(NativePreparationError::SubmissionCapacity);
+        assert!(!submission.is_deferred());
+        assert!(matches!(
+            crate::WgpuRenderError::from(submission),
+            crate::WgpuRenderError::ContentRejected { .. }
+        ));
+        for error in [
+            crate::WgpuRenderError::DeviceLost,
+            crate::WgpuRenderError::BackendUnavailable,
+            crate::WgpuRenderError::UploadDeferred {
+                message: "native allocation".to_owned(),
+            },
+            crate::WgpuRenderError::ContentRejected {
+                message: "native validation".to_owned(),
+            },
+        ] {
+            let texture = WgpuTextureError::from(NativePreparationError::Backend(error.clone()));
+            assert_eq!(crate::WgpuRenderError::from(texture), error);
+        }
+    }
+
+    #[test]
+    fn cache_hits_share_the_original_charge_until_the_last_actual_holder_retires() {
+        let [snapshot, _] = crate::readback_tests::two_image_versions();
+        crate::readback_tests::render_to_rgba(|device, queue, _, _, _, _| {
+            let budget = Arc::new(OutputBudget::new(4));
+            let layout = crate::quad::create_quad_texture_bind_group_layout(device)?;
+            let texture = WgpuQuadTexture::Image(snapshot);
+            let material = WgpuQuadMaterialKey {
+                texture: texture.key(),
+                sampler: SamplerDescriptor::NEAREST_CLAMP,
+                alpha_mode: nara_material::AlphaMode2d::Opaque,
+            };
+            let mut cache = WgpuSpriteTextureCache::default();
+            let first = with_preparation(device, queue, &budget, |preparation| {
+                cache.bind_group(preparation, &layout, material, &texture, 1)
+            })?;
+            assert_eq!(budget.retained(), 4);
+            let second = with_preparation(device, queue, &budget, |preparation| {
+                cache.bind_group(preparation, &layout, material, &texture, 2)
+            })?;
+            assert!(Arc::ptr_eq(
+                first._image.as_ref().unwrap(),
+                second._image.as_ref().unwrap()
+            ));
+            assert_eq!(budget.retained(), 4);
+            assert_eq!(cache.stats().uploaded_images, 1);
+            assert_eq!(cache.stats().reused_images, 1);
+            cache.clear();
+            drop(first);
+            assert_eq!(budget.retained(), 4);
+            drop(second);
+            assert_eq!(budget.retained(), 0);
+            Ok(())
+        })
+        .unwrap();
+    }
+
+    #[test]
+    fn failure_after_upload_keeps_the_original_charge_without_a_cache_entry() {
+        let [snapshot, _] = crate::readback_tests::two_image_versions();
+        crate::readback_tests::render_to_rgba(|device, queue, _, _, _, _| {
+            let budget = Arc::new(OutputBudget::new(4));
+            let mut reservation = WgpuSubmissionReservation::new(device, queue, ());
+            let mut cache = WgpuSpriteTextureCache::default();
+            let failure = crate::allocation::AllocationFailureGuard::at("nara_wgpu_texture_view");
+            let result = cache.ensure_image(
+                &mut NativePreparation::new(device, queue, &budget, &mut reservation),
+                &snapshot,
+                1,
+            );
+            assert!(matches!(
+                result,
+                Err(WgpuTextureError::AllocationFailed { .. })
+            ));
+            assert!(failure.was_consumed());
+            assert!(cache.images.is_empty());
+            assert_eq!(cache.logical_texture_bytes(), 0);
+            assert_eq!(budget.retained(), 4);
+            let index = queue.submit([]);
+            let prefix = reservation.submitted(index.clone());
+            device
+                .poll(wgpu::PollType::Wait {
+                    submission_index: Some(index),
+                    timeout: Some(std::time::Duration::from_secs(10)),
+                })
+                .unwrap();
+            assert!(prefix.poll().unwrap());
+            assert_eq!(budget.retained(), 0);
+            drop(failure);
+            with_preparation(device, queue, &budget, |preparation| {
+                cache.ensure_image(preparation, &snapshot, 1)
+            })?;
+            assert_eq!(budget.retained(), 4);
+            Ok(())
+        })
+        .unwrap();
     }
 
     #[cfg(feature = "ui-submitter")]
@@ -1189,16 +1375,22 @@ mod tests {
         assert_ne!(first.pixels(), second.pixels());
         assert_ne!(first.key(), second.key());
 
-        let (_, cache) = crate::readback_tests::render_to_rgba(|device, queue, _, _, _| {
+        let (_, cache) = crate::readback_tests::render_to_rgba(|device, queue, _, _, _, _| {
+            let budget = Arc::new(OutputBudget::default());
             let mut cache = WgpuSpriteTextureCache::default();
             cache.begin_frame(1);
-            cache.ensure_glyph_page(device, queue, &first, 1).unwrap();
-            cache.ensure_glyph_page(device, queue, &second, 1).unwrap();
+            with_preparation(device, queue, &budget, |preparation| {
+                cache.ensure_glyph_page(preparation, &first, 1).unwrap();
+                cache.ensure_glyph_page(preparation, &second, 1).unwrap();
+            });
             assert_eq!(cache.glyph_pages.len(), 2);
             assert_eq!(cache.stats().uploaded_glyph_pages, 2);
             assert_eq!(cache.stats().reused_glyph_pages, 0);
 
-            cache.ensure_glyph_page(device, queue, &first, 1).unwrap();
+            with_preparation(device, queue, &budget, |preparation| {
+                cache.ensure_glyph_page(preparation, &first, 1)
+            })
+            .unwrap();
             assert_eq!(cache.glyph_pages.len(), 2);
             assert_eq!(cache.stats().uploaded_glyph_pages, 2);
             assert_eq!(cache.stats().reused_glyph_pages, 1);
@@ -1240,7 +1432,8 @@ mod tests {
     #[test]
     fn image_residency_capacity_preserves_existing_versions_and_counts_actual_holders() {
         let [first, second] = crate::readback_tests::two_image_versions();
-        crate::readback_tests::render_to_rgba(|device, queue, _, _, _| {
+        crate::readback_tests::render_to_rgba(|device, queue, _, _, _, _| {
+            let budget = Arc::new(OutputBudget::default());
             let layout = crate::quad::create_quad_texture_bind_group_layout(device)?;
             for limits in [
                 WgpuImageResidencyLimits {
@@ -1262,18 +1455,20 @@ mod tests {
                     alpha_mode: nara_material::AlphaMode2d::Opaque,
                 };
                 cache.begin_frame(1);
-                let held = cache
-                    .bind_group(
-                        device,
-                        queue,
+                let held = with_preparation(device, queue, &budget, |preparation| {
+                    cache.bind_group(
+                        preparation,
                         &layout,
                         material,
                         &WgpuQuadTexture::Image(first.clone()),
                         1,
                     )
-                    .unwrap();
+                })
+                .unwrap();
                 assert!(matches!(
-                    cache.ensure_image(device, queue, &second, 1),
+                    with_preparation(device, queue, &budget, |preparation| {
+                        cache.ensure_image(preparation, &second, 1)
+                    }),
                     Err(WgpuTextureError::ImageResidencyDeferred { .. })
                 ));
                 assert_eq!(cache.stats().image_textures, 1);
@@ -1287,10 +1482,15 @@ mod tests {
                 assert_eq!(cache.stats().image_textures, 1);
                 assert_eq!(cache.logical_texture_bytes(), 4);
                 assert!(matches!(
-                    cache.ensure_image(device, queue, &second, 4),
+                    with_preparation(device, queue, &budget, |preparation| {
+                        cache.ensure_image(preparation, &second, 4)
+                    }),
                     Err(WgpuTextureError::ImageResidencyDeferred { .. })
                 ));
-                cache.ensure_image(device, queue, &first, 4).unwrap();
+                with_preparation(device, queue, &budget, |preparation| {
+                    cache.ensure_image(preparation, &first, 4)
+                })
+                .unwrap();
                 assert_eq!(cache.stats().reused_images, 1);
                 assert_eq!(
                     cache.stats().uploaded_images + cache.stats().reuploaded_images,
@@ -1301,7 +1501,10 @@ mod tests {
                 drop(held);
                 assert_eq!(cache.logical_texture_bytes(), 0);
                 cache.begin_frame(8);
-                cache.ensure_image(device, queue, &second, 8).unwrap();
+                with_preparation(device, queue, &budget, |preparation| {
+                    cache.ensure_image(preparation, &second, 8)
+                })
+                .unwrap();
                 assert_eq!(cache.stats().image_textures, 1);
                 assert_eq!(cache.logical_texture_bytes(), 4);
             }
@@ -1313,7 +1516,8 @@ mod tests {
     #[test]
     fn clearing_image_cache_retires_namespace_without_forgetting_live_allocations() {
         let [snapshot, _] = crate::readback_tests::two_image_versions();
-        crate::readback_tests::render_to_rgba(|device, queue, _, _, _| {
+        crate::readback_tests::render_to_rgba(|device, queue, _, _, _, _| {
+            let budget = Arc::new(OutputBudget::default());
             let layout = crate::quad::create_quad_texture_bind_group_layout(device)?;
             let material = WgpuQuadMaterialKey {
                 texture: WgpuQuadTextureKey::Image(snapshot.identity().key()),
@@ -1327,39 +1531,41 @@ mod tests {
                 },
                 ..Default::default()
             };
-            let old_binding = cache
-                .bind_group(
-                    device,
-                    queue,
+            let old_binding = with_preparation(device, queue, &budget, |preparation| {
+                cache.bind_group(
+                    preparation,
                     &layout,
                     material,
                     &WgpuQuadTexture::Image(snapshot.clone()),
                     1,
                 )
-                .unwrap();
+            })
+            .unwrap();
             cache.clear();
             assert_eq!(cache.stats().image_textures, 1);
             assert!(matches!(
-                cache.ensure_image(device, queue, &snapshot, 2),
+                with_preparation(device, queue, &budget, |preparation| {
+                    cache.ensure_image(preparation, &snapshot, 2)
+                }),
                 Err(WgpuTextureError::ImageResidencyDeferred { .. })
             ));
             cache.residency_limits = WgpuImageResidencyLimits {
                 versions: 2,
                 bytes: 8,
             };
-            let new_binding = cache
-                .bind_group(
-                    device,
-                    queue,
+            let new_binding = with_preparation(device, queue, &budget, |preparation| {
+                cache.bind_group(
+                    preparation,
                     &layout,
                     material,
                     &WgpuQuadTexture::Image(snapshot),
                     2,
                 )
-                .unwrap();
+            })
+            .unwrap();
             assert!(!Arc::ptr_eq(
-                old_binding.image.as_ref().unwrap(),
-                new_binding.image.as_ref().unwrap()
+                old_binding._image.as_ref().unwrap(),
+                new_binding._image.as_ref().unwrap()
             ));
             assert_eq!(cache.stats().image_textures, 2);
             assert_eq!(cache.stats().reused_images, 0);
@@ -1374,7 +1580,8 @@ mod tests {
 
     #[test]
     fn fallback_binding_eviction_does_not_count_as_an_image_binding() {
-        crate::readback_tests::render_to_rgba(|device, queue, _, _, _| {
+        crate::readback_tests::render_to_rgba(|device, queue, _, _, _, _| {
+            let budget = Arc::new(OutputBudget::default());
             let layout = crate::quad::create_quad_texture_bind_group_layout(device)?;
             let material = WgpuQuadMaterialKey {
                 texture: WgpuQuadTextureKey::Fallback,
@@ -1382,16 +1589,16 @@ mod tests {
                 alpha_mode: nara_material::AlphaMode2d::Opaque,
             };
             let mut cache = WgpuSpriteTextureCache::default();
-            cache
-                .bind_group(
-                    device,
-                    queue,
+            with_preparation(device, queue, &budget, |preparation| {
+                cache.bind_group(
+                    preparation,
                     &layout,
                     material,
                     &WgpuQuadTexture::Fallback,
                     1,
                 )
-                .unwrap();
+            })
+            .unwrap();
             cache.begin_frame(4);
             assert_eq!(cache.stats().evicted_image_bindings, 0);
             assert_eq!(cache.stats().evicted_fallback_bindings, 1);
