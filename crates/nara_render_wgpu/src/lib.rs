@@ -19,6 +19,7 @@ mod presented;
 mod quad;
 #[cfg(all(test, any(feature = "sprite-submitter", feature = "ui-submitter")))]
 mod readback_tests;
+mod retirement;
 #[cfg(feature = "sprite-submitter")]
 mod sprite;
 #[cfg(all(test, feature = "sprite-submitter"))]
@@ -111,8 +112,7 @@ pub use crate::texture::WgpuTextureCacheStats as WgpuRenderTextureCacheStats;
 pub mod __private {
     #[cfg(feature = "editor-imgui")]
     pub use crate::editor_execution::{
-        WgpuEditorGpuRetirement, WgpuEditorImguiFrame, WgpuEditorImguiRenderer,
-        WgpuEditorImguiRendererFailure,
+        WgpuEditorImguiFrame, WgpuEditorImguiRenderer, WgpuEditorImguiRendererFailure,
     };
     pub use crate::{
         editor_execution::{
@@ -125,6 +125,7 @@ pub mod __private {
             WgpuEditorCompositeReceipt, WgpuEditorWindowPresentedReceipt,
             WgpuPresentedFrameReceipt, WgpuSubmittedImageReceipt,
         },
+        retirement::{WgpuGpuRetirement, WgpuGpuRetirementError},
     };
 
     #[cfg(feature = "ui-submitter")]

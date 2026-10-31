@@ -16,9 +16,9 @@ use nara::{
     },
     render_wgpu::__private::{
         WgpuEditorExecution, WgpuEditorExecutionError, WgpuEditorFrameOutcome,
-        WgpuEditorGpuRetirement, WgpuEditorImguiFrame, WgpuEditorImguiRenderer,
-        WgpuEditorUiImageSubmission, WgpuEditorViewId, WgpuEditorViewportIdentity,
-        WgpuEditorWindowFrame, WgpuSubmittedImageReceipt,
+        WgpuEditorImguiFrame, WgpuEditorImguiRenderer, WgpuEditorUiImageSubmission,
+        WgpuEditorViewId, WgpuEditorViewportIdentity, WgpuEditorWindowFrame, WgpuGpuRetirement,
+        WgpuSubmittedImageReceipt,
     },
     tooling::{EditorActionBatch, EditorPlayState, EditorRuntimeAvailability},
     window::{WindowId as NaraWindowId, backend::WindowHandleProvider},

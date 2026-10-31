@@ -69,7 +69,7 @@ impl OffscreenGpu {
     }
 }
 
-fn drain_gpu(retirement: &mut super::WgpuEditorGpuRetirement) {
+fn drain_gpu(retirement: &mut crate::retirement::WgpuGpuRetirement) {
     let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
     while !retirement.poll().unwrap() {
         assert!(

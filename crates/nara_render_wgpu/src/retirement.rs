@@ -1,4 +1,4 @@
-use super::{WgpuEditorDeviceScope, WgpuEditorExecutionError};
+use thiserror::Error;
 
 #[derive(Debug)]
 enum DrainState {
@@ -9,31 +9,41 @@ enum DrainState {
     Poisoned,
 }
 
+/// Failure to advance the retained device's physical queue drain.
+#[doc(hidden)]
+#[derive(Debug, Error)]
+pub enum WgpuGpuRetirementError {
+    #[error("GPU retirement cannot resume an interrupted destroy or flush")]
+    Interrupted,
+    #[error(transparent)]
+    Poll(#[from] wgpu::PollError),
+}
+
 /// GPU drain custody independent of renderer construction and backend namespace validity.
 ///
-/// Create this token before renderer initialization. The owner must stop all work on this device
-/// and queue before beginning retirement, and keep it stopped until the dependent owners retire.
-/// A completed token proves queue completion, not native presentation or OS window destruction.
+/// Retain this token before initialization uploads or the first accepted submission. The owner
+/// must stop all work on this device and queue before beginning retirement, and keep it stopped
+/// until the dependent owners retire. A completed token proves queue completion, not native
+/// presentation or OS window destruction.
 #[doc(hidden)]
 #[derive(Debug)]
-pub struct WgpuEditorGpuRetirement {
+pub struct WgpuGpuRetirement {
     device: wgpu::Device,
     queue: wgpu::Queue,
     state: DrainState,
 }
 
-impl WgpuEditorDeviceScope<'_> {
+impl WgpuGpuRetirement {
+    /// Retains the actual device and queue returned together by one device request.
     #[must_use]
-    pub fn gpu_retirement(&self) -> WgpuEditorGpuRetirement {
-        WgpuEditorGpuRetirement {
-            device: self.device.clone(),
-            queue: self.queue.clone(),
+    pub(crate) fn new(device: &wgpu::Device, queue: &wgpu::Queue) -> Self {
+        Self {
+            device: device.clone(),
+            queue: queue.clone(),
             state: DrainState::Live,
         }
     }
-}
 
-impl WgpuEditorGpuRetirement {
     /// Stops admission by caller contract and selects the drain branch exactly once.
     ///
     /// `discard_pending` destroys this exact device, forbidding further submissions and discarding
@@ -63,25 +73,20 @@ impl WgpuEditorGpuRetirement {
     /// token retryable. A panic during destroy/flush leaves a poisoned token that cannot claim
     /// completion on reuse; this is not an unwind recovery protocol. WGPU 30 can report HAL fence
     /// errors through its fatal handler rather than `PollError`; those are not completion.
-    pub fn poll(&mut self) -> Result<bool, WgpuEditorExecutionError> {
+    pub fn poll(&mut self) -> Result<bool, WgpuGpuRetirementError> {
         self.begin(false);
         if matches!(self.state, DrainState::Complete) {
             return Ok(true);
         }
         if matches!(self.state, DrainState::Poisoned) {
-            return Err(WgpuEditorExecutionError::toolkit_paint(
-                "GPU retirement cannot resume an interrupted destroy or flush",
-            ));
+            return Err(WgpuGpuRetirementError::Interrupted);
         }
         if matches!(self.state, DrainState::Flush) {
             self.state = DrainState::Poisoned;
             self.queue.submit([]);
             self.state = DrainState::Polling;
         }
-        let status = self
-            .device
-            .poll(wgpu::PollType::Poll)
-            .map_err(|error| WgpuEditorExecutionError::toolkit_paint(error.to_string()))?;
+        let status = self.device.poll(wgpu::PollType::Poll)?;
         if status.is_queue_empty() {
             self.state = DrainState::Complete;
             Ok(true)

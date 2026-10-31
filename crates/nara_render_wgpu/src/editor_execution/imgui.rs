@@ -15,9 +15,6 @@ use super::{
 };
 use crate::presented::{WgpuEditorWindowPresentedReceipt, WgpuSubmittedImageReceipt};
 
-mod retirement;
-pub use retirement::WgpuEditorGpuRetirement;
-
 fn delegated_window_id(primary: WindowId, instance: u64) -> Option<WindowId> {
     let raw = if instance >= primary.get() {
         instance.checked_add(1)?

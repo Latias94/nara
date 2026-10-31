@@ -2,10 +2,7 @@ use std::collections::BTreeMap;
 #[cfg(feature = "editor-imgui")]
 mod imgui;
 #[cfg(feature = "editor-imgui")]
-pub use imgui::{
-    WgpuEditorGpuRetirement, WgpuEditorImguiFrame, WgpuEditorImguiRenderer,
-    WgpuEditorImguiRendererFailure,
-};
+pub use imgui::{WgpuEditorImguiFrame, WgpuEditorImguiRenderer, WgpuEditorImguiRendererFailure};
 #[cfg(feature = "ui-submitter")]
 use std::sync::Arc;
 
@@ -37,6 +34,7 @@ use crate::{
     presented::{
         WgpuEditorCompositeReceipt, WgpuEditorWindowPresentedReceipt, WgpuSubmittedImageReceipt,
     },
+    retirement::WgpuGpuRetirement,
 };
 
 const EDITOR_IMAGE_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Rgba8Unorm;
@@ -495,6 +493,12 @@ impl<'frame> WgpuEditorDeviceScope<'frame> {
     #[must_use]
     pub const fn queue(&self) -> &'frame wgpu::Queue {
         self.queue
+    }
+
+    /// Retains the original device and queue before renderer initialization can queue uploads.
+    #[must_use]
+    pub fn gpu_retirement(&self) -> WgpuGpuRetirement {
+        WgpuGpuRetirement::new(self.device, self.queue)
     }
 
     #[must_use]

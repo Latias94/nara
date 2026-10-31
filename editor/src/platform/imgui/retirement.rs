@@ -109,7 +109,7 @@ enum Phase {
 #[derive(Debug, Default)]
 pub(super) struct NativeClose {
     phase: Phase,
-    pub(super) drain: Option<WgpuEditorGpuRetirement>,
+    pub(super) drain: Option<WgpuGpuRetirement>,
     pub(super) errors: NativeCloseErrors,
     pub(super) saved_layout: Option<String>,
     pub(super) device_lost: bool,
