@@ -36,7 +36,7 @@ fn physical_extents_require_exact_nonempty_equality() {
     }
 }
 
-#[cfg(any(feature = "sprite-submitter", feature = "ui-submitter"))]
+#[cfg(any(feature = "stock-sprite", feature = "stock-ui"))]
 mod native {
     use super::*;
     use crate::{

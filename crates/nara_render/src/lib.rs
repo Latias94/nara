@@ -132,33 +132,6 @@ pub mod __private {
         Ok(RenderImagePacket { image, extent })
     }
 
-    /// Maps one managed Runtime logical-window packet into the private Editor image target.
-    ///
-    /// The extracted view deliberately retains its logical window target so sprite/UI lowering
-    /// continues to use the Runtime's existing target semantics. Only the backend execution target
-    /// becomes the private image owned by the Editor.
-    pub fn map_editor_game_view_packet(
-        mut packet: RenderFramePacket,
-        target: RenderImagePacket,
-    ) -> Result<RenderFramePacket, RenderFramePacketError> {
-        let RenderFrameTarget::Window(window) = packet.target else {
-            return Err(RenderFramePacketError::EditorGameViewRequiresWindowTarget);
-        };
-        let logical_extent = Extent2d::new(
-            window.resolution.physical_width,
-            window.resolution.physical_height,
-        )
-        .ok_or(RenderFramePacketError::ImageTargetHasZeroExtent)?;
-        if target.extent != logical_extent {
-            return Err(RenderFramePacketError::EditorGameViewTargetExtentMismatch {
-                logical: logical_extent,
-                image: target.extent,
-            });
-        }
-        packet.target = RenderFrameTarget::Image(target);
-        Ok(packet)
-    }
-
     /// Assembles the closed first-party draw order without exposing topology construction.
     pub fn assemble_first_party_draws<T>(mut content: Vec<T>, ui: Vec<T>) -> Vec<T> {
         content.extend(ui);
@@ -1011,52 +984,162 @@ mod tests {
     }
 
     #[test]
-    fn editor_game_view_mapping_changes_only_the_execution_target() {
+    fn frame_packet_image_adaptation_preserves_original_and_all_logical_views() {
+        let generation = test_runtime_generation();
+        let window = Window::default();
+        let mut views = ExtractedViews::default();
+        for index in 0..MAX_VIEWS_PER_TARGET {
+            views.push(ExtractedView {
+                camera_entity: Entity::from_raw_u32(index as u32 + 1).unwrap(),
+                order: index as i32,
+                target: if index % 2 == 0 {
+                    RenderTarget::PrimaryWindow
+                } else {
+                    RenderTarget::Window(WindowId::PRIMARY)
+                },
+                load: if index == 0 {
+                    ViewLoadOp::Clear(Color::BLACK)
+                } else {
+                    ViewLoadOp::Load
+                },
+                ..test_extracted_view()
+            });
+        }
+        let packet =
+            build_render_frame_packet(generation, 9, Some(WindowId::PRIMARY), [&window], &views)
+                .unwrap()
+                .unwrap();
+        let packet = std::sync::Arc::new(packet);
+        let original_target = packet.target();
+        let target = RenderImagePacket::new(
+            nara_asset::allocate_anonymous_handle().unwrap(),
+            original_target.extent(),
+        )
+        .unwrap();
+
+        let mapped = packet.with_image_target(target).unwrap();
+
+        assert_eq!(mapped.target(), RenderFrameTarget::Image(target));
+        assert_eq!(
+            mapped.source_generation().runtime_generation(),
+            Some(generation)
+        );
+        assert_eq!(mapped.frame_index(), 9);
+        assert_eq!(mapped.views(), views.as_slice());
+        assert_eq!(mapped.views().len(), MAX_VIEWS_PER_TARGET);
+        assert_eq!(mapped.world_canvas(), None);
+        assert_eq!(packet.target(), original_target);
+        assert!(matches!(original_target, RenderFrameTarget::Window(_)));
+        assert_eq!(packet.source_generation(), mapped.source_generation());
+        assert_eq!(packet.frame_index(), mapped.frame_index());
+        assert_eq!(packet.views(), mapped.views());
+    }
+
+    #[test]
+    fn frame_packet_image_adaptation_preserves_fixed_world_canvas() {
+        let generation = test_runtime_generation();
+        let mut window = Window::default();
+        window.resolution.scale_factor = 2.0;
+        let canvas = WorldCanvas::new(320, 180)
+            .unwrap()
+            .with_bar_color(Color::WHITE)
+            .unwrap();
+        let viewport = ViewportRect::from_extent(canvas.extent()).unwrap();
+        let mut views = ExtractedViews::default();
+        views.push(ExtractedView {
+            viewport,
+            mapping: ViewMapping2d::orthographic(nara_core::Mat3::IDENTITY, 180.0, viewport)
+                .unwrap(),
+            ..test_extracted_view()
+        });
+        let packet = build_render_frame_packet_with_world_canvas(
+            generation,
+            10,
+            Some(WindowId::PRIMARY),
+            [&window],
+            &views,
+            Some(canvas),
+        )
+        .unwrap()
+        .unwrap();
+        let captured_canvas = packet.world_canvas().unwrap();
+        let target = RenderImagePacket::new(
+            nara_asset::allocate_anonymous_handle().unwrap(),
+            packet.target().extent(),
+        )
+        .unwrap();
+
+        let mapped = packet.with_image_target(target).unwrap();
+
+        assert_eq!(mapped.target(), RenderFrameTarget::Image(target));
+        assert_ne!(target.extent(), canvas.extent());
+        assert_eq!(mapped.source_generation(), packet.source_generation());
+        assert_eq!(mapped.frame_index(), packet.frame_index());
+        assert_eq!(mapped.views(), packet.views());
+        assert_eq!(mapped.world_canvas(), Some(captured_canvas));
+        assert_eq!(
+            captured_canvas,
+            WorldCanvasFrame::new(canvas, window.resolution).unwrap()
+        );
+        let canvas_target = RenderImagePacket::new(target.image(), canvas.extent()).unwrap();
+        assert_eq!(
+            packet.with_image_target(canvas_target),
+            Err(RenderFramePacketError::ImageAdaptationExtentMismatch {
+                window: target.extent(),
+                image: canvas.extent(),
+            })
+        );
+        assert!(matches!(packet.target(), RenderFrameTarget::Window(_)));
+        assert_eq!(packet.world_canvas(), Some(captured_canvas));
+    }
+
+    #[test]
+    fn frame_packet_image_adaptation_rejects_wrong_extent() {
         let generation = test_runtime_generation();
         let window = Window::default();
         let mut views = ExtractedViews::default();
         views.push(test_extracted_view());
         let packet =
-            build_render_frame_packet(generation, 9, Some(WindowId::PRIMARY), [&window], &views)
+            build_render_frame_packet(generation, 11, Some(WindowId::PRIMARY), [&window], &views)
                 .unwrap()
                 .unwrap();
-        let target = RenderImagePacket {
-            image: nara_asset::allocate_anonymous_handle().unwrap(),
-            extent: Extent2d {
-                width: 1280,
-                height: 720,
-            },
-        };
-
-        let mapped = __private::map_editor_game_view_packet(packet, target).unwrap();
-
-        assert_eq!(mapped.target(), RenderFrameTarget::Image(target));
-        assert_eq!(
-            mapped.views().first().unwrap().target,
-            RenderTarget::PrimaryWindow
-        );
-        assert_eq!(
-            mapped.views().first().unwrap().viewport,
-            test_extracted_view().viewport
-        );
-
-        let packet =
-            build_render_frame_packet(generation, 10, Some(WindowId::PRIMARY), [&window], &views)
-                .unwrap()
+        let extent = Extent2d::new(640, 360).unwrap();
+        let target =
+            RenderImagePacket::new(nara_asset::allocate_anonymous_handle().unwrap(), extent)
                 .unwrap();
-        assert!(matches!(
-            __private::map_editor_game_view_packet(
-                packet,
-                RenderImagePacket {
-                    image: target.image,
-                    extent: Extent2d {
-                        width: 640,
-                        height: 360,
-                    },
-                },
-            ),
-            Err(RenderFramePacketError::EditorGameViewTargetExtentMismatch { .. })
-        ));
+
+        assert_eq!(
+            packet.with_image_target(target),
+            Err(RenderFramePacketError::ImageAdaptationExtentMismatch {
+                window: packet.target().extent(),
+                image: extent,
+            })
+        );
+    }
+
+    #[test]
+    fn frame_packet_image_adaptation_rejects_nonwindow_source() {
+        let generation = RenderFrameSourceGeneration::try_acquire().unwrap();
+        let target = RenderImagePacket::new(
+            nara_asset::allocate_anonymous_handle().unwrap(),
+            Extent2d::new(1280, 720).unwrap(),
+        )
+        .unwrap();
+        let mut views = ExtractedViews::default();
+        views.push(ExtractedView {
+            target: RenderTarget::Image(target.image()),
+            ..test_extracted_view()
+        });
+        let packet = build_image_render_frame_packet(generation, 12, &views, target)
+            .unwrap()
+            .unwrap();
+
+        assert_eq!(
+            packet.with_image_target(target),
+            Err(RenderFramePacketError::ImageAdaptationRequiresWindowTarget)
+        );
+        assert_eq!(packet.target(), RenderFrameTarget::Image(target));
+        assert_eq!(packet.views(), views.as_slice());
     }
 
     #[test]

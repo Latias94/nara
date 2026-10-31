@@ -109,8 +109,10 @@ fn accepted_scene_revision_publishes_one_matching_preview_candidate() {
         .expect("the accepted document should produce one preview candidate");
     assert_eq!(candidate.document(), document);
     assert_eq!(candidate.revision(), revision);
-    let (_, _, geometry_revision, packet, batches, hits) = candidate.into_parts();
-    assert_eq!(geometry_revision, 2);
+    let packet = candidate.packet();
+    let batches = candidate.sprite_batches();
+    let hits = candidate.hits();
+    assert_eq!(candidate.geometry_revision(), 2);
     assert_eq!(batches.total_instances(), 1);
     assert_eq!(hits.len(), 1);
     assert_eq!(hits[0].entity(), &created);

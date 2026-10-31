@@ -9,11 +9,11 @@ use super::{HeadlessRuntimePlugins, MinimalPlugins, ServerPlugins};
 const SLOT_UI_WINIT_ACCESSIBILITY: PluginSlotId =
     PluginSlotId::new("nara.plugins.slot.ui-winit-accessibility");
 #[cfg(all(feature = "presentation-2d", feature = "render-wgpu"))]
-const SLOT_WGPU_SPRITE_SUBMITTER: PluginSlotId =
-    PluginSlotId::new("nara.plugins.slot.render-wgpu.sprite-submitter");
+const SLOT_WGPU_STOCK_SPRITE: PluginSlotId =
+    PluginSlotId::new("nara.plugins.slot.render-wgpu.stock-sprite");
 #[cfg(all(feature = "presentation-ui", feature = "render-wgpu"))]
-const SLOT_WGPU_UI_SUBMITTER: PluginSlotId =
-    PluginSlotId::new("nara.plugins.slot.render-wgpu.ui-submitter");
+const SLOT_WGPU_STOCK_UI: PluginSlotId =
+    PluginSlotId::new("nara.plugins.slot.render-wgpu.stock-ui");
 #[cfg(feature = "runtime-ui")]
 const SLOT_PROJECT_PRIMARY_UI_SURFACE: PluginSlotId =
     PluginSlotId::new("nara.plugins.slot.project-primary-ui-surface");
@@ -202,26 +202,25 @@ impl PluginGroup for ProjectProfilePlugins {
         };
 
         #[cfg(feature = "render-wgpu")]
-        let builder = if self.placement == ProjectProfilePlacement::Shipping
-            && self
-                .capabilities
-                .contains(nara_project::ProductCapability::RenderWgpu)
+        let builder = if self
+            .capabilities
+            .contains(nara_project::ProductCapability::RenderWgpu)
         {
-            builder.add_edited_group(
-                super::WgpuBackendPlugins
-                    .edit()
-                    .configure_slot(super::SLOT_RENDER, self.render_definition.clone()),
-            )
+            let backend = super::WgpuBackendPlugins
+                .edit()
+                .configure_slot(super::SLOT_RENDER, self.render_definition.clone());
+            let backend = match self.placement {
+                ProjectProfilePlacement::Shipping => backend,
+                ProjectProfilePlacement::EditorPlay => {
+                    backend.disable_slot(super::SLOT_WGPU_WINDOW_PRESENTATION)
+                }
+            };
+            builder.add_edited_group(backend)
         } else {
             builder
         };
 
-        let builder = match self.placement {
-            ProjectProfilePlacement::Shipping => {
-                add_product_contributions(builder, &self.capabilities)
-            }
-            ProjectProfilePlacement::EditorPlay => builder,
-        };
+        let builder = add_product_contributions(builder, &self.capabilities, self.placement);
 
         builder.add_slot(
             PluginSlot::required(
@@ -236,11 +235,13 @@ impl PluginGroup for ProjectProfilePlugins {
 fn add_product_contributions(
     builder: PluginGroupBuilder,
     capabilities: &ProductCapabilitySet,
+    placement: ProjectProfilePlacement,
 ) -> PluginGroupBuilder {
-    let _ = capabilities;
+    let _ = (capabilities, placement);
 
     #[cfg(all(feature = "desktop-winit", feature = "presentation-ui"))]
-    let builder = if capabilities.contains(nara_project::ProductCapability::DesktopWinit)
+    let builder = if placement == ProjectProfilePlacement::Shipping
+        && capabilities.contains(nara_project::ProductCapability::DesktopWinit)
         && capabilities.contains(nara_project::ProductCapability::PresentationUi)
     {
         builder.add_slot(
@@ -262,10 +263,10 @@ fn add_product_contributions(
     {
         builder.add_slot(
             PluginSlot::required(
-                SLOT_WGPU_SPRITE_SUBMITTER,
-                nara_render_wgpu::WGPU_SPRITE_SUBMITTER_PLUGIN_ID,
+                SLOT_WGPU_STOCK_SPRITE,
+                nara_render_wgpu::WGPU_STOCK_SPRITE_PLUGIN_ID,
             ),
-            PluginDefinition::for_default::<nara_render_wgpu::WgpuSpriteSubmitterPlugin>(),
+            PluginDefinition::for_default::<nara_render_wgpu::WgpuStockSpritePlugin>(),
         )
     } else {
         builder
@@ -277,10 +278,10 @@ fn add_product_contributions(
     {
         builder.add_slot(
             PluginSlot::required(
-                SLOT_WGPU_UI_SUBMITTER,
-                nara_render_wgpu::WGPU_UI_SUBMITTER_PLUGIN_ID,
+                SLOT_WGPU_STOCK_UI,
+                nara_render_wgpu::WGPU_STOCK_UI_PLUGIN_ID,
             ),
-            PluginDefinition::for_default::<nara_render_wgpu::WgpuUiSubmitterPlugin>(),
+            PluginDefinition::for_default::<nara_render_wgpu::WgpuStockUiPlugin>(),
         )
     } else {
         builder

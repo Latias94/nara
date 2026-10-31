@@ -173,7 +173,7 @@ fn observe_with_dependencies(
         Some(&content)
     );
     let geometry = candidate.geometry_revision();
-    let (_, _, _, packet, _, _) = candidate.into_parts();
+    let packet = candidate.packet();
     let world = runtime.runtime.world();
     let snapshot = runtime.preview_world_snapshot().unwrap().clone();
     assert_eq!(
@@ -1248,7 +1248,7 @@ fn nonempty_omissions_follow_only_the_accepted_epoch_and_preserve_unknown_source
     );
     let candidate = runtime.take_preview_candidate().unwrap();
     assert_eq!(candidate.preview_omissions(), first_omissions.facts());
-    let first_producer = candidate.into_parts().3.source_generation();
+    let first_producer = candidate.packet().source_generation();
     let first_snapshot = runtime.preview_world_snapshot().unwrap().clone();
 
     let mut invalid = second_projection.clone();
@@ -1275,7 +1275,7 @@ fn nonempty_omissions_follow_only_the_accepted_epoch_and_preserve_unknown_source
     );
     let candidate = runtime.take_preview_candidate().unwrap();
     assert_eq!(candidate.preview_omissions(), first_omissions.facts());
-    assert_eq!(candidate.into_parts().3.source_generation(), first_producer);
+    assert_eq!(candidate.packet().source_generation(), first_producer);
     assert!(
         publish(
             &mut runtime,
@@ -1287,7 +1287,7 @@ fn nonempty_omissions_follow_only_the_accepted_epoch_and_preserve_unknown_source
     );
     let candidate = runtime.take_preview_candidate().unwrap();
     assert_eq!(candidate.preview_omissions(), second_omissions.facts());
-    assert_eq!(candidate.into_parts().3.source_generation(), first_producer);
+    assert_eq!(candidate.packet().source_generation(), first_producer);
     assert_ne!(
         runtime.preview_world_snapshot().unwrap().domain_id,
         first_snapshot.domain_id

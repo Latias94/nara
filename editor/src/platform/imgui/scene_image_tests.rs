@@ -293,7 +293,7 @@ impl SceneImageWorkflow<'_> {
             }
             std::thread::sleep(Duration::from_millis(1));
         };
-        let (_, _, _, _, batches, _) = candidate.into_parts();
+        let batches = candidate.sprite_batches();
         let images = batches
             .as_slice()
             .iter()

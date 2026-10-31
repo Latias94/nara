@@ -41,16 +41,24 @@ pub(crate) fn validate_submission_packets(
 }
 
 /// Stock UI drawing against the policy's exact semantic texture port.
-pub(crate) struct UiFeature<S: 'static>(PhantomData<fn() -> S>);
+pub struct UiFeature<S: 'static>(PhantomData<fn() -> S>);
 
 impl<S: 'static> UiFeature<S> {
-    pub(crate) const fn new() -> Self {
+    /// Creates the UI adapter for a policy-owned semantic texture port.
+    #[must_use]
+    pub const fn new() -> Self {
         Self(PhantomData)
     }
 }
 
+impl<S: 'static> Default for UiFeature<S> {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 /// Drawing and exact packet facts, independent of one-shot backend submission permits.
-pub(crate) struct UiCapture<S: 'static> {
+pub struct UiCapture<S: 'static> {
     pub(crate) target: WgpuProgramTexture<S>,
     pub(crate) viewport: ViewportRect,
     pub(crate) batches: Arc<[WgpuQuadBatch]>,
@@ -58,7 +66,9 @@ pub(crate) struct UiCapture<S: 'static> {
 }
 
 impl<S: 'static> UiCapture<S> {
-    pub(crate) fn new(
+    /// Lowers packets matching the original logical target into this candidate's texture.
+    /// Primary-window aliases resolve through the supplied original window identity.
+    pub fn new(
         packets: &[Arc<UiPaintPacket>],
         logical_target: RenderTarget,
         primary_window_id: Option<nara_window::WindowId>,
@@ -76,21 +86,64 @@ impl<S: 'static> UiCapture<S> {
             packet_facts: lowered.packet_facts.into(),
         })
     }
+
+    /// Observes original packet identities and logical targets in draw order, including
+    /// replayed packets and packets whose drawing was completely clipped.
+    pub fn packets(
+        &self,
+    ) -> impl ExactSizeIterator<Item = (UiPaintPacketIdentity, RenderTarget)> + '_ {
+        self.packet_facts
+            .iter()
+            .map(|facts| (facts.packet, facts.target))
+    }
 }
 
-pub(crate) struct UiPrepared<S: 'static> {
+/// Opaque epoch-local drawing retained by the UI adapter through native completion.
+pub struct UiPrepared<S: 'static> {
     target: WgpuProgramTexture<S>,
     viewport: ViewportRect,
     draw: StockQuadPrepared,
     packet_facts: Arc<[WgpuLoweredUiPacketFacts]>,
 }
 
+/// Actual UI encoding observations, retaining the original capture's packet-facts allocation.
+/// Presentation bindings validate that allocation's identity before using these observations.
 #[derive(Clone, Debug, Default)]
-pub(crate) struct UiReport {
+pub struct UiReport {
     pub(crate) draw_calls: u32,
     pub(crate) sprites: u32,
     pub(crate) image_sprites: u32,
     pub(crate) packet_facts: Arc<[WgpuLoweredUiPacketFacts]>,
+}
+
+impl UiReport {
+    /// Number of encoded UI draw calls.
+    #[must_use]
+    pub const fn draw_calls(&self) -> u32 {
+        self.draw_calls
+    }
+
+    /// Number of encoded quads counted as sprites by the shared drawing path.
+    #[must_use]
+    pub const fn sprites(&self) -> u32 {
+        self.sprites
+    }
+
+    /// Number of encoded image quads counted as sprites by the shared drawing path.
+    #[must_use]
+    pub const fn image_sprites(&self) -> u32 {
+        self.image_sprites
+    }
+
+    /// Observes the capture's original packet identities and logical targets, including
+    /// replayed packets and packets whose drawing was completely clipped.
+    pub fn packets(
+        &self,
+    ) -> impl ExactSizeIterator<Item = (UiPaintPacketIdentity, RenderTarget)> + '_ {
+        self.packet_facts
+            .iter()
+            .map(|facts| (facts.packet, facts.target))
+    }
 }
 
 impl<S: 'static> WgpuRenderFeature for UiFeature<S> {

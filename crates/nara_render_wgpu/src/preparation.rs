@@ -176,7 +176,7 @@ mod tests {
         assert_eq!(budget.retained(), 0);
     }
 
-    #[cfg(any(feature = "sprite-submitter", feature = "ui-submitter"))]
+    #[cfg(any(feature = "stock-sprite", feature = "stock-ui"))]
     #[test]
     fn mapped_buffer_storage_is_reserved_before_allocation_and_held_until_completion() {
         crate::readback_tests::render_to_rgba(|device, queue, _, _, _, _| {
@@ -230,7 +230,7 @@ mod tests {
         .unwrap();
     }
 
-    #[cfg(any(feature = "sprite-submitter", feature = "ui-submitter"))]
+    #[cfg(any(feature = "stock-sprite", feature = "stock-ui"))]
     #[test]
     fn submission_capacity_refuses_uploads_before_the_queue_can_observe_them() {
         crate::readback_tests::render_to_rgba(|device, queue, _, _, _, _| {

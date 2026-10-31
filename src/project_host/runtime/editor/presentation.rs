@@ -4,7 +4,10 @@ use nara_render::{
     DisplayMapping2d, RenderFramePacket, RenderFrameSourceGeneration, RenderFrameTarget,
     RenderImagePacket,
 };
+#[cfg(feature = "render-wgpu")]
+use nara_render_wgpu::WgpuRenderInput;
 use nara_scene::{SceneAuthoringRevision, SceneEntityId};
+#[cfg(not(feature = "render-wgpu"))]
 use nara_sprite_render::__private::SpriteBatches;
 use nara_tooling::EditorDocumentId;
 
@@ -100,22 +103,46 @@ impl EditorPreviewPresentation {
         }
     }
 
+    #[cfg(not(feature = "render-wgpu"))]
     pub fn accept(
         &mut self,
         candidate: EditorPreviewCandidate,
     ) -> Result<(EditorAcceptedPreview, RenderFramePacket, SpriteBatches), EditorPresentationError>
     {
+        let (document, revision, geometry_revision, packet, batches, hits) = candidate.into_parts();
+        let accepted = self.accept_packet(document, revision, geometry_revision, &packet, hits)?;
+        Ok((accepted, packet, batches))
+    }
+
+    #[cfg(feature = "render-wgpu")]
+    pub fn accept(
+        &mut self,
+        candidate: EditorPreviewCandidate,
+    ) -> Result<(EditorAcceptedPreview, WgpuRenderInput), EditorPresentationError> {
+        let (document, revision, geometry_revision, input, hits) = candidate.into_parts();
+        let accepted =
+            self.accept_packet(document, revision, geometry_revision, input.packet(), hits)?;
+        Ok((accepted, input))
+    }
+
+    fn accept_packet(
+        &mut self,
+        document: EditorDocumentId,
+        revision: SceneAuthoringRevision,
+        geometry_revision: u64,
+        packet: &RenderFramePacket,
+        hits: Vec<EditorPreviewHit>,
+    ) -> Result<EditorAcceptedPreview, EditorPresentationError> {
         let id = NEXT_PRESENTATION_ID
             .try_update(Ordering::Relaxed, Ordering::Relaxed, |current| {
                 current.checked_add(1)
             })
             .map_err(|_| EditorPresentationError::IdentityExhausted)?;
         let owner = *self.owner.get_or_insert(id);
-        let (document, revision, geometry_revision, packet, batches, hits) = candidate.into_parts();
         let RenderFrameTarget::Image(target) = packet.target() else {
             return Err(EditorPresentationError::ImageMismatch);
         };
-        let accepted = EditorAcceptedPreview {
+        Ok(EditorAcceptedPreview {
             owner,
             token: EditorPresentedToken(id),
             document,
@@ -125,8 +152,7 @@ impl EditorPreviewPresentation {
             source: packet.source_generation(),
             frame_index: packet.frame_index(),
             hits,
-        };
-        Ok((accepted, packet, batches))
+        })
     }
 
     /// Call only after the adapter finishes displaying this exact submitted image.

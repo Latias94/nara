@@ -150,9 +150,12 @@ fn starter_game_view_preserves_unsaved_source_and_explicit_play_lifecycle() {
     assert_eq!(first_candidate.identity().start(), first_start);
     let first_frame = first_candidate.identity().frame_index();
     let first_identity = first_candidate.identity();
-    let mut first_parts = first_candidate.into_parts();
+    let first_parts = first_candidate.into_parts();
     let first_batches = first_parts
-        .take_sprite_batches()
+        .input()
+        .captured::<nara::render_wgpu::WgpuStockPolicy>()
+        .expect("the desktop starter retains its original stock policy capture")
+        .sprite_batches()
         .expect("the desktop starter captures its unsaved color sprite");
     assert_eq!(first_batches.total_instances(), 1);
     let first_center = first_batches.as_slice()[0].instances[0].center;
@@ -261,9 +264,12 @@ fn starter_game_view_preserves_unsaved_source_and_explicit_play_lifecycle() {
     let restarted_candidate = take_game_candidate(&mut application);
     assert_eq!(restarted_candidate.identity().start(), restarted);
     let restarted_identity = restarted_candidate.identity();
-    let mut restarted_parts = restarted_candidate.into_parts();
+    let restarted_parts = restarted_candidate.into_parts();
     let restarted_batches = restarted_parts
-        .take_sprite_batches()
+        .input()
+        .captured::<nara::render_wgpu::WgpuStockPolicy>()
+        .expect("Restart retains its original stock policy capture")
+        .sprite_batches()
         .expect("Restart must capture the edited color sprite");
     assert_eq!(restarted_batches.total_instances(), 1);
     assert!(restarted_batches.as_slice()[0].instances[0].center.x > first_center.x);

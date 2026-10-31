@@ -1,4 +1,4 @@
-#[cfg(feature = "ui-submitter")]
+#[cfg(feature = "stock-ui")]
 use std::collections::BTreeSet;
 use std::{
     collections::BTreeMap,
@@ -8,7 +8,7 @@ use std::{
 use nara_image::{ImageColorSpace, ImageFormat, PreparedImageSnapshot};
 use nara_material::{AddressMode, FilterMode, SamplerDescriptor};
 use nara_render::{RenderResourceKey, RenderResourceKind, RenderResourceSnapshot};
-#[cfg(feature = "ui-submitter")]
+#[cfg(feature = "stock-ui")]
 use nara_ui_render::{UiGlyphAtlasPageKey, UiGlyphAtlasPageSnapshot};
 use thiserror::Error;
 
@@ -19,7 +19,7 @@ use crate::{
 };
 
 const RGBA8_BYTES_PER_PIXEL: u32 = 4;
-#[cfg(feature = "ui-submitter")]
+#[cfg(feature = "stock-ui")]
 const R8_BYTES_PER_PIXEL: u32 = 1;
 const DEFAULT_UNUSED_GRACE_FRAMES: u64 = 2;
 const MAX_TEXTURE_UPLOAD_BYTES_PER_FRAME: usize = 64 * 1_024 * 1_024;
@@ -34,7 +34,7 @@ pub(crate) struct WgpuSpriteTextureCache {
     images: BTreeMap<RenderResourceKey, Vec<WgpuImageTextureEntry>>,
     resident_images: Vec<ResidentImageTexture>,
     residency_limits: WgpuImageResidencyLimits,
-    #[cfg(feature = "ui-submitter")]
+    #[cfg(feature = "stock-ui")]
     glyph_pages: BTreeMap<UiGlyphAtlasPageKey, WgpuGlyphTextureResource>,
     bindings: BTreeMap<WgpuQuadMaterialKey, Vec<WgpuTextureBinding>>,
     upload_bytes: usize,
@@ -66,7 +66,7 @@ impl WgpuSpriteTextureCache {
             .filter(|(material, _)| material.texture == WgpuQuadTextureKey::Fallback)
             .map(|(_, bindings)| bindings.len())
             .sum();
-        #[cfg(feature = "ui-submitter")]
+        #[cfg(feature = "stock-ui")]
         {
             stats.glyph_textures = self.glyph_pages.len();
             stats.glyph_bindings = self
@@ -90,11 +90,11 @@ impl WgpuSpriteTextureCache {
             .fold(0_u64, |total, image| {
                 total.saturating_add(image.texture.logical_bytes)
             });
-        #[cfg(feature = "ui-submitter")]
+        #[cfg(feature = "stock-ui")]
         let glyphs = self.glyph_pages.values().fold(0_u64, |total, page| {
             total.saturating_add(page.texture.logical_bytes)
         });
-        #[cfg(not(feature = "ui-submitter"))]
+        #[cfg(not(feature = "stock-ui"))]
         let glyphs = 0;
         images.saturating_add(glyphs).saturating_add(
             self.fallback_texture
@@ -106,7 +106,7 @@ impl WgpuSpriteTextureCache {
     pub(crate) fn clear(&mut self) {
         self.fallback_texture = None;
         self.images.clear();
-        #[cfg(feature = "ui-submitter")]
+        #[cfg(feature = "stock-ui")]
         self.glyph_pages.clear();
         self.bindings.clear();
         self.resident_images.retain_mut(|resident| {
@@ -146,7 +146,7 @@ impl WgpuSpriteTextureCache {
             WgpuQuadTexture::Image(snapshot) => {
                 Some(self.ensure_image(preparation, snapshot, frame_index)?)
             }
-            #[cfg(feature = "ui-submitter")]
+            #[cfg(feature = "stock-ui")]
             WgpuQuadTexture::Glyph(page) => {
                 self.ensure_glyph_page(preparation, page, frame_index)?;
                 None
@@ -457,7 +457,7 @@ impl WgpuSpriteTextureCache {
         Ok(())
     }
 
-    #[cfg(feature = "ui-submitter")]
+    #[cfg(feature = "stock-ui")]
     fn ensure_glyph_page(
         &mut self,
         preparation: &mut NativePreparation<'_>,
@@ -561,7 +561,7 @@ impl WgpuSpriteTextureCache {
                 .as_ref()
                 .ok_or(WgpuTextureError::MissingFallbackTexture),
             WgpuQuadTextureKey::Image(key) => Err(WgpuTextureError::MissingImageTexture { key }),
-            #[cfg(feature = "ui-submitter")]
+            #[cfg(feature = "stock-ui")]
             WgpuQuadTextureKey::Glyph(key) => self
                 .glyph_pages
                 .get(&key)
@@ -580,7 +580,7 @@ impl WgpuSpriteTextureCache {
         self.stats.evicted_image_textures =
             before_images.saturating_sub(self.images.values().map(Vec::len).sum());
 
-        #[cfg(feature = "ui-submitter")]
+        #[cfg(feature = "stock-ui")]
         {
             let before_glyphs = self.glyph_pages.len();
             self.glyph_pages
@@ -589,7 +589,7 @@ impl WgpuSpriteTextureCache {
                 before_glyphs.saturating_sub(self.glyph_pages.len());
         }
 
-        #[cfg(feature = "ui-submitter")]
+        #[cfg(feature = "stock-ui")]
         let live_glyphs = self.glyph_pages.keys().copied().collect::<BTreeSet<_>>();
         let binding_counts = |bindings: &BTreeMap<WgpuQuadMaterialKey, Vec<WgpuTextureBinding>>| {
             let mut images = 0_usize;
@@ -598,7 +598,7 @@ impl WgpuSpriteTextureCache {
                 match material.texture {
                     WgpuQuadTextureKey::Image(_) => images += bindings.len(),
                     WgpuQuadTextureKey::Fallback => fallback += bindings.len(),
-                    #[cfg(feature = "ui-submitter")]
+                    #[cfg(feature = "stock-ui")]
                     WgpuQuadTextureKey::Glyph(_) => {}
                 }
             }
@@ -609,7 +609,7 @@ impl WgpuSpriteTextureCache {
             let texture_live = match material.texture {
                 WgpuQuadTextureKey::Fallback => true,
                 WgpuQuadTextureKey::Image(_) => true,
-                #[cfg(feature = "ui-submitter")]
+                #[cfg(feature = "stock-ui")]
                 WgpuQuadTextureKey::Glyph(key) => live_glyphs.contains(&key),
             };
             bindings.retain(|binding| {
@@ -714,7 +714,7 @@ pub(crate) struct WgpuCachedImageView {
     _image: Arc<WgpuImageTextureResource>,
 }
 
-#[cfg(feature = "ui-submitter")]
+#[cfg(feature = "stock-ui")]
 #[derive(Debug)]
 struct WgpuGlyphTextureResource {
     texture: WgpuTextureResource,
@@ -747,7 +747,7 @@ pub(crate) fn stock_texture_record_metadata_bytes() -> Option<usize> {
     let arc_counters = std::mem::size_of::<usize>().checked_mul(2)?;
     let image_record = std::mem::size_of::<WgpuImageTextureResource>().checked_add(arc_counters)?;
     let resource_record = image_record.max(std::mem::size_of::<WgpuTextureResource>());
-    #[cfg(feature = "ui-submitter")]
+    #[cfg(feature = "stock-ui")]
     let resource_record = resource_record.max(std::mem::size_of::<(
         UiGlyphAtlasPageKey,
         WgpuGlyphTextureResource,
@@ -817,7 +817,7 @@ pub(crate) enum WgpuTextureError {
         actual: usize,
     },
     #[error("glyph page {key:?} has invalid pixel length: expected {expected}, got {actual}")]
-    #[cfg(feature = "ui-submitter")]
+    #[cfg(feature = "stock-ui")]
     InvalidGlyphPageLength {
         key: UiGlyphAtlasPageKey,
         expected: usize,
@@ -858,14 +858,14 @@ pub(crate) enum WgpuTextureError {
         maximum_versions: usize,
     },
     #[error("glyph page {key:?} upload requires {required} bytes; per-frame maximum is {maximum}")]
-    #[cfg(feature = "ui-submitter")]
+    #[cfg(feature = "stock-ui")]
     GlyphUploadLimitExceeded {
         key: UiGlyphAtlasPageKey,
         required: usize,
         maximum: usize,
     },
     #[error("glyph page {key:?} upload requires {required} bytes with only {remaining} remaining")]
-    #[cfg(feature = "ui-submitter")]
+    #[cfg(feature = "stock-ui")]
     GlyphUploadDeferred {
         key: UiGlyphAtlasPageKey,
         required: usize,
@@ -876,7 +876,7 @@ pub(crate) enum WgpuTextureError {
     #[error("image texture {key:?} was not prepared")]
     MissingImageTexture { key: RenderResourceKey },
     #[error("glyph texture {key:?} was not prepared")]
-    #[cfg(feature = "ui-submitter")]
+    #[cfg(feature = "stock-ui")]
     MissingGlyphTexture { key: UiGlyphAtlasPageKey },
 }
 
@@ -895,7 +895,7 @@ impl WgpuTextureError {
         ) {
             return true;
         }
-        #[cfg(feature = "ui-submitter")]
+        #[cfg(feature = "stock-ui")]
         if matches!(self, Self::GlyphUploadDeferred { .. }) {
             return true;
         }
@@ -1312,7 +1312,7 @@ mod tests {
         .unwrap();
     }
 
-    #[cfg(feature = "ui-submitter")]
+    #[cfg(feature = "stock-ui")]
     #[test]
     fn independent_glyph_atlases_upload_separately_and_replay_reuses_the_same_page() {
         use nara_render::RenderTarget;

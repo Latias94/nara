@@ -971,7 +971,13 @@ const SLOT_UI_PRESENTATION_BRIDGE: PluginSlotId =
 #[cfg(feature = "desktop-winit")]
 const SLOT_WINDOW: PluginSlotId = PluginSlotId::new("nara.plugins.slot.window");
 #[cfg(feature = "render-wgpu")]
-const SLOT_WGPU_RENDER: PluginSlotId = PluginSlotId::new("nara.plugins.slot.render-wgpu");
+const SLOT_WGPU_CAPTURE: PluginSlotId = PluginSlotId::new("nara.plugins.slot.render-wgpu.capture");
+#[cfg(feature = "render-wgpu")]
+const SLOT_WGPU_WINDOW_PRESENTATION: PluginSlotId =
+    PluginSlotId::new("nara.plugins.slot.render-wgpu.window-presentation");
+#[cfg(feature = "render-wgpu")]
+const SLOT_WGPU_STOCK_POLICY: PluginSlotId =
+    PluginSlotId::new("nara.plugins.slot.render-wgpu.stock-policy");
 
 /// Minimal runtime defaults for headless examples and code-first games.
 #[derive(Debug, Default, Clone, Copy)]
@@ -1280,6 +1286,10 @@ impl PluginGroup for DesktopWinitPlugins {
     }
 }
 
+/// Stock WGPU capture, policy and native window presentation over shared render components.
+///
+/// Sprite and UI capture contributors are selected explicitly. Embedded products can disable the
+/// optional window-presentation slot while retaining the same capture and policy installation.
 #[cfg(feature = "render-wgpu")]
 #[derive(Debug, Default, Clone, Copy)]
 pub struct WgpuBackendPlugins;
@@ -1302,8 +1312,22 @@ impl PluginGroup for WgpuBackendPlugins {
                 nara_render::plugin(None),
             )
             .add_slot(
-                PluginSlot::required(SLOT_WGPU_RENDER, nara_render_wgpu::WGPU_RENDER_PLUGIN_ID),
-                PluginDefinition::for_default::<nara_render_wgpu::WgpuRenderPlugin>(),
+                PluginSlot::required(SLOT_WGPU_CAPTURE, nara_render_wgpu::WGPU_CAPTURE_PLUGIN_ID),
+                PluginDefinition::for_default::<nara_render_wgpu::WgpuCapturePlugin>(),
+            )
+            .add_slot(
+                PluginSlot::optional(
+                    SLOT_WGPU_WINDOW_PRESENTATION,
+                    nara_render_wgpu::WGPU_WINDOW_PRESENTATION_PLUGIN_ID,
+                ),
+                PluginDefinition::for_default::<nara_render_wgpu::WgpuWindowPresentationPlugin>(),
+            )
+            .add_slot(
+                PluginSlot::required(
+                    SLOT_WGPU_STOCK_POLICY,
+                    nara_render_wgpu::WGPU_STOCK_POLICY_PLUGIN_ID,
+                ),
+                PluginDefinition::for_default::<nara_render_wgpu::WgpuStockPolicyPlugin>(),
             )
     }
 }

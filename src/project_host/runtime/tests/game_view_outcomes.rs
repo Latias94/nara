@@ -37,6 +37,117 @@ fn spawn_camera(mut commands: Commands) {
     ));
 }
 
+#[cfg(feature = "presentation-ui")]
+#[derive(Clone, Copy)]
+enum CaptureRefusal {
+    EmptyViews,
+    InvalidViews,
+}
+
+#[cfg(feature = "presentation-ui")]
+impl crate::ProductConfiguration for CaptureRefusal {
+    fn write_canonical(&self, output: &mut Vec<u8>) {
+        output.push(match self {
+            Self::EmptyViews => 0,
+            Self::InvalidViews => 1,
+        });
+    }
+}
+
+#[cfg(feature = "presentation-ui")]
+struct CaptureRefusalPlugin(CaptureRefusal);
+
+#[cfg(feature = "presentation-ui")]
+impl Plugin for CaptureRefusalPlugin {
+    fn declaration() -> &'static PluginDeclaration {
+        static DECLARATION: PluginDeclaration = PluginDeclaration::new(
+            PluginId::new("nara.test.game-capture-refusal"),
+            PluginCategory::Tooling,
+        )
+        .requires_plugins(&[nara_render::RENDER_PLUGIN_ID]);
+        &DECLARATION
+    }
+
+    fn build(&self, app: &mut App) -> Result<(), PluginError> {
+        let refusal = self.0;
+        app.add_systems(
+            CoreStage::Prepare,
+            move |mut views: nara_ecs::ResMut<nara_render::ExtractedViews>| match refusal {
+                CaptureRefusal::EmptyViews => views.clear(),
+                CaptureRefusal::InvalidViews => {
+                    if let Some(mut first) = views.as_slice().first().copied() {
+                        first.load = nara_render::ViewLoadOp::Load;
+                        views.clear();
+                        views.push(first);
+                    }
+                }
+            },
+        )?;
+        Ok(())
+    }
+}
+
+#[cfg(feature = "presentation-ui")]
+#[test]
+fn empty_or_failed_policy_capture_returns_original_ui_outcomes_before_stop() {
+    for refusal in [CaptureRefusal::EmptyViews, CaptureRefusal::InvalidViews] {
+        let name = match refusal {
+            CaptureRefusal::EmptyViews => "game-view-empty-capture-ui-outcomes",
+            CaptureRefusal::InvalidViews => "game-view-failed-capture-ui-outcomes",
+        };
+        let project = TestProject::new(name);
+        project.write_ui_authoring_documents(None, None);
+        let recipe = crate::ProductRecipe::new()
+            .add_configured_plugin(refusal, |refusal: &CaptureRefusal| {
+                CaptureRefusalPlugin(*refusal)
+            })
+            .unwrap();
+        let (mut editor, request) = open_game_awaiting_target(&project, true, recipe);
+        let activation = editor.prepare_game_start_activation(request).unwrap();
+        editor.commit_game_start_activation(activation);
+        let deadline = Instant::now() + Duration::from_secs(5);
+        let receiver = loop {
+            editor.drive_editor_frame(Duration::ZERO);
+            let world = editor.test_game_view_runtime().world();
+            if world
+                .resource::<crate::ui_presentation::UiPresentationBridgeStats>()
+                .content_rejections
+                > 0
+            {
+                break nara_ui_render::__private::backend_outcome_receiver(world).unwrap();
+            }
+            assert!(
+                Instant::now() < deadline,
+                "capture did not return its original UI outcomes",
+            );
+            std::thread::sleep(Duration::from_millis(1));
+        };
+        assert_eq!(receiver.pending_backend_count(), 0);
+        assert!(!receiver.has_unsettled_backend_results());
+        match refusal {
+            CaptureRefusal::EmptyViews => {
+                assert!(editor.take_game_view_candidate().unwrap().is_none());
+            }
+            CaptureRefusal::InvalidViews => {
+                assert!(matches!(
+                    editor.take_game_view_candidate(),
+                    Err(EditorGameViewBridgeFailure::Capture(_))
+                ));
+            }
+        }
+        assert!(editor.test_game_view_bridge_is_idle());
+        assert!(
+            crate::ui_presentation::latest_presented_ui_observation(
+                editor.test_game_view_runtime().world(),
+            )
+            .is_none()
+        );
+        stop_game(&mut editor);
+        assert_eq!(receiver.pending_backend_count(), 0);
+        assert!(!receiver.has_unsettled_backend_results());
+    }
+}
+
 fn open_game(project: &TestProject, with_ui: bool) -> EditorProjectSession {
     let (mut editor, request) =
         open_game_awaiting_target(project, with_ui, crate::ProductRecipe::new());
@@ -117,6 +228,76 @@ fn take_candidate(editor: &mut EditorProjectSession) -> EditorGameViewCandidate 
         );
         std::thread::sleep(Duration::from_millis(1));
     }
+}
+
+#[test]
+fn step_after_an_outstanding_game_candidate_uses_the_new_step_capture() {
+    let project = TestProject::new("game-view-step-after-busy-capture");
+    let mut editor = open_game(&project, false);
+    let first = take_candidate(&mut editor);
+    let first_frame = first.identity().frame_index();
+    for _ in 0..3 {
+        editor.drive_editor_frame(Duration::ZERO);
+    }
+    let frame_before_step = editor
+        .test_game_view_runtime()
+        .world()
+        .resource::<nara_render::RenderFrame>()
+        .index;
+    assert!(frame_before_step > first_frame);
+    editor
+        .complete_game_view_candidate(first.content_rejected("finish the original CPU candidate"))
+        .unwrap();
+    assert_eq!(
+        editor.request_play(EditorPlayCommand::Pause),
+        EditorPlayRequestResult::Accepted,
+    );
+    let deadline = Instant::now() + Duration::from_secs(5);
+    while editor.play_view().state() != EditorPlayState::Paused {
+        editor.drive_editor_frame(Duration::ZERO);
+        assert!(Instant::now() < deadline);
+    }
+    if let Some(candidate) = editor.take_game_view_candidate().unwrap() {
+        editor
+            .complete_game_view_candidate(candidate.content_rejected("settle before Step"))
+            .unwrap();
+    }
+    assert_eq!(
+        editor.request_play(EditorPlayCommand::StepFixedTick),
+        EditorPlayRequestResult::Accepted,
+    );
+    let deadline = Instant::now() + Duration::from_secs(5);
+    let stepped = loop {
+        editor.drive_editor_frame(Duration::ZERO);
+        if let Some(candidate) = editor.take_game_view_candidate().unwrap() {
+            break candidate;
+        }
+        assert!(
+            Instant::now() < deadline,
+            "Step did not produce its original policy input",
+        );
+    };
+    assert!(stepped.identity().frame_index() > frame_before_step);
+    assert_eq!(
+        stepped.identity().frame_index(),
+        editor
+            .test_game_view_runtime()
+            .world()
+            .resource::<nara_render::RenderFrame>()
+            .index,
+        "Step cannot complete from a sealed batch left behind the previous Game candidate",
+    );
+    editor
+        .complete_game_view_candidate(stepped.content_rejected("CPU test has no native display"))
+        .unwrap();
+    assert!(matches!(
+        editor.play_view().result(),
+        Some(nara_tooling::EditorPlayOperationResult::Failed {
+            operation: nara_tooling::EditorPlayOperation::StepFixedTick,
+            failure: nara_tooling::EditorPlayFailure::Presentation,
+        })
+    ));
+    stop_game(&mut editor);
 }
 
 fn stop_game(editor: &mut EditorProjectSession) {
@@ -608,16 +789,10 @@ fn game_completion_after_the_first_stop_drive_cannot_publish_interaction_or_worl
         assert!(Instant::now() < deadline);
     };
     let identity = candidate.identity();
-    let (_, submissions) = candidate.take_ui_frame().unwrap().into_parts();
-    assert!(!submissions.is_empty());
-    let outcomes = nara_ui_render::__private::bind_backend_submission_batch(
-        submissions,
-        nara_ui_render::UiPresentationBackendGeneration::new(509, 1).unwrap(),
-    )
-    .unwrap()
-    .into_iter()
-    .map(|submission| submission.presented())
-    .collect();
+    // This CPU test has no native submission. The original sidecar refuses to fabricate UI
+    // presentation; even a Presented Game disposition must settle as retired after Stop.
+    let outcomes = candidate.take_ui_submission().unwrap().presented();
+    assert!(!outcomes.is_empty());
     let completion = EditorGameViewCompletion::with_ui(identity, outcomes);
     {
         let runtime = editor.test_game_view_runtime();

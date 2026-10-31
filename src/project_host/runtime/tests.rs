@@ -2993,7 +2993,7 @@ fn generic_editor_imported_image_can_be_selected_by_path_and_stable_id_in_scene_
                             .hits()
                             .iter()
                             .any(|hit| hit.entity().as_str() == "player");
-                    let (_, _, _, _, batches, _) = candidate.into_parts();
+                    let batches = candidate.sprite_batches();
                     selected = current
                         && batches.as_slice().iter().any(|batch| {
                             batch
@@ -4841,6 +4841,8 @@ logical_height = 540
         assert_eq!(candidate.geometry_generation(), initial_canvas_generation);
         assert_eq!(candidate.canvas(), canvas);
         let (_, _, _, _, initial_render, _, consumed_canvas) = candidate.into_parts();
+        #[cfg(feature = "render-wgpu")]
+        let initial_render = initial_render.packet();
 
         let idle_frame = editor.drive_editor_frame(Duration::ZERO);
         let idle_ui = editor.current_ui_authoring_frame().unwrap();
@@ -4872,6 +4874,8 @@ logical_height = 540
         );
         assert_eq!(recovered_candidate.canvas(), &consumed_canvas);
         let (_, _, _, _, recovered_render, _, _) = recovered_candidate.into_parts();
+        #[cfg(feature = "render-wgpu")]
+        let recovered_render = recovered_render.packet();
         assert_eq!(
             recovered_render.source_generation(),
             initial_render.source_generation()
@@ -5577,7 +5581,7 @@ fn editor_play_runtime_uses_the_plan_owned_schema_snapshot() {
     feature = "render-wgpu"
 ))]
 #[test]
-fn editor_play_profile_keeps_logical_producers_without_native_gpu_contributions() {
+fn editor_play_profile_captures_the_selected_policy_without_native_window_presentation() {
     let project = TestProject::new("editor-play-placement");
     fs::write(
         project.root.join("nara.toml"),
@@ -5657,9 +5661,7 @@ resizable = true
     };
 
     for plugin in [
-        nara_render_wgpu::WGPU_RENDER_PLUGIN_ID,
-        nara_render_wgpu::WGPU_SPRITE_SUBMITTER_PLUGIN_ID,
-        nara_render_wgpu::WGPU_UI_SUBMITTER_PLUGIN_ID,
+        nara_render_wgpu::WGPU_WINDOW_PRESENTATION_PLUGIN_ID,
         crate::WINIT_UI_ACCESSIBILITY_CONTRIBUTION_PLUGIN_ID,
     ] {
         assert!(contains(&shipping, plugin));
@@ -5670,7 +5672,12 @@ resizable = true
         nara_render::RENDER_PLUGIN_ID,
         nara_sprite_render::SPRITE_RENDER_PLUGIN_ID,
         nara_ui_render::UI_RENDER_PLUGIN_ID,
+        nara_render_wgpu::WGPU_CAPTURE_PLUGIN_ID,
+        nara_render_wgpu::WGPU_STOCK_POLICY_PLUGIN_ID,
+        nara_render_wgpu::WGPU_STOCK_SPRITE_PLUGIN_ID,
+        nara_render_wgpu::WGPU_STOCK_UI_PLUGIN_ID,
     ] {
+        assert!(contains(&shipping, plugin));
         assert!(contains(&editor, plugin));
     }
     assert_eq!(

@@ -21,9 +21,15 @@ const CHECKED_IN_AUTHORING_BUNDLE: &[u8] = include_bytes!("../schema/authoring.b
 
 #[cfg(feature = "desktop")]
 use nara::{
-    image::IMAGE_PREPARE_PLUGIN_ID, project_host::ProjectContentLoader, render::RENDER_PLUGIN_ID,
-    render_wgpu::WGPU_RENDER_PLUGIN_ID, sprite_render::SPRITE_RENDER_PLUGIN_ID,
-    ui_render::UI_RENDER_PLUGIN_ID, window::WINDOW_PLUGIN_ID,
+    image::IMAGE_PREPARE_PLUGIN_ID,
+    project_host::ProjectContentLoader,
+    render::RENDER_PLUGIN_ID,
+    render_wgpu::{
+        WGPU_CAPTURE_PLUGIN_ID, WGPU_STOCK_POLICY_PLUGIN_ID, WGPU_WINDOW_PRESENTATION_PLUGIN_ID,
+    },
+    sprite_render::SPRITE_RENDER_PLUGIN_ID,
+    ui_render::UI_RENDER_PLUGIN_ID,
+    window::WINDOW_PLUGIN_ID,
 };
 #[cfg(feature = "desktop")]
 use nara_reference_game::REFERENCE_DESKTOP_PLUGIN_ID;
@@ -248,7 +254,9 @@ fn desktop_profile_configures_one_window_slot_and_preserves_source_content() {
         IMAGE_PREPARE_PLUGIN_ID,
         SPRITE_RENDER_PLUGIN_ID,
         UI_RENDER_PLUGIN_ID,
-        WGPU_RENDER_PLUGIN_ID,
+        WGPU_CAPTURE_PLUGIN_ID,
+        WGPU_WINDOW_PRESENTATION_PLUGIN_ID,
+        WGPU_STOCK_POLICY_PLUGIN_ID,
     ] {
         assert_eq!(
             first

@@ -125,12 +125,20 @@ fn complete_fake_presentation(
 ) {
     let identity = candidate.identity();
     let mut parts = candidate.into_parts();
+    assert!(
+        !parts
+            .input()
+            .captured::<nara::render_wgpu::WgpuStockPolicy>()
+            .expect("the reference product selected its original stock capture")
+            .ui_packets()
+            .is_empty()
+    );
     let ui = parts
-        .take_ui_frame()
+        .take_ui_submission()
         .expect("the reference Game includes Runtime UI");
-    assert!(ui.has_packets());
-    let submissions = nara_ui_render::__private::bind_backend_submission_batch(
-        ui.into_parts().1,
+    let submissions = nara_ui_render::advanced::bind_backend_submission_batch(
+        ui.into_prepared_submissions()
+            .expect("the CPU fixture takes the original attempts before native binding"),
         nara_ui_render::UiPresentationBackendGeneration::new(77, 1).unwrap(),
     )
     .unwrap();

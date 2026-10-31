@@ -68,7 +68,8 @@ impl ImguiScenePresenter {
         }) {
             return Ok(());
         }
-        let (accepted, packet, sprites) = self.authority.accept(candidate).map_err(imgui_error)?;
+        let (accepted, input) = self.authority.accept(candidate).map_err(imgui_error)?;
+        let packet = input.packet();
         let RenderFrameTarget::Image(image) = packet.target() else {
             return Err(imgui_error("Scene preview did not retain an image target"));
         };
@@ -77,9 +78,7 @@ impl ImguiScenePresenter {
             .view
             .as_ref()
             .ok_or_else(|| imgui_error("Scene target has no render view"))?;
-        let output = gpu
-            .submit_sprite_image(view, window, packet, sprites)
-            .map_err(platform_gpu_error)?;
+        let output = gpu.submit(view, &input).map_err(platform_gpu_error)?;
         let submission = output.receipt();
         if !target
             .identity

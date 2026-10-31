@@ -170,7 +170,7 @@ fn native_complete_preflight_precedes_allocations_uploads_and_preserves_untouche
 
 struct Color;
 
-#[cfg(feature = "sprite-submitter")]
+#[cfg(feature = "stock-sprite")]
 #[test]
 #[ignore = "requires an explicitly selected native GPU; acquisition failure is a failed prerequisite"]
 fn native_ordered_sprite_views_have_one_writer_and_keep_whole_attachment_clears() {
@@ -243,7 +243,7 @@ fn native_ordered_sprite_views_have_one_writer_and_keep_whole_attachment_clears(
     }
 }
 
-#[cfg(feature = "sprite-submitter")]
+#[cfg(feature = "stock-sprite")]
 #[test]
 #[ignore = "requires an explicitly selected native GPU; acquisition failure is a failed prerequisite"]
 fn native_stock_known_custody_refuses_before_partial_realization() {
@@ -316,7 +316,7 @@ fn native_stock_known_custody_refuses_before_partial_realization() {
     assert_eq!(host.views[&producer.id()].admission.last_frame_index, None);
 }
 
-#[cfg(all(feature = "sprite-submitter", feature = "ui-submitter"))]
+#[cfg(all(feature = "stock-sprite", feature = "stock-ui"))]
 #[test]
 #[ignore = "requires an explicitly selected native GPU; acquisition failure is a failed prerequisite"]
 fn native_stock_features_share_complete_image_preflight_and_original_resource_custody() {

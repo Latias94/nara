@@ -113,6 +113,41 @@ impl RenderFramePacket {
     pub const fn world_canvas(&self) -> Option<WorldCanvasFrame> {
         self.world_canvas
     }
+
+    /// Copies this window transaction to an image execution target of the same physical extent.
+    ///
+    /// The source packet remains unchanged. Its source, frame index, logical view targets and
+    /// fixed world canvas are preserved, including the original world-to-window mapping. Only
+    /// the execution target changes; this copies at most [`MAX_VIEWS_PER_TARGET`] captured views.
+    ///
+    /// Returns an error if this packet does not target a window or the image extent differs from
+    /// the captured physical window extent, even when a fixed world canvas has a smaller extent.
+    pub fn with_image_target(
+        &self,
+        target: RenderImagePacket,
+    ) -> Result<RenderFramePacket, RenderFramePacketError> {
+        let RenderFrameTarget::Window(window) = self.target else {
+            return Err(RenderFramePacketError::ImageAdaptationRequiresWindowTarget);
+        };
+        let window_extent = Extent2d::new(
+            window.resolution.physical_width,
+            window.resolution.physical_height,
+        )
+        .ok_or(RenderFramePacketError::ImageTargetHasZeroExtent)?;
+        if target.extent() != window_extent {
+            return Err(RenderFramePacketError::ImageAdaptationExtentMismatch {
+                window: window_extent,
+                image: target.extent(),
+            });
+        }
+        Ok(Self {
+            source_generation: self.source_generation,
+            frame_index: self.frame_index,
+            target: RenderFrameTarget::Image(target),
+            views: self.views.to_vec(),
+            world_canvas: self.world_canvas,
+        })
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
@@ -135,12 +170,10 @@ pub enum RenderFramePacketError {
     ImageTargetHasZeroExtent,
     #[error("an Editor preview render packet must target an image")]
     EditorPreviewRequiresImageTarget,
-    #[error("an Editor Game View render packet must originate from a logical window target")]
-    EditorGameViewRequiresWindowTarget,
-    #[error(
-        "the Editor Game View image extent {image:?} does not match logical window extent {logical:?}"
-    )]
-    EditorGameViewTargetExtentMismatch { logical: Extent2d, image: Extent2d },
+    #[error("image adaptation requires an original window render target")]
+    ImageAdaptationRequiresWindowTarget,
+    #[error("the image extent {image:?} does not match captured physical window extent {window:?}")]
+    ImageAdaptationExtentMismatch { window: Extent2d, image: Extent2d },
     #[error("render target window {window_id:?} is not the admitted window")]
     TargetWindowMismatch { window_id: WindowId },
     #[error("a render viewport lies outside its physical target")]

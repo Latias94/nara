@@ -1,7 +1,7 @@
 use super::*;
 use crate::{
     WgpuRenderBackend, WgpuRenderError,
-    frame::WgpuFramePayload,
+    frame::LegacyWgpuFramePayload,
     quad::{
         WgpuMaterial2d, WgpuQuadBatch, WgpuQuadInstance, WgpuQuadMaterialKey, WgpuQuadTexture,
         create_quad_texture_bind_group_layout,
@@ -101,7 +101,7 @@ fn transient_allocations_defer_without_submission_refund_demand_and_recover() {
                     RenderTarget::PrimaryWindow,
                     readback_viewport(),
                     Some(0),
-                    &WgpuFramePayload::default(),
+                    &LegacyWgpuFramePayload::default(),
                     1,
                     preparation,
                 )
@@ -148,7 +148,7 @@ fn transient_allocations_defer_without_submission_refund_demand_and_recover() {
                 RenderTarget::PrimaryWindow,
                 readback_viewport(),
                 Some(0),
-                &WgpuFramePayload::default(),
+                &LegacyWgpuFramePayload::default(),
                 1,
                 preparation,
             )?;

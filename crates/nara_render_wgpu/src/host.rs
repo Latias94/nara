@@ -14,13 +14,11 @@ use nara_render::{
     Extent2d, RenderFramePacket, RenderFrameSourceGeneration, RenderFrameTarget, RenderImagePacket,
     RenderWindowPacket,
 };
-#[cfg(feature = "sprite-submitter")]
-use nara_sprite_render::__private::SpriteBatches;
-#[cfg(feature = "ui-submitter")]
+#[cfg(feature = "stock-ui")]
 use nara_ui_render::__private::{UiBackendPresentationFrame, UiCompletedBackendOutcome};
-#[cfg(feature = "ui-submitter")]
+#[cfg(feature = "stock-ui")]
 use nara_ui_render::{
-    UiPaintPacket, UiPresentationAttemptIdentity, UiPresentationBackendFaultDomain,
+    UiPresentationAttemptIdentity, UiPresentationBackendFaultDomain,
     UiPresentationBackendGeneration,
 };
 use nara_window::{
@@ -29,16 +27,14 @@ use nara_window::{
 };
 use thiserror::Error;
 
-#[cfg(feature = "ui-submitter")]
+#[cfg(feature = "stock-ui")]
 use crate::frame::{WgpuUiCompletion, WgpuUiSubmissionState, complete_ui_submissions};
 use crate::{
     WgpuFrameTransactionStats, WgpuRenderBackend, WgpuRenderError,
     backend::{WgpuDeviceNamespace, WgpuEditorAcquiredSurface},
-    frame::WgpuFramePayload,
     output::{OutputBudget, OutputReservation},
-    output::{
-        WgpuDisplayOccurrence, WgpuImageDisplay, WgpuImageInput, WgpuImageOutput, WgpuImageStorage,
-    },
+    output::{WgpuDisplayOccurrence, WgpuImageDisplay, WgpuImageOutput, WgpuImageStorage},
+    policy::{BuiltPolicy, PolicyExecutionCustody, PolicyInstances},
     presented::{
         WgpuEditorCompositeReceipt, WgpuEditorWindowPresentedReceipt, WgpuSubmittedImageReceipt,
     },
@@ -385,16 +381,48 @@ impl WgpuImageTargetReservation {
     }
 }
 
-/// Exact Runtime UI completion authority retained by the private Editor GPU transaction.
-#[cfg(feature = "ui-submitter")]
-#[doc(hidden)]
+/// Original move-only UI completion responsibility, separate from replayable drawing packets.
+#[cfg(feature = "stock-ui")]
 #[derive(Debug)]
-pub struct WgpuEditorUiSubmission {
+pub struct WgpuUiSubmission {
     state: WgpuUiSubmissionState,
 }
 
-#[cfg(feature = "ui-submitter")]
-impl WgpuEditorUiSubmission {
+#[cfg(feature = "stock-ui")]
+impl WgpuUiSubmission {
+    pub(crate) fn from_state(state: WgpuUiSubmissionState) -> Self {
+        Self { state }
+    }
+
+    pub(crate) fn into_state(self) -> WgpuUiSubmissionState {
+        self.state
+    }
+
+    /// Splits original drawing packets from their one-shot completion obligations.
+    pub fn capture(
+        frame: UiBackendPresentationFrame,
+    ) -> (Vec<Arc<nara_ui_render::UiPaintPacket>>, Self) {
+        let (packets, submissions) = frame.into_parts();
+        (
+            packets,
+            Self::from_state(WgpuUiSubmissionState::Prepared(submissions)),
+        )
+    }
+
+    /// Transfers the untouched attempts to a trusted backend before native binding.
+    ///
+    /// This moves the original permissions without reconstructing a frame or asserting pixels.
+    /// Once bound, refusal returns this same sidecar. Ordinary image consumers keep it in
+    /// [`WgpuRenderHost::submit_for_display`] and complete the designated display occurrence.
+    pub fn into_prepared_submissions(
+        self,
+    ) -> Result<Vec<nara_ui_render::advanced::UiBackendSubmission>, Self> {
+        match self.state {
+            WgpuUiSubmissionState::Prepared(submissions) => Ok(submissions),
+            state => Err(Self { state }),
+        }
+    }
+
     fn validate_backend_generation(
         &self,
         backend_generation: UiPresentationBackendGeneration,
@@ -421,6 +449,12 @@ impl WgpuEditorUiSubmission {
     #[must_use]
     pub fn deferred(self, message: String) -> Vec<UiCompletedBackendOutcome> {
         complete_ui_submissions(self.state, WgpuUiCompletion::Deferred(message))
+    }
+
+    /// Cancels an unsubmitted capture, or defers its original bound backend attempt.
+    #[must_use]
+    pub fn cancelled(self, message: String) -> Vec<UiCompletedBackendOutcome> {
+        complete_ui_submissions(self.state, WgpuUiCompletion::Cancelled(message))
     }
 
     #[must_use]
@@ -494,19 +528,18 @@ impl WgpuEditorUiSubmission {
     }
 }
 
-/// One submitted viewport image retaining the Runtime UI completion authority until composite.
-#[cfg(feature = "ui-submitter")]
-#[doc(hidden)]
+/// One submitted image retaining UI completion authority until its designated display completes.
+#[cfg(feature = "stock-ui")]
 #[derive(Debug)]
-pub struct WgpuEditorUiImageSubmission {
+pub struct WgpuUiImageSubmission {
     display: WgpuImageDisplay,
     interaction: Arc<AtomicBool>,
     producer_closed: Arc<AtomicBool>,
-    ui: WgpuEditorUiSubmission,
+    ui: WgpuUiSubmission,
 }
 
-#[cfg(feature = "ui-submitter")]
-impl WgpuEditorUiImageSubmission {
+#[cfg(feature = "stock-ui")]
+impl WgpuUiImageSubmission {
     #[must_use]
     pub fn image(&self) -> WgpuSubmittedImageReceipt {
         self.display.receipt()
@@ -569,23 +602,22 @@ impl WgpuEditorUiImageSubmission {
 }
 
 /// Failed image submission retaining the exact Runtime UI authority for terminal completion.
-#[cfg(feature = "ui-submitter")]
-#[doc(hidden)]
+#[cfg(feature = "stock-ui")]
 #[derive(Debug)]
-pub struct WgpuEditorUiSubmitFailure {
+pub struct WgpuUiSubmitFailure {
     error: WgpuRenderHostError,
-    ui: WgpuEditorUiSubmission,
+    ui: WgpuUiSubmission,
 }
 
-#[cfg(feature = "ui-submitter")]
-impl WgpuEditorUiSubmitFailure {
+#[cfg(feature = "stock-ui")]
+impl WgpuUiSubmitFailure {
     #[must_use]
     pub const fn error(&self) -> &WgpuRenderHostError {
         &self.error
     }
 
     #[must_use]
-    pub fn into_parts(self) -> (WgpuRenderHostError, WgpuEditorUiSubmission) {
+    pub fn into_parts(self) -> (WgpuRenderHostError, WgpuUiSubmission) {
         (self.error, self.ui)
     }
 
@@ -892,7 +924,7 @@ struct ProducerState {
     closed: Arc<AtomicBool>,
     admission: ProducerAdmission,
     target: Option<ImageTarget>,
-    stock_policy: Option<crate::stock_policy::StockPolicyInstances>,
+    policies: PolicyInstances,
     world_presentation: Arc<WorldPresentationSlot>,
     runtime_presentation: Option<runtime::RuntimeWorldPresentation>,
     submitted_prefix: Option<WgpuSubmissionPrefix>,
@@ -1128,6 +1160,9 @@ impl WgpuRenderHost {
     }
 
     fn maintain_producers(&mut self) -> Result<(), WgpuRenderHostError> {
+        for view in self.views.values_mut() {
+            view.policies.maintain();
+        }
         self.feature_states.maintain(self.backend.device_epoch());
         let closed = self
             .views
@@ -1184,7 +1219,7 @@ impl WgpuRenderHost {
     pub fn begin_frame(&mut self, host_frame_index: u64) -> Result<(), WgpuRenderHostError> {
         self.prepare_namespace(None)?;
         self.backend.begin_frame_transaction(host_frame_index, None);
-        #[cfg(any(feature = "sprite-submitter", feature = "ui-submitter"))]
+        #[cfg(any(feature = "stock-sprite", feature = "stock-ui"))]
         self.backend.begin_editor_submitter_frame(host_frame_index);
         self.host_frame_index = Some(host_frame_index);
         Ok(())
@@ -1205,11 +1240,55 @@ impl WgpuRenderHost {
     pub fn submit(
         &mut self,
         producer: &WgpuRenderProducer,
-        input: &WgpuImageInput,
+        input: &crate::WgpuRenderInput,
     ) -> Result<WgpuImageOutput, WgpuRenderHostError> {
         let view_id = self.producer_id(producer)?;
+        self.admit_policy_requirements(input.requirements())?;
         let namespace = self.prepare_namespace(None)?;
-        self.submit_image_in_namespace(view_id, &namespace, &input.packet, &input.payload, None)
+        self.submit_image_in_namespace(view_id, &namespace, input, None)
+    }
+
+    /// Admits a policy's original request before any frame/target operation acquires a device.
+    /// A late request must fit the enabled device or explicitly require reconstruction.
+    pub fn prepare_policy<P: crate::WgpuRenderPolicy>(
+        &mut self,
+        producer: &WgpuRenderProducer,
+        definition: &crate::WgpuPolicyDefinition<P>,
+    ) -> Result<(), WgpuRenderHostError> {
+        self.producer_id(producer)?;
+        self.admit_policy_requirements(definition.device_requirements())
+    }
+
+    fn admit_policy_requirements(
+        &mut self,
+        requirements: &crate::WgpuDeviceRequirements,
+    ) -> Result<(), WgpuRenderHostError> {
+        // A lost original device is an execution failure, not a healthy device's
+        // refusal to broaden its enabled request. Preserve that structured cause.
+        self.backend.check_device_health()?;
+        self.backend
+            .request_device_requirements(requirements)
+            .map_err(|error| match error {
+                crate::WgpuDeviceRequirementsError::BackendUnavailable => {
+                    WgpuRenderHostError::Backend(WgpuRenderError::BackendUnavailable)
+                }
+                error => WgpuRenderHostError::FeatureRequirements(error),
+            })
+    }
+
+    fn build_policy(
+        &mut self,
+        id: WgpuRenderProducerId,
+        input: &crate::WgpuRenderInput,
+        format: wgpu::TextureFormat,
+    ) -> Result<BuiltPolicy, WgpuRenderHostError> {
+        let view = self
+            .views
+            .get_mut(&id)
+            .ok_or(WgpuRenderHostError::ProducerClosed)?;
+        Ok(view
+            .policies
+            .build(input, self.backend.instance_id(), id, &view.closed, format)?)
     }
 
     /// Installs an exact capture/native pair for one producer-owned instance. Requirements join
@@ -1227,14 +1306,7 @@ impl WgpuRenderHost {
             Arc::clone(&producer.closed),
             definition,
         )?;
-        self.backend
-            .request_device_requirements(definition.device_requirements())
-            .map_err(|error| match error {
-                crate::WgpuDeviceRequirementsError::BackendUnavailable => {
-                    WgpuRenderHostError::Backend(WgpuRenderError::BackendUnavailable)
-                }
-                error => WgpuRenderHostError::FeatureRequirements(error),
-            })?;
+        self.admit_policy_requirements(definition.device_requirements())?;
         Ok(instance)
     }
 
@@ -1253,7 +1325,7 @@ impl WgpuRenderHost {
             .admission
             .admit(program.source_generation(), program.frame_index())?;
         let namespace = self.prepare_namespace(None)?;
-        self.execute_program_in_namespace(id, &namespace, program, None, None)
+        self.execute_program_in_namespace(id, &namespace, program, None, None, None)
     }
 
     /// Output publication and stock image publication use the same original native transaction.
@@ -1264,6 +1336,11 @@ impl WgpuRenderHost {
         program: &crate::WgpuRenderProgram,
         local_target: Option<&crate::program::HostProgramTexture>,
         mut surface: Option<ProgramSurfaceTarget<'_>>,
+        policy: Option<(
+            &crate::WgpuPolicyProgram,
+            Arc<PolicyExecutionCustody>,
+            usize,
+        )>,
     ) -> Result<crate::WgpuProgramOutputs, WgpuRenderHostError> {
         let host_frame_index = self
             .host_frame_index
@@ -1299,6 +1376,24 @@ impl WgpuRenderHost {
             }
         }
 
+        let policy_metadata = policy.as_ref().map_or(0, |(_, _, bytes)| *bytes);
+        #[cfg(feature = "stock-ui")]
+        let ui_binding = policy
+            .as_ref()
+            .and_then(|(output, _, _)| output.ui.as_ref());
+        let finalization_cost = if surface.is_some() {
+            crate::program::NativePreparationCost::new(
+                1,
+                policy_metadata
+                    .checked_add(
+                        crate::presentation::SurfacePresentationCache::modeled_metadata_bytes()
+                            + std::mem::size_of::<ProgramSurfaceTarget<'_>>(),
+                    )
+                    .ok_or(crate::WgpuRenderProgramError::PolicyCapacity)?,
+            )
+        } else {
+            crate::program::NativePreparationCost::new(0, policy_metadata)
+        };
         let validation = namespace
             .device
             .push_error_scope(wgpu::ErrorFilter::Validation);
@@ -1308,19 +1403,18 @@ impl WgpuRenderHost {
         let allocation = namespace
             .device
             .push_error_scope(wgpu::ErrorFilter::OutOfMemory);
-        let mut reservation =
-            WgpuSubmissionReservation::new(&namespace.device, &namespace.queue, program.clone());
+        let mut reservation = match policy {
+            Some((_, owner, _)) => WgpuSubmissionReservation::new(
+                &namespace.device,
+                &namespace.queue,
+                (program.clone(), owner),
+            ),
+            None => {
+                WgpuSubmissionReservation::new(&namespace.device, &namespace.queue, program.clone())
+            }
+        };
         let mut feature_attempt = crate::program::FeaturePreparationAttempt::default();
         let presentation = &mut self.presentation;
-        let finalization_cost = if surface.is_some() {
-            crate::program::NativePreparationCost::new(
-                1,
-                crate::presentation::SurfacePresentationCache::modeled_metadata_bytes()
-                    + std::mem::size_of::<ProgramSurfaceTarget<'_>>(),
-            )
-        } else {
-            crate::program::NativePreparationCost::default()
-        };
         let prepared = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
             crate::program::prepare_and_encode(
                 program,
@@ -1331,7 +1425,7 @@ impl WgpuRenderHost {
                 &mut reservation,
                 &mut feature_attempt,
                 host_frame_index,
-                #[cfg(any(feature = "sprite-submitter", feature = "ui-submitter"))]
+                #[cfg(any(feature = "stock-sprite", feature = "stock-ui"))]
                 self.backend.stock_quad_resources(),
                 local_target,
                 finalization_cost,
@@ -1470,15 +1564,26 @@ impl WgpuRenderHost {
                 return Err(error.into());
             }
             let (resources, reports) = staged?;
+            for version in program.0.graph.outputs() {
+                outputs.push((version.clone(), Arc::clone(&resources[version.index()])));
+            }
+            let outputs = crate::WgpuProgramOutputs {
+                outputs,
+                reports,
+                prefix,
+            };
+            // Actual UI encoding must match the original final-image binding before this
+            // group consumes publication admission. Completion storage was admitted earlier.
+            #[cfg(feature = "stock-ui")]
+            if let Some(binding) = ui_binding {
+                binding.submitted_facts(&outputs)?;
+            }
             if let Some(surface) = &surface {
                 self.backend.track_runtime_submission(
                     surface.app_frame_index,
                     program.frame_index(),
                     surface.work_started_at,
                 )?;
-            }
-            for version in program.0.graph.outputs() {
-                outputs.push((version.clone(), Arc::clone(&resources[version.index()])));
             }
             let admission = &mut self
                 .views
@@ -1492,11 +1597,7 @@ impl WgpuRenderHost {
             } else {
                 self.backend.record_editor_image_submission();
             }
-            Ok(crate::WgpuProgramOutputs {
-                outputs,
-                reports,
-                prefix,
-            })
+            Ok(outputs)
         })();
         if surface.is_some() {
             self.backend.finish_program_resources();
@@ -1645,19 +1746,6 @@ impl WgpuRenderHost {
         Ok(self.retired)
     }
 
-    #[cfg(feature = "ui-submitter")]
-    #[must_use]
-    pub fn reject_editor_ui_frame(
-        ui_frame: UiBackendPresentationFrame,
-        message: impl Into<String>,
-    ) -> Vec<UiCompletedBackendOutcome> {
-        let (_, submissions) = ui_frame.into_parts();
-        WgpuEditorUiSubmission {
-            state: WgpuUiSubmissionState::Prepared(submissions),
-        }
-        .content_rejected(message.into())
-    }
-
     #[must_use]
     pub const fn backend_instance_id(&self) -> u64 {
         self.backend.instance_id()
@@ -1681,7 +1769,7 @@ impl WgpuRenderHost {
     ) -> Result<(), WgpuRenderHostError> {
         self.prepare_namespace(Some(window))?;
         self.backend.begin_frame_transaction(host_frame_index, None);
-        #[cfg(any(feature = "sprite-submitter", feature = "ui-submitter"))]
+        #[cfg(any(feature = "stock-sprite", feature = "stock-ui"))]
         self.backend.begin_editor_submitter_frame(host_frame_index);
         self.host_frame_index = Some(host_frame_index);
         Ok(())
@@ -1799,21 +1887,6 @@ impl WgpuRenderHost {
             })
     }
 
-    pub fn submit_image(
-        &mut self,
-        producer: &WgpuRenderProducer,
-        window: RenderWindowPacket,
-        packet: RenderFramePacket,
-    ) -> Result<WgpuImageOutput, WgpuRenderHostError> {
-        self.submit_image_payload(
-            self.producer_id(producer)?,
-            window,
-            packet,
-            WgpuFramePayload::default(),
-            None,
-        )
-    }
-
     /// Attaches invalidate-only Runtime camera state to an existing Editor view's GPU lifetime.
     /// This grants no image submission, composite or presentation authority.
     pub fn retain_game_world_presentation(
@@ -1857,120 +1930,42 @@ impl WgpuRenderHost {
         Ok(())
     }
 
-    #[cfg(feature = "sprite-submitter")]
-    pub fn submit_sprite_image(
+    #[cfg(feature = "stock-ui")]
+    pub fn submit_for_display(
         &mut self,
         producer: &WgpuRenderProducer,
-        window: RenderWindowPacket,
-        packet: RenderFramePacket,
-        sprite_batches: SpriteBatches,
-    ) -> Result<WgpuImageOutput, WgpuRenderHostError> {
-        self.submit_image_payload(
-            self.producer_id(producer)?,
-            window,
-            packet,
-            WgpuFramePayload::for_editor_sprites(sprite_batches),
-            None,
-        )
-    }
-
-    #[cfg(feature = "ui-submitter")]
-    pub fn submit_ui_image(
-        &mut self,
-        producer: &WgpuRenderProducer,
-        window: RenderWindowPacket,
-        packet: RenderFramePacket,
-        ui_frame: UiBackendPresentationFrame,
-    ) -> Result<WgpuEditorUiImageSubmission, WgpuEditorUiSubmitFailure> {
-        let (ui_packets, submissions) = ui_frame.into_parts();
-        let mut ui = WgpuEditorUiSubmission {
-            state: WgpuUiSubmissionState::Prepared(submissions),
-        };
+        input: &crate::WgpuRenderInput,
+        mut ui: WgpuUiSubmission,
+    ) -> Result<WgpuUiImageSubmission, WgpuUiSubmitFailure> {
         let view_id = match self.producer_id(producer) {
             Ok(id) => id,
-            Err(error) => return Err(WgpuEditorUiSubmitFailure { error, ui }),
+            Err(error) => return Err(WgpuUiSubmitFailure { error, ui }),
         };
-        let payload = WgpuFramePayload::for_editor_runtime_ui(ui_packets);
-        match self.submit_image_payload(view_id, window, packet, payload, Some(&mut ui)) {
-            Ok(image) => Ok(WgpuEditorUiImageSubmission {
+        let submitted = (|| {
+            self.admit_policy_requirements(input.requirements())?;
+            let namespace = self.prepare_namespace(None)?;
+            self.submit_image_in_namespace(view_id, &namespace, input, Some(&mut ui))
+        })();
+        match submitted {
+            Ok(image) => Ok(WgpuUiImageSubmission {
                 display: WgpuImageDisplay::issue(image),
                 interaction: Arc::clone(&self.views[&view_id].interaction),
                 producer_closed: Arc::clone(&producer.closed),
                 ui,
             }),
-            Err(error) => Err(WgpuEditorUiSubmitFailure { error, ui }),
+            Err(error) => Err(WgpuUiSubmitFailure { error, ui }),
         }
-    }
-
-    /// Submits an authoring-only UI packet without entering the Runtime UI outcome protocol.
-    #[cfg(feature = "ui-submitter")]
-    pub fn submit_authoring_ui_image(
-        &mut self,
-        producer: &WgpuRenderProducer,
-        window: RenderWindowPacket,
-        packet: RenderFramePacket,
-        ui_packet: Arc<UiPaintPacket>,
-    ) -> Result<WgpuImageOutput, WgpuRenderHostError> {
-        self.submit_image_payload(
-            self.producer_id(producer)?,
-            window,
-            packet,
-            WgpuFramePayload::for_editor_authoring_ui(vec![ui_packet]),
-            None,
-        )
-    }
-
-    #[cfg(all(feature = "sprite-submitter", feature = "ui-submitter"))]
-    pub fn submit_sprite_ui_image(
-        &mut self,
-        producer: &WgpuRenderProducer,
-        window: RenderWindowPacket,
-        packet: RenderFramePacket,
-        sprite_batches: SpriteBatches,
-        ui_frame: UiBackendPresentationFrame,
-    ) -> Result<WgpuEditorUiImageSubmission, WgpuEditorUiSubmitFailure> {
-        let (ui_packets, submissions) = ui_frame.into_parts();
-        let mut ui = WgpuEditorUiSubmission {
-            state: WgpuUiSubmissionState::Prepared(submissions),
-        };
-        let view_id = match self.producer_id(producer) {
-            Ok(id) => id,
-            Err(error) => return Err(WgpuEditorUiSubmitFailure { error, ui }),
-        };
-        let payload = WgpuFramePayload::for_editor_viewport(sprite_batches, ui_packets);
-        match self.submit_image_payload(view_id, window, packet, payload, Some(&mut ui)) {
-            Ok(image) => Ok(WgpuEditorUiImageSubmission {
-                display: WgpuImageDisplay::issue(image),
-                interaction: Arc::clone(&self.views[&view_id].interaction),
-                producer_closed: Arc::clone(&producer.closed),
-                ui,
-            }),
-            Err(error) => Err(WgpuEditorUiSubmitFailure { error, ui }),
-        }
-    }
-
-    fn submit_image_payload(
-        &mut self,
-        view_id: WgpuRenderProducerId,
-        window: RenderWindowPacket,
-        packet: RenderFramePacket,
-        payload: WgpuFramePayload,
-        #[cfg(feature = "ui-submitter")] ui: Option<&mut WgpuEditorUiSubmission>,
-        #[cfg(not(feature = "ui-submitter"))] ui: Option<&mut ()>,
-    ) -> Result<WgpuImageOutput, WgpuRenderHostError> {
-        let namespace = self.prepare_namespace(Some(window))?;
-        self.submit_image_in_namespace(view_id, &namespace, &packet, &payload, ui)
     }
 
     fn submit_image_in_namespace(
         &mut self,
         view_id: WgpuRenderProducerId,
         namespace: &WgpuDeviceNamespace,
-        packet: &RenderFramePacket,
-        payload: &WgpuFramePayload,
-        #[cfg(feature = "ui-submitter")] mut ui: Option<&mut WgpuEditorUiSubmission>,
-        #[cfg(not(feature = "ui-submitter"))] _ui: Option<&mut ()>,
+        input: &crate::WgpuRenderInput,
+        #[cfg(feature = "stock-ui")] mut ui: Option<&mut WgpuUiSubmission>,
+        #[cfg(not(feature = "stock-ui"))] _ui: Option<&mut ()>,
     ) -> Result<WgpuImageOutput, WgpuRenderHostError> {
+        let packet = input.packet();
         let RenderFrameTarget::Image(target) = packet.target() else {
             return Err(WgpuRenderHostError::ExpectedImageTarget);
         };
@@ -1987,7 +1982,7 @@ impl WgpuRenderHost {
             self.backend.reject_editor_packet();
             return Err(error.into());
         }
-        #[cfg(feature = "ui-submitter")]
+        #[cfg(feature = "stock-ui")]
         let ui_backend_generation = if let Some(ui) = ui.as_deref_mut() {
             let generation = UiPresentationBackendGeneration::new(
                 namespace.backend_instance_id,
@@ -2004,31 +1999,22 @@ impl WgpuRenderHost {
         } else {
             None
         };
-        #[cfg(feature = "ui-submitter")]
+        #[cfg(feature = "stock-ui")]
         if let (Some(ui), Some(backend_generation)) = (ui.as_deref_mut(), ui_backend_generation) {
             ui.bind_backend(backend_generation)?;
         }
-        if self.views[&view_id].stock_policy.is_none() {
-            let instances = crate::stock_policy::StockPolicyInstances::new(
-                namespace.backend_instance_id,
-                view_id,
-                &self.views[&view_id].closed,
-            )?;
-            self.views
-                .get_mut(&view_id)
-                .expect("admitted producer")
-                .stock_policy = Some(instances);
-        }
-        let stock = self.views[&view_id]
-            .stock_policy
-            .as_ref()
-            .expect("installed stock policy")
-            .build(packet, payload, EDITOR_IMAGE_FORMAT)?;
-        #[cfg(feature = "ui-submitter")]
+        let built = self.build_policy(view_id, input, EDITOR_IMAGE_FORMAT)?;
+        let policy = &built.output;
+        Self::validate_policy_target(policy, packet, EDITOR_IMAGE_FORMAT, true)?;
+        #[cfg(feature = "stock-ui")]
         if let Some(ui) = ui.as_deref() {
-            crate::ui::validate_submission_packets(ui.state.bound_submissions(), &stock.ui_facts)?;
+            let facts = policy
+                .ui
+                .as_ref()
+                .map_or(&[][..], |binding| binding.facts());
+            crate::ui::validate_submission_packets(ui.state.bound_submissions(), facts)?;
         }
-        self.validate_program_instances(view_id, &stock.program)?;
+        self.validate_program_instances(view_id, &policy.program)?;
         let stamp = self.views[&view_id]
             .target
             .as_ref()
@@ -2042,11 +2028,11 @@ impl WgpuRenderHost {
             .map(|(texture, view, reservation)| {
                 (texture.clone(), view.clone(), Arc::clone(reservation))
             });
-        let descriptor = stock
+        let descriptor = policy
             .program
             .0
             .graph
-            .resource(&stock.final_version)
+            .resource(&policy.final_version)
             .map_err(crate::WgpuRenderProgramError::from)?
             .desc
             .clone();
@@ -2054,7 +2040,7 @@ impl WgpuRenderHost {
         // authority; the graph still requires its writer and complete initialization.
         let local_target = initial_storage.map(|(texture, view, reservation)| {
             crate::program::HostProgramTexture {
-                version: stock.final_version.clone(),
+                version: policy.final_version.clone(),
                 storage: Arc::new(crate::program::ProgramResourceStorage {
                     backend_instance_id: namespace.backend_instance_id,
                     device_epoch: namespace.device_epoch,
@@ -2073,14 +2059,15 @@ impl WgpuRenderHost {
         let outputs = self.execute_program_in_namespace(
             view_id,
             namespace,
-            &stock.program,
+            &policy.program,
             local_target.as_ref(),
             None,
+            Some((policy, built.custody, built.metadata_bytes)),
         )?;
         let storage = outputs
             .outputs
             .iter()
-            .find(|(version, _)| *version == stock.final_version)
+            .find(|(version, _)| *version == policy.final_version)
             .map(|(_, storage)| storage)
             .expect("the complete stock output group contains its final version");
         let crate::program::NativeResource::Texture { texture, view } = &storage.native else {
@@ -2102,6 +2089,46 @@ impl WgpuRenderHost {
             view: view.clone(),
             _reservation: Arc::clone(&storage._reservation),
         })))
+    }
+
+    fn validate_policy_target(
+        policy: &crate::WgpuPolicyProgram,
+        packet: &RenderFramePacket,
+        format: wgpu::TextureFormat,
+        readback: bool,
+    ) -> Result<(), WgpuRenderHostError> {
+        let resource = policy
+            .program
+            .0
+            .graph
+            .resource(&policy.final_version)
+            .map_err(crate::WgpuRenderProgramError::from)?;
+        let crate::graph::ResourceDescriptor::Texture {
+            native, meaning, ..
+        } = &resource.desc
+        else {
+            return Err(crate::WgpuRenderProgramError::ResourceKind.into());
+        };
+        let extent = packet.target().extent();
+        let mut usage = wgpu::TextureUsages::TEXTURE_BINDING;
+        if readback {
+            usage |= wgpu::TextureUsages::COPY_SRC;
+        }
+        if native.format != format
+            || native.size.width != extent.width
+            || native.size.height != extent.height
+            || !native.usage.contains(usage)
+            || (meaning.transfer == crate::TextureTransfer::Srgb) != format.is_srgb()
+            || !matches!(
+                meaning.alpha,
+                crate::TextureAlpha::Premultiplied | crate::TextureAlpha::Opaque
+            )
+        {
+            return Err(crate::WgpuRenderProgramError::feature(
+                "the policy final image does not match the physical target, transfer or alpha contract",
+            ).into());
+        }
+        Ok(())
     }
 
     fn native_error(error: wgpu::Error) -> WgpuRenderHostError {

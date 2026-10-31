@@ -31,7 +31,7 @@ fn main() -> Result<(), Box<dyn Error>> {
             )),
         },
         WgpuBackendPlugins,
-        WgpuSpriteSubmitterPlugin,
+        WgpuStockSpritePlugin,
     ))?;
     app.insert_resource(Material2dDefinitions::new(&MATERIALS)?)?;
     app.insert_resource(nara::transform::FixedTransformInterpolation)?;

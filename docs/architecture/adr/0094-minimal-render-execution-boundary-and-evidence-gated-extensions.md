@@ -2,7 +2,7 @@
 
 **Status**: Accepted
 **Date**: 2026-07-16
-**Last Revised**: 2026-10-31 (finite captured WGPU program prerequisite)
+**Last Revised**: 2026-11-01 (original typed policy capture and exact final-image UI reports)
 **Supersedes**: [ADR 0077](0077-render-pipeline-recipes-graph-compilation-and-backend-encoding.md)
 **Refines**: [ADR 0012](0012-render-crate-boundaries.md),
 [ADR 0016](0016-extension-seams-for-backends-and-domain-modules.md),
@@ -183,6 +183,8 @@ cross-owner composition work; this subsection does not promote that entire propo
   predecessor remains leased. CPU inputs and reconstruction availability stay independent of
   published pixels/bytes.
 - A separately admitted Host target reservation may realize one graph-local final texture.
+  Physical storage must provide every declared usage; extra native usage flags grant no
+  additional graph access. Logical descriptors, typed ports and owner/shape facts remain exact.
   This private physical binding is not an initialized import: the normal unique writer and
   initialization proof still apply. Graph output and image receipt share the same actual byte
   guard. Pure preflight/capacity refusal preserves the initial reservation; native preparation
@@ -216,11 +218,25 @@ cross-owner composition work; this subsection does not promote that entire propo
   value outside the custody lock. A hard entry limit is a deterministic refusal, separately from
   temporary allocation pressure.
 
-Static definitions and installed instances do not establish dynamic code unload, runtime policy
-replacement or a public backend-neutral Feature ABI. The complete stock migration must preserve
+The selected typed policy capture refinement admits original-definition `Capture/Instances/build`
+through the same native Host. Policy installation owns new capture admission; accepted input owns
+its original execution lease independently of installation withdrawal. Producer close still refuses
+execution. Instance creation cannot broaden the definition's closed device request, and native
+state remains Host/epoch-owned. Source/frame and logical target meaning survive physical image
+adaptation. Exact UI operation/capture bindings remain a concrete completion sidecar. The finite
+UI operation writes the selected final image, and its actual original typed report must validate
+before group publication. A successfully drawn unrelated UI branch cannot settle that image's
+presentation permissions. The
+[production design](../render-program-production-design.md#selected-policy-capture-replacement)
+owns the selected shape and complete replacement/deletion consumer; implementation and evidence
+remain separately tracked. This refinement does not promote complete0121.
+
+Static definitions and installed instances do not establish dynamic code unload, a persistent
+renderer recipe or a public backend-neutral Feature ABI. The complete stock migration must preserve
 cross-View/UI/material working-set preflight, replay packets versus one-shot UI permits, logical
-target routing, full-resolution HUD and the existing native/READY/input/close consumers. These
-remain explicit subsequent implementation work, not compatibility routes to retain permanently.
+target routing, full-resolution HUD and the existing native/READY/input/close consumers. Its
+qualification belongs in the implementation ledger; displaced routes are removed with their
+migrated consumers rather than retained as compatibility mechanisms.
 
 ## Candidate Extensions, Not Accepted Decisions
 

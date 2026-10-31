@@ -1139,7 +1139,7 @@ resizable = true
     assert_eq!(concurrent_scene.revision(), scene_revision);
     assert!(concurrent_scene.geometry_revision() > initial_scene_geometry);
     assert!(matches!(
-        concurrent_scene.into_parts().3.target(),
+        concurrent_scene.packet().target(),
         nara::render::RenderFrameTarget::Image(target) if target.extent() == scene_extent
     ));
     drop(candidate);
@@ -1240,7 +1240,7 @@ resizable = true
     assert_eq!(scene_after_game_resize.document(), scene_document);
     assert_eq!(scene_after_game_resize.revision(), scene_revision);
     assert!(matches!(
-        scene_after_game_resize.into_parts().3.target(),
+        scene_after_game_resize.packet().target(),
         nara::render::RenderFrameTarget::Image(target) if target.extent() == scene_extent
     ));
     let resized_identity = resized_candidate.identity();

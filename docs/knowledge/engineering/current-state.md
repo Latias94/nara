@@ -3,7 +3,7 @@ type: "Current State"
 title: "Current Engineering State"
 description: "Derived summary of immutable engineering-memory shards."
 tags: ["engineering-memory", "derived"]
-source_fingerprint: "4fc487a1d24a36ac53e70564ed0fdc08f5135ff3eb202f0d2a20c3d204c4878f"
+source_fingerprint: "432ba77b4d422c9ee3b54764341a30b4fd809bcaa74b44c7e54a8d128b836525"
 ---
 
 # Current State
@@ -12,8 +12,8 @@ source_fingerprint: "4fc487a1d24a36ac53e70564ed0fdc08f5135ff3eb202f0d2a20c3d204c
 
 This file is derived from immutable shards. Record new facts in shards, then render during integration.
 
-- Source fingerprint: `4fc487a1d24a36ac53e70564ed0fdc08f5135ff3eb202f0d2a20c3d204c4878f`
-- Immutable records: 1129
+- Source fingerprint: `432ba77b4d422c9ee3b54764341a30b4fd809bcaa74b44c7e54a8d128b836525`
+- Immutable records: 1137
 - Active lane heads: 2
 
 # Active Registrations
@@ -51,7 +51,7 @@ This file is derived from immutable shards. Record new facts in shards, then ren
 - [Editor foundation U9 and U1-U8 complete with exact-source external acceptance](registry/2026-10/2026-10-17T102710Z-nara-editor-foundation-implementation-codex-root-76fa1ccb656c4ebd8c2b5f77f83287f7.md): `completed` (nara-editor-foundation-implementation-codex-root; producer `codex-root`)
 - [Editor foundation research and refactor planning complete](registry/2026-10/2026-10-16T044159Z-nara-editor-foundation-planning-codex-root-d0e8f37adfd54751b67d7ae647f06d83.md): `completed` (nara-editor-foundation-planning-codex-root; producer `codex-root`)
 - [First 2D author workflow complete with clean committed-source acceptance](registry/2026-10/2026-10-16T025148Z-nara-first-2d-author-workflow-codex-root-fe7312236c5d4906b8e950d366111171.md): `completed` (nara-first-2d-author-workflow-codex-root; producer `codex-root`)
-- [Runtime window programs qualified; typed policy capture remains next](registry/2026-10/2026-10-31T170943Z-nara-foundation-rebaseline-codex-main-7a74e0807b784eb1a2b1daa91b187120.md): `active` (nara-foundation-rebaseline-codex-main; producer `codex-foundation-main`)
+- [Typed policy replacement qualified for local integration](registry/2026-10/2026-10-31T193044Z-nara-foundation-rebaseline-codex-main-b486f28e5c7f42f08cb51e77acdfd296.md): `active` (nara-foundation-rebaseline-codex-main; producer `codex-foundation-main`)
 - [Ordinary structural authoring qualified](registry/2026-10/2026-10-20T053614Z-ordinary-authoring-codex-root-ac405c79936d43b09f6cfb4197d747ed.md): `completed` (ordinary-authoring-codex-root; producer `codex-root`)
 - [Persistent checkpoint consumer qualified on Windows](registry/2026-10/2026-10-21T032628Z-persistent-two-level-game-codex-root-1ac997abdab142e590af8a6c21f9f443.md): `complete` (persistent-two-level-game-codex-root; producer `codex-root`)
 - [N05 plugin failure facts qualified](registry/2026-10/2026-10-19T172945Z-plugin-error-facts-codex-root-c20974513f104398967edbed73efccaa.md): `completed` (plugin-error-facts-codex-root; producer `codex-root`)
@@ -70,6 +70,10 @@ This file is derived from immutable shards. Record new facts in shards, then ren
 
 # Recent Evidence
 
+- **Verification Evidence**: [Original typed render policy capture and complete consumer qualification](verification/2026-10/2026-10-31T192756Z-original-typed-render-policy-capture-and-complete-consumer-qualification-df7f9377f51142b78060b53617c800a1.md) - Typed renderer policy custody, public UI transfer, stock consumer replacement and scoped native evidence.
+- **Work Progress**: [Typed policy integrated owners and native consumers qualified pending final checks](progress/2026-10/2026-10-31T184954Z-typed-policy-integrated-owners-and-native-consumers-qualified-pending-final-checks-b002ff50f627472a952f92373c1c6284.md) - Records final ordinary owner and Root results, native Editor and independent policy/image/program evidence, and the corrected device-loss admission classification.
+- **Work Progress**: [Typed policy review corrections and first external GPU qualification](progress/2026-10/2026-10-31T181343Z-typed-policy-review-corrections-and-first-external-gpu-qualification-c170e2fdd79a436985aa9eef136dc2f6.md) - Records actual independent-policy CPU and DX12 evidence, structural review corrections, and the still-open full integration qualification.
+- **Work Progress**: [Typed policy capture and original installation custody replacement in progress](progress/2026-10/2026-10-31T173542Z-typed-policy-capture-and-original-installation-custody-replacement-in-progress-30844a32a42b458ba9fb6361183f0673.md) - The next render replacement removes central package payloads and combined image facades; code and consumers remain under integration and unqualified.
 - **Verification Evidence**: [Runtime window programs and synchronous producer world permission qualification](verification/2026-10/2026-10-31T165610Z-runtime-window-programs-and-synchronous-producer-world-permission-qualification-c05b8d29194543bc9fb11fbbc79414de.md) - Verification Evidence for Runtime window programs and synchronous producer world permission qualification.
 - **Work Progress**: [Runtime windows share program execution and producer-local world permissions](progress/2026-10/2026-10-31T163643Z-runtime-windows-share-program-execution-and-producer-local-world-permissions-0e74956d20af46cbad08c17a9da21368.md) - Work Progress for Runtime windows share program execution and producer-local world permissions.
 - **Verification Evidence**: [Stock image consumers and declared WorldCanvas through shared programs qualification](verification/2026-10/2026-10-31T153613Z-stock-image-consumers-and-declared-worldcanvas-through-shared-programs-qualification-f6cfe4185aad459587db367d807aeb60.md) - Verification Evidence for Stock image consumers and declared WorldCanvas through shared programs qualification.
@@ -78,10 +82,6 @@ This file is derived from immutable shards. Record new facts in shards, then ren
 - **Verification Evidence**: [Finite typed render programs through the original Host production qualification](verification/2026-10/2026-10-31T133536Z-finite-typed-render-programs-through-the-original-host-production-qualification-a32bacec9d8b4572801df1f79fc31c01.md) - Verification Evidence for Finite typed render programs through the original Host production qualification.
 - **Verification Evidence**: [Immutable render outputs owning producers and original native prefix qualification](verification/2026-10/2026-10-31T121248Z-immutable-render-outputs-owning-producers-and-original-native-prefix-qualification-1b4de7f4305740698abba87b589f9459.md) - Verification Evidence for Immutable render outputs owning producers and original native prefix qualification.
 - **Work Progress**: [Immutable render outputs and owning producer admission replacement in progress](progress/2026-10/2026-10-31T113038Z-immutable-render-outputs-and-owning-producer-admission-replacement-in-progress-7147451b93b04ec8960ebe75ab6bf147.md) - Work Progress for Immutable render outputs and owning producer admission replacement in progress.
-- **Verification Evidence**: [Owned native desktop execution and post-Host presentation qualification](verification/2026-10/2026-10-31T105632Z-owned-native-desktop-execution-and-post-host-presentation-qualification-4db921de03c94598b2ee20d7e82508c5.md) - Verification Evidence for Owned native desktop execution and post-Host presentation qualification.
-- **Work Progress**: [Owned native desktop replacement reaches final consumer qualification](progress/2026-10/2026-10-31T104400Z-owned-native-desktop-replacement-reaches-final-consumer-qualification-c8cad19571564013b118d99b9ac1a82c.md) - Work Progress for Owned native desktop replacement reaches final consumer qualification.
-- **Work Progress**: [Owned native rendering migration and independent lifecycle review in progress](progress/2026-10/2026-10-31T100222Z-owned-native-rendering-migration-and-independent-lifecycle-review-in-progress-37208eb577264f2788ff41b8155d9908.md) - Work Progress for Owned native rendering migration and independent lifecycle review in progress.
-- **Verification Evidence**: [Late presentation retirement admission and exact Step outcomes](verification/2026-10/2026-10-31T091550Z-late-presentation-retirement-admission-and-exact-step-outcomes-817901432b684d17b69c2f87f4427408.md) - Verification Evidence for Late presentation retirement admission and exact Step outcomes.
 
 # Integration Notes
 

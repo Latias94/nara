@@ -181,9 +181,8 @@ const TEST_MISSING_ALL_WITH_MATCHING_ANY_PRODUCT_PLUGIN_ID: PluginId =
     PluginId::new("test.missing-all-with-matching-any-product-capability");
 const TEST_UNKNOWN_ANY_PRODUCT_PLUGIN_ID: PluginId =
     PluginId::new("test.unknown-any-product-capability");
-const WGPU_SPRITE_SUBMITTER_PLUGIN_ID: PluginId =
-    PluginId::new("nara.render-wgpu.sprite-submitter");
-const WGPU_UI_SUBMITTER_PLUGIN_ID: PluginId = PluginId::new("nara.render-wgpu.ui-submitter");
+const WGPU_STOCK_SPRITE_PLUGIN_ID: PluginId = PluginId::new("nara.render-wgpu.stock-sprite");
+const WGPU_STOCK_UI_PLUGIN_ID: PluginId = PluginId::new("nara.render-wgpu.stock-ui");
 #[cfg(all(
     feature = "runtime-2d",
     feature = "runtime-ui",
@@ -2429,7 +2428,9 @@ fn desktop_project_configures_the_existing_window_plugin_slot() {
 fn requested_product_profile_selects_ui_window_and_wgpu_without_runtime_tooling() {
     use nara::{
         render::RENDER_SCHEMA_PROVIDER_ID,
-        render_wgpu::WGPU_RENDER_PLUGIN_ID,
+        render_wgpu::{
+            WGPU_CAPTURE_PLUGIN_ID, WGPU_STOCK_POLICY_PLUGIN_ID, WGPU_WINDOW_PRESENTATION_PLUGIN_ID,
+        },
         ui::{UI_PLUGIN_ID, UI_SCHEMA_PROVIDER_ID},
         ui_render::UI_RENDER_PLUGIN_ID,
         window::WINDOW_PLUGIN_ID,
@@ -2462,8 +2463,10 @@ fn requested_product_profile_selects_ui_window_and_wgpu_without_runtime_tooling(
         UI_PLUGIN_ID,
         UI_RENDER_PLUGIN_ID,
         WINDOW_PLUGIN_ID,
-        WGPU_RENDER_PLUGIN_ID,
-        nara::render_wgpu::WGPU_UI_SUBMITTER_PLUGIN_ID,
+        WGPU_CAPTURE_PLUGIN_ID,
+        WGPU_STOCK_POLICY_PLUGIN_ID,
+        WGPU_WINDOW_PRESENTATION_PLUGIN_ID,
+        nara::render_wgpu::WGPU_STOCK_UI_PLUGIN_ID,
         nara::WINIT_UI_ACCESSIBILITY_CONTRIBUTION_PLUGIN_ID,
     ] {
         assert_eq!(
@@ -2475,9 +2478,9 @@ fn requested_product_profile_selects_ui_window_and_wgpu_without_runtime_tooling(
         );
     }
     assert!(
-        entries.iter().all(|entry| {
-            entry.plugin_id() != nara::render_wgpu::WGPU_SPRITE_SUBMITTER_PLUGIN_ID
-        })
+        entries
+            .iter()
+            .all(|entry| { entry.plugin_id() != nara::render_wgpu::WGPU_STOCK_SPRITE_PLUGIN_ID })
     );
     assert!(
         plan.schema_validation()
@@ -2563,17 +2566,17 @@ requested = ["runtime-2d", "presentation-2d", "render-wgpu"]
     assert!(
         entries
             .iter()
-            .any(|entry| { entry.plugin_id() == nara::render_wgpu::WGPU_RENDER_PLUGIN_ID })
-    );
-    assert!(
-        entries.iter().any(|entry| {
-            entry.plugin_id() == nara::render_wgpu::WGPU_SPRITE_SUBMITTER_PLUGIN_ID
-        })
+            .any(|entry| { entry.plugin_id() == nara::render_wgpu::WGPU_CAPTURE_PLUGIN_ID })
     );
     assert!(
         entries
             .iter()
-            .all(|entry| entry.plugin_id() != nara::render_wgpu::WGPU_UI_SUBMITTER_PLUGIN_ID)
+            .any(|entry| { entry.plugin_id() == nara::render_wgpu::WGPU_STOCK_SPRITE_PLUGIN_ID })
+    );
+    assert!(
+        entries
+            .iter()
+            .all(|entry| entry.plugin_id() != nara::render_wgpu::WGPU_STOCK_UI_PLUGIN_ID)
     );
 }
 
@@ -2699,17 +2702,17 @@ requested = ["runtime-ui", "presentation-ui", "render-wgpu"]
     assert!(
         entries
             .iter()
-            .any(|entry| { entry.plugin_id() == nara::render_wgpu::WGPU_RENDER_PLUGIN_ID })
+            .any(|entry| { entry.plugin_id() == nara::render_wgpu::WGPU_CAPTURE_PLUGIN_ID })
     );
     assert!(
         entries
             .iter()
-            .any(|entry| entry.plugin_id() == nara::render_wgpu::WGPU_UI_SUBMITTER_PLUGIN_ID)
+            .any(|entry| entry.plugin_id() == nara::render_wgpu::WGPU_STOCK_UI_PLUGIN_ID)
     );
     assert!(
-        entries.iter().all(|entry| {
-            entry.plugin_id() != nara::render_wgpu::WGPU_SPRITE_SUBMITTER_PLUGIN_ID
-        })
+        entries
+            .iter()
+            .all(|entry| { entry.plugin_id() != nara::render_wgpu::WGPU_STOCK_SPRITE_PLUGIN_ID })
     );
 }
 
@@ -2748,9 +2751,11 @@ requested = ["runtime-2d", "runtime-ui", "presentation-2d", "presentation-ui", "
     let entries = plan.plugin_plan().entries();
 
     for plugin in [
-        nara::render_wgpu::WGPU_RENDER_PLUGIN_ID,
-        nara::render_wgpu::WGPU_SPRITE_SUBMITTER_PLUGIN_ID,
-        nara::render_wgpu::WGPU_UI_SUBMITTER_PLUGIN_ID,
+        nara::render_wgpu::WGPU_CAPTURE_PLUGIN_ID,
+        nara::render_wgpu::WGPU_WINDOW_PRESENTATION_PLUGIN_ID,
+        nara::render_wgpu::WGPU_STOCK_POLICY_PLUGIN_ID,
+        nara::render_wgpu::WGPU_STOCK_SPRITE_PLUGIN_ID,
+        nara::render_wgpu::WGPU_STOCK_UI_PLUGIN_ID,
     ] {
         assert_eq!(
             entries
@@ -2774,17 +2779,17 @@ fn direct_app_selects_the_sprite_wgpu_contribution_explicitly() {
         nara::Runtime2dPlugins,
         nara::Presentation2dPlugins,
         nara::WgpuBackendPlugins,
-        nara::render_wgpu::WgpuSpriteSubmitterPlugin,
+        nara::render_wgpu::WgpuStockSpritePlugin,
     ))
     .unwrap();
 
     assert!(
         app.installed_plugins()
-            .any(|plugin| { plugin.id == nara::render_wgpu::WGPU_SPRITE_SUBMITTER_PLUGIN_ID })
+            .any(|plugin| { plugin.id == nara::render_wgpu::WGPU_STOCK_SPRITE_PLUGIN_ID })
     );
     assert!(
         app.installed_plugins()
-            .all(|plugin| plugin.id != nara::render_wgpu::WGPU_UI_SUBMITTER_PLUGIN_ID)
+            .all(|plugin| plugin.id != nara::render_wgpu::WGPU_STOCK_UI_PLUGIN_ID)
     );
     app.seal().unwrap();
 }
@@ -2801,17 +2806,17 @@ fn direct_app_selects_the_ui_wgpu_contribution_explicitly() {
         nara::RuntimeUiPlugins,
         nara::PresentationUiPlugins,
         nara::WgpuBackendPlugins,
-        nara::render_wgpu::WgpuUiSubmitterPlugin,
+        nara::render_wgpu::WgpuStockUiPlugin,
     ))
     .unwrap();
 
     assert!(
         app.installed_plugins()
-            .any(|plugin| plugin.id == nara::render_wgpu::WGPU_UI_SUBMITTER_PLUGIN_ID)
+            .any(|plugin| plugin.id == nara::render_wgpu::WGPU_STOCK_UI_PLUGIN_ID)
     );
     assert!(
         app.installed_plugins()
-            .all(|plugin| { plugin.id != nara::render_wgpu::WGPU_SPRITE_SUBMITTER_PLUGIN_ID })
+            .all(|plugin| { plugin.id != nara::render_wgpu::WGPU_STOCK_SPRITE_PLUGIN_ID })
     );
     app.seal().unwrap();
 }
@@ -2877,12 +2882,12 @@ requested = ["render-wgpu"]
     assert!(
         entries
             .iter()
-            .any(|entry| { entry.plugin_id() == nara::render_wgpu::WGPU_RENDER_PLUGIN_ID })
+            .any(|entry| { entry.plugin_id() == nara::render_wgpu::WGPU_CAPTURE_PLUGIN_ID })
     );
     assert!(entries.iter().all(|entry| {
         !matches!(
             entry.plugin_id(),
-            WGPU_SPRITE_SUBMITTER_PLUGIN_ID | WGPU_UI_SUBMITTER_PLUGIN_ID
+            WGPU_STOCK_SPRITE_PLUGIN_ID | WGPU_STOCK_UI_PLUGIN_ID
         )
     }));
 }

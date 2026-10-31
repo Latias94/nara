@@ -25,7 +25,7 @@ fn main() -> Result<(), Box<dyn Error>> {
             )),
         },
         WgpuBackendPlugins,
-        WgpuSpriteSubmitterPlugin,
+        WgpuStockSpritePlugin,
     ))?;
     app.insert_resource(nara::transform::FixedTransformInterpolation)?;
     app.add_systems(StartupStage::Scene, setup_scene)?;

@@ -153,6 +153,19 @@ age and exact touched-instance cleanup preserve independent producer clocks. The
 interface replaces output-only names without aliases. Ordinary capture/policy migration and
 central DTO/facade deletion remain next work; full0121 is still Proposed.
 
+The [typed policy successor](../../knowledge/engineering/verification/2026-10/2026-10-31T192756Z-original-typed-render-policy-capture-and-complete-consumer-qualification-df7f9377f51142b78060b53617c800a1.md)
+now carries original selected captures through Runtime windows, Scene, Canvas, embedded Game and
+independent image consumers. Explicit capture/window/stock-policy/domain plugins replace central
+payload fields, collection matches and combined facades. Installation close preserves accepted
+execution; exact final-image UI reports and original move-only sidecars retain separate custody.
+The independent scalar renderer qualifies ordinary ECS/window capture and original-input image
+reconstruction without stock drawing or a private executor. Scoped ordinary336/Editor268,
+Root745 plus corrected Canvas2, final changed-consumer4/Reference12, native owners19/Editor8,
+independent image3/program8 and final alternate window1 supply actual evidence. The record
+distinguishes pre-correction runs, minimal/portable compile and final correctness checks. Complete
+View/history groups, independent streams and Nara-drawn composition remain open; full0121 stays
+Proposed.
+
 The [stock image successor](../../knowledge/engineering/verification/2026-10/2026-10-31T153613Z-stock-image-consumers-and-declared-worldcanvas-through-shared-programs-qualification-f6cfe4185aad459587db367d807aeb60.md)
 migrates real Scene, authoring Canvas, embedded Game and independent image consumers to the
 same typed-program native transaction. Ordered Sprite Views have one writer; mapped Game

@@ -14,14 +14,14 @@ use nara_app::{
 use nara_ecs::{Resource, World};
 use nara_render::{FrameStats, RenderBackendStatus, RenderFrame, RenderWindowPacket, WorldCanvas};
 
-#[cfg(feature = "ui-submitter")]
+#[cfg(feature = "stock-ui")]
 use crate::frame::WgpuUiSubmissionState;
 use crate::{
     WgpuRenderObservation,
     frame::{WgpuCapturedFrame, WgpuFrameCaptureError, WgpuFramePacketSlot},
     presented::WgpuPresentedFrameReceipt,
 };
-#[cfg(feature = "ui-submitter")]
+#[cfg(feature = "stock-ui")]
 use nara_ui_render::__private::{UiCompletedBackendOutcome, commit_ui_backend_outcomes};
 
 static NEXT_CONNECTION: AtomicU64 = AtomicU64::new(1);
@@ -56,13 +56,13 @@ struct TransferState {
 struct Transfer {
     identity: WgpuRuntimeCaptureIdentity,
     owner: Arc<Mutex<TransferState>>,
-    #[cfg(all(test, feature = "ui-submitter"))]
+    #[cfg(all(test, feature = "stock-ui"))]
     drop_gate: Option<Arc<drop_tests::TransferDropGate>>,
 }
 
 impl Drop for Transfer {
     fn drop(&mut self) {
-        #[cfg(all(test, feature = "ui-submitter"))]
+        #[cfg(all(test, feature = "stock-ui"))]
         if let Some(gate) = &self.drop_gate {
             gate.entered.send(()).unwrap();
             gate.release.lock().unwrap().recv().unwrap();
@@ -80,7 +80,7 @@ pub(crate) struct PendingFrame {
     pub(crate) frame: RenderFrame,
     pub(crate) window: Option<RenderWindowPacket>,
     pub(crate) canvas: Option<WorldCanvas>,
-    #[cfg(feature = "ui-submitter")]
+    #[cfg(feature = "stock-ui")]
     pub(crate) ui: Option<WgpuUiSubmissionState>,
 }
 
@@ -88,7 +88,7 @@ pub(crate) struct PendingFrame {
 #[derive(Debug)]
 pub struct WgpuRuntimeCapture {
     pub(crate) pending: PendingFrame,
-    #[cfg(feature = "ui-submitter")]
+    #[cfg(feature = "stock-ui")]
     pub(crate) completed: Vec<UiCompletedBackendOutcome>,
     // Original obligations must finish dropping before the logical in-flight barrier releases.
     transfer: Transfer,
@@ -125,7 +125,7 @@ impl WgpuRuntimeCapture {
             observation: Some(observation),
             presented_world,
             fault,
-            #[cfg(feature = "ui-submitter")]
+            #[cfg(feature = "stock-ui")]
             completed: self.completed,
         }
     }
@@ -140,7 +140,7 @@ pub struct WgpuRuntimeResult {
     observation: Option<WgpuRenderObservation>,
     presented_world: Option<nara_render::__private::PresentedWorldFrame>,
     fault: Option<nara_app::RuntimeFault>,
-    #[cfg(feature = "ui-submitter")]
+    #[cfg(feature = "stock-ui")]
     completed: Vec<UiCompletedBackendOutcome>,
     // This guard is last for the same reason as the original capture's guard.
     transfer: Transfer,
@@ -243,7 +243,7 @@ impl WgpuRuntimeConnection {
         let next = sequence
             .checked_add(1)
             .ok_or(WgpuRuntimeExchangeError::SequenceExhausted)?;
-        #[cfg(feature = "ui-submitter")]
+        #[cfg(feature = "stock-ui")]
         let completed = {
             let count = owner
                 .pending
@@ -271,11 +271,11 @@ impl WgpuRuntimeConnection {
             transfer: Transfer {
                 identity,
                 owner: Arc::clone(&self.owner),
-                #[cfg(all(test, feature = "ui-submitter"))]
+                #[cfg(all(test, feature = "stock-ui"))]
                 drop_gate: None,
             },
             pending,
-            #[cfg(feature = "ui-submitter")]
+            #[cfg(feature = "stock-ui")]
             completed,
         }))
     }
@@ -355,7 +355,7 @@ fn apply_connection(
             ConnectionOutput::Taken(world.resource_mut::<WgpuRuntimeConnection>().take(runtime))
         }
         ConnectionOperation::Return(result, present) => {
-            #[cfg(feature = "ui-submitter")]
+            #[cfg(feature = "stock-ui")]
             let mut result = result;
             let connection = world.resource::<WgpuRuntimeConnection>();
             let valid = Arc::ptr_eq(&connection.owner, &result.transfer.owner)
@@ -409,7 +409,7 @@ fn apply_connection(
                     .lock()
                     .unwrap_or_else(|error| error.into_inner())
                     .closing;
-            #[cfg(feature = "ui-submitter")]
+            #[cfg(feature = "stock-ui")]
             {
                 if retiring
                     && let Some(receiver) =
@@ -485,7 +485,7 @@ pub fn cancel_runtime_frame(capture: WgpuRuntimeCapture) -> WgpuRuntimeResult {
         observation: None,
         presented_world: None,
         fault: None,
-        #[cfg(feature = "ui-submitter")]
+        #[cfg(feature = "stock-ui")]
         completed: capture.completed,
     }
 }
@@ -627,6 +627,6 @@ pub(crate) fn install(app: &mut App) -> Result<(), PluginError> {
 #[path = "runtime_tests.rs"]
 mod tests;
 
-#[cfg(all(test, feature = "ui-submitter"))]
+#[cfg(all(test, feature = "stock-ui"))]
 #[path = "runtime_drop_tests.rs"]
 mod drop_tests;

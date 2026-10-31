@@ -15,7 +15,7 @@ use nara_ui_kernel::{
     UiNode, UiRoot, UiRootKey, UiStyle, UiSurfaceId, UiTheme, UiVisual,
 };
 
-fn captured_images(editor: bool, shared: bool) -> WgpuCapturedFrame {
+fn captured_images(editor: bool, shared: bool) -> LegacyWgpuCapturedFrame {
     let mut app = App::new();
     app.add_plugins((
         nara_reflect::ComponentRegistryPlugin,
@@ -156,9 +156,9 @@ fn captured_images(editor: bool, shared: bool) -> WgpuCapturedFrame {
         let ui = nara_ui_render::UiPresentationPlanner::default()
             .plan(frame, target, &images)
             .unwrap();
-        WgpuCapturedFrame {
+        LegacyWgpuCapturedFrame {
             topology,
-            payload: WgpuFramePayload {
+            payload: LegacyWgpuFramePayload {
                 primary_window_id: Some(WindowId::PRIMARY),
                 sprite_batches: Some(
                     world

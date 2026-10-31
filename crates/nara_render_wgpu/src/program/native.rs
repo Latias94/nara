@@ -25,7 +25,7 @@ pub struct WgpuFeaturePreflightContext<'a> {
     limits: &'a wgpu::Limits,
     features: wgpu::Features,
     known_cost: &'a mut NativePreparationCost,
-    #[cfg(any(feature = "sprite-submitter", feature = "ui-submitter"))]
+    #[cfg(any(feature = "stock-sprite", feature = "stock-ui"))]
     stock_images: &'a mut crate::stock_quad::StockImagePreflight,
 }
 
@@ -62,7 +62,7 @@ impl WgpuFeaturePreflightContext<'_> {
         Ok(())
     }
 
-    #[cfg(any(feature = "sprite-submitter", feature = "ui-submitter"))]
+    #[cfg(any(feature = "stock-sprite", feature = "stock-ui"))]
     pub(crate) fn collect_stock_images(
         &mut self,
         batches: &Arc<[crate::quad::WgpuQuadBatch]>,
@@ -183,18 +183,18 @@ impl<'a> WgpuOperationResources<'a> {
 pub struct WgpuFeaturePrepareContext<'a> {
     preparation: crate::preparation::NativePreparation<'a>,
     resources: WgpuOperationResources<'a>,
-    #[cfg(any(feature = "sprite-submitter", feature = "ui-submitter"))]
+    #[cfg(any(feature = "stock-sprite", feature = "stock-ui"))]
     stock_resources: &'a mut crate::stock_quad::StockQuadResources,
-    #[cfg(any(feature = "sprite-submitter", feature = "ui-submitter"))]
+    #[cfg(any(feature = "stock-sprite", feature = "stock-ui"))]
     instance_reservations: &'a mut Vec<crate::budget::InstanceReservation>,
-    #[cfg(any(feature = "sprite-submitter", feature = "ui-submitter"))]
+    #[cfg(any(feature = "stock-sprite", feature = "stock-ui"))]
     epoch_lost: &'a std::sync::atomic::AtomicBool,
-    #[cfg(any(feature = "sprite-submitter", feature = "ui-submitter"))]
+    #[cfg(any(feature = "stock-sprite", feature = "stock-ui"))]
     frame_index: u64,
 }
 
 impl<'a> WgpuFeaturePrepareContext<'a> {
-    #[cfg(any(feature = "sprite-submitter", feature = "ui-submitter"))]
+    #[cfg(any(feature = "stock-sprite", feature = "stock-ui"))]
     pub(crate) fn prepare_stock_draw(
         &mut self,
         batches: &Arc<[crate::quad::WgpuQuadBatch]>,
@@ -317,13 +317,13 @@ pub(crate) struct EncodedProgram {
 pub(crate) struct FeaturePreparationAttempt {
     pub(crate) touched_instances: Vec<u64>,
     pub(crate) native_started: bool,
-    #[cfg(any(feature = "sprite-submitter", feature = "ui-submitter"))]
+    #[cfg(any(feature = "stock-sprite", feature = "stock-ui"))]
     instance_reservations: Vec<crate::budget::InstanceReservation>,
 }
 
 impl FeaturePreparationAttempt {
     pub(crate) fn commit_instance_reservations(&mut self) {
-        #[cfg(any(feature = "sprite-submitter", feature = "ui-submitter"))]
+        #[cfg(any(feature = "stock-sprite", feature = "stock-ui"))]
         for reservation in &mut self.instance_reservations {
             reservation.commit();
         }
@@ -339,7 +339,7 @@ pub(crate) fn prepare_and_encode(
     reservation: &mut WgpuSubmissionReservation,
     feature_attempt: &mut FeaturePreparationAttempt,
     _host_frame_index: u64,
-    #[cfg(any(feature = "sprite-submitter", feature = "ui-submitter"))]
+    #[cfg(any(feature = "stock-sprite", feature = "stock-ui"))]
     stock_resources: &mut crate::stock_quad::StockQuadResources,
     local_target: Option<&HostProgramTexture>,
     finalization_cost: NativePreparationCost,
@@ -355,7 +355,7 @@ pub(crate) fn prepare_and_encode(
         validate_local_target(program, namespace, producer, target)?;
     }
     feature_attempt.touched_instances = reserved(compiled.operations.len())?;
-    #[cfg(any(feature = "sprite-submitter", feature = "ui-submitter"))]
+    #[cfg(any(feature = "stock-sprite", feature = "stock-ui"))]
     {
         feature_attempt.instance_reservations = reserved(compiled.operations.len())?;
     }
@@ -387,13 +387,13 @@ pub(crate) fn prepare_and_encode(
 
     let enabled_limits = namespace.device.limits();
     let mut known_cost = finalization_cost;
-    #[cfg(any(feature = "sprite-submitter", feature = "ui-submitter"))]
+    #[cfg(any(feature = "stock-sprite", feature = "stock-ui"))]
     let mut stock_images = crate::stock_quad::StockImagePreflight::new(compiled.operations.len())?;
     let mut preflight = WgpuFeaturePreflightContext {
         limits: &enabled_limits,
         features: namespace.device.features(),
         known_cost: &mut known_cost,
-        #[cfg(any(feature = "sprite-submitter", feature = "ui-submitter"))]
+        #[cfg(any(feature = "stock-sprite", feature = "stock-ui"))]
         stock_images: &mut stock_images,
     };
     for operation in graph.operations() {
@@ -406,7 +406,7 @@ pub(crate) fn prepare_and_encode(
             capture.preflight(&mut preflight)?;
         }
     }
-    #[cfg(any(feature = "sprite-submitter", feature = "ui-submitter"))]
+    #[cfg(any(feature = "stock-sprite", feature = "stock-ui"))]
     stock_images.validate(stock_resources)?;
 
     compiled
@@ -430,7 +430,7 @@ pub(crate) fn prepare_and_encode(
         .ok_or(GraphError::LimitExceeded(
             crate::LimitKind::SubmissionResources,
         ))?;
-    #[cfg(any(feature = "sprite-submitter", feature = "ui-submitter"))]
+    #[cfg(any(feature = "stock-sprite", feature = "stock-ui"))]
     let automatic_entries = {
         let cost = stock_images.cost()?;
         compiled
@@ -559,13 +559,13 @@ pub(crate) fn prepare_and_encode(
                     reservation,
                 ),
                 resources: scoped,
-                #[cfg(any(feature = "sprite-submitter", feature = "ui-submitter"))]
+                #[cfg(any(feature = "stock-sprite", feature = "stock-ui"))]
                 stock_resources,
-                #[cfg(any(feature = "sprite-submitter", feature = "ui-submitter"))]
+                #[cfg(any(feature = "stock-sprite", feature = "stock-ui"))]
                 instance_reservations: &mut feature_attempt.instance_reservations,
-                #[cfg(any(feature = "sprite-submitter", feature = "ui-submitter"))]
+                #[cfg(any(feature = "stock-sprite", feature = "stock-ui"))]
                 epoch_lost: &namespace.epoch_lost,
-                #[cfg(any(feature = "sprite-submitter", feature = "ui-submitter"))]
+                #[cfg(any(feature = "stock-sprite", feature = "stock-ui"))]
                 frame_index: _host_frame_index,
             },
         )?;
@@ -724,11 +724,13 @@ fn native_matches_descriptor(storage: &ProgramResourceStorage) -> bool {
                 && texture.format() == native.format
                 && texture.mip_level_count() == native.mip_level_count
                 && texture.sample_count() == native.sample_count
-                && texture.usage() == native.usage
+                // The graph limits this candidate's accesses. Host-reserved storage can
+                // support additional operations without granting them to this program.
+                && texture.usage().contains(native.usage)
                 && view.texture() == texture
         }
         (ResourceDescriptor::Buffer { native, .. }, NativeResource::Buffer(buffer)) => {
-            buffer.size() == native.size && buffer.usage() == native.usage
+            buffer.size() == native.size && buffer.usage().contains(native.usage)
         }
         _ => false,
     }

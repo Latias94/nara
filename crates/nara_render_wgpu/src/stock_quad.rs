@@ -320,7 +320,7 @@ impl StockQuadResources {
         frame_index: u64,
     ) -> Result<PreparedSubmitterDraw, WgpuRenderError> {
         let batches = crate::allocation::take_test_batches().unwrap_or(lowered.batches);
-        #[cfg(feature = "ui-submitter")]
+        #[cfg(feature = "stock-ui")]
         let ui_packets = lowered.ui_packets;
         let prepared = self.prepare_batches(
             preparation,
@@ -334,9 +334,9 @@ impl StockQuadResources {
             buffers: prepared.buffers,
             draw_calls: prepared.draw_calls,
             sprites: prepared.sprites,
-            #[cfg(feature = "ui-submitter")]
+            #[cfg(feature = "stock-ui")]
             image_sprites: prepared.image_sprites,
-            #[cfg(feature = "ui-submitter")]
+            #[cfg(feature = "stock-ui")]
             ui_packets,
             instance_reservation: prepared.instance_reservation,
         })
@@ -728,7 +728,7 @@ mod tests {
                                 texture: image,
                             }),
                         }],
-                        #[cfg(feature = "ui-submitter")]
+                        #[cfg(feature = "stock-ui")]
                         ui_packets: Vec::new(),
                     },
                     8,

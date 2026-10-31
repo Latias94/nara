@@ -10,15 +10,15 @@ use bytemuck::{Pod, Zeroable};
 use nara_image::PreparedImageSnapshot;
 use nara_material::{AlphaMode2d, Material2dDefinition, SamplerDescriptor};
 use nara_render::{RenderResourceKey, ViewportRect};
-#[cfg(feature = "ui-submitter")]
+#[cfg(feature = "stock-ui")]
 use nara_ui_render::{UiGlyphAtlasPageKey, UiGlyphAtlasPageSnapshot};
 use thiserror::Error;
 
 const VERTICES_PER_QUAD: u32 = 6;
 pub(crate) const WGPU_QUAD_SHAPE_PLAIN: u32 = 0;
-#[cfg(feature = "ui-submitter")]
+#[cfg(feature = "stock-ui")]
 pub(crate) const WGPU_QUAD_SHAPE_ROUNDED_FILL: u32 = 1;
-#[cfg(feature = "ui-submitter")]
+#[cfg(feature = "stock-ui")]
 pub(crate) const WGPU_QUAD_SHAPE_ROUNDED_BORDER: u32 = 2;
 
 #[repr(C)]
@@ -55,7 +55,7 @@ const QUAD_INSTANCE_ATTRIBUTES: [wgpu::VertexAttribute; 11] = wgpu::vertex_attr_
 pub(crate) enum WgpuQuadTextureKey {
     Fallback,
     Image(RenderResourceKey),
-    #[cfg(feature = "ui-submitter")]
+    #[cfg(feature = "stock-ui")]
     Glyph(UiGlyphAtlasPageKey),
 }
 
@@ -63,7 +63,7 @@ pub(crate) enum WgpuQuadTextureKey {
 pub(crate) enum WgpuQuadTexture {
     Fallback,
     Image(PreparedImageSnapshot),
-    #[cfg(feature = "ui-submitter")]
+    #[cfg(feature = "stock-ui")]
     Glyph(UiGlyphAtlasPageSnapshot),
 }
 
@@ -72,7 +72,7 @@ impl WgpuQuadTexture {
         match self {
             Self::Fallback => WgpuQuadTextureKey::Fallback,
             Self::Image(snapshot) => WgpuQuadTextureKey::Image(snapshot.identity().key()),
-            #[cfg(feature = "ui-submitter")]
+            #[cfg(feature = "stock-ui")]
             Self::Glyph(page) => WgpuQuadTextureKey::Glyph(page.key()),
         }
     }

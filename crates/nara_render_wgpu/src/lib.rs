@@ -2,7 +2,7 @@
 
 mod allocation;
 mod backend;
-#[cfg(any(feature = "sprite-submitter", feature = "ui-submitter"))]
+#[cfg(any(feature = "stock-sprite", feature = "stock-ui"))]
 mod budget;
 mod canvas;
 mod device;
@@ -13,60 +13,53 @@ mod host;
 mod observation;
 mod output;
 mod plugin;
+mod policy;
 mod preparation;
 mod presentation;
 mod presented;
 mod program;
-#[cfg(any(feature = "sprite-submitter", feature = "ui-submitter"))]
+#[cfg(any(feature = "stock-sprite", feature = "stock-ui"))]
 mod quad;
-#[cfg(all(test, any(feature = "sprite-submitter", feature = "ui-submitter")))]
+#[cfg(all(test, any(feature = "stock-sprite", feature = "stock-ui")))]
 mod readback_tests;
 mod requirements;
 mod retirement;
 mod runtime;
-#[cfg(feature = "sprite-submitter")]
+#[cfg(feature = "stock-sprite")]
 mod sprite;
-#[cfg(all(test, feature = "sprite-submitter"))]
+#[cfg(all(test, feature = "stock-sprite"))]
 mod sprite_probe;
 mod stock_policy;
-#[cfg(any(feature = "sprite-submitter", feature = "ui-submitter"))]
+#[cfg(any(feature = "stock-sprite", feature = "stock-ui"))]
 mod stock_quad;
 mod submission;
 mod surface;
 mod telemetry;
-#[cfg(any(feature = "sprite-submitter", feature = "ui-submitter"))]
+#[cfg(any(feature = "stock-sprite", feature = "stock-ui"))]
 mod texture;
-#[cfg(feature = "ui-submitter")]
+#[cfg(feature = "stock-ui")]
 mod ui;
-#[cfg(all(test, feature = "sprite-submitter"))]
+#[cfg(all(test, feature = "stock-sprite"))]
 mod view_probe;
 
 use crate::backend::{WgpuRenderBackend, render_backend_state};
-use crate::frame::{WgpuFrameCaptureError, WgpuFramePacketSlot};
-#[cfg(any(feature = "sprite-submitter", feature = "ui-submitter"))]
+#[cfg(test)]
+use crate::frame::WgpuFramePacketSlot;
+#[cfg(any(feature = "stock-sprite", feature = "stock-ui"))]
 use crate::quad::WgpuQuadBatch;
-#[cfg(all(test, any(feature = "sprite-submitter", feature = "ui-submitter")))]
+#[cfg(all(test, any(feature = "stock-sprite", feature = "stock-ui")))]
 use crate::quad::{WgpuQuadBatchBuffer, WgpuQuadPipelineDrawRef, draw_quad_batch_buffers};
 use crate::surface::SurfaceDropReason;
 #[cfg(test)]
 use crate::surface::WgpuSurfaceState;
-use nara_app::{
-    App, CoreStage, FrameExecutionStart, Plugin, PluginError, RuntimeFault, RuntimeFaultKind,
-    RuntimeFaultReporter, RuntimeGeneration,
-};
-use nara_ecs::{Query, Res, ResMut, schedule::IntoScheduleConfigs};
-use nara_render::{
-    ExtractedViews, RenderBackendState, RenderBackendStatus, RenderFrame, RenderFrameSkipReason,
-    build_render_frame_packet_with_world_canvas,
-};
-#[cfg(feature = "ui-submitter")]
-use nara_ui_render::__private::UiBackendSubmissionReader;
+use nara_app::{RuntimeFault, RuntimeFaultKind};
+use nara_render::{RenderBackendStatus, RenderFrameSkipReason};
 #[cfg(test)]
 use nara_window::WindowId;
-use nara_window::{PrimaryWindowId, Window, backend::WindowPresentationRequirement};
 
 pub use crate::backend::{WgpuBackendState, WgpuFrameTransactionStats};
 pub use crate::error::WgpuRenderError;
+pub use crate::frame::{WgpuFrameCaptureError, WgpuFrameSet as WgpuPolicyCaptureSet};
 pub use crate::graph::{
     AccessRole, GraphError, GraphLimits, LimitKind, TextureAlpha, TextureTransfer,
 };
@@ -75,15 +68,28 @@ pub use crate::host::{
     WgpuRenderHostError, WgpuRenderProducer, WgpuRenderProducerId,
 };
 pub use crate::observation::WgpuRenderObservation;
-pub use crate::output::{WgpuDisplayOccurrence, WgpuImageDisplay, WgpuImageInput, WgpuImageOutput};
-#[cfg(feature = "sprite-submitter")]
+pub use crate::output::{WgpuDisplayOccurrence, WgpuImageDisplay, WgpuImageOutput};
 pub use crate::plugin::{
-    WGPU_SPRITE_SUBMITTER_PLUGIN_DECLARATION, WGPU_SPRITE_SUBMITTER_PLUGIN_ID,
-    WgpuSpriteSubmitterPlugin,
+    WGPU_BACKEND_SHUTDOWN_OBLIGATION, WGPU_CAPTURE_PLUGIN_DECLARATION, WGPU_CAPTURE_PLUGIN_ID,
+    WGPU_STOCK_POLICY_PLUGIN_DECLARATION, WGPU_STOCK_POLICY_PLUGIN_ID,
+    WGPU_WINDOW_PRESENTATION_PLUGIN_DECLARATION, WGPU_WINDOW_PRESENTATION_PLUGIN_ID,
+    WgpuCapturePlugin, WgpuPolicyFrameWriter, WgpuStockPolicyPlugin, WgpuWindowPresentationPlugin,
+    install_wgpu_policy,
 };
-#[cfg(feature = "ui-submitter")]
+#[cfg(feature = "stock-sprite")]
 pub use crate::plugin::{
-    WGPU_UI_SUBMITTER_PLUGIN_DECLARATION, WGPU_UI_SUBMITTER_PLUGIN_ID, WgpuUiSubmitterPlugin,
+    WGPU_STOCK_SPRITE_PLUGIN_DECLARATION, WGPU_STOCK_SPRITE_PLUGIN_ID, WgpuStockSpritePlugin,
+};
+#[cfg(feature = "stock-ui")]
+pub use crate::plugin::{
+    WGPU_STOCK_UI_PLUGIN_DECLARATION, WGPU_STOCK_UI_PLUGIN_ID, WgpuStockUiPlugin,
+};
+#[cfg(feature = "stock-ui")]
+pub use crate::policy::WgpuUiProgramBinding;
+pub use crate::policy::{
+    WgpuPolicyBuildContext, WgpuPolicyDefinition, WgpuPolicyFrameFacts, WgpuPolicyInstallation,
+    WgpuPolicyInstallationId, WgpuPolicyInstanceContext, WgpuPolicyProgram, WgpuRenderInput,
+    WgpuRenderPolicy,
 };
 pub use crate::presented::WgpuSubmittedImageReceipt;
 pub use crate::program::{
@@ -95,11 +101,17 @@ pub use crate::program::{
     WgpuRenderProgramBuilder, WgpuRenderProgramError,
 };
 pub use crate::requirements::{WgpuDeviceRequirements, WgpuDeviceRequirementsError};
+pub use crate::stock_policy::{WgpuStockCapture, WgpuStockPolicy, WgpuStockPolicyInstances};
 pub use crate::submission::{WgpuSubmissionPrefix, WgpuSubmissionPrefixError};
 pub use crate::telemetry::{
     MAX_ADAPTER_SUMMARY_FIELD_BYTES, MAX_BUFFERED_FRAME_COMPLETIONS, MAX_PENDING_FRAME_COMPLETIONS,
     WgpuAdapterSummary, WgpuBackendTelemetryConfig, WgpuFrameCompletionSample,
     WgpuFrameCompletionStats, WgpuGpuResourceStats, WgpuTelemetryConfigError,
+};
+#[cfg(feature = "stock-ui")]
+pub use crate::{
+    host::{WgpuUiImageSubmission, WgpuUiSubmission, WgpuUiSubmitFailure},
+    plugin::WgpuPolicyUiCaptureFailure,
 };
 
 pub use crate::surface::{
@@ -107,11 +119,18 @@ pub use crate::surface::{
     choose_present_mode, clear_color_to_wgpu, map_present_mode, surface_acquire_policy,
     surface_resize_action,
 };
-#[cfg(any(feature = "sprite-submitter", feature = "ui-submitter"))]
+#[cfg(any(feature = "stock-sprite", feature = "stock-ui"))]
 pub use crate::texture::WgpuTextureCacheStats as WgpuRenderTextureCacheStats;
+#[cfg(feature = "stock-ui")]
+pub use crate::ui::{
+    UiCapture as WgpuUiCapture, UiFeature as WgpuUiFeature, UiReport as WgpuUiReport,
+};
 
 #[doc(hidden)]
 pub mod __private {
+    pub use crate::frame::{
+        WgpuCapturedPolicyBatch, WgpuFrameCaptureError, take_captured_policy_batch,
+    };
     #[cfg(feature = "editor-imgui")]
     pub use crate::host::{
         WgpuEditorImguiFrame, WgpuEditorImguiRenderer, WgpuEditorImguiRendererFailure,
@@ -123,7 +142,7 @@ pub mod __private {
             WgpuImageTargetActivation, WgpuImageTargetIdentity, WgpuImageTargetReservation,
             WgpuRenderHost, WgpuRenderHostError, WgpuRenderProducer, WgpuRenderProducerId,
         },
-        output::{WgpuDisplayOccurrence, WgpuImageDisplay, WgpuImageInput, WgpuImageOutput},
+        output::{WgpuDisplayOccurrence, WgpuImageDisplay, WgpuImageOutput},
         presented::{
             WgpuEditorCompositeReceipt, WgpuEditorWindowPresentedReceipt,
             WgpuPresentedFrameReceipt, WgpuSubmittedImageReceipt,
@@ -137,15 +156,13 @@ pub mod __private {
         },
     };
 
-    #[cfg(feature = "ui-submitter")]
+    #[cfg(feature = "stock-ui")]
     pub use crate::backend::WgpuSubmittedUiFacts;
 
-    #[cfg(feature = "ui-submitter")]
-    pub use crate::host::{
-        WgpuEditorUiImageSubmission, WgpuEditorUiSubmission, WgpuEditorUiSubmitFailure,
-    };
+    #[cfg(feature = "stock-ui")]
+    pub use crate::host::{WgpuUiImageSubmission, WgpuUiSubmission, WgpuUiSubmitFailure};
 
-    #[cfg(feature = "ui-submitter")]
+    #[cfg(feature = "stock-ui")]
     #[must_use]
     pub fn submitted_ui_facts(
         backend: &crate::WgpuRenderObservation,
@@ -166,226 +183,25 @@ pub mod __private {
 
 const WGPU_RENDER_BACKEND: &str = "wgpu";
 
-#[cfg(feature = "ui-submitter")]
+#[cfg(feature = "stock-ui")]
 fn saturating_u64(value: usize) -> u64 {
     u64::try_from(value).unwrap_or(u64::MAX)
-}
-
-#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
-pub struct WgpuRenderPlugin;
-
-pub const WGPU_RENDER_PLUGIN_ID: nara_app::PluginId = nara_app::PluginId::new("nara.render-wgpu");
-pub const WGPU_BACKEND_SHUTDOWN_OBLIGATION: nara_app::PluginShutdownObligationId =
-    nara_app::PluginShutdownObligationId::new("nara.render-wgpu.backend");
-const WGPU_RENDER_PRODUCT_REQUIREMENTS: &[nara_app::PluginProductCapability] =
-    &[nara_app::PluginProductCapability::new("render-wgpu")];
-const WGPU_RENDER_PLUGIN_REQUIREMENTS: &[nara_app::PluginId] = &[nara_render::RENDER_PLUGIN_ID];
-pub const WGPU_RENDER_PLUGIN_DECLARATION: nara_app::PluginDeclaration =
-    nara_app::PluginDeclaration::new(WGPU_RENDER_PLUGIN_ID, nara_app::PluginCategory::Backend)
-        .requires_plugins(WGPU_RENDER_PLUGIN_REQUIREMENTS)
-        .requires_product_capabilities(WGPU_RENDER_PRODUCT_REQUIREMENTS)
-        .shutdown_obligations(&[WGPU_BACKEND_SHUTDOWN_OBLIGATION]);
-
-impl Plugin for WgpuRenderPlugin {
-    fn declaration() -> &'static nara_app::PluginDeclaration {
-        &WGPU_RENDER_PLUGIN_DECLARATION
-    }
-
-    fn build(&self, app: &mut App) -> Result<(), PluginError> {
-        app.init_resource::<WgpuRenderObservation>()?;
-        app.init_resource::<WgpuFramePacketSlot>()?;
-        app.init_resource::<RenderBackendStatus>()?;
-        let world = app.world_mut()?;
-        if let Some(requirement) = world.get_resource::<WindowPresentationRequirement>() {
-            return Err(PluginError::SetupFailed {
-                plugin: WGPU_RENDER_PLUGIN_ID,
-                message: format!(
-                    "native window presentation is already required by {}",
-                    requirement.backend()
-                ),
-            });
-        }
-        world.insert_resource(WindowPresentationRequirement::new(WGPU_RENDER_BACKEND));
-        world
-            .resource_mut::<RenderBackendStatus>()
-            .mark_state(WGPU_RENDER_BACKEND, RenderBackendState::Uninitialized);
-        app.configure_sets(
-            CoreStage::Render,
-            (
-                frame::WgpuFrameSet::Reset,
-                frame::WgpuFrameSet::CollectSprite,
-                frame::WgpuFrameSet::CollectUi,
-                frame::WgpuFrameSet::Seal,
-            )
-                .chain()
-                .after(nara_render::begin_render_frame),
-        )?;
-        app.add_systems(
-            CoreStage::Render,
-            (
-                reset_wgpu_frame_packet.in_set(frame::WgpuFrameSet::Reset),
-                capture_wgpu_frame_packet.in_set(frame::WgpuFrameSet::Seal),
-            ),
-        )?;
-        runtime::install(app)?;
-        Ok(())
-    }
 }
 
 #[cfg(test)]
 impl PreparedSubmitterDraw {
     fn instance_buffer_bytes(&self) -> u64 {
-        #[cfg(any(feature = "sprite-submitter", feature = "ui-submitter"))]
+        #[cfg(any(feature = "stock-sprite", feature = "stock-ui"))]
         {
             self.buffers.iter().fold(0_u64, |total, buffer| {
                 total.saturating_add(buffer.logical_bytes())
             })
         }
-        #[cfg(not(any(feature = "sprite-submitter", feature = "ui-submitter")))]
+        #[cfg(not(any(feature = "stock-sprite", feature = "stock-ui")))]
         {
             0
         }
     }
-}
-
-fn reset_wgpu_frame_packet(
-    mut slot: ResMut<WgpuFramePacketSlot>,
-    connection: Res<runtime::WgpuRuntimeConnection>,
-    authority: Res<runtime::ConnectionAuthority>,
-    faults: Option<Res<RuntimeFaultReporter>>,
-) {
-    if !authority.is_current(&connection) {
-        if let Some(faults) = faults {
-            faults.report(RuntimeFault::engine(
-                RuntimeFaultKind::RequiredService,
-                "nara.render-wgpu.connection",
-            ));
-        }
-        return;
-    }
-    if connection.can_capture_from(&authority) {
-        slot.reset();
-    }
-}
-
-#[cfg(feature = "sprite-submitter")]
-fn collect_wgpu_sprite_payload(
-    sprite_batches: Res<nara_sprite_render::__private::SpriteBatches>,
-    mut slot: ResMut<WgpuFramePacketSlot>,
-    connection: Res<runtime::WgpuRuntimeConnection>,
-    authority: Res<runtime::ConnectionAuthority>,
-) {
-    if connection.can_capture_from(&authority) {
-        slot.collect_sprite(sprite_batches.clone());
-    }
-}
-
-#[cfg(feature = "ui-submitter")]
-fn collect_wgpu_ui_payload(
-    mut submissions: UiBackendSubmissionReader,
-    mut slot: ResMut<WgpuFramePacketSlot>,
-    connection: Res<runtime::WgpuRuntimeConnection>,
-    authority: Res<runtime::ConnectionAuthority>,
-) {
-    if !connection.can_capture_from(&authority) || !slot.accepts_ui_collection() {
-        return;
-    }
-    match submissions.take() {
-        Ok(frame) => {
-            let (packets, submissions) = frame.into_parts();
-            slot.collect_ui(packets, submissions);
-        }
-        Err(error) => slot.reject_ui_collection(error),
-    }
-}
-
-fn capture_wgpu_frame_packet(
-    generation: Option<Res<RuntimeGeneration>>,
-    frame_start: Res<FrameExecutionStart>,
-    frame: Res<RenderFrame>,
-    primary_window_id: Option<Res<PrimaryWindowId>>,
-    windows: Query<&Window>,
-    views: Res<ExtractedViews>,
-    mut slot: ResMut<WgpuFramePacketSlot>,
-    mut connection: ResMut<runtime::WgpuRuntimeConnection>,
-    authority: Res<runtime::ConnectionAuthority>,
-) {
-    if !connection.can_capture_from(&authority) {
-        return;
-    }
-    let primary_window_id = primary_window_id.map(|primary| primary.0);
-    let window = primary_window_id
-        .and_then(|id| windows.iter().find(|window| window.id == id))
-        .map(|window| nara_render::RenderWindowPacket {
-            id: window.id,
-            resolution: window.resolution,
-            present_mode: window.present_mode,
-        });
-    let Some(generation) = generation.map(|generation| *generation) else {
-        slot.reject_capture(WgpuFrameCaptureError::MissingRuntimeGeneration);
-        publish_wgpu_capture(
-            &mut slot,
-            &mut connection,
-            *frame,
-            window,
-            views.world_canvas(),
-        );
-        return;
-    };
-    if !slot.payload_matches_topology(
-        &views,
-        #[cfg(feature = "ui-submitter")]
-        primary_window_id,
-    ) {
-        slot.reject_capture(WgpuFrameCaptureError::BatchTopologyMismatch);
-        publish_wgpu_capture(
-            &mut slot,
-            &mut connection,
-            *frame,
-            window,
-            views.world_canvas(),
-        );
-        return;
-    }
-    let captured = build_render_frame_packet_with_world_canvas(
-        generation,
-        frame.index,
-        primary_window_id,
-        windows.iter(),
-        &views,
-        views.world_canvas(),
-    );
-    slot.seal(
-        #[cfg(feature = "ui-submitter")]
-        primary_window_id,
-        captured,
-        frame_start.frame(),
-        frame_start.started_at(),
-    );
-    publish_wgpu_capture(
-        &mut slot,
-        &mut connection,
-        *frame,
-        window,
-        views.world_canvas(),
-    );
-}
-
-fn publish_wgpu_capture(
-    slot: &mut WgpuFramePacketSlot,
-    connection: &mut runtime::WgpuRuntimeConnection,
-    frame: RenderFrame,
-    window: Option<nara_render::RenderWindowPacket>,
-    canvas: Option<nara_render::WorldCanvas>,
-) {
-    connection.publish(runtime::PendingFrame {
-        captured: slot.take_capture().unwrap_or(Ok(None)),
-        frame,
-        window,
-        canvas,
-        #[cfg(feature = "ui-submitter")]
-        ui: slot.take_ui_submissions(),
-    });
 }
 
 // Private legacy quad oracle for native readback, allocation and Runtime custody tests.
@@ -393,17 +209,17 @@ fn publish_wgpu_capture(
 #[cfg(test)]
 #[derive(Debug, Default)]
 struct PreparedSubmitterDraw {
-    #[cfg(any(feature = "sprite-submitter", feature = "ui-submitter"))]
+    #[cfg(any(feature = "stock-sprite", feature = "stock-ui"))]
     pipelines: Vec<WgpuQuadPipelineDrawRef>,
-    #[cfg(any(feature = "sprite-submitter", feature = "ui-submitter"))]
+    #[cfg(any(feature = "stock-sprite", feature = "stock-ui"))]
     buffers: Vec<WgpuQuadBatchBuffer>,
-    #[cfg(feature = "ui-submitter")]
+    #[cfg(feature = "stock-ui")]
     ui_packets: Vec<ui::WgpuLoweredUiPacketFacts>,
     draw_calls: u32,
     sprites: u32,
-    #[cfg(feature = "ui-submitter")]
+    #[cfg(feature = "stock-ui")]
     image_sprites: u32,
-    #[cfg(any(feature = "sprite-submitter", feature = "ui-submitter"))]
+    #[cfg(any(feature = "stock-sprite", feature = "stock-ui"))]
     instance_reservation: Option<budget::InstanceReservation>,
 }
 
@@ -422,15 +238,15 @@ struct PreparedTargetDraw {
     canvas: Option<canvas::PreparedWorldCanvas>,
     draw_calls: u32,
     sprites: u32,
-    #[cfg(feature = "ui-submitter")]
+    #[cfg(feature = "stock-ui")]
     image_sprites: u32,
-    #[cfg(feature = "ui-submitter")]
+    #[cfg(feature = "stock-ui")]
     ui_packets: Vec<ui::WgpuLoweredUiPacketFacts>,
 }
 
 #[cfg(test)]
 impl PreparedTargetDraw {
-    #[cfg(any(feature = "sprite-submitter", feature = "ui-submitter"))]
+    #[cfg(any(feature = "stock-sprite", feature = "stock-ui"))]
     fn commit_instance_reservations(&mut self) {
         for view in &mut self.views {
             if let Some(reservation) = view.draw.instance_reservation.as_mut() {
@@ -447,7 +263,7 @@ impl PreparedTargetDraw {
     ) {
         self.draw_calls = self.draw_calls.saturating_add(draw.draw_calls);
         self.sprites = self.sprites.saturating_add(draw.sprites);
-        #[cfg(feature = "ui-submitter")]
+        #[cfg(feature = "stock-ui")]
         {
             self.image_sprites = self.image_sprites.saturating_add(draw.image_sprites);
             self.ui_packets.append(&mut draw.ui_packets);
@@ -519,7 +335,7 @@ fn encode_view_draws(
             0.0,
             1.0,
         );
-        #[cfg(any(feature = "sprite-submitter", feature = "ui-submitter"))]
+        #[cfg(any(feature = "stock-sprite", feature = "stock-ui"))]
         draw_quad_batch_buffers(
             &mut pass,
             &view.draw.pipelines,
@@ -595,7 +411,7 @@ fn handle_wgpu_render_error(
     ))
 }
 
-#[cfg(any(feature = "sprite-submitter", feature = "ui-submitter"))]
+#[cfg(any(feature = "stock-sprite", feature = "stock-ui"))]
 fn required_quad_pipeline_keys(
     batches: &[WgpuQuadBatch],
     format: wgpu::TextureFormat,
@@ -644,7 +460,7 @@ fn render_acquired_texture(
         label: Some("nara_wgpu_surface_encoder"),
     });
     encode_target_draw(&mut encoder, &view, draw);
-    #[cfg(any(feature = "sprite-submitter", feature = "ui-submitter"))]
+    #[cfg(any(feature = "stock-sprite", feature = "stock-ui"))]
     draw.commit_instance_reservations();
     queue.submit([encoder.finish()]);
     queue.present(surface_texture);

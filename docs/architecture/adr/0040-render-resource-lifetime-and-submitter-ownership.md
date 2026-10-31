@@ -2,7 +2,7 @@
 
 **Status**: Accepted
 **Date**: 2026-07-09
-**Last Revised**: 2026-10-31 (local Host custody and CPU contribution ownership)
+**Last Revised**: 2026-11-01 (original policy capture and concrete UI completion custody)
 **Refines**: ADR 0010, ADR 0017, ADR 0032, ADR 0033, ADR 0037
 **Refined By**: ADR 0046: Plugin Metadata and Default Plugin Groups; ADR 0053: Visibility,
 Culling, and Tilemap Render Cache (Superseded); ADR 0054: GPU Upload Budget and Buffer Allocation Policy; ADR
@@ -21,22 +21,31 @@ Scene View Execution and Picking Authority
 ## ADR 0106 Product-Contribution Refinement
 
 ADR 0106 distinguishes a closed first-party contribution plugin from an independently replaceable
-submitter SPI. `WgpuRenderPlugin` installs CPU capture, status and the finite result connection.
+submitter SPI. `WgpuCapturePlugin` installs CPU capture, status and the finite result connection.
 The concrete local WGPU Host owns device, queue, surface, cache and the sealed backend frame
-transaction. Concrete `WgpuSpriteSubmitterPlugin` and `WgpuUiSubmitterPlugin` may install the
-first-party systems that contribute already-owned CPU domain packets to that transaction, but
-they expose no submitter trait, registry, dynamic phase or backend-replacement contract. Their
+transaction. `WgpuWindowPresentationPlugin` selects the native-window consumer independently.
+`WgpuStockPolicyPlugin` selects the stock policy, while `WgpuStockSpritePlugin` and
+`WgpuStockUiPlugin` contribute already-owned CPU domain packets to that policy. They expose no
+submitter trait, registry, dynamic phase or backend-replacement contract. Their
 installation is selected by the requested product closure, never by whether their Cargo code was
 compiled. A compiled but uninstalled contribution cannot drain, clear, bind or complete its domain
 queue; direct Rust products select the same concrete contribution explicitly.
 
+Accepted ADR0094's finite typed-policy refinement replaces the central package payload and
+combined image facade family. Original policy definitions, capture-admission installations,
+accepted input, producer-local CPU instances and epoch-local native state have distinct owners.
+Installation close refuses new capture without revoking accepted execution; original submission
+custody retains actual captures and instances through physical completion. Producer close remains
+irreversible. A concrete public UI bridge atomically accepts the original sidecar and capture or
+returns the sidecar; exact final-image/report binding remains separate from replayable paint data.
+This does not admit dynamic route replacement, code unload or the complete Proposed0121 contract.
+
 ## ADR 0096 Refinement
 
-`RenderPassPlan` remains a static engine-owned order. `RenderPassDependency` edge/cycle vocabulary,
-open-ended phase construction, and independently replaceable submitter plugins are not current
-compatibility promises because the stock capture/encode path cannot consume arbitrary external
-passes. Domain plugins own their batch data; a submitter SPI requires a complete external feature
-tracer before admission.
+`RenderPassPlan` describes the stock engine order. Open-ended phase construction and independently
+replaceable submitter plugins remain unadmitted. Accepted ADR0094 separately permits finite typed
+resource dependencies and native Features under the original Host, then original-definition policy
+capture. Domain plugins own their batch data; neither seam creates another submission authority.
 
 ## Immutable Output And Submitted-Use Refinement
 
@@ -65,7 +74,7 @@ These accepted responsibilities are being implemented under the
 the implementation ledger. The subsequent
 [finite captured-program refinement in ADR0094](0094-minimal-render-execution-boundary-and-evidence-gated-extensions.md#finite-captured-wgpu-programs)
 accepts typed texture/buffer programs through this same original Host custody. The complete
-Proposed0121 stock-policy, View/history and Editor composition contract remains separate.
+Proposed0121 View/history and Editor composition contract remains separate.
 
 ## Context
 
@@ -86,8 +95,9 @@ product contract must prevent:
 
 ## Decision
 
-nara keeps the Phase 1 renderer phase-first and graph-ready, but render resource lifetime and
-submitter ownership are explicit contracts.
+Nara keeps render resource lifetime explicit, with separate domain capture, policy composition
+and Host-owned native execution. ADR0094 owns the admitted finite typed resource graph and
+original-policy capture boundary; complete history and custom composition remain separate work.
 
 ```mermaid
 flowchart TD
@@ -95,9 +105,10 @@ flowchart TD
     Import --> Prepared[Backend-neutral prepared resource]
     Prepared --> Key[Stable render resource key + generation]
     Key --> Cache[Backend GPU cache]
-    Cache --> Submitter[Installed submitter systems]
-    Submitter --> Plan[RenderPassPlan]
-    Plan --> Backend[nara_render_wgpu submission]
+    Domain[Domain capture] --> Policy[Selected original policy]
+    Policy --> Program[Finite typed resource program]
+    Program --> Backend[nara_render_wgpu Host]
+    Cache --> Backend
 ```
 
 Rules:
@@ -123,17 +134,13 @@ Rules:
   rebuilt merely because it was unused for one frame.
 - Upload work is budgeted per frame and reported through render diagnostics or backend status
   resources, with details refined by ADR 0054.
-- Device loss clears backend-native caches, but prepared backend-neutral resources remain the source
-  for rebuilding after recovery. The current native baseline detects device loss and invalidates the
-  current backend generation; epoch-correlated bounded recovery remains future work.
-- `RenderPassPlan` remains the static engine-owned pass-order contract. The unconsumed public
-  `RenderPassDependency` edge/cycle surface should be removed or internalized; stock ordering can
-  validate phase presence/index directly. ADR 0111 resolves the first cross-target dependency with
-  one fixed private transaction. Later computed ordering, transient resources, or pass-produced
-  lifetimes require a new focused comparison of extended static phases, independent target
-  transactions, a minimal execution kernel, and a logical graph. The pressure does not itself
-  select `RenderGraph`.
-- The local WGPU Host owns native device/surface/backend resources; `WgpuRenderPlugin` owns their
+- Device loss invalidates the native epoch. Original immutable CPU inputs and prepared resources
+  remain available for explicit reconstruction on a replacement Host. Old native handles do not
+  become valid again, and current assets cannot substitute for an accepted input's captured facts.
+- `RenderPassPlan` describes stock logical phase order. Actual finite texture/buffer dependencies,
+  initialization and output groups use ADR0094's typed program through the same Host. A separate
+  dependency facade or independently submitting pass system cannot impersonate that transaction.
+- The local WGPU Host owns native device/surface/backend resources; `WgpuCapturePlugin` owns their
   CPU capture/result protocol. Sprite, tilemap, UI, text, gizmo, and future 3D domains own extraction
   and batch data. Stock wgpu may encode concrete batches in
   private feature-gated modules whose concrete first-party contribution plugins are installed only
@@ -149,6 +156,9 @@ Rules:
   keys, clip data, text runs later) rather than exposing sprite semantics as UI API.
 
 ## Alternatives Considered
+
+These alternatives record the original decision. The refinements above and ADR0094 govern the
+subsequently admitted finite graph and policy boundary.
 
 ### Option A: Adopt a Bevy-style render app and graph now
 
@@ -186,14 +196,14 @@ and submitter ownership mature enough for 2D, UI, and later 3D.
 | Reload behavior | Asset reload invalidates prepared/gpu resources by generation | Reload tests |
 | Feature decoupling | UI/sprite/text batch production and concrete wgpu encoders can be enabled independently from device/surface setup without claiming a submitter SPI | Feature/plugin tests |
 | Surface retirement | Surface loss retains provider ownership; shutdown and backend replacement retire surface ownership before provider/native target ownership | Window/wgpu lifecycle and platform smoke tests |
-| Execution-model trigger clarity | ADR 0111 closes the first fixed cross-target edge; later computed ordering or transient lifetime pressure requires a new focused decision | Design review |
+| Execution-model ownership | ADR0094 finite programs and policy capture share the original Host; complete View/history and custom composition remain explicit subsequent work | Independent consumers and design review |
 
 ## Risks and Mitigations
 
 | Risk | Severity | Likelihood | Mitigation |
 |---|---|---:|---|
 | Cache policies diverge between sprites, UI, text, and 3D | High | Medium | Centralize backend cache diagnostics and use shared key/generation vocabulary. |
-| Static pass dependencies are mistaken for a graph | Medium | Medium | Document `RenderPassDependency` as validation only until graph promotion. |
+| Stock phase order is confused with resource dependencies | Medium | Medium | Keep logical phase descriptions separate from the finite program's actual resource compiler. |
 | Submitter plugins become tedious for examples | Low | Medium | Provide convenience plugin groups while keeping individual plugins explicit. |
 | Device loss recovery is under-tested | High | Low | Keep backend-neutral prepared resources rebuildable and add recovery smoke tests when supported. |
 | Surface cleanup races native window teardown | Critical | Medium | Use the shared target lifecycle and require renderer acknowledgement before provider release. |
@@ -202,16 +212,16 @@ and submitter ownership mature enough for 2D, UI, and later 3D.
 
 - `nara_render_wgpu` should grow explicit cache lifetime/eviction diagnostics before more resource
   classes are added.
-- `WgpuRenderPlugin` may keep concrete encoders behind compiled integration flags; domains own
+- `WgpuStockPolicyPlugin` selects concrete drawing behind compiled integration flags; domains own
   batches, and requested products install only the matching closed first-party contribution
   plugins. Independently replaceable submitters and a public submitter SPI remain unadmitted.
-- The full render graph remains deferred, but resource lifetime is no longer deferred.
+- Complete Proposed0121 history and custom composition remain open. The finite typed resource
+  compiler and original Host custody are governed by the narrower Accepted0094 refinement.
 
 ## Open Questions
 
-- What exact cache eviction defaults should desktop Phase 1 use: grace frames, memory budget, or
-  both?
-- Which concrete workflow first proves the static plan insufficient: editor viewports,
-  post-processing, render-to-texture, 3D depth/prepass, or text/UI composition targets?
-- Which smallest model then satisfies its resource lifetime, ordering, inspection, and extension
-  needs without turning `RenderPassPlan` into a partial graph?
+- Which measured workloads justify changes to current cache grace periods and byte limits?
+- How should complete View/history and independent stream publication extend the admitted finite
+  program while preserving original input, exact output and physical retirement custody?
+- Which measured pressure would justify physical aliasing, pass fusion or parallel encoding beyond
+  deterministic serial program execution?

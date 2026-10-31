@@ -237,7 +237,6 @@ impl Drop for UiBackendOutcomePermit {
 }
 
 /// One exact backend outcome whose storage was reserved before submission.
-#[doc(hidden)]
 #[derive(Debug)]
 pub struct UiCompletedBackendOutcome {
     permit: UiBackendOutcomePermit,
@@ -245,7 +244,7 @@ pub struct UiCompletedBackendOutcome {
 }
 
 /// One prepared backend submission paired with its pre-submit outcome permission.
-#[doc(hidden)]
+/// Dropping it returns an aborted outcome to its original owner.
 #[derive(Debug)]
 pub struct UiBackendSubmission {
     submission: UiPreparedBackendSubmission,
@@ -253,7 +252,6 @@ pub struct UiBackendSubmission {
 }
 
 /// One backend-generation-bound submission retaining its exact outcome permission.
-#[doc(hidden)]
 #[derive(Debug)]
 pub struct UiSubmittedBackendSubmission {
     submission: UiSubmittedBackendPresentation,
@@ -266,6 +264,8 @@ impl UiSubmittedBackendSubmission {
         &self.submission
     }
 
+    /// Completes this exact attempt after the trusted backend actually presents its packet.
+    /// Binding a backend generation alone does not establish presentation.
     #[must_use]
     pub fn presented(self) -> UiCompletedBackendOutcome {
         let Self { submission, permit } = self;
@@ -325,7 +325,6 @@ impl UiSubmittedBackendSubmission {
 }
 
 /// Failure-atomic batch bind result retaining every prepared submission for rejection outcomes.
-#[doc(hidden)]
 #[derive(Debug)]
 pub struct UiBackendSubmissionBatchBindError {
     admission_id: UiPresentationAttemptId,
@@ -356,7 +355,11 @@ impl UiBackendSubmissionBatchBindError {
     }
 }
 
-#[doc(hidden)]
+/// Binds original attempts to the trusted backend's actual generation.
+///
+/// All retry-generation constraints are checked before binding any attempt. A refusal returns
+/// the complete original batch through [`UiBackendSubmissionBatchBindError::into_submissions`].
+/// Binding does not assert drawing or presentation; the backend retains that responsibility.
 pub fn bind_backend_submission_batch(
     submissions: Vec<UiBackendSubmission>,
     backend_generation: UiPresentationBackendGeneration,
@@ -514,7 +517,6 @@ impl UiBackendSubmissionQueue {
 }
 
 /// Exact draw packets and admission attempts for one concrete backend frame.
-#[doc(hidden)]
 #[derive(Debug, Default)]
 pub struct UiBackendPresentationFrame {
     packets: Vec<Arc<UiPaintPacket>>,
@@ -1225,7 +1227,8 @@ pub fn snapshot_ui_paint_packets(
     })
 }
 
-#[doc(hidden)]
+/// Takes one original backend frame after the destination has admitted capture.
+/// Retain or return every completion obligation independently of replayable drawing packets.
 #[derive(SystemParam)]
 pub struct UiBackendSubmissionReader<'w> {
     queue: ResMut<'w, UiBackendSubmissionQueue>,

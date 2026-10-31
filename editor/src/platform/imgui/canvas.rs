@@ -57,8 +57,8 @@ impl ImguiUiCanvasPresenter {
         window: RenderWindowPacket,
         candidate: EditorUiPreviewCandidate,
     ) -> Result<(), EditorRunError> {
-        let (document, revision, gesture, generation, packet, paint, canvas) =
-            candidate.into_parts();
+        let (document, revision, gesture, generation, input, _, canvas) = candidate.into_parts();
+        let packet = input.packet();
         let RenderFrameTarget::Image(image_target) = packet.target() else {
             return Err(imgui_error("the UI Canvas candidate has no image target"));
         };
@@ -67,9 +67,7 @@ impl ImguiUiCanvasPresenter {
             .view
             .as_ref()
             .ok_or_else(|| imgui_error("the UI Canvas has no committed render view"))?;
-        let output = gpu
-            .submit_authoring_ui_image(view, window, packet, paint)
-            .map_err(platform_gpu_error)?;
+        let output = gpu.submit(view, &input).map_err(platform_gpu_error)?;
         if !target
             .identity
             .is_some_and(|identity| identity.matches_submission(output.receipt()))

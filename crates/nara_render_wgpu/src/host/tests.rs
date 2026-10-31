@@ -1,5 +1,26 @@
 use super::*;
 
+fn stock_policy() -> &'static crate::WgpuPolicyInstallation<crate::WgpuStockPolicy> {
+    static POLICY: std::sync::OnceLock<crate::WgpuPolicyInstallation<crate::WgpuStockPolicy>> =
+        std::sync::OnceLock::new();
+    POLICY.get_or_init(|| {
+        crate::WgpuPolicyDefinition::new(crate::WgpuStockPolicy::new())
+            .install()
+            .unwrap()
+    })
+}
+
+pub(super) fn test_stock_input(packet: RenderFramePacket) -> crate::WgpuRenderInput {
+    test_stock_capture(packet, crate::WgpuStockCapture::new())
+}
+
+pub(super) fn test_stock_capture(
+    packet: RenderFramePacket,
+    capture: crate::WgpuStockCapture,
+) -> crate::WgpuRenderInput {
+    stock_policy().capture(packet, Arc::new(capture)).unwrap()
+}
+
 #[test]
 #[ignore = "requires an explicitly selected native GPU; acquisition failure is a failed prerequisite"]
 fn native_direct_host_drop_drains_the_original_callback_cycle() {
@@ -12,9 +33,7 @@ fn native_direct_host_drop_drains_the_original_callback_cycle() {
         .reserve_image_target(&producer, packet.source_generation(), target)
         .unwrap();
     host.activate_image_target(&producer, reservation).unwrap();
-    let output = host
-        .submit(&producer, &WgpuImageInput::new(packet))
-        .unwrap();
+    let output = host.submit(&producer, &test_stock_input(packet)).unwrap();
     let weak_output = Arc::downgrade(&output.0);
     drop(output);
     drop(producer);
@@ -39,9 +58,7 @@ fn native_direct_host_drop_callback_panic_cannot_release_incomplete_dependencies
             .reserve_image_target(&producer, packet.source_generation(), target)
             .unwrap();
         host.activate_image_target(&producer, reservation).unwrap();
-        let output = host
-            .submit(&producer, &WgpuImageInput::new(packet))
-            .unwrap();
+        let output = host.submit(&producer, &test_stock_input(packet)).unwrap();
         let (readback, _) = host
             .submit_image_use(
                 std::slice::from_ref(&output),
@@ -120,7 +137,7 @@ fn native_released_reconstruction_input_is_unavailable_while_pixels_remain() {
         .reserve_image_target(&producer, packet.source_generation(), target)
         .unwrap();
     host.activate_image_target(&producer, reservation).unwrap();
-    let input = Arc::new(WgpuImageInput::new(packet));
+    let input = Arc::new(test_stock_input(packet));
     let recovery = Arc::downgrade(&input);
     let output = host.submit(&producer, &input).unwrap();
     drain_submission_prefix(
@@ -148,9 +165,9 @@ use nara_render::{
     Color, ExtractedView, ExtractedViews, RenderImage2d, RenderTarget, ViewportRect,
     build_image_render_frame_packet,
 };
-#[cfg(feature = "ui-submitter")]
+#[cfg(feature = "stock-ui")]
 use nara_ui_render::__private::UiBackendSubmission;
-#[cfg(feature = "ui-submitter")]
+#[cfg(feature = "stock-ui")]
 use nara_ui_render::{
     UiPaintPacket, UiPresentationAttemptId, UiPresentationCapabilityGeneration,
     UiPresentationEpoch, UiPresentationOutcome, UiPresentationRuntimeGeneration,
@@ -464,7 +481,7 @@ fn closed_producer_cannot_reserve_or_resubmit_after_a_successor_is_created() {
     let mut execution = WgpuRenderHost::offscreen();
     let producer = execution.create_producer().unwrap();
     let closed_id = producer.id();
-    let input = WgpuImageInput::new(test_image_frame());
+    let input = test_stock_input(test_image_frame());
     let source = input.packet().source_generation();
     let target = image_target(input.packet());
 
@@ -1000,7 +1017,38 @@ fn matching_runtime_and_target_reservations_publish_together_or_not_at_all() {
     assert_eq!(publication.target, Some(target_reservation));
 }
 
-#[cfg(feature = "ui-submitter")]
+#[cfg(feature = "stock-ui")]
+#[test]
+fn prepared_ui_handoff_moves_original_attempts_and_refuses_bound_reinterpretation() {
+    let backend_generation = UiPresentationBackendGeneration::new(21, 4).unwrap();
+    let (outcomes, original) = editor_ui_submission(83);
+    let WgpuUiSubmissionState::Prepared(original_submissions) = &original.state else {
+        panic!("the fixture must own its original prepared attempts");
+    };
+    let original_storage = original_submissions.as_ptr();
+    let original_identity = original_submissions[0].submission().identity();
+    let original_attempt =
+        nara_ui_render::__private::prepared_attempt(original_submissions[0].submission());
+    let attempts = original.into_prepared_submissions().unwrap();
+    assert_eq!(attempts.as_ptr(), original_storage);
+    let submitted =
+        nara_ui_render::advanced::bind_backend_submission_batch(attempts, backend_generation)
+            .unwrap();
+    let bound_storage = submitted.as_ptr();
+    let bound = WgpuUiSubmission::from_state(WgpuUiSubmissionState::Submitted(submitted));
+    let bound = bound.into_prepared_submissions().unwrap_err();
+    assert_eq!(bound.state.bound_submissions().as_ptr(), bound_storage);
+    let completed = publish_editor_ui_outcomes(outcomes, bound.presented());
+    assert!(matches!(
+        completed.as_slice(),
+        [UiPresentationOutcome::Presented(commit)]
+            if commit.attempt() == original_attempt
+                && commit.submission() == original_identity
+                && commit.backend_generation() == backend_generation
+    ));
+}
+
+#[cfg(feature = "stock-ui")]
 #[test]
 fn editor_ui_completion_maps_every_terminal_path_without_stranding_permits() {
     let backend_generation = UiPresentationBackendGeneration::new(21, 4).unwrap();
@@ -1084,7 +1132,7 @@ fn editor_ui_completion_maps_every_terminal_path_without_stranding_permits() {
     ));
 }
 
-#[cfg(feature = "ui-submitter")]
+#[cfg(feature = "stock-ui")]
 #[test]
 fn editor_ui_presented_completion_requires_the_exact_final_composite() {
     let mut execution = WgpuRenderHost::offscreen();
@@ -1116,7 +1164,7 @@ fn editor_ui_presented_completion_requires_the_exact_final_composite() {
     let output = allocated_test_output(&execution, &namespace, submitted);
     let display = WgpuImageDisplay::issue(output.clone());
     let mirror = WgpuImageDisplay::issue(output.clone());
-    let submission = WgpuEditorUiImageSubmission {
+    let submission = WgpuUiImageSubmission {
         display: display.clone(),
         interaction: Arc::new(std::sync::atomic::AtomicBool::new(true)),
         producer_closed: Arc::new(AtomicBool::new(false)),
@@ -1190,7 +1238,7 @@ fn editor_admission_validation_is_read_only_until_success_is_committed() {
     assert_eq!(admission.last_frame_index, Some(8));
 }
 
-#[cfg(feature = "ui-submitter")]
+#[cfg(feature = "stock-ui")]
 #[test]
 #[ignore = "requires an explicitly selected native GPU; acquisition failure is a failed prerequisite"]
 fn native_editor_ui_rejected_after_close_or_loss_retains_the_original_permit() {
@@ -1212,7 +1260,14 @@ fn native_editor_ui_rejected_after_close_or_loss_retains_the_original_permit() {
             namespace.device_epoch,
         )
         .unwrap();
-        let (outcomes, mut ui) = editor_ui_submission(if lost { 91 } else { 90 });
+        let (outcomes, mut ui) = editor_ui_submission_with_packet(
+            if lost { 91 } else { 90 },
+            compile_test_ui_packet(
+                nara_ui_kernel::UiVisual::solid(nara_ui_kernel::UiColor::rgba(1.0, 1.0, 1.0, 1.0)),
+                RenderTarget::Image(image_target(&frame).image()),
+                &nara_ui_render::UiPreparedImages::default(),
+            ),
+        );
         let (packet, attempt) = match &ui.state {
             WgpuUiSubmissionState::Prepared(submissions) => (
                 Arc::clone(submissions[0].submission().packet()),
@@ -1222,16 +1277,19 @@ fn native_editor_ui_rejected_after_close_or_loss_retains_the_original_permit() {
                 panic!("fixture must start with its original prepared permit")
             }
         };
-        let payload = WgpuFramePayload::for_editor_runtime_ui(vec![Arc::clone(&packet)]);
+        let input = test_stock_capture(
+            frame,
+            crate::WgpuStockCapture::new().with_ui(vec![Arc::clone(&packet)], None, None),
+        );
         let output = execution
-            .submit_image_in_namespace(view_id, &namespace, &frame, &payload, Some(&mut ui))
+            .submit_image_in_namespace(view_id, &namespace, &input, Some(&mut ui))
             .unwrap();
         let original_submission = std::ptr::from_ref(&ui.state.bound_submissions()[0]);
         let original_identity = ui.state.bound_submissions()[0].submission().identity();
         let display = execution.display_image(output.clone()).unwrap();
         let interaction = Arc::clone(&execution.views[&view_id].interaction);
         let producer_closed = Arc::clone(&producer.closed);
-        let submission = WgpuEditorUiImageSubmission {
+        let submission = WgpuUiImageSubmission {
             display: display.clone(),
             interaction: Arc::clone(&interaction),
             producer_closed: Arc::clone(&producer_closed),
@@ -1465,7 +1523,7 @@ fn native_offscreen_outputs_retain_exact_pixels_through_resize_and_close() {
     execution
         .activate_image_target(&producer, reservation)
         .unwrap();
-    let first_input = WgpuImageInput::new(image_frame_for(
+    let first_input = test_stock_input(image_frame_for(
         source,
         1,
         target,
@@ -1477,7 +1535,7 @@ fn native_offscreen_outputs_retain_exact_pixels_through_resize_and_close() {
     assert!(original_identity.matches_submission(first.receipt()));
 
     execution.begin_frame(102).unwrap();
-    let second_input = WgpuImageInput::new(image_frame_for(
+    let second_input = test_stock_input(image_frame_for(
         source,
         2,
         target,
@@ -1514,7 +1572,7 @@ fn native_offscreen_outputs_retain_exact_pixels_through_resize_and_close() {
         .activate_image_target(&producer, reservation)
         .unwrap();
     execution.begin_frame(103).unwrap();
-    let resized_input = WgpuImageInput::new(image_frame_for(
+    let resized_input = test_stock_input(image_frame_for(
         source,
         3,
         resized,
@@ -1587,14 +1645,14 @@ fn native_producer_retirement_settles_while_another_producer_keeps_submitting() 
             .activate_image_target(producer, reservation)
             .unwrap();
     }
-    let first_input = WgpuImageInput::new(image_frame_for(
+    let first_input = test_stock_input(image_frame_for(
         first_frame.source_generation(),
         1,
         image_target(&first_frame),
         Color::rgba(1.0, 0.0, 0.0, 1.0),
     ));
     let retained = execution.submit(&first_producer, &first_input).unwrap();
-    let second_input = WgpuImageInput::new(second_frame);
+    let second_input = test_stock_input(second_frame);
     let second_source = second_input.packet().source_generation();
     let second_target = image_target(second_input.packet());
     execution.submit(&second_producer, &second_input).unwrap();
@@ -1637,7 +1695,7 @@ fn native_producer_retirement_settles_while_another_producer_keeps_submitting() 
     let mut frame_index = 2;
     loop {
         execution.begin_frame(frame_index).unwrap();
-        let input = WgpuImageInput::new(image_frame_for(
+        let input = test_stock_input(image_frame_for(
             second_source,
             frame_index,
             second_target,
@@ -1659,7 +1717,7 @@ fn native_producer_retirement_settles_while_another_producer_keeps_submitting() 
         "settlement must remain stable after later work"
     );
     execution.begin_frame(frame_index + 1).unwrap();
-    let later_input = WgpuImageInput::new(image_frame_for(
+    let later_input = test_stock_input(image_frame_for(
         second_source,
         frame_index + 1,
         second_target,
@@ -1687,7 +1745,7 @@ fn native_failed_submission_allows_retry_of_the_same_original_input() {
     let target = image_target(&frame);
     let producer = execution.create_producer().unwrap();
     let view_id = producer.id();
-    let first_input = WgpuImageInput::new(image_frame_for(
+    let first_input = test_stock_input(image_frame_for(
         source,
         1,
         target,
@@ -1706,7 +1764,7 @@ fn native_failed_submission_allows_retry_of_the_same_original_input() {
     );
 
     execution.begin_frame(2).unwrap();
-    let input = WgpuImageInput::new(image_frame_for(
+    let input = test_stock_input(image_frame_for(
         source,
         2,
         target,
@@ -1774,7 +1832,7 @@ fn native_failed_submission_allows_retry_of_the_same_original_input() {
 
 #[test]
 #[ignore = "requires an explicitly selected native GPU; acquisition failure is a failed prerequisite"]
-#[cfg(feature = "ui-submitter")]
+#[cfg(feature = "stock-ui")]
 fn native_image_preflight_refusal_preserves_the_original_reserved_storage_for_retry() {
     let mut host = WgpuRenderHost::offscreen();
     host.begin_frame(1).unwrap();
@@ -1796,10 +1854,17 @@ fn native_image_preflight_refusal_preserves_the_original_reserved_storage_for_re
         .unwrap();
     let bytes = host.retained_resource_bytes();
     let [image, _] = crate::readback_tests::two_image_versions();
-    let input = WgpuImageInput::new(frame).with_ui(vec![test_ui_image_packet(
-        image,
-        RenderTarget::Image(target.image()),
-    )]);
+    let input = test_stock_capture(
+        frame,
+        crate::WgpuStockCapture::new().with_ui(
+            vec![test_ui_image_packet(
+                image,
+                RenderTarget::Image(target.image()),
+            )],
+            None,
+            None,
+        ),
+    );
     *host.backend.stock_quad_resources().textures_mut() =
         crate::texture::WgpuSpriteTextureCache::with_image_residency_limits(1, 3);
     let error = host.submit(&producer, &input).unwrap_err();
@@ -1858,7 +1923,7 @@ fn native_output_budget_counts_exact_storage_until_callbacks_and_last_leases_dro
     execution
         .activate_image_target(&producer, reservation)
         .unwrap();
-    let first_input = WgpuImageInput::new(image_frame_for(
+    let first_input = test_stock_input(image_frame_for(
         source,
         1,
         target,
@@ -1878,7 +1943,7 @@ fn native_output_budget_counts_exact_storage_until_callbacks_and_last_leases_dro
     );
 
     execution.begin_frame(2).unwrap();
-    let second_input = WgpuImageInput::new(image_frame_for(
+    let second_input = test_stock_input(image_frame_for(
         source,
         2,
         target,
@@ -1923,7 +1988,7 @@ fn native_output_budget_counts_exact_storage_until_callbacks_and_last_leases_dro
 
     execution = execution.with_resource_byte_limit(BYTES - 1);
     execution.begin_frame(3).unwrap();
-    let third_input = WgpuImageInput::new(image_frame_for(source, 3, target, Color::BLACK));
+    let third_input = test_stock_input(image_frame_for(source, 3, target, Color::BLACK));
     assert!(matches!(
         execution.submit(&producer, &third_input),
         Err(WgpuRenderHostError::Program(
@@ -1962,7 +2027,7 @@ fn native_allocation_rejection_preserves_last_good_and_allows_same_capture_retry
     execution
         .activate_image_target(&producer, reservation)
         .unwrap();
-    let first_input = WgpuImageInput::new(image_frame_for(
+    let first_input = test_stock_input(image_frame_for(
         source,
         1,
         target,
@@ -1970,7 +2035,7 @@ fn native_allocation_rejection_preserves_last_good_and_allows_same_capture_retry
     ));
     let first = execution.submit(&producer, &first_input).unwrap();
     execution.begin_frame(2).unwrap();
-    let input = WgpuImageInput::new(image_frame_for(
+    let input = test_stock_input(image_frame_for(
         source,
         2,
         target,
@@ -2019,14 +2084,14 @@ fn native_loss_rejects_old_outputs_and_new_host_replays_the_original_input() {
     let frame = test_image_frame();
     let source = frame.source_generation();
     let target = image_target(&frame);
-    #[cfg(not(feature = "ui-submitter"))]
-    let input = WgpuImageInput::new(image_frame_for(
+    #[cfg(not(feature = "stock-ui"))]
+    let input = test_stock_input(image_frame_for(
         source,
         1,
         target,
         Color::rgba(1.0, 0.0, 0.0, 1.0),
     ));
-    #[cfg(feature = "ui-submitter")]
+    #[cfg(feature = "stock-ui")]
     let (input, current_input) = {
         // This fixture publishes green over red in the same Assets slot and drops the
         // original stores. Recovery must use the pinned red capture, never recapture green.
@@ -2035,10 +2100,14 @@ fn native_loss_rejects_old_outputs_and_new_host_replays_the_original_input() {
         let pinned = test_ui_image_packet(red, logical_target);
         let current = test_ui_image_packet(green, logical_target);
         (
-            WgpuImageInput::new(image_frame_for(source, 1, target, Color::BLACK))
-                .with_ui(vec![pinned]),
-            WgpuImageInput::new(image_frame_for(source, 1, target, Color::BLACK))
-                .with_ui(vec![current]),
+            test_stock_capture(
+                image_frame_for(source, 1, target, Color::BLACK),
+                crate::WgpuStockCapture::new().with_ui(vec![pinned], None, None),
+            ),
+            test_stock_capture(
+                image_frame_for(source, 1, target, Color::BLACK),
+                crate::WgpuStockCapture::new().with_ui(vec![current], None, None),
+            ),
         )
     };
     let mut original = WgpuRenderHost::offscreen();
@@ -2071,6 +2140,10 @@ fn native_loss_rejects_old_outputs_and_new_host_replays_the_original_input() {
     ));
     assert!(matches!(
         original.submit(&original_producer, &input),
+        Err(WgpuRenderHostError::Backend(WgpuRenderError::DeviceLost))
+    ));
+    assert!(matches!(
+        original.prepare_policy(&original_producer, stock_policy().definition()),
         Err(WgpuRenderHostError::Backend(WgpuRenderError::DeviceLost))
     ));
     drain_submission_prefix(&original.retire_producer(&original_producer).unwrap());
@@ -2115,7 +2188,7 @@ fn native_loss_rejects_old_outputs_and_new_host_replays_the_original_input() {
         read_output_pixel(&mut replacement, &recovered, 16, 16),
         [255, 0, 0, 255]
     );
-    #[cfg(feature = "ui-submitter")]
+    #[cfg(feature = "stock-ui")]
     {
         let current_producer = replacement.create_producer().unwrap();
         let reservation = replacement
@@ -2319,14 +2392,31 @@ fn image_target(packet: &RenderFramePacket) -> RenderImagePacket {
     }
 }
 
-#[cfg(feature = "ui-submitter")]
+#[cfg(feature = "stock-ui")]
 fn editor_ui_submission(
     admission_id: u64,
 ) -> (
     nara_ui_render::__private::UiPresentationOutcomes,
-    WgpuEditorUiSubmission,
+    WgpuUiSubmission,
 ) {
-    let prepared = test_ui_prepared_submission(admission_id);
+    editor_ui_submission_with_packet(admission_id, test_ui_packet())
+}
+
+#[cfg(feature = "stock-ui")]
+fn editor_ui_submission_with_packet(
+    admission_id: u64,
+    packet: Arc<UiPaintPacket>,
+) -> (
+    nara_ui_render::__private::UiPresentationOutcomes,
+    WgpuUiSubmission,
+) {
+    let prepared = nara_ui_render::__private::prepare_backend_submission(
+        UiPresentationAttemptId::new(admission_id).unwrap(),
+        packet,
+        UiPresentationEpoch::new(admission_id + 100).unwrap(),
+        UiPresentationRuntimeGeneration::new(7).unwrap(),
+        UiPresentationCapabilityGeneration::new(9).unwrap(),
+    );
     let mut outcomes = nara_ui_render::__private::UiPresentationOutcomes::default();
     let permit = outcomes
         .reserve_backend(std::slice::from_ref(&prepared))
@@ -2335,13 +2425,13 @@ fn editor_ui_submission(
     let submission = UiBackendSubmission::pair(prepared, permit).unwrap();
     (
         outcomes,
-        WgpuEditorUiSubmission {
+        WgpuUiSubmission {
             state: WgpuUiSubmissionState::Prepared(vec![submission]),
         },
     )
 }
 
-#[cfg(feature = "ui-submitter")]
+#[cfg(feature = "stock-ui")]
 fn test_ui_prepared_submission(
     admission_id: u64,
 ) -> nara_ui_render::__private::UiPreparedBackendSubmission {
@@ -2354,7 +2444,7 @@ fn test_ui_prepared_submission(
     )
 }
 
-#[cfg(feature = "ui-submitter")]
+#[cfg(feature = "stock-ui")]
 fn publish_editor_ui_outcomes(
     mut outcomes: nara_ui_render::__private::UiPresentationOutcomes,
     completed: Vec<UiCompletedBackendOutcome>,
@@ -2367,7 +2457,7 @@ fn publish_editor_ui_outcomes(
     nara_ui_render::drain_ui_presentation_outcomes(&mut world).unwrap()
 }
 
-#[cfg(feature = "ui-submitter")]
+#[cfg(feature = "stock-ui")]
 fn test_ui_packet() -> std::sync::Arc<UiPaintPacket> {
     compile_test_ui_packet(
         nara_ui_kernel::UiVisual::solid(nara_ui_kernel::UiColor::rgba(1.0, 1.0, 1.0, 1.0)),
@@ -2376,7 +2466,7 @@ fn test_ui_packet() -> std::sync::Arc<UiPaintPacket> {
     )
 }
 
-#[cfg(feature = "ui-submitter")]
+#[cfg(feature = "stock-ui")]
 pub(super) fn test_ui_image_packet(
     snapshot: nara_image::PreparedImageSnapshot,
     target: RenderTarget,
@@ -2391,7 +2481,7 @@ pub(super) fn test_ui_image_packet(
     )
 }
 
-#[cfg(feature = "ui-submitter")]
+#[cfg(feature = "stock-ui")]
 fn compile_test_ui_packet(
     visual: nara_ui_kernel::UiVisual,
     target: RenderTarget,

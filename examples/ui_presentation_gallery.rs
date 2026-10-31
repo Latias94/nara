@@ -300,7 +300,7 @@ fn run_windowed() -> Result<(), Box<dyn Error>> {
             )),
         },
         WgpuBackendPlugins,
-        WgpuUiSubmitterPlugin,
+        WgpuStockUiPlugin,
         WinitUiAccessibilityContributionPlugin,
     ))?;
     app.add_systems(StartupStage::Scene, setup_gallery)?;

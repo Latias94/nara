@@ -261,6 +261,9 @@ pub(super) fn operation_metadata_bytes<F: WgpuRenderFeature>() -> Option<usize> 
 
 pub(crate) trait CapturedOperation: Send + Sync {
     fn identity(&self) -> &Arc<FeatureInstanceIdentity>;
+    #[cfg(feature = "stock-ui")]
+    fn capture_value(&self) -> &dyn Any;
+    fn requirements(&self) -> &WgpuDeviceRequirements;
     fn preflight(
         &self,
         context: &mut WgpuFeaturePreflightContext<'_>,
@@ -303,6 +306,15 @@ struct TypedCapture<F: WgpuRenderFeature> {
 impl<F: WgpuRenderFeature> CapturedOperation for TypedCapture<F> {
     fn identity(&self) -> &Arc<FeatureInstanceIdentity> {
         &self.identity
+    }
+
+    #[cfg(feature = "stock-ui")]
+    fn capture_value(&self) -> &dyn Any {
+        self.capture.as_ref()
+    }
+
+    fn requirements(&self) -> &WgpuDeviceRequirements {
+        &self.definition.requirements
     }
 
     fn preflight(

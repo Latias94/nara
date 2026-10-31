@@ -637,9 +637,9 @@ fn generic_editor_retires_an_image_when_its_metadata_becomes_invalid() {
         std::thread::sleep(Duration::from_millis(1));
     };
     let before_stamp = before.content_stamp();
-    let (_, _, _, _, before_batches, _) = before.into_parts();
     assert!(
-        before_batches
+        before
+            .sprite_batches()
             .as_slice()
             .iter()
             .any(|batch| batch.image.is_some())
@@ -658,9 +658,9 @@ fn generic_editor_retires_an_image_when_its_metadata_becomes_invalid() {
     let after = editor.take_editor_preview_candidate();
     if let Some(after) = after {
         assert_eq!(after_stamp, Some(after.content_stamp()));
-        let (_, _, _, _, after_batches, _) = after.into_parts();
         assert!(
-            after_batches
+            after
+                .sprite_batches()
                 .as_slice()
                 .iter()
                 .all(|batch| batch.image.is_none()),

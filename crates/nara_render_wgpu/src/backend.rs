@@ -6,7 +6,7 @@ use std::{
 
 #[cfg(test)]
 use nara_app::RuntimeGeneration;
-#[cfg(all(test, any(feature = "sprite-submitter", feature = "ui-submitter")))]
+#[cfg(all(test, any(feature = "stock-sprite", feature = "stock-ui")))]
 use nara_material::AlphaMode2d;
 #[cfg(test)]
 use nara_render::{
@@ -14,7 +14,7 @@ use nara_render::{
     RenderFrameSourceGeneration, RenderFrameTarget, RenderTarget, ViewportRect,
 };
 use nara_render::{Extent2d, RenderBackendState, RenderWindowPacket};
-#[cfg(feature = "ui-submitter")]
+#[cfg(feature = "stock-ui")]
 use nara_ui_render::{
     UiBackendSubmissionIdentity, UiPaintPacketIdentity, UiPresentationBackendGeneration,
 };
@@ -26,11 +26,11 @@ use nara_window::{
 use crate::WgpuRenderError;
 use crate::device::WgpuDeviceOwner;
 #[cfg(test)]
-use crate::frame::{WgpuCapturedFrame, WgpuFramePayload};
+use crate::frame::{LegacyWgpuCapturedFrame, LegacyWgpuFramePayload};
 use crate::presented::WgpuPresentedFrameReceipt;
-#[cfg(all(test, any(feature = "sprite-submitter", feature = "ui-submitter")))]
+#[cfg(all(test, any(feature = "stock-sprite", feature = "stock-ui")))]
 use crate::quad::create_quad_texture_bind_group_layout;
-#[cfg(any(feature = "sprite-submitter", feature = "ui-submitter"))]
+#[cfg(any(feature = "stock-sprite", feature = "stock-ui"))]
 use crate::stock_quad::StockQuadResources;
 use crate::surface::{
     SurfaceDropReason, WgpuSurfaceState, configure_surface, create_surface, surface_extent,
@@ -39,7 +39,7 @@ use crate::telemetry::{
     WgpuAdapterSummary, WgpuBackendTelemetry, WgpuBackendTelemetryConfig,
     WgpuFrameCompletionSample, WgpuFrameCompletionStats, WgpuGpuResourceStats,
 };
-#[cfg(all(test, any(feature = "sprite-submitter", feature = "ui-submitter")))]
+#[cfg(all(test, any(feature = "stock-sprite", feature = "stock-ui")))]
 use crate::texture::WgpuSpriteTextureCache;
 #[cfg(test)]
 use crate::{
@@ -74,15 +74,15 @@ pub struct WgpuFrameTransactionStats {
     presents: u64,
     candidate_instance_buffer_demand_bytes: u64,
     submitted_instance_buffer_demand_bytes: u64,
-    #[cfg(feature = "ui-submitter")]
+    #[cfg(feature = "stock-ui")]
     ui_packet_count: u64,
-    #[cfg(feature = "ui-submitter")]
+    #[cfg(feature = "stock-ui")]
     ui_packet_identity: Option<UiPaintPacketIdentity>,
-    #[cfg(feature = "ui-submitter")]
+    #[cfg(feature = "stock-ui")]
     ui_primitives: u64,
-    #[cfg(feature = "ui-submitter")]
+    #[cfg(feature = "stock-ui")]
     ui_glyph_primitives: u64,
-    #[cfg(feature = "ui-submitter")]
+    #[cfg(feature = "stock-ui")]
     ui_glyph_pages: u64,
 }
 
@@ -91,7 +91,7 @@ pub struct WgpuFrameTransactionStats {
 /// UI payload counters are packet-local. Frame context, such as the submitted Sprite count, is
 /// named explicitly. The record is produced only after surface submission succeeds and is retained
 /// for the presentation owner to bind to the matching one-shot backend acceptance.
-#[cfg(feature = "ui-submitter")]
+#[cfg(feature = "stock-ui")]
 #[doc(hidden)]
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct WgpuSubmittedUiFacts {
@@ -112,7 +112,7 @@ pub struct WgpuSubmittedUiFacts {
     submitted_instance_buffer_bytes: u64,
 }
 
-#[cfg(feature = "ui-submitter")]
+#[cfg(feature = "stock-ui")]
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) struct WgpuSubmittedFrameFacts {
     app_frame_index: u64,
@@ -123,7 +123,7 @@ pub(crate) struct WgpuSubmittedFrameFacts {
     submitted_instance_buffer_bytes: u64,
 }
 
-#[cfg(feature = "ui-submitter")]
+#[cfg(feature = "stock-ui")]
 impl WgpuSubmittedFrameFacts {
     pub(crate) const fn new(
         app_frame_index: u64,
@@ -144,7 +144,7 @@ impl WgpuSubmittedFrameFacts {
     }
 }
 
-#[cfg(feature = "ui-submitter")]
+#[cfg(feature = "stock-ui")]
 impl WgpuSubmittedUiFacts {
     pub(crate) fn set_resource_bytes(&mut self, texture_bytes: u64, instance_buffer_bytes: u64) {
         self.submitted_texture_bytes = texture_bytes;
@@ -290,41 +290,41 @@ impl WgpuFrameTransactionStats {
     }
 
     /// Returns the number of UI packets admitted for this exact backend frame transaction.
-    #[cfg(feature = "ui-submitter")]
+    #[cfg(feature = "stock-ui")]
     #[must_use]
     pub const fn ui_packet_count(self) -> u64 {
         self.ui_packet_count
     }
 
     /// Returns the immutable packet identity when exactly one UI packet targeted this frame.
-    #[cfg(feature = "ui-submitter")]
+    #[cfg(feature = "stock-ui")]
     #[must_use]
     pub const fn ui_packet_identity(self) -> Option<UiPaintPacketIdentity> {
         self.ui_packet_identity
     }
 
     /// Returns the expanded UI primitive count referenced by this exact frame transaction.
-    #[cfg(feature = "ui-submitter")]
+    #[cfg(feature = "stock-ui")]
     #[must_use]
     pub const fn ui_primitives(self) -> u64 {
         self.ui_primitives
     }
 
     /// Returns the glyph primitive count referenced by this exact backend frame transaction.
-    #[cfg(feature = "ui-submitter")]
+    #[cfg(feature = "stock-ui")]
     #[must_use]
     pub const fn ui_glyph_primitives(self) -> u64 {
         self.ui_glyph_primitives
     }
 
     /// Returns the glyph-atlas page reference count retained by this exact transaction.
-    #[cfg(feature = "ui-submitter")]
+    #[cfg(feature = "stock-ui")]
     #[must_use]
     pub const fn ui_glyph_pages(self) -> u64 {
         self.ui_glyph_pages
     }
 
-    #[cfg(feature = "ui-submitter")]
+    #[cfg(feature = "stock-ui")]
     pub(crate) fn record_ui_payload(&mut self, facts: crate::frame::WgpuUiPayloadFacts) {
         let previous_count = self.ui_packet_count;
         self.ui_packet_count = previous_count.saturating_add(facts.packet_count);
@@ -369,10 +369,10 @@ pub(crate) struct WgpuRenderBackend {
     last_frame_index: Option<u64>,
     frame_transaction_stats: WgpuFrameTransactionStats,
     presented_frame_this_transaction: Option<WgpuPresentedFrameReceipt>,
-    #[cfg(feature = "ui-submitter")]
+    #[cfg(feature = "stock-ui")]
     submitted_ui_facts: Vec<WgpuSubmittedUiFacts>,
     telemetry: WgpuBackendTelemetry,
-    #[cfg(any(feature = "sprite-submitter", feature = "ui-submitter"))]
+    #[cfg(any(feature = "stock-sprite", feature = "stock-ui"))]
     stock_quad: StockQuadResources,
     last_error: Option<String>,
     runtime_execution: bool,
@@ -508,7 +508,7 @@ impl WgpuRenderBackend {
     #[must_use]
     pub fn frame_transaction_stats(&self) -> WgpuFrameTransactionStats {
         let stats = self.frame_transaction_stats;
-        #[cfg(any(feature = "sprite-submitter", feature = "ui-submitter"))]
+        #[cfg(any(feature = "stock-sprite", feature = "stock-ui"))]
         let stats = {
             let mut stats = stats;
             (
@@ -531,7 +531,7 @@ impl WgpuRenderBackend {
             self.state(),
             self.frame_transaction_stats(),
             self.presented_frame_this_transaction,
-            #[cfg(feature = "ui-submitter")]
+            #[cfg(feature = "stock-ui")]
             std::mem::take(&mut self.submitted_ui_facts),
         );
         observation.record_presented_surface_extent(extent);
@@ -546,7 +546,7 @@ impl WgpuRenderBackend {
     }
 
     /// Returns the exact submitted facts for one presentation attempt in the latest transaction.
-    #[cfg(all(test, feature = "ui-submitter"))]
+    #[cfg(all(test, feature = "stock-ui"))]
     #[doc(hidden)]
     #[must_use]
     pub(crate) fn submitted_ui_facts(
@@ -676,7 +676,7 @@ impl WgpuRenderBackend {
     ) {
         self.frame_transaction_stats =
             WgpuFrameTransactionStats::begin(render_transaction_frame_index, app_frame_index);
-        #[cfg(any(feature = "sprite-submitter", feature = "ui-submitter"))]
+        #[cfg(any(feature = "stock-sprite", feature = "stock-ui"))]
         {
             self.stock_quad.reset_instance_budget();
         }
@@ -685,7 +685,7 @@ impl WgpuRenderBackend {
         {
             self.presented_world = None;
         }
-        #[cfg(feature = "ui-submitter")]
+        #[cfg(feature = "stock-ui")]
         self.clear_submitted_ui_facts();
     }
 
@@ -708,11 +708,11 @@ impl WgpuRenderBackend {
             self.presented_world = None;
             self.world_presentation_target = None;
         }
-        #[cfg(any(feature = "sprite-submitter", feature = "ui-submitter"))]
+        #[cfg(any(feature = "stock-sprite", feature = "stock-ui"))]
         {
             self.stock_quad.clear();
         }
-        #[cfg(feature = "ui-submitter")]
+        #[cfg(feature = "stock-ui")]
         self.clear_submitted_ui_facts();
         self.presented_frame_this_transaction = None;
         self.device_owner.clear();
@@ -720,18 +720,18 @@ impl WgpuRenderBackend {
         retirement_result
     }
 
-    #[cfg(feature = "ui-submitter")]
+    #[cfg(feature = "stock-ui")]
     fn clear_submitted_ui_facts(&mut self) {
         self.submitted_ui_facts.clear();
     }
 
-    #[cfg(all(test, any(feature = "sprite-submitter", feature = "ui-submitter")))]
+    #[cfg(all(test, any(feature = "stock-sprite", feature = "stock-ui")))]
     #[must_use]
     pub fn texture_stats(&self) -> crate::WgpuRenderTextureCacheStats {
         self.stock_quad.texture_stats()
     }
 
-    #[cfg(any(feature = "sprite-submitter", feature = "ui-submitter"))]
+    #[cfg(any(feature = "stock-sprite", feature = "stock-ui"))]
     pub(crate) fn stock_quad_resources(&mut self) -> &mut StockQuadResources {
         &mut self.stock_quad
     }
@@ -886,15 +886,15 @@ impl WgpuRenderBackend {
     pub(super) fn render_packet(
         &mut self,
         handles: Option<&BackendWindowHandles>,
-        captured: WgpuCapturedFrame,
-        #[cfg(feature = "ui-submitter")] mut ui_submissions: Option<
+        captured: LegacyWgpuCapturedFrame,
+        #[cfg(feature = "stock-ui")] mut ui_submissions: Option<
             &mut crate::frame::WgpuUiSubmissionState,
         >,
         frame: &mut RenderFrame,
         stats: &mut FrameStats,
         status: &mut RenderBackendStatus,
     ) -> Result<(), WgpuRenderError> {
-        let WgpuCapturedFrame {
+        let LegacyWgpuCapturedFrame {
             topology: packet,
             payload,
             app_frame_index,
@@ -984,7 +984,7 @@ impl WgpuRenderBackend {
         }
         self.ensure_device(window.id)?;
         self.fail_if_device_lost()?;
-        #[cfg(feature = "ui-submitter")]
+        #[cfg(feature = "stock-ui")]
         if let Some(ui_submissions) = ui_submissions.as_deref_mut() {
             let backend_generation = nara_ui_render::UiPresentationBackendGeneration::new(
                 self.instance_id(),
@@ -997,7 +997,7 @@ impl WgpuRenderBackend {
             ui_submissions.bind_backend(backend_generation)?;
         }
         status.mark_ready(WGPU_RENDER_BACKEND);
-        #[cfg(any(feature = "sprite-submitter", feature = "ui-submitter"))]
+        #[cfg(any(feature = "stock-sprite", feature = "stock-ui"))]
         self.stock_quad.begin_frame(frame.index);
         self.telemetry
             .observe_gpu_resources(self.logical_texture_bytes(), 0);
@@ -1016,7 +1016,7 @@ impl WgpuRenderBackend {
             return Ok(());
         }
         let view_format = self.surface_view_format(window.id)?;
-        #[cfg(feature = "ui-submitter")]
+        #[cfg(feature = "stock-ui")]
         {
             let ui = payload.ui_facts(packet.views()[0].target);
             self.frame_transaction_stats.record_ui_payload(ui);
@@ -1063,7 +1063,7 @@ impl WgpuRenderBackend {
             };
             let submitted_texture_bytes = self.logical_texture_bytes();
             let submitted_instance_buffer_bytes = draw.instance_buffer_bytes();
-            #[cfg(feature = "ui-submitter")]
+            #[cfg(feature = "stock-ui")]
             let submitted_frame_facts = WgpuSubmittedFrameFacts::new(
                 app_frame_index,
                 packet.frame_index(),
@@ -1072,7 +1072,7 @@ impl WgpuRenderBackend {
                 submitted_texture_bytes,
                 submitted_instance_buffer_bytes,
             );
-            #[cfg(feature = "ui-submitter")]
+            #[cfg(feature = "stock-ui")]
             let submitted_ui_facts = ui_submissions
                 .as_deref()
                 .map(|ui_submissions| {
@@ -1106,7 +1106,7 @@ impl WgpuRenderBackend {
                     self.presented_world = Some(snapshot);
                     self.world_presentation_target = Some((window, packet.world_canvas()));
                 }
-                #[cfg(feature = "ui-submitter")]
+                #[cfg(feature = "stock-ui")]
                 if let Some(facts) = submitted_ui_facts {
                     self.publish_submitted_ui_facts(facts);
                 }
@@ -1132,7 +1132,7 @@ impl WgpuRenderBackend {
         }
     }
 
-    #[cfg(feature = "ui-submitter")]
+    #[cfg(feature = "stock-ui")]
     pub(crate) fn prepare_submitted_ui_facts(
         submissions: &[nara_ui_render::__private::UiSubmittedBackendSubmission],
         lowered: &[crate::ui::WgpuLoweredUiPacketFacts],
@@ -1182,7 +1182,7 @@ impl WgpuRenderBackend {
         Ok(submitted_facts)
     }
 
-    #[cfg(feature = "ui-submitter")]
+    #[cfg(feature = "stock-ui")]
     pub(crate) fn publish_submitted_ui_facts(&mut self, facts: Vec<WgpuSubmittedUiFacts>) {
         // The closed Runtime transaction prepares one complete batch before native submission.
         // Move that buffer through publication; extend would allocate again after acceptance.
@@ -1255,7 +1255,7 @@ impl WgpuRenderBackend {
             self.frame_transaction_stats.presents.saturating_add(1);
     }
 
-    #[cfg(feature = "ui-submitter")]
+    #[cfg(feature = "stock-ui")]
     pub(crate) fn record_runtime_ui_payload(&mut self, facts: crate::frame::WgpuUiPayloadFacts) {
         self.frame_transaction_stats.record_ui_payload(facts);
     }
@@ -1291,12 +1291,12 @@ impl WgpuRenderBackend {
         self.telemetry.finish_prepared_gpu_resources();
     }
 
-    #[cfg(any(feature = "sprite-submitter", feature = "ui-submitter"))]
+    #[cfg(any(feature = "stock-sprite", feature = "stock-ui"))]
     pub(super) fn begin_editor_submitter_frame(&mut self, frame_index: u64) {
         self.stock_quad.begin_frame(frame_index);
     }
 
-    #[cfg(any(feature = "sprite-submitter", feature = "ui-submitter"))]
+    #[cfg(any(feature = "stock-sprite", feature = "stock-ui"))]
     #[cfg(test)]
     pub(crate) fn reserve_instance_buffer_bytes(
         &self,
@@ -1305,7 +1305,7 @@ impl WgpuRenderBackend {
         self.stock_quad.reserve_instance_buffer_bytes(bytes)
     }
 
-    #[cfg(all(test, any(feature = "sprite-submitter", feature = "ui-submitter")))]
+    #[cfg(all(test, any(feature = "stock-sprite", feature = "stock-ui")))]
     pub(crate) fn set_instance_budget_limit(&mut self, maximum: u64) {
         self.stock_quad.set_instance_budget_limit(maximum);
     }
@@ -1563,7 +1563,7 @@ impl WgpuRenderBackend {
         &mut self,
         format: wgpu::TextureFormat,
         packet: &nara_render::RenderFramePacket,
-        payload: &WgpuFramePayload,
+        payload: &LegacyWgpuFramePayload,
         frame_index: u64,
         preparation: &mut crate::preparation::NativePreparation<'_>,
     ) -> Result<PreparedTargetDraw, WgpuRenderError> {
@@ -1585,19 +1585,19 @@ impl WgpuRenderBackend {
         &mut self,
         format: wgpu::TextureFormat,
         packet: &nara_render::RenderFramePacket,
-        payload: &WgpuFramePayload,
+        payload: &LegacyWgpuFramePayload,
         frame_index: u64,
         canvas_cache: &mut crate::canvas::WorldCanvasCache,
         preparation: &mut crate::preparation::NativePreparation<'_>,
     ) -> Result<PreparedTargetDraw, WgpuRenderError> {
-        #[cfg(any(feature = "sprite-submitter", feature = "ui-submitter"))]
+        #[cfg(any(feature = "stock-sprite", feature = "stock-ui"))]
         let lowered_views = packet
             .views()
             .iter()
             .enumerate()
             .map(|(index, view)| payload.lower_draw(view.target, view.viewport, Some(index)))
             .collect::<Result<Vec<_>, _>>()?;
-        #[cfg(feature = "ui-submitter")]
+        #[cfg(feature = "stock-ui")]
         let (ui_viewport, lowered_ui) = {
             let viewport = ViewportRect::from_extent(packet.target().extent())
                 .expect("admitted target extent");
@@ -1606,15 +1606,15 @@ impl WgpuRenderBackend {
                 payload.lower_draw(packet.views()[0].target, viewport, None)?,
             )
         };
-        #[cfg(any(feature = "sprite-submitter", feature = "ui-submitter"))]
+        #[cfg(any(feature = "stock-sprite", feature = "stock-ui"))]
         {
             let draws = lowered_views.iter();
-            #[cfg(feature = "ui-submitter")]
+            #[cfg(feature = "stock-ui")]
             let draws = draws.chain(std::iter::once(&lowered_ui));
             self.stock_quad
                 .preflight_image_residency(draws.flat_map(|draw| draw.batches.iter()))?;
             let draws = lowered_views.iter();
-            #[cfg(feature = "ui-submitter")]
+            #[cfg(feature = "stock-ui")]
             let draws = draws.chain(std::iter::once(&lowered_ui));
             let cost = crate::stock_quad::StockPreparationCost::for_batches(
                 draws.flat_map(|draw| draw.batches.iter()),
@@ -1668,7 +1668,7 @@ impl WgpuRenderBackend {
             canvas_cache.clear();
             format
         };
-        #[cfg(any(feature = "sprite-submitter", feature = "ui-submitter"))]
+        #[cfg(any(feature = "stock-sprite", feature = "stock-ui"))]
         for (view, lowered_draw) in packet.views().iter().zip(lowered_views) {
             let draw = self.prepare_submitter_draw_lowered(
                 world_format,
@@ -1678,7 +1678,7 @@ impl WgpuRenderBackend {
             )?;
             prepared.push(view.viewport, view.load, draw);
         }
-        #[cfg(not(any(feature = "sprite-submitter", feature = "ui-submitter")))]
+        #[cfg(not(any(feature = "stock-sprite", feature = "stock-ui")))]
         for (index, view) in packet.views().iter().enumerate() {
             let draw = self.prepare_submitter_draw(
                 world_format,
@@ -1691,7 +1691,7 @@ impl WgpuRenderBackend {
             )?;
             prepared.push(view.viewport, view.load, draw);
         }
-        #[cfg(feature = "ui-submitter")]
+        #[cfg(feature = "stock-ui")]
         {
             let draw =
                 self.prepare_submitter_draw_lowered(format, lowered_ui, frame_index, preparation)?;
@@ -1726,16 +1726,16 @@ impl WgpuRenderBackend {
         target: RenderTarget,
         viewport: ViewportRect,
         view_index: Option<usize>,
-        payload: &WgpuFramePayload,
+        payload: &LegacyWgpuFramePayload,
         frame_index: u64,
         preparation: &mut crate::preparation::NativePreparation<'_>,
     ) -> Result<PreparedSubmitterDraw, WgpuRenderError> {
-        #[cfg(any(feature = "sprite-submitter", feature = "ui-submitter"))]
+        #[cfg(any(feature = "stock-sprite", feature = "stock-ui"))]
         {
             let lowered = payload.lower_draw(target, viewport, view_index)?;
             self.prepare_submitter_draw_lowered(view_format, lowered, frame_index, preparation)
         }
-        #[cfg(not(any(feature = "sprite-submitter", feature = "ui-submitter")))]
+        #[cfg(not(any(feature = "stock-sprite", feature = "stock-ui")))]
         {
             let _ = (
                 view_format,
@@ -1750,7 +1750,7 @@ impl WgpuRenderBackend {
         }
     }
 
-    #[cfg(all(test, any(feature = "sprite-submitter", feature = "ui-submitter")))]
+    #[cfg(all(test, any(feature = "stock-sprite", feature = "stock-ui")))]
     fn prepare_submitter_draw_lowered(
         &mut self,
         view_format: wgpu::TextureFormat,
@@ -1769,9 +1769,9 @@ impl WgpuRenderBackend {
     }
 
     pub(crate) fn logical_texture_bytes(&self) -> u64 {
-        #[cfg(any(feature = "sprite-submitter", feature = "ui-submitter"))]
+        #[cfg(any(feature = "stock-sprite", feature = "stock-ui"))]
         let images = self.stock_quad.logical_texture_bytes();
-        #[cfg(not(any(feature = "sprite-submitter", feature = "ui-submitter")))]
+        #[cfg(not(any(feature = "stock-sprite", feature = "stock-ui")))]
         let images: u64 = 0;
         #[cfg(test)]
         let images = images.saturating_add(self.world_canvas.logical_bytes());
@@ -1803,9 +1803,9 @@ pub(super) fn render_backend_state(state: WgpuBackendState) -> RenderBackendStat
     }
 }
 
-#[cfg(all(test, feature = "sprite-submitter", feature = "ui-submitter"))]
+#[cfg(all(test, feature = "stock-sprite", feature = "stock-ui"))]
 mod image_working_set;
-#[cfg(all(test, feature = "sprite-submitter", feature = "ui-submitter"))]
+#[cfg(all(test, feature = "stock-sprite", feature = "stock-ui"))]
 mod runtime_measurement;
 
 #[cfg(test)]
@@ -2026,7 +2026,7 @@ mod tests {
         assert_ne!(first.instance_id(), second.instance_id());
     }
 
-    #[cfg(any(feature = "sprite-submitter", feature = "ui-submitter"))]
+    #[cfg(any(feature = "stock-sprite", feature = "stock-ui"))]
     #[test]
     fn cumulative_instance_budget_rejects_two_admissible_views_in_one_frame() {
         let mut backend = WgpuRenderBackend::default();
@@ -2047,7 +2047,7 @@ mod tests {
         drop(recovered);
     }
 
-    #[cfg(any(feature = "sprite-submitter", feature = "ui-submitter"))]
+    #[cfg(any(feature = "stock-sprite", feature = "stock-ui"))]
     #[test]
     fn replacing_frame_scope_does_not_let_old_reservation_charge_the_new_scope() {
         let mut backend = WgpuRenderBackend::default();
@@ -2064,7 +2064,7 @@ mod tests {
         drop(new_reservation);
     }
 
-    #[cfg(any(feature = "sprite-submitter", feature = "ui-submitter"))]
+    #[cfg(any(feature = "stock-sprite", feature = "stock-ui"))]
     #[test]
     fn new_frame_demand_is_independent_of_older_physical_completion() {
         let mut backend = WgpuRenderBackend::default();
@@ -2139,7 +2139,7 @@ mod tests {
         );
     }
 
-    #[cfg(any(feature = "sprite-submitter", feature = "ui-submitter"))]
+    #[cfg(any(feature = "stock-sprite", feature = "stock-ui"))]
     #[test]
     fn replacement_backend_renews_device_namespace_and_starts_with_an_empty_texture_cache() {
         use crate::quad::WgpuQuadMaterialKey;
@@ -2192,7 +2192,7 @@ mod tests {
         );
     }
 
-    #[cfg(any(feature = "sprite-submitter", feature = "ui-submitter"))]
+    #[cfg(any(feature = "stock-sprite", feature = "stock-ui"))]
     #[test]
     fn reconstructed_backend_readmits_exact_image_against_replacement_device_limits() {
         use crate::quad::{WgpuQuadMaterialKey, WgpuQuadTexture, WgpuQuadTextureKey};
@@ -2300,7 +2300,7 @@ mod tests {
         generation
     }
 
-    fn test_packet(generation: RuntimeGeneration, frame_index: u64) -> WgpuCapturedFrame {
+    fn test_packet(generation: RuntimeGeneration, frame_index: u64) -> LegacyWgpuCapturedFrame {
         let window = Window::default();
         let mut views = ExtractedViews::default();
         views.push(ExtractedView {
@@ -2325,9 +2325,9 @@ mod tests {
         )
         .unwrap()
         .unwrap();
-        WgpuCapturedFrame {
+        LegacyWgpuCapturedFrame {
             topology,
-            payload: WgpuFramePayload::default(),
+            payload: LegacyWgpuFramePayload::default(),
             app_frame_index: frame_index,
             work_started_at: std::time::Instant::now(),
         }
@@ -2335,18 +2335,18 @@ mod tests {
 
     fn render_packet_without_surface(
         backend: &mut WgpuRenderBackend,
-        packet: WgpuCapturedFrame,
+        packet: LegacyWgpuCapturedFrame,
     ) -> Result<(), WgpuRenderError> {
         let mut frame = RenderFrame {
             index: packet.topology.frame_index(),
             state: nara_render::RenderFrameState::Rendering,
         };
-        #[cfg(feature = "ui-submitter")]
+        #[cfg(feature = "stock-ui")]
         let mut ui_submissions = crate::frame::WgpuUiSubmissionState::Prepared(Vec::new());
         backend.render_packet(
             None,
             packet,
-            #[cfg(feature = "ui-submitter")]
+            #[cfg(feature = "stock-ui")]
             Some(&mut ui_submissions),
             &mut frame,
             &mut FrameStats::default(),

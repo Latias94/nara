@@ -2,7 +2,7 @@
 
 **Status**: Accepted
 **Date**: 2026-07-09
-**Last Revised**: 2026-10-23
+**Last Revised**: 2026-11-01 (explicit render capture and policy composition)
 **Refines**: ADR 0003, ADR 0010, ADR 0035, ADR 0040, ADR 0044
 **Refined By**: ADR 0056: Headless Runtime and Dedicated Server Readiness; ADR 0079: Root Product
 Capabilities and Placeholder Domain Retirement; ADR 0095: Plugin-Owned Specialized Domains and
@@ -202,7 +202,7 @@ Initial group vocabulary:
 | `HeadlessRuntimePlugins` | Core runtime plus asset/scene/gameplay-domain systems that can run without window, render, audio-device, editor, or UI toolkit adapters |
 | `ServerPlugins` | Dedicated-server-ready headless composition with deterministic-friendly gameplay stages, diagnostics/metrics, and no networking transport unless an optional networking crate is explicitly added |
 | `DesktopWinitPlugins` | Backend-neutral window configuration for a desktop profile; top-level Host/code-first authority selects `WinitRunner` separately |
-| `WgpuBackendPlugins` | Transitional runtime integration for the already selected stock wgpu Host; it does not select or replace Render Host authority. Sprite and UI submitters are available only under their compiled domain/backend features and join a resolved plan only when requested. |
+| `WgpuBackendPlugins` | Stock typed policy, CPU capture and optional native-window presentation over the selected WGPU Host. Sprite/UI capture contributors require their compiled domain/backend features and join a resolved plan only when requested. Embedded products can disable native-window presentation without selecting another execution owner. |
 
 Editor tooling is Host-owned under ADR 0104. The `tooling` and `tooling-egui` Cargo features compile
 Host models and adapters, but no `ToolingPlugins` group, tooling slot, or runtime product capability
@@ -299,8 +299,9 @@ immediate-install semantics.
 - Pre-resolution occurrences use private entry-draft vocabulary; resolved inspection exposes
   `PluginPlanEntry`. `PluginRegistration` is not a public type because no active registration has
   occurred during pure planning.
-- `WgpuRenderPlugin` no longer unconditionally installs every render domain. Product capability
-  closure selects concrete compiled batch encoders; this does not imply an independent submitter SPI.
+- Capture, native-window presentation, stock policy and stock domain contributors are explicit
+  plugins. Product capability closure selects actual domain contributors; compiling a domain does
+  not install it. ADR0094's typed policy seam remains distinct from a submitter registry.
 - Runtime 2D and runtime UI are separate groups, and desktop window plus wgpu composition is
   additive rather than fixed in `DesktopWgpuPlugins`.
 - Root facade/prelude refinement exposes group names deliberately rather than exporting backend/plugin

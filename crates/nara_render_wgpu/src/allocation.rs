@@ -1,8 +1,8 @@
-#[cfg(any(feature = "sprite-submitter", feature = "ui-submitter"))]
+#[cfg(any(feature = "stock-sprite", feature = "stock-ui"))]
 use crate::texture::WgpuTextureError;
 
 /// Checks a single resource operation before its returned handle can be consumed.
-#[cfg(any(feature = "sprite-submitter", feature = "ui-submitter"))]
+#[cfg(any(feature = "stock-sprite", feature = "stock-ui"))]
 pub(crate) fn checked_allocation<T>(
     device: &wgpu::Device,
     label: &'static str,
@@ -126,10 +126,10 @@ impl Drop for AllocationFailureGuard {
     }
 }
 
-#[cfg(all(test, any(feature = "sprite-submitter", feature = "ui-submitter")))]
+#[cfg(all(test, any(feature = "stock-sprite", feature = "stock-ui")))]
 mod tests;
 
-#[cfg(all(test, any(feature = "sprite-submitter", feature = "ui-submitter")))]
+#[cfg(all(test, any(feature = "stock-sprite", feature = "stock-ui")))]
 pub(crate) fn take_test_batches() -> Option<Vec<crate::quad::WgpuQuadBatch>> {
     tests::take_batches()
 }

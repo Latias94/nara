@@ -310,7 +310,7 @@ fn tilemap_and_changing_hud_costs() {
                     )
                     .unwrap();
                 let plan_ns = begin.elapsed().as_nanos();
-                let payload = WgpuFramePayload::for_editor_viewport(
+                let payload = LegacyWgpuFramePayload::for_editor_viewport(
                     runtime.world().resource::<SpriteBatches>().clone(),
                     vec![Arc::clone(&ui)],
                 );

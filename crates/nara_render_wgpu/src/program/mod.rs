@@ -52,6 +52,16 @@ pub enum WgpuRenderProgramError {
     IdentityExhausted,
     #[error("the Feature's original native state is unavailable")]
     FeatureState,
+    #[error("the policy installation is closed to new captures")]
+    PolicyClosed,
+    #[error("the original policy CPU instances or capture identity are unavailable")]
+    PolicyState,
+    #[error("producer-local policy instances or metadata are at capacity")]
+    PolicyCapacity,
+    #[error("policy validation or construction panicked")]
+    PolicyPanicked,
+    #[error(transparent)]
+    PolicyRequirements(#[from] crate::WgpuDeviceRequirementsError),
     #[error("the resource has a different native kind")]
     ResourceKind,
     #[error("the resource has a different semantic port type")]
@@ -296,7 +306,7 @@ impl WgpuRenderProgramBuilder {
                 .checked_add(table)
                 .ok_or(GraphError::LimitExceeded(crate::LimitKind::MetadataBytes))?;
         }
-        #[cfg(any(feature = "sprite-submitter", feature = "ui-submitter"))]
+        #[cfg(any(feature = "stock-sprite", feature = "stock-ui"))]
         {
             bytes = bytes
                 .checked_add(std::mem::size_of::<crate::stock_quad::StockImagePreflight>())
@@ -311,7 +321,7 @@ impl WgpuRenderProgramBuilder {
                 })
                 .ok_or(GraphError::LimitExceeded(crate::LimitKind::MetadataBytes))?;
         }
-        #[cfg(feature = "sprite-submitter")]
+        #[cfg(feature = "stock-sprite")]
         {
             bytes = limits
                 .max_operations

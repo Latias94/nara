@@ -1528,6 +1528,46 @@ mod preview_content_tests {
         assert_eq!(before.revision(), after_rejection.revision());
     }
 
+    #[cfg(feature = "render-wgpu")]
+    #[test]
+    fn scene_preview_accept_retains_original_input_after_producer_retirement() {
+        use nara_render_wgpu::WgpuStockPolicy;
+
+        use super::super::presentation::EditorPreviewPresentation;
+
+        let (mut runtime, _, _) = authoring_runtime();
+        runtime.set_preview_extent(Extent2d::new(320, 240));
+        let source = SceneAuthoringSession::new(SceneDocument::default());
+        let first = preview(&mut runtime, &source);
+        let original = first.render_input().clone();
+        let content = first.content_stamp();
+        let document = first.document();
+        let revision = first.revision();
+        let second = preview(&mut runtime, &source);
+        assert_eq!(
+            second.render_input().installation(),
+            original.installation()
+        );
+        assert_eq!(second.content_stamp(), content);
+        assert!(second.geometry_revision() > first.geometry_revision());
+        assert!(second.packet().frame_index() > original.packet().frame_index());
+        retire(&mut runtime);
+        drop(runtime);
+
+        let mut presentation = EditorPreviewPresentation::new();
+        let (accepted, input) = presentation.accept(first).unwrap();
+
+        assert_eq!(accepted.document(), document);
+        assert_eq!(accepted.revision(), revision);
+        assert_eq!(input.installation(), original.installation());
+        assert!(std::ptr::eq(input.packet(), original.packet()));
+        assert!(std::ptr::eq(
+            input.captured::<WgpuStockPolicy>().unwrap(),
+            original.captured::<WgpuStockPolicy>().unwrap(),
+        ));
+        assert_eq!(second.render_input().installation(), input.installation());
+    }
+
     #[test]
     fn replacement_preview_runtime_cannot_reuse_a_predecessors_content_stamp() {
         let source = SceneAuthoringSession::new(SceneDocument::default());

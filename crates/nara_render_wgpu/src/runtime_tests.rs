@@ -22,6 +22,8 @@ enum HarnessMutation {
     RestoreStats,
     BackendStatus(RenderBackendStatus),
     RuntimeGeneration(RuntimeGeneration),
+    CaptureError(WgpuFrameCaptureError),
+    EmptyFrame(u64),
     Fault,
 }
 
@@ -63,6 +65,34 @@ fn mutate(
         }
         HarnessMutation::RuntimeGeneration(generation) => {
             world.insert_resource(generation);
+            None
+        }
+        HarnessMutation::CaptureError(error) => {
+            let connection = world.resource::<WgpuRuntimeConnection>();
+            let mut owner = connection.owner.lock().unwrap();
+            owner
+                .pending
+                .as_mut()
+                .expect("the harness published a pending frame before capture")
+                .captured = Err(error);
+            None
+        }
+        HarnessMutation::EmptyFrame(index) => {
+            let frame = RenderFrame {
+                index,
+                state: nara_render::RenderFrameState::Rendering,
+            };
+            *world.resource_mut::<RenderFrame>() = frame;
+            world
+                .resource_mut::<WgpuRuntimeConnection>()
+                .publish(PendingFrame {
+                    captured: Ok(None),
+                    frame,
+                    window: None,
+                    canvas: None,
+                    #[cfg(feature = "stock-ui")]
+                    ui: None,
+                });
             None
         }
         HarnessMutation::Fault => {
@@ -130,6 +160,12 @@ impl Plugin for ConnectionHarness {
         )?;
         app.insert_resource(HarnessControl)?;
         app.__register_driver_port::<HarnessControl>(mutate)?;
+        crate::install_wgpu_policy(
+            app,
+            crate::WgpuPolicyDefinition::new(crate::WgpuStockPolicy::default())
+                .install()
+                .unwrap(),
+        )?;
         app.world_mut()?
             .resource_mut::<WgpuRuntimeConnection>()
             .publish(PendingFrame {
@@ -140,7 +176,7 @@ impl Plugin for ConnectionHarness {
                 },
                 window: None,
                 canvas: None,
-                #[cfg(feature = "ui-submitter")]
+                #[cfg(feature = "stock-ui")]
                 ui: None,
             });
         Ok(())
@@ -214,10 +250,14 @@ fn window_capture(runtime: &mut RuntimeInstance, source: RuntimeGeneration) -> W
     )
     .unwrap()
     .unwrap();
+    let input = runtime
+        .world()
+        .resource::<crate::WgpuPolicyInstallation<crate::WgpuStockPolicy>>()
+        .capture(packet, Arc::new(crate::WgpuStockCapture::default()))
+        .unwrap();
     let mut capture = capture(runtime);
     capture.pending.captured = Ok(Some(crate::frame::WgpuCapturedFrame {
-        topology: packet,
-        payload: crate::frame::WgpuFramePayload::default(),
+        input,
         app_frame_index: 1,
         work_started_at: std::time::Instant::now(),
     }));
@@ -242,6 +282,142 @@ fn replacing_world_generation_faults_before_a_foreign_capture_can_be_issued() {
 }
 
 #[test]
+fn policy_capture_rejection_keeps_the_runtime_running_and_the_next_frame_completes() {
+    let mut runtime = runtime(false);
+    control(
+        &mut runtime,
+        HarnessMutation::CaptureError(WgpuFrameCaptureError::Policy(
+            crate::WgpuRenderProgramError::feature("policy capture rejected this frame"),
+        )),
+    );
+    assert_eq!(runtime.state(), RuntimeState::Running);
+    let mut host = WgpuRenderHost::offscreen();
+    let producer = host.create_producer().unwrap();
+    let rejected = capture(&mut runtime);
+    let rejected_identity = rejected.identity();
+    let rejected =
+        host.execute_runtime_frame(&producer, &BackendWindowHandles::default(), rejected);
+    assert_eq!(rejected.identity(), rejected_identity);
+    let skip = rejected.status.as_ref().unwrap().last_skip().unwrap();
+    assert_eq!(
+        skip.reason(),
+        nara_render::RenderFrameSkipReason::ContentRejected,
+    );
+    assert!(
+        skip.message()
+            .unwrap()
+            .contains("policy capture rejected this frame")
+    );
+    assert_eq!(rejected.observation().unwrap().device_epoch(), 0);
+    assert_eq!(host.frame_transaction_stats().packet_rejections(), 1);
+    assert_eq!(host.frame_transaction_stats().queue_submissions(), 0);
+    assert_eq!(host.retained_resource_bytes(), 0);
+
+    let completed = complete_runtime_frame(&mut runtime, rejected).unwrap();
+    assert!(!completed.output.retired);
+    assert!(completed.output.presented.is_none());
+    assert!(completed.post_operation_fault.is_none());
+    assert_eq!(runtime.state(), RuntimeState::Running);
+    assert!(runtime.fault().is_none());
+    assert_eq!(
+        runtime
+            .world()
+            .resource::<RenderBackendStatus>()
+            .last_skip()
+            .unwrap()
+            .reason(),
+        nara_render::RenderFrameSkipReason::ContentRejected,
+    );
+    assert!(
+        runtime
+            .world()
+            .resource::<WgpuRuntimeConnection>()
+            .can_capture()
+    );
+    runtime.drive(Duration::ZERO).unwrap();
+    assert_eq!(runtime.state(), RuntimeState::Running);
+
+    // Publish through the same original connection after the first result releases its claim.
+    control(&mut runtime, HarnessMutation::EmptyFrame(18));
+    let recovered = capture(&mut runtime);
+    assert_eq!(
+        recovered.identity().connection(),
+        rejected_identity.connection(),
+    );
+    assert_eq!(
+        recovered.identity().runtime_generation(),
+        runtime.generation()
+    );
+    assert_eq!(
+        recovered.identity().sequence(),
+        rejected_identity.sequence() + 1,
+    );
+    let recovered_identity = recovered.identity();
+    let recovered =
+        host.execute_runtime_frame(&producer, &BackendWindowHandles::default(), recovered);
+    assert_eq!(recovered.identity(), recovered_identity);
+    assert_eq!(recovered.observation().unwrap().device_epoch(), 0);
+    assert_eq!(host.frame_transaction_stats().queue_submissions(), 0);
+    assert_eq!(host.frame_transaction_stats().packet_rejections(), 0);
+    assert_eq!(host.retained_resource_bytes(), 0);
+    let completed = complete_runtime_frame(&mut runtime, recovered).unwrap();
+    assert!(!completed.output.retired);
+    assert!(completed.output.presented.is_none());
+    assert!(completed.post_operation_fault.is_none());
+    assert_eq!(runtime.state(), RuntimeState::Running);
+    assert!(runtime.fault().is_none());
+    assert_eq!(runtime.world().resource::<RenderFrame>().index, 18);
+    assert_eq!(
+        runtime
+            .world()
+            .resource::<RenderBackendStatus>()
+            .last_skip()
+            .unwrap()
+            .reason(),
+        nara_render::RenderFrameSkipReason::NoViews,
+    );
+    assert!(
+        runtime
+            .world()
+            .resource::<WgpuRuntimeConnection>()
+            .can_capture()
+    );
+    drop(host);
+    finish(runtime);
+}
+
+#[test]
+fn a_topology_capture_error_still_faults_the_actual_runtime() {
+    let mut runtime = runtime(false);
+    control(
+        &mut runtime,
+        HarnessMutation::CaptureError(WgpuFrameCaptureError::Topology(
+            nara_render::RenderFramePacketError::UninitializedTarget,
+        )),
+    );
+    let mut host = WgpuRenderHost::offscreen();
+    let producer = host.create_producer().unwrap();
+    let rejected = host.execute_runtime_frame(
+        &producer,
+        &BackendWindowHandles::default(),
+        capture(&mut runtime),
+    );
+    assert_eq!(rejected.observation().unwrap().device_epoch(), 0);
+    assert_eq!(host.frame_transaction_stats().queue_submissions(), 0);
+    let completed = complete_runtime_frame(&mut runtime, rejected).unwrap();
+    assert!(!completed.output.retired);
+    assert!(completed.output.presented.is_none());
+    assert_eq!(
+        completed.post_operation_fault.unwrap().kind(),
+        RuntimeFaultKind::System,
+    );
+    assert_eq!(runtime.state(), RuntimeState::Faulted);
+    assert_eq!(runtime.fault().unwrap().kind(), RuntimeFaultKind::System);
+    drop(host);
+    finish(runtime);
+}
+
+#[test]
 fn host_rejects_foreign_captured_source_before_native_authority_and_returns_original_result() {
     let mut owner = runtime(false);
     let foreign = runtime(false);
@@ -263,6 +439,8 @@ fn host_rejects_foreign_captured_source_before_native_authority_and_returns_orig
     let outcome = complete_runtime_frame(&mut owner, result).unwrap();
     assert!(outcome.output.presented.is_none());
     assert!(outcome.post_operation_fault.is_some());
+    assert_eq!(owner.state(), RuntimeState::Faulted);
+    assert_eq!(owner.fault().unwrap().kind(), RuntimeFaultKind::System);
     assert!(
         host.create_producer().is_ok(),
         "one invalid source cannot retire a healthy Host"

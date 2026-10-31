@@ -332,7 +332,7 @@ impl EditorAuthoringImageCatalogCandidate {
         })
     }
 
-    fn into_receipt(
+    pub(super) fn into_receipt(
         self,
         generation: UiImageChoiceGeneration,
     ) -> Result<EditorAuthoringImageCatalogReceipt, EditorAuthoringImageCatalogError> {

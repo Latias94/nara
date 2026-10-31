@@ -11,7 +11,8 @@ The render Host creates each move-only `WgpuRenderProducer`; configuration, subm
 retirement borrow that owned producer. Its copyable `.id()` is used only to compare nominal facts,
 never as execution authority. Independent source identities and logical image handles use their
 public constructors. Each image is a real stock clear draw built from one manually supplied
-`ExtractedView`. There is no private implementation import, fake Runtime generation, alternative
+`ExtractedView`. A retained stock policy installation captures those immutable facts into each
+`WgpuRenderInput`; the Host uses that input's original definition. There is no private implementation import, fake Runtime generation, alternative
 device initialization path or mock GPU.
 
 ## Run
@@ -59,7 +60,8 @@ not a browser or window-presentation qualification.
   successful-publication watermark. After the original prefix settles, a retained display keeps
   the allocation until its last lease drops, with exact retained-byte assertions.
 - `original_cpu_input_reconstructs_after_the_original_host_has_retired` keeps the original input
-  independently, completes producer and final Host retirement, drops that Host, and submits the
+  independently, closes and drops its installation, completes producer and final Host retirement,
+  drops that Host, and submits the
   same input object to a new normal offscreen Host. It checks red pixels and new issued identities,
   and rejects the foreign old output for both display and native access. It neither injects nor
   claims actual device-loss recovery, and does not test released-input recovery unavailability.

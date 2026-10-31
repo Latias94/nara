@@ -103,13 +103,17 @@ impl WgpuRenderHost {
             capture.pending.canvas,
         );
         self.backend.begin_frame_transaction(frame.index, None);
-        #[cfg(feature = "ui-submitter")]
+        #[cfg(feature = "stock-ui")]
         let mut ui = capture.pending.ui.take();
         let mut fault = None;
         let mut presented_world = None;
         let result = match std::mem::replace(&mut capture.pending.captured, Ok(None)) {
             Ok(Some(captured))
-                if captured.topology.source_generation().runtime_generation()
+                if captured
+                    .input
+                    .packet()
+                    .source_generation()
+                    .runtime_generation()
                     != Some(original_runtime) =>
             {
                 self.backend.reject_captured_packet();
@@ -120,7 +124,7 @@ impl WgpuRenderHost {
                 Err(WgpuRenderHostError::Backend(
                     WgpuRenderError::StaleFrameGeneration {
                         expected: original_runtime.into(),
-                        actual: captured.topology.source_generation(),
+                        actual: captured.input.packet().source_generation(),
                     },
                 ))
             }
@@ -128,7 +132,7 @@ impl WgpuRenderHost {
                 producer,
                 handles,
                 captured,
-                #[cfg(feature = "ui-submitter")]
+                #[cfg(feature = "stock-ui")]
                 ui.as_mut(),
                 &mut frame,
                 &mut stats,
@@ -146,24 +150,33 @@ impl WgpuRenderHost {
             }
             Err(error) => {
                 self.backend.reject_captured_packet();
-                status.mark_skipped_with_message(
-                    frame.index,
-                    RenderFrameSkipReason::InvalidTopology,
-                    error.to_string(),
-                );
-                fault = Some(RuntimeFault::engine(
-                    RuntimeFaultKind::System,
-                    "nara.render.frame-packet",
-                ));
                 frame.mark_skipped();
-                Err(WgpuRenderHostError::Backend(
-                    WgpuRenderError::ContentRejected {
-                        message: error.to_string(),
-                    },
-                ))
+                match error {
+                    crate::WgpuFrameCaptureError::Policy(error) => {
+                        // Domain capture rejection is recoverable on the next frame, just
+                        // as rejection by the same policy during program construction is.
+                        Err(error.into())
+                    }
+                    error => {
+                        status.mark_skipped_with_message(
+                            frame.index,
+                            RenderFrameSkipReason::InvalidTopology,
+                            error.to_string(),
+                        );
+                        fault = Some(RuntimeFault::engine(
+                            RuntimeFaultKind::System,
+                            "nara.render.frame-packet",
+                        ));
+                        Err(WgpuRenderHostError::Backend(
+                            WgpuRenderError::ContentRejected {
+                                message: error.to_string(),
+                            },
+                        ))
+                    }
+                }
             }
         };
-        #[cfg(feature = "ui-submitter")]
+        #[cfg(feature = "stock-ui")]
         if let Some(ui) = ui {
             let backend_result = result
                 .as_ref()
@@ -214,18 +227,18 @@ impl WgpuRenderHost {
         producer: &super::WgpuRenderProducer,
         handles: &BackendWindowHandles,
         captured: crate::frame::WgpuCapturedFrame,
-        #[cfg(feature = "ui-submitter")] mut ui: Option<&mut crate::frame::WgpuUiSubmissionState>,
+        #[cfg(feature = "stock-ui")] mut ui: Option<&mut crate::frame::WgpuUiSubmissionState>,
         frame: &mut nara_render::RenderFrame,
         stats: &mut FrameStats,
         status: &mut RenderBackendStatus,
         presented_world: &mut Option<nara_render::__private::PresentedWorldFrame>,
     ) -> Result<(), WgpuRenderHostError> {
         let crate::frame::WgpuCapturedFrame {
-            topology: packet,
-            payload,
+            input,
             app_frame_index,
             work_started_at,
         } = captured;
+        let packet = input.packet();
         let id = self.producer_id(producer)?;
         self.backend
             .begin_frame_transaction(packet.frame_index(), Some(app_frame_index));
@@ -259,6 +272,7 @@ impl WgpuRenderHost {
             );
             return Ok(());
         }
+        self.admit_policy_requirements(input.requirements())?;
         match &self.handles {
             Some(original) if !original.shares_authority_with(handles) => {
                 return Err(WgpuRenderProgramError::feature(
@@ -299,12 +313,12 @@ impl WgpuRenderHost {
                 .map_or(Some(1), |frame| frame.checked_add(1))
                 .ok_or(WgpuRenderHostError::TargetGenerationExhausted)?,
         );
-        #[cfg(any(feature = "sprite-submitter", feature = "ui-submitter"))]
+        #[cfg(any(feature = "stock-sprite", feature = "stock-ui"))]
         self.backend
             .begin_editor_submitter_frame(self.host_frame_index.expect("admitted Host frame"));
         status.mark_ready(crate::WGPU_RENDER_BACKEND);
         status.clear_skip();
-        #[cfg(feature = "ui-submitter")]
+        #[cfg(feature = "stock-ui")]
         if let Some(ui) = ui.as_deref_mut() {
             let generation = nara_ui_render::UiPresentationBackendGeneration::new(
                 namespace.backend_instance_id,
@@ -313,9 +327,6 @@ impl WgpuRenderHost {
             .ok_or(WgpuRenderHostError::StaleImageSubmission)?;
             ui.bind_backend(generation)?;
         }
-        #[cfg(feature = "ui-submitter")]
-        self.backend
-            .record_runtime_ui_payload(payload.ui_facts(packet.views()[0].target));
         let Some(acquired) = self.backend.acquire_editor_surface(window.id)? else {
             if self.backend.configured_surface_extent(window.id).is_none() {
                 self.invalidate_runtime_presentation(id);
@@ -328,35 +339,33 @@ impl WgpuRenderHost {
             );
             return Ok(());
         };
-        if self.views[&id].stock_policy.is_none() {
-            self.views
-                .get_mut(&id)
-                .expect("admitted producer")
-                .stock_policy = Some(crate::stock_policy::StockPolicyInstances::new(
-                namespace.backend_instance_id,
-                id,
-                &producer.closed,
-            )?);
-        }
-        let stock = self.views[&id]
-            .stock_policy
+        let built = self.build_policy(id, &input, acquired.format)?;
+        let policy = &built.output;
+        Self::validate_policy_target(policy, packet, acquired.format, false)?;
+        #[cfg(feature = "stock-ui")]
+        let ui_facts = policy
+            .ui
             .as_ref()
-            .expect("installed stock policy")
-            .build(&packet, &payload, acquired.format)?;
-        #[cfg(feature = "ui-submitter")]
+            .map_or(&[][..], |binding| binding.facts());
+        #[cfg(feature = "stock-ui")]
+        if let Some(binding) = &policy.ui {
+            self.backend
+                .record_runtime_ui_payload(binding.payload_facts());
+        }
+        #[cfg(feature = "stock-ui")]
         let mut submitted_ui = ui
             .as_deref()
             .map(|ui| {
                 crate::backend::WgpuRenderBackend::prepare_submitted_ui_facts(
                     ui.bound_submissions(),
-                    &stock.ui_facts,
+                    ui_facts,
                     crate::backend::WgpuSubmittedFrameFacts::new(
                         app_frame_index,
                         packet.frame_index(),
-                        stock.facts.sprites,
-                        stock.facts.image_sprites,
-                        stock.program.modeled_resource_bytes(),
-                        stock.facts.instance_buffer_bytes,
+                        policy.facts.frame.sprites,
+                        policy.facts.image_sprites,
+                        policy.program.modeled_resource_bytes(),
+                        policy.facts.instance_buffer_bytes,
                     ),
                 )
             })
@@ -365,22 +374,25 @@ impl WgpuRenderHost {
         self.execute_program_in_namespace(
             id,
             &namespace,
-            &stock.program,
+            &policy.program,
             None,
             Some(ProgramSurfaceTarget {
                 acquired: &acquired,
-                final_version: &stock.final_version,
-                instance_buffer_bytes: stock.facts.instance_buffer_bytes,
+                final_version: &policy.final_version,
+                instance_buffer_bytes: policy.facts.instance_buffer_bytes,
                 app_frame_index,
                 work_started_at,
                 submitted_texture_bytes: &mut submitted_texture_bytes,
             }),
+            Some((policy, built.custody, built.metadata_bytes)),
         )?;
-        #[cfg(feature = "ui-submitter")]
+        #[cfg(feature = "stock-ui")]
         if let Some(facts) = &mut submitted_ui {
             for facts in facts {
-                facts
-                    .set_resource_bytes(submitted_texture_bytes, stock.facts.instance_buffer_bytes);
+                facts.set_resource_bytes(
+                    submitted_texture_bytes,
+                    policy.facts.instance_buffer_bytes,
+                );
             }
         }
         let scope = namespace
@@ -403,12 +415,12 @@ impl WgpuRenderHost {
         );
         *presented_world = self.commit_runtime_world_presentation(id, &packet)?;
         self.backend.commit_runtime_presentation(receipt);
-        #[cfg(feature = "ui-submitter")]
+        #[cfg(feature = "stock-ui")]
         if let Some(facts) = submitted_ui {
             self.backend.publish_submitted_ui_facts(facts);
         }
-        stats.draw_calls = stock.facts.draw_calls.saturating_add(1);
-        stats.sprites = stock.facts.sprites;
+        *stats = policy.facts.frame;
+        stats.draw_calls = stats.draw_calls.saturating_add(1);
         frame.mark_submitted();
         Ok(())
     }

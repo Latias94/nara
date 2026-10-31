@@ -469,15 +469,22 @@ pub mod backend_prelude {
         WINIT_UI_ACCESSIBILITY_CONTRIBUTION_PLUGIN_DECLARATION,
         WINIT_UI_ACCESSIBILITY_CONTRIBUTION_PLUGIN_ID, WinitUiAccessibilityContributionPlugin,
     };
-    #[cfg(all(feature = "presentation-2d", feature = "render-wgpu"))]
-    pub use nara_render_wgpu::WgpuSpriteSubmitterPlugin;
-    #[cfg(all(feature = "presentation-ui", feature = "render-wgpu"))]
-    pub use nara_render_wgpu::WgpuUiSubmitterPlugin;
     #[cfg(feature = "render-wgpu")]
     pub use nara_render_wgpu::{
-        SurfaceAcquireAction, SurfaceResizeAction, SurfaceTextureStatus, WgpuBackendState,
-        WgpuFrameTransactionStats, WgpuRenderError, WgpuRenderHost, WgpuRenderPlugin,
-        WgpuRenderProducer,
+        SurfaceAcquireAction, SurfaceResizeAction, SurfaceTextureStatus,
+        WGPU_CAPTURE_PLUGIN_DECLARATION, WGPU_CAPTURE_PLUGIN_ID,
+        WGPU_STOCK_POLICY_PLUGIN_DECLARATION, WGPU_STOCK_POLICY_PLUGIN_ID,
+        WGPU_WINDOW_PRESENTATION_PLUGIN_DECLARATION, WGPU_WINDOW_PRESENTATION_PLUGIN_ID,
+        WgpuBackendState, WgpuCapturePlugin, WgpuFrameTransactionStats, WgpuRenderError,
+        WgpuRenderHost, WgpuRenderProducer, WgpuStockPolicyPlugin, WgpuWindowPresentationPlugin,
+    };
+    #[cfg(all(feature = "presentation-2d", feature = "render-wgpu"))]
+    pub use nara_render_wgpu::{
+        WGPU_STOCK_SPRITE_PLUGIN_DECLARATION, WGPU_STOCK_SPRITE_PLUGIN_ID, WgpuStockSpritePlugin,
+    };
+    #[cfg(all(feature = "presentation-ui", feature = "render-wgpu"))]
+    pub use nara_render_wgpu::{
+        WGPU_STOCK_UI_PLUGIN_DECLARATION, WGPU_STOCK_UI_PLUGIN_ID, WgpuStockUiPlugin,
     };
     pub use nara_window::{
         PresentMode, PrimaryWindow, PrimaryWindowId, Window, WindowCloseRequest,

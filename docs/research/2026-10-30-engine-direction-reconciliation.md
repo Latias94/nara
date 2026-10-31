@@ -208,3 +208,19 @@ the existing plan, without another roadmap or imported toolkit. Typed policy cap
 history/custom composition stay open, as do the named Schema/Prefab, joint motion/executor and
 editable Nara-drawn Inspector workflows. No historical source snapshot is reclassified as a fresh
 current-platform qualification.
+
+The [typed policy successor](../knowledge/engineering/verification/2026-10/2026-10-31T192756Z-original-typed-render-policy-capture-and-complete-consumer-qualification-df7f9377f51142b78060b53617c800a1.md)
+now removes production central domain payloads and combined image facades. Original policy capture
+and concrete UI completion custody pass through actual Runtime, Editor and independent consumers;
+a non-stock scalar renderer qualifies ordinary ECS/window presentation and original-input image
+reconstruction. F1/F2/F3 advance in that scope. Full View/history, streams, editable Inspector and
+durable material declarations retain their separate remaining gates.
+
+The same ZIP was rechecked on 2026-11-01: all 91 manifest entries and all 10 imported studies still
+match. A focused independent review and Astra/max adversarial review refine the
+[next View/history transaction](../architecture/render-program-production-design.md#next-production-unit-view-history-transactions)
+within the existing unit: original topology/execution leases, transactional instance membership,
+candidate-pinned predecessors, lineage deduplication, explicit View retirement and temporal reset
+after device loss. Successful output/history publication is distinct from later present/UI
+completion. These design corrections are unimplemented successor requirements, not newly
+reproduced bugs in currently unsupported temporal behavior or another graph/toolkit selection.

@@ -76,7 +76,13 @@ impl FakeToolkit {
         candidate: EditorPreviewCandidate,
         mapping: DisplayMapping2d,
     ) -> DisplayCommand {
-        let (accepted, packet, batches) = self.presentation.accept(candidate).unwrap();
+        let batches = candidate.sprite_batches().clone();
+        #[cfg(feature = "render-wgpu")]
+        let (accepted, input) = self.presentation.accept(candidate).unwrap();
+        #[cfg(feature = "render-wgpu")]
+        let packet = input.packet();
+        #[cfg(not(feature = "render-wgpu"))]
+        let (accepted, packet, _) = self.presentation.accept(candidate).unwrap();
         let RenderFrameTarget::Image(image) = packet.target() else {
             panic!("the Host preview owns an image target")
         };

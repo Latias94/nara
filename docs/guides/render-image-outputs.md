@@ -30,7 +30,14 @@ and its first allocation, not a future toolkit registration or successful output
 
 ## Pixels, Display And Reconstruction
 
-`WgpuImageInput` owns exact captured CPU drawing facts. `host.submit(&producer, &input)`
+Create a `WgpuPolicyDefinition<P>` and keep its `WgpuPolicyInstallation<P>` with the capture
+owner. For stock clears, use `WgpuStockPolicy::new()` and `WgpuStockCapture::new()`. Calling
+`installation.capture(packet, Arc::new(capture))` produces a `WgpuRenderInput` that retains its
+original definition and exact captured CPU facts. Call `host.prepare_policy(&producer, &definition)`
+before beginning a frame or reserving a target when the policy needs nondefault device features
+or limits. A late request must fit the already enabled device or require explicit reconstruction.
+
+`host.submit(&producer, &input)`
 borrows those facts and returns `WgpuImageOutput` only after successful native admission and
 device-health checks. A refused attempt preserves the successful producer watermark; the same
 input can be retried where the error permits it. Inputs contain no Runtime UI completion permit.
@@ -42,9 +49,8 @@ limit is 512MiB of shared logical native payload; `with_resource_byte_limit` cha
 `retained_resource_bytes` includes inactive output reservations, retained outputs, graph allocations,
 and prepared Image, glyph, fallback, instance and material allocations. Each allocation is charged
 once until its last responsibility releases it, including cached state, output leases and submitted
-uses. Toolkit-owned storage and the legacy Runtime/window WorldCanvas cache retain separate accounting during
-the stock-policy transition. Native pipeline/driver overhead is excluded; the budget does not measure physical driver
-residency.
+uses. Toolkit-owned storage and native pipeline/driver overhead are excluded; the budget does not
+measure physical driver residency. A WorldCanvas world image is a declared program resource.
 
 `display_image(output)` selects one exact output for a new display occurrence. Clone that display
 for repaint; create a separate display for a mirror. Toolkit bindings retain the exact display.
@@ -52,7 +58,9 @@ Image equality, a receipt or a passive mirror cannot settle another occurrence's
 permission. Editor adapters additionally preserve document/revision, geometry, mapping and
 existing Runtime input authority. A retained pixel allocation alone grants no interaction.
 
-Keep the original `WgpuImageInput` separately when reconstruction is required. A new Host can
+Keep the original `WgpuRenderInput` separately when reconstruction is required. Closing or dropping
+its installation refuses new captures while accepted inputs retain their original implementation.
+A new Host can
 realize those exact facts with a new output identity after the old device/Host retires. An output
 does not retain or recreate its CPU input; after the caller releases that input there is no
 reconstruction operation from the output. Do not resolve current assets to impersonate an old
@@ -85,6 +93,7 @@ retirement for a finite drive budget and aborts if dependencies cannot be safely
 the native Session policy. The drive budget is not a strict wall-clock bound on WGPU callbacks
 or native destructors. Explicit retirement retains errors and allows the caller to retry.
 
-The production resource graph, external Feature/policy interface and Nara-drawn editable Editor
-remain separately ordered work in the [render plan](../plans/2026-10-31-render-composition-and-host-execution-plan.md).
-This image-output interface does not imply that those capabilities are implemented.
+The [program guide](render-programs.md) explains finite texture/buffer Features and policy capture.
+Complete View/history groups and the Nara-drawn editable Editor remain separately ordered work in
+the [render plan](../plans/2026-10-31-render-composition-and-host-execution-plan.md). Interface
+availability and native qualification retain their explicitly recorded scopes.

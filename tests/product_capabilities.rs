@@ -128,7 +128,7 @@ fn root_manifest_exposes_only_coarse_product_capabilities() {
             "runtime-2d",
             "dep:nara_sprite_render",
             "nara_image/render-prepare",
-            "nara_render_wgpu?/sprite-submitter",
+            "nara_render_wgpu?/stock-sprite",
         ]
     );
     assert_eq!(
@@ -143,7 +143,7 @@ fn root_manifest_exposes_only_coarse_product_capabilities() {
             "dep:nara_render",
             "dep:nara_ui_render",
             "nara_image/render-prepare",
-            "nara_render_wgpu?/ui-submitter",
+            "nara_render_wgpu?/stock-ui",
             "nara_winit?/platform-accessibility",
         ]
     );

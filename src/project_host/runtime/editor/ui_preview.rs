@@ -3,12 +3,19 @@ use std::sync::Arc;
 use nara_asset::Handle;
 use nara_core::Mat3;
 use nara_ecs::Entity;
+#[cfg(not(feature = "render-wgpu"))]
+use nara_render::RenderFramePacket;
 use nara_render::{
     __private::{
         EditorRenderGeneration, build_editor_render_frame_packet, editor_viewport_image_target,
     },
-    Color, Extent2d, ExtractedView, ExtractedViews, RenderFramePacket, RenderImage2d, RenderTarget,
-    ViewLoadOp, ViewMapping2d, ViewportRect,
+    Color, Extent2d, ExtractedView, ExtractedViews, RenderImage2d, RenderTarget, ViewLoadOp,
+    ViewMapping2d, ViewportRect,
+};
+#[cfg(feature = "render-wgpu")]
+use nara_render_wgpu::{
+    WgpuPolicyDefinition, WgpuPolicyInstallation, WgpuRenderInput, WgpuStockCapture,
+    WgpuStockPolicy,
 };
 use nara_scene::{SceneAuthoringRevision, SceneOccurrenceKey, SourceDocumentKey};
 use nara_tooling::{EditorDocumentId, EditorGestureStamp};
@@ -25,6 +32,9 @@ use crate::product::AcceptedPrimaryUiSurfaceProfile;
 use super::authoring_images::EditorAuthoringImageCatalogReceipt;
 use super::authoring_runtime::EditorCanvasImageSources;
 
+#[cfg(all(test, feature = "render-wgpu"))]
+mod tests;
+
 /// One exact authoring-only UI image candidate owned by the Editor Host.
 ///
 /// The candidate carries no Runtime UI session, reducer, input route, or backend permit. It is
@@ -37,6 +47,9 @@ pub struct EditorUiPreviewCandidate {
     revision: SceneAuthoringRevision,
     gesture: Option<EditorGestureStamp>,
     geometry_generation: u64,
+    #[cfg(feature = "render-wgpu")]
+    render_input: WgpuRenderInput,
+    #[cfg(not(feature = "render-wgpu"))]
     render_packet: RenderFramePacket,
     paint_packet: Arc<UiPaintPacket>,
     canvas: UiAuthoringCanvasReady,
@@ -63,6 +76,32 @@ impl EditorUiPreviewCandidate {
         &self.canvas
     }
 
+    /// Moves the original accepted policy input without resolving a current installation.
+    #[cfg(feature = "render-wgpu")]
+    #[doc(hidden)]
+    pub fn into_parts(
+        self,
+    ) -> (
+        EditorDocumentId,
+        SceneAuthoringRevision,
+        Option<EditorGestureStamp>,
+        u64,
+        WgpuRenderInput,
+        Arc<UiPaintPacket>,
+        UiAuthoringCanvasReady,
+    ) {
+        (
+            self.document,
+            self.revision,
+            self.gesture,
+            self.geometry_generation,
+            self.render_input,
+            self.paint_packet,
+            self.canvas,
+        )
+    }
+
+    #[cfg(not(feature = "render-wgpu"))]
     #[doc(hidden)]
     pub fn into_parts(
         self,
@@ -92,6 +131,8 @@ pub(super) struct EditorUiPreviewSession {
     occurrence: SceneOccurrenceKey,
     compiler: UiAuthoringCanvasCompiler,
     planner: UiPresentationPlanner,
+    #[cfg(feature = "render-wgpu")]
+    policy: WgpuPolicyInstallation<WgpuStockPolicy>,
     render_generation: EditorRenderGeneration,
     target: Handle<RenderImage2d>,
     next_frame_index: u64,
@@ -136,6 +177,8 @@ impl EditorUiPreviewSession {
                 .expect("the Editor Canvas declares a nonempty logical occurrence"),
             compiler,
             planner: UiPresentationPlanner::default(),
+            #[cfg(feature = "render-wgpu")]
+            policy: WgpuPolicyDefinition::new(WgpuStockPolicy::new()).install()?,
             render_generation,
             target: RenderImage2d::allocate_handle()?,
             next_frame_index: 0,
@@ -327,12 +370,20 @@ impl EditorUiPreviewSession {
             editor_viewport_image_target(self.target, extent)?,
         )?
         .ok_or(UiPreviewError::RenderViewMissing)?;
+        #[cfg(feature = "render-wgpu")]
+        let render_input = self.policy.capture(
+            render_packet,
+            Arc::new(WgpuStockCapture::new().with_ui(vec![Arc::clone(&paint_packet)], None, None)),
+        )?;
         self.next_frame_index = frame_index;
         Ok(EditorUiPreviewCandidate {
             document: key.document,
             revision: key.revision,
             gesture: key.gesture,
             geometry_generation,
+            #[cfg(feature = "render-wgpu")]
+            render_input,
+            #[cfg(not(feature = "render-wgpu"))]
             render_packet,
             paint_packet,
             canvas,
@@ -377,6 +428,9 @@ pub(super) enum UiPreviewError {
     Presentation(#[from] nara_ui_render::UiPresentationContentError),
     #[error(transparent)]
     Packet(#[from] nara_render::RenderFramePacketError),
+    #[cfg(feature = "render-wgpu")]
+    #[error(transparent)]
+    Policy(#[from] nara_render_wgpu::WgpuRenderProgramError),
     #[error("the Editor UI render generation is exhausted")]
     RenderGenerationExhausted,
     #[error("the Editor UI frame index is exhausted")]

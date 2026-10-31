@@ -11,14 +11,14 @@ use nara::{
         EditorGameStartRequest, EditorGameViewCandidateIdentity, EditorGameViewCompletion,
     },
     render::{
-        __private::{editor_viewport_image_target, map_editor_game_view_packet},
-        Extent2d, RenderFrameSourceGeneration, RenderImagePacket, RenderWindowPacket,
+        __private::editor_viewport_image_target, Extent2d, RenderFrameSourceGeneration,
+        RenderImagePacket, RenderWindowPacket,
     },
     render_wgpu::__private::{
         WgpuEditorFrameOutcome, WgpuEditorImguiFrame, WgpuEditorImguiRenderer,
-        WgpuEditorUiImageSubmission, WgpuEditorWindowFrame, WgpuGpuRetirement, WgpuImageDisplay,
-        WgpuImageTargetActivation, WgpuImageTargetIdentity, WgpuRenderHost, WgpuRenderHostError,
-        WgpuRenderProducer, WgpuSubmittedImageReceipt,
+        WgpuEditorWindowFrame, WgpuGpuRetirement, WgpuImageDisplay, WgpuImageTargetActivation,
+        WgpuImageTargetIdentity, WgpuRenderHost, WgpuRenderHostError, WgpuRenderProducer,
+        WgpuSubmittedImageReceipt, WgpuUiImageSubmission,
     },
     tooling::{EditorActionBatch, EditorPlayState, EditorRuntimeAvailability},
     window::{WindowId as NaraWindowId, backend::WindowHandleProvider},
@@ -721,7 +721,7 @@ impl ImguiTarget {
 struct PendingGameImage {
     identity: EditorGameViewCandidateIdentity,
     display: WgpuImageDisplay,
-    ui: Option<WgpuEditorUiImageSubmission>,
+    ui: Option<WgpuUiImageSubmission>,
 }
 
 impl PendingGameImage {
@@ -1668,32 +1668,28 @@ impl NativeImgui {
         else {
             return Ok(None);
         };
-        let world_presentation_revoker = candidate.world_presentation_revoker();
-        let (identity, packet, sprites, runtime_ui) =
-            candidate.into_parts().into_submission_parts();
         #[cfg(all(test, target_os = "windows"))]
-        let content = game_input_tests::GameCandidateContent::new(
-            sprites.as_ref(),
-            runtime_ui.as_ref().is_some_and(|frame| frame.has_packets()),
-        );
+        let content = game_input_tests::GameCandidateContent::captured(candidate.input());
+        let world_presentation_revoker = candidate.world_presentation_revoker();
+        let (identity, input, runtime_ui) = candidate.into_parts().into_submission_parts();
         let Some((view, target)) = self.game.view.as_ref().zip(self.game.target) else {
             let completion = match runtime_ui {
                 Some(ui) => EditorGameViewCompletion::with_ui_failed(
                     identity,
-                    WgpuRenderHost::reject_editor_ui_frame(ui, "Game has no live target"),
+                    ui.content_rejected("Game has no live target".to_owned()),
                 ),
                 None => EditorGameViewCompletion::without_ui_failed(identity),
             };
             self.return_game_completion(application, completion)?;
             return Err(imgui_error("Game has no live target"));
         };
-        let packet = match map_editor_game_view_packet(packet, target) {
-            Ok(packet) => packet,
+        let input = match input.with_image_target(target) {
+            Ok(input) => input,
             Err(error) => {
                 let completion = match runtime_ui {
                     Some(ui) => EditorGameViewCompletion::with_ui_failed(
                         identity,
-                        WgpuRenderHost::reject_editor_ui_frame(ui, error.to_string()),
+                        ui.content_rejected(error.to_string()),
                     ),
                     None => EditorGameViewCompletion::without_ui_failed(identity),
                 };
@@ -1709,7 +1705,7 @@ impl NativeImgui {
                 let completion = match runtime_ui {
                     Some(ui) => EditorGameViewCompletion::with_ui_failed(
                         identity,
-                        WgpuRenderHost::reject_editor_ui_frame(ui, error.to_string()),
+                        ui.content_rejected(error.to_string()),
                     ),
                     None => EditorGameViewCompletion::without_ui_failed(identity),
                 };
@@ -1717,14 +1713,9 @@ impl NativeImgui {
                 return Err(platform_gpu_error(error));
             }
         }
-        let (display, ui) = match (sprites, runtime_ui) {
-            (sprites, Some(ui)) => {
-                let submitted = match sprites {
-                    Some(sprites) => self
-                        .gpu
-                        .submit_sprite_ui_image(view, window, packet, sprites, ui),
-                    None => self.gpu.submit_ui_image(view, window, packet, ui),
-                };
+        let (display, ui) = match runtime_ui {
+            Some(ui) => {
+                let submitted = self.gpu.submit_for_display(view, &input, ui);
                 match submitted {
                     Ok(ui) => (ui.display().clone(), Some(ui)),
                     Err(failure) => {
@@ -1737,11 +1728,8 @@ impl NativeImgui {
                     }
                 }
             }
-            (sprites, None) => {
-                let submitted = match sprites {
-                    Some(sprites) => self.gpu.submit_sprite_image(view, window, packet, sprites),
-                    None => self.gpu.submit_image(view, window, packet),
-                };
+            None => {
+                let submitted = self.gpu.submit(view, &input);
                 match submitted {
                     Ok(image) => match self.gpu.display_image(image) {
                         Ok(display) => (display, None),
@@ -1777,12 +1765,13 @@ impl NativeImgui {
         }
         #[cfg(all(test, target_os = "windows"))]
         {
-            self.submitted_game_observation = Some(game_input_tests::SubmittedGameObservation {
-                image: pending.display.receipt(),
-                occurrence: pending.display.occurrence(),
-                identity,
-                content,
-            });
+            self.submitted_game_observation =
+                content.map(|content| game_input_tests::SubmittedGameObservation {
+                    image: pending.display.receipt(),
+                    occurrence: pending.display.occurrence(),
+                    identity,
+                    content,
+                });
         }
         Ok(Some(pending))
     }

@@ -132,7 +132,17 @@ pub mod prelude {
 }
 
 /// Explicit Host/backend integration surface kept out of ordinary gameplay imports.
+/// Backend collectors use [`UiBackendSubmissionReader`](crate::advanced::UiBackendSubmissionReader)
+/// only after destination admission, then return its original one-shot outcomes with
+/// [`commit_ui_backend_outcomes`](crate::advanced::commit_ui_backend_outcomes).
 pub mod advanced {
+    pub use crate::integration::{
+        UiBackendPresentationFrame, UiBackendSubmission, UiBackendSubmissionBatchBindError,
+        UiBackendSubmissionReader, UiCompletedBackendOutcome, UiSubmittedBackendSubmission,
+        bind_backend_submission_batch, commit_ui_backend_outcome, commit_ui_backend_outcomes,
+        take_ui_backend_presentation_frame,
+    };
+    pub use crate::packet::{UiPreparedBackendSubmission, UiSubmittedBackendPresentation};
     pub use crate::{
         OneShotPresentationCommit, UiGlyphAtlasPageKey, UiGlyphAtlasPageSnapshot, UiPacketBorder,
         UiPacketFill, UiPacketImage, UiPacketPrimitive, UiPacketRect, UiPacketUv,

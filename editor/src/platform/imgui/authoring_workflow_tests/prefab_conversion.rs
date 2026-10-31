@@ -291,7 +291,7 @@ impl AuthoringWorkflow<'_> {
                 {
                     return Err("conversion observed another source or omitted preview data".into());
                 }
-                let (_, _, _, _, batches, _) = candidate.into_parts();
+                let batches = candidate.sprite_batches();
                 let mut inputs = Vec::new();
                 for batch in batches.as_slice() {
                     let image = batch

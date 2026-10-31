@@ -35,10 +35,10 @@ pub enum WgpuRenderError {
     FrameAlreadyConsumed { frame_index: u64 },
     #[error("render packet content was rejected: {message}")]
     ContentRejected { message: String },
-    #[cfg(feature = "ui-submitter")]
+    #[cfg(feature = "stock-ui")]
     #[error("resource-complete UI packet violated the WGPU adapter contract: {message}")]
     UiPacketInvariant { message: String },
-    #[cfg(feature = "ui-submitter")]
+    #[cfg(feature = "stock-ui")]
     #[error("prepared UI backend submission was rejected before submit: {message}")]
     UiSubmissionRejected { message: String },
     #[error("render packet submission was deferred: {message}")]
@@ -58,7 +58,7 @@ pub enum WgpuRenderError {
     SurfaceValidation { window_id: WindowId },
     #[error("wgpu window target lifecycle error: {0}")]
     WindowTargetLifecycle(#[from] WindowTargetError),
-    #[cfg(any(feature = "sprite-submitter", feature = "ui-submitter"))]
+    #[cfg(any(feature = "stock-sprite", feature = "stock-ui"))]
     #[error("wgpu quad pipeline is missing for format {format} and alpha mode {alpha_mode}")]
     QuadPipelineMissing { format: String, alpha_mode: String },
 }
@@ -77,7 +77,7 @@ impl WgpuRenderError {
         if self.is_packet_admission_rejection() {
             return true;
         }
-        #[cfg(feature = "ui-submitter")]
+        #[cfg(feature = "stock-ui")]
         if matches!(
             self,
             Self::UiPacketInvariant { .. } | Self::UiSubmissionRejected { .. }
@@ -112,7 +112,7 @@ impl WgpuRenderError {
     }
 
     #[must_use]
-    #[cfg(feature = "ui-submitter")]
+    #[cfg(feature = "stock-ui")]
     pub(crate) const fn is_target_fault(&self) -> bool {
         self.target_window().is_some()
     }

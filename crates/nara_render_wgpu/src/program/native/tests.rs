@@ -370,6 +370,26 @@ fn native_host_local_binding_validates_provenance_and_reuses_exact_storage() {
         ));
     };
     assert!(validate_local_target(&program, &namespace, producer, &target).is_ok());
+    let allocation = |usage| {
+        let texture = namespace.device.create_texture(&wgpu::TextureDescriptor {
+            usage,
+            ..native.clone()
+        });
+        let view = texture.create_view(&wgpu::TextureViewDescriptor::default());
+        NativeResource::Texture { texture, view }
+    };
+    let original_allocation = std::mem::replace(
+        &mut Arc::get_mut(&mut target.storage).unwrap().native,
+        allocation(native.usage | wgpu::TextureUsages::COPY_DST),
+    );
+    assert!(
+        validate_local_target(&program, &namespace, producer, &target).is_ok(),
+        "Host storage with extra physical usages must satisfy the exact graph declaration",
+    );
+    Arc::get_mut(&mut target.storage).unwrap().native =
+        allocation(wgpu::TextureUsages::TEXTURE_BINDING);
+    reject(&target);
+    Arc::get_mut(&mut target.storage).unwrap().native = original_allocation;
     Arc::get_mut(&mut target.storage)
         .unwrap()
         .backend_instance_id ^= 1;
@@ -413,7 +433,7 @@ fn native_host_local_binding_validates_provenance_and_reuses_exact_storage() {
     let mut states = NativeFeatureStates::default();
     let mut attempt = FeaturePreparationAttempt::default();
     let mut reservation = WgpuSubmissionReservation::new(&namespace.device, &namespace.queue, ());
-    #[cfg(any(feature = "sprite-submitter", feature = "ui-submitter"))]
+    #[cfg(any(feature = "stock-sprite", feature = "stock-ui"))]
     let mut stock = crate::stock_quad::StockQuadResources::default();
     let encoded = prepare_and_encode(
         &program,
@@ -424,7 +444,7 @@ fn native_host_local_binding_validates_provenance_and_reuses_exact_storage() {
         &mut reservation,
         &mut attempt,
         7,
-        #[cfg(any(feature = "sprite-submitter", feature = "ui-submitter"))]
+        #[cfg(any(feature = "stock-sprite", feature = "stock-ui"))]
         &mut stock,
         Some(&target),
         NativePreparationCost::default(),
@@ -499,7 +519,7 @@ fn native_final_consumer_cost_rejects_before_allocation_or_finalization() {
         let mut attempt = FeaturePreparationAttempt::default();
         let mut reservation =
             WgpuSubmissionReservation::new(&namespace.device, &namespace.queue, ());
-        #[cfg(any(feature = "sprite-submitter", feature = "ui-submitter"))]
+        #[cfg(any(feature = "stock-sprite", feature = "stock-ui"))]
         let mut stock = crate::stock_quad::StockQuadResources::default();
         let result = prepare_and_encode(
             &program,
@@ -510,7 +530,7 @@ fn native_final_consumer_cost_rejects_before_allocation_or_finalization() {
             &mut reservation,
             &mut attempt,
             1,
-            #[cfg(any(feature = "sprite-submitter", feature = "ui-submitter"))]
+            #[cfg(any(feature = "stock-sprite", feature = "stock-ui"))]
             &mut stock,
             None,
             cost,

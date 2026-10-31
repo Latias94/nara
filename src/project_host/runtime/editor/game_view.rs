@@ -1,7 +1,9 @@
+#[cfg(any(test, feature = "render-wgpu"))]
+use nara_app::CoreStage;
 use nara_app::{
-    __RuntimeDriverPort, App, CoreStage, Plugin, PluginCategory, PluginDeclaration,
-    PluginDefinition, PluginDefinitionId, PluginError, PluginId, PluginPlanFingerprint,
-    PluginProductCapability, RuntimeGeneration, RuntimeScopeError, RuntimeState,
+    __RuntimeDriverPort, App, Plugin, PluginCategory, PluginDeclaration, PluginDefinition,
+    PluginDefinitionId, PluginError, PluginId, PluginPlanFingerprint, PluginProductCapability,
+    RuntimeGeneration, RuntimeScopeError, RuntimeState,
 };
 use nara_ecs::{Mut, Resource, World};
 use nara_input::{
@@ -12,35 +14,39 @@ use nara_input::{
 };
 use nara_project::{ProductCapability, ProductCapabilitySet};
 use nara_reflect::SchemaCompositionFingerprint;
+#[cfg(feature = "render-wgpu")]
+use nara_render::__private::prepare_world_presentation;
 use nara_render::__private::{
     PresentedWorldFrame, WorldPresentationGuard, WorldPresentationRevoker,
-    prepare_world_presentation,
 };
-use nara_render::{
-    Extent2d, ExtractedViews, RenderFrame, RenderFramePacket, RenderFramePacketError,
-    RenderFrameTarget, RenderWindowPacket, build_render_frame_packet_with_world_canvas,
-};
+use nara_render::{Extent2d, RenderWindowPacket};
+#[cfg(feature = "render-wgpu")]
+use nara_render::{RenderFramePacket, RenderFrameTarget};
+#[cfg(all(feature = "render-wgpu", feature = "presentation-ui"))]
+use nara_render_wgpu::__private::WgpuUiSubmission;
+#[cfg(feature = "render-wgpu")]
+use nara_render_wgpu::{__private::take_captured_policy_batch, WgpuRenderInput};
 use nara_scene::SceneAuthoringRevision;
-#[cfg(feature = "presentation-2d")]
-use nara_sprite_render::__private::SpriteBatches;
 #[cfg(feature = "presentation-ui")]
-use nara_ui_render::__private::{
-    UiBackendPresentationFrame, UiCompletedBackendOutcome, commit_ui_backend_outcomes,
-    take_ui_backend_presentation_frame,
-};
-#[cfg(feature = "presentation-ui")]
-use nara_ui_render::UiPresentationIntegrationError;
-use nara_window::{PresentMode, PrimaryWindowId, Window, WindowEvent, push_window_event};
+use nara_ui_render::__private::{UiCompletedBackendOutcome, commit_ui_backend_outcomes};
+use nara_window::{PresentMode, Window, WindowEvent, push_window_event};
 use thiserror::Error;
 
 use crate::project_host::{ProjectContentRevision, ProjectSettingsLineage};
 use nara_tooling::EditorDocumentId;
 
 const EDITOR_GAME_VIEW_BRIDGE_PLUGIN_ID: PluginId = PluginId::new("nara.editor-game-view-bridge");
+
+#[cfg(all(test, feature = "render-wgpu"))]
+mod capture_tests;
 const EDITOR_GAME_VIEW_BRIDGE_DEFINITION_ID: PluginDefinitionId =
     PluginDefinitionId::new("nara.editor-game-view-bridge", 1);
-const EDITOR_GAME_VIEW_BRIDGE_REQUIREMENTS: &[PluginId] =
-    &[nara_render::RENDER_PLUGIN_ID, nara_window::WINDOW_PLUGIN_ID];
+const EDITOR_GAME_VIEW_BRIDGE_REQUIREMENTS: &[PluginId] = &[
+    nara_render::RENDER_PLUGIN_ID,
+    nara_window::WINDOW_PLUGIN_ID,
+    #[cfg(feature = "render-wgpu")]
+    nara_render_wgpu::WGPU_CAPTURE_PLUGIN_ID,
+];
 const EDITOR_GAME_VIEW_BRIDGE_PRODUCT_REQUIREMENTS: &[PluginProductCapability] = &[
     PluginProductCapability::new("desktop-winit"),
     PluginProductCapability::new("render-wgpu"),
@@ -65,7 +71,8 @@ pub(super) struct EditorGameViewCaptureConfig {
 
 impl EditorGameViewCaptureConfig {
     fn from_profile(capabilities: ProductCapabilitySet, window: Option<Window>) -> Option<Self> {
-        let available = capabilities.contains(ProductCapability::DesktopWinit)
+        let available = cfg!(feature = "render-wgpu")
+            && capabilities.contains(ProductCapability::DesktopWinit)
             && capabilities.contains(ProductCapability::RenderWgpu)
             && (capabilities.contains(ProductCapability::Presentation2d)
                 || capabilities.contains(ProductCapability::PresentationUi));
@@ -136,8 +143,9 @@ impl Plugin for EditorGameViewBridgePlugin {
         #[cfg(not(test))]
         let apply_driver_input = EditorGameViewBridge::apply_driver_input_in_world;
         app.insert_resource(EditorGameViewBridge::new(self.config))?
-            .__register_driver_port::<EditorGameViewBridge>(apply_driver_input)?
-            .add_systems(CoreStage::Last, capture_editor_game_view_candidate)?;
+            .__register_driver_port::<EditorGameViewBridge>(apply_driver_input)?;
+        #[cfg(feature = "render-wgpu")]
+        app.add_systems(CoreStage::Last, capture_editor_game_view_candidate)?;
         Ok(())
     }
 
@@ -408,19 +416,19 @@ impl EditorGameInputBatch {
 #[derive(Debug)]
 pub(super) struct PendingEditorGameViewCandidate {
     identity: EditorGameViewRuntimeCandidateIdentity,
-    packet: RenderFramePacket,
+    #[cfg(feature = "render-wgpu")]
+    input: WgpuRenderInput,
     world_presentation_revoker: Option<WorldPresentationRevoker>,
-    #[cfg(feature = "presentation-2d")]
-    sprite_batches: Option<SpriteBatches>,
-    #[cfg(feature = "presentation-ui")]
-    ui_frame: Option<UiBackendPresentationFrame>,
+    #[cfg(all(feature = "render-wgpu", feature = "presentation-ui"))]
+    ui_submission: Option<WgpuUiSubmission>,
 }
 
 impl PendingEditorGameViewCandidate {
     pub(super) fn bind_start(self, start: EditorGameStartRequest) -> EditorGameViewCandidate {
         debug_assert_eq!(self.identity.runtime_generation, start.runtime_generation);
+        #[cfg(feature = "render-wgpu")]
         debug_assert_eq!(
-            self.packet.target(),
+            self.input.packet().target(),
             RenderFrameTarget::Window(start.logical_window())
         );
         EditorGameViewCandidate {
@@ -428,12 +436,11 @@ impl PendingEditorGameViewCandidate {
                 start,
                 runtime: self.identity,
             },
-            packet: self.packet,
+            #[cfg(feature = "render-wgpu")]
+            input: self.input,
             world_presentation_revoker: self.world_presentation_revoker,
-            #[cfg(feature = "presentation-2d")]
-            sprite_batches: self.sprite_batches,
-            #[cfg(feature = "presentation-ui")]
-            ui_frame: self.ui_frame,
+            #[cfg(all(feature = "render-wgpu", feature = "presentation-ui"))]
+            ui_submission: self.ui_submission,
         }
     }
 }
@@ -442,12 +449,11 @@ impl PendingEditorGameViewCandidate {
 #[derive(Debug)]
 pub struct EditorGameViewCandidate {
     identity: EditorGameViewCandidateIdentity,
-    packet: RenderFramePacket,
+    #[cfg(feature = "render-wgpu")]
+    input: WgpuRenderInput,
     world_presentation_revoker: Option<WorldPresentationRevoker>,
-    #[cfg(feature = "presentation-2d")]
-    sprite_batches: Option<SpriteBatches>,
-    #[cfg(feature = "presentation-ui")]
-    ui_frame: Option<UiBackendPresentationFrame>,
+    #[cfg(all(feature = "render-wgpu", feature = "presentation-ui"))]
+    ui_submission: Option<WgpuUiSubmission>,
 }
 
 impl EditorGameViewCandidate {
@@ -461,20 +467,26 @@ impl EditorGameViewCandidate {
         self.identity
     }
 
+    #[cfg(feature = "render-wgpu")]
     #[must_use]
-    pub const fn packet(&self) -> &RenderFramePacket {
-        &self.packet
+    pub fn input(&self) -> &WgpuRenderInput {
+        &self.input
+    }
+
+    #[cfg(feature = "render-wgpu")]
+    #[must_use]
+    pub fn packet(&self) -> &RenderFramePacket {
+        self.input.packet()
     }
 
     #[must_use]
     pub fn into_parts(self) -> EditorGameViewCandidateParts {
         EditorGameViewCandidateParts {
             identity: self.identity,
-            packet: self.packet,
-            #[cfg(feature = "presentation-2d")]
-            sprite_batches: self.sprite_batches,
-            #[cfg(feature = "presentation-ui")]
-            ui_frame: self.ui_frame,
+            #[cfg(feature = "render-wgpu")]
+            input: self.input,
+            #[cfg(all(feature = "render-wgpu", feature = "presentation-ui"))]
+            ui_submission: self.ui_submission,
         }
     }
 
@@ -482,46 +494,35 @@ impl EditorGameViewCandidate {
         EditorGameViewCompletion {
             identity: self.identity,
             disposition: EditorGameViewCompletionDisposition::Deferred,
-            #[cfg(feature = "presentation-ui")]
+            #[cfg(all(feature = "render-wgpu", feature = "presentation-ui"))]
             outcomes: self
-                .ui_frame
-                .map(|frame| {
-                    frame
-                        .into_parts()
-                        .1
-                        .into_iter()
-                        .map(|submission| {
-                            submission.aborted(
-                                "native input interrupted the buffered Game presentation"
-                                    .to_owned(),
-                            )
-                        })
-                        .collect()
+                .ui_submission
+                .map(|ui| {
+                    ui.cancelled(
+                        "native input interrupted the buffered Game presentation".to_owned(),
+                    )
                 })
                 .unwrap_or_default(),
+            #[cfg(all(not(feature = "render-wgpu"), feature = "presentation-ui"))]
+            outcomes: Vec::new(),
         }
     }
 
     #[must_use]
     pub fn content_rejected(self, message: impl Into<String>) -> EditorGameViewCompletion {
         let message = message.into();
-        #[cfg(not(feature = "presentation-ui"))]
+        #[cfg(not(all(feature = "render-wgpu", feature = "presentation-ui")))]
         let _ = &message;
         EditorGameViewCompletion {
             identity: self.identity,
             disposition: EditorGameViewCompletionDisposition::ContentRejected,
-            #[cfg(feature = "presentation-ui")]
+            #[cfg(all(feature = "render-wgpu", feature = "presentation-ui"))]
             outcomes: self
-                .ui_frame
-                .map(|frame| {
-                    frame
-                        .into_parts()
-                        .1
-                        .into_iter()
-                        .map(|submission| submission.content_rejected(message.clone()))
-                        .collect()
-                })
+                .ui_submission
+                .map(|ui| ui.content_rejected(message))
                 .unwrap_or_default(),
+            #[cfg(all(not(feature = "render-wgpu"), feature = "presentation-ui"))]
+            outcomes: Vec::new(),
         }
     }
 }
@@ -530,11 +531,10 @@ impl EditorGameViewCandidate {
 #[derive(Debug)]
 pub struct EditorGameViewCandidateParts {
     identity: EditorGameViewCandidateIdentity,
-    packet: RenderFramePacket,
-    #[cfg(feature = "presentation-2d")]
-    sprite_batches: Option<SpriteBatches>,
-    #[cfg(feature = "presentation-ui")]
-    ui_frame: Option<UiBackendPresentationFrame>,
+    #[cfg(feature = "render-wgpu")]
+    input: WgpuRenderInput,
+    #[cfg(all(feature = "render-wgpu", feature = "presentation-ui"))]
+    ui_submission: Option<WgpuUiSubmission>,
 }
 
 impl EditorGameViewCandidateParts {
@@ -543,39 +543,40 @@ impl EditorGameViewCandidateParts {
         self.identity
     }
 
+    #[cfg(feature = "render-wgpu")]
     #[must_use]
-    pub const fn packet(&self) -> &RenderFramePacket {
-        &self.packet
+    pub fn input(&self) -> &WgpuRenderInput {
+        &self.input
     }
 
-    #[cfg(feature = "presentation-2d")]
+    #[cfg(feature = "render-wgpu")]
     #[must_use]
-    pub fn take_sprite_batches(&mut self) -> Option<SpriteBatches> {
-        self.sprite_batches.take()
+    pub fn packet(&self) -> &RenderFramePacket {
+        self.input.packet()
     }
 
-    #[cfg(feature = "presentation-ui")]
+    #[cfg(all(feature = "render-wgpu", feature = "presentation-ui"))]
     #[must_use]
-    pub fn take_ui_frame(&mut self) -> Option<UiBackendPresentationFrame> {
-        self.ui_frame.take()
+    pub fn take_ui_submission(&mut self) -> Option<WgpuUiSubmission> {
+        self.ui_submission.take()
     }
 
-    #[cfg(all(feature = "presentation-2d", feature = "presentation-ui"))]
+    #[cfg(all(feature = "render-wgpu", feature = "presentation-ui"))]
     #[must_use]
     pub fn into_submission_parts(
         self,
     ) -> (
         EditorGameViewCandidateIdentity,
-        RenderFramePacket,
-        Option<SpriteBatches>,
-        Option<UiBackendPresentationFrame>,
+        WgpuRenderInput,
+        Option<WgpuUiSubmission>,
     ) {
-        (
-            self.identity,
-            self.packet,
-            self.sprite_batches,
-            self.ui_frame,
-        )
+        (self.identity, self.input, self.ui_submission)
+    }
+
+    #[cfg(all(feature = "render-wgpu", not(feature = "presentation-ui")))]
+    #[must_use]
+    pub fn into_submission_parts(self) -> (EditorGameViewCandidateIdentity, WgpuRenderInput) {
+        (self.identity, self.input)
     }
 }
 
@@ -728,14 +729,8 @@ pub enum EditorGameViewBridgeFailure {
     GameStartNotPending,
     #[error("the native Game View start does not match the prepared Runtime")]
     GameStartRequestMismatch,
-    #[error("the Runtime did not publish a render frame")]
-    MissingRenderFrame,
     #[error("the Runtime generation is unavailable")]
     MissingRuntimeGeneration,
-    #[error("the logical primary window is unavailable")]
-    MissingPrimaryWindow,
-    #[error("the Runtime did not publish sprite batches")]
-    MissingSpriteBatches,
     #[error("the Game View bridge accepts only logical window targets")]
     NonWindowTarget,
     #[error("the managed Play Runtime is unavailable")]
@@ -755,16 +750,15 @@ pub enum EditorGameViewBridgeFailure {
         #[source]
         source: RuntimeScopeError,
     },
-    #[error("the Runtime render frame was rejected: {0}")]
-    Packet(RenderFramePacketError),
-    #[cfg(feature = "presentation-ui")]
-    #[error("the Runtime UI presentation frame was rejected: {0}")]
-    Ui(UiPresentationIntegrationError),
+    #[cfg(feature = "render-wgpu")]
+    #[error("the Runtime policy capture was rejected: {0}")]
+    Capture(String),
 }
 
 #[derive(Debug)]
 enum EditorGameViewBridgeSlot {
     Empty,
+    #[cfg_attr(not(feature = "render-wgpu"), allow(dead_code))]
     Buffered(PendingEditorGameViewCandidate),
     InFlight(EditorGameViewRuntimeCandidateIdentity),
 }
@@ -773,11 +767,14 @@ enum EditorGameViewBridgeSlot {
 struct EditorGameViewBridge {
     config: EditorGameViewCaptureConfig,
     capture_enabled: bool,
+    #[cfg(feature = "render-wgpu")]
     next_sequence: u64,
     slot: EditorGameViewBridgeSlot,
     failure: Option<EditorGameViewBridgeFailure>,
     pending_world_presentation: Option<(PresentedWorldFrame, WorldPresentationGuard)>,
     world_presentation_guard: Option<WorldPresentationGuard>,
+    #[cfg(feature = "presentation-ui")]
+    rejected_ui_outcomes: Vec<UiCompletedBackendOutcome>,
 }
 
 impl EditorGameViewBridge {
@@ -785,26 +782,39 @@ impl EditorGameViewBridge {
         Self {
             config,
             capture_enabled: true,
+            #[cfg(feature = "render-wgpu")]
             next_sequence: 1,
             slot: EditorGameViewBridgeSlot::Empty,
             failure: None,
             pending_world_presentation: None,
             world_presentation_guard: None,
+            #[cfg(feature = "presentation-ui")]
+            rejected_ui_outcomes: Vec::new(),
         }
     }
 
+    #[cfg(feature = "render-wgpu")]
     fn can_capture(&self) -> bool {
-        self.capture_enabled && matches!(self.slot, EditorGameViewBridgeSlot::Empty)
+        self.capture_enabled && self.is_idle()
     }
 
     fn is_idle(&self) -> bool {
-        matches!(self.slot, EditorGameViewBridgeSlot::Empty)
+        if !matches!(self.slot, EditorGameViewBridgeSlot::Empty) {
+            return false;
+        }
+        #[cfg(feature = "presentation-ui")]
+        if !self.rejected_ui_outcomes.is_empty() {
+            return false;
+        }
+        true
     }
 
+    #[cfg(feature = "render-wgpu")]
     fn can_issue_sequence(&self) -> bool {
         self.next_sequence.checked_add(1).is_some()
     }
 
+    #[cfg(feature = "render-wgpu")]
     fn publish(
         &mut self,
         captured: CapturedEditorGameViewCandidate,
@@ -818,23 +828,36 @@ impl EditorGameViewBridge {
             .expect("capture rejects before exhausting the candidate sequence");
         let identity = EditorGameViewRuntimeCandidateIdentity {
             runtime_generation: captured.runtime_generation,
-            frame_index: captured.packet.frame_index(),
+            frame_index: captured.input.packet().frame_index(),
             sequence,
         };
-        self.pending_world_presentation = prepare_world_presentation(&captured.packet);
+        self.pending_world_presentation = prepare_world_presentation(captured.input.packet());
         self.slot = EditorGameViewBridgeSlot::Buffered(PendingEditorGameViewCandidate {
             identity,
-            packet: captured.packet,
+            input: captured.input,
             world_presentation_revoker: self
                 .pending_world_presentation
                 .as_ref()
                 .map(|(_, guard)| guard.revoker()),
-            #[cfg(feature = "presentation-2d")]
-            sprite_batches: captured.sprite_batches,
             #[cfg(feature = "presentation-ui")]
-            ui_frame: captured.ui_frame,
+            ui_submission: captured.ui_submission,
         });
         Ok(())
+    }
+
+    #[cfg(feature = "presentation-ui")]
+    fn flush_rejected_ui_outcomes(&mut self, world: &mut World) -> bool {
+        if self.rejected_ui_outcomes.is_empty() {
+            return true;
+        }
+        let outcomes = std::mem::take(&mut self.rejected_ui_outcomes);
+        if let Err(outcomes) = commit_ui_backend_outcomes(world, outcomes) {
+            self.rejected_ui_outcomes = outcomes;
+            self.failure = Some(EditorGameViewBridgeFailure::CompletionAuthorityMismatch);
+            return false;
+        }
+        crate::ui_presentation::commit_runtime_ui_presentations(world);
+        true
     }
 
     fn take_candidate(&mut self) -> EditorGameViewBridgeOutput {
@@ -1013,6 +1036,22 @@ impl EditorGameViewBridge {
             world.resource_scope(|world, mut bridge: Mut<'_, EditorGameViewBridge>| {
                 #[cfg(not(feature = "presentation-ui"))]
                 let _ = &world;
+                #[cfg(feature = "presentation-ui")]
+                if matches!(
+                    &input,
+                    EditorGameViewBridgeInput::TakeCandidate
+                        | EditorGameViewBridgeInput::RetirementBlocked
+                ) && !bridge.flush_rejected_ui_outcomes(world)
+                {
+                    return match input {
+                        EditorGameViewBridgeInput::TakeCandidate => {
+                            EditorGameViewBridgeOutput::Failed(
+                                EditorGameViewBridgeFailure::CompletionAuthorityMismatch,
+                            )
+                        }
+                        _ => EditorGameViewBridgeOutput::RetirementBlocked(true),
+                    };
+                }
                 match input {
                     EditorGameViewBridgeInput::Complete(completion, admission) => {
                         let runtime_identity = completion.identity.runtime;
@@ -1093,27 +1132,28 @@ impl EditorGameViewBridge {
     }
 }
 
+#[cfg(feature = "render-wgpu")]
 struct CapturedEditorGameViewCandidate {
     runtime_generation: RuntimeGeneration,
-    packet: RenderFramePacket,
-    #[cfg(feature = "presentation-2d")]
-    sprite_batches: Option<SpriteBatches>,
+    input: WgpuRenderInput,
     #[cfg(feature = "presentation-ui")]
-    ui_frame: Option<UiBackendPresentationFrame>,
+    ui_submission: Option<WgpuUiSubmission>,
 }
 
+#[cfg(feature = "render-wgpu")]
 fn capture_editor_game_view_candidate(world: &mut World) {
+    if !world.contains_resource::<EditorGameViewBridge>() {
+        return;
+    }
+    #[cfg(feature = "presentation-ui")]
+    if !world.resource_scope(|world, mut bridge: Mut<'_, EditorGameViewBridge>| {
+        bridge.flush_rejected_ui_outcomes(world)
+    }) {
+        return;
+    }
     let Some(bridge) = world.get_resource::<EditorGameViewBridge>() else {
         return;
     };
-    if !bridge.can_capture() {
-        return;
-    }
-    if !bridge.can_issue_sequence() {
-        world.resource_mut::<EditorGameViewBridge>().failure =
-            Some(EditorGameViewBridgeFailure::CandidateSequenceExhausted);
-        return;
-    }
     let config = bridge.config;
     let captured = capture_candidate(world, config);
     let mut bridge = world.resource_mut::<EditorGameViewBridge>();
@@ -1128,75 +1168,81 @@ fn capture_editor_game_view_candidate(world: &mut World) {
     }
 }
 
+#[cfg(feature = "render-wgpu")]
 fn capture_candidate(
     world: &mut World,
     config: EditorGameViewCaptureConfig,
 ) -> Result<Option<CapturedEditorGameViewCandidate>, EditorGameViewBridgeFailure> {
-    let runtime_generation = world
-        .get_resource::<RuntimeGeneration>()
-        .copied()
-        .ok_or(EditorGameViewBridgeFailure::MissingRuntimeGeneration)?;
-    let frame_index = world
-        .get_resource::<RenderFrame>()
-        .map(|frame| frame.index)
-        .ok_or(EditorGameViewBridgeFailure::MissingRenderFrame)?;
-    let primary_window_id = world
-        .get_resource::<PrimaryWindowId>()
-        .map(|primary| primary.0)
-        .ok_or(EditorGameViewBridgeFailure::MissingPrimaryWindow)?;
-    let packet = {
-        let mut query = world.query::<&Window>();
-        build_render_frame_packet_with_world_canvas(
-            runtime_generation,
-            frame_index,
-            Some(primary_window_id),
-            query.iter(world),
-            world.resource::<ExtractedViews>(),
-            world.resource::<ExtractedViews>().world_canvas(),
-        )
-        .map_err(EditorGameViewBridgeFailure::Packet)?
-    };
-    let Some(packet) = packet else {
+    let Some(batch) = take_captured_policy_batch(world) else {
         return Ok(None);
     };
-    if !matches!(packet.target(), RenderFrameTarget::Window(_)) {
-        return Err(EditorGameViewBridgeFailure::NonWindowTarget);
-    }
-    if packet.target() != RenderFrameTarget::Window(config.logical_window) {
-        return Err(EditorGameViewBridgeFailure::CandidateSourceMismatch);
-    }
-
-    #[cfg(feature = "presentation-2d")]
-    let sprite_batches = if config.sprites {
-        Some(
-            world
-                .get_resource::<SpriteBatches>()
-                .cloned()
-                .ok_or(EditorGameViewBridgeFailure::MissingSpriteBatches)?,
-        )
-    } else {
-        None
-    };
-    #[cfg(not(feature = "presentation-2d"))]
-    let _ = config.sprites;
-
     #[cfg(feature = "presentation-ui")]
-    let ui_frame = if config.ui {
-        Some(take_ui_backend_presentation_frame(world).map_err(EditorGameViewBridgeFailure::Ui)?)
-    } else {
-        None
-    };
+    let (captured, ui_submission) = batch.into_parts();
     #[cfg(not(feature = "presentation-ui"))]
-    let _ = config.ui;
+    let (captured,) = batch.into_parts();
 
-    Ok(Some(CapturedEditorGameViewCandidate {
-        runtime_generation,
-        packet,
-        #[cfg(feature = "presentation-2d")]
-        sprite_batches,
-        #[cfg(feature = "presentation-ui")]
-        ui_frame,
-    }))
+    let captured = (|| {
+        // Consume each sealed batch in its own CoreLast. Keeping a second batch behind an
+        // outstanding Game candidate would let a later Step observe an earlier capture.
+        if !world.resource::<EditorGameViewBridge>().can_capture() {
+            return Ok(None);
+        }
+        let input =
+            captured.map_err(|error| EditorGameViewBridgeFailure::Capture(error.to_string()))?;
+        let Some(input) = input else {
+            return Ok(None);
+        };
+        if !world
+            .resource::<EditorGameViewBridge>()
+            .can_issue_sequence()
+        {
+            return Err(EditorGameViewBridgeFailure::CandidateSequenceExhausted);
+        }
+        let runtime_generation = world
+            .get_resource::<RuntimeGeneration>()
+            .copied()
+            .ok_or(EditorGameViewBridgeFailure::MissingRuntimeGeneration)?;
+        let packet = input.packet();
+        if packet.source_generation().runtime_generation() != Some(runtime_generation) {
+            return Err(EditorGameViewBridgeFailure::CandidateSourceMismatch);
+        }
+        if !matches!(packet.target(), RenderFrameTarget::Window(_)) {
+            return Err(EditorGameViewBridgeFailure::NonWindowTarget);
+        }
+        if packet.target() != RenderFrameTarget::Window(config.logical_window) {
+            return Err(EditorGameViewBridgeFailure::CandidateSourceMismatch);
+        }
+        Ok(Some((runtime_generation, input)))
+    })();
+
+    match captured {
+        Ok(Some((runtime_generation, input))) => Ok(Some(CapturedEditorGameViewCandidate {
+            runtime_generation,
+            input,
+            #[cfg(feature = "presentation-ui")]
+            ui_submission,
+        })),
+        result => {
+            #[cfg(feature = "presentation-ui")]
+            if let Some(ui) = ui_submission {
+                let outcomes = match &result {
+                    Err(failure) => ui.content_rejected(failure.to_string()),
+                    Ok(None) => ui.content_rejected("Game capture has no render input".to_owned()),
+                    Ok(Some(_)) => unreachable!("accepted input was returned above"),
+                };
+                let returned =
+                    world.resource_scope(|world, mut bridge: Mut<'_, EditorGameViewBridge>| {
+                        debug_assert!(bridge.rejected_ui_outcomes.is_empty());
+                        bridge.rejected_ui_outcomes = outcomes;
+                        bridge.flush_rejected_ui_outcomes(world)
+                    });
+                if !returned {
+                    return Err(EditorGameViewBridgeFailure::CompletionAuthorityMismatch);
+                }
+            }
+            result.map(|_| None)
+        }
+    }
 }
 
 pub(super) fn take_candidate(
@@ -2002,15 +2048,42 @@ mod input_batch_tests {
     }
 }
 
-#[cfg(test)]
+#[cfg(all(test, feature = "render-wgpu"))]
 mod world_presentation_tests {
     use super::*;
     use nara_core::{Color, Mat3, Vec2};
     use nara_ecs::{Entity, bevy_ecs::system::SystemState};
     use nara_render::{
-        ExtractedView, RenderTarget, ViewLoadOp, ViewMapping2d, ViewportRect, WorldCanvas,
-        WorldPointer,
+        ExtractedView, ExtractedViews, RenderTarget, ViewLoadOp, ViewMapping2d, ViewportRect,
+        WorldCanvas, WorldPointer, build_render_frame_packet_with_world_canvas,
     };
+    use nara_render_wgpu::{
+        WgpuPolicyBuildContext, WgpuPolicyDefinition, WgpuPolicyInstanceContext, WgpuPolicyProgram,
+        WgpuRenderPolicy, WgpuRenderProgramError,
+    };
+
+    struct PickingPolicy;
+
+    impl WgpuRenderPolicy for PickingPolicy {
+        type Capture = ();
+        type Instances = ();
+
+        fn create_instances(
+            &self,
+            _: &mut WgpuPolicyInstanceContext<'_>,
+        ) -> Result<(), WgpuRenderProgramError> {
+            panic!("world-presentation ownership tests do not execute a renderer")
+        }
+
+        fn build(
+            &self,
+            _: &(),
+            _: &(),
+            _: WgpuPolicyBuildContext<'_>,
+        ) -> Result<WgpuPolicyProgram, WgpuRenderProgramError> {
+            panic!("world-presentation ownership tests do not execute a renderer")
+        }
+    }
 
     fn generation() -> RuntimeGeneration {
         let runtime = nara_app::RuntimeInstance::start(App::new()).unwrap();
@@ -2035,15 +2108,17 @@ mod world_presentation_tests {
         packet: RenderFramePacket,
     ) -> EditorGameViewRuntimeCandidateIdentity {
         let generation = packet.source_generation().runtime_generation().unwrap();
+        let installation = WgpuPolicyDefinition::new(PickingPolicy).install().unwrap();
+        let input = installation
+            .capture(packet, std::sync::Arc::new(()))
+            .unwrap();
         let mut bridge = world.resource_mut::<EditorGameViewBridge>();
         bridge
             .publish(CapturedEditorGameViewCandidate {
                 runtime_generation: generation,
-                packet,
-                #[cfg(feature = "presentation-2d")]
-                sprite_batches: None,
+                input,
                 #[cfg(feature = "presentation-ui")]
-                ui_frame: None,
+                ui_submission: None,
             })
             .unwrap();
         let EditorGameViewBridgeOutput::Candidate(candidate) = bridge.take_candidate() else {

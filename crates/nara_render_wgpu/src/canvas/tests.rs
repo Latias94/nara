@@ -1,45 +1,45 @@
 use super::*;
 use crate::allocation::AllocationFailureGuard;
 
-#[cfg(feature = "sprite-submitter")]
+#[cfg(feature = "stock-sprite")]
 use nara_app::RuntimeGeneration;
 use nara_app::{App, RuntimeCandidateRetirementState, RuntimeInstance};
 use nara_core::Color;
-#[cfg(feature = "sprite-submitter")]
+#[cfg(feature = "stock-sprite")]
 use nara_core::Vec2;
-#[cfg(feature = "sprite-submitter")]
+#[cfg(feature = "stock-sprite")]
 use nara_hierarchy::{
     HierarchyOperation, HierarchyPlacement, HierarchyPlacementOwner, HierarchyWriter,
 };
-#[cfg(feature = "sprite-submitter")]
+#[cfg(feature = "stock-sprite")]
 use nara_render::{Camera2d, RenderFramePacket};
 use nara_render::{
     ExtractedViews, RenderTarget, WorldCanvas, build_render_frame_packet_with_world_canvas,
 };
-#[cfg(feature = "sprite-submitter")]
+#[cfg(feature = "stock-sprite")]
 use nara_sprite::Sprite;
-#[cfg(feature = "sprite-submitter")]
+#[cfg(feature = "stock-sprite")]
 use nara_sprite_render::__private::SpriteBatches;
-#[cfg(feature = "sprite-submitter")]
+#[cfg(feature = "stock-sprite")]
 use nara_transform::Transform2d;
 use nara_window::{Window, WindowId, WindowResolution};
 
-#[cfg(feature = "sprite-submitter")]
+#[cfg(feature = "stock-sprite")]
 use crate::readback_tests::{readback_pixel, render_to_rgba};
 use crate::{
-    WgpuRenderBackend, frame::WgpuFramePayload, output::OutputBudget,
+    WgpuRenderBackend, frame::LegacyWgpuFramePayload, output::OutputBudget,
     preparation::NativePreparation, submission::WgpuSubmissionReservation,
 };
 
-#[cfg(feature = "sprite-submitter")]
+#[cfg(feature = "stock-sprite")]
 struct CheckerFrame {
     generation: RuntimeGeneration,
     views: ExtractedViews,
-    payload: WgpuFramePayload,
+    payload: LegacyWgpuFramePayload,
     canvas: WorldCanvas,
 }
 
-#[cfg(feature = "sprite-submitter")]
+#[cfg(feature = "stock-sprite")]
 impl CheckerFrame {
     fn new() -> Self {
         let canvas = WorldCanvas::new(8, 4).unwrap();
@@ -110,7 +110,7 @@ impl CheckerFrame {
         let frame = Self {
             generation: runtime.generation(),
             views: runtime.world().resource::<ExtractedViews>().clone(),
-            payload: WgpuFramePayload::for_editor_sprites(
+            payload: LegacyWgpuFramePayload::for_editor_sprites(
                 runtime.world().resource::<SpriteBatches>().clone(),
             ),
             canvas,
@@ -142,14 +142,14 @@ impl CheckerFrame {
 }
 
 #[test]
-#[cfg(feature = "sprite-submitter")]
+#[cfg(feature = "stock-sprite")]
 fn fixed_canvas_checkerboard_bars_and_native_ui_share_the_target_encoder() {
     #[allow(
         unused_mut,
         reason = "the UI packet is present only with the UI submitter"
     )]
     let mut captured = CheckerFrame::new();
-    #[cfg(feature = "ui-submitter")]
+    #[cfg(feature = "stock-ui")]
     {
         captured.payload.ui_packets = vec![crate::view_probe::overlay_packet(
             RenderTarget::Window(WindowId::PRIMARY),
@@ -162,7 +162,7 @@ fn fixed_canvas_checkerboard_bars_and_native_ui_share_the_target_encoder() {
         let prepared =
             backend.prepare_target_draw(format, &packet, &captured.payload, 1, preparation)?;
         assert_eq!(prepared.canvas.as_ref().unwrap().world_view_count, 1);
-        #[cfg(feature = "ui-submitter")]
+        #[cfg(feature = "stock-ui")]
         assert_eq!(prepared.ui_packets.len(), 1);
         assert_eq!(backend.frame_transaction_stats().queue_submissions(), 0);
         assert_eq!(
@@ -178,9 +178,9 @@ fn fixed_canvas_checkerboard_bars_and_native_ui_share_the_target_encoder() {
         packet.world_canvas().unwrap(),
         64,
         64,
-        cfg!(feature = "ui-submitter"),
+        cfg!(feature = "stock-ui"),
     );
-    #[cfg(feature = "ui-submitter")]
+    #[cfg(feature = "stock-ui")]
     assert!(
         readback_pixel(&pixels, 29, 8)
             .iter()
@@ -191,7 +191,7 @@ fn fixed_canvas_checkerboard_bars_and_native_ui_share_the_target_encoder() {
 }
 
 #[test]
-#[cfg(feature = "sprite-submitter")]
+#[cfg(feature = "stock-sprite")]
 fn fixed_canvas_nearest_composite_handles_odd_fractional_and_undersized_windows() {
     let captured = CheckerFrame::new();
     for (width, height, scale) in [(63, 61, 1.5), (5, 3, 1.25)] {
@@ -214,7 +214,7 @@ fn fixed_canvas_nearest_composite_handles_odd_fractional_and_undersized_windows(
     }
 }
 
-#[cfg(feature = "sprite-submitter")]
+#[cfg(feature = "stock-sprite")]
 fn assert_checkerboard(pixels: &[u8], frame: WorldCanvasFrame, width: u32, height: u32, ui: bool) {
     let rect = frame.mapping().content_rect();
     let ppp = frame.mapping().pixels_per_point();
@@ -248,7 +248,7 @@ fn assert_checkerboard(pixels: &[u8], frame: WorldCanvasFrame, width: u32, heigh
 }
 
 #[test]
-#[cfg(feature = "sprite-submitter")]
+#[cfg(feature = "stock-sprite")]
 fn canvas_resize_reuses_raster_and_configuration_retirement_releases_it() {
     let captured = CheckerFrame::new();
     render_to_rgba(|device, queue, format, _, _, preparation| {
@@ -283,7 +283,7 @@ fn canvas_resize_reuses_raster_and_configuration_retirement_releases_it() {
 }
 
 #[test]
-#[cfg(feature = "sprite-submitter")]
+#[cfg(feature = "stock-sprite")]
 fn canvas_allocation_failures_do_not_submit_and_valid_retry_recovers() {
     let captured = CheckerFrame::new();
     render_to_rgba(|device, queue, format, output, encoder, preparation| {
@@ -418,7 +418,7 @@ fn clear_only_canvas_uses_checked_base_backend_without_submitters() {
     let prepared = match backend.prepare_target_draw_with_canvas_cache(
         format,
         &packet,
-        &WgpuFramePayload::default(),
+        &LegacyWgpuFramePayload::default(),
         1,
         &mut cache,
         &mut preparation,
@@ -461,7 +461,7 @@ fn clear_only_canvas_uses_checked_base_backend_without_submitters() {
         backend.prepare_target_draw_with_canvas_cache(
             format,
             &invalid,
-            &WgpuFramePayload::default(),
+            &LegacyWgpuFramePayload::default(),
             2,
             &mut cache,
             &mut preparation,
@@ -475,7 +475,7 @@ fn clear_only_canvas_uses_checked_base_backend_without_submitters() {
         backend.prepare_target_draw_with_canvas_cache(
             format,
             &packet,
-            &WgpuFramePayload::default(),
+            &LegacyWgpuFramePayload::default(),
             3,
             &mut empty,
             &mut preparation,

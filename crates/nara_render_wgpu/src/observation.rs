@@ -1,8 +1,8 @@
 use nara_ecs::Resource;
-#[cfg(feature = "ui-submitter")]
+#[cfg(feature = "stock-ui")]
 use nara_ui_render::{UiBackendSubmissionIdentity, UiPresentationBackendGeneration};
 
-#[cfg(feature = "ui-submitter")]
+#[cfg(feature = "stock-ui")]
 use crate::backend::WgpuSubmittedUiFacts;
 use crate::{
     backend::{WgpuBackendState, WgpuFrameTransactionStats},
@@ -22,7 +22,7 @@ pub struct WgpuRenderObservation {
     transaction: WgpuFrameTransactionStats,
     presented: Option<WgpuPresentedFrameReceipt>,
     presented_surface_extent: Option<nara_render::Extent2d>,
-    #[cfg(feature = "ui-submitter")]
+    #[cfg(feature = "stock-ui")]
     facts: Vec<WgpuSubmittedUiFacts>,
 }
 
@@ -38,7 +38,7 @@ impl WgpuRenderObservation {
         state: WgpuBackendState,
         transaction: WgpuFrameTransactionStats,
         presented: Option<WgpuPresentedFrameReceipt>,
-        #[cfg(feature = "ui-submitter")] mut facts: Vec<WgpuSubmittedUiFacts>,
+        #[cfg(feature = "stock-ui")] mut facts: Vec<WgpuSubmittedUiFacts>,
     ) -> Self {
         let current_transaction = if instance_id != 0
             && device_epoch != 0
@@ -61,7 +61,7 @@ impl WgpuRenderObservation {
                         receipt.render_transaction_frame_index(),
                     ))
         });
-        #[cfg(feature = "ui-submitter")]
+        #[cfg(feature = "stock-ui")]
         {
             if current_transaction.is_some()
                 && u64::try_from(facts.len())
@@ -90,7 +90,7 @@ impl WgpuRenderObservation {
             transaction,
             presented,
             presented_surface_extent: None,
-            #[cfg(feature = "ui-submitter")]
+            #[cfg(feature = "stock-ui")]
             facts,
         }
     }
@@ -142,7 +142,7 @@ impl WgpuRenderObservation {
         self.presented
     }
 
-    #[cfg(feature = "ui-submitter")]
+    #[cfg(feature = "stock-ui")]
     pub(crate) fn submitted_ui_facts(
         &self,
         submission: UiBackendSubmissionIdentity,
@@ -172,7 +172,7 @@ mod tests {
         backend.begin_frame_transaction(render_frame, app_frame);
         backend.record_editor_window_presentation();
         let stats = backend.frame_transaction_stats();
-        #[cfg(feature = "ui-submitter")]
+        #[cfg(feature = "stock-ui")]
         let stats = {
             let mut stats = stats;
             stats.record_ui_payload(crate::frame::WgpuUiPayloadFacts {
@@ -214,7 +214,7 @@ mod tests {
             WgpuFrameTransactionStats::default()
         );
         assert_eq!(observation.presented_frame_this_transaction(), None);
-        #[cfg(feature = "ui-submitter")]
+        #[cfg(feature = "stock-ui")]
         assert!(observation.facts.is_empty());
     }
 
@@ -228,7 +228,7 @@ mod tests {
             WgpuBackendState::Ready,
             stats,
             Some(receipt),
-            #[cfg(feature = "ui-submitter")]
+            #[cfg(feature = "stock-ui")]
             Vec::new(),
         );
         let retained = observation.clone();
@@ -273,7 +273,7 @@ mod tests {
                 state,
                 stats,
                 Some(receipt),
-                #[cfg(feature = "ui-submitter")]
+                #[cfg(feature = "stock-ui")]
                 Vec::new(),
             );
             assert_eq!(next.frame_transaction_stats(), stats);
@@ -292,14 +292,14 @@ mod tests {
             WgpuBackendState::Ready,
             stats,
             None,
-            #[cfg(feature = "ui-submitter")]
+            #[cfg(feature = "stock-ui")]
             Vec::new(),
         );
 
         assert_eq!(observation.presented_frame_this_transaction(), None);
     }
 
-    #[cfg(feature = "ui-submitter")]
+    #[cfg(feature = "stock-ui")]
     fn submitted_ui_facts() -> Vec<WgpuSubmittedUiFacts> {
         use std::sync::Arc;
 
@@ -365,7 +365,7 @@ mod tests {
         .unwrap()
     }
 
-    #[cfg(feature = "ui-submitter")]
+    #[cfg(feature = "stock-ui")]
     #[test]
     fn ui_facts_match_the_exact_attempt_in_the_current_namespace_and_transaction() {
         let facts = submitted_ui_facts();
@@ -437,7 +437,7 @@ mod tests {
         }
     }
 
-    #[cfg(feature = "ui-submitter")]
+    #[cfg(feature = "stock-ui")]
     #[test]
     fn ui_facts_cannot_exceed_the_admitted_packets_or_resolve_ambiguous_attempts() {
         let first = submitted_ui_facts()[0];

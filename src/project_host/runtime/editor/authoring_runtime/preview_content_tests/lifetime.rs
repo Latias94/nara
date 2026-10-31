@@ -142,7 +142,8 @@ impl Observed {
         let candidate_exact = candidate.document() == EditorDocumentId::from_raw(1)
             && candidate.revision() == source.revision()
             && candidate.preview_omissions().is_empty();
-        let (_, revision, _, packet, _, _) = candidate.into_parts();
+        let revision = candidate.revision();
+        let packet = candidate.packet();
         let world = owner.0.runtime.world();
         let snapshot = WorldIdentitySnapshot::capture_default(world).unwrap();
         let stats = world.resource::<WorldIdentityDomain>().stats();

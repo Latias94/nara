@@ -16,6 +16,11 @@ use nara_render::{
     Camera2d, Color, Extent2d, ExtractedViews, RenderFrame, RenderFramePacket,
     RenderFrameSourceGeneration, RenderImage2d, RenderTarget, ViewportRect,
 };
+#[cfg(feature = "render-wgpu")]
+use nara_render_wgpu::{
+    WgpuPolicyDefinition, WgpuPolicyInstallation, WgpuRenderInput, WgpuStockCapture,
+    WgpuStockPolicy,
+};
 use nara_scene::{
     __private::AuthoringPreviewOmission, ExpandedSceneCandidate, SceneAuthoringRevision,
     SceneDocument, SceneEntityId, SceneEntitySource, SceneProjection, SourceDocumentKey,
@@ -92,10 +97,12 @@ impl EditorPreviewContentStamp {
     }
 }
 
-/// One exact renderer-neutral Scene preview captured from the accepted Editor document.
+/// One exact Scene preview captured from the accepted Editor document.
 ///
 /// The private Editor process may submit this candidate once. It does not become input authority
 /// until the platform owner joins its image submission, toolkit sample, and window presentation.
+/// WGPU builds retain the policy input accepted at capture; other builds retain neutral drawing
+/// inputs without requiring a native backend.
 #[doc(hidden)]
 #[derive(Debug)]
 pub struct EditorPreviewCandidate {
@@ -103,7 +110,11 @@ pub struct EditorPreviewCandidate {
     revision: SceneAuthoringRevision,
     geometry_revision: u64,
     content_stamp: EditorPreviewContentStamp,
+    #[cfg(feature = "render-wgpu")]
+    render_input: WgpuRenderInput,
+    #[cfg(not(feature = "render-wgpu"))]
     packet: RenderFramePacket,
+    #[cfg(not(feature = "render-wgpu"))]
     sprite_batches: SpriteBatches,
     hits: Vec<EditorPreviewHit>,
     omissions: EditorAuthoringPreviewOmissions,
@@ -136,6 +147,42 @@ impl EditorPreviewCandidate {
         &self.hits
     }
 
+    /// Borrows the original captured topology without transferring its ownership.
+    #[must_use]
+    pub fn packet(&self) -> &RenderFramePacket {
+        #[cfg(feature = "render-wgpu")]
+        {
+            self.render_input.packet()
+        }
+        #[cfg(not(feature = "render-wgpu"))]
+        {
+            &self.packet
+        }
+    }
+
+    /// Borrows the exact Sprite snapshots retained by this candidate's capture.
+    #[must_use]
+    pub fn sprite_batches(&self) -> &SpriteBatches {
+        #[cfg(feature = "render-wgpu")]
+        {
+            self.render_input
+                .captured::<WgpuStockPolicy>()
+                .expect("Scene preview retains its original stock capture")
+                .sprite_batches()
+                .expect("Scene preview captures its extracted Sprite batches")
+        }
+        #[cfg(not(feature = "render-wgpu"))]
+        {
+            &self.sprite_batches
+        }
+    }
+
+    #[cfg(feature = "render-wgpu")]
+    #[must_use]
+    pub fn render_input(&self) -> &WgpuRenderInput {
+        &self.render_input
+    }
+
     /// Returns exact source facts omitted from this fail-closed authoring projection.
     #[doc(hidden)]
     #[must_use]
@@ -143,6 +190,7 @@ impl EditorPreviewCandidate {
         self.omissions.facts()
     }
 
+    #[cfg(not(feature = "render-wgpu"))]
     #[must_use]
     pub fn into_parts(
         self,
@@ -160,6 +208,26 @@ impl EditorPreviewCandidate {
             self.geometry_revision,
             self.packet,
             self.sprite_batches,
+            self.hits,
+        )
+    }
+
+    #[cfg(feature = "render-wgpu")]
+    #[must_use]
+    pub fn into_parts(
+        self,
+    ) -> (
+        EditorDocumentId,
+        SceneAuthoringRevision,
+        u64,
+        WgpuRenderInput,
+        Vec<EditorPreviewHit>,
+    ) {
+        (
+            self.document,
+            self.revision,
+            self.geometry_revision,
+            self.render_input,
             self.hits,
         )
     }
@@ -392,6 +460,8 @@ pub(super) struct EditorPreviewSession {
     input: Arc<Mutex<Option<EditorPreviewRequest>>>,
     generation: EditorRenderGeneration,
     target: Handle<RenderImage2d>,
+    #[cfg(feature = "render-wgpu")]
+    policy: WgpuPolicyInstallation<WgpuStockPolicy>,
     extent: Option<Extent2d>,
     geometry_revision: u64,
     candidate: Option<EditorPreviewCandidate>,
@@ -449,6 +519,10 @@ impl EditorPreviewSession {
     ) -> Result<Self, DiagnosticReport> {
         let generation = EditorRenderGeneration::try_acquire()
             .ok_or_else(|| preview_error("project.editor.preview-generation-exhausted"))?;
+        #[cfg(feature = "render-wgpu")]
+        let policy = WgpuPolicyDefinition::new(WgpuStockPolicy::new())
+            .install()
+            .map_err(|_| preview_error("project.editor.preview-policy-install-failed"))?;
         let input = Arc::new(Mutex::new(None));
         app.insert_resource(EditorPreviewInput(Arc::clone(&input)))
             .and_then(|app| {
@@ -465,6 +539,8 @@ impl EditorPreviewSession {
             generation,
             target: RenderImage2d::allocate_handle()
                 .map_err(|_| preview_error("project.editor.preview-target-id-exhausted"))?,
+            #[cfg(feature = "render-wgpu")]
+            policy,
             extent: None,
             geometry_revision: 0,
             candidate: None,
@@ -654,13 +730,26 @@ impl EditorPreviewSession {
             extent,
             image_publication_revision,
         };
+        let sprite_batches = runtime.world().resource::<SpriteBatches>().clone();
+        #[cfg(feature = "render-wgpu")]
+        let render_input = self
+            .policy
+            .capture(
+                packet,
+                Arc::new(WgpuStockCapture::new().with_sprites(sprite_batches)),
+            )
+            .map_err(|_| preview_error("project.editor.preview-policy-capture-rejected"))?;
         self.candidate = Some(EditorPreviewCandidate {
             document: source.document,
             revision: source.revision,
             geometry_revision,
             content_stamp: content_stamp.clone(),
+            #[cfg(feature = "render-wgpu")]
+            render_input,
+            #[cfg(not(feature = "render-wgpu"))]
             packet,
-            sprite_batches: runtime.world().resource::<SpriteBatches>().clone(),
+            #[cfg(not(feature = "render-wgpu"))]
+            sprite_batches,
             hits,
             omissions: accepted.omissions.clone(),
         });

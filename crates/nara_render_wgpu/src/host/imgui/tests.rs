@@ -818,14 +818,14 @@ mod bare_primary {
         let event_loop = builder.build().unwrap();
         let mut app = BarePrimaryApp {
             result: None,
-            #[cfg(all(feature = "sprite-submitter", feature = "ui-submitter"))]
+            #[cfg(all(feature = "stock-sprite", feature = "stock-ui"))]
             instance_budget_probe: false,
         };
         event_loop.run_app(&mut app).unwrap();
         app.result.expect("the primary lifecycle must run").unwrap();
     }
 
-    #[cfg(all(feature = "sprite-submitter", feature = "ui-submitter"))]
+    #[cfg(all(feature = "stock-sprite", feature = "stock-ui"))]
     #[test]
     #[ignore = "requires an interactive Windows desktop and a working WGPU adapter"]
     fn editor_targets_share_submitted_scope_budget_and_recover_next_frame() {
@@ -844,7 +844,7 @@ mod bare_primary {
 
     struct BarePrimaryApp {
         result: Option<Result<(), String>>,
-        #[cfg(all(feature = "sprite-submitter", feature = "ui-submitter"))]
+        #[cfg(all(feature = "stock-sprite", feature = "stock-ui"))]
         instance_budget_probe: bool,
     }
 
@@ -884,7 +884,7 @@ mod bare_primary {
                         );
                     })
                     .map_err(|error| error.to_string())?;
-                #[cfg(all(feature = "sprite-submitter", feature = "ui-submitter"))]
+                #[cfg(all(feature = "stock-sprite", feature = "stock-ui"))]
                 if self.instance_budget_probe {
                     std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
                         verify_instance_budget(&mut execution, packet)
@@ -917,7 +917,7 @@ mod bare_primary {
         }
     }
 
-    #[cfg(all(feature = "sprite-submitter", feature = "ui-submitter"))]
+    #[cfg(all(feature = "stock-sprite", feature = "stock-ui"))]
     fn verify_instance_budget(
         execution: &mut WgpuRenderHost,
         window: RenderWindowPacket,
@@ -974,11 +974,18 @@ mod bare_primary {
 
         let (first_view, first_target, first_views, first_packet) = targets.remove(0);
         let first = execution
-            .submit_authoring_ui_image(
+            .submit(
                 &first_view,
-                window,
-                first_packet,
-                crate::view_probe::overlay_packet(RenderTarget::Image(first_target.image())),
+                &crate::host::tests::test_stock_capture(
+                    first_packet,
+                    crate::WgpuStockCapture::new().with_ui(
+                        vec![crate::view_probe::overlay_packet(RenderTarget::Image(
+                            first_target.image(),
+                        ))],
+                        None,
+                        None,
+                    ),
+                ),
             )
             .map_err(|error| error.to_string())?;
         assert_eq!(
@@ -995,11 +1002,18 @@ mod bare_primary {
         );
         let (second_view, second_target, second_views, second_packet) = targets.remove(0);
         let error = execution
-            .submit_authoring_ui_image(
+            .submit(
                 &second_view,
-                window,
-                second_packet,
-                crate::view_probe::overlay_packet(RenderTarget::Image(second_target.image())),
+                &crate::host::tests::test_stock_capture(
+                    second_packet,
+                    crate::WgpuStockCapture::new().with_ui(
+                        vec![crate::view_probe::overlay_packet(RenderTarget::Image(
+                            second_target.image(),
+                        ))],
+                        None,
+                        None,
+                    ),
+                ),
             )
             .expect_err("a second target must share the first submitted target's demand");
         assert!(matches!(
@@ -1045,11 +1059,18 @@ mod bare_primary {
                 .unwrap()
                 .unwrap();
         execution
-            .submit_authoring_ui_image(
+            .submit(
                 &first_view,
-                window,
-                next_first_packet,
-                crate::view_probe::overlay_packet(RenderTarget::Image(first_target.image())),
+                &crate::host::tests::test_stock_capture(
+                    next_first_packet,
+                    crate::WgpuStockCapture::new().with_ui(
+                        vec![crate::view_probe::overlay_packet(RenderTarget::Image(
+                            first_target.image(),
+                        ))],
+                        None,
+                        None,
+                    ),
+                ),
             )
             .map_err(|error| error.to_string())?;
         let next_packet =
@@ -1057,11 +1078,18 @@ mod bare_primary {
                 .unwrap()
                 .unwrap();
         execution
-            .submit_authoring_ui_image(
+            .submit(
                 &second_view,
-                window,
-                next_packet,
-                crate::view_probe::overlay_packet(RenderTarget::Image(second_target.image())),
+                &crate::host::tests::test_stock_capture(
+                    next_packet,
+                    crate::WgpuStockCapture::new().with_ui(
+                        vec![crate::view_probe::overlay_packet(RenderTarget::Image(
+                            second_target.image(),
+                        ))],
+                        None,
+                        None,
+                    ),
+                ),
             )
             .map_err(|error| error.to_string())?;
         assert_eq!(execution.frame_transaction_stats().queue_submissions(), 2);
@@ -1321,7 +1349,10 @@ mod native {
                 .activate_image_target(&producer, reservation)
                 .unwrap();
             let image = execution
-                .submit_image(&producer, packet, image_packet)
+                .submit(
+                    &producer,
+                    &crate::host::tests::test_stock_input(image_packet),
+                )
                 .unwrap();
             let alias = image
                 .0
@@ -1528,10 +1559,13 @@ mod native {
                     drop(prepared);
                     let successor = self
                         .execution
-                        .submit_image(
+                        .submit(
                             &self.producer,
-                            packet,
-                            image_packet(self.generation, self.target, 2),
+                            &crate::host::tests::test_stock_input(image_packet(
+                                self.generation,
+                                self.target,
+                                2,
+                            )),
                         )
                         .unwrap();
                     assert_eq!(

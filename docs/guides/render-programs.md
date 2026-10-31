@@ -8,8 +8,10 @@ whole workload through public APIs without a World, Runtime, window or private e
 
 This guide covers the bounded prerequisite admitted by
 [ADR0094](../architecture/adr/0094-minimal-render-execution-boundary-and-evidence-gated-extensions.md#finite-captured-wgpu-programs).
-Typed policy capture installation, alternate policy, history and complete custom-drawn Editor
-composition remain work in the [render unit](../plans/2026-10-31-render-composition-and-host-execution-plan.md).
+The [typed policy replacement](../knowledge/engineering/verification/2026-10/2026-10-31T192756Z-original-typed-render-policy-capture-and-complete-consumer-qualification-df7f9377f51142b78060b53617c800a1.md)
+also carries ordinary Runtime/Editor consumers and an independent alternate policy through this
+Host. Complete View/history and custom-drawn Editor qualification remain in the
+[render unit](../plans/2026-10-31-render-composition-and-host-execution-plan.md).
 
 ## Definitions, Instances And Captures
 
@@ -29,6 +31,65 @@ aggregate requested WGPU features and the strongest limits, including correct bu
 direction. Adapter support alone does not enable a capability. Late requirements must fit the
 original enabled request; `ReconstructionRequired` refuses the contribution without invalidating
 other producers. A healthy device is never silently replaced.
+
+## Policy Capture And Selection
+
+Implement `WgpuRenderPolicy` when a renderer owns capture meaning and complete graph wiring.
+Its immutable definition freezes device requirements. Its `Capture` contains replayable CPU data;
+its producer-local `Instances` hold stable typed Feature instances. `create_instances` receives
+`WgpuPolicyInstanceContext`, which only creates Features within that original request. `build`
+receives the exact capture, neutral packet and actual destination format. It has no World, Device,
+Queue or presentation authority. Return `WgpuPolicyProgram` with its published final texture and
+explicit observation counters. The Host checks the final texture's actual extent, format,
+transfer and alpha contract before execution.
+
+For normal ECS capture, install `WgpuCapturePlugin`, select one exact installation with
+`install_wgpu_policy`, and run the domain collector in `WgpuPolicyCaptureSet::Capture`. The
+collector reads ordinary ECS parameters and calls `WgpuPolicyFrameWriter::capture` with an
+`Arc<Capture>`. Check `can_capture` before consuming move-only domain work. Backpressure leaves
+the already accepted input intact. A second installation cannot silently replace the selected
+route. `WgpuWindowPresentationPlugin` selects the ordinary native-window consumer; capture alone
+does not require a window or create a second native execution owner.
+
+The default product explicitly composes `WgpuStockPolicyPlugin` and its selected
+`WgpuStockSpritePlugin`/`WgpuStockUiPlugin` contributors. Compiling a domain does not install it.
+Independent image owners may retain their installation and call `installation.capture` directly.
+Call `host.prepare_policy` before device acquisition to admit nondefault requirements. The same
+accepted `WgpuRenderInput` can adapt an equal-sized physical window target to an image with
+`with_image_target`; original source, frame, logical Views and WorldCanvas facts remain pinned.
+
+Closing or dropping an installation rejects new captures. Accepted inputs retain their original
+definition and execution lease, so Host construction never looks up the currently installed policy
+to reinterpret them. Submitted work retains the original capture and CPU instances through actual
+completion. Producer close still refuses execution. A retained CPU input can build new instances
+on a replacement Host; it contains no old native state. Host caches are finite and reclaim entries
+after the installation, accepted inputs and submitted uses release their leases.
+
+UI paint packets remain replayable data while backend presentation permissions stay move-only in
+their concrete sidecar. An external policy's collector can check `can_capture_with_ui`, take one
+`UiBackendSubmissionReader` frame, split it with `WgpuUiSubmission::capture`, and pass its typed
+capture plus the original sidecar to `capture_with_ui`. Acceptance moves both into the same slot;
+failure returns the original sidecar for retry or explicit settlement. A collector must not drop
+that returned responsibility to impersonate successful capture. `cancelled` aborts an unbound
+attempt and defers an already bound one. Content rejection skips that policy frame and allows
+the next Runtime frame to repair it; an owner or topology violation still faults the Runtime.
+
+A trusted backend can take untouched attempts with `into_prepared_submissions` before native
+binding. A bound sidecar refuses the transfer and returns itself. The `nara_ui_render::advanced`
+batch binder checks all retry generations before moving any attempt into its bound state; a
+failure retains the complete original batch. Binding alone does not establish presentation.
+The backend must present the exact packet before returning its one-shot `presented` outcome.
+
+`WgpuUiProgramBinding` binds the exact UI operation key, original Feature
+instance and typed capture Arc. That operation must write the selected final texture. The Host
+checks its actual original typed report before output publication; drawing UI into an unrelated
+texture cannot complete a permit for the displayed image. Equal packet contents cannot substitute another operation. An
+image submission with Runtime UI uses `submit_for_display` and retains its designated display
+completion obligation. Authoring Canvas has no Runtime UI permission. A passive mirror never
+settles another occurrence's permission.
+
+These APIs do not establish a persistent renderer recipe, runtime route replacement or native
+code unloading. Complete current qualification belongs to the render unit and its evidence.
 
 ## Typed Versions And Dependencies
 
@@ -77,8 +138,8 @@ is RGBA8/BGRA8 in linear or sRGB formats, preserving its declared alpha interpre
 The Host may bind already-reserved target storage as a private local output. It still needs its
 normal writer and initialization; it grants no public raw initialized import. A pure preflight
 refusal preserves that reservation. Later outputs allocate after preflight and image receipts
-share the actual program storage guard. Typed policy capture and general policy installation
-remain the following migration work; the existing stock facade names are not a new policy API.
+share the actual program storage guard. The same submission operation accepts each original
+`WgpuRenderInput`; Sprite/UI combinations do not select separate image facade methods.
 
 For an ordinary Runtime window, the acquired surface is the Host's final consumer of the exact
 physical-resolution program image. It joins the same encoder and native submission. Output

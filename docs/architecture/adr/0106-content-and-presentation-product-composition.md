@@ -2,7 +2,7 @@
 
 **Status**: Accepted
 **Date**: 2026-08-04
-**Last Revised**: 2026-08-13
+**Last Revised**: 2026-11-01 (explicit policy capture and presentation placement)
 **Owner**: Root product features, project capability normalization, Host recipes, and plugin groups
 **Refines**: [ADR 0005](0005-dimension-aware-runtime-with-2d-first-authoring.md),
 [ADR 0040](0040-render-resource-lifetime-and-submitter-ownership.md),
@@ -36,10 +36,14 @@ flowchart LR
     Admission -->|presentation-ui + desktop-winit| A11y[Winit accessibility contribution]
 ```
 
-- `WgpuRenderPlugin` has one feature-invariant declaration and owns only the base WGPU backend
-  lifecycle plus sealed frame submission. Concrete first-party Sprite and UI contribution plugins
-  install the systems that contribute their domain packets to the private backend frame. They do
-  not admit a public submitter trait, registry, dynamic phase or RenderGraph.
+- `WgpuCapturePlugin` has one feature-invariant declaration and owns CPU capture plus the original
+  managed result connection. The native Host owns execution; `WgpuWindowPresentationPlugin`
+  selects ordinary window publication. Stock policy and Sprite/UI capture contributors are
+  explicit plugins. Editor Play installs the same capture/policy/contributors and its embedded
+  consumer while omitting native window publication. Shipping selects window publication.
+  A domain's compiled availability grants none of these installation effects. ADR0094 separately
+  admits finite typed programs and policy construction; these composition plugins introduce no
+  submitter registry or dynamic phase.
 - The WGPU Sprite contribution is installed only for the requested
   `presentation-2d + render-wgpu` intersection. The WGPU UI contribution is installed only for the
   requested `presentation-ui + render-wgpu` intersection.

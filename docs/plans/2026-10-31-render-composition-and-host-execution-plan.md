@@ -1,8 +1,9 @@
 # Render Composition And Host Execution
 
-Date: 2026-10-31. Status: private CPU/DX12/cost comparison, internal device ownership, original
-UI custody and owned native desktop execution qualified; complete output/producer/Feature
-replacement remains in development.
+Date: 2026-10-31. Last reviewed: 2026-11-01. Status: private CPU/DX12/cost comparison, native
+ownership, immutable outputs, finite typed programs and original policy capture qualified in
+their recorded scopes; complete View/history, independent streams and custom composition remain
+in development.
 Baseline: `a0995e7b65288ae67a5786b5312e6166b679d171`.
 Parent: [foundation R8/R9a](2026-10-23-foundation-architecture-rebaseline-plan.md#r8-external-render-feature-and-host-local-execution).
 Candidate: Proposed [ADR0121](../architecture/adr/0121-composable-render-programs-and-host-execution.md).
@@ -212,6 +213,25 @@ window/Canvas executor are absent from the public/production path. Continue type
 installation and actual alternate-policy consumers before deleting the central capture payload,
 combined image facades and remaining private numerical oracles. View/history groups, complete
 independent streams and custom-drawn composition retain their full outcome above.
+
+The current typed-policy integration replaces that central payload and facade family. Its
+independent consumer must select a non-stock scalar renderer through normal ECS capture and
+ordinary Runtime window presentation, then reconstruct the original input on an image Host.
+Review also requires a concrete public UI-sidecar capture route for that selected policy, a
+final-image UI binding verified against actual encode reports before publication, recoverable
+policy-content rejection, and complete fixed engine metadata accounting. These are acceptance
+refinements inside steps4-5 above, not a new render roadmap. The
+[typed policy qualification](../knowledge/engineering/verification/2026-10/2026-10-31T192756Z-original-typed-render-policy-capture-and-complete-consumer-qualification-df7f9377f51142b78060b53617c800a1.md)
+records their implemented result, scoped ordinary/native evidence and final external consumers.
+
+The next production slice is the design's
+[View history transaction](../architecture/render-program-production-design.md#next-production-unit-view-history-transactions):
+two Views with two independently replaceable accumulation instances each, pinned history bases
+and explicit slot/output bindings, published together through the existing Host transaction.
+Retry retains its original predecessor basis. Reorder, one-instance replacement, stale/reset
+siblings, public budget refusal and independently progressing producer B have an external numeric
+oracle. This refines the remaining history work rather than reopening the graph decision; it is
+not implemented merely because the private history comparison passes.
 
 The [first executable comparison](../knowledge/engineering/verification/2026-10/2026-10-31T060722Z-private-render-graph-buffer-history-and-viable-controls-comparison-on-dx12-d6aca1996b2342659bd07933b33e0e64.md)
 records 61 unique CPU tests, seven actual DX12 tests and one subsequent actual submission-failure

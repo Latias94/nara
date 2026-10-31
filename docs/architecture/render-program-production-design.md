@@ -1,9 +1,11 @@
 # Production Render Program And Typed Feature Integration
 
-Date: 2026-10-31. Status: selected implementation design for step4 of the
-[render ownership transition](render-host-ownership-design.md). Public names below are sketches.
+Date: 2026-10-31. Last reviewed: 2026-11-01. Status: selected production integration and next
+history-unit design for step4 of the [render ownership transition](render-host-ownership-design.md).
 The [finite prerequisite in Accepted ADR0094](adr/0094-minimal-render-execution-boundary-and-evidence-gated-extensions.md#finite-captured-wgpu-programs)
-admits the bounded native program; broader policy/history/stock integration still follows below.
+admits the bounded native program and original typed policy capture. Their implementation evidence
+is tracked in the [ledger](adr/implementation-status.md); the next history section remains
+unimplemented design.
 Proposed [ADR0121](adr/0121-composable-render-programs-and-host-execution.md) remains Proposed
 until its complete production consumers qualify the selected contract.
 
@@ -24,6 +26,9 @@ WGPU types directly; a parallel descriptor family or new RHI is unnecessary.
 Each candidate owns its resource handles. Texture and buffer versions retain an unforgeable
 candidate identity and a local index, checked before indexing. Native resource descriptions keep
 exact WGPU descriptors plus explicit color/alpha interpretation and a code-owned semantic type.
+The declared usage flags limit graph access; physical storage must contain those usages and may
+support additional Host operations. That superset grants no additional graph access. Extent,
+format, subresources, semantic identity and logical descriptor agreement remain exact.
 The first implementation tracks whole single-sample, single-mip 2D textures and whole aligned,
 unmapped buffers. Other ranges, multisampling and resolves reject at admission.
 
@@ -156,13 +161,80 @@ policy interface or a new generic section registry.
 
 Policy requirements close over its original Feature definitions before device acquisition. Instance
 creation cannot expand that declared request. Late installation must fit actual enabled facts or
-request explicit Host reconstruction. A captured source/processed input retains the original
+request explicit Host reconstruction. Check original device health before policy or Feature
+capability admission: actual device loss remains `DeviceLost`, distinct from a healthy device's
+refusal to broaden its enabled request. A captured source/processed input retains the original
 definition and exact reconstruction inputs; building it cannot consult a current policy or assets.
 Installation identity and producer-local instance identity remain independent of Rust type and list
 position. Before exposing withdrawal, distinguish closing new capture admission from the retained
 execution admission already issued to an accepted capture. Existing Feature-instance Drop closes
 execution admission, so dropping an old binding at route replacement cannot implement draining.
 Producer close still revokes execution, even while old inputs retain reconstruction/code custody.
+
+### Selected Policy Capture Replacement
+
+`WgpuRenderPolicy` pairs an immutable `Capture` with producer-local CPU `Instances`, a closed
+device request, capture validation and program construction. `WgpuPolicyDefinition<P>` retains
+the exact implementation and request. `WgpuPolicyInstallation<P>` owns admission of new captures;
+its non-reused installation identity is separate from definition identity and Rust type. Closing
+or dropping it refuses new captures while accepted `WgpuRenderInput` values retain the original
+definition and execution lease. Producer close remains irreversible. No registry lookup can
+retarget an accepted input to the currently selected policy.
+
+Capture systems use normal ECS parameters and one finite capture stage. The generic frame has
+no Sprite, UI drawing or future domain sections. `WgpuStockCapture` owns those concrete inputs;
+explicit stock contributors populate it. The UI completion sidecar continues to own one-shot
+permissions separately from replayable capture data. Native Runtime and embedded Game transport
+the same selected input; neither reconstructs a stock policy from optional fields at presentation.
+Scene and authoring Canvas bind their definitions when their original candidates are captured.
+
+`WgpuPolicyInstanceContext` can create typed Feature instances only within the policy's original
+closed request. It grants no Device, Queue, World or target authority. The Host caches CPU instances
+by producer and installation identity, with a finite bound and reclamation after the installation
+and accepted inputs release their leases. Its private fixed slot table has no retained Vec capacity
+after reclamation. Account for the complete table and exact original-submission payload increment,
+then admit predictable custody wrappers before their allocation. Native Feature state remains separately epoch-owned.
+An original submitted reservation retains its exact policy capture, definition and CPU instances
+through actual GPU completion, including failure. Closing capture admission cannot prematurely
+Drop Feature instances and impersonate draining.
+
+`WgpuPolicyBuildContext` supplies the captured packet and actual destination format. A policy
+constructs candidate-local ports and returns `WgpuPolicyProgram` with an exact published final
+texture and explicit observations. The Host validates the original source/frame, native format,
+extent, interpretation and Feature ownership before execution. An image adaptation preserves
+source, frame, logical Views and fixed-canvas facts, changing only an equal-sized execution target.
+Accepted CPU input remains usable for explicit reconstruction on a new Host; it contains no old
+native instances.
+
+Runtime UI completion uses a concrete `WgpuUiProgramBinding` to the original UiFeature operation,
+instance and capture. In the finite selected contract, that UI operation writes the exact selected
+final texture. An independent offscreen UI branch cannot authorize completion for another image.
+Validate this relationship before native work. After encoding, match the actual original UiReport
+and its retained capture-facts identity before output publication consumes its watermark. Prepare
+completion capacity before native work, then match permits by packet identity plus logical target.
+This is a presentation obligation, not a generic render-domain
+section registry. A different renderer can omit UI; it cannot settle pending UI permits without
+their exact binding. Compiling a stock domain does not install its contribution.
+
+The complete consumer for this replacement includes normal ECS capture, ordinary Runtime windows,
+Scene/Canvas/Game, a source/processed product, independent image reconstruction and an independently
+authored alternate policy through the same capture/final-target selection. Remove the old central
+payload, domain collection stages, submitter names and combined image facade family with those
+consumers. Installation withdrawal proves accepted-work draining; it does not qualify resident
+native code unload or a persistent renderer-recipe format.
+
+The pinned Bevy/Godot source comparison supports separating extracted CPU input, policy wiring,
+per-instance state and device-local realization. It does not supply this accepted-capture drain
+guarantee: Bevy's pipeline-cache requeue follows current shader handles, while Godot's effect
+lists/callbacks are live lookups and delayed RID destruction establishes physical lifetime rather
+than old-capture execution admission. Both close device features/limits before device creation.
+Use their ownership concepts without substituting a current cache lookup for the original Nara
+definition. Reference pins remain Bevy `85503941e488152711a4695bbe248e9ed9f453fc` and Godot
+`81ab961f91066a63bcbf3ec340962bb1a1ada558`; this source comparison is not performance evidence.
+The inspected owners are Bevy's `crates/bevy_render/src/render_resource/pipeline_cache.rs`
+(`set_shader`/`remove_shader`), and Godot's
+`servers/rendering/storage/compositor_storage.cpp` plus
+`servers/rendering/renderer_rd/pipeline_cache_rd.cpp` (`setup`/`update_shader`).
 
 Use one private staged program transaction for ordinary Runtime/window, Editor Scene/Canvas/Game
 and independent image output. It performs one producer admission, complete preflight, preparation,
@@ -227,6 +299,88 @@ uploads admit destination custody first, and a refused retained value leaves the
 before its destructor runs. A valid large candidate cannot create a recursive Arc cleanup chain
 merely by repeating exact imports.
 
+### Next Production Unit: View History Transactions
+
+This is the next unimplemented owner slice after typed policy migration. Extend the existing
+Host transaction and exact resource imports; do not put a separately mutable history manager
+beside `submit_program` or publish four GPU results before a later caller-side history commit.
+
+The first consumer has two captured Views with two accumulation instances per View. Each instance
+keeps its own exact predecessor and code-owned slot. Captured View identity includes its source
+and runtime incarnation; camera ordering, operation order, target extent and vector position are
+not identity. Camera identity alone must not preclude separately identified subviews of one
+source camera. The Host's current `views` table is producer target state, not a per-camera history
+table. Reuse the existing non-reused Feature instance identity for effect incarnation. Add bounded
+producer-local instance reconciliation within the policy's original closed device request, so
+retiring or replacing one effect preserves the other three histories without reinstalling the
+entire policy. Reconciliation must distinguish live membership, capture admission and accepted
+candidate execution; dropping a latest-map entry cannot revoke a still-accepted candidate's
+original instances. The immutable CPU capture fixes its original topology, definitions,
+incarnations and parameters even before Host preparation; preparation resolves those facts into
+an immutable binding snapshot retaining the actual Feature instance owners. Keeping only a shared
+map or numeric instance IDs does not retain the instance's execution admission. Preserve explicit
+Feature/producer close semantics rather than changing them as a hidden reconciliation detail.
+A temporarily absent or minimized View is not implicitly retired. Removing and readding the
+camera component is a real lifecycle change even if its Entity survives.
+
+Reconciliation prepares candidate membership without changing published membership. New instance,
+capability or budget failure leaves the original group, last-good slots and older candidates
+unchanged. Candidate-driven membership changes commit with publication. Explicit reset or
+execution revocation may fence older candidates immediately, under their separate owner operation.
+
+A Host-issued candidate pins the complete history basis before program construction: exact
+predecessors, empty-slot revisions, reset incarnations, group membership and capture watermarks.
+Explicit slot-to-resource bindings select its new history outputs independently of output order.
+Retry executes that same pinned candidate; it cannot silently rebuild against current history.
+An explicit new preparation may acquire another basis. Retained CPU input remains the separate
+reconstruction authority on a new Host; retired GPU history cannot cross epochs as a valid import.
+An accumulation capture alone cannot reproduce its old temporal output after losing its GPU
+predecessor. This unit selects an explicit effect-declared temporal reset on a new Host/epoch,
+with an empty-history reason and declared initialization. The resulting pixels belong to a new
+lineage, not an exact reconstruction of the old accumulated output. Complete original CPU
+history replay/checkpoints are separate unimplemented capability. Preserve non-temporal
+original-input reconstruction without extending its promise to unavailable predecessors.
+
+Validate the basis before native work and again at the existing final publication boundary.
+Publish the complete output group, every history pointer and successful-capture watermark
+together after native submission admission and epoch checks. Admit ticket/binding/result storage
+and old-value retirement capacity before native work. Successful-capture deduplication belongs to
+the source/history lineage, independently of current group, target and reclaimable slot records.
+Reset, regroup and instance replacement do not clear it. A source handoff cannot restore an old
+capture's execution eligibility: retain its lineage watermark or permanently retire that lineage.
+A stale sibling, reset basis or explicitly revoked instance rejects the whole group.
+A later surface-presentation failure does not undo successful GPU output/history
+publication. Publication consumes the candidate, including when its exact output has not yet
+presented; transport retries return the original result rather than accumulating again. Display,
+UI settlement, READY and physical completion keep their existing separate owners.
+
+The candidate is move-only, Host/epoch/producer-bound, and owns a complete program, original
+binding snapshot, target contract and history basis. It never holds an acquired surface across
+calls. Choose caller-owned candidate custody versus a bounded Host record with an ownership token
+against the actual Runtime/Game/Scene/Canvas transport; do not add a second renderer API or a
+registry merely to hide the value. A retryable failure returns the same candidate. Cancellation
+discards the uncommitted candidate while touched native resources remain with their original
+prefix. If a transport retains a retry across calls, it retains the original capture and UI
+sidecar too; settling that sidecar and later recreating its responsibility from cached input is
+invalid. One-shot paths explicitly cancel instead. Policy `Instances` and native `State` may
+cache implementation data but do not advance authoritative history during build or preparation.
+
+Initially one producer/capture owns one publication group; independent producer rates do not
+require a multi-group scheduler. Metadata reclamation follows outstanding candidates, tickets,
+outputs and native custody rather than a lifetime registration counter. The independent consumer
+checks four distinguishable accumulation chains against a linear-float CPU oracle, changes View
+and operation order, replaces one instance, rejects stale/reset siblings, injects public budget
+pressure and keeps producer B progressing after A pauses or closes. Retained A outputs remain
+readable. Owning native tests separately cover submission failure and device loss.
+
+Pinned Bevy's `RetainedViewEntity` supports an explicit retained View identity; its TAA frame
+parity is not a predecessor transaction for independently paced producers. Godot's named
+`RenderSceneBuffersRD` storage and TAA initialization support local lifetime reasoning; copying
+over history does not preserve Nara's independently retained exact versions. These are mechanism
+comparisons at the pins above, not upstream defect or performance claims. Reconcile the selected
+finite history contract in ADRs0040/0094 and neutral View facts in ADR0117 before implementing it;
+full0121 remains Proposed.
+
 ## Implementation Order And Deletion
 
 1. Port the finite resource admission/compiler into the production backend with hostile owner,
@@ -235,12 +389,15 @@ merely by repeating exact imports.
 2. Integrate texture/buffer execution and publication through the existing Host. An independent
    package runs blur, a chained effect, raw/normalized statistics and vertex histogram with
    actual readback. It imports no private fixture executor or core package branch.
-3. Add exact View/instance/history ownership and coherent groups, then move stock Sprite/UI and
-   Runtime/Editor/image-only consumers through the same contribution boundary. Delete central
-   payload fields, package lowering matches, quad-only prepared containers and combined submit
-   facades after their consumers use the replacement.
-4. Qualify alternate policy, source/processed capture interleaving, independent streams, retained
-   old outputs, native failures/loss/close and clipped Nara-drawn composition. Preserve exact UI,
+3. Move stock Sprite/UI and Runtime/Editor/image-only consumers through the same contribution
+   boundary, then qualify original typed policy capture and a real alternate policy. Delete
+   displaced central payload fields, package lowering matches and combined submit facades with
+   their consumers. Test-only numerical controls remain scoped comparison evidence until their
+   replacement oracle is complete.
+4. Add exact View/instance/history ownership and coherent groups through the existing Host
+   publication transaction, following the next-unit boundary above. Qualify source/processed
+   capture interleaving, independent streams, retained old outputs, native failures/loss/close and
+   clipped Nara-drawn composition. Preserve exact UI,
    input, READY and native Editor evidence. Update accepted contracts and retire displaced private
    experiment implementations only with the complete result.
 

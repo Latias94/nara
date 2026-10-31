@@ -1,61 +1,64 @@
-use std::time::Instant;
+use std::{sync::Arc, time::Instant};
 
-#[cfg(feature = "ui-submitter")]
-use std::sync::Arc;
-
-use nara_ecs::{Resource, SystemSet};
-#[cfg(feature = "ui-submitter")]
+use nara_ecs::{Resource, SystemSet, World};
+#[cfg(feature = "stock-ui")]
 use nara_render::RenderFrameState;
-#[cfg(any(feature = "ui-submitter", all(test, feature = "sprite-submitter")))]
+#[cfg(any(feature = "stock-ui", all(test, feature = "stock-sprite")))]
 use nara_render::RenderTarget;
-#[cfg(all(test, any(feature = "sprite-submitter", feature = "ui-submitter")))]
+#[cfg(all(test, any(feature = "stock-sprite", feature = "stock-ui")))]
 use nara_render::ViewportRect;
-use nara_render::{ExtractedViews, RenderFramePacket, RenderFramePacketError};
-#[cfg(feature = "sprite-submitter")]
+use nara_render::{RenderFramePacket, RenderFramePacketError};
+#[cfg(all(test, feature = "stock-sprite"))]
 use nara_sprite_render::__private::SpriteBatches;
-#[cfg(all(test, feature = "ui-submitter"))]
+#[cfg(all(test, feature = "stock-ui"))]
 use nara_ui_render::__private::UiPresentationOutcomes;
-#[cfg(feature = "ui-submitter")]
+#[cfg(feature = "stock-ui")]
 use nara_ui_render::__private::{
     UiBackendSubmission, UiCompletedBackendOutcome, UiSubmittedBackendSubmission,
 };
-#[cfg(feature = "ui-submitter")]
+#[cfg(all(test, feature = "stock-ui"))]
+use nara_ui_render::{UiPacketPrimitive, UiPaintPacket};
+#[cfg(feature = "stock-ui")]
 use nara_ui_render::{
-    UiPacketPrimitive, UiPaintPacket, UiPaintPacketIdentity, UiPresentationAttemptIdentity,
-    UiPresentationBackendFaultDomain, UiPresentationBackendGeneration,
-    UiPresentationIntegrationError,
+    UiPaintPacketIdentity, UiPresentationAttemptIdentity, UiPresentationBackendFaultDomain,
+    UiPresentationBackendGeneration, UiPresentationIntegrationError,
 };
-#[cfg(feature = "ui-submitter")]
+#[cfg(feature = "stock-ui")]
 use nara_window::WindowId;
 
-#[cfg(any(feature = "ui-submitter", all(test, feature = "sprite-submitter")))]
+#[cfg(any(feature = "stock-ui", all(test, feature = "stock-sprite")))]
 use crate::WgpuRenderError;
-#[cfg(all(test, any(feature = "sprite-submitter", feature = "ui-submitter")))]
+#[cfg(all(test, any(feature = "stock-sprite", feature = "stock-ui")))]
 use crate::quad::WgpuQuadBatch;
-#[cfg(all(test, feature = "ui-submitter"))]
+#[cfg(all(test, feature = "stock-ui"))]
 use crate::ui::WgpuLoweredUiPacketFacts;
+use crate::{WgpuRenderInput, WgpuRenderProgramError, policy::CapturedPolicy};
 
+/// Ordered CPU capture and optional native-window publication in `CoreStage::Render`.
+/// Policy systems contribute their immutable input in [`Self::Capture`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, SystemSet)]
-pub(crate) enum WgpuFrameSet {
+pub enum WgpuFrameSet {
     Reset,
-    CollectSprite,
-    CollectUi,
+    Capture,
     Seal,
+    Publish,
 }
 
+/// Private legacy drawing input retained only for numerical comparison tests.
+#[cfg(test)]
 #[derive(Debug, Default, Clone)]
-pub(crate) struct WgpuFramePayload {
-    #[cfg(feature = "ui-submitter")]
+pub(crate) struct LegacyWgpuFramePayload {
+    #[cfg(feature = "stock-ui")]
     pub(crate) primary_window_id: Option<WindowId>,
-    #[cfg(feature = "ui-submitter")]
+    #[cfg(feature = "stock-ui")]
     pub(crate) ui_logical_target: Option<RenderTarget>,
-    #[cfg(feature = "sprite-submitter")]
+    #[cfg(feature = "stock-sprite")]
     pub(crate) sprite_batches: Option<SpriteBatches>,
-    #[cfg(feature = "ui-submitter")]
+    #[cfg(feature = "stock-ui")]
     pub(crate) ui_packets: Vec<Arc<UiPaintPacket>>,
 }
 
-#[cfg(feature = "ui-submitter")]
+#[cfg(feature = "stock-ui")]
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub(crate) struct WgpuUiPayloadFacts {
     pub(crate) packet_count: u64,
@@ -67,36 +70,50 @@ pub(crate) struct WgpuUiPayloadFacts {
 
 #[derive(Debug)]
 pub(crate) struct WgpuCapturedFrame {
-    pub(crate) topology: RenderFramePacket,
-    pub(crate) payload: WgpuFramePayload,
+    pub(crate) input: WgpuRenderInput,
     pub(crate) app_frame_index: u64,
     pub(crate) work_started_at: Instant,
 }
 
+/// Private legacy transaction retained only for numerical comparison tests.
+#[cfg(test)]
+#[derive(Debug)]
+pub(crate) struct LegacyWgpuCapturedFrame {
+    pub(crate) topology: RenderFramePacket,
+    pub(crate) payload: LegacyWgpuFramePayload,
+    pub(crate) app_frame_index: u64,
+    pub(crate) work_started_at: Instant,
+}
+
+/// Refusal to seal one exact CPU policy capture and its neutral render topology.
 #[derive(Debug, thiserror::Error)]
-pub(crate) enum WgpuFrameCaptureError {
+pub enum WgpuFrameCaptureError {
     #[error("managed runtime generation is unavailable")]
     MissingRuntimeGeneration,
-    #[cfg(feature = "ui-submitter")]
+    #[cfg(feature = "stock-ui")]
     #[error("the previous UI frame transaction did not reach terminal completion")]
     IncompleteUiTransaction,
     #[error(transparent)]
     Topology(#[from] RenderFramePacketError),
     #[error("a render batch does not belong to the admitted view and target")]
     BatchTopologyMismatch,
-    #[cfg(feature = "ui-submitter")]
+    #[error("nonempty render views require a capture from the selected policy installation")]
+    MissingPolicy,
+    #[error(transparent)]
+    Policy(#[from] WgpuRenderProgramError),
+    #[cfg(feature = "stock-ui")]
     #[error(transparent)]
     UiPresentation(#[from] UiPresentationIntegrationError),
 }
 
-#[cfg(feature = "ui-submitter")]
+#[cfg(feature = "stock-ui")]
 #[derive(Debug)]
 pub(crate) enum WgpuUiSubmissionState {
     Prepared(Vec<UiBackendSubmission>),
     Submitted(Vec<UiSubmittedBackendSubmission>),
 }
 
-#[cfg(feature = "ui-submitter")]
+#[cfg(feature = "stock-ui")]
 impl WgpuUiSubmissionState {
     pub(crate) fn submission_count(&self) -> usize {
         match self {
@@ -169,7 +186,7 @@ impl WgpuUiSubmissionState {
     }
 }
 
-#[cfg(feature = "ui-submitter")]
+#[cfg(feature = "stock-ui")]
 fn ui_backend_generation_mismatch(
     admission_id: u64,
     required: UiPresentationBackendGeneration,
@@ -186,9 +203,10 @@ fn ui_backend_generation_mismatch(
     }
 }
 
-#[cfg(feature = "ui-submitter")]
+#[cfg(feature = "stock-ui")]
 pub(crate) enum WgpuUiCompletion {
     Presented,
+    Cancelled(String),
     Deferred(String),
     ContentRejected(String),
     BackendFault {
@@ -202,7 +220,7 @@ pub(crate) enum WgpuUiCompletion {
     },
 }
 
-#[cfg(feature = "ui-submitter")]
+#[cfg(feature = "stock-ui")]
 pub(crate) fn complete_ui_submissions(
     submissions: WgpuUiSubmissionState,
     completion: WgpuUiCompletion,
@@ -216,7 +234,7 @@ pub(crate) fn complete_ui_submissions(
 ///
 /// The caller must reserve room for the complete batch before calling. Runtime captures reserve
 /// this storage before native execution begins.
-#[cfg(feature = "ui-submitter")]
+#[cfg(feature = "stock-ui")]
 pub(crate) fn complete_ui_submissions_into(
     submissions: WgpuUiSubmissionState,
     completion: WgpuUiCompletion,
@@ -240,6 +258,16 @@ pub(crate) fn complete_ui_submissions_into(
                     "the target reached presentation without binding UI to a live backend generation"
                         .to_owned(),
                 ));
+            }
+        }
+        (WgpuUiSubmissionState::Prepared(submissions), WgpuUiCompletion::Cancelled(message)) => {
+            for submission in submissions {
+                completed.push(submission.aborted(message.clone()));
+            }
+        }
+        (WgpuUiSubmissionState::Submitted(submissions), WgpuUiCompletion::Cancelled(message)) => {
+            for submission in submissions {
+                completed.push(submission.deferred(message.clone()));
             }
         }
         (WgpuUiSubmissionState::Submitted(submissions), WgpuUiCompletion::Deferred(message)) => {
@@ -320,147 +348,218 @@ pub(crate) fn complete_ui_submissions_into(
     }
 }
 
-#[derive(Debug, Default, Resource)]
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
+enum CapturePhase {
+    #[default]
+    Idle,
+    Collecting,
+    Sealed,
+    Closed,
+}
+
+#[derive(Default, Resource)]
 pub(crate) struct WgpuFramePacketSlot {
-    payload: WgpuFramePayload,
+    phase: CapturePhase,
+    capture: Option<Arc<dyn CapturedPolicy>>,
     collection_error: Option<WgpuFrameCaptureError>,
     current: Option<Result<Option<WgpuCapturedFrame>, WgpuFrameCaptureError>>,
-    #[cfg(feature = "ui-submitter")]
+    #[cfg(feature = "stock-ui")]
     ui_submissions: Option<WgpuUiSubmissionState>,
+}
+
+impl std::fmt::Debug for WgpuFramePacketSlot {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let mut debug = formatter.debug_struct("WgpuFramePacketSlot");
+        debug
+            .field("phase", &self.phase)
+            .field(
+                "installation",
+                &self.capture.as_ref().map(|capture| capture.admission().id),
+            )
+            .field("collection_error", &self.collection_error)
+            .field("current", &self.current);
+        #[cfg(feature = "stock-ui")]
+        debug.field("ui_submissions", &self.ui_submissions);
+        debug.finish()
+    }
 }
 
 impl WgpuFramePacketSlot {
     pub(crate) fn close(&mut self) {
         // Return every original UI permission before the Runtime's logical close barrier.
         // Their original pre-admitted result storage remains alive independently of this slot.
-        self.payload = WgpuFramePayload::default();
+        self.phase = CapturePhase::Closed;
+        self.capture = None;
         self.current = None;
         self.collection_error = None;
-        #[cfg(feature = "ui-submitter")]
+        #[cfg(feature = "stock-ui")]
         {
             self.ui_submissions = None;
         }
     }
 
     pub(crate) fn reset(&mut self) {
-        #[cfg(feature = "ui-submitter")]
-        if self.ui_submissions.is_some() {
-            self.payload = WgpuFramePayload::default();
-            self.current = None;
-            self.collection_error = Some(WgpuFrameCaptureError::IncompleteUiTransaction);
+        // A slow consumer owns the current batch until it takes it, including its UI sidecar.
+        if self.phase == CapturePhase::Closed || self.current.is_some() {
             return;
         }
-        self.payload = WgpuFramePayload::default();
-        self.collection_error = None;
-        self.current = None;
-        #[cfg(feature = "ui-submitter")]
-        {
-            self.ui_submissions = None;
+        if self.phase == CapturePhase::Collecting {
+            #[cfg(feature = "stock-ui")]
+            if self.ui_submissions.is_some() && self.collection_error.is_none() {
+                self.collection_error = Some(WgpuFrameCaptureError::IncompleteUiTransaction);
+            }
+            return;
         }
+        self.phase = CapturePhase::Collecting;
     }
 
-    #[cfg(feature = "sprite-submitter")]
-    pub(crate) fn collect_sprite(&mut self, batches: SpriteBatches) {
-        self.payload.sprite_batches = Some(batches);
+    pub(crate) fn is_collecting(&self) -> bool {
+        self.phase == CapturePhase::Collecting && self.current.is_none()
     }
 
-    #[cfg(all(test, feature = "sprite-submitter"))]
-    pub(crate) fn collected_sprite_instances(&self) -> Option<usize> {
-        self.payload
-            .sprite_batches
-            .as_ref()
-            .map(SpriteBatches::total_instances)
+    pub(crate) fn accepts_capture(&self) -> bool {
+        self.is_collecting() && self.capture.is_none() && self.collection_error.is_none()
     }
 
-    #[cfg(feature = "ui-submitter")]
+    pub(crate) fn collect_policy(&mut self, capture: Arc<dyn CapturedPolicy>) -> bool {
+        if !self.accepts_capture() {
+            return false;
+        }
+        self.capture = Some(capture);
+        true
+    }
+
+    #[cfg(feature = "stock-ui")]
     pub(crate) fn accepts_ui_collection(&self) -> bool {
-        self.collection_error.is_none() && self.ui_submissions.is_none()
+        self.accepts_capture() && self.ui_submissions.is_none()
     }
 
-    #[cfg(feature = "ui-submitter")]
-    pub(crate) fn collect_ui(
-        &mut self,
-        packets: Vec<Arc<UiPaintPacket>>,
-        submissions: Vec<UiBackendSubmission>,
-    ) {
-        self.payload.ui_packets = packets;
+    #[cfg(feature = "stock-ui")]
+    pub(crate) fn collect_ui(&mut self, submissions: Vec<UiBackendSubmission>) -> bool {
+        if !self.accepts_ui_collection() {
+            return false;
+        }
         self.ui_submissions = Some(WgpuUiSubmissionState::Prepared(submissions));
+        true
     }
 
-    #[cfg(feature = "ui-submitter")]
+    #[cfg(feature = "stock-ui")]
+    pub(crate) fn collect_policy_with_ui(
+        &mut self,
+        capture: Arc<dyn CapturedPolicy>,
+        ui: WgpuUiSubmissionState,
+    ) -> Result<(), (Arc<dyn CapturedPolicy>, WgpuUiSubmissionState)> {
+        if !self.accepts_ui_collection() {
+            return Err((capture, ui));
+        }
+        self.capture = Some(capture);
+        self.ui_submissions = Some(ui);
+        Ok(())
+    }
+
+    #[cfg(feature = "stock-ui")]
     pub(crate) fn reject_ui_collection(&mut self, error: UiPresentationIntegrationError) {
-        self.collection_error = Some(WgpuFrameCaptureError::UiPresentation(error));
+        if self.accepts_ui_collection() {
+            self.collection_error = Some(WgpuFrameCaptureError::UiPresentation(error));
+        }
     }
 
     pub(crate) fn seal(
         &mut self,
-        #[cfg(feature = "ui-submitter")] primary_window_id: Option<WindowId>,
         captured: Result<Option<RenderFramePacket>, RenderFramePacketError>,
         app_frame_index: u64,
         work_started_at: Instant,
     ) {
-        if let Some(error) = self.collection_error.take() {
-            self.current = Some(Err(error));
+        if !self.is_collecting() {
             return;
         }
-        #[cfg(feature = "ui-submitter")]
-        {
-            self.payload.primary_window_id = primary_window_id;
-        }
-        let payload = std::mem::take(&mut self.payload);
-        self.current = Some(
+        self.phase = CapturePhase::Sealed;
+        let capture = self.capture.take();
+        self.current = Some(if let Some(error) = self.collection_error.take() {
+            Err(error)
+        } else {
             captured
-                .map(|topology| {
-                    topology.map(|topology| WgpuCapturedFrame {
-                        topology,
-                        payload,
+                .map_err(WgpuFrameCaptureError::from)
+                .and_then(|packet| {
+                    let Some(packet) = packet else {
+                        return Ok(None);
+                    };
+                    let capture = capture.ok_or(WgpuFrameCaptureError::MissingPolicy)?;
+                    let input = WgpuRenderInput::from_capture(packet, capture)?;
+                    Ok(Some(WgpuCapturedFrame {
+                        input,
                         app_frame_index,
                         work_started_at,
-                    })
+                    }))
                 })
-                .map_err(WgpuFrameCaptureError::from),
-        );
+        });
     }
 
     pub(crate) fn reject_capture(&mut self, error: WgpuFrameCaptureError) {
-        self.current = Some(Err(error));
+        if !self.is_collecting() {
+            return;
+        }
+        self.phase = CapturePhase::Sealed;
+        self.capture = None;
+        self.current = Some(Err(self.collection_error.take().unwrap_or(error)));
     }
 
-    pub(crate) fn take_capture(
-        &mut self,
-    ) -> Option<Result<Option<WgpuCapturedFrame>, WgpuFrameCaptureError>> {
-        self.current.take()
-    }
-
-    pub(crate) fn payload_matches_topology(
-        &self,
-        views: &ExtractedViews,
-        #[cfg(feature = "ui-submitter")] primary_window_id: Option<WindowId>,
-    ) -> bool {
-        payload_batches_match_topology(
-            &self.payload,
-            views,
-            #[cfg(feature = "ui-submitter")]
-            primary_window_id,
-        )
-    }
-
-    #[cfg(feature = "ui-submitter")]
-    pub(crate) fn take_ui_submissions(&mut self) -> Option<WgpuUiSubmissionState> {
-        self.ui_submissions.take()
+    pub(crate) fn take_batch(&mut self) -> Option<WgpuCapturedPolicyBatch> {
+        let captured = self.current.take()?;
+        self.phase = CapturePhase::Idle;
+        Some(WgpuCapturedPolicyBatch {
+            captured,
+            #[cfg(feature = "stock-ui")]
+            ui: self.ui_submissions.take(),
+        })
     }
 }
 
-impl WgpuFramePayload {
-    #[cfg(feature = "ui-submitter")]
-    pub(crate) fn for_editor_authoring_ui(ui_packets: Vec<Arc<UiPaintPacket>>) -> Self {
-        Self {
-            ui_packets,
-            ..Self::default()
-        }
+/// Move-only transport of an already sealed policy input and its original UI permissions.
+#[doc(hidden)]
+#[derive(Debug)]
+pub struct WgpuCapturedPolicyBatch {
+    pub(crate) captured: Result<Option<WgpuCapturedFrame>, WgpuFrameCaptureError>,
+    #[cfg(feature = "stock-ui")]
+    pub(crate) ui: Option<WgpuUiSubmissionState>,
+}
+
+impl WgpuCapturedPolicyBatch {
+    #[cfg(feature = "stock-ui")]
+    #[must_use]
+    pub fn into_parts(
+        self,
+    ) -> (
+        Result<Option<WgpuRenderInput>, WgpuFrameCaptureError>,
+        Option<crate::host::WgpuUiSubmission>,
+    ) {
+        (
+            self.captured
+                .map(|captured| captured.map(|frame| frame.input)),
+            self.ui.map(crate::host::WgpuUiSubmission::from_state),
+        )
     }
 
-    #[cfg(feature = "sprite-submitter")]
+    #[cfg(not(feature = "stock-ui"))]
+    #[must_use]
+    pub fn into_parts(self) -> (Result<Option<WgpuRenderInput>, WgpuFrameCaptureError>,) {
+        (self
+            .captured
+            .map(|captured| captured.map(|frame| frame.input)),)
+    }
+}
+
+/// Takes the original sealed batch once without selecting or capturing a policy again.
+#[doc(hidden)]
+pub fn take_captured_policy_batch(world: &mut World) -> Option<WgpuCapturedPolicyBatch> {
+    world
+        .get_resource_mut::<WgpuFramePacketSlot>()?
+        .take_batch()
+}
+
+#[cfg(test)]
+impl LegacyWgpuFramePayload {
+    #[cfg(feature = "stock-sprite")]
     pub(crate) fn for_editor_sprites(sprite_batches: SpriteBatches) -> Self {
         Self {
             sprite_batches: Some(sprite_batches),
@@ -468,7 +567,7 @@ impl WgpuFramePayload {
         }
     }
 
-    #[cfg(feature = "ui-submitter")]
+    #[cfg(feature = "stock-ui")]
     pub(crate) fn for_editor_runtime_ui(ui_packets: Vec<Arc<UiPaintPacket>>) -> Self {
         Self {
             primary_window_id: Some(WindowId::PRIMARY),
@@ -478,7 +577,7 @@ impl WgpuFramePayload {
         }
     }
 
-    #[cfg(all(feature = "sprite-submitter", feature = "ui-submitter"))]
+    #[cfg(all(feature = "stock-sprite", feature = "stock-ui"))]
     pub(crate) fn for_editor_viewport(
         sprite_batches: SpriteBatches,
         ui_packets: Vec<Arc<UiPaintPacket>>,
@@ -488,7 +587,7 @@ impl WgpuFramePayload {
         payload
     }
 
-    #[cfg(feature = "ui-submitter")]
+    #[cfg(feature = "stock-ui")]
     pub(crate) fn ui_facts(&self, target: RenderTarget) -> WgpuUiPayloadFacts {
         let packet_target = self.ui_packet_target(target);
         let mut facts = WgpuUiPayloadFacts::default();
@@ -518,20 +617,20 @@ impl WgpuFramePayload {
         facts
     }
 
-    #[cfg(feature = "ui-submitter")]
+    #[cfg(feature = "stock-ui")]
     fn ui_packet_target(&self, execution_target: RenderTarget) -> RenderTarget {
         self.ui_logical_target.unwrap_or(execution_target)
     }
 
     /// Private legacy lowering oracle for ordered quad readback and Runtime comparison tests.
-    #[cfg(all(test, any(feature = "sprite-submitter", feature = "ui-submitter")))]
+    #[cfg(all(test, any(feature = "stock-sprite", feature = "stock-ui")))]
     pub(crate) fn lower_draw(
         &self,
         target: RenderTarget,
         viewport: ViewportRect,
         view_index: Option<usize>,
     ) -> Result<WgpuLoweredFrameDraw, WgpuRenderError> {
-        #[cfg(feature = "sprite-submitter")]
+        #[cfg(feature = "stock-sprite")]
         let content = self
             .sprite_batches
             .as_ref()
@@ -540,11 +639,11 @@ impl WgpuFramePayload {
                     crate::sprite::collect_sprite_quad_batches(batches, index)
                 })
             });
-        #[cfg(not(feature = "sprite-submitter"))]
+        #[cfg(not(feature = "stock-sprite"))]
         let content = Vec::new();
-        #[cfg(feature = "ui-submitter")]
+        #[cfg(feature = "stock-ui")]
         let ui_packet_target = self.ui_packet_target(target);
-        #[cfg(feature = "ui-submitter")]
+        #[cfg(feature = "stock-ui")]
         let ui = crate::ui::lower_ui_packets(
             if view_index.is_none() {
                 &self.ui_packets
@@ -558,65 +657,32 @@ impl WgpuFramePayload {
         .map_err(|error| WgpuRenderError::UiPacketInvariant {
             message: error.to_string(),
         })?;
-        #[cfg(not(feature = "ui-submitter"))]
+        #[cfg(not(feature = "stock-ui"))]
         let ui_batches = {
             let _ = (target, viewport, view_index);
             Vec::new()
         };
-        #[cfg(feature = "ui-submitter")]
+        #[cfg(feature = "stock-ui")]
         let ui_batches = ui.batches;
 
         Ok(WgpuLoweredFrameDraw {
             batches: nara_render::__private::assemble_first_party_draws(content, ui_batches),
-            #[cfg(feature = "ui-submitter")]
+            #[cfg(feature = "stock-ui")]
             ui_packets: ui.packet_facts,
         })
     }
 }
 
 /// Private legacy combined draw used only by the native/unit comparison oracle.
-#[cfg(all(test, any(feature = "sprite-submitter", feature = "ui-submitter")))]
+#[cfg(all(test, any(feature = "stock-sprite", feature = "stock-ui")))]
 #[derive(Debug, Default)]
 pub(crate) struct WgpuLoweredFrameDraw {
     pub(crate) batches: Vec<WgpuQuadBatch>,
-    #[cfg(feature = "ui-submitter")]
+    #[cfg(feature = "stock-ui")]
     pub(crate) ui_packets: Vec<WgpuLoweredUiPacketFacts>,
 }
 
-fn payload_batches_match_topology(
-    payload: &WgpuFramePayload,
-    views: &ExtractedViews,
-    #[cfg(feature = "ui-submitter")] primary_window_id: Option<WindowId>,
-) -> bool {
-    let Some(view) = views.as_slice().first() else {
-        return true;
-    };
-    #[cfg(not(any(feature = "sprite-submitter", feature = "ui-submitter")))]
-    let _ = (payload, view);
-    #[cfg(feature = "sprite-submitter")]
-    if payload.sprite_batches.as_ref().is_some_and(|batches| {
-        batches.as_slice().iter().any(|batch| {
-            views
-                .as_slice()
-                .get(batch.view_index)
-                .is_none_or(|view| batch.target != view.target || batch.view_order != view.order)
-        })
-    }) {
-        return false;
-    }
-    #[cfg(feature = "ui-submitter")]
-    {
-        let ui_packet_target = payload.ui_packet_target(view.target);
-        if payload.ui_packets.iter().any(|packet| {
-            !render_targets_match(packet.target(), ui_packet_target, primary_window_id)
-        }) {
-            return false;
-        }
-    }
-    true
-}
-
-#[cfg(feature = "ui-submitter")]
+#[cfg(feature = "stock-ui")]
 pub(crate) fn render_targets_match(
     packet: RenderTarget,
     view: RenderTarget,
@@ -631,7 +697,7 @@ pub(crate) fn render_targets_match(
     }
 }
 
-#[cfg(feature = "ui-submitter")]
+#[cfg(feature = "stock-ui")]
 pub(crate) fn ui_completion(
     submissions: &WgpuUiSubmissionState,
     result: &Result<(), WgpuRenderError>,
@@ -681,7 +747,7 @@ pub(crate) fn ui_completion(
     }
 }
 
-#[cfg(all(test, feature = "ui-submitter"))]
+#[cfg(all(test, feature = "stock-ui"))]
 pub(crate) fn publish_ui_outcomes(
     outcomes: &mut UiPresentationOutcomes,
     submissions: WgpuUiSubmissionState,
@@ -702,7 +768,7 @@ pub(crate) fn publish_ui_outcomes(
     }
 }
 
-#[cfg(feature = "ui-submitter")]
+#[cfg(feature = "stock-ui")]
 pub(crate) const fn classify_ui_backend_fault(
     error: &WgpuRenderError,
 ) -> UiPresentationBackendFaultDomain {
@@ -719,7 +785,7 @@ pub(crate) const fn classify_ui_backend_fault(
 mod tests {
     use super::*;
 
-    #[cfg(feature = "ui-submitter")]
+    #[cfg(feature = "stock-ui")]
     #[test]
     fn target_matching_normalizes_windows_but_keeps_images_exact() {
         use nara_render::RenderImage2d;
@@ -736,35 +802,340 @@ mod tests {
         ));
     }
 
-    #[cfg(feature = "sprite-submitter")]
     #[test]
-    fn sprite_payload_is_absent_until_the_contribution_collects() {
+    fn policy_capture_starts_only_in_the_collection_phase() {
         let mut slot = WgpuFramePacketSlot::default();
+        assert!(!slot.accepts_capture());
         slot.reset();
 
-        assert!(slot.payload.sprite_batches.is_none());
+        assert!(slot.accepts_capture());
+        assert!(slot.capture.is_none());
     }
 
-    #[cfg(feature = "ui-submitter")]
+    #[test]
+    fn empty_views_do_not_require_an_implicit_policy() {
+        let mut slot = WgpuFramePacketSlot::default();
+        slot.reset();
+        slot.seal(Ok(None), 7, Instant::now());
+
+        assert!(matches!(slot.take_batch().unwrap().captured, Ok(None)));
+        assert!(slot.take_batch().is_none());
+    }
+
+    #[test]
+    fn nonempty_views_require_an_explicit_policy_capture() {
+        let mut slot = WgpuFramePacketSlot::default();
+        slot.reset();
+        slot.seal(Ok(Some(image_packet(1))), 7, Instant::now());
+
+        assert!(matches!(
+            slot.take_batch().unwrap().captured,
+            Err(WgpuFrameCaptureError::MissingPolicy)
+        ));
+    }
+
+    #[test]
+    fn accepted_capture_survives_withdrawal_and_reset_until_its_consumer_takes_it() {
+        let definition = crate::WgpuPolicyDefinition::new(crate::WgpuStockPolicy::default());
+        let installation = definition.install().unwrap();
+        let identity = installation.id();
+        let capture = Arc::new(crate::WgpuStockCapture::default());
+        let mut slot = WgpuFramePacketSlot::default();
+        slot.reset();
+        assert!(slot.collect_policy(installation.accept(Arc::clone(&capture)).unwrap()));
+        assert!(!slot.collect_policy(installation.accept(Arc::clone(&capture)).unwrap()));
+        drop(installation);
+
+        slot.seal(Ok(Some(image_packet(1))), 7, Instant::now());
+        slot.reset();
+        slot.seal(Ok(None), 8, Instant::now());
+        slot.reject_capture(WgpuFrameCaptureError::MissingRuntimeGeneration);
+
+        let captured = slot.take_batch().unwrap().captured.unwrap().unwrap();
+        assert_eq!(captured.input.installation(), identity);
+        assert_eq!(captured.input.packet().frame_index(), 1);
+        assert_eq!(captured.app_frame_index, 7);
+        assert!(std::ptr::eq(
+            captured.input.captured::<crate::WgpuStockPolicy>().unwrap(),
+            capture.as_ref(),
+        ));
+        assert!(slot.take_batch().is_none());
+        slot.reset();
+        assert!(slot.accepts_capture());
+    }
+
+    #[test]
+    fn reset_preserves_an_unconsumed_capture_error_and_close_is_irreversible() {
+        let mut slot = WgpuFramePacketSlot::default();
+        slot.reset();
+        slot.reject_capture(WgpuFrameCaptureError::MissingRuntimeGeneration);
+        slot.reset();
+        slot.seal(Ok(None), 7, Instant::now());
+
+        assert!(matches!(
+            slot.take_batch().unwrap().captured,
+            Err(WgpuFrameCaptureError::MissingRuntimeGeneration)
+        ));
+        slot.close();
+        slot.reset();
+        assert!(!slot.is_collecting());
+        assert!(slot.take_batch().is_none());
+    }
+
+    #[cfg(feature = "stock-ui")]
     #[test]
     fn ui_submission_state_is_absent_until_the_contribution_collects() {
         let mut slot = WgpuFramePacketSlot::default();
         slot.reset();
 
-        assert!(slot.take_ui_submissions().is_none());
+        assert!(slot.ui_submissions.is_none());
         assert!(slot.accepts_ui_collection());
-        assert!(slot.payload.ui_packets.is_empty());
-        assert!(slot.take_capture().is_none());
+        assert!(slot.take_batch().is_none());
     }
 
-    #[cfg(feature = "ui-submitter")]
+    #[cfg(feature = "stock-ui")]
+    #[test]
+    fn refused_policy_ui_pair_preserves_both_allocations_and_every_slot_field() {
+        let installation = crate::WgpuPolicyDefinition::new(crate::WgpuStockPolicy::default())
+            .install()
+            .unwrap();
+        let packet = ui_packet();
+        for state in 0..6 {
+            let mut outcomes = UiPresentationOutcomes::default();
+            let submissions = prepare_ui_submissions(&mut outcomes, &packet, 1);
+            let allocation = submissions.as_ptr();
+            let capture = installation
+                .accept(Arc::new(crate::WgpuStockCapture::default()))
+                .unwrap();
+            let mut slot = WgpuFramePacketSlot::default();
+            match state {
+                0 => {}
+                1 => {
+                    slot.reset();
+                    assert!(
+                        slot.collect_policy(
+                            installation
+                                .accept(Arc::new(crate::WgpuStockCapture::default()),)
+                                .unwrap()
+                        )
+                    );
+                }
+                2 => {
+                    slot.reset();
+                    assert!(slot.collect_ui(Vec::new()));
+                }
+                3 => {
+                    slot.reset();
+                    slot.seal(Ok(None), 1, Instant::now());
+                }
+                4 => slot.close(),
+                5 => {
+                    slot.reset();
+                    slot.reject_ui_collection(UiPresentationIntegrationError::Unavailable);
+                }
+                _ => unreachable!(),
+            }
+            let phase = slot.phase;
+            let previous_capture = slot.capture.clone();
+            let previous_ui_count = slot
+                .ui_submissions
+                .as_ref()
+                .map(WgpuUiSubmissionState::submission_count);
+            let previous_current = slot.current.is_some();
+            let previous_error = slot.collection_error.as_ref().map(ToString::to_string);
+
+            let (returned_capture, returned_ui) = slot
+                .collect_policy_with_ui(
+                    Arc::clone(&capture),
+                    WgpuUiSubmissionState::Prepared(submissions),
+                )
+                .unwrap_err();
+
+            assert!(Arc::ptr_eq(&capture, &returned_capture));
+            let WgpuUiSubmissionState::Prepared(returned_submissions) = returned_ui else {
+                panic!("refusal must preserve the original UI state");
+            };
+            assert_eq!(returned_submissions.as_ptr(), allocation);
+            assert_eq!(returned_submissions.len(), 1);
+            assert_eq!(slot.phase, phase);
+            assert_eq!(slot.current.is_some(), previous_current);
+            assert_eq!(
+                slot.collection_error.as_ref().map(ToString::to_string),
+                previous_error
+            );
+            assert_eq!(
+                slot.ui_submissions
+                    .as_ref()
+                    .map(WgpuUiSubmissionState::submission_count),
+                previous_ui_count
+            );
+            match (previous_capture.as_ref(), slot.capture.as_ref()) {
+                (None, None) => {}
+                (Some(previous), Some(current)) => assert!(Arc::ptr_eq(previous, current)),
+                _ => panic!("refusal must not partially write a policy capture"),
+            }
+            for completed in complete_ui_submissions(
+                WgpuUiSubmissionState::Prepared(returned_submissions),
+                WgpuUiCompletion::ContentRejected("original pair returned".to_owned()),
+            ) {
+                outcomes.commit_backend(completed);
+            }
+            let mut world = World::new();
+            world.insert_resource(outcomes);
+            assert!(matches!(
+                nara_ui_render::drain_ui_presentation_outcomes(&mut world).unwrap().as_slice(),
+                [nara_ui_render::UiPresentationOutcome::ContentRejected { attempt, .. }]
+                    if attempt.admission_id().unwrap().get() == 1,
+            ));
+        }
+    }
+
+    #[cfg(feature = "stock-ui")]
+    #[test]
+    fn accepted_policy_ui_pair_survives_seal_reset_and_installation_drop() {
+        let installation = crate::WgpuPolicyDefinition::new(crate::WgpuStockPolicy::default())
+            .install()
+            .unwrap();
+        let identity = installation.id();
+        let capture = Arc::new(crate::WgpuStockCapture::default());
+        let packet = ui_packet();
+        let mut outcomes = UiPresentationOutcomes::default();
+        let submissions = prepare_ui_submissions(&mut outcomes, &packet, 1);
+        let allocation = submissions.as_ptr();
+        let mut slot = WgpuFramePacketSlot::default();
+        slot.reset();
+        assert!(
+            slot.collect_policy_with_ui(
+                installation.accept(Arc::clone(&capture)).unwrap(),
+                WgpuUiSubmissionState::Prepared(submissions),
+            )
+            .is_ok()
+        );
+        drop(installation);
+        slot.seal(Ok(Some(image_packet(1))), 7, Instant::now());
+        slot.reset();
+        slot.seal(Ok(None), 8, Instant::now());
+
+        let batch = slot.take_batch().unwrap();
+        assert!(slot.take_batch().is_none());
+        let frame = batch.captured.unwrap().unwrap();
+        assert_eq!(frame.input.installation(), identity);
+        assert_eq!(frame.input.packet().frame_index(), 1);
+        assert_eq!(frame.app_frame_index, 7);
+        assert!(std::ptr::eq(
+            frame.input.captured::<crate::WgpuStockPolicy>().unwrap(),
+            capture.as_ref(),
+        ));
+        let WgpuUiSubmissionState::Prepared(submissions) = batch.ui.unwrap() else {
+            panic!("the original unsubmitted UI state must remain attached");
+        };
+        assert_eq!(submissions.as_ptr(), allocation);
+        for completed in complete_ui_submissions(
+            WgpuUiSubmissionState::Prepared(submissions),
+            WgpuUiCompletion::ContentRejected("original pair consumed".to_owned()),
+        ) {
+            outcomes.commit_backend(completed);
+        }
+        let mut world = World::new();
+        world.insert_resource(outcomes);
+        assert!(matches!(
+            nara_ui_render::drain_ui_presentation_outcomes(&mut world).unwrap().as_slice(),
+            [nara_ui_render::UiPresentationOutcome::ContentRejected { attempt, .. }]
+                if attempt.admission_id().unwrap().get() == 1,
+        ));
+    }
+
+    #[cfg(feature = "stock-ui")]
+    #[test]
+    fn close_returns_policy_ui_pair_permissions_once_before_or_after_seal() {
+        let installation = crate::WgpuPolicyDefinition::new(crate::WgpuStockPolicy::default())
+            .install()
+            .unwrap();
+        let packet = ui_packet();
+        for seal in [false, true] {
+            let mut outcomes = UiPresentationOutcomes::default();
+            let submissions = prepare_ui_submissions(&mut outcomes, &packet, 1);
+            let mut slot = WgpuFramePacketSlot::default();
+            slot.reset();
+            assert!(
+                slot.collect_policy_with_ui(
+                    installation
+                        .accept(Arc::new(crate::WgpuStockCapture::default()))
+                        .unwrap(),
+                    WgpuUiSubmissionState::Prepared(submissions),
+                )
+                .is_ok()
+            );
+            if seal {
+                slot.seal(Ok(Some(image_packet(1))), 7, Instant::now());
+            }
+            slot.close();
+            slot.close();
+            slot.reset();
+
+            assert!(slot.capture.is_none());
+            assert!(slot.ui_submissions.is_none());
+            assert!(slot.take_batch().is_none());
+            let mut world = World::new();
+            world.insert_resource(outcomes);
+            assert!(matches!(
+                nara_ui_render::drain_ui_presentation_outcomes(&mut world).unwrap().as_slice(),
+                [nara_ui_render::UiPresentationOutcome::Aborted { attempt, .. }]
+                    if attempt.admission_id().unwrap().get() == 1,
+            ));
+            assert!(
+                nara_ui_render::drain_ui_presentation_outcomes(&mut world)
+                    .unwrap()
+                    .is_empty()
+            );
+        }
+    }
+
+    #[cfg(feature = "stock-ui")]
+    #[test]
+    fn editor_batch_takes_the_original_ui_sidecar_once() {
+        let packet = ui_packet();
+        let mut outcomes = UiPresentationOutcomes::default();
+        let submissions = prepare_ui_submissions(&mut outcomes, &packet, 1);
+        let mut slot = WgpuFramePacketSlot::default();
+        slot.reset();
+        assert!(slot.collect_ui(submissions));
+        assert!(!slot.collect_ui(Vec::new()));
+        slot.seal(Ok(None), 7, Instant::now());
+        slot.reset();
+        assert!(!slot.accepts_ui_collection());
+        assert!(slot.collection_error.is_none());
+
+        let mut world = World::new();
+        world.insert_resource(slot);
+        world.insert_resource(outcomes);
+        let batch = take_captured_policy_batch(&mut world).unwrap();
+        assert!(take_captured_policy_batch(&mut world).is_none());
+        let (captured, ui) = batch.into_parts();
+        assert!(matches!(captured, Ok(None)));
+        assert!(matches!(
+            nara_ui_render::drain_ui_presentation_outcomes(&mut world),
+            Err(UiPresentationIntegrationError::OutstandingBackendOutcomeReservations { count: 1 })
+        ));
+        drop(ui);
+
+        let published = nara_ui_render::drain_ui_presentation_outcomes(&mut world).unwrap();
+        assert!(matches!(
+            published.as_slice(),
+            [nara_ui_render::UiPresentationOutcome::Aborted { attempt, .. }]
+                if attempt.admission_id().unwrap().get() == 1
+        ));
+    }
+
+    #[cfg(feature = "stock-ui")]
     #[test]
     fn reset_rejects_without_overwriting_an_incomplete_ui_transaction() {
         let packet = ui_packet();
         let mut outcomes = UiPresentationOutcomes::default();
         let submissions = prepare_ui_submissions(&mut outcomes, &packet, 1);
         let mut slot = WgpuFramePacketSlot::default();
-        slot.collect_ui(vec![packet], submissions);
+        slot.reset();
+        assert!(slot.collect_ui(submissions));
 
         slot.reset();
 
@@ -774,7 +1145,13 @@ mod tests {
             slot.collection_error,
             Some(WgpuFrameCaptureError::IncompleteUiTransaction)
         ));
-        let submissions = slot.take_ui_submissions().unwrap();
+        slot.seal(Ok(None), 7, Instant::now());
+        let batch = slot.take_batch().unwrap();
+        assert!(matches!(
+            batch.captured,
+            Err(WgpuFrameCaptureError::IncompleteUiTransaction)
+        ));
+        let submissions = batch.ui.unwrap();
         assert_eq!(submissions.submission_count(), 1);
         slot.close();
 
@@ -795,21 +1172,21 @@ mod tests {
         ));
     }
 
-    #[cfg(feature = "ui-submitter")]
+    #[cfg(feature = "stock-ui")]
     #[test]
     fn close_returns_untransferred_ui_permissions_to_the_original_owner_once() {
         let packet = ui_packet();
         let mut outcomes = UiPresentationOutcomes::default();
         let submissions = prepare_ui_submissions(&mut outcomes, &packet, 2);
         let mut slot = WgpuFramePacketSlot::default();
-        slot.collect_ui(vec![packet], submissions);
+        slot.reset();
+        assert!(slot.collect_ui(submissions));
 
         slot.close();
         slot.close();
 
-        assert!(slot.take_ui_submissions().is_none());
-        assert!(slot.take_capture().is_none());
-        assert!(slot.payload.ui_packets.is_empty());
+        assert!(slot.ui_submissions.is_none());
+        assert!(slot.take_batch().is_none());
         let mut world = nara_ecs::World::new();
         world.insert_resource(outcomes);
         let published = nara_ui_render::drain_ui_presentation_outcomes(&mut world).unwrap();
@@ -828,7 +1205,7 @@ mod tests {
         );
     }
 
-    #[cfg(feature = "ui-submitter")]
+    #[cfg(feature = "stock-ui")]
     #[test]
     fn completion_appends_to_reserved_storage_and_preserves_exact_submission_authority() {
         use nara_ui_render::UiPresentationOutcome;
@@ -892,7 +1269,82 @@ mod tests {
         }
     }
 
-    #[cfg(feature = "ui-submitter")]
+    #[cfg(feature = "stock-ui")]
+    #[test]
+    fn cancellation_returns_prepared_abort_and_bound_retry_while_unbound_deferral_stays_a_fault() {
+        use nara_ui_render::UiPresentationOutcome;
+
+        let packet = ui_packet();
+        let generation = UiPresentationBackendGeneration::new(17, 3).unwrap();
+        let mut outcomes = UiPresentationOutcomes::default();
+        let mut prepared = prepare_ui_submissions(&mut outcomes, &packet, 3);
+        let unbound_deferral = WgpuUiSubmissionState::Prepared(prepared.split_off(2));
+        let bound_cancellation = WgpuUiSubmissionState::Submitted(
+            nara_ui_render::__private::bind_backend_submission_batch(
+                prepared.split_off(1),
+                generation,
+            )
+            .unwrap(),
+        );
+        let prepared_cancellation = WgpuUiSubmissionState::Prepared(prepared);
+        let message = "the original presentation was interrupted";
+        let mut completed = Vec::with_capacity(3);
+        let allocation = completed.as_ptr();
+        let capacity = completed.capacity();
+
+        complete_ui_submissions_into(
+            prepared_cancellation,
+            WgpuUiCompletion::Cancelled(message.to_owned()),
+            &mut completed,
+        );
+        complete_ui_submissions_into(
+            bound_cancellation,
+            WgpuUiCompletion::Cancelled(message.to_owned()),
+            &mut completed,
+        );
+        complete_ui_submissions_into(
+            unbound_deferral,
+            WgpuUiCompletion::Deferred("the unbound backend is unavailable".to_owned()),
+            &mut completed,
+        );
+
+        assert_eq!(completed.len(), 3);
+        assert_eq!(completed.as_ptr(), allocation);
+        assert_eq!(completed.capacity(), capacity);
+        for completion in completed {
+            outcomes.commit_backend(completion);
+        }
+        let mut world = World::new();
+        world.insert_resource(outcomes);
+        let published = nara_ui_render::drain_ui_presentation_outcomes(&mut world).unwrap();
+        assert!(matches!(
+            published.as_slice(),
+            [
+                UiPresentationOutcome::Aborted { attempt, message: aborted_message },
+                UiPresentationOutcome::Deferred { retry, message: retry_message },
+                UiPresentationOutcome::BackendFault {
+                    attempt: Some(fault_attempt),
+                    backend_generation: None,
+                    domain: UiPresentationBackendFaultDomain::Target,
+                    ..
+                },
+            ] if attempt.admission_id().unwrap().get() == 1
+                && attempt.packet() == packet.identity()
+                && aborted_message == message
+                && retry.attempt().admission_id().unwrap().get() == 2
+                && retry.backend_generation() == generation
+                && Arc::ptr_eq(retry.packet(), &packet)
+                && retry_message == message
+                && fault_attempt.admission_id().unwrap().get() == 3,
+        ));
+        assert!(
+            nara_ui_render::drain_ui_presentation_outcomes(&mut world)
+                .unwrap()
+                .is_empty()
+        );
+    }
+
+    #[cfg(feature = "stock-ui")]
     #[test]
     fn dropping_completed_storage_returns_every_original_permission_as_aborted() {
         let packet = ui_packet();
@@ -920,7 +1372,41 @@ mod tests {
         }
     }
 
-    #[cfg(feature = "ui-submitter")]
+    fn image_packet(frame_index: u64) -> RenderFramePacket {
+        use nara_core::{Color, Mat3};
+        use nara_ecs::Entity;
+        use nara_render::{
+            Extent2d, ExtractedView, ExtractedViews, RenderFrameSourceGeneration, RenderImage2d,
+            RenderImagePacket, RenderTarget, ViewLoadOp, ViewMapping2d, ViewportRect,
+            build_image_render_frame_packet,
+        };
+
+        let target = RenderImagePacket::new(
+            RenderImage2d::allocate_handle().unwrap(),
+            Extent2d::new(2, 2).unwrap(),
+        )
+        .unwrap();
+        let viewport = ViewportRect::from_extent(target.extent()).unwrap();
+        let mut views = ExtractedViews::default();
+        views.push(ExtractedView {
+            camera_entity: Entity::PLACEHOLDER,
+            target: RenderTarget::Image(target.image()),
+            viewport,
+            mapping: ViewMapping2d::orthographic(Mat3::IDENTITY, 2.0, viewport).unwrap(),
+            order: 0,
+            load: ViewLoadOp::Clear(Color::BLACK),
+        });
+        build_image_render_frame_packet(
+            RenderFrameSourceGeneration::try_acquire().unwrap(),
+            frame_index,
+            &views,
+            target,
+        )
+        .unwrap()
+        .unwrap()
+    }
+
+    #[cfg(feature = "stock-ui")]
     fn prepare_ui_submissions(
         outcomes: &mut UiPresentationOutcomes,
         packet: &Arc<UiPaintPacket>,
@@ -950,7 +1436,7 @@ mod tests {
             .collect()
     }
 
-    #[cfg(feature = "ui-submitter")]
+    #[cfg(feature = "stock-ui")]
     fn ui_packet() -> Arc<UiPaintPacket> {
         use nara_ui_kernel::{
             UiAuthoringSnapshotBuilder, UiColor, UiCompiler, UiEnvironment, UiLayer, UiLocalKey,

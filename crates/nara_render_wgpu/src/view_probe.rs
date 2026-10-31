@@ -1,4 +1,4 @@
-#[cfg(feature = "ui-submitter")]
+#[cfg(feature = "stock-ui")]
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
@@ -20,11 +20,11 @@ use nara_transform::Transform2d;
 
 use crate::{
     WgpuRenderBackend,
-    frame::WgpuFramePacketSlot,
+    frame::{LegacyWgpuCapturedFrame, LegacyWgpuFramePayload},
     readback_tests::{readback_pixel, render_to_rgba},
 };
 
-pub(crate) fn captured_split_frame() -> crate::frame::WgpuCapturedFrame {
+pub(crate) fn captured_split_frame() -> LegacyWgpuCapturedFrame {
     let mut app = App::new();
     app.add_plugins((
         nara_reflect::ComponentRegistryPlugin,
@@ -40,7 +40,7 @@ pub(crate) fn captured_split_frame() -> crate::frame::WgpuCapturedFrame {
     let target = RenderTarget::Image(image);
     let descriptor = editor_viewport_image_target(image, Extent2d::new(64, 64).unwrap()).unwrap();
     let generation = EditorRenderGeneration::try_acquire().unwrap();
-    #[cfg(feature = "ui-submitter")]
+    #[cfg(feature = "stock-ui")]
     let overlay = overlay_packet(target);
     let world = app.world_mut().unwrap();
     let mut entities = Vec::new();
@@ -114,23 +114,18 @@ pub(crate) fn captured_split_frame() -> crate::frame::WgpuCapturedFrame {
             views,
             descriptor,
         );
-        let mut slot = WgpuFramePacketSlot::default();
-        slot.collect_sprite(runtime.world().resource::<SpriteBatches>().clone());
-        #[cfg(feature = "ui-submitter")]
-        slot.collect_ui(vec![overlay], Vec::new());
-        let topology_matches = slot.payload_matches_topology(
-            views,
-            #[cfg(feature = "ui-submitter")]
-            None,
-        );
-        slot.seal(
-            #[cfg(feature = "ui-submitter")]
-            None,
-            packet,
-            1,
-            Instant::now(),
-        );
-        Some((loads, topology_matches, slot.take_capture()))
+        let captured = LegacyWgpuCapturedFrame {
+            topology: packet.unwrap().unwrap(),
+            payload: LegacyWgpuFramePayload {
+                sprite_batches: Some(runtime.world().resource::<SpriteBatches>().clone()),
+                #[cfg(feature = "stock-ui")]
+                ui_packets: vec![overlay],
+                ..Default::default()
+            },
+            app_frame_index: 1,
+            work_started_at: Instant::now(),
+        };
+        Some((loads, captured))
     } else {
         None
     };
@@ -139,10 +134,9 @@ pub(crate) fn captured_split_frame() -> crate::frame::WgpuCapturedFrame {
         retirement.drive_retirement();
     }
     driven.unwrap();
-    let (loads, topology_matches, captured) = snapshot.unwrap();
+    let (loads, captured) = snapshot.unwrap();
     assert_eq!(loads, [ViewLoadOp::Clear(Color::BLACK), ViewLoadOp::Load]);
-    assert!(topology_matches);
-    captured.unwrap().unwrap().unwrap()
+    captured
 }
 
 #[test]
@@ -162,13 +156,13 @@ fn native_packet_executes_split_affine_views_with_one_ui_overlay() {
                 captured.topology.frame_index(),
                 preparation,
             )?;
-            #[cfg(feature = "ui-submitter")]
+            #[cfg(feature = "stock-ui")]
             assert_eq!(prepared.ui_packets.len(), 1);
             crate::encode_target_draw(encoder, output, &prepared);
             Ok(prepared.views.len())
         })
         .unwrap();
-    assert_eq!(view_count, 2 + usize::from(cfg!(feature = "ui-submitter")));
+    assert_eq!(view_count, 2 + usize::from(cfg!(feature = "stock-ui")));
     assert_pixel(&pixels, 16, 32, [255, 0, 0, 255]);
     assert_pixel(&pixels, 48, 32, [0, 255, 0, 255]);
     assert_pixel(&pixels, 24, 32, [255, 0, 0, 255]);
@@ -176,13 +170,13 @@ fn native_packet_executes_split_affine_views_with_one_ui_overlay() {
     assert_pixel(&pixels, 48, 42, [0, 255, 0, 255]);
     assert_pixel(&pixels, 58, 32, [0, 0, 0, 255]);
     assert_pixel(&pixels, 2, 2, [0, 0, 0, 255]);
-    #[cfg(feature = "ui-submitter")]
+    #[cfg(feature = "stock-ui")]
     for x in [29, 34] {
         assert_pixel(&pixels, x, 8, [188, 188, 188, 255]);
     }
 }
 
-#[cfg(feature = "ui-submitter")]
+#[cfg(feature = "stock-ui")]
 #[test]
 fn mixed_sprite_ui_scope_rejection_refunds_prepared_views_and_recovers() {
     let captured = captured_split_frame();
@@ -225,7 +219,7 @@ fn mixed_sprite_ui_scope_rejection_refunds_prepared_views_and_recovers() {
             0
         );
 
-        let sprite_payload = crate::frame::WgpuFramePayload {
+        let sprite_payload = LegacyWgpuFramePayload {
             sprite_batches: captured.payload.sprite_batches.clone(),
             ..Default::default()
         };
@@ -285,7 +279,7 @@ fn assert_pixel(pixels: &[u8], x: u32, y: u32, expected: [u8; 4]) {
     );
 }
 
-#[cfg(feature = "ui-submitter")]
+#[cfg(feature = "stock-ui")]
 pub(crate) fn overlay_packet(target: RenderTarget) -> Arc<nara_ui_render::UiPaintPacket> {
     use nara_ui_kernel::{
         UiAuthoringSnapshotBuilder, UiColor, UiCompiler, UiEnvironment, UiLayer, UiLocalKey,

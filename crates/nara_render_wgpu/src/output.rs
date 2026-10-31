@@ -5,8 +5,7 @@ use std::sync::{
     atomic::{AtomicU64, Ordering},
 };
 
-use crate::{frame::WgpuFramePayload, presented::WgpuSubmittedImageReceipt};
-use nara_render::RenderFramePacket;
+use crate::presented::WgpuSubmittedImageReceipt;
 
 static NEXT_DISPLAY_OCCURRENCE: AtomicU64 = AtomicU64::new(1);
 
@@ -62,46 +61,6 @@ impl Drop for OutputReservation {
     }
 }
 
-/// The immutable CPU drawing inputs needed to realize an image on another device generation.
-///
-/// This owner contains captured geometry and content snapshots, never a live asset resolver or
-/// Runtime UI completion permit. Retain it explicitly if device reconstruction is required.
-#[derive(Debug)]
-pub struct WgpuImageInput {
-    pub(crate) packet: RenderFramePacket,
-    pub(crate) payload: WgpuFramePayload,
-}
-
-impl WgpuImageInput {
-    #[must_use]
-    pub fn new(packet: RenderFramePacket) -> Self {
-        Self {
-            packet,
-            payload: WgpuFramePayload::default(),
-        }
-    }
-
-    #[must_use]
-    pub const fn packet(&self) -> &RenderFramePacket {
-        &self.packet
-    }
-
-    #[cfg(feature = "sprite-submitter")]
-    #[doc(hidden)]
-    #[must_use]
-    pub fn with_sprites(mut self, sprites: nara_sprite_render::__private::SpriteBatches) -> Self {
-        self.payload.sprite_batches = Some(sprites);
-        self
-    }
-
-    #[cfg(feature = "ui-submitter")]
-    #[must_use]
-    pub fn with_ui(mut self, packets: Vec<Arc<nara_ui_render::UiPaintPacket>>) -> Self {
-        self.payload.ui_packets = packets;
-        self
-    }
-}
-
 #[derive(Debug)]
 pub(crate) struct WgpuImageStorage {
     pub(crate) epoch_lost: Arc<std::sync::atomic::AtomicBool>,
@@ -115,7 +74,7 @@ pub(crate) struct WgpuImageStorage {
 ///
 /// Cloning retains these pixels, including through producer resize or retirement. A successor
 /// render never writes this storage. A retained image grants neither Runtime input authority nor
-/// device-loss recovery; keep [`WgpuImageInput`] separately for reconstruction.
+/// device-loss recovery; keep [`crate::WgpuRenderInput`] separately for reconstruction.
 #[derive(Clone, Debug)]
 pub struct WgpuImageOutput(pub(crate) Arc<WgpuImageStorage>);
 

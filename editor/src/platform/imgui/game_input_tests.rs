@@ -18,8 +18,9 @@ use nara::{
     input::{ButtonInput, KeyCode},
     project_host::{EditorGameViewCandidateIdentity, TrustedCompiledEditorProjectIntent},
     render::{Camera2d, DisplayRect},
-    render_wgpu::__private::{
-        WgpuDisplayOccurrence, WgpuEditorCompositeReceipt, WgpuSubmittedImageReceipt,
+    render_wgpu::{
+        __private::{WgpuDisplayOccurrence, WgpuEditorCompositeReceipt, WgpuSubmittedImageReceipt},
+        WgpuRenderInput, WgpuStockPolicy,
     },
     sprite::Sprite,
     sprite_render::__private::SpriteBatches,
@@ -62,7 +63,15 @@ pub(super) struct GameCandidateContent {
 }
 
 impl GameCandidateContent {
-    pub(super) fn new(sprites: Option<&SpriteBatches>, runtime_ui_present: bool) -> Self {
+    pub(super) fn captured(input: &WgpuRenderInput) -> Option<Self> {
+        let capture = input.captured::<WgpuStockPolicy>()?;
+        Some(Self::new(
+            capture.sprite_batches(),
+            !capture.ui_packets().is_empty(),
+        ))
+    }
+
+    fn new(sprites: Option<&SpriteBatches>, runtime_ui_present: bool) -> Self {
         let center_x = sprites.and_then(|sprites| {
             let mut centers = sprites
                 .as_slice()

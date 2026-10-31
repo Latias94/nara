@@ -18,7 +18,7 @@ fn preview_publication(
         Some(candidate.revision())
     );
     let content = candidate.content_stamp();
-    (candidate.into_parts().3.source_generation(), content)
+    (candidate.packet().source_generation(), content)
 }
 
 #[test]
