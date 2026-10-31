@@ -1,7 +1,8 @@
 # Render Composition And Host Execution
 
-Date: 2026-10-31. Status: private CPU/DX12/cost comparison, internal device ownership and original
-UI result/logical-close prerequisites evidenced; complete production replacement remains in development.
+Date: 2026-10-31. Status: private CPU/DX12/cost comparison, internal device ownership, original
+UI custody and owned native desktop execution qualified; complete output/producer/Feature
+replacement remains in development.
 Baseline: `a0995e7b65288ae67a5786b5312e6166b679d171`.
 Parent: [foundation R8/R9a](2026-10-23-foundation-architecture-rebaseline-plan.md#r8-external-render-feature-and-host-local-execution).
 Candidate: Proposed [ADR0121](../architecture/adr/0121-composable-render-programs-and-host-execution.md).
@@ -122,8 +123,13 @@ aggregate, private surface-less acquisition, loss isolation and cleanup/epoch be
 and selected native evidence. The [original-result/logical-close successor](../knowledge/engineering/verification/2026-10/2026-10-31T082117Z-original-ui-result-custody-and-logical-close-qualification-6e1965c6428841ec9138088bef20f90c.md)
 is implemented at `8e9d840`: original nominal batch storage, retained receivers, Root UI/Input
 settlement and CPU WGPU observations have final owner/neutral and selected native evidence.
-Continue with the complete owned native session, capture/result execution and runner migration;
-GPU ECS storage and public offscreen/Feature/output workflows are still open.
+Its [owned native desktop successor](../knowledge/engineering/verification/2026-10/2026-10-31T105632Z-owned-native-desktop-execution-and-post-host-presentation-qualification-4db921de03c94598b2ee20d7e82508c5.md)
+is implemented at `37ca8bb`: one retained Runtime/Host/window/pump session, authenticated CPU
+capture/results, actual post-Host UI/READY/startup, finite telemetry seal and maintenance without
+simulation. GPU ECS storage, scheduled submit and the obsolete World retirement operation are
+removed. Minimal code-first and Source/Processed products share the owner. Continue with exact
+immutable outputs, original reconstruction inputs and producer-prefix custody; public window-free,
+external Feature, alternate policy and complete graph/output workflows remain open.
 
 The [shared concrete drain](../knowledge/engineering/verification/2026-10/2026-10-31T084653Z-shared-concrete-gpu-queue-retirement-qualification-ab68d8adf25f406d9222df6b3b2fcc70.md)
 is extracted at `96bd0bf` with its actual Editor consumer and adapter/native retirement evidence.

@@ -3,7 +3,7 @@ type: "Current State"
 title: "Current Engineering State"
 description: "Derived summary of immutable engineering-memory shards."
 tags: ["engineering-memory", "derived"]
-source_fingerprint: "9d5fc0c85005f556145085e4353ecd87c21a461fdba8825b917b548d508de4fe"
+source_fingerprint: "ac20020cff8b35b9794cd8111f6d1a033afb6827a55bdadae9c61f718a9bb659"
 ---
 
 # Current State
@@ -12,8 +12,8 @@ source_fingerprint: "9d5fc0c85005f556145085e4353ecd87c21a461fdba8825b917b548d508
 
 This file is derived from immutable shards. Record new facts in shards, then render during integration.
 
-- Source fingerprint: `9d5fc0c85005f556145085e4353ecd87c21a461fdba8825b917b548d508de4fe`
-- Immutable records: 1111
+- Source fingerprint: `ac20020cff8b35b9794cd8111f6d1a033afb6827a55bdadae9c61f718a9bb659`
+- Immutable records: 1116
 - Active lane heads: 2
 
 # Active Registrations
@@ -51,7 +51,7 @@ This file is derived from immutable shards. Record new facts in shards, then ren
 - [Editor foundation U9 and U1-U8 complete with exact-source external acceptance](registry/2026-10/2026-10-17T102710Z-nara-editor-foundation-implementation-codex-root-76fa1ccb656c4ebd8c2b5f77f83287f7.md): `completed` (nara-editor-foundation-implementation-codex-root; producer `codex-root`)
 - [Editor foundation research and refactor planning complete](registry/2026-10/2026-10-16T044159Z-nara-editor-foundation-planning-codex-root-d0e8f37adfd54751b67d7ae647f06d83.md): `completed` (nara-editor-foundation-planning-codex-root; producer `codex-root`)
 - [First 2D author workflow complete with clean committed-source acceptance](registry/2026-10/2026-10-16T025148Z-nara-first-2d-author-workflow-codex-root-fe7312236c5d4906b8e950d366111171.md): `completed` (nara-first-2d-author-workflow-codex-root; producer `codex-root`)
-- [Original result and late retirement qualified; owned native session remains active](registry/2026-10/2026-10-31T091929Z-nara-foundation-rebaseline-codex-main-5c32ed7fb76649829caba7ebc9f14f3c.md): `active` (nara-foundation-rebaseline-codex-main; producer `codex-foundation-main`)
+- [Owned native desktop qualified; immutable outputs and producer custody next](registry/2026-10/2026-10-31T105908Z-nara-foundation-rebaseline-codex-main-d2ab177fe2424d7d92e44eef42b36299.md): `active` (nara-foundation-rebaseline-codex-main; producer `codex-foundation-main`)
 - [Ordinary structural authoring qualified](registry/2026-10/2026-10-20T053614Z-ordinary-authoring-codex-root-ac405c79936d43b09f6cfb4197d747ed.md): `completed` (ordinary-authoring-codex-root; producer `codex-root`)
 - [Persistent checkpoint consumer qualified on Windows](registry/2026-10/2026-10-21T032628Z-persistent-two-level-game-codex-root-1ac997abdab142e590af8a6c21f9f443.md): `complete` (persistent-two-level-game-codex-root; producer `codex-root`)
 - [N05 plugin failure facts qualified](registry/2026-10/2026-10-19T172945Z-plugin-error-facts-codex-root-c20974513f104398967edbed73efccaa.md): `completed` (plugin-error-facts-codex-root; producer `codex-root`)
@@ -70,6 +70,9 @@ This file is derived from immutable shards. Record new facts in shards, then ren
 
 # Recent Evidence
 
+- **Verification Evidence**: [Owned native desktop execution and post-Host presentation qualification](verification/2026-10/2026-10-31T105632Z-owned-native-desktop-execution-and-post-host-presentation-qualification-4db921de03c94598b2ee20d7e82508c5.md) - Verification Evidence for Owned native desktop execution and post-Host presentation qualification.
+- **Work Progress**: [Owned native desktop replacement reaches final consumer qualification](progress/2026-10/2026-10-31T104400Z-owned-native-desktop-replacement-reaches-final-consumer-qualification-c8cad19571564013b118d99b9ac1a82c.md) - Work Progress for Owned native desktop replacement reaches final consumer qualification.
+- **Work Progress**: [Owned native rendering migration and independent lifecycle review in progress](progress/2026-10/2026-10-31T100222Z-owned-native-rendering-migration-and-independent-lifecycle-review-in-progress-37208eb577264f2788ff41b8155d9908.md) - Work Progress for Owned native rendering migration and independent lifecycle review in progress.
 - **Verification Evidence**: [Late presentation retirement admission and exact Step outcomes](verification/2026-10/2026-10-31T091550Z-late-presentation-retirement-admission-and-exact-step-outcomes-817901432b684d17b69c2f87f4427408.md) - Verification Evidence for Late presentation retirement admission and exact Step outcomes.
 - **Verification Evidence**: [Shared concrete GPU queue retirement qualification](verification/2026-10/2026-10-31T084653Z-shared-concrete-gpu-queue-retirement-qualification-ab68d8adf25f406d9222df6b3b2fcc70.md) - Verification Evidence for Shared concrete GPU queue retirement qualification.
 - **Verification Evidence**: [Original UI result custody and logical close qualification](verification/2026-10/2026-10-31T082117Z-original-ui-result-custody-and-logical-close-qualification-6e1965c6428841ec9138088bef20f90c.md) - Verification Evidence for Original UI result custody and logical close qualification.
@@ -79,9 +82,6 @@ This file is derived from immutable shards. Record new facts in shards, then ren
 - **Work Progress**: [Private render composition comparison exposes semantic copy and history publication contracts](progress/2026-10/2026-10-31T054954Z-private-render-composition-comparison-exposes-semantic-copy-and-history-publication-contracts-5bb86f53d9ca42f892bd1a90598a2b56.md) - Work Progress for Private render composition comparison exposes semantic copy and history publication contracts.
 - **Verification Evidence**: [Cooked content assembly captured Player binding and relocatable source-free delivery qualification](verification/2026-10/2026-10-31T050529Z-cooked-content-assembly-captured-player-binding-and-relocatable-source-free-delivery-qualification-816fbb7867fb4c3288a2b2b34f27e1ff.md) - Verification Evidence for Cooked content assembly captured Player binding and relocatable source-free delivery qualification.
 - **Work Progress**: [Cooked Player content assembly and package binding integration in progress](progress/2026-10/2026-10-31T043115Z-cooked-player-content-assembly-and-package-binding-integration-in-progress-43a245bed70541e6bf6656113c7297c9.md) - Work Progress for Cooked Player content assembly and package binding integration in progress.
-- **Verification Evidence**: [Explicit Cargo builds captured executables and supervised protocol qualification](verification/2026-10/2026-10-31T035034Z-explicit-cargo-builds-captured-executables-and-supervised-protocol-qualification-4cfff5128fa64423b6f234ea7b312c63.md) - Cargo-authoritative target selection, captured input and executable binding, exact bounded Editor protocol and real native consumers.
-- **Work Progress**: [Native Cargo metadata exposes lossy protocol transport and requires owned queue replacement](progress/2026-10/2026-10-31T030020Z-native-cargo-metadata-exposes-lossy-protocol-transport-and-requires-owned-queue-replacement-566938962bc9455cbfb9516d2fbae4ee.md) - Work Progress for Native Cargo metadata exposes lossy protocol transport and requires owned queue replacement.
-- **Work Progress**: [Explicit Cargo contracts independently reviewed with actual native and foreign consumers](progress/2026-10/2026-10-31T020011Z-explicit-cargo-contracts-independently-reviewed-with-actual-native-and-foreign-consumers-ca2e1780a12140d6acee32ad39c35481.md) - Work Progress for Explicit Cargo contracts independently reviewed with actual native and foreign consumers.
 
 # Integration Notes
 

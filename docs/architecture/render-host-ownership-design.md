@@ -293,6 +293,10 @@ physical custody or restore its UI/picking authority.
 
 ## Evidence
 
+- The [owned native desktop qualification](../knowledge/engineering/verification/2026-10/2026-10-31T105632Z-owned-native-desktop-execution-and-post-host-presentation-qualification-4db921de03c94598b2ee20d7e82508c5.md)
+  qualifies `37ca8bb` through the stock single-Runtime window path, common minimal/project owner,
+  original CPU result custody, retained pump/actual drain and post-Host UI/READY/telemetry consumers.
+  It closes transition step2, not immutable outputs, producer prefixes, public offscreen or Features.
 - [Source-backed rendering review](../research/2026-10-29-render-architecture-and-refactor-plan-review.md)
   compares pinned Bevy `85503941e488152711a4695bbe248e9ed9f453fc` and Godot
   `81ab961f91066a63bcbf3ec340962bb1a1ada558`. Schedule composition and product effect slots can

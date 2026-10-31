@@ -731,8 +731,8 @@ Delete implicit profile-name-to-Cargo policy and code/source/package generation 
 
 ## R8: External Render Feature And Host-Local Execution
 
-**Design:** D14. **State:** private CPU/DX12/cost comparison, internal device ownership and original
-UI result/logical-close prerequisites have scoped evidence under the
+**Design:** D14. **State:** private CPU/DX12/cost comparison, internal device ownership, original
+UI custody and owned native desktop execution have scoped evidence under the
 [render composition unit](2026-10-31-render-composition-and-host-execution-plan.md); complete
 production replacement and matching qualification remain open. **Owners:** render semantics/domain
 adapters/WGPU Host; Proposed 0121.
@@ -742,6 +742,13 @@ runner-owned GPU execution. Named slots are convenient placement that lowers int
 Design for shared/branching intermediates, multiple views, custom Editor composition, offscreen
 targets and recovery now; do not select an initial linear core merely because one effect is small.
 Use pinned Bevy and Godot as primary architecture evidence without copying a historical graph API.
+
+The [native ownership qualification](../knowledge/engineering/verification/2026-10/2026-10-31T105632Z-owned-native-desktop-execution-and-post-host-presentation-qualification-4db921de03c94598b2ee20d7e82508c5.md)
+at `37ca8bb` moves stock execution outside World through a retained Runtime/Host/window/pump session
+and exact CPU capture/result connection. Post-Host UI/READY, finite telemetry seal, code-first and
+project consumers have owner/public and selected Windows evidence. This closes that native unit;
+immutable outputs, original reconstruction, producer-prefix retirement and external Features remain
+the next integrated production work. Proposed0121 and the complete foundation Goal stay open.
 
 ADR 0121's [identity, wiring and candidate boundaries](../architecture/adr/0121-composable-render-programs-and-host-execution.md#identity-wiring-and-candidate-boundaries)
 close three remaining shared contracts before interface freeze: stable Feature-instance and

@@ -175,3 +175,10 @@ executes texture/buffer kernels through graph and viable controls, with fixed hi
 exact physical versions and failure/custody oracles. Comparative costs, production Host/epochs,
 independently paced streams and UI completion remain open. This advances the imported F1/F2/F3
 research gates without treating a private experiment as the production rendering replacement.
+
+The [owned native desktop successor](../knowledge/engineering/verification/2026-10/2026-10-31T105632Z-owned-native-desktop-execution-and-post-host-presentation-qualification-4db921de03c94598b2ee20d7e82508c5.md)
+now qualifies the stock execution-owner migration at `37ca8bb`: Runtime/Host/window/pump custody,
+original CPU capture/results, actual UI/READY/startup boundaries and finite telemetry sealing.
+Minimal code-first, project, Reference and selected native Editor consumers share that owner.
+The repeated-display/output/producer/Feature and editable Nara-drawn Editor gates above remain
+open. This successor advances F1/F2/F3 without restarting the imported research or claiming full R8.
