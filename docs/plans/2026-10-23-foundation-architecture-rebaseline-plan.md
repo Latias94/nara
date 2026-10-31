@@ -731,9 +731,10 @@ Delete implicit profile-name-to-Cargo policy and code/source/package generation 
 
 ## R8: External Render Feature And Host-Local Execution
 
-**Design:** D14. **State:** private CPU/DX12 comparison evidenced under the
-[render composition unit](2026-10-31-render-composition-and-host-execution-plan.md); measurements,
-production replacement and matching native qualification remain open. **Owners:** render semantics/domain
+**Design:** D14. **State:** private CPU/DX12/cost comparison and the internal device-owner
+prerequisite have scoped evidence under the
+[render composition unit](2026-10-31-render-composition-and-host-execution-plan.md); complete
+production replacement and matching qualification remain open. **Owners:** render semantics/domain
 adapters/WGPU Host; Proposed 0121.
 
 The preferred complete design is typed Features over an explicit resource-dependency graph, with

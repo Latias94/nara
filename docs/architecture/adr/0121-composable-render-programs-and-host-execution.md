@@ -9,8 +9,12 @@
 
 The [private CPU/DX12 comparison](../../knowledge/engineering/verification/2026-10/2026-10-31T060722Z-private-render-graph-buffer-history-and-viable-controls-comparison-on-dx12-d6aca1996b2342659bd07933b33e0e64.md)
 exercises graph/ordered/slot/schedule kernels, exact physical versions and fixed history groups.
-It informs this proposal's semantic-copy and publication boundaries; production Host/epoch,
-external Runtime/Scene View consumers, costs and exact UI completion remain unqualified.
+It informs this proposal's semantic-copy and publication boundaries. A later
+[CPU-stage comparison](../../benchmarks/2026-10-31-render-composition.md) reports substantial
+repeat variation and no cost winner. The
+[internal device-owner prerequisite](../../knowledge/engineering/verification/2026-10/2026-10-31T064658Z-coherent-wgpu-device-ownership-and-render-cost-comparison-qualification-18760d4fdea7435b90fb9bd2bee64510.md)
+has separate stock/native evidence under ADR0078. Complete runner-local Host/epoch/output authority,
+external Runtime/Scene View/offscreen Features and exact UI completion remain unqualified.
 
 ## Context
 

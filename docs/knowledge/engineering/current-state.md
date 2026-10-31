@@ -3,7 +3,7 @@ type: "Current State"
 title: "Current Engineering State"
 description: "Derived summary of immutable engineering-memory shards."
 tags: ["engineering-memory", "derived"]
-source_fingerprint: "245064e3b35bab76f43c7d0b67d3887908b844ea77f8ed976a7fee46eb665bc2"
+source_fingerprint: "3cdfac91b993ce45e7f65842709a4225e93b1efe173233370ffcd589ac292c8e"
 ---
 
 # Current State
@@ -12,8 +12,8 @@ source_fingerprint: "245064e3b35bab76f43c7d0b67d3887908b844ea77f8ed976a7fee46eb6
 
 This file is derived from immutable shards. Record new facts in shards, then render during integration.
 
-- Source fingerprint: `245064e3b35bab76f43c7d0b67d3887908b844ea77f8ed976a7fee46eb665bc2`
-- Immutable records: 1102
+- Source fingerprint: `3cdfac91b993ce45e7f65842709a4225e93b1efe173233370ffcd589ac292c8e`
+- Immutable records: 1104
 - Active lane heads: 2
 
 # Active Registrations
@@ -51,7 +51,7 @@ This file is derived from immutable shards. Record new facts in shards, then ren
 - [Editor foundation U9 and U1-U8 complete with exact-source external acceptance](registry/2026-10/2026-10-17T102710Z-nara-editor-foundation-implementation-codex-root-76fa1ccb656c4ebd8c2b5f77f83287f7.md): `completed` (nara-editor-foundation-implementation-codex-root; producer `codex-root`)
 - [Editor foundation research and refactor planning complete](registry/2026-10/2026-10-16T044159Z-nara-editor-foundation-planning-codex-root-d0e8f37adfd54751b67d7ae647f06d83.md): `completed` (nara-editor-foundation-planning-codex-root; producer `codex-root`)
 - [First 2D author workflow complete with clean committed-source acceptance](registry/2026-10/2026-10-16T025148Z-nara-first-2d-author-workflow-codex-root-fe7312236c5d4906b8e950d366111171.md): `completed` (nara-first-2d-author-workflow-codex-root; producer `codex-root`)
-- [Private render comparison verified; production Host transition active](registry/2026-10/2026-10-31T061950Z-nara-foundation-rebaseline-codex-main-65375906aa73451b8a1a6f3ff792d246.md): `active` (nara-foundation-rebaseline-codex-main; producer `codex-foundation-main`)
+- [Coherent device owner qualified; complete render Host migration active](registry/2026-10/2026-10-31T065406Z-nara-foundation-rebaseline-codex-main-8addb3ab540e47f2a7a25e2b503a495d.md): `active` (nara-foundation-rebaseline-codex-main; producer `codex-foundation-main`)
 - [Ordinary structural authoring qualified](registry/2026-10/2026-10-20T053614Z-ordinary-authoring-codex-root-ac405c79936d43b09f6cfb4197d747ed.md): `completed` (ordinary-authoring-codex-root; producer `codex-root`)
 - [Persistent checkpoint consumer qualified on Windows](registry/2026-10/2026-10-21T032628Z-persistent-two-level-game-codex-root-1ac997abdab142e590af8a6c21f9f443.md): `complete` (persistent-two-level-game-codex-root; producer `codex-root`)
 - [N05 plugin failure facts qualified](registry/2026-10/2026-10-19T172945Z-plugin-error-facts-codex-root-c20974513f104398967edbed73efccaa.md): `completed` (plugin-error-facts-codex-root; producer `codex-root`)
@@ -70,6 +70,7 @@ This file is derived from immutable shards. Record new facts in shards, then ren
 
 # Recent Evidence
 
+- **Verification Evidence**: [Coherent WGPU device ownership and render cost comparison qualification](verification/2026-10/2026-10-31T064658Z-coherent-wgpu-device-ownership-and-render-cost-comparison-qualification-18760d4fdea7435b90fb9bd2bee64510.md) - Verification Evidence for Coherent WGPU device ownership and render cost comparison qualification.
 - **Verification Evidence**: [Private render graph buffer history and viable controls comparison on DX12](verification/2026-10/2026-10-31T060722Z-private-render-graph-buffer-history-and-viable-controls-comparison-on-dx12-d6aca1996b2342659bd07933b33e0e64.md) - Verification Evidence for Private render graph buffer history and viable controls comparison on DX12.
 - **Work Progress**: [Private render composition comparison exposes semantic copy and history publication contracts](progress/2026-10/2026-10-31T054954Z-private-render-composition-comparison-exposes-semantic-copy-and-history-publication-contracts-5bb86f53d9ca42f892bd1a90598a2b56.md) - Work Progress for Private render composition comparison exposes semantic copy and history publication contracts.
 - **Verification Evidence**: [Cooked content assembly captured Player binding and relocatable source-free delivery qualification](verification/2026-10/2026-10-31T050529Z-cooked-content-assembly-captured-player-binding-and-relocatable-source-free-delivery-qualification-816fbb7867fb4c3288a2b2b34f27e1ff.md) - Verification Evidence for Cooked content assembly captured Player binding and relocatable source-free delivery qualification.
@@ -81,7 +82,6 @@ This file is derived from immutable shards. Record new facts in shards, then ren
 - **Verification Evidence**: [Tracked local artifact builds and complete-group publication qualification](verification/2026-10/2026-10-30T231610Z-tracked-local-artifact-builds-and-complete-group-publication-qualification-d3fcd08e15e04d45812ae09d7c81e944.md) - Finite typed compound and Image execution, current-input reuse, whole-group publication and original Runtime custody.
 - **Work Progress**: [Tracked local artifact execution and complete-group store implementation in progress](progress/2026-10/2026-10-30T213010Z-tracked-local-artifact-execution-and-complete-group-store-implementation-in-progress-610ba9175c1b41bebdaa3f8f0c86bd79.md) - Work Progress for Tracked local artifact execution and complete-group store implementation in progress.
 - **Verification Evidence**: [Source import recipes and target-sensitive CPU Image cook prerequisite qualification](verification/2026-10/2026-10-30T201802Z-source-import-recipes-and-target-sensitive-cpu-image-cook-prerequisite-qualification-462c0179d20b44fd8545d4c135e814f9.md) - Verification Evidence for Source import recipes and target-sensitive CPU Image cook prerequisite qualification.
-- **Work Progress**: [Durable build recipe successor and source provenance replacement in progress](progress/2026-10/2026-10-30T193104Z-durable-build-recipe-successor-and-source-provenance-replacement-in-progress-d866a6d48d1c440e802557c7954186ec.md) - Work Progress for Durable build recipe successor and source provenance replacement in progress.
 
 # Integration Notes
 
