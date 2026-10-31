@@ -13,7 +13,7 @@ use nara_core::{Color, Mat3};
 use nara_ecs::Entity;
 use nara_render::{
     Extent2d, ExtractedView, ExtractedViews, RenderFrameSourceGeneration, RenderImage2d,
-    RenderImagePacket, RenderTarget, ViewLoadOp, ViewMapping2d, ViewportRect,
+    RenderImagePacket, RenderTarget, RenderViewId, ViewLoadOp, ViewMapping2d, ViewportRect,
     build_image_render_frame_packet,
 };
 use nara_render_wgpu::{
@@ -47,6 +47,8 @@ fn retained_pixels_survive_resize_and_a_close_while_b_keeps_submitting() {
         .expect("the Host must admit producer B");
     let a_source = source();
     let b_source = source();
+    let a_view_id = RenderViewId::try_acquire().unwrap();
+    let b_view_id = RenderViewId::try_acquire().unwrap();
     assert_ne!(a.id(), b.id());
     assert_ne!(a_source, b_source);
     assert!(a_source.runtime_generation().is_none());
@@ -56,7 +58,7 @@ fn retained_pixels_survive_resize_and_a_close_while_b_keeps_submitting() {
     let b_target = image_target(16, 16);
     let a_configuration = admit(&mut host, &a, a_source, a_target);
     admit(&mut host, &b, b_source, b_target);
-    let a1_input = input(&policy, a_source, 1, a_target, RED);
+    let a1_input = input(&policy, a_source, a_view_id, 1, a_target, RED);
     let a1 = host
         .submit(&a, &a1_input)
         .expect("A1 must publish red pixels");
@@ -76,7 +78,7 @@ fn retained_pixels_survive_resize_and_a_close_while_b_keeps_submitting() {
     );
 
     begin(&mut host, 2);
-    let a2_input = input(&policy, a_source, 2, a_target, GREEN);
+    let a2_input = input(&policy, a_source, a_view_id, 2, a_target, GREEN);
     let a2 = host
         .submit(&a, &a2_input)
         .expect("A2 must publish green pixels");
@@ -109,7 +111,7 @@ fn retained_pixels_survive_resize_and_a_close_while_b_keeps_submitting() {
     host.activate_image_target(&a, reservation)
         .expect("the prepared replacement must activate");
     begin(&mut host, 3);
-    let a3_input = input(&policy, a_source, 3, resized, BLUE);
+    let a3_input = input(&policy, a_source, a_view_id, 3, resized, BLUE);
     let a3 = host.submit(&a, &a3_input).expect("resized A3 must publish");
     assert_eq!(a3.extent(), resized.extent());
     assert!(!a_configuration.matches_submission(a3.receipt()));
@@ -118,7 +120,10 @@ fn retained_pixels_survive_resize_and_a_close_while_b_keeps_submitting() {
 
     // No readback or blocking queue drain precedes the producer-local retirement probe.
     let first_b = host
-        .submit(&b, &input(&policy, b_source, 1, b_target, Color::BLACK))
+        .submit(
+            &b,
+            &input(&policy, b_source, b_view_id, 1, b_target, Color::BLACK),
+        )
         .expect("B must independently accept its first capture");
     assert_eq!(first_b.receipt().render_transaction_frame_index(), 1);
     drop(first_b);
@@ -150,7 +155,14 @@ fn retained_pixels_survive_resize_and_a_close_while_b_keeps_submitting() {
         let output = host
             .submit(
                 &b,
-                &input(&policy, b_source, b_frame, b_target, Color::WHITE),
+                &input(
+                    &policy,
+                    b_source,
+                    b_view_id,
+                    b_frame,
+                    b_target,
+                    Color::WHITE,
+                ),
             )
             .expect("B must keep publishing while A retires");
         assert_eq!(output.receipt().render_transaction_frame_index(), b_frame);
@@ -181,7 +193,10 @@ fn retained_pixels_survive_resize_and_a_close_while_b_keeps_submitting() {
     b_frame += 1;
     begin(&mut host, b_frame + 2);
     let later_b = host
-        .submit(&b, &input(&policy, b_source, b_frame, b_target, GREEN))
+        .submit(
+            &b,
+            &input(&policy, b_source, b_view_id, b_frame, b_target, GREEN),
+        )
         .expect("B must remain live after A physically completes");
     assert!(a_prefix.poll().expect("A settlement must remain monotonic"));
     assert_pixels(&mut host, &later_b, GREEN_BYTES);
@@ -218,6 +233,7 @@ fn exact_output_budget_preserves_leases_and_retries_the_same_refused_capture() {
         .create_producer()
         .expect("the Host must admit producer A");
     let source = source();
+    let view_id = RenderViewId::try_acquire().unwrap();
     let target = image_target(16, 16);
     assert!(matches!(
         host.reserve_image_target(&a, source, target),
@@ -232,7 +248,7 @@ fn exact_output_budget_preserves_leases_and_retries_the_same_refused_capture() {
     assert_eq!(host.retained_resource_bytes(), BYTES);
     host.activate_image_target(&a, reservation)
         .expect("configuration activation must consume its admitted allocation");
-    let red_input = input(&policy, source, 1, target, RED);
+    let red_input = input(&policy, source, view_id, 1, target, RED);
     let red = host
         .submit(&a, &red_input)
         .expect("the first output must fit");
@@ -242,7 +258,7 @@ fn exact_output_budget_preserves_leases_and_retries_the_same_refused_capture() {
     assert_eq!(host.retained_resource_bytes(), BYTES);
 
     begin(&mut host, 2);
-    let green_input = input(&policy, source, 2, target, GREEN);
+    let green_input = input(&policy, source, view_id, 2, target, GREEN);
     assert!(matches!(
         host.submit(&a, &green_input),
         Err(WgpuRenderHostError::Program(
@@ -290,8 +306,9 @@ fn original_cpu_input_reconstructs_after_the_original_host_has_retired() {
         .install()
         .unwrap();
     let source = source();
+    let view_id = RenderViewId::try_acquire().unwrap();
     let target = image_target(16, 16);
-    let original_input = input(&policy, source, 1, target, RED);
+    let original_input = input(&policy, source, view_id, 1, target, RED);
     policy.close();
     drop(policy);
     let mut original_host = WgpuRenderHost::offscreen();
@@ -376,6 +393,7 @@ fn image_target(width: u32, height: u32) -> RenderImagePacket {
 fn input(
     policy: &WgpuPolicyInstallation<WgpuStockPolicy>,
     source: RenderFrameSourceGeneration,
+    view_id: RenderViewId,
     frame: u64,
     target: RenderImagePacket,
     color: Color,
@@ -383,6 +401,7 @@ fn input(
     let viewport = ViewportRect::from_extent(target.extent()).expect("nonempty image viewport");
     let mut views = ExtractedViews::default();
     views.push(ExtractedView {
+        id: view_id,
         camera_entity: Entity::PLACEHOLDER,
         target: RenderTarget::Image(target.image()),
         viewport,

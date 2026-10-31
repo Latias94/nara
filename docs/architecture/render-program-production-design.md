@@ -173,7 +173,7 @@ Producer close still revokes execution, even while old inputs retain reconstruct
 
 ### Selected Policy Capture Replacement
 
-`WgpuRenderPolicy` pairs an immutable `Capture` with producer-local CPU `Instances`, a closed
+`WgpuRenderPolicy` pairs an immutable `Capture` with candidate-local immutable CPU `Bindings`, a closed
 device request, capture validation and program construction. `WgpuPolicyDefinition<P>` retains
 the exact implementation and request. `WgpuPolicyInstallation<P>` owns admission of new captures;
 its non-reused installation identity is separate from definition identity and Rust type. Closing
@@ -188,10 +188,12 @@ permissions separately from replayable capture data. Native Runtime and embedded
 the same selected input; neither reconstructs a stock policy from optional fields at presentation.
 Scene and authoring Canvas bind their definitions when their original candidates are captured.
 
-`WgpuPolicyInstanceContext` can create typed Feature instances only within the policy's original
-closed request. It grants no Device, Queue, World or target authority. The Host caches CPU instances
-by producer and installation identity, with a finite bound and reclamation after the installation
-and accepted inputs release their leases. Its private fixed slot table has no retained Vec capacity
+`WgpuPolicyBindingContext` resolves original logical Feature declarations into actual owners only
+within the policy's original closed request. It grants no Device, Queue, World or target authority.
+The Host resolves CPU instances by producer and original logical declaration, with a finite bound
+and reclamation after declarations and accepted candidates release their leases. Each `bind`
+constructs a new immutable membership snapshot; only complete publication updates the latest
+snapshot. The private fixed slot table has no retained Vec capacity
 after reclamation. Account for the complete table and exact original-submission payload increment,
 then admit predictable custody wrappers before their allocation. Native Feature state remains separately epoch-owned.
 An original submitted reservation retains its exact policy capture, definition and CPU instances
@@ -301,9 +303,11 @@ merely by repeating exact imports.
 
 ### Next Production Unit: View History Transactions
 
-This is the next unimplemented owner slice after typed policy migration. Extend the existing
-Host transaction and exact resource imports; do not put a separately mutable history manager
-beside `submit_program` or publish four GPU results before a later caller-side history commit.
+This selected owner slice follows typed policy migration; its
+[production evidence](../knowledge/engineering/verification/2026-10/2026-10-31T210034Z-captured-view-histories-and-original-submission-cleanup-production-qualification-5c061376803446c0bff1a95495ca55c7.md)
+records the bounded implementation and remaining full-unit scope. It extends the existing Host
+transaction and exact resource imports. No separately mutable history manager sits beside
+`submit_program`, and no caller-side commit follows already-published GPU results.
 
 The first consumer has two captured Views with two accumulation instances per View. Each instance
 keeps its own exact predecessor and code-owned slot. Captured View identity includes its source
@@ -327,6 +331,11 @@ requirements close before capture admission, and selected Feature definitions mu
 request. Preparation cannot discover new capabilities and silently enlarge it.
 A temporarily absent or minimized View is not implicitly retired. Removing and readding the
 camera component is a real lifecycle change even if its Entity survives.
+Temporal topology retains `WgpuHistoryView` alongside its captured `RenderViewId`; the original
+topology/input/candidate holds that concrete lifetime owner. Slot reclamation follows both the
+View owner's and effect declaration's Weak leases. A shared static effect does not turn destroyed
+Views into lifetime slot registrations. Reusing a copyable ID with another live temporal owner
+cannot silently adopt its predecessor. This owner has no global registry or retirement mailbox.
 
 Reconciliation prepares candidate membership without changing published membership. New instance,
 capability or budget failure leaves the original group, last-good slots and older candidates
@@ -359,6 +368,14 @@ publication. Publication consumes the candidate, including when its exact output
 presented; transport retries return the original result rather than accumulating again. Display,
 UI settlement, READY and physical completion keep their existing separate owners.
 
+Success cleanup also includes the original submitted custody's eventual final references. A
+Capture or Bindings destructor can run during a later native poll after the consumed candidate
+and input have gone. Isolate each flat retained entry at that release boundary, preserve reverse
+dependency order and the actual completion fact, and retain an explicit cleanup observation.
+Never convert that destructor fault into callback abandonment or lose another already-published
+result because polling released an older capture. Genuine callback abandonment remains an
+unsettled responsibility requiring its existing original-device recovery.
+
 Select an opaque, caller-owned, move-only candidate with no public constructor, `Clone` or retained
 `&mut Host` borrow. It owns the original input, complete program, actual binding owners, target
 contract, history basis and RAII count/metadata reservations. Its Host/epoch/producer facts fence
@@ -377,7 +394,7 @@ caller-side history commit is introduced.
 
 If a transport retains a retry across calls, it retains the original capture and UI
 sidecar too; settling that sidecar and later recreating its responsibility from cached input is
-invalid. One-shot paths explicitly cancel instead. Policy `Instances` and native `State` may
+invalid. One-shot paths explicitly cancel instead. Policy `Bindings` and native `State` may
 cache implementation data but do not advance authoritative history during build or preparation.
 
 Initially one producer/capture owns one publication group; independent producer rates do not

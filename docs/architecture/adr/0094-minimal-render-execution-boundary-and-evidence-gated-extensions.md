@@ -2,7 +2,7 @@
 
 **Status**: Accepted
 **Date**: 2026-07-16
-**Last Revised**: 2026-11-01 (original typed policy capture and exact final-image UI reports)
+**Last Revised**: 2026-11-01 (original typed policy bindings and captured View/history transactions)
 **Supersedes**: [ADR 0077](0077-render-pipeline-recipes-graph-compilation-and-backend-encoding.md)
 **Refines**: [ADR 0012](0012-render-crate-boundaries.md),
 [ADR 0016](0016-extension-seams-for-backends-and-domain-modules.md),
@@ -218,7 +218,7 @@ cross-owner composition work; this subsection does not promote that entire propo
   value outside the custody lock. A hard entry limit is a deterministic refusal, separately from
   temporary allocation pressure.
 
-The selected typed policy capture refinement admits original-definition `Capture/Instances/build`
+The selected typed policy capture refinement admits original-definition `Capture/Bindings/build`
 through the same native Host. Policy installation owns new capture admission; accepted input owns
 its original execution lease independently of installation withdrawal. Producer close still refuses
 execution. Instance creation cannot broaden the definition's closed device request, and native
@@ -237,6 +237,53 @@ cross-View/UI/material working-set preflight, replay packets versus one-shot UI 
 target routing, full-resolution HUD and the existing native/READY/input/close consumers. Its
 qualification belongs in the implementation ledger; displaced routes are removed with their
 migrated consumers rather than retained as compatibility mechanisms.
+
+### Captured View History Transactions
+
+The finite program may own temporal outputs keyed by an original CPU history lineage, captured
+View lifetime, logical Feature incarnation and code-owned slot. A lineage binds one source clock;
+its Host realization owns successful-capture deduplication independently of current target, group
+membership and reclaimable slots. Reset, regroup or complete instance replacement cannot clear
+that watermark. Original declaration/input/candidate leases retain its realization; unused
+lineages and inactive instance rows are reclaimable rather than lifetime registrations. Original
+CPU topology also retains a concrete temporal View owner, separate from its copyable captured
+View ID. Each slot observes both View and Feature declaration lifetimes. Sharing one effect
+declaration across Views cannot keep every retired View's rows alive, and temporary extraction
+absence alone cannot grant retirement.
+
+Capture admission freezes original logical topology, exact Feature definitions, parameters and
+members within the policy's already closed device request. Host preparation resolves an immutable
+snapshot of actual Feature owners, pins complete predecessor/empty-slot revisions and builds the
+program. A latest-instance map cannot reinterpret an older accepted input. Candidate-driven
+membership changes publish with the candidate; failed preparation preserves last-good membership.
+Explicit reset/revocation retains its separate invalidation meaning.
+
+One opaque move-only candidate owns original input, program, bindings, history basis, target facts
+and ordinary budget guards without borrowing the Host across calls. Retry returns that same value;
+it does not rebuild against latest history. The Host revalidates its original identity, epoch,
+producer and basis before native work and at final publication. Complete outputs, slot pointers,
+membership and successful-capture watermark publish together after successful native admission.
+No caller-side history commit or second renderer is introduced. Unbound native submission custody
+cannot escape one serial native attempt; failed uploads retain their original prefix.
+
+The production program builder has a hard 64 MiB modeled metadata ceiling, regardless of a
+caller's larger `GraphLimits` allowance. Graph/access/scratch capacity admission precedes vectors
+and compilation. Pending candidates reserve this full program envelope plus bounded inline
+capture, binding and history metadata before policy execution. Arbitrary user indirect payloads
+and unrelated caller-owned allocations remain outside this engine metadata model.
+
+Publication consumes the candidate even if later presentation fails. It cannot be accumulated
+again, rolled back after an output escapes, or used to claim UI/READY/picking success. Old-binding
+destructor panics after publication are isolated cleanup observations; native target state and
+the successful result are completed before that cleanup. They cannot transform a committed group
+into a retryable refusal. Existing
+transports retain original capture and UI responsibilities while retrying, or explicitly cancel.
+On a replacement Host/epoch, temporal effects receive an explicit empty-history reset reason and
+declare initialization. Current-sample CPU capture alone does not reconstruct old accumulated
+pixels; exact temporal replay/checkpoints remain separate unimplemented capability.
+
+These responsibilities are selected for the next bounded production unit. Current implementation
+and actual evidence remain in the ledger; this does not qualify the complete Proposed0121 workload.
 
 ## Candidate Extensions, Not Accepted Decisions
 

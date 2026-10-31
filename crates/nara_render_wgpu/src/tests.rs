@@ -101,9 +101,14 @@ struct UninstalledSpriteContributionObservation {
 }
 
 #[cfg(feature = "stock-sprite")]
-fn inject_sprite_domain_work(mut views: ResMut<ExtractedViews>) {
+fn inject_sprite_domain_work(
+    mut view_id: nara_ecs::Local<Option<nara_render::RenderViewId>>,
+    mut views: ResMut<ExtractedViews>,
+) {
+    let view_id = *view_id.get_or_insert_with(|| nara_render::RenderViewId::try_acquire().unwrap());
     views.clear();
     views.push(nara_render::ExtractedView {
+        id: view_id,
         camera_entity: Entity::PLACEHOLDER,
         target: nara_render::RenderTarget::PrimaryWindow,
         viewport: nara_render::ViewportRect::new(0, 0, 16, 16).unwrap(),
@@ -1652,6 +1657,7 @@ fn build_stock_ui_policy(input: &WgpuRenderInput) -> policy::BuiltPolicy {
             WgpuRenderProducerId::new(1),
             &Arc::new(std::sync::atomic::AtomicBool::new(false)),
             wgpu::TextureFormat::Rgba8UnormSrgb,
+            None,
         )
         .unwrap()
 }

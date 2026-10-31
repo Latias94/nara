@@ -1389,6 +1389,7 @@ mod tests {
         let viewport = ViewportRect::from_extent(target.extent()).unwrap();
         let mut views = ExtractedViews::default();
         views.push(ExtractedView {
+            id: nara_render::RenderViewId::try_acquire().unwrap(),
             camera_entity: Entity::PLACEHOLDER,
             target: RenderTarget::Image(target.image()),
             viewport,

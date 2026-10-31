@@ -23,8 +23,8 @@ pub use target::{
     RenderWindowPacket, ViewportRect,
 };
 pub use view::{
-    Camera2d, ExtractedView, ExtractedViews, ViewLoadOp, ViewMapping2d, viewport_clip_to_physical,
-    viewport_physical_to_clip,
+    Camera2d, ExtractedView, ExtractedViews, RenderViewId, ViewLoadOp, ViewMapping2d,
+    viewport_clip_to_physical, viewport_physical_to_clip,
 };
 pub use world_pointer::WorldPointer;
 
@@ -45,7 +45,9 @@ pub use nara_core::Color;
 #[cfg(test)]
 use nara_core::Vec2;
 use nara_ecs::{
-    Entity, Query, Res, ResMut, Resource, bevy_ecs::error::BevyError, schedule::IntoScheduleConfigs,
+    DetectChanges, Entity, FromWorld, Mut, Query, QueryState, Ref, Res, ResMut, Resource, World,
+    bevy_ecs::entity::EntityHashMap, bevy_ecs::entity_disabling::DefaultQueryFilters,
+    bevy_ecs::error::BevyError, bevy_ecs::system::SystemState, schedule::IntoScheduleConfigs,
 };
 use nara_reflect::{
     ComponentCapability, ComponentCodecError, ComponentFieldId, ComponentFieldPath,
@@ -148,9 +150,53 @@ pub mod __private {
 #[derive(Debug, Default, Resource)]
 struct ExtractedViewScratch(Vec<ExtractedView>);
 
+/// World-owned camera membership, independent of whether extraction can publish a View.
+#[derive(Debug, Resource)]
+struct CameraViewLifetimes {
+    ids: EntityHashMap<RenderViewId>,
+    cameras: QueryState<(Entity, Ref<'static, Camera2d>)>,
+}
+
+impl FromWorld for CameraViewLifetimes {
+    fn from_world(world: &mut World) -> Self {
+        // Camera membership outlives query visibility, including built-in and custom disabling
+        // components. Only this private membership query bypasses the World's default filters.
+        let cameras = world
+            .try_resource_scope(|world, _: Mut<DefaultQueryFilters>| world.query())
+            .unwrap_or_else(|| world.query());
+        Self {
+            ids: EntityHashMap::default(),
+            cameras,
+        }
+    }
+}
+
+impl CameraViewLifetimes {
+    fn observe(&mut self, world: &World) -> Result<(), RenderViewExtractionError> {
+        let cameras = self.cameras.query(world);
+        // Invalidate all retired incarnations before any fallible allocation or projection.
+        // Ref::is_added also catches remove/readd between two observations of the same Entity.
+        self.ids.retain(|entity, _| {
+            cameras
+                .get(*entity)
+                .is_ok_and(|(_, camera)| !camera.is_added())
+        });
+        for (entity, _) in cameras.iter() {
+            if !self.ids.contains_key(&entity) {
+                let id = RenderViewId::try_acquire()
+                    .ok_or(RenderViewExtractionError::IdentityUnavailable { entity })?;
+                self.ids.insert(entity, id);
+            }
+        }
+        Ok(())
+    }
+}
+
 /// Failure to publish the world-space camera projection for one frame.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
 pub(crate) enum RenderViewExtractionError {
+    #[error("camera entity {entity:?} has no available View lifetime identity")]
+    IdentityUnavailable { entity: Entity },
     #[error("camera entity {entity:?} has a non-finite completed transform")]
     NonFiniteTransform { entity: Entity },
     #[error("camera entity {entity:?} has a singular completed linear transform")]
@@ -462,6 +508,7 @@ impl Plugin for RenderPlugin {
         app.init_resource::<ClearColor>()?;
         app.init_resource::<ExtractedViews>()?;
         app.init_resource::<ExtractedViewScratch>()?;
+        app.init_resource::<CameraViewLifetimes>()?;
         app.init_resource::<RenderFrame>()?;
         app.init_resource::<FrameStats>()?;
         app.init_resource::<RenderBackendStatus>()?;
@@ -708,23 +755,55 @@ fn optional_i32(value: &ComponentValue, field: &str) -> Result<Option<i32>, Comp
         .transpose()
 }
 
+#[derive(nara_ecs::SystemParam)]
+struct ViewExtraction<'w, 's> {
+    frame: ResMut<'w, RenderFrame>,
+    extracted_views: ResMut<'w, ExtractedViews>,
+    scratch: ResMut<'w, ExtractedViewScratch>,
+    lifetimes: Res<'w, CameraViewLifetimes>,
+    clear_color: Res<'w, ClearColor>,
+    spatial: PresentedSpatialSnapshot2d<'w>,
+    primary_window_id: Option<Res<'w, PrimaryWindowId>>,
+    windows: Query<'w, 's, &'static Window>,
+    canvas: Option<Res<'w, WorldCanvas>>,
+    cameras: Query<'w, 's, (Entity, &'static Camera2d)>,
+}
+
 fn extract_views(
-    mut frame: ResMut<RenderFrame>,
-    mut extracted_views: ResMut<ExtractedViews>,
-    mut scratch: ResMut<ExtractedViewScratch>,
-    clear_color: Res<ClearColor>,
-    spatial: PresentedSpatialSnapshot2d,
-    primary_window_id: Option<Res<PrimaryWindowId>>,
-    windows: Query<&Window>,
-    canvas: Option<Res<WorldCanvas>>,
-    cameras: Query<(Entity, &Camera2d)>,
+    world: &mut World,
+    state: &mut SystemState<ViewExtraction<'static, 'static>>,
 ) -> Result<(), BevyError> {
+    // The cached Ref query uses this exclusive system's last-run baseline. Observation and
+    // capture share one exclusive call, so no system can replace a camera between them.
+    world.resource_scope(|world, mut lifetimes: Mut<CameraViewLifetimes>| {
+        lifetimes.observe(world).map_err(BevyError::error)
+    })?;
+    let ViewExtraction {
+        mut frame,
+        mut extracted_views,
+        mut scratch,
+        lifetimes,
+        clear_color,
+        spatial,
+        primary_window_id,
+        windows,
+        canvas,
+        cameras,
+    } = state.get_mut(world).map_err(BevyError::error)?;
     spatial.stamp().map_err(BevyError::error)?;
     scratch.0.clear();
 
     let primary_window_id = primary_window_id.map(|resource| resource.0);
 
     for (camera_entity, camera) in cameras.iter() {
+        let id = lifetimes
+            .ids
+            .get(&camera_entity)
+            .copied()
+            .ok_or(RenderViewExtractionError::IdentityUnavailable {
+                entity: camera_entity,
+            })
+            .map_err(BevyError::error)?;
         let global = spatial.global(camera_entity).map_err(BevyError::error)?;
         let Some(viewport) = camera.viewport.or_else(|| {
             viewport_for_target(
@@ -745,6 +824,7 @@ fn extract_views(
         )
         .map_err(BevyError::error)?;
         scratch.0.push(ExtractedView {
+            id,
             camera_entity,
             target: camera.target,
             viewport,
@@ -815,6 +895,7 @@ fn viewport_for_target(
 
 #[cfg(test)]
 mod tests {
+    mod view_lifecycle;
     mod world_canvas;
     use super::*;
     use std::time::Duration;
@@ -912,7 +993,8 @@ mod tests {
         let generation = test_runtime_generation();
         let window = Window::default();
         let mut views = ExtractedViews::default();
-        views.push(test_extracted_view());
+        let view = test_extracted_view();
+        views.push(view);
 
         let packet =
             build_render_frame_packet(generation, 9, Some(WindowId::PRIMARY), [&window], &views)
@@ -928,7 +1010,7 @@ mod tests {
             packet.target(),
             RenderFrameTarget::Window(window) if window.id == WindowId::PRIMARY
         ));
-        assert_eq!(packet.views().first().unwrap(), &test_extracted_view());
+        assert_eq!(packet.views().first().unwrap(), &view);
     }
 
     #[test]
@@ -1400,6 +1482,7 @@ mod tests {
 
     fn test_extracted_view() -> ExtractedView {
         ExtractedView {
+            id: RenderViewId::try_acquire().unwrap(),
             camera_entity: Entity::from_raw_u32(1).unwrap(),
             target: RenderTarget::PrimaryWindow,
             viewport: ViewportRect::new(0, 0, 1280, 720).unwrap(),
@@ -1468,6 +1551,7 @@ mod tests {
             .expect("app should allow world mutation")
             .resource_mut::<ExtractedViews>()
             .push(ExtractedView {
+                id: RenderViewId::try_acquire().unwrap(),
                 camera_entity: Entity::PLACEHOLDER,
                 target: RenderTarget::PrimaryWindow,
                 viewport: ViewportRect::new(0, 0, 1, 1).unwrap(),

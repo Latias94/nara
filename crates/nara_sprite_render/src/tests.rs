@@ -29,6 +29,7 @@ mod visibility;
 
 fn test_view() -> ExtractedView {
     ExtractedView {
+        id: nara_render::RenderViewId::try_acquire().unwrap(),
         camera_entity: Entity::PLACEHOLDER,
         target: RenderTarget::PrimaryWindow,
         viewport: ViewportRect::new(0, 0, 200, 100).unwrap(),

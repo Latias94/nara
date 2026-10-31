@@ -22,7 +22,7 @@ pub struct WgpuProgramTextureDescriptor {
 }
 
 impl WgpuProgramTextureDescriptor {
-    pub(super) fn resource<S: 'static>(&self) -> ResourceDescriptor {
+    pub(crate) fn resource<S: 'static>(&self) -> ResourceDescriptor {
         ResourceDescriptor::Texture {
             native: self.native.clone(),
             range: wgpu::ImageSubresourceRange::default(),
@@ -103,7 +103,7 @@ impl<S: 'static> WgpuProgramTexture<S> {
 /// One candidate's typed whole-buffer version, independent of its native usage flags.
 #[derive(Debug)]
 pub struct WgpuProgramBuffer<S: 'static> {
-    pub(super) version: ResourceVersion,
+    pub(crate) version: ResourceVersion,
     pub(super) descriptor: wgpu::BufferDescriptor<'static>,
     semantic: PhantomData<fn() -> S>,
 }
@@ -131,7 +131,7 @@ impl<S: 'static> WgpuProgramBuffer<S> {
         &self.descriptor
     }
 
-    pub(super) fn resource(&self) -> ResourceDescriptor {
+    pub(crate) fn resource(&self) -> ResourceDescriptor {
         ResourceDescriptor::Buffer {
             native: self.descriptor.clone(),
             meaning: BufferMeaning::of::<S>(),
@@ -248,7 +248,7 @@ impl<S: 'static> std::fmt::Debug for WgpuProgramTextureOutput<S> {
 }
 
 impl<S: 'static> WgpuProgramTextureOutput<S> {
-    pub(super) fn new(storage: Arc<ProgramResourceStorage>) -> Self {
+    pub(crate) fn new(storage: Arc<ProgramResourceStorage>) -> Self {
         Self {
             storage,
             semantic: PhantomData,
@@ -313,7 +313,7 @@ impl<S: 'static> std::fmt::Debug for WgpuProgramBufferOutput<S> {
 }
 
 impl<S: 'static> WgpuProgramBufferOutput<S> {
-    pub(super) fn new(storage: Arc<ProgramResourceStorage>) -> Self {
+    pub(crate) fn new(storage: Arc<ProgramResourceStorage>) -> Self {
         Self {
             storage,
             semantic: PhantomData,
@@ -349,7 +349,7 @@ impl<S: 'static> WgpuProgramBufferOutput<S> {
     }
 }
 
-pub(super) fn require_descriptor<S: 'static>(
+pub(crate) fn require_descriptor<S: 'static>(
     actual: &ResourceDescriptor,
     texture: bool,
 ) -> Result<(), WgpuRenderProgramError> {

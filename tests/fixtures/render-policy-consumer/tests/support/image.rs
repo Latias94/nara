@@ -10,8 +10,8 @@ use nara::core::{Color, Mat3};
 use nara_ecs::Entity;
 use nara_render::{
     Extent2d, ExtractedView, ExtractedViews, RenderFramePacket, RenderFrameSourceGeneration,
-    RenderImage2d, RenderImagePacket, RenderTarget, ViewLoadOp, ViewMapping2d, ViewportRect,
-    build_image_render_frame_packet,
+    RenderImage2d, RenderImagePacket, RenderTarget, RenderViewId, ViewLoadOp, ViewMapping2d,
+    ViewportRect, build_image_render_frame_packet,
 };
 use nara_render_wgpu::{WgpuImageOutput, WgpuRenderHost, WgpuRenderProducer, WgpuSubmissionPrefix};
 
@@ -46,12 +46,14 @@ pub fn target(width: u32, height: u32) -> RenderImagePacket {
 
 pub fn packet(
     source: RenderFrameSourceGeneration,
+    view_id: RenderViewId,
     frame: u64,
     target: RenderImagePacket,
 ) -> RenderFramePacket {
     let viewport = ViewportRect::from_extent(target.extent()).unwrap();
     let mut views = ExtractedViews::default();
     views.push(ExtractedView {
+        id: view_id,
         camera_entity: Entity::PLACEHOLDER,
         target: RenderTarget::Image(target.image()),
         viewport,

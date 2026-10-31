@@ -10,10 +10,10 @@ use nara_ecs::{Res, ResMut, Resource, World, schedule::IntoScheduleConfigs};
 use nara_render::{RenderFramePacket, RenderTarget, ViewportRect};
 use nara_render_wgpu::{
     AccessRole, GraphLimits, TextureAlpha, TextureTransfer, WgpuCapturePlugin,
-    WgpuFeatureDefinition, WgpuFeatureInstance, WgpuFrameCaptureError, WgpuPolicyBuildContext,
-    WgpuPolicyCaptureSet, WgpuPolicyDefinition, WgpuPolicyFrameFacts, WgpuPolicyFrameWriter,
-    WgpuPolicyInstallation, WgpuPolicyInstanceContext, WgpuPolicyProgram,
-    WgpuPolicyUiCaptureFailure, WgpuProgramTextureDescriptor, WgpuRenderPolicy,
+    WgpuDeviceRequirements, WgpuFeatureDeclaration, WgpuFeatureDefinition, WgpuFeatureInstance,
+    WgpuFrameCaptureError, WgpuPolicyBindingContext, WgpuPolicyBuildContext, WgpuPolicyCaptureSet,
+    WgpuPolicyDefinition, WgpuPolicyFrameFacts, WgpuPolicyFrameWriter, WgpuPolicyInstallation,
+    WgpuPolicyProgram, WgpuPolicyUiCaptureFailure, WgpuProgramTextureDescriptor, WgpuRenderPolicy,
     WgpuRenderProgramBuilder, WgpuRenderProgramError, WgpuUiCapture, WgpuUiFeature,
     WgpuUiProgramBinding, WgpuUiSubmission, install_wgpu_policy,
 };
@@ -28,7 +28,9 @@ use nara_window::WindowId;
 
 // This integration test is compiled as an external crate. The collector and completion path
 // use only public imports; engine-private helpers below only seed and inspect the CPU fixture.
-struct CustomUiPolicy;
+struct CustomUiPolicy {
+    feature: WgpuFeatureDeclaration<WgpuUiFeature<UiColorTarget>>,
+}
 struct UiColorTarget;
 
 struct CustomUiCapture {
@@ -39,13 +41,18 @@ struct CustomUiCapture {
 
 impl WgpuRenderPolicy for CustomUiPolicy {
     type Capture = CustomUiCapture;
-    type Instances = WgpuFeatureInstance<WgpuUiFeature<UiColorTarget>>;
+    type Bindings = Arc<WgpuFeatureInstance<WgpuUiFeature<UiColorTarget>>>;
 
-    fn create_instances(
+    fn device_requirements(&self) -> WgpuDeviceRequirements {
+        self.feature.device_requirements().clone()
+    }
+
+    fn bind(
         &self,
-        context: &mut WgpuPolicyInstanceContext<'_>,
-    ) -> Result<Self::Instances, WgpuRenderProgramError> {
-        context.feature(&WgpuFeatureDefinition::new(WgpuUiFeature::new()))
+        _: &Self::Capture,
+        context: &mut WgpuPolicyBindingContext<'_>,
+    ) -> Result<Self::Bindings, WgpuRenderProgramError> {
+        context.feature(&self.feature)
     }
 
     fn validate_capture(
@@ -64,7 +71,7 @@ impl WgpuRenderPolicy for CustomUiPolicy {
 
     fn build(
         &self,
-        instance: &Self::Instances,
+        bindings: &Self::Bindings,
         capture: &Self::Capture,
         context: WgpuPolicyBuildContext<'_>,
     ) -> Result<WgpuPolicyProgram, WgpuRenderProgramError> {
@@ -104,10 +111,10 @@ impl WgpuRenderPolicy for CustomUiPolicy {
             target.clone(),
             ViewportRect::from_extent(extent).unwrap(),
         )?);
-        let binding = WgpuUiProgramBinding::new(1, instance, Arc::clone(&ui));
+        let binding = WgpuUiProgramBinding::new(1, bindings, Arc::clone(&ui));
         builder.operation(
             1,
-            instance,
+            bindings,
             ui,
             &[],
             &[target.clear(wgpu::Color::TRANSPARENT, AccessRole::Attachment)],
@@ -328,7 +335,9 @@ fn run_case(case: Case) {
     ))
     .unwrap();
     app.add_plugins(WgpuCapturePlugin).unwrap();
-    let definition = WgpuPolicyDefinition::new(CustomUiPolicy);
+    let definition = WgpuPolicyDefinition::new(CustomUiPolicy {
+        feature: WgpuFeatureDefinition::new(WgpuUiFeature::new()).declare(),
+    });
     app.insert_resource(ForeignInstallation(definition.install().unwrap()))
         .unwrap();
     install_wgpu_policy(&mut app, definition.install().unwrap()).unwrap();

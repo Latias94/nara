@@ -4,11 +4,13 @@ mod allocation;
 mod backend;
 #[cfg(any(feature = "stock-sprite", feature = "stock-ui"))]
 mod budget;
+mod candidate;
 mod canvas;
 mod device;
 mod error;
 mod frame;
 mod graph;
+mod history;
 mod host;
 mod observation;
 mod output;
@@ -58,10 +60,17 @@ use nara_render::{RenderBackendStatus, RenderFrameSkipReason};
 use nara_window::WindowId;
 
 pub use crate::backend::{WgpuBackendState, WgpuFrameTransactionStats};
+#[cfg(feature = "stock-ui")]
+pub use crate::candidate::WgpuUiCandidateSubmitFailure;
+pub use crate::candidate::{WgpuCandidateSubmitFailure, WgpuPublishedFrame, WgpuRenderCandidate};
 pub use crate::error::WgpuRenderError;
 pub use crate::frame::{WgpuFrameCaptureError, WgpuFrameSet as WgpuPolicyCaptureSet};
 pub use crate::graph::{
     AccessRole, GraphError, GraphLimits, LimitKind, TextureAlpha, TextureTransfer,
+};
+pub use crate::history::{
+    WgpuEmptyHistoryReason, WgpuHistoryBinding, WgpuHistoryBuffer, WgpuHistoryLineage,
+    WgpuHistoryReset, WgpuHistoryTexture, WgpuHistoryView,
 };
 pub use crate::host::{
     WgpuImageTargetActivation, WgpuImageTargetIdentity, WgpuImageTargetReservation, WgpuRenderHost,
@@ -87,21 +96,21 @@ pub use crate::plugin::{
 #[cfg(feature = "stock-ui")]
 pub use crate::policy::WgpuUiProgramBinding;
 pub use crate::policy::{
-    WgpuPolicyBuildContext, WgpuPolicyDefinition, WgpuPolicyFrameFacts, WgpuPolicyInstallation,
-    WgpuPolicyInstallationId, WgpuPolicyInstanceContext, WgpuPolicyProgram, WgpuRenderInput,
+    WgpuPolicyBindingContext, WgpuPolicyBuildContext, WgpuPolicyDefinition, WgpuPolicyFrameFacts,
+    WgpuPolicyInstallation, WgpuPolicyInstallationId, WgpuPolicyProgram, WgpuRenderInput,
     WgpuRenderPolicy,
 };
 pub use crate::presented::WgpuSubmittedImageReceipt;
 pub use crate::program::{
-    WgpuFeatureAllocation, WgpuFeatureDefinition, WgpuFeatureEncodeContext, WgpuFeatureInstance,
-    WgpuFeaturePreflightContext, WgpuFeaturePrepareContext, WgpuNativeResources,
-    WgpuOperationResources, WgpuProgramBuffer, WgpuProgramBufferOutput, WgpuProgramOutput,
-    WgpuProgramOutputs, WgpuProgramRead, WgpuProgramTexture, WgpuProgramTextureDescriptor,
-    WgpuProgramTextureOutput, WgpuProgramWrite, WgpuRenderFeature, WgpuRenderProgram,
-    WgpuRenderProgramBuilder, WgpuRenderProgramError,
+    WgpuFeatureAllocation, WgpuFeatureDeclaration, WgpuFeatureDefinition, WgpuFeatureEncodeContext,
+    WgpuFeatureInstance, WgpuFeaturePreflightContext, WgpuFeaturePrepareContext,
+    WgpuNativeResources, WgpuOperationResources, WgpuProgramBuffer, WgpuProgramBufferOutput,
+    WgpuProgramOutput, WgpuProgramOutputs, WgpuProgramRead, WgpuProgramTexture,
+    WgpuProgramTextureDescriptor, WgpuProgramTextureOutput, WgpuProgramWrite, WgpuRenderFeature,
+    WgpuRenderProgram, WgpuRenderProgramBuilder, WgpuRenderProgramError,
 };
 pub use crate::requirements::{WgpuDeviceRequirements, WgpuDeviceRequirementsError};
-pub use crate::stock_policy::{WgpuStockCapture, WgpuStockPolicy, WgpuStockPolicyInstances};
+pub use crate::stock_policy::{WgpuStockCapture, WgpuStockPolicy, WgpuStockPolicyBindings};
 pub use crate::submission::{WgpuSubmissionPrefix, WgpuSubmissionPrefixError};
 pub use crate::telemetry::{
     MAX_ADAPTER_SUMMARY_FIELD_BYTES, MAX_BUFFERED_FRAME_COMPLETIONS, MAX_PENDING_FRAME_COMPLETIONS,

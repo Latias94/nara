@@ -339,8 +339,9 @@ impl WgpuRenderHost {
             );
             return Ok(());
         };
-        let built = self.build_policy(id, &input, acquired.format)?;
-        let policy = &built.output;
+        let mut candidate =
+            self.prepare_candidate_in_namespace(id, &namespace, &input, acquired.format, false)?;
+        let policy = &candidate.built.output;
         Self::validate_policy_target(policy, packet, acquired.format, false)?;
         #[cfg(feature = "stock-ui")]
         let ui_facts = policy
@@ -371,58 +372,66 @@ impl WgpuRenderHost {
             })
             .transpose()?;
         let mut submitted_texture_bytes = 0;
-        self.execute_program_in_namespace(
+        let program = policy.program.clone();
+        let final_version = policy.final_version.clone();
+        let policy_facts = policy.facts;
+        let mut published = self.execute_program_in_namespace(
             id,
             &namespace,
-            &policy.program,
+            &program,
             None,
             Some(ProgramSurfaceTarget {
                 acquired: &acquired,
-                final_version: &policy.final_version,
-                instance_buffer_bytes: policy.facts.instance_buffer_bytes,
+                final_version: &final_version,
+                instance_buffer_bytes: policy_facts.instance_buffer_bytes,
                 app_frame_index,
                 work_started_at,
                 submitted_texture_bytes: &mut submitted_texture_bytes,
             }),
-            Some((policy, built.custody, built.metadata_bytes)),
+            Some(&mut candidate.built),
         )?;
-        #[cfg(feature = "stock-ui")]
-        if let Some(facts) = &mut submitted_ui {
-            for facts in facts {
-                facts.set_resource_bytes(
-                    submitted_texture_bytes,
-                    policy.facts.instance_buffer_bytes,
-                );
+        let presentation = (|| {
+            #[cfg(feature = "stock-ui")]
+            if let Some(facts) = &mut submitted_ui {
+                for facts in facts {
+                    facts.set_resource_bytes(
+                        submitted_texture_bytes,
+                        policy_facts.instance_buffer_bytes,
+                    );
+                }
             }
-        }
-        let scope = namespace
-            .device
-            .push_error_scope(wgpu::ErrorFilter::Validation);
-        namespace.queue.present(acquired.texture);
-        let error = pollster::block_on(scope.pop());
-        self.backend.check_device_health()?;
-        if let Some(error) = error {
-            return Err(Self::native_error(error));
-        }
-        let receipt = crate::presented::WgpuPresentedFrameReceipt::new(
-            runtime,
-            window.id,
-            acquired.surface_generation,
-            namespace.backend_instance_id,
-            namespace.device_epoch,
-            app_frame_index,
-            packet.frame_index(),
-        );
-        *presented_world = self.commit_runtime_world_presentation(id, &packet)?;
-        self.backend.commit_runtime_presentation(receipt);
-        #[cfg(feature = "stock-ui")]
-        if let Some(facts) = submitted_ui {
-            self.backend.publish_submitted_ui_facts(facts);
-        }
-        *stats = policy.facts.frame;
-        stats.draw_calls = stats.draw_calls.saturating_add(1);
-        frame.mark_submitted();
-        Ok(())
+            let scope = namespace
+                .device
+                .push_error_scope(wgpu::ErrorFilter::Validation);
+            namespace.queue.present(acquired.texture);
+            let error = pollster::block_on(scope.pop());
+            self.backend.check_device_health()?;
+            if let Some(error) = error {
+                return Err(Self::native_error(error));
+            }
+            let receipt = crate::presented::WgpuPresentedFrameReceipt::new(
+                runtime,
+                window.id,
+                acquired.surface_generation,
+                namespace.backend_instance_id,
+                namespace.device_epoch,
+                app_frame_index,
+                packet.frame_index(),
+            );
+            *presented_world = self.commit_runtime_world_presentation(id, &packet)?;
+            self.backend.commit_runtime_presentation(receipt);
+            #[cfg(feature = "stock-ui")]
+            if let Some(facts) = submitted_ui {
+                self.backend.publish_submitted_ui_facts(facts);
+            }
+            *stats = policy_facts.frame;
+            stats.draw_calls = stats.draw_calls.saturating_add(1);
+            frame.mark_submitted();
+            Ok(())
+        })();
+        self.release_published_candidate(candidate, &mut published);
+        self.release_publication_value((program, input, published));
+        presentation
     }
     fn invalidate_runtime_presentation(&mut self, id: super::WgpuRenderProducerId) {
         if let Some(view) = self.views.get_mut(&id) {

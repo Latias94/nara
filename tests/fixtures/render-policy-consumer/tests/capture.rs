@@ -1,5 +1,6 @@
 use std::sync::Arc;
 
+use nara_render::RenderViewId;
 use nara_render_wgpu::{
     WgpuDeviceRequirements, WgpuPolicyDefinition, WgpuRenderHost, WgpuRenderProgramError,
 };
@@ -17,16 +18,20 @@ fn installation_close_refuses_new_captures_and_preserves_original_input() {
     let mut installation = definition.install().unwrap();
     let source = image::source();
     let target = image::target(16, 16);
+    let view_id = RenderViewId::try_acquire().unwrap();
     let capture = ScalarField::default().capture();
     let input = installation
-        .capture(image::packet(source, 1, target), Arc::clone(&capture))
+        .capture(
+            image::packet(source, view_id, 1, target),
+            Arc::clone(&capture),
+        )
         .unwrap();
     let original_installation = installation.id();
     let clone = input.clone();
     installation.close();
     assert!(!installation.is_open());
     assert!(matches!(
-        installation.capture(image::packet(source, 2, target), capture),
+        installation.capture(image::packet(source, view_id, 2, target), capture),
         Err(WgpuRenderProgramError::PolicyClosed),
     ));
     let replacement = definition.install().unwrap();
@@ -54,12 +59,13 @@ fn capture_copies_normal_domain_data_and_validates_before_native_work() {
 
     let source = image::source();
     let target = image::target(16, 16);
+    let view_id = RenderViewId::try_acquire().unwrap();
     installation
-        .capture(image::packet(source, 1, target), capture)
+        .capture(image::packet(source, view_id, 1, target), capture)
         .unwrap();
     field.samples[5] = 4;
     assert!(matches!(
-        installation.capture(image::packet(source, 2, target), field.capture()),
+        installation.capture(image::packet(source, view_id, 2, target), field.capture()),
         Err(WgpuRenderProgramError::Feature { .. }),
     ));
 }

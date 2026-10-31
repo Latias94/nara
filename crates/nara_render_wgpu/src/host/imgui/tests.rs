@@ -947,6 +947,7 @@ mod bare_primary {
             let viewport = ViewportRect::new(0, 0, 64, 64).unwrap();
             let mut views = ExtractedViews::default();
             views.push(ExtractedView {
+                id: nara_render::RenderViewId::try_acquire().unwrap(),
                 camera_entity: Entity::PLACEHOLDER,
                 target: RenderTarget::Image(image),
                 viewport,
@@ -1127,7 +1128,7 @@ mod native {
             EditorRenderGeneration, build_editor_render_frame_packet, editor_viewport_image_target,
         },
         Color, Extent2d, ExtractedView, ExtractedViews, RenderFramePacket, RenderImage2d,
-        RenderImagePacket, RenderTarget, RenderWindowPacket, ViewportRect,
+        RenderImagePacket, RenderTarget, RenderViewId, RenderWindowPacket, ViewportRect,
     };
     use nara_window::{PresentMode, WindowId, WindowResolution, backend::WindowHandleProvider};
     use winit::{
@@ -1260,6 +1261,7 @@ mod native {
         mirror: WgpuImageDisplay,
         successor: Option<WgpuImageOutput>,
         generation: EditorRenderGeneration,
+        view_id: RenderViewId,
         target: RenderImagePacket,
         frame_index: u64,
         phase: Phase,
@@ -1334,7 +1336,8 @@ mod native {
                 Extent2d::new(64, 64).unwrap(),
             )
             .unwrap();
-            let image_packet = image_packet(generation, target, 1);
+            let view_id = RenderViewId::try_acquire().unwrap();
+            let image_packet = image_packet(generation, view_id, target, 1);
             execution.begin_editor_frame(packet, 1).unwrap();
             let producer = execution.create_producer().unwrap();
             let reservation = execution
@@ -1380,6 +1383,7 @@ mod native {
                 mirror,
                 successor: None,
                 generation,
+                view_id,
                 target,
                 frame_index: 1,
                 phase: Phase::Exact,
@@ -1563,6 +1567,7 @@ mod native {
                             &self.producer,
                             &crate::host::tests::test_stock_input(image_packet(
                                 self.generation,
+                                self.view_id,
                                 self.target,
                                 2,
                             )),
@@ -1783,12 +1788,14 @@ mod native {
 
     fn image_packet(
         generation: EditorRenderGeneration,
+        view_id: RenderViewId,
         target: RenderImagePacket,
         frame_index: u64,
     ) -> RenderFramePacket {
         let viewport = ViewportRect::new(0, 0, 64, 64).unwrap();
         let mut views = ExtractedViews::default();
         views.push(ExtractedView {
+            id: view_id,
             camera_entity: Entity::PLACEHOLDER,
             target: RenderTarget::Image(target.image()),
             viewport,

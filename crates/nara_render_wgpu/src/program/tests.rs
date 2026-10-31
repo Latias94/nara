@@ -67,6 +67,36 @@ fn builder() -> WgpuRenderProgramBuilder {
 }
 
 #[test]
+fn policy_program_metadata_cannot_expand_the_engine_preallocation_envelope() {
+    let excessive = GraphLimits {
+        max_accesses: 1_000_000,
+        max_modeled_metadata_bytes: 1024 * 1024 * 1024,
+        ..GraphLimits::default()
+    };
+    assert!(matches!(
+        WgpuRenderProgramBuilder::new(source(), 1, excessive),
+        Err(WgpuRenderProgramError::Graph(GraphError::LimitExceeded(
+            crate::LimitKind::MetadataBytes
+        )))
+    ));
+    assert!(matches!(
+        WgpuRenderProgramBuilder::required_metadata_bytes(excessive),
+        Err(WgpuRenderProgramError::Graph(GraphError::LimitExceeded(
+            crate::LimitKind::MetadataBytes
+        )))
+    ));
+    let enlarged_allowance = GraphLimits {
+        max_modeled_metadata_bytes: usize::MAX,
+        ..GraphLimits::default()
+    };
+    let accepted = WgpuRenderProgramBuilder::new(source(), 1, enlarged_allowance).unwrap();
+    assert_eq!(
+        accepted.max_modeled_metadata_bytes,
+        MAX_PROGRAM_METADATA_BYTES
+    );
+}
+
+#[test]
 fn public_builder_rejects_foreign_writes_before_consuming_the_operation_key() {
     let mut first = builder();
     let foreign = first.texture::<SceneColor>(descriptor()).unwrap();

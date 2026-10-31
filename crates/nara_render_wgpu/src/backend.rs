@@ -2304,6 +2304,7 @@ mod tests {
         let window = Window::default();
         let mut views = ExtractedViews::default();
         views.push(ExtractedView {
+            id: nara_render::RenderViewId::try_acquire().unwrap(),
             camera_entity: Entity::from_raw_u32(1).unwrap(),
             target: RenderTarget::PrimaryWindow,
             viewport: ViewportRect::new(0, 0, 1280, 720).unwrap(),

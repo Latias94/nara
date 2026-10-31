@@ -34,6 +34,7 @@ impl PresentedWorld {
         let viewport = ViewportRect::new(0, 0, 64, 64).unwrap();
         let mut views = ExtractedViews::default();
         views.push(ExtractedView {
+            id: nara_render::RenderViewId::try_acquire().unwrap(),
             camera_entity: camera,
             target: RenderTarget::Window(window.id),
             viewport,

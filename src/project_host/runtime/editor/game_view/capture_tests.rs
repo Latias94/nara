@@ -10,12 +10,12 @@ use std::{
 use nara_core::{Color, Mat3};
 use nara_ecs::{Entity, Res, ResMut, schedule::IntoScheduleConfigs};
 use nara_render::{
-    ExtractedView, ExtractedViews, RenderImage2d, RenderImagePacket, RenderTarget, ViewLoadOp,
-    ViewMapping2d, ViewportRect,
+    ExtractedView, ExtractedViews, RenderImage2d, RenderImagePacket, RenderTarget, RenderViewId,
+    ViewLoadOp, ViewMapping2d, ViewportRect,
 };
 use nara_render_wgpu::{
-    WgpuCapturePlugin, WgpuPolicyBuildContext, WgpuPolicyCaptureSet, WgpuPolicyDefinition,
-    WgpuPolicyFrameWriter, WgpuPolicyInstallation, WgpuPolicyInstanceContext, WgpuPolicyProgram,
+    WgpuCapturePlugin, WgpuPolicyBindingContext, WgpuPolicyBuildContext, WgpuPolicyCaptureSet,
+    WgpuPolicyDefinition, WgpuPolicyFrameWriter, WgpuPolicyInstallation, WgpuPolicyProgram,
     WgpuRenderPolicy, WgpuRenderProgramError, install_wgpu_policy,
 };
 use nara_window::{
@@ -31,6 +31,7 @@ struct SelectedSnapshot {
 struct CaptureSource {
     snapshot: Arc<SelectedSnapshot>,
     window: Window,
+    view_id: RenderViewId,
 }
 
 struct SelectedPolicy {
@@ -39,11 +40,12 @@ struct SelectedPolicy {
 
 impl WgpuRenderPolicy for SelectedPolicy {
     type Capture = SelectedSnapshot;
-    type Instances = ();
+    type Bindings = ();
 
-    fn create_instances(
+    fn bind(
         &self,
-        _: &mut WgpuPolicyInstanceContext<'_>,
+        _: &SelectedSnapshot,
+        _: &mut WgpuPolicyBindingContext<'_>,
     ) -> Result<(), WgpuRenderProgramError> {
         panic!("Game capture transport must not instantiate a renderer")
     }
@@ -74,6 +76,7 @@ fn extract_views(source: Res<CaptureSource>, mut views: ResMut<ExtractedViews>) 
     let viewport = ViewportRect::new(0, 0, 2, 2).unwrap();
     views.clear();
     views.push(ExtractedView {
+        id: source.view_id,
         camera_entity: Entity::PLACEHOLDER,
         target: RenderTarget::Window(source.window.id),
         viewport,
@@ -139,6 +142,7 @@ fn runtime(
     app.insert_resource(CaptureSource {
         snapshot: Arc::clone(&snapshot),
         window,
+        view_id: RenderViewId::try_acquire().unwrap(),
     })
     .unwrap();
     app.add_systems(CoreStage::Prepare, extract_views).unwrap();

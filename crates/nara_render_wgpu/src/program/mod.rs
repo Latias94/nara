@@ -23,7 +23,8 @@ pub use crate::preparation::WgpuFeatureAllocation;
 pub(crate) use feature::NativeFeatureStates;
 use feature::{CapturedOperation, FeatureInstanceIdentity, OperationReport};
 pub use feature::{
-    WgpuFeatureDefinition, WgpuFeatureInstance, WgpuNativeResources, WgpuRenderFeature,
+    WgpuFeatureDeclaration, WgpuFeatureDefinition, WgpuFeatureInstance, WgpuNativeResources,
+    WgpuRenderFeature,
 };
 pub(crate) use native::prepare_and_encode;
 pub(crate) use native::{FeaturePreparationAttempt, NativePreparationCost};
@@ -32,8 +33,9 @@ pub use native::{
     WgpuOperationResources,
 };
 pub(crate) use resources::NativeResource;
-use resources::require_descriptor;
+pub(crate) use resources::require_descriptor;
 pub(crate) use resources::{HostProgramTexture, ProgramResourceStorage};
+pub(crate) const MAX_PROGRAM_METADATA_BYTES: usize = 64 * 1024 * 1024;
 pub use resources::{
     WgpuProgramBuffer, WgpuProgramBufferOutput, WgpuProgramOutput, WgpuProgramRead,
     WgpuProgramTexture, WgpuProgramTextureDescriptor, WgpuProgramTextureOutput, WgpuProgramWrite,
@@ -60,6 +62,16 @@ pub enum WgpuRenderProgramError {
     PolicyCapacity,
     #[error("policy validation or construction panicked")]
     PolicyPanicked,
+    #[error("the candidate's pinned history basis is no longer current")]
+    StaleHistory,
+    #[error("the original history capture has already published")]
+    HistoryAlreadyConsumed,
+    #[error("history metadata is at capacity")]
+    HistoryCapacity,
+    #[error("pending render candidates retain the available metadata capacity")]
+    CandidateCapacity,
+    #[error("the history declaration or complete output binding is invalid")]
+    HistoryDeclaration,
     #[error(transparent)]
     PolicyRequirements(#[from] crate::WgpuDeviceRequirementsError),
     #[error("the resource has a different native kind")]
@@ -206,8 +218,13 @@ impl WgpuRenderProgramBuilder {
     pub fn new(
         source: RenderFrameSourceGeneration,
         frame_index: u64,
-        limits: GraphLimits,
+        mut limits: GraphLimits,
     ) -> Result<Self, WgpuRenderProgramError> {
+        // A caller may lower this engine envelope, never enlarge it beyond the amount admitted
+        // before policy construction. Check the complete graph/scratch cost before any vectors.
+        limits.max_modeled_metadata_bytes = limits
+            .max_modeled_metadata_bytes
+            .min(MAX_PROGRAM_METADATA_BYTES);
         let modeled_metadata_bytes = Self::required_metadata_bytes(limits)?;
         let mut operations = Vec::new();
         operations
@@ -231,7 +248,12 @@ impl WgpuRenderProgramBuilder {
     /// Conservative capacity envelope for graph/scratch, execution side tables, native resource
     /// wrappers and the bounded state index. Each actual typed operation additionally admits its
     /// exact inline capture/state/prepared/report wrappers before allocating a capture wrapper.
-    pub fn required_metadata_bytes(limits: GraphLimits) -> Result<usize, WgpuRenderProgramError> {
+    pub fn required_metadata_bytes(
+        mut limits: GraphLimits,
+    ) -> Result<usize, WgpuRenderProgramError> {
+        limits.max_modeled_metadata_bytes = limits
+            .max_modeled_metadata_bytes
+            .min(MAX_PROGRAM_METADATA_BYTES);
         let mut bytes = limits.modeled_metadata_bytes()?;
         limits
             .max_operations
@@ -467,6 +489,7 @@ pub struct WgpuProgramOutputs {
     pub(crate) outputs: Vec<(ResourceVersion, Arc<ProgramResourceStorage>)>,
     pub(crate) reports: Vec<ProgramOperationReport>,
     pub(crate) prefix: WgpuSubmissionPrefix,
+    pub(crate) cleanup_panicked: bool,
 }
 
 impl std::fmt::Debug for WgpuProgramOutputs {
@@ -480,7 +503,15 @@ impl std::fmt::Debug for WgpuProgramOutputs {
 }
 
 impl WgpuProgramOutputs {
-    fn storage(
+    /// Reports isolated cleanup panics after publication, including later native completion.
+    /// The observation can change when the original prefix releases its last CPU owners.
+    /// Publication stays successful and cannot be retried because a destructor failed.
+    #[must_use]
+    pub fn cleanup_panicked(&self) -> bool {
+        self.cleanup_panicked || self.prefix.cleanup_fault_count() != 0
+    }
+
+    pub(crate) fn storage(
         &self,
         version: &ResourceVersion,
     ) -> Result<Arc<ProgramResourceStorage>, WgpuRenderProgramError> {

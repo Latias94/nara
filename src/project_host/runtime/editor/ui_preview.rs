@@ -9,8 +9,8 @@ use nara_render::{
     __private::{
         EditorRenderGeneration, build_editor_render_frame_packet, editor_viewport_image_target,
     },
-    Color, Extent2d, ExtractedView, ExtractedViews, RenderImage2d, RenderTarget, ViewLoadOp,
-    ViewMapping2d, ViewportRect,
+    Color, Extent2d, ExtractedView, ExtractedViews, RenderImage2d, RenderTarget, RenderViewId,
+    ViewLoadOp, ViewMapping2d, ViewportRect,
 };
 #[cfg(feature = "render-wgpu")]
 use nara_render_wgpu::{
@@ -134,6 +134,7 @@ pub(super) struct EditorUiPreviewSession {
     #[cfg(feature = "render-wgpu")]
     policy: WgpuPolicyInstallation<WgpuStockPolicy>,
     render_generation: EditorRenderGeneration,
+    view_id: RenderViewId,
     target: Handle<RenderImage2d>,
     next_frame_index: u64,
     next_compile_generation: u64,
@@ -180,6 +181,7 @@ impl EditorUiPreviewSession {
             #[cfg(feature = "render-wgpu")]
             policy: WgpuPolicyDefinition::new(WgpuStockPolicy::new()).install()?,
             render_generation,
+            view_id: RenderViewId::try_acquire().ok_or(UiPreviewError::ViewIdentityExhausted)?,
             target: RenderImage2d::allocate_handle()?,
             next_frame_index: 0,
             next_compile_generation: 0,
@@ -351,6 +353,7 @@ impl EditorUiPreviewSession {
         let viewport = ViewportRect::from_extent(extent).ok_or(UiPreviewError::InvalidProfile)?;
         let mut views = ExtractedViews::default();
         views.push(ExtractedView {
+            id: self.view_id,
             camera_entity: Entity::PLACEHOLDER,
             target,
             viewport,
@@ -433,6 +436,8 @@ pub(super) enum UiPreviewError {
     Policy(#[from] nara_render_wgpu::WgpuRenderProgramError),
     #[error("the Editor UI render generation is exhausted")]
     RenderGenerationExhausted,
+    #[error("the Editor UI View identity is exhausted")]
+    ViewIdentityExhausted,
     #[error("the Editor UI frame index is exhausted")]
     FrameIndexExhausted,
     #[error("the Editor UI compile generation is exhausted")]

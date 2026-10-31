@@ -2,7 +2,7 @@
 
 **Status**: Accepted
 **Date**: 2026-07-09
-**Last Revised**: 2026-11-01 (original policy capture and concrete UI completion custody)
+**Last Revised**: 2026-11-01 (captured history and original submitted-resource cleanup)
 **Refines**: ADR 0010, ADR 0017, ADR 0032, ADR 0033, ADR 0037
 **Refined By**: ADR 0046: Plugin Metadata and Default Plugin Groups; ADR 0053: Visibility,
 Culling, and Tilemap Render Cache (Superseded); ADR 0054: GPU Upload Budget and Buffer Allocation Policy; ADR
@@ -69,12 +69,29 @@ callback reports abandonment; explicit original-device fence evidence can settle
 cannot mint output, history, presentation or UI success. Whole-queue retirement remains final
 Host close, with an explicitly reported uncertainty fallback for an un-waitable rejected index.
 
+After the actual completion fence, release original resources in flat reverse dependency order,
+outside custody locks. Isolate and observe each entry's destructor failure while attempting the
+remaining entries. Keep this cleanup observation distinct from callback abandonment: an observed
+physical fence stays observed, while a genuinely discarded callback still requires original-device
+recovery. Late cleanup cannot unwind through native polling and replace an already published result,
+advance history again or grant display/UI success. Original prefix clones retain their cleanup
+observation after Host maintenance retires its token.
+
 These accepted responsibilities are being implemented under the
 [render ownership design](../render-host-ownership-design.md). Their current evidence belongs in
 the implementation ledger. The subsequent
 [finite captured-program refinement in ADR0094](0094-minimal-render-execution-boundary-and-evidence-gated-extensions.md#finite-captured-wgpu-programs)
 accepts typed texture/buffer programs through this same original Host custody. The complete
 Proposed0121 View/history and Editor composition contract remains separate.
+
+ADR0094's selected captured-history refinement extends this same final publication boundary.
+An original CPU lineage retains deduplication independently of target/group/slot reclamation;
+its actual declarations and accepted inputs govern metadata lifetime. A candidate owns exact
+Feature owners and predecessors, with ordinary RAII budget guards. Native submission custody
+is created and bound only inside the serial Host attempt. Temporal reset on a new epoch is
+explicit and does not claim reconstruction of unavailable old history pixels. Bounded history
+implementation, independent-consumer evidence and remaining full-unit scope are tracked in the
+implementation ledger.
 
 ## Context
 

@@ -2058,7 +2058,7 @@ mod world_presentation_tests {
         WorldCanvas, WorldPointer, build_render_frame_packet_with_world_canvas,
     };
     use nara_render_wgpu::{
-        WgpuPolicyBuildContext, WgpuPolicyDefinition, WgpuPolicyInstanceContext, WgpuPolicyProgram,
+        WgpuPolicyBindingContext, WgpuPolicyBuildContext, WgpuPolicyDefinition, WgpuPolicyProgram,
         WgpuRenderPolicy, WgpuRenderProgramError,
     };
 
@@ -2066,11 +2066,12 @@ mod world_presentation_tests {
 
     impl WgpuRenderPolicy for PickingPolicy {
         type Capture = ();
-        type Instances = ();
+        type Bindings = ();
 
-        fn create_instances(
+        fn bind(
             &self,
-            _: &mut WgpuPolicyInstanceContext<'_>,
+            _: &(),
+            _: &mut WgpuPolicyBindingContext<'_>,
         ) -> Result<(), WgpuRenderProgramError> {
             panic!("world-presentation ownership tests do not execute a renderer")
         }
@@ -2169,6 +2170,7 @@ mod world_presentation_tests {
         let viewport = ViewportRect::new(0, 0, 320, 180).unwrap();
         let mut views = ExtractedViews::default();
         views.push(ExtractedView {
+            id: nara_render::RenderViewId::try_acquire().unwrap(),
             camera_entity: camera,
             target: RenderTarget::Window(window.id),
             viewport,

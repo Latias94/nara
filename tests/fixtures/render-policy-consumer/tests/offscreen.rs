@@ -2,6 +2,7 @@
 
 use std::sync::Arc;
 
+use nara_render::RenderViewId;
 use nara_render_wgpu::{WgpuPolicyDefinition, WgpuRenderHost, WgpuRenderHostError};
 
 pub mod support;
@@ -19,14 +20,21 @@ fn accepted_capture_reconstructs_on_a_fresh_host_after_installation_close() {
     let mut installation = definition.install().unwrap();
     let source = image::source();
     let target = image::target(16, 16);
+    let view_id = RenderViewId::try_acquire().unwrap();
     let capture = ScalarField::default().capture();
     let input = installation
-        .capture(image::packet(source, 1, target), Arc::clone(&capture))
+        .capture(
+            image::packet(source, view_id, 1, target),
+            Arc::clone(&capture),
+        )
         .unwrap();
     installation.close();
     assert!(
         installation
-            .capture(image::packet(source, 2, target), Arc::clone(&capture))
+            .capture(
+                image::packet(source, view_id, 2, target),
+                Arc::clone(&capture)
+            )
             .is_err(),
     );
 
@@ -51,7 +59,10 @@ fn accepted_capture_reconstructs_on_a_fresh_host_after_installation_close() {
     let replacement = WgpuPolicyDefinition::new(HeatmapPolicy::new(2));
     let replacement_installation = replacement.install().unwrap();
     let replacement_input = replacement_installation
-        .capture(image::packet(source, 2, target), Arc::clone(&capture))
+        .capture(
+            image::packet(source, view_id, 2, target),
+            Arc::clone(&capture),
+        )
         .unwrap();
     assert_ne!(input.installation(), replacement_input.installation());
     let mut fresh = WgpuRenderHost::offscreen();
@@ -94,12 +105,20 @@ fn producer_a_retires_while_b_keeps_its_own_policy_and_outputs() {
     let b_source = image::source();
     let a_target = image::target(16, 16);
     let b_target = image::target(16, 16);
+    let a_view_id = RenderViewId::try_acquire().unwrap();
+    let b_view_id = RenderViewId::try_acquire().unwrap();
     let capture = ScalarField::default().capture();
     let a_input = a_installation
-        .capture(image::packet(a_source, 1, a_target), Arc::clone(&capture))
+        .capture(
+            image::packet(a_source, a_view_id, 1, a_target),
+            Arc::clone(&capture),
+        )
         .unwrap();
     let b_input = b_installation
-        .capture(image::packet(b_source, 1, b_target), Arc::clone(&capture))
+        .capture(
+            image::packet(b_source, b_view_id, 1, b_target),
+            Arc::clone(&capture),
+        )
         .unwrap();
     let mut host = WgpuRenderHost::offscreen();
     let a = host.create_producer().unwrap();
@@ -120,7 +139,10 @@ fn producer_a_retires_while_b_keeps_its_own_policy_and_outputs() {
     ));
     assert!(host.reserve_image_target(&a, a_source, a_target).is_err());
     let b_next_input = b_installation
-        .capture(image::packet(b_source, 2, b_target), Arc::clone(&capture))
+        .capture(
+            image::packet(b_source, b_view_id, 2, b_target),
+            Arc::clone(&capture),
+        )
         .unwrap();
     host.begin_frame(2).unwrap();
     let b_next = host.submit(&b, &b_next_input).unwrap();
@@ -136,7 +158,10 @@ fn producer_a_retires_while_b_keeps_its_own_policy_and_outputs() {
     image::assert_heatmap(&mut host, &b_next, &capture, 1);
     image::settle(&a_prefix);
     let b_later_input = b_installation
-        .capture(image::packet(b_source, 3, b_target), Arc::clone(&capture))
+        .capture(
+            image::packet(b_source, b_view_id, 3, b_target),
+            Arc::clone(&capture),
+        )
         .unwrap();
     host.begin_frame(3).unwrap();
     let b_later = host.submit(&b, &b_later_input).unwrap();

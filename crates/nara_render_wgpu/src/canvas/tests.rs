@@ -369,6 +369,7 @@ fn clear_only_canvas_uses_checked_base_backend_without_submitters() {
     let mut views = ExtractedViews::default();
     let viewport = nara_render::ViewportRect::new(0, 0, 8, 4).unwrap();
     views.push(nara_render::ExtractedView {
+        id: nara_render::RenderViewId::try_acquire().unwrap(),
         camera_entity: nara_ecs::Entity::PLACEHOLDER,
         target: RenderTarget::Window(WindowId::PRIMARY),
         viewport,

@@ -4,7 +4,7 @@ use std::{
     any::Any,
     mem::size_of,
     sync::{
-        Arc, Mutex,
+        Arc, Mutex, Weak,
         atomic::{AtomicBool, AtomicU64, Ordering},
     },
 };
@@ -16,6 +16,7 @@ use super::{
     WgpuRenderProgramError,
 };
 
+static NEXT_FEATURE_DECLARATION: AtomicU64 = AtomicU64::new(1);
 static NEXT_FEATURE_INSTANCE: AtomicU64 = AtomicU64::new(1);
 const MAX_ACTIVE_NATIVE_FEATURE_STATES: usize = 1024;
 
@@ -113,6 +114,87 @@ impl<F: WgpuRenderFeature> WgpuFeatureDefinition<F> {
     #[must_use]
     pub fn device_requirements(&self) -> &WgpuDeviceRequirements {
         &self.0.requirements
+    }
+
+    /// Declares a new logical effect incarnation independently of any Host or producer.
+    ///
+    /// Each call acquires a process-local identity that is never reused. Exhausting the
+    /// identity space aborts the process rather than allowing an old incarnation to alias.
+    /// Clone the declaration to retain the same incarnation across immutable captures.
+    #[must_use]
+    pub fn declare(&self) -> WgpuFeatureDeclaration<F> {
+        let id = NEXT_FEATURE_DECLARATION
+            .fetch_update(Ordering::Relaxed, Ordering::Relaxed, |id| id.checked_add(1))
+            .unwrap_or_else(|_| std::process::abort());
+        WgpuFeatureDeclaration {
+            id,
+            definition: self.clone(),
+            lifetime: Arc::new(()),
+        }
+    }
+}
+
+/// An immutable original logical effect incarnation and its exact implementation.
+///
+/// A declaration carries no Host admission authority. Dropping one clone does not close a
+/// bound Feature instance; the actual instance owners retain their explicit Drop-close
+/// semantics. Retained policies and captures keep declarations usable on a replacement Host.
+/// Clones name the same effect even across policy installations on one producer; independently
+/// mutable effects require separate calls to [`WgpuFeatureDefinition::declare`].
+pub struct WgpuFeatureDeclaration<F: WgpuRenderFeature> {
+    id: u64,
+    definition: WgpuFeatureDefinition<F>,
+    lifetime: Arc<()>,
+}
+
+impl<F: WgpuRenderFeature> Clone for WgpuFeatureDeclaration<F> {
+    fn clone(&self) -> Self {
+        Self {
+            id: self.id,
+            definition: self.definition.clone(),
+            lifetime: Arc::clone(&self.lifetime),
+        }
+    }
+}
+
+impl<F: WgpuRenderFeature> std::fmt::Debug for WgpuFeatureDeclaration<F> {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter
+            .debug_struct("WgpuFeatureDeclaration")
+            .field("id", &self.id)
+            .field("definition", &self.definition)
+            .finish_non_exhaustive()
+    }
+}
+
+impl<F: WgpuRenderFeature> WgpuFeatureDeclaration<F> {
+    #[must_use]
+    pub fn device_requirements(&self) -> &WgpuDeviceRequirements {
+        self.definition.device_requirements()
+    }
+
+    pub(crate) fn id(&self) -> u64 {
+        self.id
+    }
+
+    pub(crate) fn lifetime(&self) -> Weak<()> {
+        Arc::downgrade(&self.lifetime)
+    }
+
+    pub(crate) fn definition(&self) -> &WgpuFeatureDefinition<F> {
+        &self.definition
+    }
+
+    pub(crate) fn binding_metadata_bytes(&self) -> Option<usize> {
+        [
+            size_of::<WgpuFeatureInstance<F>>(),
+            size_of::<FeatureInstanceIdentity>(),
+            size_of::<FeatureDefinition<F>>(),
+            // Instance, identity, original definition and declaration lifetime counters.
+            8 * size_of::<usize>(),
+        ]
+        .into_iter()
+        .try_fold(0usize, usize::checked_add)
     }
 }
 

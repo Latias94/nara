@@ -231,3 +231,15 @@ basis are fixed at preparation. Existing in-flight owners can retain this value 
 UI sidecar. Ordinary budget guards follow RAII, while an unbound native submission reservation
 cannot escape the same serial Host attempt. This resolves the next design's custody choice
 without implementing history or adding a general admission registry.
+
+The subsequent current-source audit at `9f79d51` plus the uncommitted View/history replacement
+rechecked all91 archive manifest entries and the ten imported studies. Independent runtime/content
+and render/Editor reviews found no additional uncovered plan requirement. Keep R5's coordinated
+Schema/claim/occurrence evolution and interrupted recovery, R4c/R10's joint execution/motion
+consumer, R8's exact display/UI completion, R9b's material declarations and R11's editable Nara-drawn
+Inspector open under their existing gates. The history replacement now has executable production
+consumers in qualification; this statement does not close the complete render unit. One concrete
+integration correction belongs to [ADR0040](../architecture/adr/0040-render-resource-lifetime-and-submitter-ownership.md):
+original submitted resources can own the final Capture/Bindings after candidate disposal, so late
+destructor faults must be isolated at actual prefix release and observed separately from callback
+abandonment. This refines that owner implementation without a new roadmap, toolkit or registry.

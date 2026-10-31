@@ -21,7 +21,8 @@ The policy supports exactly one full-target logical View, no fixed world canvas,
 one typed final texture using the actual destination format, with explicit initialization,
 one writer and complete output publication. No Sprite/UI stock Feature, stock quad path,
 `WgpuBackendPlugins`, `WgpuStockPolicyPlugin`, or direct `submit_program` path is used.
-There are no temporal, history, UI, source/processed-product or performance claims.
+This scalar renderer has no temporal, UI, source/processed-product or performance claim. The
+separate four-chain temporal consumer below has its own workload and qualification scope.
 
 ## Actual Runtime window and original input reconstruction
 
@@ -109,3 +110,44 @@ to its absolute executable path before running the window test. The default look
 relative to the test executable's profile directory and supports the shared root target.
 Vulkan/Metal selection is available for a future native run; it has no evidence in this
 source-only handoff. The README describes intended assertions, not results of executed tests.
+
+## Temporal Policy And Original View Ownership
+
+The additional `tests/history.rs` consumer uses `tests/support/accumulation.rs` and
+`accumulation.wgsl` for two Views with two independent accumulation declarations per View.
+One production Host transaction publishes all four exact history textures and the selected final
+image. The shader computes `Hn = 0.25 * current + 0.75 * predecessor`; an independent `f64` CPU
+oracle checks every linear-float history pixel and the composed RGBA8 image. Ordinary program
+imports and Host-owned image use provide readback, without an independent queue submission owner.
+
+Original topology retains `WgpuHistoryView` alongside each neutral captured ID. Immutable captures
+clone the topology and effect declarations. Binding creates candidate-local slot tokens; the Host
+pins complete predecessors before graph construction. Tests cover View/effect/output reorder,
+one-effect replacement with the other three histories continuous, sibling/reset rejection,
+deduplication after reset, public budget refusal returning the same candidate, and independent B
+progress while A waits or retires. Retained A outputs keep their original pixels. A sixth test
+keeps one Feature declaration alive across 513 retired View owners, proving active slot reclamation
+rather than a lifetime registration ceiling. It also retrieves the final typed output for ordinary
+imports. Fresh-Host recovery explicitly starts empty `DeviceRecreated` history, without claiming
+reconstruction of the old temporal pixels.
+
+`examples/history_window.rs` runs that same policy through ordinary managed Runtime capture and
+native presentation. Two ordinary Camera components supply actual extracted View IDs. The first
+capture fixes original topology and lineage. Three actual presented receipts supply the next
+predecessor expectations, allowing unrelated skipped frames. The example checks original capture
+identity, installation, View continuity, native acquire/submit/present and complete graph draws,
+then completes original Runtime/native retirement. Window sRGB/BGRA output is selected from actual
+destination facts; the offscreen numeric oracle remains linear RGBA8. The window probe adds
+execution-path evidence, not another window pixel-quality or performance claim.
+
+Run serially with the root target and explicit hardware selection already described above:
+
+```powershell
+cargo +1.95.0 nextest run --locked --manifest-path tests/fixtures/render-policy-consumer/Cargo.toml --test history --run-ignored only --test-threads=1
+cargo +1.95.0 build --locked --manifest-path tests/fixtures/render-policy-consumer/Cargo.toml --example history_window
+cargo +1.95.0 nextest run --locked --manifest-path tests/fixtures/render-policy-consumer/Cargo.toml --test history_window --run-ignored only --test-threads=1
+```
+
+The history window test launches the prebuilt executable on a real main thread and never invokes
+Cargo. `NARA_RENDER_POLICY_HISTORY_WINDOW_EXE` selects an explicit executable path when needed.
+Missing hardware, expected presentation or retirement fails; no adapter-failure skip qualifies it.

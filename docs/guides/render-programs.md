@@ -10,7 +10,9 @@ This guide covers the bounded prerequisite admitted by
 [ADR0094](../architecture/adr/0094-minimal-render-execution-boundary-and-evidence-gated-extensions.md#finite-captured-wgpu-programs).
 The [typed policy replacement](../knowledge/engineering/verification/2026-10/2026-10-31T192756Z-original-typed-render-policy-capture-and-complete-consumer-qualification-df7f9377f51142b78060b53617c800a1.md)
 also carries ordinary Runtime/Editor consumers and an independent alternate policy through this
-Host. Complete View/history and custom-drawn Editor qualification remain in the
+Host. The [captured-history successor](../knowledge/engineering/verification/2026-10/2026-10-31T210034Z-captured-view-histories-and-original-submission-cleanup-production-qualification-5c061376803446c0bff1a95495ca55c7.md)
+adds exact View/Feature history candidates and independent temporal consumers. Complete
+cross-stream composition and custom-drawn Editor qualification remain in the
 [render unit](../plans/2026-10-31-render-composition-and-host-execution-plan.md).
 
 ## Definitions, Instances And Captures
@@ -35,9 +37,13 @@ other producers. A healthy device is never silently replaced.
 ## Policy Capture And Selection
 
 Implement `WgpuRenderPolicy` when a renderer owns capture meaning and complete graph wiring.
-Its immutable definition freezes device requirements. Its `Capture` contains replayable CPU data;
-its producer-local `Instances` hold stable typed Feature instances. `create_instances` receives
-`WgpuPolicyInstanceContext`, which only creates Features within that original request. `build`
+Its immutable definition freezes device requirements. Its `Capture` contains replayable CPU data
+and the original logical declarations. Call `WgpuFeatureDefinition::declare` once for each
+independently mutable effect incarnation and retain or clone that declaration into captures.
+Each preparation calls `bind(capture, context)` to create immutable `Bindings` holding actual
+typed Feature owners. `WgpuPolicyBindingContext::feature` resolves the original declaration within
+the closed device request. Cloning a declaration preserves its incarnation; another `declare`
+creates an independent one. Only successful complete publication changes cached membership. `build`
 receives the exact capture, neutral packet and actual destination format. It has no World, Device,
 Queue or presentation authority. Return `WgpuPolicyProgram` with its published final texture and
 explicit observation counters. The Host checks the final texture's actual extent, format,
@@ -115,6 +121,55 @@ and whole four-byte-aligned unmapped buffers. Unsupported scopes, formats, usage
 Output order does not retarget resource identity. Typed reports describe encoded work; they grant
 no presentation or UI-completion authority.
 
+## Temporal Candidates And Exact Retry
+
+Temporal captures retain a source-bound `WgpuHistoryLineage` and their original per-View topology.
+That topology owns a `WgpuHistoryView`, created once from the captured `RenderViewId`, and clones
+it into accepted captures. Keep it across resize, reorder and temporary extraction absence; release
+it when that View's temporal lifetime ends. Slot reclamation follows both this owner and the effect
+declaration, so sharing an effect cannot retain every destroyed View. These are runtime facts, not
+persistent camera fields or a global View registry.
+
+Return the original lineage from `WgpuRenderPolicy::history_lineage`. During `bind`, use
+`history_texture` or `history_buffer` with the original View owner, effect declaration, code-owned
+slot and exact descriptor. The returned CPU token contains no native resource. All declarations
+finish before the Host pins the complete basis, including empty/reset revisions. During `build`,
+`previous_texture`/`previous_buffer` borrow those exact predecessors. A missing predecessor has an
+explicit initial, reset or device-recreated reason. Import the predecessor normally; initialize
+every new version explicitly. `slot.bind(&new_port)` associates that slot with its new output, and
+`WgpuPolicyProgram::with_history` supplies the complete binding set. Output order is immaterial.
+
+For retained retries, call `host.prepare(&producer, &input)` and then
+`host.submit_candidate(&producer, candidate)`. Preparation owns the original program, actual
+Feature owners, target contract, complete history basis and budget guards. It does not retain a
+surface or an unbound native submission reservation. Failure returns that same move-only candidate;
+temporary pressure can be retried without rebinding or calling policy build again. Stale/reset
+bases and consumed captures reject. The one-shot `submit` convenience discards a refused candidate;
+another call performs a new preparation and is not the exact-retry protocol.
+
+`WgpuPublishedFrame` owns the complete successful group. `history_texture` and `history_buffer`
+read that publication's original slots, and `final_texture` exposes its selected typed final
+image for ordinary imports. Retaining an older published frame never redirects it to latest state.
+Publication advances all slots and the lineage watermark together. Reset, regroup, target/source
+handoff and effect replacement do not erase successful-capture deduplication. Reset with explicit
+`WgpuHistoryReset` requests before preparing a descriptor-incompatible successor.
+
+A successful publication cannot be accumulated again after later surface/display failure. UI,
+READY, picking and physical completion remain separate outcomes. Retained display retries use
+`submit_candidate_for_display`, which returns both candidate and original UI sidecar on refusal.
+Do not settle a sidecar and later recreate its responsibility from cached input. Old binding or
+consumed-candidate destructor panics after publication are recorded through the Host's
+`cleanup_fault_count` and the complete group's `cleanup_panicked` observation, preserving the
+successful result and native target state. The latter also observes late cleanup of that group's
+original submitted resources, so it can change after native completion. Prefix clones retain their
+own fault count after Host retirement. Cleanup faults do not mean that a completion callback was
+abandoned; only genuine abandonment uses the separate recovery protocol.
+
+A new Host/epoch reports `DeviceRecreated` for empty temporal slots; the effect declares its new
+initialization. For example, a zero seed yields `0.25 * current` for a quarter-weight accumulator.
+That is a new temporal lineage realization, not reconstruction of its unavailable old accumulated
+pixels. Exact temporal replay/checkpoints remain a separate capability.
+
 ## Native Work And Budgets
 
 `preflight` visits every original capture before local native allocations, state creation or
@@ -174,6 +229,10 @@ and the bounded state index. Each Feature operation additionally admits exact in
 prepared/report wrappers and automatic retention records before capture-wrapper allocation.
 User-owned indirect heaps, adapter-requested extra retention, allocator rounding and native
 pipeline/driver overhead are outside this modeled envelope. It is not RSS or measured residency.
+The builder clamps the effective metadata allowance to a hard 64 MiB before allocation. Pending
+policy candidates reserve that full envelope plus a bounded 2 MiB of capture/binding/history storage;
+the Host shares a separate pending-candidate metadata/count budget. Caller-owned indirect heaps
+and independent programs created outside the candidate are not part of this modeled allowance.
 
 All known local resource guards are acquired before creating any native local object; refusal
 releases the guards immediately. Graph allocations, retained outputs and adapter-private payloads

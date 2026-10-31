@@ -6,7 +6,7 @@ static NEXT_RENDER_SOURCE: AtomicU64 = AtomicU64::new(1);
 
 use crate::{
     Extent2d, ExtractedView, ExtractedViews, RenderFrameTarget, RenderImagePacket, RenderTarget,
-    RenderWindowPacket, ViewLoadOp, WorldCanvas, WorldCanvasFrame,
+    RenderViewId, RenderWindowPacket, ViewLoadOp, WorldCanvas, WorldCanvasFrame,
 };
 
 /// Maximum serial views in one exclusive target transaction.
@@ -117,8 +117,9 @@ impl RenderFramePacket {
     /// Copies this window transaction to an image execution target of the same physical extent.
     ///
     /// The source packet remains unchanged. Its source, frame index, logical view targets and
-    /// fixed world canvas are preserved, including the original world-to-window mapping. Only
-    /// the execution target changes; this copies at most [`MAX_VIEWS_PER_TARGET`] captured views.
+    /// View lifetime identities and fixed world canvas are preserved, including the original
+    /// world-to-window mapping. Only the execution target changes; this copies at most
+    /// [`MAX_VIEWS_PER_TARGET`] captured views.
     ///
     /// Returns an error if this packet does not target a window or the image extent differs from
     /// the captured physical window extent, even when a fixed world canvas has a smaller extent.
@@ -154,6 +155,8 @@ impl RenderFramePacket {
 pub enum RenderFramePacketError {
     #[error("one target transaction supports at most {maximum} views, but captured {actual}")]
     TooManyViews { actual: usize, maximum: usize },
+    #[error("captured views repeat View lifetime identity {id:?}")]
+    DuplicateViewId { id: RenderViewId },
     #[error("one target transaction cannot contain views for different targets")]
     MixedRenderTargets,
     #[error("captured views must retain their extracted stable order")]
@@ -241,6 +244,14 @@ pub(crate) fn build_render_frame_packet_for_source<'a>(
             actual: views.len(),
             maximum: MAX_VIEWS_PER_TARGET,
         });
+    }
+    for (index, view) in views.as_slice().iter().enumerate() {
+        if views.as_slice()[..index]
+            .iter()
+            .any(|previous| previous.id == view.id)
+        {
+            return Err(RenderFramePacketError::DuplicateViewId { id: view.id });
+        }
     }
     if views
         .as_slice()

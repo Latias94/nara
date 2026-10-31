@@ -1525,6 +1525,7 @@ fn native_offscreen_outputs_retain_exact_pixels_through_resize_and_close() {
         .unwrap();
     let first_input = test_stock_input(image_frame_for(
         source,
+        frame.views()[0].id,
         1,
         target,
         Color::rgba(1.0, 0.0, 0.0, 1.0),
@@ -1537,6 +1538,7 @@ fn native_offscreen_outputs_retain_exact_pixels_through_resize_and_close() {
     execution.begin_frame(102).unwrap();
     let second_input = test_stock_input(image_frame_for(
         source,
+        frame.views()[0].id,
         2,
         target,
         Color::rgba(0.0, 1.0, 0.0, 1.0),
@@ -1574,6 +1576,7 @@ fn native_offscreen_outputs_retain_exact_pixels_through_resize_and_close() {
     execution.begin_frame(103).unwrap();
     let resized_input = test_stock_input(image_frame_for(
         source,
+        frame.views()[0].id,
         3,
         resized,
         Color::rgba(0.0, 0.0, 1.0, 1.0),
@@ -1647,6 +1650,7 @@ fn native_producer_retirement_settles_while_another_producer_keeps_submitting() 
     }
     let first_input = test_stock_input(image_frame_for(
         first_frame.source_generation(),
+        first_frame.views()[0].id,
         1,
         image_target(&first_frame),
         Color::rgba(1.0, 0.0, 0.0, 1.0),
@@ -1697,6 +1701,7 @@ fn native_producer_retirement_settles_while_another_producer_keeps_submitting() 
         execution.begin_frame(frame_index).unwrap();
         let input = test_stock_input(image_frame_for(
             second_source,
+            second_input.packet().views()[0].id,
             frame_index,
             second_target,
             Color::BLACK,
@@ -1719,6 +1724,7 @@ fn native_producer_retirement_settles_while_another_producer_keeps_submitting() 
     execution.begin_frame(frame_index + 1).unwrap();
     let later_input = test_stock_input(image_frame_for(
         second_source,
+        second_input.packet().views()[0].id,
         frame_index + 1,
         second_target,
         Color::BLACK,
@@ -1747,6 +1753,7 @@ fn native_failed_submission_allows_retry_of_the_same_original_input() {
     let view_id = producer.id();
     let first_input = test_stock_input(image_frame_for(
         source,
+        frame.views()[0].id,
         1,
         target,
         Color::rgba(1.0, 0.0, 0.0, 1.0),
@@ -1766,6 +1773,7 @@ fn native_failed_submission_allows_retry_of_the_same_original_input() {
     execution.begin_frame(2).unwrap();
     let input = test_stock_input(image_frame_for(
         source,
+        frame.views()[0].id,
         2,
         target,
         Color::rgba(0.0, 1.0, 0.0, 1.0),
@@ -1925,6 +1933,7 @@ fn native_output_budget_counts_exact_storage_until_callbacks_and_last_leases_dro
         .unwrap();
     let first_input = test_stock_input(image_frame_for(
         source,
+        frame.views()[0].id,
         1,
         target,
         Color::rgba(1.0, 0.0, 0.0, 1.0),
@@ -1945,6 +1954,7 @@ fn native_output_budget_counts_exact_storage_until_callbacks_and_last_leases_dro
     execution.begin_frame(2).unwrap();
     let second_input = test_stock_input(image_frame_for(
         source,
+        frame.views()[0].id,
         2,
         target,
         Color::rgba(0.0, 1.0, 0.0, 1.0),
@@ -1988,7 +1998,13 @@ fn native_output_budget_counts_exact_storage_until_callbacks_and_last_leases_dro
 
     execution = execution.with_resource_byte_limit(BYTES - 1);
     execution.begin_frame(3).unwrap();
-    let third_input = test_stock_input(image_frame_for(source, 3, target, Color::BLACK));
+    let third_input = test_stock_input(image_frame_for(
+        source,
+        frame.views()[0].id,
+        3,
+        target,
+        Color::BLACK,
+    ));
     assert!(matches!(
         execution.submit(&producer, &third_input),
         Err(WgpuRenderHostError::Program(
@@ -2029,6 +2045,7 @@ fn native_allocation_rejection_preserves_last_good_and_allows_same_capture_retry
         .unwrap();
     let first_input = test_stock_input(image_frame_for(
         source,
+        frame.views()[0].id,
         1,
         target,
         Color::rgba(1.0, 0.0, 0.0, 1.0),
@@ -2037,6 +2054,7 @@ fn native_allocation_rejection_preserves_last_good_and_allows_same_capture_retry
     execution.begin_frame(2).unwrap();
     let input = test_stock_input(image_frame_for(
         source,
+        frame.views()[0].id,
         2,
         target,
         Color::rgba(0.0, 1.0, 0.0, 1.0),
@@ -2087,6 +2105,7 @@ fn native_loss_rejects_old_outputs_and_new_host_replays_the_original_input() {
     #[cfg(not(feature = "stock-ui"))]
     let input = test_stock_input(image_frame_for(
         source,
+        frame.views()[0].id,
         1,
         target,
         Color::rgba(1.0, 0.0, 0.0, 1.0),
@@ -2101,11 +2120,11 @@ fn native_loss_rejects_old_outputs_and_new_host_replays_the_original_input() {
         let current = test_ui_image_packet(green, logical_target);
         (
             test_stock_capture(
-                image_frame_for(source, 1, target, Color::BLACK),
+                image_frame_for(source, frame.views()[0].id, 1, target, Color::BLACK),
                 crate::WgpuStockCapture::new().with_ui(vec![pinned], None, None),
             ),
             test_stock_capture(
-                image_frame_for(source, 1, target, Color::BLACK),
+                image_frame_for(source, frame.views()[0].id, 1, target, Color::BLACK),
                 crate::WgpuStockCapture::new().with_ui(vec![current], None, None),
             ),
         )
@@ -2356,11 +2375,18 @@ fn test_image_frame() -> RenderFramePacket {
     let generation = RenderFrameSourceGeneration::try_acquire().unwrap();
     let image = RenderImage2d::allocate_handle().unwrap();
     let target = RenderImagePacket::new(image, Extent2d::new(64, 64).unwrap()).unwrap();
-    image_frame_for(generation, 1, target, Color::BLACK)
+    image_frame_for(
+        generation,
+        nara_render::RenderViewId::try_acquire().unwrap(),
+        1,
+        target,
+        Color::BLACK,
+    )
 }
 
 fn image_frame_for(
     generation: RenderFrameSourceGeneration,
+    view_id: nara_render::RenderViewId,
     frame_index: u64,
     target: RenderImagePacket,
     color: Color,
@@ -2368,6 +2394,7 @@ fn image_frame_for(
     let viewport = ViewportRect::from_extent(target.extent()).unwrap();
     let mut views = ExtractedViews::default();
     views.push(ExtractedView {
+        id: view_id,
         camera_entity: Entity::PLACEHOLDER,
         target: RenderTarget::Image(target.image()),
         viewport,

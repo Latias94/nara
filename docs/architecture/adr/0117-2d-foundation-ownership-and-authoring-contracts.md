@@ -3,7 +3,7 @@
 **Status**: Accepted
 **Date**: 2026-10-15
 **Amended**: 2026-10-23 for explicit phase spatial cuts, common asset mutation admission and
-borrowed/scoped current-Scene access
+borrowed/scoped current-Scene access; refined 2026-11-01 for captured View lifetimes
 **Owner**: game composition, managed execution, content, domain plugins, rendering, and tooling
 **Implementation Plan**: [2D foundation contracts](../../plans/2026-10-15-1636-refactor-2d-foundation-contracts-plan.md)
 
@@ -233,7 +233,20 @@ A view owns an invertible camera/projection mapping, viewport, visibility, order
 policy. A target owns physical configuration; presentation maps it to a window/panel. A bounded
 ordered view list executes serially, including shared targets and explicit offscreen sequencing.
 This supersedes the single-view cardinality clauses in 0018/0094/0111/0112, retaining exclusive target
-ownership. Optional pixel-canvas policies do not quantize simulation. No public render graph or RHI is added.
+ownership. Optional pixel-canvas policies do not quantize simulation. ADR0094 separately owns the
+finite typed resource program; no backend-neutral RHI is added here.
+
+Each captured View carries a non-reused process-local lifetime identity, separate from its camera
+Entity, target, raster extent and ordering. Camera removal/readdition starts a new lifetime even
+when the Entity survives. A temporarily unavailable target, zero extent or filtered extraction
+does not retire the camera's View lifetime. Automatic extraction and manually supplied Views use
+the same identity type; manual producers retain their identity with their actual View owner rather
+than minting one per frame. Distinct code-owned subviews may share a source camera without sharing
+identity. Frame source plus View identity binds historical render state. Duplicate identities in
+one captured packet reject rather than aliasing two Views. These are runtime facts and are not
+serialized into camera authoring data. Persistent camera edits keep their normal codec/lifecycle
+contracts; this refinement does not introduce RequiredComponents or native effects into document
+transactions.
 
 Per-view queueing may omit a quad only when its actual projected instance is conservatively
 separated from the clip rectangle. Floating-point uncertainty, non-finite coefficients and overflow

@@ -6,11 +6,11 @@ use nara_ecs::Resource;
 use nara_render::{FrameStats, RenderFramePacket, ViewportRect};
 use nara_render_wgpu::{
     AccessRole, GraphLimits, TextureAlpha, TextureTransfer, WgpuDeviceRequirements,
-    WgpuFeatureAllocation, WgpuFeatureDefinition, WgpuFeatureEncodeContext, WgpuFeatureInstance,
-    WgpuFeaturePreflightContext, WgpuFeaturePrepareContext, WgpuPolicyBuildContext,
-    WgpuPolicyFrameFacts, WgpuPolicyInstanceContext, WgpuPolicyProgram, WgpuProgramTexture,
-    WgpuProgramTextureDescriptor, WgpuRenderFeature, WgpuRenderPolicy, WgpuRenderProgramBuilder,
-    WgpuRenderProgramError,
+    WgpuFeatureAllocation, WgpuFeatureDeclaration, WgpuFeatureDefinition, WgpuFeatureEncodeContext,
+    WgpuFeatureInstance, WgpuFeaturePreflightContext, WgpuFeaturePrepareContext,
+    WgpuPolicyBindingContext, WgpuPolicyBuildContext, WgpuPolicyFrameFacts, WgpuPolicyProgram,
+    WgpuProgramTexture, WgpuProgramTextureDescriptor, WgpuRenderFeature, WgpuRenderPolicy,
+    WgpuRenderProgramBuilder, WgpuRenderProgramError,
 };
 
 pub const GRID_SIDE: u32 = 4;
@@ -43,37 +43,38 @@ pub struct HeatmapCapture {
 }
 
 pub struct HeatmapPolicy {
-    feature: WgpuFeatureDefinition<HeatmapFeature>,
+    feature: WgpuFeatureDeclaration<HeatmapFeature>,
 }
 
 impl HeatmapPolicy {
     pub fn new(palette_shift: u32) -> Self {
         assert!(palette_shift < GRID_SIDE);
         Self {
-            feature: WgpuFeatureDefinition::new(HeatmapFeature { palette_shift }),
+            feature: WgpuFeatureDefinition::new(HeatmapFeature { palette_shift }).declare(),
         }
     }
 }
 
-pub struct HeatmapInstances {
-    feature: WgpuFeatureInstance<HeatmapFeature>,
+pub struct HeatmapBindings {
+    feature: Arc<WgpuFeatureInstance<HeatmapFeature>>,
 }
 
 pub struct HeatmapColor;
 
 impl WgpuRenderPolicy for HeatmapPolicy {
     type Capture = HeatmapCapture;
-    type Instances = HeatmapInstances;
+    type Bindings = HeatmapBindings;
 
     fn device_requirements(&self) -> WgpuDeviceRequirements {
         self.feature.device_requirements().clone()
     }
 
-    fn create_instances(
+    fn bind(
         &self,
-        context: &mut WgpuPolicyInstanceContext<'_>,
-    ) -> Result<HeatmapInstances, WgpuRenderProgramError> {
-        Ok(HeatmapInstances {
+        _: &HeatmapCapture,
+        context: &mut WgpuPolicyBindingContext<'_>,
+    ) -> Result<HeatmapBindings, WgpuRenderProgramError> {
+        Ok(HeatmapBindings {
             feature: context.feature(&self.feature)?,
         })
     }
@@ -100,7 +101,7 @@ impl WgpuRenderPolicy for HeatmapPolicy {
 
     fn build(
         &self,
-        instances: &HeatmapInstances,
+        bindings: &HeatmapBindings,
         capture: &HeatmapCapture,
         context: WgpuPolicyBuildContext<'_>,
     ) -> Result<WgpuPolicyProgram, WgpuRenderProgramError> {
@@ -147,7 +148,7 @@ impl WgpuRenderPolicy for HeatmapPolicy {
         })?;
         builder.operation(
             17,
-            &instances.feature,
+            &bindings.feature,
             Arc::new(HeatmapDrawCapture {
                 target: target.clone(),
                 samples: capture.samples,

@@ -30,6 +30,7 @@ fn canvas_frame(width: u32, height: u32, scale: f64) -> WorldCanvasFrame {
     let viewport = ViewportRect::new(0, 0, 8, 4).unwrap();
     let mut views = ExtractedViews::default();
     views.push(ExtractedView {
+        id: nara_render::RenderViewId::try_acquire().unwrap(),
         camera_entity: nara_ecs::Entity::PLACEHOLDER,
         target: RenderTarget::Window(WindowId::PRIMARY),
         viewport,

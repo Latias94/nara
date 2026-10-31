@@ -37,6 +37,7 @@ struct RetainedState {
     keep_alive: Option<RetainedResourceSet>,
     callback_abandoned: bool,
     uncertain_index: bool,
+    cleanup_faults: u64,
 }
 
 pub(crate) const MAX_SUBMISSION_RESOURCES: usize = 65_536;
@@ -78,14 +79,28 @@ impl RetainedResourceSet {
             .try_reserve_exact(additional)
             .map_err(|_| SubmissionCapacity::Allocation)
     }
+
+    fn release(&mut self) -> u64 {
+        let mut faults = 0_u64;
+        // Prepared/native work retires before earlier captures and definition dependencies.
+        // Isolate each entry so one user destructor cannot skip the remaining original custody
+        // or unwind through the native completion callback that established its release fence.
+        while let Some(value) = self.0.pop() {
+            if let Err(payload) =
+                std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| drop(value)))
+            {
+                // The payload may itself have a user destructor; it cannot replace this result.
+                std::mem::forget(payload);
+                faults = faults.saturating_add(1);
+            }
+        }
+        faults
+    }
 }
 
 impl Drop for RetainedResourceSet {
     fn drop(&mut self) {
-        // Prepared/native work retires before earlier captures and definition dependencies.
-        while let Some(value) = self.0.pop() {
-            drop(value);
-        }
+        self.release();
     }
 }
 
@@ -114,6 +129,12 @@ impl RetainedResources {
         self.state().callback_abandoned
     }
 
+    fn cleanup_fault_count(&self) -> u64 {
+        #[cfg(target_arch = "wasm32")]
+        self.observe_notification();
+        self.state().cleanup_faults
+    }
+
     #[cfg(target_arch = "wasm32")]
     fn observe_notification(&self) {
         match self.notification.load(Ordering::Acquire) {
@@ -134,7 +155,7 @@ impl RetainedResources {
     }
 
     fn settle(&self) -> bool {
-        let keep_alive = {
+        let mut keep_alive = {
             let mut state = self.state();
             match state.state {
                 PrefixState::Completed => return true,
@@ -146,8 +167,11 @@ impl RetainedResources {
         };
         // Do not hold our lock across arbitrary resource destructors. Other token clones must
         // continue to observe incomplete until all original resources have actually released.
+        let cleanup_faults = keep_alive.as_mut().map_or(0, RetainedResourceSet::release);
         drop(keep_alive);
-        self.state().state = PrefixState::Completed;
+        let mut state = self.state();
+        state.cleanup_faults = state.cleanup_faults.saturating_add(cleanup_faults);
+        state.state = PrefixState::Completed;
         true
     }
 }
@@ -287,6 +311,7 @@ impl WgpuSubmissionReservation {
                         keep_alive: Some(RetainedResourceSet::new(keep_alive)),
                         callback_abandoned: false,
                         uncertain_index: false,
+                        cleanup_faults: 0,
                     }),
                     #[cfg(target_arch = "wasm32")]
                     notification: Arc::new(AtomicU8::new(0)),
@@ -426,6 +451,7 @@ impl fmt::Debug for WgpuSubmissionPrefix {
             .field("state", &state.state)
             .field("callback_abandoned", &state.callback_abandoned)
             .field("uncertain_index", &state.uncertain_index)
+            .field("cleanup_faults", &state.cleanup_faults)
             .finish_non_exhaustive()
     }
 }
@@ -459,6 +485,16 @@ impl WgpuSubmissionPrefix {
     /// Reports callback abandonment, including after explicit recovery successfully settles it.
     pub fn callback_abandoned(&self) -> bool {
         self.original.retained.callback_abandoned()
+    }
+
+    /// Counts isolated destructor panics while releasing this original prefix's CPU resources.
+    ///
+    /// This observation becomes available after actual completion or explicit abandoned recovery.
+    /// It neither invalidates physical completion nor establishes publication or presentation.
+    /// Clones retain the same count after the Host has retired its own observation token.
+    #[must_use]
+    pub fn cleanup_fault_count(&self) -> u64 {
+        self.original.retained.cleanup_fault_count()
     }
 
     /// Explicitly attempts nonblocking native recovery after callback abandonment.
@@ -575,6 +611,74 @@ mod tests {
         assert_eq!(*order.lock().unwrap(), [3, 2, 1]);
     }
 
+    #[test]
+    fn completed_release_isolates_each_fault_and_preserves_original_observations() {
+        struct HostilePayload;
+        impl Drop for HostilePayload {
+            fn drop(&mut self) {
+                panic!("a caught cleanup payload must not run its own destructor");
+            }
+        }
+        struct Resource {
+            id: u8,
+            panic: bool,
+            retained: std::sync::Weak<RetainedResources>,
+            order: Arc<Mutex<Vec<u8>>>,
+        }
+        impl Drop for Resource {
+            fn drop(&mut self) {
+                let retained = self.retained.upgrade().unwrap();
+                assert!(!retained.is_complete(), "release is still in progress");
+                assert_eq!(retained.state().state, PrefixState::Releasing);
+                self.order.lock().unwrap().push(self.id);
+                if self.panic {
+                    std::panic::panic_any(HostilePayload);
+                }
+            }
+        }
+        for abandoned in [false, true] {
+            let retained = Arc::new(RetainedResources {
+                inner: Mutex::new(RetainedState {
+                    state: PrefixState::Pending,
+                    keep_alive: Some(RetainedResourceSet(Vec::new())),
+                    callback_abandoned: false,
+                    uncertain_index: false,
+                    cleanup_faults: 0,
+                }),
+            });
+            let order = Arc::new(Mutex::new(Vec::new()));
+            for (id, panic) in [(1, false), (2, true), (3, false), (4, true)] {
+                assert!(
+                    retained
+                        .state()
+                        .keep_alive
+                        .as_mut()
+                        .unwrap()
+                        .retain(Resource {
+                            id,
+                            panic,
+                            retained: Arc::downgrade(&retained),
+                            order: Arc::clone(&order),
+                        })
+                        .is_ok()
+                );
+            }
+            if abandoned {
+                retained.abandon();
+            }
+            assert!(retained.settle());
+            assert_eq!(*order.lock().unwrap(), [4, 3, 2, 1]);
+            assert!(retained.is_complete());
+            assert_eq!(retained.callback_abandoned(), abandoned);
+            assert_eq!(retained.cleanup_fault_count(), 2);
+            retained.abandon();
+            assert_eq!(retained.callback_abandoned(), abandoned);
+            assert!(retained.settle(), "settlement is monotonic");
+            assert_eq!(retained.cleanup_fault_count(), 2, "faults are counted once");
+            assert_eq!(*order.lock().unwrap(), [4, 3, 2, 1]);
+        }
+    }
+
     struct NativeGpu {
         device: wgpu::Device,
         queue: wgpu::Queue,
@@ -642,6 +746,71 @@ mod tests {
             );
             std::thread::yield_now();
         }
+    }
+
+    #[test]
+    #[ignore = "requires an explicitly selected native GPU; acquisition failure is a failed prerequisite"]
+    fn native_prefix_releases_the_last_capture_without_unwinding_or_abandoning_callbacks() {
+        struct Capture {
+            drops: Arc<AtomicUsize>,
+        }
+        impl Drop for Capture {
+            fn drop(&mut self) {
+                self.drops.fetch_add(1, Ordering::AcqRel);
+                panic!("injected late final-capture cleanup panic");
+            }
+        }
+        let gpu = NativeGpu::new();
+        let buffer = gpu.buffer();
+        let drops = Arc::new(AtomicUsize::new(0));
+        let prepared_drops = Arc::new(AtomicUsize::new(0));
+        let capture = Arc::new(Capture {
+            drops: Arc::clone(&drops),
+        });
+        let weak_capture = Arc::downgrade(&capture);
+        let mut reservation =
+            WgpuSubmissionReservation::new(&gpu.device, &gpu.queue, Arc::clone(&capture));
+        assert!(
+            reservation
+                .retain((buffer.clone(), DropProbe(Arc::clone(&prepared_drops))))
+                .is_ok()
+        );
+        let mut encoder = gpu
+            .device
+            .create_command_encoder(&wgpu::CommandEncoderDescriptor::default());
+        encoder.clear_buffer(&buffer, 0, None);
+        let prefix = reservation.submitted(gpu.queue.submit([encoder.finish()]));
+        let clone = prefix.clone();
+        drop(capture);
+        assert_eq!(
+            weak_capture.strong_count(),
+            1,
+            "only original submitted custody remains"
+        );
+        assert_eq!(drops.load(Ordering::Acquire), 0);
+        assert_eq!(prefix.cleanup_fault_count(), 0);
+
+        poll_until_complete(&prefix);
+        assert_eq!(drops.load(Ordering::Acquire), 1);
+        assert_eq!(prepared_drops.load(Ordering::Acquire), 1);
+        assert!(weak_capture.upgrade().is_none());
+        assert!(clone.is_complete());
+        assert!(
+            !clone.callback_abandoned(),
+            "cleanup failure is not callback abandonment"
+        );
+        assert_eq!(clone.cleanup_fault_count(), 1);
+        assert!(clone.poll().unwrap());
+        assert!(clone.recover_abandoned().unwrap());
+        assert_eq!(drops.load(Ordering::Acquire), 1);
+        assert_eq!(clone.cleanup_fault_count(), 1);
+
+        let successor_drops = Arc::new(AtomicUsize::new(0));
+        let successor = gpu.submit(&buffer, &successor_drops);
+        poll_until_complete(&successor);
+        assert_eq!(successor_drops.load(Ordering::Acquire), 1);
+        assert_eq!(successor.cleanup_fault_count(), 0);
+        assert!(!successor.callback_abandoned());
     }
 
     #[test]

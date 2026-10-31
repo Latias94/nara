@@ -14,9 +14,9 @@ use nara_window::WindowId;
 
 use crate::{
     AccessRole, GraphLimits, TextureAlpha, TextureTransfer, WgpuDeviceRequirements,
-    WgpuFeatureDefinition, WgpuFeatureInstance, WgpuPolicyBuildContext, WgpuPolicyFrameFacts,
-    WgpuPolicyInstanceContext, WgpuPolicyProgram, WgpuProgramTextureDescriptor, WgpuRenderPolicy,
-    WgpuRenderProgramBuilder, WgpuRenderProgramError,
+    WgpuFeatureDeclaration, WgpuFeatureDefinition, WgpuFeatureInstance, WgpuPolicyBindingContext,
+    WgpuPolicyBuildContext, WgpuPolicyFrameFacts, WgpuPolicyProgram, WgpuProgramTextureDescriptor,
+    WgpuRenderPolicy, WgpuRenderProgramBuilder, WgpuRenderProgramError,
 };
 
 struct SceneColor;
@@ -30,24 +30,25 @@ struct FinalComposite;
 /// not populate a capture or install a domain's capture systems.
 #[derive(Debug, Clone)]
 pub struct WgpuStockPolicy {
-    canvas: WgpuFeatureDefinition<
+    canvas: WgpuFeatureDeclaration<
         crate::canvas::CanvasCompositeFeature<SceneColor, ResolvedSceneColor>,
     >,
     #[cfg(feature = "stock-sprite")]
-    world: WgpuFeatureDefinition<crate::sprite::SpriteFeature<SceneColor>>,
+    world: WgpuFeatureDeclaration<crate::sprite::SpriteFeature<SceneColor>>,
     #[cfg(feature = "stock-ui")]
-    ui: WgpuFeatureDefinition<crate::ui::UiFeature<FinalComposite>>,
+    ui: WgpuFeatureDeclaration<crate::ui::UiFeature<FinalComposite>>,
 }
 
 impl WgpuStockPolicy {
     #[must_use]
     pub fn new() -> Self {
         Self {
-            canvas: WgpuFeatureDefinition::new(crate::canvas::CanvasCompositeFeature::new()),
+            canvas: WgpuFeatureDefinition::new(crate::canvas::CanvasCompositeFeature::new())
+                .declare(),
             #[cfg(feature = "stock-sprite")]
-            world: WgpuFeatureDefinition::new(crate::sprite::SpriteFeature::new()),
+            world: WgpuFeatureDefinition::new(crate::sprite::SpriteFeature::new()).declare(),
             #[cfg(feature = "stock-ui")]
-            ui: WgpuFeatureDefinition::new(crate::ui::UiFeature::new()),
+            ui: WgpuFeatureDefinition::new(crate::ui::UiFeature::new()).declare(),
         }
     }
 }
@@ -124,19 +125,20 @@ impl WgpuStockCapture {
     }
 }
 
-/// Producer-local CPU instances of the stock policy's original Feature definitions.
-pub struct WgpuStockPolicyInstances {
-    canvas:
+/// One immutable candidate's actual owners of the stock policy's original declarations.
+pub struct WgpuStockPolicyBindings {
+    canvas: Arc<
         WgpuFeatureInstance<crate::canvas::CanvasCompositeFeature<SceneColor, ResolvedSceneColor>>,
+    >,
     #[cfg(feature = "stock-sprite")]
-    world: WgpuFeatureInstance<crate::sprite::SpriteFeature<SceneColor>>,
+    world: Arc<WgpuFeatureInstance<crate::sprite::SpriteFeature<SceneColor>>>,
     #[cfg(feature = "stock-ui")]
-    ui: WgpuFeatureInstance<crate::ui::UiFeature<FinalComposite>>,
+    ui: Arc<WgpuFeatureInstance<crate::ui::UiFeature<FinalComposite>>>,
 }
 
 impl WgpuRenderPolicy for WgpuStockPolicy {
     type Capture = WgpuStockCapture;
-    type Instances = WgpuStockPolicyInstances;
+    type Bindings = WgpuStockPolicyBindings;
 
     fn device_requirements(&self) -> WgpuDeviceRequirements {
         let requirements = self.canvas.device_requirements().clone();
@@ -147,11 +149,12 @@ impl WgpuRenderPolicy for WgpuStockPolicy {
         requirements
     }
 
-    fn create_instances(
+    fn bind(
         &self,
-        context: &mut WgpuPolicyInstanceContext<'_>,
-    ) -> Result<Self::Instances, WgpuRenderProgramError> {
-        Ok(WgpuStockPolicyInstances {
+        _capture: &Self::Capture,
+        context: &mut WgpuPolicyBindingContext<'_>,
+    ) -> Result<Self::Bindings, WgpuRenderProgramError> {
+        Ok(WgpuStockPolicyBindings {
             canvas: context.feature(&self.canvas)?,
             #[cfg(feature = "stock-sprite")]
             world: context.feature(&self.world)?,
@@ -213,7 +216,7 @@ impl WgpuRenderPolicy for WgpuStockPolicy {
 
     fn build(
         &self,
-        instances: &Self::Instances,
+        bindings: &Self::Bindings,
         capture: &Self::Capture,
         context: WgpuPolicyBuildContext<'_>,
     ) -> Result<WgpuPolicyProgram, WgpuRenderProgramError> {
@@ -275,7 +278,7 @@ impl WgpuRenderPolicy for WgpuStockPolicy {
             add_draw_facts(&mut facts, &sprite_capture.batches)?;
             builder.operation(
                 1,
-                &instances.world,
+                &bindings.world,
                 Arc::new(sprite_capture),
                 &[],
                 &[scene.clear(crate::clear_color_to_wgpu(clear), AccessRole::Attachment)],
@@ -306,7 +309,7 @@ impl WgpuRenderPolicy for WgpuStockPolicy {
             let resolved = builder.texture::<ResolvedSceneColor>(descriptor.clone())?;
             builder.operation(
                 2,
-                &instances.canvas,
+                &bindings.canvas,
                 Arc::new(crate::canvas::CanvasCompositeCapture::new(
                     scene.clone(),
                     resolved.clone(),
@@ -338,8 +341,8 @@ impl WgpuRenderPolicy for WgpuStockPolicy {
                 None => final_color.preserve(&scene, AccessRole::Attachment),
             };
             let binding =
-                crate::WgpuUiProgramBinding::new(3, &instances.ui, Arc::clone(&ui_capture));
-            builder.operation(3, &instances.ui, ui_capture, &[], &[initialized])?;
+                crate::WgpuUiProgramBinding::new(3, &bindings.ui, Arc::clone(&ui_capture));
+            builder.operation(3, &bindings.ui, ui_capture, &[], &[initialized])?;
             return WgpuPolicyProgram::new(
                 builder.finish(&[final_color.output()])?,
                 &final_color,

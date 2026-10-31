@@ -2,8 +2,8 @@
 
 Date: 2026-10-31. Last reviewed: 2026-11-01. Status: private CPU/DX12/cost comparison, native
 ownership, immutable outputs, finite typed programs and original policy capture qualified in
-their recorded scopes; complete View/history, independent streams and custom composition remain
-in development.
+their recorded scopes, followed by the selected captured View/history transaction. Complete
+source/processed interleaving, independent streams and custom composition remain in development.
 Baseline: `a0995e7b65288ae67a5786b5312e6166b679d171`.
 Parent: [foundation R8/R9a](2026-10-23-foundation-architecture-rebaseline-plan.md#r8-external-render-feature-and-host-local-execution).
 Candidate: Proposed [ADR0121](../architecture/adr/0121-composable-render-programs-and-host-execution.md).
@@ -224,7 +224,7 @@ refinements inside steps4-5 above, not a new render roadmap. The
 [typed policy qualification](../knowledge/engineering/verification/2026-10/2026-10-31T192756Z-original-typed-render-policy-capture-and-complete-consumer-qualification-df7f9377f51142b78060b53617c800a1.md)
 records their implemented result, scoped ordinary/native evidence and final external consumers.
 
-The next production slice is the design's
+The selected production slice implements the design's
 [View history transaction](../architecture/render-program-production-design.md#next-production-unit-view-history-transactions):
 two Views with two independently replaceable accumulation instances each, pinned history bases
 and explicit slot/output bindings, published together through the existing Host transaction.
@@ -233,8 +233,19 @@ siblings, public budget refusal and independently progressing producer B have an
 oracle. Candidate custody uses one opaque caller-owned value with original bindings and budget
 guards; the existing Host retains final publication and native-prefix authority without a
 candidate registry or another Runtime in-flight barrier. This refines the remaining history work
-rather than reopening the graph decision; it is not implemented merely because the private
-history comparison passes.
+rather than reopening the graph decision. Its
+[production qualification](../knowledge/engineering/verification/2026-10/2026-10-31T210034Z-captured-view-histories-and-original-submission-cleanup-production-qualification-5c061376803446c0bff1a95495ca55c7.md)
+separates the actual four-chain numeric/Runtime consumers, owner corrections and native evidence
+from the private comparison. Complete source/processed interleaving, independently paced
+two-window/image composition and the Nara-drawn editable Inspector remain open.
+
+Include cleanup after both synchronous publication and later original-prefix completion. The
+candidate/input may already be gone when native polling releases the last Capture or Bindings.
+Prove reverse flat release, remaining-resource cleanup, explicit fault observation and preserved
+successful results without misclassifying destructor failure as callback abandonment. Host
+maintenance transfers stable observations and removes a completed prefix in one decision, including
+when a public clone completes on another polling thread. Qualify producer-wide active-owner capacity
+separately from each candidate's binding/metadata allowance; neither test may loosen the other bound.
 
 The [first executable comparison](../knowledge/engineering/verification/2026-10/2026-10-31T060722Z-private-render-graph-buffer-history-and-viable-controls-comparison-on-dx12-d6aca1996b2342659bd07933b33e0e64.md)
 records 61 unique CPU tests, seven actual DX12 tests and one subsequent actual submission-failure

@@ -26,6 +26,7 @@ fn canvas_packet_with_viewport(
 ) -> RenderFramePacket {
     let mut views = ExtractedViews::default();
     views.push(ExtractedView {
+        id: RenderViewId::try_acquire().unwrap(),
         camera_entity: camera,
         target: RenderTarget::PrimaryWindow,
         viewport,
@@ -349,6 +350,7 @@ fn native_world_pointer_uses_the_presented_camera_without_canvas_configuration()
     let viewport = ViewportRect::from_window_resolution(window.resolution).unwrap();
     let mut views = ExtractedViews::default();
     views.push(ExtractedView {
+        id: RenderViewId::try_acquire().unwrap(),
         camera_entity: camera,
         target: RenderTarget::PrimaryWindow,
         viewport,
@@ -547,6 +549,7 @@ fn zero_window_skips_explicit_viewports_and_requires_fresh_presentation_after_re
         let viewport = ViewportRect::new(0, 0, 320, 180).unwrap();
         let mut views = ExtractedViews::default();
         views.push(ExtractedView {
+            id: RenderViewId::try_acquire().unwrap(),
             camera_entity: camera,
             target: RenderTarget::PrimaryWindow,
             viewport,

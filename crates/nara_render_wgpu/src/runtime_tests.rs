@@ -232,6 +232,7 @@ fn window_capture(runtime: &mut RuntimeInstance, source: RuntimeGeneration) -> W
     let viewport = ViewportRect::new(0, 0, 8, 8).unwrap();
     let mut views = ExtractedViews::default();
     views.push(ExtractedView {
+        id: nara_render::RenderViewId::try_acquire().unwrap(),
         camera_entity: nara_ecs::Entity::PLACEHOLDER,
         target: RenderTarget::PrimaryWindow,
         viewport,
