@@ -310,7 +310,8 @@ keeps its own exact predecessor and code-owned slot. Captured View identity incl
 and runtime incarnation; camera ordering, operation order, target extent and vector position are
 not identity. Camera identity alone must not preclude separately identified subviews of one
 source camera. The Host's current `views` table is producer target state, not a per-camera history
-table. Reuse the existing non-reused Feature instance identity for effect incarnation. Add bounded
+table. Keep the capture's logical effect incarnation separate from its Host-specific Feature
+binding; reuse the existing non-reused instance identity for the latter. Add bounded
 producer-local instance reconciliation within the policy's original closed device request, so
 retiring or replacing one effect preserves the other three histories without reinstalling the
 entire policy. Reconciliation must distinguish live membership, capture admission and accepted
@@ -320,6 +321,10 @@ incarnations and parameters even before Host preparation; preparation resolves t
 an immutable binding snapshot retaining the actual Feature instance owners. Keeping only a shared
 map or numeric instance IDs does not retain the instance's execution admission. Preserve explicit
 Feature/producer close semantics rather than changing them as a hidden reconciliation detail.
+A previously accepted input first prepared after a topology replacement or installation withdrawal
+still resolves its original declaration; it cannot consult the current topology. Original policy
+requirements close before capture admission, and selected Feature definitions must fit that
+request. Preparation cannot discover new capabilities and silently enlarge it.
 A temporarily absent or minimized View is not implicitly retired. Removing and readding the
 camera component is a real lifecycle change even if its Entity survives.
 
@@ -354,13 +359,23 @@ publication. Publication consumes the candidate, including when its exact output
 presented; transport retries return the original result rather than accumulating again. Display,
 UI settlement, READY and physical completion keep their existing separate owners.
 
-The candidate is move-only, Host/epoch/producer-bound, and owns a complete program, original
-binding snapshot, target contract and history basis. It never holds an acquired surface across
-calls. Choose caller-owned candidate custody versus a bounded Host record with an ownership token
-against the actual Runtime/Game/Scene/Canvas transport; do not add a second renderer API or a
-registry merely to hide the value. A retryable failure returns the same candidate. Cancellation
-discards the uncommitted candidate while touched native resources remain with their original
-prefix. If a transport retains a retry across calls, it retains the original capture and UI
+Select an opaque, caller-owned, move-only candidate with no public constructor, `Clone` or retained
+`&mut Host` borrow. It owns the original input, complete program, actual binding owners, target
+contract, history basis and RAII count/metadata reservations. Its Host/epoch/producer facts fence
+execution without a Host candidate table, cancellation mailbox or second admission barrier. The
+existing Runtime/Game in-flight owner retains it; Scene/Canvas use their existing presenter. It
+never holds an acquired surface across calls. A retryable failure returns the same candidate;
+success consumes it, and terminal rejection or Drop releases its uncommitted references and
+reservations. Object lifetime does not promise that reset or close leaves it executable.
+
+Do not let an unbound `WgpuSubmissionReservation` escape with the candidate. Create and bind that
+original native responsibility inside one serial Host attempt, including its failure path. A
+candidate may retain ordinary budget guards across retries; touched resources independently remain
+with their original submitted prefix. This preserves conservative failed-attempt cleanup without
+requiring Drop to route a cancellation back into a Host table. No second renderer API or
+caller-side history commit is introduced.
+
+If a transport retains a retry across calls, it retains the original capture and UI
 sidecar too; settling that sidecar and later recreating its responsibility from cached input is
 invalid. One-shot paths explicitly cancel instead. Policy `Instances` and native `State` may
 cache implementation data but do not advance authoritative history during build or preparation.

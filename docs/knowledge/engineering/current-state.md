@@ -3,7 +3,7 @@ type: "Current State"
 title: "Current Engineering State"
 description: "Derived summary of immutable engineering-memory shards."
 tags: ["engineering-memory", "derived"]
-source_fingerprint: "432ba77b4d422c9ee3b54764341a30b4fd809bcaa74b44c7e54a8d128b836525"
+source_fingerprint: "37a26ef4fa0501cc74bcff611bd3214835a7ebde87868c851d6a3bca86711851"
 ---
 
 # Current State
@@ -12,8 +12,8 @@ source_fingerprint: "432ba77b4d422c9ee3b54764341a30b4fd809bcaa74b44c7e54a8d128b8
 
 This file is derived from immutable shards. Record new facts in shards, then render during integration.
 
-- Source fingerprint: `432ba77b4d422c9ee3b54764341a30b4fd809bcaa74b44c7e54a8d128b836525`
-- Immutable records: 1137
+- Source fingerprint: `37a26ef4fa0501cc74bcff611bd3214835a7ebde87868c851d6a3bca86711851`
+- Immutable records: 1138
 - Active lane heads: 2
 
 # Active Registrations
@@ -51,7 +51,7 @@ This file is derived from immutable shards. Record new facts in shards, then ren
 - [Editor foundation U9 and U1-U8 complete with exact-source external acceptance](registry/2026-10/2026-10-17T102710Z-nara-editor-foundation-implementation-codex-root-76fa1ccb656c4ebd8c2b5f77f83287f7.md): `completed` (nara-editor-foundation-implementation-codex-root; producer `codex-root`)
 - [Editor foundation research and refactor planning complete](registry/2026-10/2026-10-16T044159Z-nara-editor-foundation-planning-codex-root-d0e8f37adfd54751b67d7ae647f06d83.md): `completed` (nara-editor-foundation-planning-codex-root; producer `codex-root`)
 - [First 2D author workflow complete with clean committed-source acceptance](registry/2026-10/2026-10-16T025148Z-nara-first-2d-author-workflow-codex-root-fe7312236c5d4906b8e950d366111171.md): `completed` (nara-first-2d-author-workflow-codex-root; producer `codex-root`)
-- [Typed policy replacement qualified for local integration](registry/2026-10/2026-10-31T193044Z-nara-foundation-rebaseline-codex-main-b486f28e5c7f42f08cb51e77acdfd296.md): `active` (nara-foundation-rebaseline-codex-main; producer `codex-foundation-main`)
+- [Typed policy committed and owned history candidate selected](registry/2026-10/2026-10-31T193254Z-nara-foundation-rebaseline-codex-main-5f44bbe538f14c67aaaa5b8d5d5422f2.md): `active` (nara-foundation-rebaseline-codex-main; producer `codex-foundation-main`)
 - [Ordinary structural authoring qualified](registry/2026-10/2026-10-20T053614Z-ordinary-authoring-codex-root-ac405c79936d43b09f6cfb4197d747ed.md): `completed` (ordinary-authoring-codex-root; producer `codex-root`)
 - [Persistent checkpoint consumer qualified on Windows](registry/2026-10/2026-10-21T032628Z-persistent-two-level-game-codex-root-1ac997abdab142e590af8a6c21f9f443.md): `complete` (persistent-two-level-game-codex-root; producer `codex-root`)
 - [N05 plugin failure facts qualified](registry/2026-10/2026-10-19T172945Z-plugin-error-facts-codex-root-c20974513f104398967edbed73efccaa.md): `completed` (plugin-error-facts-codex-root; producer `codex-root`)

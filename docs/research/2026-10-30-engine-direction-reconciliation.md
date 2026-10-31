@@ -224,3 +224,10 @@ candidate-pinned predecessors, lineage deduplication, explicit View retirement a
 after device loss. Successful output/history publication is distinct from later present/UI
 completion. These design corrections are unimplemented successor requirements, not newly
 reproduced bugs in currently unsupported temporal behavior or another graph/toolkit selection.
+
+The adversarial follow-up selects a caller-owned move-only candidate over a Host candidate table.
+Original CPU topology/definitions are fixed at input admission; actual Host bindings and history
+basis are fixed at preparation. Existing in-flight owners can retain this value and its original
+UI sidecar. Ordinary budget guards follow RAII, while an unbound native submission reservation
+cannot escape the same serial Host attempt. This resolves the next design's custody choice
+without implementing history or adding a general admission registry.

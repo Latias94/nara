@@ -230,8 +230,11 @@ two Views with two independently replaceable accumulation instances each, pinned
 and explicit slot/output bindings, published together through the existing Host transaction.
 Retry retains its original predecessor basis. Reorder, one-instance replacement, stale/reset
 siblings, public budget refusal and independently progressing producer B have an external numeric
-oracle. This refines the remaining history work rather than reopening the graph decision; it is
-not implemented merely because the private history comparison passes.
+oracle. Candidate custody uses one opaque caller-owned value with original bindings and budget
+guards; the existing Host retains final publication and native-prefix authority without a
+candidate registry or another Runtime in-flight barrier. This refines the remaining history work
+rather than reopening the graph decision; it is not implemented merely because the private
+history comparison passes.
 
 The [first executable comparison](../knowledge/engineering/verification/2026-10/2026-10-31T060722Z-private-render-graph-buffer-history-and-viable-controls-comparison-on-dx12-d6aca1996b2342659bd07933b33e0e64.md)
 records 61 unique CPU tests, seven actual DX12 tests and one subsequent actual submission-failure
