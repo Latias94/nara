@@ -16,7 +16,7 @@ use crate::{
 use super::{
     NativeFeatureStates, ProgramOperationReport, WgpuFeatureAllocation, WgpuNativeResources,
     WgpuProgramBuffer, WgpuProgramTexture, WgpuRenderProgram, WgpuRenderProgramError,
-    resources::{NativeResource, ProgramResourceStorage, require_descriptor},
+    resources::{HostProgramTexture, NativeResource, ProgramResourceStorage, require_descriptor},
 };
 
 /// Capability-only inspection before native resource allocation, state creation or upload.
@@ -24,6 +24,7 @@ use super::{
 pub struct WgpuFeaturePreflightContext<'a> {
     limits: &'a wgpu::Limits,
     features: wgpu::Features,
+    known_cost: &'a mut NativePreparationCost,
     #[cfg(any(feature = "sprite-submitter", feature = "ui-submitter"))]
     stock_images: &'a mut crate::stock_quad::StockImagePreflight,
 }
@@ -39,6 +40,28 @@ impl WgpuFeaturePreflightContext<'_> {
         self.features
     }
 
+    /// First-party adapters declare automatic custody before any native work. External
+    /// arbitrary extra retention remains the existing fallible preparation request.
+    pub(crate) fn add_native_cost(
+        &mut self,
+        custody_entries: usize,
+        metadata_bytes: usize,
+    ) -> Result<(), WgpuRenderProgramError> {
+        self.known_cost.custody_entries = self
+            .known_cost
+            .custody_entries
+            .checked_add(custody_entries)
+            .ok_or(GraphError::LimitExceeded(
+                crate::LimitKind::SubmissionResources,
+            ))?;
+        self.known_cost.metadata_bytes = self
+            .known_cost
+            .metadata_bytes
+            .checked_add(metadata_bytes)
+            .ok_or(GraphError::LimitExceeded(crate::LimitKind::MetadataBytes))?;
+        Ok(())
+    }
+
     #[cfg(any(feature = "sprite-submitter", feature = "ui-submitter"))]
     pub(crate) fn collect_stock_images(
         &mut self,
@@ -46,6 +69,12 @@ impl WgpuFeaturePreflightContext<'_> {
     ) -> Result<(), WgpuRenderProgramError> {
         self.stock_images.collect(batches)
     }
+}
+
+#[derive(Default)]
+pub(crate) struct NativePreparationCost {
+    custody_entries: usize,
+    metadata_bytes: usize,
 }
 
 /// The exact native resources declared by one operation in one compiled program.
@@ -278,6 +307,7 @@ pub(crate) struct EncodedProgram {
 #[derive(Default)]
 pub(crate) struct FeaturePreparationAttempt {
     pub(crate) touched_instances: Vec<u64>,
+    pub(crate) native_started: bool,
     #[cfg(any(feature = "sprite-submitter", feature = "ui-submitter"))]
     instance_reservations: Vec<crate::budget::InstanceReservation>,
 }
@@ -302,9 +332,13 @@ pub(crate) fn prepare_and_encode(
     _host_frame_index: u64,
     #[cfg(any(feature = "sprite-submitter", feature = "ui-submitter"))]
     stock_resources: &mut crate::stock_quad::StockQuadResources,
+    local_target: Option<&HostProgramTexture>,
 ) -> Result<EncodedProgram, WgpuRenderProgramError> {
     let compiled = &program.0;
     let graph = &compiled.graph;
+    if let Some(target) = local_target {
+        validate_local_target(program, namespace, producer, target)?;
+    }
     feature_attempt.touched_instances = reserved(compiled.operations.len())?;
     #[cfg(any(feature = "sprite-submitter", feature = "ui-submitter"))]
     {
@@ -337,11 +371,13 @@ pub(crate) fn prepare_and_encode(
     }
 
     let enabled_limits = namespace.device.limits();
+    let mut known_cost = NativePreparationCost::default();
     #[cfg(any(feature = "sprite-submitter", feature = "ui-submitter"))]
     let mut stock_images = crate::stock_quad::StockImagePreflight::new(compiled.operations.len())?;
     let mut preflight = WgpuFeaturePreflightContext {
         limits: &enabled_limits,
         features: namespace.device.features(),
+        known_cost: &mut known_cost,
         #[cfg(any(feature = "sprite-submitter", feature = "ui-submitter"))]
         stock_images: &mut stock_images,
     };
@@ -358,10 +394,17 @@ pub(crate) fn prepare_and_encode(
     #[cfg(any(feature = "sprite-submitter", feature = "ui-submitter"))]
     stock_images.validate(stock_resources)?;
 
+    compiled
+        .modeled_metadata_bytes
+        .checked_add(known_cost.metadata_bytes)
+        .filter(|bytes| *bytes <= compiled.max_modeled_metadata_bytes)
+        .ok_or(GraphError::LimitExceeded(crate::LimitKind::MetadataBytes))?;
+
     let automatic_entries = graph
         .resources()
         .len()
         .checked_add(1)
+        .and_then(|count| count.checked_add(known_cost.custody_entries))
         .and_then(|count| {
             compiled
                 .operations
@@ -378,6 +421,7 @@ pub(crate) fn prepare_and_encode(
         compiled
             .modeled_metadata_bytes
             .checked_add(cost.modeled_metadata_bytes)
+            .and_then(|bytes| bytes.checked_add(known_cost.metadata_bytes))
             .filter(|bytes| *bytes <= compiled.max_modeled_metadata_bytes)
             .ok_or(GraphError::LimitExceeded(crate::LimitKind::MetadataBytes))?;
         automatic_entries
@@ -390,13 +434,16 @@ pub(crate) fn prepare_and_encode(
 
     // Refuse the complete known local working set before any native allocation or prefix
     // retention. On refusal the temporary table drops every earlier guard immediately.
-    let mut allocations = reserve_local_allocations(graph, budget)?.into_iter();
+    let mut allocations =
+        reserve_local_allocations(graph, budget, local_target.map(|target| &target.version))?
+            .into_iter();
 
     // Keep original captures/definitions and all imports even if state creation or preparation
     // fails. This custody ends with the prefix and is never transferred into published outputs.
     reservation
         .retain(program.clone())
         .map_err(|(error, _)| WgpuRenderProgramError::from(error))?;
+    feature_attempt.native_started = true;
     for resource in graph.resources() {
         graph.resource(&resource.version)?;
         if resource.version.index() != resources.len() {
@@ -409,20 +456,38 @@ pub(crate) fn prepare_and_encode(
                 .find(|entry| entry.version == resource.version)
                 .ok_or(WgpuRenderProgramError::StaleImport)?;
             Arc::clone(&import.storage)
+        } else if let Some(target) =
+            local_target.filter(|target| target.version == resource.version)
+        {
+            Arc::clone(&target.storage)
         } else {
-            // Every local version is a distinct physical allocation and a distinct charge,
-            // including preservation destinations and resources not selected as outputs.
+            // Every unbound local version has its own allocation and charge, including
+            // preservation destinations and resources not selected as outputs.
             let allocation = allocations
                 .next()
                 .expect("every local resource has a preflight reservation");
             let native = match &resource.desc {
                 ResourceDescriptor::Texture { native, .. } => {
-                    let texture = namespace.device.create_texture(native);
-                    let view = texture.create_view(&wgpu::TextureViewDescriptor::default());
+                    // OOM can return an invalid handle. Check it before creating a view or
+                    // passing it to a Feature, retaining the original structured retry reason.
+                    let texture = crate::allocation::checked_resource(
+                        &namespace.device,
+                        "nara_program_texture",
+                        || namespace.device.create_texture(native),
+                    )?;
+                    let view = crate::allocation::checked_resource(
+                        &namespace.device,
+                        "nara_program_texture_view",
+                        || texture.create_view(&wgpu::TextureViewDescriptor::default()),
+                    )?;
                     NativeResource::Texture { texture, view }
                 }
                 ResourceDescriptor::Buffer { native, .. } => {
-                    NativeResource::Buffer(namespace.device.create_buffer(native))
+                    NativeResource::Buffer(crate::allocation::checked_resource(
+                        &namespace.device,
+                        "nara_program_buffer",
+                        || namespace.device.create_buffer(native),
+                    )?)
                 }
             };
             Arc::new(ProgramResourceStorage {
@@ -434,7 +499,7 @@ pub(crate) fn prepare_and_encode(
                 frame_index: compiled.frame_index,
                 descriptor: resource.desc.clone(),
                 native,
-                _reservation: allocation,
+                _reservation: Arc::new(allocation),
             })
         };
         // Never rely on the success return to establish physical custody. A later upload,
@@ -515,11 +580,15 @@ pub(crate) fn prepare_and_encode(
 fn reserve_local_allocations(
     graph: &CompiledGraph,
     budget: &Arc<OutputBudget>,
+    local_target: Option<&ResourceVersion>,
 ) -> Result<Vec<OutputReservation>, WgpuRenderProgramError> {
+    if let Some(version) = local_target {
+        validate_local_target_version(graph, version)?;
+    }
     let locals = graph
         .resources()
         .iter()
-        .filter(|resource| !resource.is_imported());
+        .filter(|resource| !resource.is_imported() && local_target != Some(&resource.version));
     // This table's worst-case capacity is included in the program metadata envelope. Admit
     // its actual capacity before acquiring guards so no growth can strand a partial admission.
     let mut allocations = reserved::<OutputReservation>(locals.clone().count())?;
@@ -531,6 +600,52 @@ fn reserve_local_allocations(
         );
     }
     Ok(allocations)
+}
+
+fn validate_local_target_version<'a>(
+    graph: &'a CompiledGraph,
+    version: &ResourceVersion,
+) -> Result<&'a ResourceDescriptor, WgpuRenderProgramError> {
+    let resource = graph.resource(version)?;
+    if resource.is_imported() {
+        return Err(GraphError::ImportedWrite(version.index()).into());
+    }
+    if !graph.outputs().contains(version) {
+        return Err(WgpuRenderProgramError::UnpublishedResource);
+    }
+    if !matches!(&resource.desc, ResourceDescriptor::Texture { .. }) {
+        return Err(WgpuRenderProgramError::ResourceKind);
+    }
+    Ok(&resource.desc)
+}
+
+fn validate_local_target(
+    program: &WgpuRenderProgram,
+    namespace: &WgpuDeviceNamespace,
+    producer: WgpuRenderProducerId,
+    target: &HostProgramTexture,
+) -> Result<(), WgpuRenderProgramError> {
+    let descriptor = validate_local_target_version(&program.0.graph, &target.version)?;
+    let storage = &target.storage;
+    if !matches!(&storage.native, NativeResource::Texture { .. }) {
+        return Err(WgpuRenderProgramError::ResourceKind);
+    }
+    if storage.backend_instance_id != namespace.backend_instance_id
+        || storage.device_epoch != namespace.device_epoch
+        || !Arc::ptr_eq(&storage.epoch_lost, &namespace.epoch_lost)
+        || !storage.is_current()
+        || namespace
+            .epoch_lost
+            .load(std::sync::atomic::Ordering::Acquire)
+        || storage.producer != producer
+        || storage.source != program.0.source
+        || storage.frame_index != program.0.frame_index
+        || storage.descriptor != *descriptor
+        || !native_matches_descriptor(storage)
+    {
+        return Err(GraphError::IncompatibleRead(target.version.index()).into());
+    }
+    Ok(())
 }
 
 fn validate_imports(

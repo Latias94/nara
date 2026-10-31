@@ -152,6 +152,15 @@ age and exact touched-instance cleanup preserve independent producer clocks. The
 interface replaces output-only names without aliases. Ordinary capture/policy migration and
 central DTO/facade deletion remain next work; full0121 is still Proposed.
 
+The [stock image successor](../../knowledge/engineering/verification/2026-10/2026-10-31T153613Z-stock-image-consumers-and-declared-worldcanvas-through-shared-programs-qualification-f6cfe4185aad459587db367d807aeb60.md)
+migrates real Scene, authoring Canvas, embedded Game and independent image consumers to the
+same typed-program native transaction. Ordered Sprite Views have one writer; mapped Game
+WorldCanvas uses declared graph textures and shared nearest composition before full-resolution UI.
+Private final-target binding shares actual byte custody and preserves initial storage on pure
+preflight refusal. Final affected88, no-default14, public program8/image3 and selected native
+Editor8 qualify their recorded source scopes. Ordinary Runtime/window capture/policy migration,
+central payload/facade deletion, View/history and complete custom composition remain open.
+
 The [original-result/logical-close prerequisite](../../knowledge/engineering/verification/2026-10/2026-10-31T082117Z-original-ui-result-custody-and-logical-close-qualification-6e1965c6428841ec9138088bef20f90c.md)
 is implemented at `8e9d840` under ADR0102. Nominal pre-admitted result batches, retained original
 receivers, replacement/backpressure guards and Root UI/Input close settlement now have final85,

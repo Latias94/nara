@@ -128,6 +128,70 @@ the original completion rendezvous. Generic prepared work has no mandatory UI fi
 Canvas, embedded Game and ordinary desktop all consume the same installed adapter definitions;
 Game retains its logical window routing when its physical execution target is an image.
 
+### Selected Stock Migration Shape
+
+One stock Sprite operation owns the admitted ordered world Views and one Scene-color writer.
+Its immutable capture flattens exact batches once and retains each View's viewport, load operation
+and prepared-buffer range. Preparation uses one instance reservation and shared native resources;
+encoding preserves the ordered attachment transaction. A later View Clear still clears the entire
+attachment. Serial Views do not require a full-target preservation copy per View, and the generic
+graph executor does not acquire a quad-only sequence container. The existing finite View limit
+also bounds this capture's engine metadata, including a clear-only world.
+
+Fixed WorldCanvas rendering declares its world texture in the graph. A typed composite Feature
+samples that exact input into the initialized physical-resolution output, sharing the incumbent
+shader and mapping/scissor implementation. It does not allocate a second hidden world texture.
+UI writes a distinct FinalComposite version through an explicit initialization copy and runs once
+at physical target resolution. A policy without UI uses ordinary initialization/output declarations;
+compiling the UI package does not activate it.
+
+The next policy seam pairs a code-provided immutable Capture with its original build definition.
+Stock fields belong to that policy, rather than the central frame, connection or Host. Concrete
+capture systems read already-extracted domain data through normal ECS parameters; the policy
+interface does not receive a World. Producer-local CPU instances hold typed Feature instances and
+stable View/effect identity. Candidate ports are created only during Host-local construction, so
+capturing a frame does not require native resources or preexisting graph handles. Erasure stays
+inside the connection and Host. This is a selected integration shape, not a qualified public
+policy interface or a new generic section registry.
+
+Policy requirements close over its original Feature definitions before device acquisition. Instance
+creation cannot expand that declared request. Late installation must fit actual enabled facts or
+request explicit Host reconstruction. A captured source/processed input retains the original
+definition and exact reconstruction inputs; building it cannot consult a current policy or assets.
+Installation identity and producer-local instance identity remain independent of Rust type and list
+position. Before exposing withdrawal, distinguish closing new capture admission from the retained
+execution admission already issued to an accepted capture. Existing Feature-instance Drop closes
+execution admission, so dropping an old binding at route replacement cannot implement draining.
+Producer close still revokes execution, even while old inputs retain reconstruction/code custody.
+
+Use one private staged program transaction for ordinary Runtime/window, Editor Scene/Canvas/Game
+and independent image output. It performs one producer admission, complete preflight, preparation,
+native validation and original submission-prefix binding. An Editor target's already-reserved
+texture may realize a final local version only through a Host-private binding: it remains an
+uninitialized local resource with one writer, rather than a public initialized import. Program
+outputs and the exact image receipt retain the same actual allocation/byte guard. Native handle
+clones alone cannot create a second charge or discharge the original responsibility.
+
+The acquired surface is the Host's final consumer. Its final draw and the program's commands join
+one original reservation and native submission attempt before present. This avoids requiring
+surface copy usages or treating an acquired surface as initialized imported content. Keep output
+publication, surface presentation, exact UI settlement and physical completion separate. Do not
+implement stock migration by chaining public submit_program and the incumbent image/window path;
+that would retain multiple admission/submission authorities.
+
+The concrete UI bridge joins reports to permits by packet identity and original logical target,
+validating uniqueness and result capacity before native submission. Replayed packets with no new
+permit still draw; a fully clipped packet still has exact facts. The bridge never zips packets
+with permits or puts a permit in a replayable capture. Runtime Presented still requires actual
+surface presentation; embedded Game requires its designated exact display occurrence. Authoring
+Canvas has no Runtime permit. Preserve the Root post-Host UI/Input join, first-present/READY,
+telemetry seal, accepted target/picking facts and original close/result custody together.
+
+Migrate the actual desktop driver, Scene and Canvas presenters, embedded Game candidate/presenter,
+and independent image consumer before deleting their displaced fields and facades. The first
+alternate policy must cross the same capture selection and final-target adaptation; another
+direct submit_program blur alone does not qualify renderer-policy replacement.
+
 ## Publication, History And Close
 
 One candidate owns one complete output publication group. Initially encode and submit independent

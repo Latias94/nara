@@ -27,6 +27,7 @@ mod runtime;
 mod sprite;
 #[cfg(all(test, feature = "sprite-submitter"))]
 mod sprite_probe;
+mod stock_policy;
 #[cfg(any(feature = "sprite-submitter", feature = "ui-submitter"))]
 mod stock_quad;
 mod submission;

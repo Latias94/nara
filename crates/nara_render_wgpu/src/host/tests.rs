@@ -1774,6 +1774,70 @@ fn native_failed_submission_allows_retry_of_the_same_original_input() {
 
 #[test]
 #[ignore = "requires an explicitly selected native GPU; acquisition failure is a failed prerequisite"]
+#[cfg(feature = "ui-submitter")]
+fn native_image_preflight_refusal_preserves_the_original_reserved_storage_for_retry() {
+    let mut host = WgpuRenderHost::offscreen();
+    host.begin_frame(1).unwrap();
+    let frame = test_image_frame();
+    let source = frame.source_generation();
+    let target = image_target(&frame);
+    let producer = host.create_producer().unwrap();
+    let reservation = host
+        .reserve_image_target(&producer, source, target)
+        .unwrap();
+    host.activate_image_target(&producer, reservation).unwrap();
+    let (texture, view, guard) = host.views[&producer.id()]
+        .target
+        .as_ref()
+        .unwrap()
+        .initial_storage
+        .as_ref()
+        .map(|(texture, view, guard)| (texture.clone(), view.clone(), Arc::clone(guard)))
+        .unwrap();
+    let bytes = host.retained_resource_bytes();
+    let [image, _] = crate::readback_tests::two_image_versions();
+    let input = WgpuImageInput::new(frame).with_ui(vec![test_ui_image_packet(
+        image,
+        RenderTarget::Image(target.image()),
+    )]);
+    *host.backend.stock_quad_resources().textures_mut() =
+        crate::texture::WgpuSpriteTextureCache::with_image_residency_limits(1, 3);
+    let error = host.submit(&producer, &input).unwrap_err();
+    assert!(error.is_content_rejected());
+    let preserved = host.views[&producer.id()]
+        .target
+        .as_ref()
+        .unwrap()
+        .initial_storage
+        .as_ref()
+        .expect("pure preflight refusal preserves the separately admitted target");
+    assert_eq!(preserved.0, texture);
+    assert_eq!(preserved.1, view);
+    assert!(Arc::ptr_eq(&preserved.2, &guard));
+    assert_eq!(host.retained_resource_bytes(), bytes);
+    assert_eq!(host.backend.texture_stats().uploaded_images, 0);
+    assert_eq!(host.views[&producer.id()].admission.last_frame_index, None);
+    *host.backend.stock_quad_resources().textures_mut() =
+        crate::texture::WgpuSpriteTextureCache::with_image_residency_limits(1, 4);
+    let output = host.submit(&producer, &input).unwrap();
+    assert_eq!(output.0.texture, texture);
+    assert!(
+        host.views[&producer.id()]
+            .target
+            .as_ref()
+            .unwrap()
+            .initial_storage
+            .is_none()
+    );
+    assert_eq!(
+        read_output_pixel(&mut host, &output, 16, 16),
+        [255, 0, 0, 255]
+    );
+    drain_submission_prefix(&host.retire_producer(&producer).unwrap());
+}
+
+#[test]
+#[ignore = "requires an explicitly selected native GPU; acquisition failure is a failed prerequisite"]
 fn native_output_budget_counts_exact_storage_until_callbacks_and_last_leases_drop() {
     const BYTES: u64 = 64 * 64 * 4;
     let mut execution = WgpuRenderHost::offscreen().with_resource_byte_limit(2 * BYTES - 1);
@@ -1822,7 +1886,9 @@ fn native_output_budget_counts_exact_storage_until_callbacks_and_last_leases_dro
     ));
     assert!(matches!(
         execution.submit(&producer, &second_input),
-        Err(WgpuRenderHostError::OutputCapacity)
+        Err(WgpuRenderHostError::Program(
+            crate::WgpuRenderProgramError::ResourceCapacity
+        ))
     ));
     assert_eq!(execution.retained_resource_bytes(), BYTES);
     assert_eq!(
@@ -1860,7 +1926,9 @@ fn native_output_budget_counts_exact_storage_until_callbacks_and_last_leases_dro
     let third_input = WgpuImageInput::new(image_frame_for(source, 3, target, Color::BLACK));
     assert!(matches!(
         execution.submit(&producer, &third_input),
-        Err(WgpuRenderHostError::OutputCapacity)
+        Err(WgpuRenderHostError::Program(
+            crate::WgpuRenderProgramError::ResourceCapacity
+        ))
     ));
     assert_eq!(
         execution.views[&view_id].admission.last_frame_index,
@@ -1909,8 +1977,13 @@ fn native_allocation_rejection_preserves_last_good_and_allows_same_capture_retry
         Color::rgba(0.0, 1.0, 0.0, 1.0),
     ));
     let retained_bytes = execution.retained_resource_bytes();
-    VIEWPORT_ALLOCATION_FAILURE.with(|failure| failure.set(Some(2)));
+    let failure = crate::allocation::AllocationFailureGuard::at("nara_program_texture_view");
     let error = execution.submit(&producer, &input).unwrap_err();
+    assert!(
+        failure.was_consumed(),
+        "failure must exercise the actual program allocation path"
+    );
+    drop(failure);
     assert!(error.is_deferred());
     assert!(!error.is_content_rejected());
     assert_eq!(execution.retained_resource_bytes(), retained_bytes);
@@ -2176,7 +2249,7 @@ fn allocated_test_output(
         receipt,
         texture,
         view,
-        _reservation: reservation,
+        _reservation: Arc::new(reservation),
     }))
 }
 

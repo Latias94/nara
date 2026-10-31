@@ -182,6 +182,12 @@ cross-owner composition work; this subsection does not promote that entire propo
   native handle establishes initialization. A successor allocates distinct storage while a
   predecessor remains leased. CPU inputs and reconstruction availability stay independent of
   published pixels/bytes.
+- A separately admitted Host target reservation may realize one graph-local final texture.
+  This private physical binding is not an initialized import: the normal unique writer and
+  initialization proof still apply. Graph output and image receipt share the same actual byte
+  guard. Pure preflight/capacity refusal preserves the initial reservation; native preparation
+  transfers that attempt to original-prefix custody even when later work fails. Successor output
+  allocation follows complete preflight through the same program realization path.
 - Each candidate has one complete output group and one independently validated native submission.
   Failed preparation, encoding or submission publishes none of it and leaves its successful
   capture watermark unchanged. Even failures flush and retain original uploads through the

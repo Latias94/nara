@@ -108,7 +108,7 @@ pub(crate) struct WgpuImageStorage {
     pub(crate) receipt: WgpuSubmittedImageReceipt,
     pub(crate) texture: wgpu::Texture,
     pub(crate) view: wgpu::TextureView,
-    pub(crate) _reservation: OutputReservation,
+    pub(crate) _reservation: Arc<OutputReservation>,
 }
 
 /// One exact, immutable physical image version published by a WGPU Host.

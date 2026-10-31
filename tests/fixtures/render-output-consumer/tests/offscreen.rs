@@ -15,7 +15,7 @@ use nara_render::{
 };
 use nara_render_wgpu::{
     WgpuImageInput, WgpuImageOutput, WgpuImageTargetIdentity, WgpuRenderHost, WgpuRenderHostError,
-    WgpuRenderProducer, WgpuSubmissionPrefix,
+    WgpuRenderProducer, WgpuRenderProgramError, WgpuSubmissionPrefix,
 };
 
 const TIMEOUT: Duration = Duration::from_secs(10);
@@ -232,7 +232,9 @@ fn exact_output_budget_preserves_leases_and_retries_the_same_refused_capture() {
     let green_input = input(source, 2, target, GREEN);
     assert!(matches!(
         host.submit(&a, &green_input),
-        Err(WgpuRenderHostError::OutputCapacity)
+        Err(WgpuRenderHostError::Program(
+            WgpuRenderProgramError::ResourceCapacity
+        ))
     ));
     assert_eq!(host.retained_resource_bytes(), BYTES);
     assert_pixels(&mut host, retained_red.output(), RED_BYTES);

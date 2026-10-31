@@ -196,6 +196,13 @@ tests execute both stock adapters. Their ordinary capture/policy consumers still
 before central payloads, combined image facades and quad-only prepared containers can be deleted.
 Continue that actual replacement next; tested adapter presence does not close the complete unit.
 
+The [ordinary stock image successor](../knowledge/engineering/verification/2026-10/2026-10-31T153613Z-stock-image-consumers-and-declared-worldcanvas-through-shared-programs-qualification-f6cfe4185aad459587db367d807aeb60.md)
+now routes actual Scene, Canvas, embedded Game and independent image consumers through that program
+transaction. Mapped fixed-world Game uses graph-owned world/resolved/final versions; initial target
+storage has exact shared custody and survives pure preflight refusal. Continue ordinary Runtime/
+window and typed policy capture installation next, removing the central payload and combined
+facades with their remaining consumers before qualifying general policy/history replacement.
+
 The [first executable comparison](../knowledge/engineering/verification/2026-10/2026-10-31T060722Z-private-render-graph-buffer-history-and-viable-controls-comparison-on-dx12-d6aca1996b2342659bd07933b33e0e64.md)
 records 61 unique CPU tests, seven actual DX12 tests and one subsequent actual submission-failure
 test. Image/buffer kernels, independent numeric controls, logical history groups and accepted-

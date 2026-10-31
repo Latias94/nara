@@ -1,6 +1,6 @@
 //! Shared stock quad realization owned by the Host's backend and device epoch.
 
-use std::{mem::size_of, sync::Arc};
+use std::{mem::size_of, ops::Range, sync::Arc};
 
 use crate::{
     GraphError, LimitKind, PreparedSubmitterDraw, WgpuRenderError, WgpuRenderProgramError,
@@ -39,28 +39,65 @@ impl StockQuadPrepared {
         target: &wgpu::TextureView,
         viewport: nara_render::ViewportRect,
     ) {
-        let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
-            label: Some("nara_stock_feature"),
-            color_attachments: &[Some(wgpu::RenderPassColorAttachment {
-                view: target,
-                depth_slice: None,
-                resolve_target: None,
-                ops: wgpu::Operations {
-                    load: wgpu::LoadOp::Load,
-                    store: wgpu::StoreOp::Store,
-                },
-            })],
-            ..Default::default()
-        });
-        pass.set_viewport(
-            viewport.physical_x as f32,
-            viewport.physical_y as f32,
-            viewport.physical_width as f32,
-            viewport.physical_height as f32,
-            0.0,
-            1.0,
+        self.encode_views(
+            encoder,
+            target,
+            std::iter::once((
+                viewport,
+                nara_render::ViewLoadOp::Load,
+                0..self.buffers.len(),
+            )),
         );
-        crate::quad::draw_quad_batch_buffers(&mut pass, &self.pipelines, &self.buffers, viewport);
+    }
+
+    /// One stock Feature owns the ordered attachment transaction. These ranges select the
+    /// already prepared buffers; they do not create another writer or copy the attachment.
+    pub(crate) fn encode_views(
+        &self,
+        encoder: &mut wgpu::CommandEncoder,
+        target: &wgpu::TextureView,
+        views: impl Iterator<
+            Item = (
+                nara_render::ViewportRect,
+                nara_render::ViewLoadOp,
+                Range<usize>,
+            ),
+        >,
+    ) {
+        for (viewport, load, buffers) in views {
+            let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                label: Some("nara_stock_feature"),
+                color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                    view: target,
+                    depth_slice: None,
+                    resolve_target: None,
+                    ops: wgpu::Operations {
+                        load: match load {
+                            nara_render::ViewLoadOp::Clear(color) => {
+                                wgpu::LoadOp::Clear(crate::clear_color_to_wgpu(color))
+                            }
+                            nara_render::ViewLoadOp::Load => wgpu::LoadOp::Load,
+                        },
+                        store: wgpu::StoreOp::Store,
+                    },
+                })],
+                ..Default::default()
+            });
+            pass.set_viewport(
+                viewport.physical_x as f32,
+                viewport.physical_y as f32,
+                viewport.physical_width as f32,
+                viewport.physical_height as f32,
+                0.0,
+                1.0,
+            );
+            crate::quad::draw_quad_batch_buffers(
+                &mut pass,
+                &self.pipelines,
+                &self.buffers[buffers],
+                viewport,
+            );
+        }
     }
 }
 

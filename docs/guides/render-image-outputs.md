@@ -42,7 +42,7 @@ limit is 512MiB of shared logical native payload; `with_resource_byte_limit` cha
 `retained_resource_bytes` includes inactive output reservations, retained outputs, graph allocations,
 and prepared Image, glyph, fallback, instance and material allocations. Each allocation is charged
 once until its last responsibility releases it, including cached state, output leases and submitted
-uses. Toolkit-owned storage and the fixed WorldCanvas cache retain separate accounting during
+uses. Toolkit-owned storage and the legacy Runtime/window WorldCanvas cache retain separate accounting during
 the stock-policy transition. Native pipeline/driver overhead is excluded; the budget does not measure physical driver
 residency.
 

@@ -31,10 +31,9 @@ pub use native::{
     WgpuFeatureEncodeContext, WgpuFeaturePreflightContext, WgpuFeaturePrepareContext,
     WgpuOperationResources,
 };
-#[cfg(test)]
 pub(crate) use resources::NativeResource;
-pub(crate) use resources::ProgramResourceStorage;
 use resources::require_descriptor;
+pub(crate) use resources::{HostProgramTexture, ProgramResourceStorage};
 pub use resources::{
     WgpuProgramBuffer, WgpuProgramBufferOutput, WgpuProgramOutput, WgpuProgramRead,
     WgpuProgramTexture, WgpuProgramTextureDescriptor, WgpuProgramTextureOutput, WgpuProgramWrite,
@@ -239,6 +238,9 @@ impl WgpuRenderProgramBuilder {
             size_of::<WgpuProgramOutputs>(),
             size_of::<native::EncodedProgram>(),
             size_of::<native::FeaturePreparationAttempt>(),
+            size_of::<native::NativePreparationCost>(),
+            size_of::<HostProgramTexture>(),
+            size_of::<crate::output::WgpuImageStorage>() + 2 * size_of::<usize>(),
             2 * size_of::<usize>(),
             crate::submission::WgpuSubmissionReservation::modeled_metadata_bytes::<WgpuRenderProgram>(
             ),
@@ -273,6 +275,10 @@ impl WgpuRenderProgramBuilder {
             ),
             (
                 limits.max_resources,
+                size_of::<crate::output::OutputReservation>() + 2 * size_of::<usize>(),
+            ),
+            (
+                limits.max_resources,
                 size_of::<ProgramResourceStorage>() + 2 * size_of::<usize>(),
             ),
             (
@@ -303,6 +309,14 @@ impl WgpuRenderProgramBuilder {
                         )
                         .and_then(|table| bytes.checked_add(table))
                 })
+                .ok_or(GraphError::LimitExceeded(crate::LimitKind::MetadataBytes))?;
+        }
+        #[cfg(feature = "sprite-submitter")]
+        {
+            bytes = limits
+                .max_operations
+                .checked_mul(crate::sprite::ordered_view_metadata_bytes())
+                .and_then(|views| bytes.checked_add(views))
                 .ok_or(GraphError::LimitExceeded(crate::LimitKind::MetadataBytes))?;
         }
         if bytes > limits.max_modeled_metadata_bytes {

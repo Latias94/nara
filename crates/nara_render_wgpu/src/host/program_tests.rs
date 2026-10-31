@@ -173,6 +173,79 @@ struct Color;
 #[cfg(feature = "sprite-submitter")]
 #[test]
 #[ignore = "requires an explicitly selected native GPU; acquisition failure is a failed prerequisite"]
+fn native_ordered_sprite_views_have_one_writer_and_keep_whole_attachment_clears() {
+    use crate::sprite::{SpriteCapture, SpriteFeature};
+    let captured = crate::view_probe::captured_split_frame();
+    let mut host = WgpuRenderHost::offscreen();
+    let producer = host.create_producer().unwrap();
+    let instance = host
+        .create_feature_instance(
+            &producer,
+            &WgpuFeatureDefinition::new(SpriteFeature::<Color>::new()),
+        )
+        .unwrap();
+    let source = captured.topology.source_generation();
+    let mut description = descriptor();
+    description.native.size.width = 64;
+    description.native.size.height = 64;
+    host.begin_frame(1).unwrap();
+    for frame in 1..=3 {
+        let mut views = captured.topology.views().to_vec();
+        if frame > 1 {
+            views[1].load = nara_render::ViewLoadOp::Clear(nara_core::Color::rgb(0.0, 0.0, 1.0));
+        }
+        let mut builder =
+            WgpuRenderProgramBuilder::new(source, frame, GraphLimits::default()).unwrap();
+        let target = builder.texture::<Color>(description.clone()).unwrap();
+        let capture = SpriteCapture::for_views(
+            (frame < 3).then_some(captured.payload.sprite_batches.as_ref().unwrap()),
+            &views,
+            target.clone(),
+        )
+        .unwrap();
+        builder
+            .operation(
+                1,
+                &instance,
+                Arc::new(capture),
+                &[],
+                &[target.clear(wgpu::Color::TRANSPARENT, AccessRole::Attachment)],
+            )
+            .unwrap();
+        let program = builder.finish(&[target.output()]).unwrap();
+        assert_eq!(
+            program.0.graph.resources().len(),
+            1,
+            "serial Views share one declared output"
+        );
+        let outputs = host.submit_program(&producer, &program).unwrap();
+        let output = outputs.texture(&target).unwrap();
+        let actual = pixels(&mut host, &output);
+        let at = |x: usize, y: usize| actual[y * 64 + x];
+        if frame == 1 {
+            assert_eq!(at(16, 32), [255, 0, 0, 255]);
+            assert_eq!(at(48, 32), [0, 255, 0, 255]);
+            assert_eq!(at(16, 42), [0, 0, 0, 255]);
+            assert_eq!(at(48, 42), [0, 255, 0, 255]);
+        } else if frame == 2 {
+            assert_eq!(
+                at(16, 32),
+                [0, 0, 255, 255],
+                "a later Clear affects the whole attachment"
+            );
+            assert_eq!(at(48, 32), [0, 255, 0, 255]);
+            assert_eq!(at(58, 32), [0, 0, 255, 255]);
+        } else {
+            assert!(actual.iter().all(|pixel| *pixel == [0, 0, 255, 255]));
+            assert_eq!(outputs.report(1, &instance).unwrap().draw_calls, 0);
+        }
+        drain(outputs.submitted_prefix());
+    }
+}
+
+#[cfg(feature = "sprite-submitter")]
+#[test]
+#[ignore = "requires an explicitly selected native GPU; acquisition failure is a failed prerequisite"]
 fn native_stock_known_custody_refuses_before_partial_realization() {
     use crate::{
         quad::{WgpuQuadBatch, WgpuQuadInstance, WgpuQuadMaterialKey, WgpuQuadTexture},
@@ -209,12 +282,11 @@ fn native_stock_known_custody_refuses_before_partial_realization() {
         material_extension: None,
         instances: vec![<WgpuQuadInstance as bytemuck::Zeroable>::zeroed()],
     };
-    let capture = SpriteCapture {
-        target: target.clone(),
-        viewport: nara_render::ViewportRect::from_extent(nara_render::Extent2d::new(4, 4).unwrap())
-            .unwrap(),
-        batches: vec![batch; 20_000].into(),
-    };
+    let capture = SpriteCapture::from_lowered(
+        target.clone(),
+        nara_render::ViewportRect::from_extent(nara_render::Extent2d::new(4, 4).unwrap()).unwrap(),
+        vec![batch; 20_000].into(),
+    );
     builder
         .operation(
             1,
@@ -283,10 +355,10 @@ fn native_stock_features_share_complete_image_preflight_and_original_resource_cu
     let world = builder.texture::<Color>(descriptor.clone()).unwrap();
     let final_color = builder.texture::<Color>(descriptor).unwrap();
     let texture = WgpuQuadTexture::Image(red);
-    let sprite_capture = SpriteCapture {
-        target: world.clone(),
+    let sprite_capture = SpriteCapture::from_lowered(
+        world.clone(),
         viewport,
-        batches: vec![WgpuQuadBatch {
+        vec![WgpuQuadBatch {
             material: WgpuQuadMaterialKey {
                 texture: texture.key(),
                 sampler: SamplerDescriptor::default(),
@@ -311,7 +383,7 @@ fn native_stock_features_share_complete_image_preflight_and_original_resource_cu
             }],
         }]
         .into(),
-    };
+    );
     let packet =
         super::tests::test_ui_image_packet(green, nara_render::RenderTarget::PrimaryWindow);
     let ui_capture = UiCapture::new(

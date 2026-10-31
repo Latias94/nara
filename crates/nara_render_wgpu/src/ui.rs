@@ -17,6 +17,29 @@ use crate::{
     stock_quad::StockQuadPrepared,
 };
 
+/// Replay packets can outnumber new permits. Each actual permit still needs exactly one
+/// original packet/target fact, including a packet whose drawing was completely clipped.
+pub(crate) fn validate_submission_packets(
+    submissions: &[nara_ui_render::__private::UiSubmittedBackendSubmission],
+    packets: &[WgpuLoweredUiPacketFacts],
+) -> Result<(), WgpuRenderError> {
+    for submission in submissions {
+        let identity = submission.submission().identity();
+        let mut matching = packets
+            .iter()
+            .filter(|facts| facts.packet == identity.packet() && facts.target == identity.target());
+        if matching.next().is_none() || matching.next().is_some() {
+            return Err(WgpuRenderError::UiSubmissionRejected {
+                message: format!(
+                    "UI backend attempt {} requires one exact packet for its original logical target",
+                    identity.admission_id().get(),
+                ),
+            });
+        }
+    }
+    Ok(())
+}
+
 /// Stock UI drawing against the policy's exact semantic texture port.
 pub(crate) struct UiFeature<S: 'static>(PhantomData<fn() -> S>);
 

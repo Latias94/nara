@@ -66,6 +66,19 @@ Complete main/material Image demand and known automatic custody/engine records a
 native work. The shared stock cost calculation also serves existing Runtime/Editor consumers
 during policy migration. Arbitrary external extra retention remains fallible dynamic work.
 
+Stock image execution for Scene, authoring Canvas, embedded Game and independent image consumers
+uses that same native program transaction. Ordered world Views share one Sprite writer. A fixed
+WorldCanvas uses declared world/physical-resolution textures and the original nearest composite;
+UI then writes a distinct final version at physical resolution. Its automatic mapping custody and
+engine metadata join preflight even without Sprite/UI support. Current Canvas destination scope
+is RGBA8/BGRA8 in linear or sRGB formats, preserving its declared alpha interpretation.
+
+The Host may bind already-reserved target storage as a private local output. It still needs its
+normal writer and initialization; it grants no public raw initialized import. A pure preflight
+refusal preserves that reservation. Later outputs allocate after preflight and image receipts
+share the actual program storage guard. Runtime/window capture and general policy installation
+remain the following migration work; the existing stock facade names are not a new policy API.
+
 Both `create_state` and `prepare` receive `WgpuFeaturePrepareContext`. Use `device()` for pipelines,
 `resources()` for declared versions and scoped uploads for private inputs. Reserve native payload
 bytes with `reserve_bytes` before allocation. Keep the cloneable `WgpuFeatureAllocation` with the
@@ -103,7 +116,7 @@ returned native bindings/views retain their use through cache removal and physic
 The former per-Image completion callbacks are removed. Shared cache age uses the Host maintenance
 frame, independently of producer capture/frame identities.
 
-Toolkit-owned resources and the current fixed WorldCanvas cache retain their separate accounting
+Toolkit-owned resources and the legacy Runtime/window WorldCanvas cache retain their separate accounting
 during the stock-policy transition. This budget covers the represented native payload owners;
 it is not a promise that every device allocation is admitted by one complete GPU-memory budget.
 

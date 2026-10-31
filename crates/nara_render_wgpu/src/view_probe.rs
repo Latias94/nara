@@ -24,7 +24,7 @@ use crate::{
     readback_tests::{readback_pixel, render_to_rgba},
 };
 
-fn captured_split_frame() -> crate::frame::WgpuCapturedFrame {
+pub(crate) fn captured_split_frame() -> crate::frame::WgpuCapturedFrame {
     let mut app = App::new();
     app.add_plugins((
         nara_reflect::ComponentRegistryPlugin,

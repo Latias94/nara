@@ -1,8 +1,8 @@
 use super::*;
 
 use crate::graph::{
-    AccessRole, BufferMeaning, GraphBuilder, GraphLimits, TextureAlpha, TextureMeaning,
-    TextureTransfer,
+    AccessRole, BufferMeaning, GraphBuilder, GraphLimits, ResourceWrite, TextureAlpha,
+    TextureMeaning, TextureTransfer,
 };
 
 struct Values;
@@ -36,7 +36,7 @@ fn texture_resource(width: u32, height: u32) -> ResourceDescriptor {
             sample_count: 1,
             dimension: wgpu::TextureDimension::D2,
             format: wgpu::TextureFormat::R8Unorm,
-            usage: wgpu::TextureUsages::TEXTURE_BINDING,
+            usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::RENDER_ATTACHMENT,
             view_formats: &[],
         },
         range: wgpu::ImageSubresourceRange::default(),
@@ -165,7 +165,7 @@ fn local_preflight_rolls_back_refusal_and_each_guard_follows_its_last_use() {
 
     let budget = Arc::new(OutputBudget::new(127));
     assert!(matches!(
-        reserve_local_allocations(&graph, &budget),
+        reserve_local_allocations(&graph, &budget, None),
         Err(WgpuRenderProgramError::ResourceCapacity)
     ));
     assert_eq!(budget.retained(), 0);
@@ -175,7 +175,7 @@ fn local_preflight_rolls_back_refusal_and_each_guard_follows_its_last_use() {
     assert_eq!(budget.retained(), 0);
 
     let budget = Arc::new(OutputBudget::new(128));
-    let mut allocations = reserve_local_allocations(&graph, &budget)
+    let mut allocations = reserve_local_allocations(&graph, &budget, None)
         .unwrap()
         .into_iter();
     assert_eq!(allocations.len(), 2);
@@ -199,6 +199,256 @@ fn local_preflight_rolls_back_refusal_and_each_guard_follows_its_last_use() {
     drop(independent);
     assert_eq!(budget.retained(), 64);
     drop(output);
+    assert_eq!(budget.retained(), 0);
+}
+
+#[test]
+fn host_local_target_requires_a_selected_local_texture_from_the_same_graph() {
+    let mut builder = GraphBuilder::new(GraphLimits::default()).unwrap();
+    let selected = builder.reserve_resource(texture_resource(8, 8)).unwrap();
+    let unselected = builder.reserve_resource(texture_resource(8, 8)).unwrap();
+    let imported = builder.import_resource(texture_resource(8, 8)).unwrap();
+    let buffer = builder.reserve_resource(buffer_resource(16)).unwrap();
+    builder
+        .add_operation(
+            1,
+            &[],
+            &[
+                ResourceWrite {
+                    version: selected.clone(),
+                    role: AccessRole::Attachment,
+                    initialization: Initialization::Clear(wgpu::Color::BLACK),
+                },
+                ResourceWrite {
+                    version: unselected.clone(),
+                    role: AccessRole::Attachment,
+                    initialization: Initialization::Clear(wgpu::Color::BLACK),
+                },
+                ResourceWrite {
+                    version: buffer.clone(),
+                    role: AccessRole::StorageWrite,
+                    initialization: Initialization::Zero,
+                },
+            ],
+        )
+        .unwrap();
+    builder
+        .set_output_group(&[selected.clone(), buffer.clone(), imported.clone()])
+        .unwrap();
+    let graph = builder.compile().unwrap();
+    assert_eq!(
+        validate_local_target_version(&graph, &selected).unwrap(),
+        &texture_resource(8, 8)
+    );
+    assert!(matches!(
+        validate_local_target_version(&graph, &unselected),
+        Err(WgpuRenderProgramError::UnpublishedResource)
+    ));
+    assert!(matches!(
+        validate_local_target_version(&graph, &imported),
+        Err(WgpuRenderProgramError::Graph(GraphError::ImportedWrite(2)))
+    ));
+    assert!(matches!(
+        validate_local_target_version(&graph, &buffer),
+        Err(WgpuRenderProgramError::ResourceKind)
+    ));
+    let mut other = GraphBuilder::new(GraphLimits::default()).unwrap();
+    let foreign = other.reserve_resource(texture_resource(8, 8)).unwrap();
+    assert_eq!(selected.index(), foreign.index());
+    assert!(matches!(
+        validate_local_target_version(&graph, &foreign),
+        Err(WgpuRenderProgramError::Graph(GraphError::ForeignCandidate))
+    ));
+}
+
+#[test]
+fn bound_local_target_skips_only_its_existing_charge_and_preserves_guard_order() {
+    let mut builder = GraphBuilder::new(GraphLimits::default()).unwrap();
+    let first = builder.reserve_resource(buffer_resource(32)).unwrap();
+    let target = builder.reserve_resource(texture_resource(8, 8)).unwrap();
+    builder.import_resource(texture_resource(8, 8)).unwrap();
+    let last = builder.reserve_resource(buffer_resource(16)).unwrap();
+    builder
+        .add_operation(
+            1,
+            &[],
+            &[
+                ResourceWrite {
+                    version: first,
+                    role: AccessRole::StorageWrite,
+                    initialization: Initialization::Zero,
+                },
+                ResourceWrite {
+                    version: target.clone(),
+                    role: AccessRole::Attachment,
+                    initialization: Initialization::Clear(wgpu::Color::BLACK),
+                },
+                ResourceWrite {
+                    version: last,
+                    role: AccessRole::StorageWrite,
+                    initialization: Initialization::Zero,
+                },
+            ],
+        )
+        .unwrap();
+    builder.set_output_group(&[target.clone()]).unwrap();
+    let graph = builder.compile().unwrap();
+    let budget = Arc::new(OutputBudget::new(112));
+    let image_guard = Arc::new(budget.reserve(64).unwrap());
+    let program_guard = Arc::clone(&image_guard);
+    assert!(matches!(
+        reserve_local_allocations(&graph, &budget, None),
+        Err(WgpuRenderProgramError::ResourceCapacity)
+    ));
+    assert_eq!(
+        budget.retained(),
+        64,
+        "refusal rolls back only fresh guards"
+    );
+    let mut allocations = reserve_local_allocations(&graph, &budget, Some(&target))
+        .unwrap()
+        .into_iter();
+    assert_eq!(allocations.len(), 2);
+    assert_eq!(budget.retained(), 112);
+    drop(allocations.next().unwrap());
+    assert_eq!(budget.retained(), 80);
+    drop(allocations.next().unwrap());
+    assert_eq!(budget.retained(), 64);
+    drop(program_guard);
+    assert_eq!(budget.retained(), 64);
+    drop(image_guard);
+    assert_eq!(budget.retained(), 0);
+}
+
+#[test]
+#[ignore = "requires an explicitly selected native GPU; acquisition failure is a failed prerequisite"]
+fn native_host_local_binding_validates_provenance_and_reuses_exact_storage() {
+    let mut backend = crate::WgpuRenderBackend::default();
+    let namespace = backend.prepare_image_device().unwrap();
+    let source = nara_render::RenderFrameSourceGeneration::try_acquire().unwrap();
+    let producer = WgpuRenderProducerId::new(1);
+    let mut builder =
+        super::super::WgpuRenderProgramBuilder::new(source, 7, GraphLimits::default()).unwrap();
+    let ResourceDescriptor::Texture { native, .. } = texture_resource(8, 8) else {
+        unreachable!()
+    };
+    let port = builder
+        .texture::<Values>(super::super::WgpuProgramTextureDescriptor {
+            native: native.clone(),
+            transfer: TextureTransfer::Linear,
+            alpha: TextureAlpha::Opaque,
+        })
+        .unwrap();
+    builder
+        .initialize(1, &[port.clear(wgpu::Color::WHITE, AccessRole::Attachment)])
+        .unwrap();
+    let program = builder.finish(&[port.output()]).unwrap();
+    let budget = Arc::new(OutputBudget::new(64));
+    let image_guard = Arc::new(budget.reserve(64).unwrap());
+    let texture = namespace.device.create_texture(&native);
+    let view = texture.create_view(&wgpu::TextureViewDescriptor::default());
+    let mut target = HostProgramTexture {
+        version: port.version.clone(),
+        storage: Arc::new(ProgramResourceStorage {
+            backend_instance_id: namespace.backend_instance_id,
+            device_epoch: namespace.device_epoch,
+            epoch_lost: Arc::clone(&namespace.epoch_lost),
+            producer,
+            source,
+            frame_index: 7,
+            descriptor: texture_resource(8, 8),
+            native: NativeResource::Texture { texture, view },
+            _reservation: Arc::clone(&image_guard),
+        }),
+    };
+    let reject = |target: &HostProgramTexture| {
+        assert!(matches!(
+            validate_local_target(&program, &namespace, producer, target),
+            Err(WgpuRenderProgramError::Graph(GraphError::IncompatibleRead(
+                0
+            )))
+        ));
+    };
+    assert!(validate_local_target(&program, &namespace, producer, &target).is_ok());
+    Arc::get_mut(&mut target.storage)
+        .unwrap()
+        .backend_instance_id ^= 1;
+    reject(&target);
+    Arc::get_mut(&mut target.storage)
+        .unwrap()
+        .backend_instance_id ^= 1;
+    Arc::get_mut(&mut target.storage).unwrap().device_epoch ^= 1;
+    reject(&target);
+    Arc::get_mut(&mut target.storage).unwrap().device_epoch ^= 1;
+    Arc::get_mut(&mut target.storage).unwrap().producer = WgpuRenderProducerId::new(2);
+    reject(&target);
+    Arc::get_mut(&mut target.storage).unwrap().producer = producer;
+    Arc::get_mut(&mut target.storage).unwrap().source =
+        nara_render::RenderFrameSourceGeneration::try_acquire().unwrap();
+    reject(&target);
+    Arc::get_mut(&mut target.storage).unwrap().source = source;
+    Arc::get_mut(&mut target.storage).unwrap().frame_index = 8;
+    reject(&target);
+    Arc::get_mut(&mut target.storage).unwrap().frame_index = 7;
+    Arc::get_mut(&mut target.storage).unwrap().descriptor = texture_resource(4, 8);
+    reject(&target);
+    Arc::get_mut(&mut target.storage).unwrap().descriptor = texture_resource(8, 8);
+    let wrong_texture = namespace.device.create_texture(&native);
+    let NativeResource::Texture { view, .. } =
+        &mut Arc::get_mut(&mut target.storage).unwrap().native
+    else {
+        unreachable!()
+    };
+    let correct_view = std::mem::replace(
+        view,
+        wrong_texture.create_view(&wgpu::TextureViewDescriptor::default()),
+    );
+    reject(&target);
+    let NativeResource::Texture { view, .. } =
+        &mut Arc::get_mut(&mut target.storage).unwrap().native
+    else {
+        unreachable!()
+    };
+    *view = correct_view;
+    let mut states = NativeFeatureStates::default();
+    let mut attempt = FeaturePreparationAttempt::default();
+    let mut reservation = WgpuSubmissionReservation::new(&namespace.device, &namespace.queue, ());
+    #[cfg(any(feature = "sprite-submitter", feature = "ui-submitter"))]
+    let mut stock = crate::stock_quad::StockQuadResources::default();
+    let encoded = prepare_and_encode(
+        &program,
+        &namespace,
+        producer,
+        &mut states,
+        &budget,
+        &mut reservation,
+        &mut attempt,
+        7,
+        #[cfg(any(feature = "sprite-submitter", feature = "ui-submitter"))]
+        &mut stock,
+        Some(&target),
+    )
+    .unwrap();
+    assert!(Arc::ptr_eq(&encoded.resources[0], &target.storage));
+    assert_eq!(
+        budget.retained(),
+        64,
+        "the image target is charged exactly once"
+    );
+    let prefix = reservation.submitted(namespace.queue.submit([encoded.commands]));
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+    while !prefix.poll().unwrap() {
+        assert!(std::time::Instant::now() < deadline);
+        std::thread::yield_now();
+    }
+    drop(encoded.resources);
+    drop(target);
+    assert_eq!(
+        budget.retained(),
+        64,
+        "the image owner still holds the shared guard"
+    );
+    drop(image_guard);
     assert_eq!(budget.retained(), 0);
 }
 

@@ -92,9 +92,11 @@ fn test_image_output(
     let view = texture.create_view(&wgpu::TextureViewDescriptor::default());
     crate::output::WgpuImageOutput(std::sync::Arc::new(crate::output::WgpuImageStorage {
         epoch_lost: std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)),
-        _reservation: std::sync::Arc::new(crate::output::OutputBudget::default())
-            .reserve(u64::from(texture.width()) * u64::from(texture.height()) * 4)
-            .unwrap(),
+        _reservation: std::sync::Arc::new(
+            std::sync::Arc::new(crate::output::OutputBudget::default())
+                .reserve(u64::from(texture.width()) * u64::from(texture.height()) * 4)
+                .unwrap(),
+        ),
         receipt,
         texture,
         view,
@@ -600,13 +602,15 @@ fn owned_renderer_records_exact_external_binding_revisions_and_excludes_clipped_
         output: crate::output::WgpuImageOutput(std::sync::Arc::new(
             crate::output::WgpuImageStorage {
                 epoch_lost: std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)),
-                _reservation: std::sync::Arc::new(crate::output::OutputBudget::default())
-                    .reserve(
-                        u64::from(image.0.texture.width())
-                            * u64::from(image.0.texture.height())
-                            * 4,
-                    )
-                    .unwrap(),
+                _reservation: std::sync::Arc::new(
+                    std::sync::Arc::new(crate::output::OutputBudget::default())
+                        .reserve(
+                            u64::from(image.0.texture.width())
+                                * u64::from(image.0.texture.height())
+                                * 4,
+                        )
+                        .unwrap(),
+                ),
                 receipt: test_image_output(image.0.texture.clone(), 1, 1).receipt(),
                 texture: image.0.texture.clone(),
                 view: image.0.view.clone(),

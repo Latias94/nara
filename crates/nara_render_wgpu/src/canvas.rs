@@ -1,4 +1,8 @@
-//! Fixed world raster and final nearest composite, owned by the existing target lifetime.
+//! Shared nearest composite and the transition cache's fixed world raster.
+
+mod program;
+
+pub(crate) use program::{CanvasCompositeCapture, CanvasCompositeFeature};
 
 use std::sync::Arc;
 
@@ -7,6 +11,7 @@ use nara_render::{Extent2d, RenderFrameSourceGeneration, WorldCanvasFrame};
 use crate::{WgpuRenderError, allocation::checked_resource as checked};
 
 pub(crate) const WORLD_CANVAS_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Rgba8UnormSrgb;
+const CANVAS_MAPPING_BYTES: u64 = 16;
 
 #[derive(Debug, Default)]
 pub(crate) struct WorldCanvasCache {
@@ -26,34 +31,34 @@ struct WorldCanvasResources {
     key: CanvasKey,
     _texture: wgpu::Texture,
     view: wgpu::TextureView,
-    layout: wgpu::BindGroupLayout,
-    pipeline: wgpu::RenderPipeline,
+    composite: Arc<CanvasCompositePipeline>,
 }
 
 #[derive(Debug)]
 pub(crate) struct PreparedWorldCanvas {
     resources: Arc<WorldCanvasResources>,
-    frame: WorldCanvasFrame,
-    _mapping_buffer: wgpu::Buffer,
-    binding: wgpu::BindGroup,
+    mapping: CanvasCompositeMapping,
     pub(crate) world_view_count: usize,
+}
+
+/// Shared native program; the owner supplies both source and destination textures.
+#[derive(Debug)]
+struct CanvasCompositePipeline {
+    destination_format: wgpu::TextureFormat,
+    layout: wgpu::BindGroupLayout,
+    pipeline: wgpu::RenderPipeline,
+}
+
+#[derive(Debug)]
+struct CanvasCompositeMapping {
+    frame: WorldCanvasFrame,
+    buffer: wgpu::Buffer,
+    binding: wgpu::BindGroup,
 }
 
 impl WorldCanvasCache {
     pub(crate) fn clear(&mut self) {
         self.resources = None;
-    }
-
-    pub(crate) fn retain_namespace(
-        &mut self,
-        source: RenderFrameSourceGeneration,
-        device_epoch: u64,
-    ) {
-        if self.resources.as_ref().is_some_and(|resources| {
-            resources.key.source != source || resources.key.device_epoch != device_epoch
-        }) {
-            self.clear();
-        }
     }
 
     pub(crate) fn logical_bytes(&self) -> u64 {
@@ -85,51 +90,15 @@ impl WorldCanvasCache {
             Some(resources) => Arc::clone(resources),
             None => Arc::new(WorldCanvasResources::create(device, key)?),
         };
-        let mapping = frame.mapping();
-        let rect = mapping.content_rect();
-        let ppp = mapping.pixels_per_point();
-        let physical = [
-            rect.min[0] * ppp,
-            rect.min[1] * ppp,
-            rect.max[0] * ppp,
-            rect.max[1] * ppp,
-        ];
-        let mut bytes = [0_u8; 16];
-        for (chunk, value) in bytes.chunks_exact_mut(4).zip(physical) {
-            chunk.copy_from_slice(&value.to_le_bytes());
-        }
-        // Each draw owns its immutable mapping instead of overwriting a uniform retained by
-        // another prepared or submitted frame during a resize.
-        let mapping_buffer = crate::allocation::create_checked_buffer_with_data(
-            device,
-            "nara_world_canvas_mapping",
-            &bytes,
-            wgpu::BufferUsages::UNIFORM,
-        )?;
-        let binding = checked(device, "nara_world_canvas_binding", || {
-            device.create_bind_group(&wgpu::BindGroupDescriptor {
-                label: Some("nara_world_canvas_binding"),
-                layout: &resources.layout,
-                entries: &[
-                    wgpu::BindGroupEntry {
-                        binding: 0,
-                        resource: wgpu::BindingResource::TextureView(&resources.view),
-                    },
-                    wgpu::BindGroupEntry {
-                        binding: 1,
-                        resource: mapping_buffer.as_entire_binding(),
-                    },
-                ],
-            })
-        })?;
+        let mapping = resources
+            .composite
+            .prepare_mapping(device, &resources.view, frame)?;
         // The target and its frame binding must both succeed before replacing the retained
         // allocation, including a late mapping-buffer or binding allocation failure.
         self.resources = Some(Arc::clone(&resources));
         Ok(PreparedWorldCanvas {
             resources,
-            frame,
-            _mapping_buffer: mapping_buffer,
-            binding,
+            mapping,
             world_view_count,
         })
     }
@@ -146,6 +115,44 @@ impl WorldCanvasResources {
                 ),
             });
         }
+        let texture = checked(device, "nara_world_canvas_texture", || {
+            device.create_texture(&wgpu::TextureDescriptor {
+                label: Some("nara_world_canvas_texture"),
+                size: wgpu::Extent3d {
+                    width: key.extent.width,
+                    height: key.extent.height,
+                    depth_or_array_layers: 1,
+                },
+                mip_level_count: 1,
+                sample_count: 1,
+                dimension: wgpu::TextureDimension::D2,
+                format: WORLD_CANVAS_FORMAT,
+                usage: wgpu::TextureUsages::RENDER_ATTACHMENT
+                    | wgpu::TextureUsages::TEXTURE_BINDING,
+                view_formats: &[],
+            })
+        })?;
+        let view = checked(device, "nara_world_canvas_view", || {
+            texture.create_view(&wgpu::TextureViewDescriptor::default())
+        })?;
+        let composite = Arc::new(CanvasCompositePipeline::create(
+            device,
+            key.destination_format,
+        )?);
+        Ok(Self {
+            key,
+            _texture: texture,
+            view,
+            composite,
+        })
+    }
+}
+
+impl CanvasCompositePipeline {
+    fn create(
+        device: &wgpu::Device,
+        destination_format: wgpu::TextureFormat,
+    ) -> Result<Self, WgpuRenderError> {
         let layout = checked(device, "nara_world_canvas_layout", || {
             device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
                 label: Some("nara_world_canvas_layout"),
@@ -166,32 +173,12 @@ impl WorldCanvasResources {
                         ty: wgpu::BindingType::Buffer {
                             ty: wgpu::BufferBindingType::Uniform,
                             has_dynamic_offset: false,
-                            min_binding_size: wgpu::BufferSize::new(16),
+                            min_binding_size: wgpu::BufferSize::new(CANVAS_MAPPING_BYTES),
                         },
                         count: None,
                     },
                 ],
             })
-        })?;
-        let texture = checked(device, "nara_world_canvas_texture", || {
-            device.create_texture(&wgpu::TextureDescriptor {
-                label: Some("nara_world_canvas_texture"),
-                size: wgpu::Extent3d {
-                    width: key.extent.width,
-                    height: key.extent.height,
-                    depth_or_array_layers: 1,
-                },
-                mip_level_count: 1,
-                sample_count: 1,
-                dimension: wgpu::TextureDimension::D2,
-                format: WORLD_CANVAS_FORMAT,
-                usage: wgpu::TextureUsages::RENDER_ATTACHMENT
-                    | wgpu::TextureUsages::TEXTURE_BINDING,
-                view_formats: &[],
-            })
-        })?;
-        let view = checked(device, "nara_world_canvas_view", || {
-            texture.create_view(&wgpu::TextureViewDescriptor::default())
         })?;
         let shader = checked(device, "nara_world_canvas_shader", || {
             device.create_shader_module(wgpu::ShaderModuleDescriptor {
@@ -224,7 +211,7 @@ impl WorldCanvasResources {
                     entry_point: Some("fs_main"),
                     compilation_options: wgpu::PipelineCompilationOptions::default(),
                     targets: &[Some(wgpu::ColorTargetState {
-                        format: key.destination_format,
+                        format: destination_format,
                         blend: None,
                         write_mask: wgpu::ColorWrites::ALL,
                     })],
@@ -234,26 +221,70 @@ impl WorldCanvasResources {
             })
         })?;
         Ok(Self {
-            key,
-            _texture: texture,
-            view,
+            destination_format,
             layout,
             pipeline,
         })
     }
-}
 
-impl PreparedWorldCanvas {
-    pub(crate) fn view(&self) -> &wgpu::TextureView {
-        &self.resources.view
+    fn prepare_mapping(
+        &self,
+        device: &wgpu::Device,
+        source: &wgpu::TextureView,
+        frame: WorldCanvasFrame,
+    ) -> Result<CanvasCompositeMapping, WgpuRenderError> {
+        let mapping = frame.mapping();
+        let rect = mapping.content_rect();
+        let ppp = mapping.pixels_per_point();
+        let physical = [
+            rect.min[0] * ppp,
+            rect.min[1] * ppp,
+            rect.max[0] * ppp,
+            rect.max[1] * ppp,
+        ];
+        let mut bytes = [0_u8; CANVAS_MAPPING_BYTES as usize];
+        for (chunk, value) in bytes.chunks_exact_mut(4).zip(physical) {
+            chunk.copy_from_slice(&value.to_le_bytes());
+        }
+        // Each draw owns its immutable mapping instead of overwriting a uniform retained by
+        // another prepared or submitted frame during a resize.
+        let buffer = crate::allocation::create_checked_buffer_with_data(
+            device,
+            "nara_world_canvas_mapping",
+            &bytes,
+            wgpu::BufferUsages::UNIFORM,
+        )?;
+        let binding = checked(device, "nara_world_canvas_binding", || {
+            device.create_bind_group(&wgpu::BindGroupDescriptor {
+                label: Some("nara_world_canvas_binding"),
+                layout: &self.layout,
+                entries: &[
+                    wgpu::BindGroupEntry {
+                        binding: 0,
+                        resource: wgpu::BindingResource::TextureView(source),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 1,
+                        resource: buffer.as_entire_binding(),
+                    },
+                ],
+            })
+        })?;
+        Ok(CanvasCompositeMapping {
+            frame,
+            buffer,
+            binding,
+        })
     }
 
-    pub(crate) fn encode_composite(
+    fn encode_composite(
         &self,
+        prepared: &CanvasCompositeMapping,
         encoder: &mut wgpu::CommandEncoder,
         destination: &wgpu::TextureView,
+        load: wgpu::LoadOp<wgpu::Color>,
     ) {
-        let mapping = self.frame.mapping();
+        let mapping = prepared.frame.mapping();
         let content = mapping.content_rect();
         let scale = mapping.pixels_per_point();
         let min = content.min.map(|point| point * scale);
@@ -265,7 +296,7 @@ impl PreparedWorldCanvas {
                 depth_slice: None,
                 resolve_target: None,
                 ops: wgpu::Operations {
-                    load: wgpu::LoadOp::Clear(crate::clear_color_to_wgpu(self.frame.bar_color())),
+                    load,
                     store: wgpu::StoreOp::Store,
                 },
             })],
@@ -292,11 +323,33 @@ impl PreparedWorldCanvas {
             1.0,
         );
         pass.set_scissor_rect(begin[0], begin[1], end[0] - begin[0], end[1] - begin[1]);
-        pass.set_pipeline(&self.resources.pipeline);
-        pass.set_bind_group(0, &self.binding, &[]);
+        pass.set_pipeline(&self.pipeline);
+        pass.set_bind_group(0, &prepared.binding, &[]);
         pass.draw(0..3, 0..1);
     }
 }
+
+impl PreparedWorldCanvas {
+    pub(crate) fn view(&self) -> &wgpu::TextureView {
+        &self.resources.view
+    }
+
+    pub(crate) fn encode_composite(
+        &self,
+        encoder: &mut wgpu::CommandEncoder,
+        destination: &wgpu::TextureView,
+    ) {
+        self.resources.composite.encode_composite(
+            &self.mapping,
+            encoder,
+            destination,
+            wgpu::LoadOp::Clear(crate::clear_color_to_wgpu(self.mapping.frame.bar_color())),
+        );
+    }
+}
+
+#[cfg(test)]
+mod program_tests;
 
 #[cfg(test)]
 mod tests;

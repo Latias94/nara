@@ -1,4 +1,4 @@
-use std::{marker::PhantomData, sync::Arc};
+use std::{marker::PhantomData, ops::Range, sync::Arc};
 
 use crate::{
     WgpuFeatureEncodeContext, WgpuFeaturePreflightContext, WgpuFeaturePrepareContext,
@@ -9,7 +9,7 @@ use crate::{
     },
     stock_quad::StockQuadPrepared,
 };
-use nara_render::ViewportRect;
+use nara_render::{ExtractedView, ViewLoadOp, ViewportRect};
 use nara_sprite_render::__private::{SpriteBatch, SpriteBatches, SpriteInstance};
 
 /// Stock Sprite drawing against the policy's exact semantic texture port.
@@ -24,28 +24,126 @@ impl<S: 'static> SpriteFeature<S> {
 /// Immutable lowering shared by complete Image preflight and native preparation.
 pub(crate) struct SpriteCapture<S: 'static> {
     pub(crate) target: WgpuProgramTexture<S>,
-    pub(crate) viewport: ViewportRect,
     pub(crate) batches: Arc<[WgpuQuadBatch]>,
+    views: Arc<[SpriteViewDraw]>,
+}
+
+#[derive(Clone, Debug)]
+struct SpriteViewDraw {
+    viewport: ViewportRect,
+    load: ViewLoadOp,
+    buffers: Range<usize>,
+}
+
+/// Every Sprite operation can own this bounded View table, including a clear-only capture.
+/// The program admits this capacity before its typed operation/capture allocation.
+pub(crate) const fn ordered_view_metadata_bytes() -> usize {
+    nara_render::MAX_VIEWS_PER_TARGET * std::mem::size_of::<SpriteViewDraw>()
+        + 2 * std::mem::size_of::<usize>()
 }
 
 impl<S: 'static> SpriteCapture<S> {
+    #[cfg(test)]
     pub(crate) fn new(
         batches: &SpriteBatches,
         view_index: usize,
         target: WgpuProgramTexture<S>,
         viewport: ViewportRect,
     ) -> Self {
-        Self {
+        Self::from_lowered(
             target,
             viewport,
-            batches: collect_sprite_quad_batches(batches, view_index).into(),
+            collect_sprite_quad_batches(batches, view_index).into(),
+        )
+    }
+
+    #[cfg(test)]
+    pub(crate) fn from_lowered(
+        target: WgpuProgramTexture<S>,
+        viewport: ViewportRect,
+        batches: Arc<[WgpuQuadBatch]>,
+    ) -> Self {
+        let buffers = batches
+            .iter()
+            .filter(|batch| !batch.instances.is_empty())
+            .count();
+        Self {
+            target,
+            batches,
+            views: Arc::from([SpriteViewDraw {
+                viewport,
+                load: ViewLoadOp::Load,
+                buffers: 0..buffers,
+            }]),
         }
+    }
+
+    /// Keeps the admitted world's View order and load semantics inside its one graph writer.
+    /// UI and later effects consume a separate version selected by the renderer policy.
+    pub(crate) fn for_views(
+        batches: Option<&SpriteBatches>,
+        views: &[ExtractedView],
+        target: WgpuProgramTexture<S>,
+    ) -> Result<Self, WgpuRenderProgramError> {
+        if views.is_empty() || views.len() > nara_render::MAX_VIEWS_PER_TARGET {
+            return Err(WgpuRenderProgramError::feature(
+                "invalid stock world View count",
+            ));
+        }
+        if batches.is_some_and(|batches| {
+            batches.as_slice().iter().any(|batch| {
+                views.get(batch.view_index).is_none_or(|view| {
+                    batch.target != view.target || batch.view_order != view.order
+                })
+            })
+        }) {
+            return Err(WgpuRenderProgramError::feature(
+                "a Sprite batch does not belong to the captured View and logical target",
+            ));
+        }
+        let batch_count = batches.map_or(0, |batches| {
+            batches
+                .as_slice()
+                .iter()
+                .filter(|batch| batch.view_index < views.len())
+                .count()
+        });
+        let mut lowered = Vec::new();
+        lowered
+            .try_reserve_exact(batch_count)
+            .map_err(|_| WgpuRenderProgramError::ResourceCapacity)?;
+        let mut draws = Vec::new();
+        draws
+            .try_reserve_exact(views.len())
+            .map_err(|_| WgpuRenderProgramError::ResourceCapacity)?;
+        let mut next_buffer = 0;
+        for (index, view) in views.iter().enumerate() {
+            let first_buffer = next_buffer;
+            if let Some(batches) = batches {
+                for batch in batches.for_view(index) {
+                    if !batch.instances.is_empty() {
+                        next_buffer += 1;
+                    }
+                    lowered.push(sprite_quad_batch(batch));
+                }
+            }
+            draws.push(SpriteViewDraw {
+                viewport: view.viewport,
+                load: view.load,
+                buffers: first_buffer..next_buffer,
+            });
+        }
+        Ok(Self {
+            target,
+            batches: lowered.into(),
+            views: draws.into(),
+        })
     }
 }
 
 pub(crate) struct SpritePrepared<S: 'static> {
     target: WgpuProgramTexture<S>,
-    viewport: ViewportRect,
+    views: Arc<[SpriteViewDraw]>,
     draw: StockQuadPrepared,
 }
 
@@ -87,7 +185,7 @@ impl<S: 'static> WgpuRenderFeature for SpriteFeature<S> {
             .prepare_stock_draw(&capture.batches, capture.target.descriptor().native.format)?;
         Ok(SpritePrepared {
             target: capture.target.clone(),
-            viewport: capture.viewport,
+            views: Arc::clone(&capture.views),
             draw,
         })
     }
@@ -98,9 +196,14 @@ impl<S: 'static> WgpuRenderFeature for SpriteFeature<S> {
         context: &mut WgpuFeatureEncodeContext<'_>,
     ) -> Result<Self::Report, WgpuRenderProgramError> {
         let target = context.resources().texture(&prepared.target)?;
-        prepared
-            .draw
-            .encode(context.encoder(), target, prepared.viewport);
+        prepared.draw.encode_views(
+            context.encoder(),
+            target,
+            prepared
+                .views
+                .iter()
+                .map(|view| (view.viewport, view.load, view.buffers.clone())),
+        );
         Ok(SpriteReport {
             draw_calls: prepared.draw.draw_calls,
             sprites: prepared.draw.sprites,
@@ -215,7 +318,7 @@ mod tests {
             .unwrap();
         let viewport = ViewportRect::new(4, 8, 32, 16).unwrap();
         let capture = SpriteCapture::new(&SpriteBatches::default(), 3, target.clone(), viewport);
-        assert_eq!(capture.viewport, viewport);
+        assert_eq!(capture.views[0].viewport, viewport);
         assert!(capture.batches.is_empty());
         let writes = [capture
             .target

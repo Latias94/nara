@@ -34,7 +34,7 @@ impl WgpuProgramTextureDescriptor {
 /// One candidate's typed texture version. Cloning does not create another writer or GPU texture.
 #[derive(Debug)]
 pub struct WgpuProgramTexture<S: 'static> {
-    pub(super) version: ResourceVersion,
+    pub(crate) version: ResourceVersion,
     pub(super) descriptor: WgpuProgramTextureDescriptor,
     semantic: PhantomData<fn() -> S>,
 }
@@ -208,7 +208,14 @@ pub(crate) struct ProgramResourceStorage {
     pub(crate) frame_index: u64,
     pub(crate) descriptor: ResourceDescriptor,
     pub(crate) native: NativeResource,
-    pub(crate) _reservation: OutputReservation,
+    pub(crate) _reservation: Arc<OutputReservation>,
+}
+
+/// Host-owned storage for one graph-local final texture, initialized by its normal writer.
+/// Preallocation supplies physical custody only; it does not authorize an initialized import.
+pub(crate) struct HostProgramTexture {
+    pub(crate) version: ResourceVersion,
+    pub(crate) storage: Arc<ProgramResourceStorage>,
 }
 
 impl ProgramResourceStorage {

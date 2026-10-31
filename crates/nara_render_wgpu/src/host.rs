@@ -280,7 +280,7 @@ impl WgpuImageTargetIdentity {
 
 struct ImageTarget {
     stamp: ImageTargetStamp,
-    initial_storage: Option<(wgpu::Texture, wgpu::TextureView, OutputReservation)>,
+    initial_storage: Option<(wgpu::Texture, wgpu::TextureView, Arc<OutputReservation>)>,
 }
 
 /// Move-only inactive image target prepared for one coordinated Host publication.
@@ -844,7 +844,7 @@ struct ProducerState {
     closed: Arc<AtomicBool>,
     admission: ProducerAdmission,
     target: Option<ImageTarget>,
-    world_canvas: crate::canvas::WorldCanvasCache,
+    stock_policy: Option<crate::stock_policy::StockPolicyInstances>,
     world_presentation: Option<nara_render::__private::WorldPresentationRevoker>,
     submitted_prefix: Option<WgpuSubmissionPrefix>,
     interaction: Arc<AtomicBool>,
@@ -1179,14 +1179,26 @@ impl WgpuRenderHost {
     ) -> Result<crate::WgpuProgramOutputs, WgpuRenderHostError> {
         let id = self.producer_id(producer)?;
         self.validate_program_instances(id, program)?;
-        let host_frame_index = self
-            .host_frame_index
+        self.host_frame_index
             .ok_or(WgpuRenderHostError::FrameTransactionUnavailable)?;
         self.views[&id]
             .admission
             .admit(program.source_generation(), program.frame_index())?;
         let namespace = self.prepare_namespace(None)?;
+        self.execute_program_in_namespace(id, &namespace, program, None)
+    }
 
+    /// Output publication and stock image publication use the same original native transaction.
+    fn execute_program_in_namespace(
+        &mut self,
+        id: WgpuRenderProducerId,
+        namespace: &WgpuDeviceNamespace,
+        program: &crate::WgpuRenderProgram,
+        local_target: Option<&crate::program::HostProgramTexture>,
+    ) -> Result<crate::WgpuProgramOutputs, WgpuRenderHostError> {
+        let host_frame_index = self
+            .host_frame_index
+            .ok_or(WgpuRenderHostError::FrameTransactionUnavailable)?;
         let mut outputs = Vec::new();
         outputs
             .try_reserve_exact(program.0.graph.outputs().len())
@@ -1208,7 +1220,7 @@ impl WgpuRenderHost {
         let prepared = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
             crate::program::prepare_and_encode(
                 program,
-                &namespace,
+                namespace,
                 id,
                 &mut self.feature_states,
                 &self.output_budget,
@@ -1217,6 +1229,7 @@ impl WgpuRenderHost {
                 host_frame_index,
                 #[cfg(any(feature = "sprite-submitter", feature = "ui-submitter"))]
                 self.backend.stock_quad_resources(),
+                local_target,
             )
         }))
         .unwrap_or(Err(crate::WgpuRenderProgramError::FeaturePanicked));
@@ -1238,6 +1251,19 @@ impl WgpuRenderHost {
                             }
                             crate::program::NativeResource::Buffer(buffer) => buffer.destroy(),
                         }
+                    }
+                }
+            }
+        });
+        #[cfg(test)]
+        IMAGE_SUBMISSION_FAILURE.with(|failure| {
+            if failure.replace(false) {
+                if let (Ok(encoded), Some(version)) = (&prepared, program.0.graph.outputs().first())
+                {
+                    if let crate::program::NativeResource::Texture { texture, .. } =
+                        &encoded.resources[version.index()].native
+                    {
+                        texture.destroy();
                     }
                 }
             }
@@ -1301,6 +1327,17 @@ impl WgpuRenderHost {
                 prefix,
             })
         })();
+        if local_target.is_some() && feature_attempt.native_started {
+            // A pure preflight/capacity refusal preserves separately admitted initial storage.
+            // Once native work starts, the original prefix owns the attempt, including failure.
+            if let Some(target) = self
+                .views
+                .get_mut(&id)
+                .and_then(|view| view.target.as_mut())
+            {
+                target.initial_storage.take();
+            }
+        }
         if result.is_err() {
             self.feature_states
                 .discard(feature_attempt.touched_instances.iter().copied());
@@ -1551,17 +1588,13 @@ impl WgpuRenderHost {
             self.backend
                 .retire_editor_world_presentation(reservation.stamp.view_id);
         }
-        view.world_canvas.retain_namespace(
-            reservation.stamp.source_generation,
-            reservation.stamp.device_epoch,
-        );
         view.admission.activate(reservation.stamp);
         view.target = Some(ImageTarget {
             stamp: reservation.stamp,
             initial_storage: Some((
                 reservation.texture,
                 reservation.view,
-                reservation.storage_reservation,
+                Arc::new(reservation.storage_reservation),
             )),
         });
     }
@@ -1763,8 +1796,7 @@ impl WgpuRenderHost {
         let RenderFrameTarget::Image(target) = packet.target() else {
             return Err(WgpuRenderHostError::ExpectedImageTarget);
         };
-        let host_frame_index = self
-            .host_frame_index
+        self.host_frame_index
             .ok_or(WgpuRenderHostError::FrameTransactionUnavailable)?;
         self.require_viewport_target(view_id, packet.source_generation(), target)?;
         if let Err(error) = self
@@ -1798,21 +1830,84 @@ impl WgpuRenderHost {
         if let (Some(ui), Some(backend_generation)) = (ui.as_deref_mut(), ui_backend_generation) {
             ui.bind_backend(backend_generation)?;
         }
+        if self.views[&view_id].stock_policy.is_none() {
+            let instances = crate::stock_policy::StockPolicyInstances::new(
+                namespace.backend_instance_id,
+                view_id,
+                &self.views[&view_id].closed,
+            )?;
+            self.views
+                .get_mut(&view_id)
+                .expect("admitted producer")
+                .stock_policy = Some(instances);
+        }
+        let stock = self.views[&view_id]
+            .stock_policy
+            .as_ref()
+            .expect("installed stock policy")
+            .build(packet, payload, EDITOR_IMAGE_FORMAT)?;
+        #[cfg(feature = "ui-submitter")]
+        if let Some(ui) = ui.as_deref() {
+            crate::ui::validate_submission_packets(ui.state.bound_submissions(), &stock.ui_facts)?;
+        }
+        self.validate_program_instances(view_id, &stock.program)?;
         let stamp = self.views[&view_id]
             .target
             .as_ref()
             .expect("admitted target")
             .stamp;
-        let storage = self
+        let initial_storage = self
             .views
-            .get_mut(&view_id)
-            .and_then(|view| view.target.as_mut())
-            .and_then(|target| target.initial_storage.take());
-        let (texture, view, storage_reservation) = match storage {
-            Some(storage) => storage,
-            None => self.allocate_output_storage(namespace, target)?,
+            .get(&view_id)
+            .and_then(|view| view.target.as_ref())
+            .and_then(|target| target.initial_storage.as_ref())
+            .map(|(texture, view, reservation)| {
+                (texture.clone(), view.clone(), Arc::clone(reservation))
+            });
+        let descriptor = stock
+            .program
+            .0
+            .graph
+            .resource(&stock.final_version)
+            .map_err(crate::WgpuRenderProgramError::from)?
+            .desc
+            .clone();
+        // Reserved target storage realizes a normal local output. It has no initialized-import
+        // authority; the graph still requires its writer and complete initialization.
+        let local_target = initial_storage.map(|(texture, view, reservation)| {
+            crate::program::HostProgramTexture {
+                version: stock.final_version.clone(),
+                storage: Arc::new(crate::program::ProgramResourceStorage {
+                    backend_instance_id: namespace.backend_instance_id,
+                    device_epoch: namespace.device_epoch,
+                    epoch_lost: Arc::clone(&namespace.epoch_lost),
+                    producer: view_id,
+                    source: packet.source_generation(),
+                    frame_index: packet.frame_index(),
+                    descriptor,
+                    native: crate::program::NativeResource::Texture { texture, view },
+                    _reservation: reservation,
+                }),
+            }
+        });
+        // Only the separately admitted target reservation can precede this candidate's
+        // preflight. Successors let the program allocate its final version after that barrier.
+        let outputs = self.execute_program_in_namespace(
+            view_id,
+            namespace,
+            &stock.program,
+            local_target.as_ref(),
+        )?;
+        let storage = outputs
+            .outputs
+            .iter()
+            .find(|(version, _)| *version == stock.final_version)
+            .map(|(_, storage)| storage)
+            .expect("the complete stock output group contains its final version");
+        let crate::program::NativeResource::Texture { texture, view } = &storage.native else {
+            unreachable!("the stock policy declares a texture output")
         };
-        let output = WgpuImageOutput(Arc::new(WgpuImageStorage {
+        Ok(WgpuImageOutput(Arc::new(WgpuImageStorage {
             epoch_lost: Arc::clone(&namespace.epoch_lost),
             receipt: WgpuSubmittedImageReceipt::new(
                 view_id,
@@ -1824,108 +1919,10 @@ impl WgpuRenderHost {
                 namespace.device_epoch,
                 packet.frame_index(),
             ),
-            texture,
-            view,
-            _reservation: storage_reservation,
-        }));
-        let validation = namespace
-            .device
-            .push_error_scope(wgpu::ErrorFilter::Validation);
-        let internal = namespace
-            .device
-            .push_error_scope(wgpu::ErrorFilter::Internal);
-        let allocation = namespace
-            .device
-            .push_error_scope(wgpu::ErrorFilter::OutOfMemory);
-        let mut reservation = WgpuSubmissionReservation::new(
-            &namespace.device,
-            &namespace.queue,
-            (payload.clone(), output.clone()),
-        );
-        let result = (|| {
-            // Clear-only execution has no stock batch preflight, but still retains its final
-            // prepared draw. Admit that slot before any preparation or native upload.
-            reservation
-                .reserve_entries(1)
-                .map_err(crate::WgpuRenderProgramError::from)?;
-            let canvas_cache = &mut self
-                .views
-                .get_mut(&view_id)
-                .expect("a required target belongs to a registered view")
-                .world_canvas;
-            #[allow(unused_mut)]
-            // Feature-free clear draws have no instance reservations to commit.
-            let mut draw = self.backend.prepare_target_draw_with_canvas_cache(
-                EDITOR_IMAGE_FORMAT,
-                packet,
-                payload,
-                host_frame_index,
-                canvas_cache,
-                &mut crate::preparation::NativePreparation::new(
-                    &namespace.device,
-                    &namespace.queue,
-                    &self.output_budget,
-                    &mut reservation,
-                ),
-            )?;
-            let mut encoder =
-                namespace
-                    .device
-                    .create_command_encoder(&wgpu::CommandEncoderDescriptor {
-                        label: Some("nara_editor_viewport_encoder"),
-                    });
-            crate::encode_target_draw(&mut encoder, &output.0.view, &draw);
-            let commands = encoder.finish();
-            #[cfg(any(feature = "sprite-submitter", feature = "ui-submitter"))]
-            draw.commit_instance_reservations();
-            reservation
-                .retain(draw)
-                .map_err(|(error, _)| crate::WgpuRenderProgramError::from(error))?;
-            Ok::<_, WgpuRenderHostError>(commands)
-        })();
-        // Preparation may already have queued immutable Image uploads before rejecting a later
-        // draw. Flush and retain that original responsibility even when no output is published.
-        #[cfg(test)]
-        IMAGE_SUBMISSION_FAILURE.with(|failure| {
-            if failure.replace(false) {
-                output.0.texture.destroy();
-            }
-        });
-        let (prefix, preparation_error) = match result {
-            Ok(command) => (
-                reservation.submitted(namespace.queue.submit([command])),
-                None,
-            ),
-            Err(error) => (
-                reservation.submitted(namespace.queue.submit([])),
-                Some(error),
-            ),
-        };
-        self.retiring_prefixes.push(prefix.clone());
-        self.views
-            .get_mut(&view_id)
-            .expect("admitted view")
-            .submitted_prefix = Some(prefix);
-        // A completion callback is only resource settlement. Native scopes and loss decide
-        // whether this attempt may publish pixels or consume its successful-frame watermark.
-        let allocation_error = pollster::block_on(allocation.pop());
-        let internal_error = pollster::block_on(internal.pop());
-        let validation_error = pollster::block_on(validation.pop());
-        let native_error = allocation_error.or(internal_error).or(validation_error);
-        self.backend.check_device_health()?;
-        if let Some(error) = native_error {
-            return Err(Self::native_error(error));
-        }
-        if let Some(error) = preparation_error {
-            return Err(error);
-        }
-        self.views
-            .get_mut(&view_id)
-            .expect("admitted view")
-            .admission
-            .last_frame_index = Some(packet.frame_index());
-        self.backend.record_editor_image_submission();
-        Ok(output)
+            texture: texture.clone(),
+            view: view.clone(),
+            _reservation: Arc::clone(&storage._reservation),
+        })))
     }
 
     fn native_error(error: wgpu::Error) -> WgpuRenderHostError {
@@ -2218,8 +2215,9 @@ impl WgpuRenderHost {
             format: EDITOR_IMAGE_FORMAT,
             usage: wgpu::TextureUsages::RENDER_ATTACHMENT
                 | wgpu::TextureUsages::TEXTURE_BINDING
-                | wgpu::TextureUsages::COPY_SRC,
-            view_formats: &[EDITOR_IMAGE_FORMAT],
+                | wgpu::TextureUsages::COPY_SRC
+                | wgpu::TextureUsages::COPY_DST,
+            view_formats: &[],
         });
         // A failed texture is an invalid WGPU handle. Reject it before attempting a view,
         // otherwise the expected allocation failure also produces a validation failure.
