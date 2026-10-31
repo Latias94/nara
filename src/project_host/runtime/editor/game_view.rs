@@ -23,7 +23,7 @@ use nara_render::{Extent2d, RenderWindowPacket};
 #[cfg(feature = "render-wgpu")]
 use nara_render::{RenderFramePacket, RenderFrameTarget};
 #[cfg(all(feature = "render-wgpu", feature = "presentation-ui"))]
-use nara_render_wgpu::__private::WgpuUiSubmission;
+use nara_render_wgpu::WgpuUiSubmission;
 #[cfg(feature = "render-wgpu")]
 use nara_render_wgpu::{__private::take_captured_policy_batch, WgpuRenderInput};
 use nara_scene::SceneAuthoringRevision;

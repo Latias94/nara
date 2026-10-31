@@ -18,7 +18,7 @@ impl Default for ImguiSceneView {
 pub(super) struct ImguiSceneViewOutput {
     pub desired_extent: Option<[f32; 2]>,
     pub mapping: Option<DisplayMapping2d>,
-    pub occurrence: Option<nara::render_wgpu::__private::WgpuDisplayOccurrence>,
+    pub occurrence: Option<nara::render_wgpu::WgpuDisplayOccurrence>,
     pub pick_point: Option<[f32; 2]>,
     pub camera_changed: bool,
 }

@@ -247,6 +247,25 @@ maintenance transfers stable observations and removes a completed prefix in one 
 when a public clone completes on another polling thread. Qualify producer-wide active-owner capacity
 separately from each candidate's binding/metadata allowance; neither test may loosen the other bound.
 
+The complete Source/Processed capture consumer also exposes a native lifetime mismatch: the
+incumbent desktop action creates a physical Winit event loop per logical Runtime, while Winit
+admits only one such loop per native process. Replace that incidental coupling with an explicit
+move-only physical pump returned only after complete native-session retirement, under ADRs0078/
+0084/0110. Reuse it for sequential ordinary Source and Processed desktop actions, retain their
+four original stock captures, then interleave those captures on the same offscreen Host after
+live stores and owned backing retire. Preserve each mode's existing witness and residency rules;
+neither a private transport drain nor a synthetic direct-App substitute qualifies this workflow.
+Exercise incomplete-close refusal and failed startup recovery as well as the successful handoff.
+
+The next [public stock-composition unit](../architecture/render-program-production-design.md#next-production-unit-public-stock-composition)
+must close the remaining actual API gap: stock world/Canvas/UI lowering is currently fixed inside
+one build, ordinary collectors require its concrete installation, and Scene/Canvas construction
+hardcodes that definition. Compare shared typed stages with full replacement using the same
+external blur/second-effect packages across Runtime, Scene View and offscreen, with crisp HUD and
+exact final UI binding. Expose explicit world-raster versus resolved-target effect inputs rather
+than freezing one implicit pre-UI pixel space. This follows the selected graph/Host model and
+does not add another executor, string-slot registry or full0121 qualification claim.
+
 The [first executable comparison](../knowledge/engineering/verification/2026-10/2026-10-31T060722Z-private-render-graph-buffer-history-and-viable-controls-comparison-on-dx12-d6aca1996b2342659bd07933b33e0e64.md)
 records 61 unique CPU tests, seven actual DX12 tests and one subsequent actual submission-failure
 test. Image/buffer kernels, independent numeric controls, logical history groups and accepted-

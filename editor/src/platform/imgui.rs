@@ -14,11 +14,11 @@ use nara::{
         __private::editor_viewport_image_target, Extent2d, RenderFrameSourceGeneration,
         RenderImagePacket, RenderWindowPacket,
     },
-    render_wgpu::__private::{
-        WgpuEditorFrameOutcome, WgpuEditorImguiFrame, WgpuEditorImguiRenderer,
-        WgpuEditorWindowFrame, WgpuGpuRetirement, WgpuImageDisplay, WgpuImageTargetActivation,
+    render_wgpu::{
+        __private::{WgpuEditorImguiFrame, WgpuEditorImguiRenderer},
+        WgpuGpuRetirement, WgpuImageCompositeReceipt, WgpuImageDisplay, WgpuImageTargetActivation,
         WgpuImageTargetIdentity, WgpuRenderHost, WgpuRenderHostError, WgpuRenderProducer,
-        WgpuSubmittedImageReceipt, WgpuUiImageSubmission,
+        WgpuSubmittedImageReceipt, WgpuUiImageSubmission, WgpuWindowFrame, WgpuWindowFrameOutcome,
     },
     tooling::{EditorActionBatch, EditorPlayState, EditorRuntimeAvailability},
     window::{WindowId as NaraWindowId, backend::WindowHandleProvider},
@@ -516,7 +516,7 @@ struct NativeImgui {
     presented: bool,
     ui_followup: bool,
     #[cfg(test)]
-    lifecycle_frame: Option<(WgpuEditorFrameOutcome, Vec<WgpuEditorFrameOutcome>)>,
+    lifecycle_frame: Option<(WgpuWindowFrameOutcome, Vec<WgpuWindowFrameOutcome>)>,
     #[cfg(all(test, target_os = "windows"))]
     submitted_game_observation: Option<game_input_tests::SubmittedGameObservation>,
 }
@@ -552,7 +552,7 @@ impl ImguiRenderer {
         event_loop: &ActiveEventLoop,
         frame: dear_imgui_rs::FrameToken<'frame>,
         submissions: &[WgpuImageDisplay],
-        outcomes: &mut Vec<WgpuEditorFrameOutcome>,
+        outcomes: &mut Vec<WgpuWindowFrameOutcome>,
     ) -> Result<WgpuEditorImguiFrame<'frame>, EditorRunError> {
         gpu.prepare_imgui_frame(
             window,
@@ -568,7 +568,7 @@ impl ImguiRenderer {
     fn paint(
         &mut self,
         prepared: WgpuEditorImguiFrame<'_>,
-        frame: &mut WgpuEditorWindowFrame<'_>,
+        frame: &mut WgpuWindowFrame<'_>,
     ) -> Result<(), WgpuRenderHostError> {
         let clear = wgpu::Color {
             r: 0.055,
@@ -578,7 +578,7 @@ impl ImguiRenderer {
         };
         self.0
             .as_mut()
-            .ok_or_else(|| WgpuRenderHostError::toolkit_paint("the renderer is uninitialized"))?
+            .ok_or_else(|| WgpuRenderHostError::window_paint("the renderer is uninitialized"))?
             .paint(prepared, frame, clear)
     }
 
@@ -725,22 +725,19 @@ struct PendingGameImage {
 }
 
 impl PendingGameImage {
-    fn matches(&self, receipt: nara::render_wgpu::__private::WgpuEditorCompositeReceipt) -> bool {
+    fn matches(&self, receipt: WgpuImageCompositeReceipt) -> bool {
         receipt.image() == self.display.receipt()
             && receipt.occurrence() == self.display.occurrence()
     }
 
     fn composite(
         &self,
-        receipts: impl IntoIterator<Item = nara::render_wgpu::__private::WgpuEditorCompositeReceipt>,
-    ) -> Option<nara::render_wgpu::__private::WgpuEditorCompositeReceipt> {
+        receipts: impl IntoIterator<Item = WgpuImageCompositeReceipt>,
+    ) -> Option<WgpuImageCompositeReceipt> {
         receipts.into_iter().find(|receipt| self.matches(*receipt))
     }
 
-    fn finish(
-        self,
-        receipt: Option<nara::render_wgpu::__private::WgpuEditorCompositeReceipt>,
-    ) -> EditorGameViewCompletion {
+    fn finish(self, receipt: Option<WgpuImageCompositeReceipt>) -> EditorGameViewCompletion {
         let receipt = receipt.filter(|receipt| self.matches(*receipt));
         match (self.ui, receipt) {
             (Some(ui), Some(receipt)) => match ui.presented(receipt) {
@@ -763,7 +760,7 @@ impl PendingGameImage {
 
     fn finish_after_error(
         self,
-        receipts: impl IntoIterator<Item = nara::render_wgpu::__private::WgpuEditorCompositeReceipt>,
+        receipts: impl IntoIterator<Item = WgpuImageCompositeReceipt>,
         error: &EditorRunError,
     ) -> EditorGameViewCompletion {
         match self.composite(receipts) {
@@ -773,10 +770,10 @@ impl PendingGameImage {
     }
 
     fn fail(self, error: &EditorRunError) -> EditorGameViewCompletion {
-        let toolkit = WgpuRenderHostError::toolkit_paint(error.to_string());
+        let paint = WgpuRenderHostError::window_paint(error.to_string());
         let error = match error {
             EditorRunError::Gpu(error) => error,
-            _ => &toolkit,
+            _ => &paint,
         };
         match self.ui {
             Some(ui) if error.is_deferred() => {
@@ -1033,7 +1030,7 @@ impl NativeImgui {
             .ok_or_else(|| imgui_error("host frame exhausted"))?;
         let window_packet = editor_window_packet(&self.window);
         self.gpu
-            .begin_editor_frame(window_packet, self.frame_index)
+            .begin_window_frame(window_packet, self.frame_index)
             .map_err(platform_gpu_error)?;
         let mut canvas_rebuild_requested = false;
         if !self.frontend.scene_open(application.panel_workspace()) {
@@ -1168,7 +1165,7 @@ impl NativeImgui {
                     let completion = pending.finish_after_error(
                         secondary_outcomes
                             .iter()
-                            .flat_map(WgpuEditorFrameOutcome::composites)
+                            .flat_map(WgpuWindowFrameOutcome::composites)
                             .copied(),
                         &error,
                     );
@@ -1214,7 +1211,7 @@ impl NativeImgui {
             .chain(
                 secondary_outcomes
                     .iter()
-                    .flat_map(WgpuEditorFrameOutcome::composites),
+                    .flat_map(WgpuWindowFrameOutcome::composites),
             )
             .copied()
             .filter(|receipt| {
@@ -1275,7 +1272,7 @@ impl NativeImgui {
                     .chain(
                         secondary_outcomes
                             .iter()
-                            .flat_map(WgpuEditorFrameOutcome::composites),
+                            .flat_map(WgpuWindowFrameOutcome::composites),
                     )
                     .copied(),
             );
@@ -1299,7 +1296,7 @@ impl NativeImgui {
             .chain(
                 secondary_outcomes
                     .iter()
-                    .flat_map(WgpuEditorFrameOutcome::composites),
+                    .flat_map(WgpuWindowFrameOutcome::composites),
             )
             .copied()
             .find(|receipt| {

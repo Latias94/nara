@@ -236,10 +236,14 @@ fn wait_maintenance_wakes_do_not_advance_gameplay_or_last_on_the_retained_pump()
                 .get_or_insert("native maintenance probe exceeded its finite deadline");
             probe.state.begin_shutdown_transition(Instant::now());
         }
-        if probe.state.retirement_drive_incomplete(Instant::now()) {
+        if probe.state.shutdown == WinitShutdownState::Complete
+            || probe.state.retirement_drive_incomplete(Instant::now())
+        {
             break;
         }
     }
+    let mut event_loop = WinitEventLoop::from_native(event_loop);
+    event_loop.resumed = probe.state.native_resumed;
     let mut session = WinitSession {
         app: Some(probe.state),
         event_loop: Some(event_loop),

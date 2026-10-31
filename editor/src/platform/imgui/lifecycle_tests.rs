@@ -3,7 +3,7 @@
 use super::*;
 use crate::{EditorLaunchOptions, frontend::imgui::UiProject};
 use nara::{
-    render_wgpu::__private::WgpuRenderProducerId,
+    render_wgpu::WgpuRenderProducerId,
     tooling::{EditorAction, EditorPlayAction},
 };
 use windows_sys::Win32::UI::WindowsAndMessaging::{
@@ -80,8 +80,8 @@ impl NativeLifecycleProof {
         &mut self,
         native: &mut NativeImgui,
         application: &mut EditorApplication,
-        outcome: WgpuEditorFrameOutcome,
-        secondary_outcomes: Vec<WgpuEditorFrameOutcome>,
+        outcome: WgpuWindowFrameOutcome,
+        secondary_outcomes: Vec<WgpuWindowFrameOutcome>,
     ) -> Result<bool, EditorRunError> {
         let window_packet = editor_window_packet(&native.window);
         for panel in application.panel_workspace().layout().instances() {
@@ -166,7 +166,7 @@ impl NativeLifecycleProof {
             });
             let secondary_game = secondary_outcomes
                 .iter()
-                .flat_map(WgpuEditorFrameOutcome::composites)
+                .flat_map(WgpuWindowFrameOutcome::composites)
                 .any(|receipt| {
                     Some(receipt.image()) == game
                         && native
@@ -733,12 +733,12 @@ pub(super) fn present_registered_images(
     native: &mut NativeImgui,
     event_loop: &ActiveEventLoop,
     images: &[(ExternalTextureId, WgpuImageDisplay)],
-) -> Result<WgpuEditorFrameOutcome, String> {
+) -> Result<WgpuWindowFrameOutcome, String> {
     native.frame_index += 1;
     let window = editor_window_packet(&native.window);
     native
         .gpu
-        .begin_editor_frame(window, native.frame_index)
+        .begin_window_frame(window, native.frame_index)
         .map_err(|error| error.to_string())?;
     native
         .platform

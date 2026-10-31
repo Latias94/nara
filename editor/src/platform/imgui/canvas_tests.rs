@@ -9,7 +9,7 @@ use std::{
 use nara::{
     project_host::TrustedCompiledEditorProjectIntent,
     render::Extent2d,
-    render_wgpu::__private::WgpuSubmittedImageReceipt,
+    render_wgpu::WgpuSubmittedImageReceipt,
     scene::SceneEntityId,
     tooling::{
         EditorAction, EditorActionBatch, EditorCloseDecision, EditorNavigationAction,
@@ -198,7 +198,7 @@ fn record_pending_canvas(
         native.frame_index += 1;
         native
             .gpu
-            .begin_editor_frame(window, native.frame_index)
+            .begin_window_frame(window, native.frame_index)
             .map_err(|error| error.to_string())?;
         native
             .submit_ui_canvas(application, &authoring, window)
@@ -282,7 +282,7 @@ fn record_pending_canvas(
     native.frame_index += 1;
     native
         .gpu
-        .begin_editor_frame(window, native.frame_index)
+        .begin_window_frame(window, native.frame_index)
         .map_err(|error| error.to_string())?;
     native
         .canvas

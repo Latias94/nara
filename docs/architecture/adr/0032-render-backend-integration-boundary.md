@@ -2,7 +2,7 @@
 
 **Status**: Accepted
 **Date**: 2026-07-08
-**Last Revised**: 2026-10-31 (owned native execution and finite CPU result connection)
+**Last Revised**: 2026-11-01 (owned native execution and public native-window composition)
 **Refines**: ADR 0012
 **Refined By**: ADR 0040: Render Resource Lifetime and Submitter Ownership; ADR 0044: Root Facade
 and Prelude Layering Policy; ADR 0053: Visibility, Culling, and Tilemap Render Cache (Superseded); ADR 0077:
@@ -33,6 +33,27 @@ retirement under the original affinity. Root assembles the Winit and WGPU partic
 narrow frame-maintenance/target-retirement/wake boundary; this is not a universal Runner or GPU
 service interface. [Implementation evidence](implementation-status.md) distinguishes the qualified
 native transition from the remaining complete output, producer and Feature replacement.
+
+## Native Frontend Composition Refinement
+
+A trusted native frontend may use the concrete Host's public `WgpuWindowDeviceScope` and
+`WgpuWindowFrame` to initialize its exact-wgpu renderer and paint registered windows. The Host
+retains device selection, surface acquisition, submission, presentation and original-prefix
+custody. `WgpuWindowFrameOutcome`, `WgpuWindowPresentedReceipt` and `WgpuImageCompositeReceipt`
+report original window/display-attempt facts with private constructors. A sample receipt alone
+does not establish input mapping or interaction permission. This replaces the former hidden
+Editor-specific scope vocabulary without introducing a submitter trait or backend replacement.
+
+The independent two-window consumer may depend directly on exact Winit0.30.13 to own its event
+loop and safe window providers. This is a native frontend integration; neutral domain/Window
+crates keep their existing dependency direction. Exact-wgpu integration remains trusted Rust:
+callbacks obey declared output use and the original Host's submission/retirement protocol.
+
+`WgpuPolicyFrameReader` borrows the current sealed replayable CPU input between the capture
+pipeline's Seal and Publish phases. It may clone that original meaning for inspection or later
+independent rendering. It never drains the managed transport, takes a UI sidecar, changes the
+connection barrier or grants presentation authority. The original connection owner alone takes
+the sealed batch with its one-shot completion responsibilities.
 
 ## Context
 

@@ -10,7 +10,7 @@ use std::{
 use dear_imgui_rs::ConfigFlags;
 use nara::{
     image::PreparedImageSnapshot,
-    render_wgpu::__private::WgpuSubmittedImageReceipt,
+    render_wgpu::WgpuSubmittedImageReceipt,
     tooling::{
         EditorAction, EditorActionBatch, EditorImageImportAttemptView, EditorImageImportSettings,
         EditorProjectBrowserLocalAction,

@@ -20,7 +20,7 @@ use winit::{
 
 use crate::{
     DEFAULT_NATIVE_RETIREMENT_BUDGET, NoPresentationDriver, WinitApp, WinitControlFlow,
-    WinitSession, WinitShutdownState, WinitUserEvent,
+    WinitEventLoop, WinitSession, WinitShutdownState, WinitUserEvent,
 };
 
 #[test]
@@ -90,10 +90,14 @@ fn run_native_mode(mode: WindowMode, unsupported: bool) {
         {
             break;
         }
-        if probe.state.retirement_drive_incomplete(Instant::now()) {
+        if probe.state.shutdown == WinitShutdownState::Complete
+            || probe.state.retirement_drive_incomplete(Instant::now())
+        {
             break;
         }
     }
+    let mut event_loop = WinitEventLoop::from_native(event_loop);
+    event_loop.resumed = probe.state.native_resumed;
     let mut session = WinitSession {
         app: Some(probe.state),
         event_loop: Some(event_loop),
@@ -230,6 +234,7 @@ impl NativeModeProbe {
 
 impl ApplicationHandler<WinitUserEvent> for NativeModeProbe {
     fn resumed(&mut self, event_loop: &ActiveEventLoop) {
+        self.state.native_resumed = true;
         if self.started {
             return;
         }

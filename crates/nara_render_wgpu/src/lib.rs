@@ -64,6 +64,7 @@ pub use crate::backend::{WgpuBackendState, WgpuFrameTransactionStats};
 pub use crate::candidate::WgpuUiCandidateSubmitFailure;
 pub use crate::candidate::{WgpuCandidateSubmitFailure, WgpuPublishedFrame, WgpuRenderCandidate};
 pub use crate::error::WgpuRenderError;
+pub use crate::frame::WgpuPolicyFrameReader;
 pub use crate::frame::{WgpuFrameCaptureError, WgpuFrameSet as WgpuPolicyCaptureSet};
 pub use crate::graph::{
     AccessRole, GraphError, GraphLimits, LimitKind, TextureAlpha, TextureTransfer,
@@ -74,7 +75,8 @@ pub use crate::history::{
 };
 pub use crate::host::{
     WgpuImageTargetActivation, WgpuImageTargetIdentity, WgpuImageTargetReservation, WgpuRenderHost,
-    WgpuRenderHostError, WgpuRenderProducer, WgpuRenderProducerId,
+    WgpuRenderHostError, WgpuRenderProducer, WgpuRenderProducerId, WgpuWindowDeviceScope,
+    WgpuWindowFrame, WgpuWindowFrameOutcome,
 };
 pub use crate::observation::WgpuRenderObservation;
 pub use crate::output::{WgpuDisplayOccurrence, WgpuImageDisplay, WgpuImageOutput};
@@ -100,7 +102,9 @@ pub use crate::policy::{
     WgpuPolicyInstallation, WgpuPolicyInstallationId, WgpuPolicyProgram, WgpuRenderInput,
     WgpuRenderPolicy,
 };
-pub use crate::presented::WgpuSubmittedImageReceipt;
+pub use crate::presented::{
+    WgpuImageCompositeReceipt, WgpuSubmittedImageReceipt, WgpuWindowPresentedReceipt,
+};
 pub use crate::program::{
     WgpuFeatureAllocation, WgpuFeatureDeclaration, WgpuFeatureDefinition, WgpuFeatureEncodeContext,
     WgpuFeatureInstance, WgpuFeaturePreflightContext, WgpuFeaturePrepareContext,
@@ -110,6 +114,7 @@ pub use crate::program::{
     WgpuRenderProgram, WgpuRenderProgramBuilder, WgpuRenderProgramError,
 };
 pub use crate::requirements::{WgpuDeviceRequirements, WgpuDeviceRequirementsError};
+pub use crate::retirement::{WgpuGpuRetirement, WgpuGpuRetirementError};
 pub use crate::stock_policy::{WgpuStockCapture, WgpuStockPolicy, WgpuStockPolicyBindings};
 pub use crate::submission::{WgpuSubmissionPrefix, WgpuSubmissionPrefixError};
 pub use crate::telemetry::{
@@ -147,15 +152,11 @@ pub mod __private {
     pub use crate::host::{WgpuRuntimeHostFacts, WgpuRuntimeMaintenance};
     pub use crate::{
         host::{
-            WgpuEditorDeviceScope, WgpuEditorFrameOutcome, WgpuEditorWindowFrame,
             WgpuImageTargetActivation, WgpuImageTargetIdentity, WgpuImageTargetReservation,
             WgpuRenderHost, WgpuRenderHostError, WgpuRenderProducer, WgpuRenderProducerId,
         },
         output::{WgpuDisplayOccurrence, WgpuImageDisplay, WgpuImageOutput},
-        presented::{
-            WgpuEditorCompositeReceipt, WgpuEditorWindowPresentedReceipt,
-            WgpuPresentedFrameReceipt, WgpuSubmittedImageReceipt,
-        },
+        presented::{WgpuPresentedFrameReceipt, WgpuSubmittedImageReceipt},
         retirement::{WgpuGpuRetirement, WgpuGpuRetirementError},
         runtime::{
             WgpuRuntimeCapture, WgpuRuntimeCaptureFailure, WgpuRuntimeCaptureIdentity,

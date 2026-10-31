@@ -2,7 +2,7 @@ use std::collections::BTreeMap;
 
 use nara::{
     asset::AssetRef,
-    render_wgpu::__private::WgpuSubmittedImageReceipt,
+    render_wgpu::WgpuSubmittedImageReceipt,
     scene::{
         PrefabDeclarationLimits, PrefabDocument, PrefabInstance, PrefabInstancePath, SceneDocument,
         SceneEntityId, SceneEntityRecord,

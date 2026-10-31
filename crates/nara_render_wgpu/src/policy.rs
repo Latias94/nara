@@ -680,13 +680,11 @@ struct FeatureResolution {
     published: Option<Arc<FeatureBinding>>,
 }
 
-pub(crate) struct FeatureResolutions(
-    [Option<FeatureResolution>; MAX_FEATURE_BINDINGS_PER_PRODUCER],
-);
+pub(crate) struct FeatureResolutions(Vec<Option<FeatureResolution>>);
 
 impl Default for FeatureResolutions {
     fn default() -> Self {
-        Self(std::array::from_fn(|_| None))
+        Self(Vec::new())
     }
 }
 
@@ -735,14 +733,14 @@ struct PolicyInstanceEntry {
 
 /// Bounded producer-local resolution, separate from the latest published policy memberships.
 pub(crate) struct PolicyInstances {
-    policies: [Option<PolicyInstanceEntry>; MAX_POLICIES_PER_PRODUCER],
+    policies: Vec<Option<PolicyInstanceEntry>>,
     features: FeatureResolutions,
 }
 
 impl Default for PolicyInstances {
     fn default() -> Self {
         Self {
-            policies: std::array::from_fn(|_| None),
+            policies: Vec::new(),
             features: FeatureResolutions::default(),
         }
     }
@@ -778,6 +776,44 @@ pub(crate) struct BuiltPolicy {
 }
 
 impl PolicyInstances {
+    fn reserve_tables(&mut self) -> Result<(), WgpuRenderProgramError> {
+        // Keep large bounded tables out of ProducerState and therefore out of inline BTreeMap
+        // nodes and native callback stacks. Allocate their full stable slot space before binding;
+        // candidate indices stay valid across reconciliation and no publication allocates.
+        if self.policies.is_empty() {
+            self.policies
+                .try_reserve_exact(MAX_POLICIES_PER_PRODUCER)
+                .map_err(|_| WgpuRenderProgramError::PolicyCapacity)?;
+            self.policies
+                .resize_with(MAX_POLICIES_PER_PRODUCER, || None);
+        }
+        if self.features.0.is_empty() {
+            self.features
+                .0
+                .try_reserve_exact(MAX_FEATURE_BINDINGS_PER_PRODUCER)
+                .map_err(|_| WgpuRenderProgramError::PolicyCapacity)?;
+            self.features
+                .0
+                .resize_with(MAX_FEATURE_BINDINGS_PER_PRODUCER, || None);
+        }
+        Ok(())
+    }
+
+    fn metadata_bytes(&self) -> Result<usize, WgpuRenderProgramError> {
+        self.policies
+            .capacity()
+            .checked_mul(size_of::<Option<PolicyInstanceEntry>>())
+            .and_then(|bytes| {
+                self.features
+                    .0
+                    .capacity()
+                    .checked_mul(size_of::<Option<FeatureResolution>>())
+                    .and_then(|features| bytes.checked_add(features))
+            })
+            .and_then(|bytes| bytes.checked_add(size_of::<Self>()))
+            .ok_or(WgpuRenderProgramError::PolicyCapacity)
+    }
+
     pub(crate) fn maintain(&mut self) {
         // Do not compact slots: accepted candidates retain their pre-admitted slot indices.
         for entry in &mut self.policies {
@@ -831,6 +867,7 @@ impl PolicyInstances {
             if capture_metadata > 256 * 1024 {
                 return Err(WgpuRenderProgramError::PolicyCapacity);
             }
+            self.reserve_tables()?;
             let installation_slot = if let Some(index) = self.policies.iter().position(|entry| {
                 entry
                     .as_ref()
@@ -912,6 +949,7 @@ impl PolicyInstances {
                     >(),
                 )
                 .ok_or(WgpuRenderProgramError::PolicyCapacity)?;
+            let table_metadata = self.metadata_bytes()?;
             let metadata_bytes = capture_metadata
                 .checked_add(size_of::<PolicyExecutionCustody>() + 2 * size_of::<usize>())
                 .and_then(|bytes| {
@@ -920,7 +958,7 @@ impl PolicyInstances {
                 .and_then(|bytes| bytes.checked_add(size_of::<PolicyBindingStage>()))
                 .and_then(|bytes| bytes.checked_add(size_of::<RetiredPolicyBindings>()))
                 .and_then(|bytes| bytes.checked_add(staged_features.metadata_bytes))
-                .and_then(|bytes| bytes.checked_add(size_of::<Self>()))
+                .and_then(|bytes| bytes.checked_add(table_metadata))
                 .and_then(|bytes| bytes.checked_add(root_metadata))
                 .ok_or(WgpuRenderProgramError::PolicyCapacity)?;
             let metadata_bytes = match &history {

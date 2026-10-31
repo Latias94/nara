@@ -77,6 +77,15 @@ recovery. Late cleanup cannot unwind through native polling and replace an alrea
 advance history again or grant display/UI success. Original prefix clones retain their cleanup
 observation after Host maintenance retires its token.
 
+Native window paint and read-only output use admit bounded output/sample/command/receipt tables
+and original-custody metadata before clones or native work. Repeated samples of one display
+occurrence do not grow the table. Host-owned window presentation prepares every composite join
+before present and returns it only after successful validation/presentation; no post-present
+allocation may erase that result. A user callback failure or unwind still binds its original
+queued uploads to a prefix. Attempt-local failure does not revoke another producer or window.
+Third-party delegated native windows retain their separate captured-report and partial-result
+contract; this does not promise transactional rollback of SDK presentations.
+
 These accepted responsibilities are being implemented under the
 [render ownership design](../render-host-ownership-design.md). Their current evidence belongs in
 the implementation ledger. The subsequent

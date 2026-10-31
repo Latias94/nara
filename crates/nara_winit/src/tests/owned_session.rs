@@ -303,16 +303,18 @@ fn construction_failure_closes_without_a_pump_and_preserves_runtime_and_driver()
     let runtime = start_runtime(App::new());
     let generation = runtime.generation();
     let calls = Rc::new(Cell::new(0));
-    let session = WinitRunner::default().__run_with_presentation(
+    let session = WinitRunner::default().__run_with_presentation_on(
         runtime,
         Box::new(ConstructionDriver(calls.clone())),
         Duration::from_secs(1),
+        None,
     );
     assert!(session.event_loop.is_none());
     assert!(session.is_retired());
     assert_eq!(session.runtime().generation(), generation);
-    assert!(calls.get() >= 2);
+    assert!(calls.get() >= 1);
     let retired = session.into_retired().ok().unwrap();
+    assert!(retired.event_loop.is_none());
     assert_eq!(retired.runtime.state(), RuntimeState::Stopped);
     assert_eq!(
         retired.result,

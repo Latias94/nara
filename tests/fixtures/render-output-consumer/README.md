@@ -57,7 +57,9 @@ not a browser or window-presentation qualification.
   configuration one byte below a 16-by-16 RGBA8 allocation, then refuses A2 one byte below the
   two-output budget while A1 remains red and charged. Raising the limit to the exact budget lets
   the same A2 input object/frame publish green, proving the refused attempt did not consume its
-  successful-publication watermark. After the original prefix settles, a retained display keeps
+  successful-publication watermark. At the exact two-output cap, an additional read-use custody
+  table refuses before its callback. The numeric oracle then separately admits that bounded native
+  observation. After the original prefix settles, a retained display keeps
   the allocation until its last lease drops, with exact retained-byte assertions.
 - `original_cpu_input_reconstructs_after_the_original_host_has_retired` keeps the original input
   independently, closes and drops its installation, completes producer and final Host retirement,

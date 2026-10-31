@@ -496,7 +496,9 @@ fn expected_budget_policy_metadata() -> usize {
         size_of::<ModeledArcValue<PolicyBindings>>(),
         size_of::<ModeledArcValue<PolicyExecutionCustody>>(),
     ];
-    let tables = size_of::<PolicyInstances>();
+    let tables = size_of::<PolicyInstances>()
+        + MAX_POLICIES_PER_PRODUCER * size_of::<Option<PolicyInstanceEntry>>()
+        + MAX_FEATURE_BINDINGS_PER_PRODUCER * size_of::<Option<FeatureResolution>>();
     let stage = MAX_FEATURE_BINDINGS_PER_PRODUCER * size_of::<Arc<FeatureBinding>>()
         + size_of::<PolicyBindingStage>()
         + size_of::<RetiredPolicyBindings>();
@@ -1172,9 +1174,14 @@ fn fixed_policy_metadata_fits_the_exact_program_residual_and_refuses_one_byte_le
 #[test]
 fn pruning_64_policy_instances_to_one_keeps_the_entire_fixed_table_in_the_metadata_cost() {
     assert_eq!(MAX_POLICIES_PER_PRODUCER, 64);
-    let table_bytes = size_of::<PolicyInstances>();
-    assert!(table_bytes >= 64 * size_of::<Option<PolicyInstanceEntry>>());
-    assert!(table_bytes >= 1024 * size_of::<Option<FeatureResolution>>());
+    let inline_bytes = size_of::<PolicyInstances>();
+    assert!(
+        inline_bytes < 256,
+        "bounded slot payloads must not inflate native callback stacks"
+    );
+    let table_bytes = inline_bytes
+        + MAX_POLICIES_PER_PRODUCER * size_of::<Option<PolicyInstanceEntry>>()
+        + MAX_FEATURE_BINDINGS_PER_PRODUCER * size_of::<Option<FeatureResolution>>();
     let expected = expected_budget_policy_metadata();
     let program_bytes =
         WgpuRenderProgramBuilder::required_metadata_bytes(metadata_fixture_limits(usize::MAX))
@@ -1196,7 +1203,8 @@ fn pruning_64_policy_instances_to_one_keeps_the_entire_fixed_table_in_the_metada
         inputs.push(input);
     }
     assert_eq!(cpu.instances.len(), 64);
-    assert_eq!(std::mem::size_of_val(&cpu.instances), table_bytes);
+    assert_eq!(std::mem::size_of_val(&cpu.instances), inline_bytes);
+    assert_eq!(cpu.instances.metadata_bytes().unwrap(), table_bytes);
     // Retain an installation from the middle. Published storage keeps its full admitted
     // capacity after pruning, while outstanding candidates keep their original slots.
     let survivor = inputs.swap_remove(31);
@@ -1204,7 +1212,8 @@ fn pruning_64_policy_instances_to_one_keeps_the_entire_fixed_table_in_the_metada
     drop(inputs);
     cpu.instances.maintain();
     assert_eq!(cpu.instances.len(), 1);
-    assert_eq!(std::mem::size_of_val(&cpu.instances), table_bytes);
+    assert_eq!(std::mem::size_of_val(&cpu.instances), inline_bytes);
+    assert_eq!(cpu.instances.metadata_bytes().unwrap(), table_bytes);
     assert_eq!(
         cpu.instances
             .policies
@@ -1241,7 +1250,8 @@ fn pruning_64_policy_instances_to_one_keeps_the_entire_fixed_table_in_the_metada
     drop((survivor, dense, sparse, retry));
     cpu.instances.maintain();
     assert!(cpu.instances.is_empty());
-    assert_eq!(std::mem::size_of_val(&cpu.instances), table_bytes);
+    assert_eq!(std::mem::size_of_val(&cpu.instances), inline_bytes);
+    assert_eq!(cpu.instances.metadata_bytes().unwrap(), table_bytes);
 }
 
 #[test]

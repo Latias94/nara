@@ -56,6 +56,26 @@ App is configuration-only. Platform adapters translate their events and elapsed 
 concrete runtime's public control and drive operations. Hidden driver ports and mutable runtime
 World access are first-party plumbing, not external runner integration APIs.
 
+## Sequential Native Runs
+
+Winit permits one physical event loop per native process. Keep that physical owner when a
+process needs sequential logical runs. `WinitRunner::run_on(event_loop, runtime)` consumes an
+explicit `WinitEventLoop` for a platform-only Runtime. `WinitRetiredSession::event_loop` returns
+it only after the session's Runtime and native dependencies physically retire. Ordinary
+presentation products use `DesktopRun` instead of the platform-only runner.
+
+For desktop products, recover the loop with `DesktopRun::take_event_loop()` after a terminal
+report, then pass it to the next action through `DesktopRunOptions::with_event_loop(loop)`.
+Incomplete cleanup returns no loop and must continue through the same action. A loop supplied
+before a failed source admission remains recoverable after that action reaches its terminal
+failure. Keep every operation on the loop's constructing thread.
+
+Each action creates its own Runtime generation, content admission, windows and presentation Host.
+Loop reuse transfers none of those authorities and does not allow live Source/Processed content
+to bypass Schema agreement or residency publication. The independent
+[composition consumer](../../tests/fixtures/render-composition-consumer/README.md) exercises
+the normal Source then Processed actions and separately replays their retained CPU inputs.
+
 ## First-Party Staged Publication
 
 Engine-owned Hosts use hidden `RuntimeAdmissionReservation`, sealed-App and candidate plumbing to

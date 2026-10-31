@@ -9,7 +9,7 @@ use nara_app::{
     RuntimeState,
 };
 use nara_diagnostic::DiagnosticReport;
-use nara_winit::{WinitControlFlow, WinitRunner, WinitSession};
+use nara_winit::{WinitControlFlow, WinitEventLoop, WinitRunner, WinitSession};
 
 mod presentation;
 #[cfg(all(feature = "runtime-2d", feature = "serde"))]
@@ -47,6 +47,7 @@ pub struct DesktopRunOptions {
     #[cfg(all(feature = "runtime-2d", feature = "serde"))]
     pub(super) cleanup_policy: RuntimeClosePolicy,
     native_retirement_budget: Duration,
+    pub(super) event_loop: Option<WinitEventLoop>,
     runner: WinitRunner,
     presentation: DesktopPresentationOptions,
 }
@@ -57,6 +58,7 @@ impl Default for DesktopRunOptions {
             #[cfg(all(feature = "runtime-2d", feature = "serde"))]
             cleanup_policy: RuntimeClosePolicy::default(),
             native_retirement_budget: Duration::from_secs(5),
+            event_loop: None,
             runner: WinitRunner::default(),
             presentation: DesktopPresentationOptions::default(),
         }
@@ -82,6 +84,16 @@ impl DesktopRunOptions {
     #[must_use]
     pub fn with_native_retirement_budget(mut self, budget: Duration) -> Self {
         self.native_retirement_budget = budget;
+        self
+    }
+
+    /// Transfers an existing physical event loop into this logical run.
+    ///
+    /// Recover it from [`DesktopRun::take_event_loop`] after the preceding run has fully retired.
+    /// This does not reuse Runtime, window, presentation or GPU authority.
+    #[must_use]
+    pub fn with_event_loop(mut self, event_loop: WinitEventLoop) -> Self {
+        self.event_loop = Some(event_loop);
         self
     }
 
@@ -173,6 +185,7 @@ pub struct DesktopRun {
     #[cfg(all(feature = "runtime-2d", feature = "serde"))]
     pub(super) presentation_verification: Option<DesktopPresentationVerificationReceipt>,
     pub(super) telemetry_seal: Option<DesktopTelemetrySealReport>,
+    pub(super) event_loop: Option<WinitEventLoop>,
 }
 
 impl fmt::Debug for DesktopRun {
@@ -180,6 +193,7 @@ impl fmt::Debug for DesktopRun {
         let mut debug = formatter.debug_struct("DesktopRun");
         debug
             .field("state", &self.state.label())
+            .field("retains_event_loop", &self.event_loop.is_some())
             .field("diagnostics", &self.diagnostics);
         #[cfg(all(feature = "runtime-2d", feature = "serde"))]
         debug
@@ -202,7 +216,11 @@ impl DesktopRun {
     /// `with_native_retirement_budget` bounds a subsequent finite native retirement drive;
     /// `with_cleanup_timeout` is a source/processed startup option.
     #[must_use]
-    pub fn from_runtime(runtime: nara_app::RuntimeInstance, execution: DesktopRunOptions) -> Self {
+    pub fn from_runtime(
+        runtime: nara_app::RuntimeInstance,
+        mut execution: DesktopRunOptions,
+    ) -> Self {
+        let event_loop = execution.event_loop.take();
         Self {
             state: DesktopRunState::FreshRuntime { runtime, execution },
             diagnostics: DiagnosticReport::default(),
@@ -211,6 +229,22 @@ impl DesktopRun {
             #[cfg(all(feature = "runtime-2d", feature = "serde"))]
             presentation_verification: None,
             telemetry_seal: None,
+            event_loop,
+        }
+    }
+
+    /// Returns the physical event loop only after this run reaches a terminal outcome.
+    ///
+    /// Incomplete cleanup keeps it with the original native session. An explicitly supplied loop
+    /// also remains recoverable after content admission fails before native startup.
+    pub fn take_event_loop(&mut self) -> Option<WinitEventLoop> {
+        if matches!(
+            self.state,
+            DesktopRunState::Completed(_) | DesktopRunState::Failed
+        ) {
+            self.event_loop.take()
+        } else {
+            None
         }
     }
 
@@ -267,10 +301,11 @@ impl DesktopRun {
             reports.clone(),
         );
         // This consumes the one published Runtime. Its publication slot is never refilled.
-        let session = execution.runner.__run_with_presentation(
+        let session = execution.runner.__run_with_presentation_on(
             runtime,
             Box::new(driver),
             execution.native_retirement_budget,
+            self.event_loop.take(),
         );
         self.finish_native(DesktopNativeRun {
             session,
@@ -402,6 +437,7 @@ impl DesktopRun {
         drop(runtime);
         #[cfg(all(feature = "runtime-2d", feature = "serde"))]
         drop(_context);
+        self.event_loop = retired.event_loop;
         terminal.finish()
     }
 

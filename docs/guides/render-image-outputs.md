@@ -87,6 +87,42 @@ original native fence evidence may recover resource settlement without authorizi
 An SDK prefix without an exposed native index has a conservative original-QueueEmpty recovery
 branch. Neither normal polling nor recovery enqueues new work.
 
+## Native Window Composition
+
+A native frontend owns its actual platform windows and registers their owning providers with
+one Host. `WgpuRenderHost::new` admits the initial provider; `register_window` adds another real
+target to the same device domain. The selected adapter must support each actual surface. Keep
+native windows alive through Host retirement and registered-provider release.
+
+Use `begin_window_frame` for the Host drive and `with_device` to initialize frontend-native
+pipeline state from `WgpuWindowDeviceScope`. That borrowed scope shares the original device,
+queue, enabled requirements and retirement owner. It does not grant independent submission.
+The same Host may also initialize window-free and later accept real registered windows.
+
+Admit `WgpuImageDisplay` with a frontend-owned immutable snapshot of destination, placement,
+clip, DPI and role. A changed snapshot gets a fresh occurrence; a passive mirror has its own
+occurrence. Pass those exact displays to `present_window`. Its `WgpuWindowFrame` exposes native
+encoding and actual acquired extent/format, while the Host acquires, submits and presents.
+`record_image_sample` declares an actual non-fully-clipped encoded sample of a supplied display.
+The Host does not parse shaders or infer input mappings from a texture.
+
+`WgpuWindowFrameOutcome` returns an optional actual window receipt and exact image-composite
+receipts. Join each `WgpuImageCompositeReceipt` to its original immutable placement/binding
+snapshot before accepting picking or UI interaction. A repaint cannot mint another one-shot UI
+permit, and another window's mirror cannot complete the designated occurrence.
+
+Each native attempt admits at most256 output/display items and256 extra command buffers.
+Repeated sampling of one occurrence consumes one record. Engine tables and original-prefix
+metadata admit before clones/native work; receipt storage and generation checks precede present.
+Paint/read-use callback refusal or panic still binds its queued uploads and retains the original
+prefix. `NativeCallbackPanicked` is attempt-local; actual native execution failure retains its
+separate owner-replacement classification. A skipped/minimized target returns no present facts.
+
+The independent [composition consumer](../../tests/fixtures/render-composition-consumer/README.md)
+exercises two real windows and an independent image stream. Its source, processed-content and
+clipped drawing cases have separate assertions; their actual qualification belongs to the
+render unit's evidence rather than interface availability alone.
+
 After all consumers stop, drive `poll_retirement` until complete. This final whole-queue boundary
 is separate from producer-local close. Direct native Host Drop attempts the same original-owner
 retirement for a finite drive budget and aborts if dependencies cannot be safely retired, matching
@@ -94,6 +130,6 @@ the native Session policy. The drive budget is not a strict wall-clock bound on 
 or native destructors. Explicit retirement retains errors and allows the caller to retry.
 
 The [program guide](render-programs.md) explains finite texture/buffer Features and policy capture.
-Complete View/history groups and the Nara-drawn editable Editor remain separately ordered work in
+Complete cross-stream composition and the Nara-drawn editable Editor remain separately ordered work in
 the [render plan](../plans/2026-10-31-render-composition-and-host-execution-plan.md). Interface
 availability and native qualification retain their explicitly recorded scopes.

@@ -7,10 +7,20 @@ use std::sync::mpsc::{self, Sender};
 use winit::platform::windows::EventLoopBuilderExtWindows;
 
 mod maintenance;
+mod reusable;
 
 #[derive(Debug)]
-pub(super) struct NativeTestEvent {
-    pub window: Sender<Arc<WinitWindow>>,
+pub(super) enum NativeTestEvent {
+    RetainWindowAndExit {
+        window: Sender<Arc<WinitWindow>>,
+    },
+    ObserveWindow {
+        window: Sender<WinitWindowId>,
+    },
+    ProbeWake {
+        wake_id: SessionWakeId,
+        accepted: Sender<bool>,
+    },
 }
 
 pub(super) fn handle_event(
@@ -18,11 +28,28 @@ pub(super) fn handle_event(
     event_loop: &ActiveEventLoop,
     event: NativeTestEvent,
 ) {
-    if let Some(window) = app.platform_windows.get(&WindowId::PRIMARY) {
-        let _ = event.window.send(window.clone());
+    match event {
+        NativeTestEvent::RetainWindowAndExit { window: sender } => {
+            if let Some(window) = app.platform_windows.get(&WindowId::PRIMARY) {
+                let _ = sender.send(window.clone());
+            }
+            // Exercise the actual Exit/reset path of the pinned Windows pump, not a mock result.
+            event_loop.exit();
+        }
+        NativeTestEvent::ObserveWindow { window: sender } => {
+            if let Some(window) = app.platform_windows.get(&WindowId::PRIMARY) {
+                let _ = sender.send(window.id());
+            }
+        }
+        NativeTestEvent::ProbeWake { wake_id, accepted } => {
+            let before = app.frame_requested;
+            let result = app.handle_session_wake(wake_id).unwrap();
+            if !result {
+                assert_eq!(app.frame_requested, before);
+            }
+            let _ = accepted.send(result);
+        }
     }
-    // Exercise the actual Exit/reset path of the pinned Windows pump, not a mock pump result.
-    event_loop.exit();
 }
 
 struct BoundedPlatformDriver {
@@ -59,8 +86,7 @@ impl __WinitPresentationDriver for BoundedPlatformDriver {
 fn native_session(budget: Duration) -> WinitSession {
     let mut builder = EventLoop::<WinitUserEvent>::with_user_event();
     builder.with_any_thread(true);
-    let event_loop = builder.build().unwrap();
-    event_loop.set_control_flow(ControlFlow::Wait);
+    let mut event_loop = WinitEventLoop::from_native(builder.build().unwrap());
     let mut app = App::new();
     app.add_plugin(WindowPlugin {
         primary_window: Some(Window::new(
@@ -77,7 +103,7 @@ fn native_session(budget: Duration) -> WinitSession {
         WinitControlFlow::Wait,
         budget,
     );
-    state.event_proxy = Some(event_loop.create_proxy());
+    event_loop.bind(&mut state).unwrap();
     WinitSession {
         app: Some(state),
         event_loop: Some(event_loop),
@@ -91,8 +117,11 @@ fn exit_with_retained_window(session: &mut WinitSession) -> Arc<WinitWindow> {
         .event_loop
         .as_ref()
         .unwrap()
+        .event_loop
         .create_proxy()
-        .send_event(WinitUserEvent::NativeTest(NativeTestEvent { window: send }))
+        .send_event(WinitUserEvent::NativeTest(
+            NativeTestEvent::RetainWindowAndExit { window: send },
+        ))
         .unwrap();
     assert_eq!(session.execute(), WinitRunProgress::Incomplete);
     receive.recv_timeout(Duration::from_secs(1)).unwrap()
@@ -135,6 +164,7 @@ fn early_exit_resumes_the_original_pump_without_recreating_the_window() {
     assert_eq!(snapshot.phase, WindowTargetPhase::NativeDestroyed);
     assert_eq!(snapshot.fault, None);
     let retired = session.into_retired().ok().unwrap();
+    assert!(retired.event_loop.is_some());
     assert!(
         retired
             .result
@@ -201,7 +231,9 @@ fn native_budget_expiry_returns_the_same_owner_then_retry_observes_destroyed() {
             .nara_windows_by_winit
             .is_empty()
     );
-    assert!(session.into_retired().ok().unwrap().result.is_err());
+    let retired = session.into_retired().ok().unwrap();
+    assert!(retired.event_loop.is_some());
+    assert!(retired.result.is_err());
 }
 
 #[test]
@@ -214,15 +246,17 @@ fn event_loop_construction_failure_still_retires_the_supplied_runtime() {
     app.add_plugin(WindowPlugin::default()).unwrap();
     let runtime = RuntimeInstance::start(app).unwrap();
     let generation = runtime.generation();
-    let session = WinitRunner::default().__run_with_presentation(
+    let session = WinitRunner::default().__run_with_presentation_on(
         runtime,
         Box::new(NoPresentationDriver),
         Duration::from_millis(500),
+        None,
     );
     assert!(session.event_loop.is_none());
     assert!(session.is_retired());
     assert_eq!(session.runtime().generation(), generation);
     let retired = session.into_retired().ok().unwrap();
+    assert!(retired.event_loop.is_none());
     assert_eq!(retired.runtime.state(), RuntimeState::Stopped);
     assert!(
         retired

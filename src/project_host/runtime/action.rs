@@ -367,22 +367,25 @@ impl DesktopRun {
     #[must_use]
     pub fn from_runtime_content(
         base: crate::runtime_content::RuntimeContentBase,
-        execution: DesktopRunOptions,
+        mut execution: DesktopRunOptions,
     ) -> Self {
+        let event_loop = execution.event_loop.take();
         Self {
             state: DesktopRunState::Fresh(DesktopRunInputs::Processed { base, execution }),
             diagnostics: DiagnosticReport::default(),
             startup_content_closure: None,
             presentation_verification: None,
             telemetry_seal: None,
+            event_loop,
         }
     }
 
     fn new_inner(
         project_root: DirectoryCapability,
-        intent: DesktopRunIntent,
+        mut intent: DesktopRunIntent,
         overlay: Option<RuntimePluginOverlay>,
     ) -> Self {
+        let event_loop = intent.execution.event_loop.take();
         Self {
             state: DesktopRunState::Fresh(DesktopRunInputs::Source {
                 project_root,
@@ -393,6 +396,7 @@ impl DesktopRun {
             startup_content_closure: None,
             presentation_verification: None,
             telemetry_seal: None,
+            event_loop,
         }
     }
 

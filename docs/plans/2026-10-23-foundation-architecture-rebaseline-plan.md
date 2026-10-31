@@ -843,6 +843,12 @@ completion; whole-Host queue-empty drain is not a per-stream close requirement. 
 in-flight work per stream and cumulatively per Host drive. Preserve supervised ordinary project
 Play; local GPU sharing does not authorize arbitrary project Rust inside the generic Editor.
 
+Keep the physical native event loop distinct from each logical run. The complete source/processed
+capture consumer must retain and transfer the same thread-bound pump only after original Runtime,
+presentation, window and GPU retirement. It must not rebuild Winit's process-level loop, substitute
+synthetic captures or bypass receiving Schema/content residency to arrange the interleaving. The
+owning render unit also verifies unused-pump recovery after startup admission failure.
+
 Acceptance: Runtime/Scene View/offscreen, intermediate textures, independent renderer policy,
 two producer streams/two windows/image target, one-stream close, old packets and device loss.
 Reject cycles/uninitialized input and unauthorized acquire/submit/present. Generated/history
@@ -879,7 +885,9 @@ Delete central package-specific payload/match growth and tests prohibiting any p
 
 ## R9: Material Artifacts, Views, Color And Domain Render Locality
 
-**Design:** D15, D16. **State:** not started. **Owners:** shader/material/view owners and domain projection.
+**Design:** D15, D16. **State:** View, retained-output and composition work shares the active R8
+unit and its scoped evidence; complete R9a, durable materials and measured geometry locality
+remain open. **Owners:** shader/material/view owners and domain projection.
 
 Turn the palette consumer into durable typed parameters/references plus tracked WGSL/WESL shader
 artifacts. Derive one inspectable binding model rather than maintaining Rust and dynamic metadata

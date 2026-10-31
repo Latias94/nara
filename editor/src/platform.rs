@@ -3,7 +3,7 @@ use std::time::{Duration, Instant};
 use nara::{
     project_host::TrustedCompiledEditorProjectIntent,
     render::RenderWindowPacket,
-    render_wgpu::__private::WgpuRenderHostError,
+    render_wgpu::WgpuRenderHostError,
     tooling::{EditorPersistenceOperation, EditorPlayState},
     window::{PresentMode, WindowId as NaraWindowId, WindowResolution},
 };

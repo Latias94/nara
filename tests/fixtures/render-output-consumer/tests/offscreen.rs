@@ -279,6 +279,16 @@ fn exact_output_budget_preserves_leases_and_retries_the_same_refused_capture() {
         green.receipt().output_version()
     );
     assert_eq!(host.retained_resource_bytes(), 2 * BYTES);
+    assert!(matches!(
+        host.submit_image_use::<()>(std::slice::from_ref(&green), |_, _, _, _| {
+            panic!("a full payload budget cannot admit another native-use custody table")
+        }),
+        Err(WgpuRenderHostError::OutputCapacity)
+    ));
+    assert_eq!(host.retained_resource_bytes(), 2 * BYTES);
+    // Publication above used the exact two-output budget. Numeric observation is another native
+    // attempt with its own bounded metadata, so admit that extra work only after proving the cap.
+    host = host.with_resource_byte_limit(64 * 1024);
     assert_pixels(&mut host, &green, GREEN_BYTES);
     assert_pixels(&mut host, retained_red.output(), RED_BYTES);
     assert_window_free(&host);

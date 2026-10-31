@@ -24,6 +24,7 @@ fn executable_owners_are_bound_to_their_construction_thread() {
     static_assertions::assert_not_impl_any!(RuntimeStartFailure: Send, Sync);
     #[cfg(feature = "desktop-winit")]
     {
+        static_assertions::assert_not_impl_any!(nara::winit::WinitEventLoop: Send, Sync, Clone);
         static_assertions::assert_not_impl_any!(nara::winit::WinitSession: Send, Sync);
         static_assertions::assert_not_impl_any!(nara::winit::WinitRetiredSession: Send, Sync);
     }
@@ -98,6 +99,11 @@ fn managed_world_access_is_read_only_and_scopes_do_not_escape() {
 fn platform_runner_consumes_the_managed_runtime_contract() {
     let _: fn(nara::winit::WinitRunner, RuntimeInstance) -> nara::winit::WinitSession =
         nara::winit::WinitRunner::run;
+    let _: fn(
+        nara::winit::WinitRunner,
+        nara::winit::WinitEventLoop,
+        RuntimeInstance,
+    ) -> nara::winit::WinitSession = nara::winit::WinitRunner::run_on;
     let _: fn(&mut nara::winit::WinitSession) -> nara::winit::WinitRunProgress =
         nara::winit::WinitSession::execute;
     let _: fn(&nara::winit::WinitSession) -> &RuntimeInstance = nara::winit::WinitSession::runtime;
@@ -114,4 +120,11 @@ fn desktop_action_consumes_an_existing_runtime_with_its_native_owner() {
         RuntimeInstance,
         nara::project_host::DesktopRunOptions,
     ) -> nara::project_host::DesktopRun = nara::project_host::DesktopRun::from_runtime;
+    let _: fn(
+        nara::project_host::DesktopRunOptions,
+        nara::project_host::WinitEventLoop,
+    ) -> nara::project_host::DesktopRunOptions =
+        nara::project_host::DesktopRunOptions::with_event_loop;
+    let _: fn(&mut nara::project_host::DesktopRun) -> Option<nara::project_host::WinitEventLoop> =
+        nara::project_host::DesktopRun::take_event_loop;
 }

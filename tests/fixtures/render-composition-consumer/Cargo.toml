@@ -1,0 +1,29 @@
+[package]
+name = "nara-render-composition-consumer"
+version = "0.0.0"
+edition = "2024"
+rust-version = "1.95"
+license = "MIT OR Apache-2.0"
+publish = false
+
+[workspace]
+resolver = "3"
+
+[dependencies]
+nara = { path = "../../..", default-features = false, features = ["project-workflow", "tooling", "presentation-2d", "presentation-ui", "desktop-winit", "render-wgpu"] }
+nara_asset = { path = "../../../crates/nara_asset", default-features = false, features = ["serde"] }
+nara_core = { path = "../../../crates/nara_core", default-features = false }
+nara_ecs = { path = "../../../crates/nara_ecs", default-features = false }
+nara_fs = { path = "../../../crates/nara_fs", default-features = false }
+nara_image = { path = "../../../crates/nara_image", default-features = false, features = ["serde", "render-prepare"] }
+nara_render = { path = "../../../crates/nara_render", default-features = false }
+nara_render_wgpu = { path = "../../../crates/nara_render_wgpu", default-features = false, features = ["stock-sprite", "stock-ui"] }
+nara_window = { path = "../../../crates/nara_window", default-features = false }
+wgpu = "=30.0.1"
+winit = "=0.30.13"
+
+[dev-dependencies]
+pollster = "0.4"
+serde_json = "1"
+tempfile = "3"
+uuid = "1.23.4"

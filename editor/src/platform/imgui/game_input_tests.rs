@@ -19,8 +19,8 @@ use nara::{
     project_host::{EditorGameViewCandidateIdentity, TrustedCompiledEditorProjectIntent},
     render::{Camera2d, DisplayRect},
     render_wgpu::{
-        __private::{WgpuDisplayOccurrence, WgpuEditorCompositeReceipt, WgpuSubmittedImageReceipt},
-        WgpuRenderInput, WgpuStockPolicy,
+        WgpuDisplayOccurrence, WgpuImageCompositeReceipt, WgpuRenderInput, WgpuStockPolicy,
+        WgpuSubmittedImageReceipt,
     },
     sprite::Sprite,
     sprite_render::__private::SpriteBatches,
@@ -100,7 +100,7 @@ pub(super) struct SubmittedGameObservation {
 #[derive(Clone, Copy)]
 struct GameObservation {
     submitted: SubmittedGameObservation,
-    receipt: WgpuEditorCompositeReceipt,
+    receipt: WgpuImageCompositeReceipt,
     scene: WgpuSubmittedImageReceipt,
     center_x: f32,
 }
@@ -454,7 +454,7 @@ impl GameInputWorkflow<'_> {
         let window = super::editor_window_packet(&self.native.window);
         self.native
             .gpu
-            .begin_editor_frame(window, self.native.frame_index)
+            .begin_window_frame(window, self.native.frame_index)
             .map_err(|error| error.to_string())?;
         let mut pending = self
             .native

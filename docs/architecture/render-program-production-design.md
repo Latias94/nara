@@ -1,11 +1,12 @@
 # Production Render Program And Typed Feature Integration
 
-Date: 2026-10-31. Last reviewed: 2026-11-01. Status: selected production integration and next
-history-unit design for step4 of the [render ownership transition](render-host-ownership-design.md).
+Date: 2026-10-31. Last reviewed: 2026-11-01. Status: selected production program, history and
+native-window integration, followed by the public stock-composition design, within step4 of the
+[render ownership transition](render-host-ownership-design.md).
 The [finite prerequisite in Accepted ADR0094](adr/0094-minimal-render-execution-boundary-and-evidence-gated-extensions.md#finite-captured-wgpu-programs)
 admits the bounded native program and original typed policy capture. Their implementation evidence
-is tracked in the [ledger](adr/implementation-status.md); the next history section remains
-unimplemented design.
+is tracked in the [ledger](adr/implementation-status.md). Captured View/history prerequisites
+have scoped production qualification; the public stock-composition successor remains unimplemented.
 Proposed [ADR0121](adr/0121-composable-render-programs-and-host-execution.md) remains Proposed
 until its complete production consumers qualify the selected contract.
 
@@ -193,8 +194,8 @@ within the policy's original closed request. It grants no Device, Queue, World o
 The Host resolves CPU instances by producer and original logical declaration, with a finite bound
 and reclamation after declarations and accepted candidates release their leases. Each `bind`
 constructs a new immutable membership snapshot; only complete publication updates the latest
-snapshot. The private fixed slot table has no retained Vec capacity
-after reclamation. Account for the complete table and exact original-submission payload increment,
+snapshot. The private heap slot tables retain stable indices and their full admitted capacity
+after entry reclamation. Account for that retained capacity and exact original-submission payload increment,
 then admit predictable custody wrappers before their allocation. Native Feature state remains separately epoch-owned.
 An original submitted reservation retains its exact policy capture, definition and CPU instances
 through actual GPU completion, including failure. Closing capture admission cannot prematurely
@@ -413,7 +414,90 @@ comparisons at the pins above, not upstream defect or performance claims. Reconc
 finite history contract in ADRs0040/0094 and neutral View facts in ADR0117 before implementing it;
 full0121 remains Proposed.
 
+## Next Production Unit: Public Stock Composition
+
+The native-window/content/drawing consumer does not complete the ordinary external Scene-effect
+workflow. Current `WgpuStockPolicy::build` owns the whole world/Canvas/UI graph. Its intermediate
+markers and binding fields are private; Sprite lowering is crate-private. Runtime collectors
+require the concrete stock installation, and Scene/Canvas constructors install that definition
+directly. Public Features and an alternate scalar policy therefore do not yet let a normal
+package add a Scene blur to those stock consumers without reproducing lowering or using private
+imports. This is an explicit remaining capability, not an assertion that current supported stock
+drawing violates its contract.
+
+Compare a public typed stock-stage helper, used by the existing `WgpuRenderPolicy`, with full
+policy replacement on the same complete consumer. Prefer shared stage lowering when it preserves
+the existing complete preflight, ordered Views, statistics and final UI binding. The default stock
+policy becomes the ordinary composition of those same stages; do not retain duplicate fixed
+lowering. Stage definitions close their exact Feature requirements before device creation and
+each original capture retains the selected definitions and parameters. A helper name or generic
+shape is a design candidate until the real consumer qualifies it.
+
+Expose actual world raster, optional Canvas resolution and final UI composition as independently
+owned graph operations. World-raster color, resolved Scene color and final composite remain
+distinct semantic ports with actual extents, transfer and premultiplied-alpha facts. An effect's
+radius/coordinates explicitly select world-raster or resolved-target pixels. The illustrative
+Canvas-then-effects order above is one wiring choice, not a universal fixed hook: a foreseeable
+world-pixel effect and a target-pixel effect must not require another graph-model replacement.
+Only the selected pre-UI Scene result feeds the final full-resolution HUD. Preserve the original
+Scene as an exact separately exported version for before/after composition; never obtain it by
+relabeling the final image or consulting a latest slot.
+
+Complete the CPU and construction boundary with the stage helper. A public stock-capture handoff
+must provide the collected immutable stock drawing and original optional UI sidecar under actual
+backpressure. The composing collector captures its effect parameters and submits through existing
+`capture`/`capture_with_ui`, retaining any refused original sidecar. It need not understand private
+`SpriteBatches`. Runtime recipe and Scene/Canvas construction must select the same original typed
+policy and capture adapter. Picking/provenance remains with its original Editor owner, independent
+of a mandatory downcast to `WgpuStockPolicy`. Reconcile ADRs0094/0105/0106/0111/0117 and the affected
+0017/0032 stage wording before replacing those owners; full0121 remains Proposed.
+
+The next independent consumer has separately authored blur and second-effect packages, normal
+Sprite Scene content, actual Runtime and Editor Scene View, and image-only replay. Include optional
+WorldCanvas, unchanged full-resolution HUD, original Scene before/after branching and an actual
+final-UI-binding rejection. Reuse the qualified original-input, producer, candidate and native
+submission owners. The existing comparison blur writes fixed `rgba32float` storage, so it cannot
+be silently reused as a general stock-format shader. Use actual supported attachment formats,
+explicit sampling/color semantics and a format-appropriate numeric oracle. A graph-only blur or
+another manually assembled policy is not complete consumer evidence for this seam.
+
 ## Implementation Order And Deletion
+
+### Native Window Composition Consumer
+
+After the selected View/history transaction, qualify two independently paced producers, two
+actual native windows and an image-only composition under the original Host. The native frontend
+owns platform windows and their safe providers; public exact-wgpu window scopes admit their
+initialization and painting without exposing another acquire/submit/present owner. Remove the
+former toolkit-specific hidden window scope/outcome vocabulary as its actual Dear consumers
+migrate. Public window and image-composite receipts retain original Host/epoch, native target,
+display clock and exact image occurrence; their constructors remain private. A composite receipt
+proves sampling/presentation facts, not a widget mapping, interaction permit or monitor scanout.
+
+Admit bounded image-display, unique-sample, extra-command and complete-receipt storage before
+native work. Repeated sampling of one occurrence does not grow metadata. Prepare all receipt
+joins before present and publish them only after successful native validation/presentation;
+allocation or generation failure cannot turn an already-presented window into a missing result.
+Painting failure or unwind still binds its original queued writes to submitted custody. Window
+failure remains local to that attempt and does not roll back another window or producer output.
+Existing one-shot UI completion continues to name its designated display occurrence.
+
+Bounded producer policy/Feature tables keep their stable slot space in fallibly admitted heap
+storage, outside inline producer-map nodes and native callback stacks. Pruning active entries
+does not discount retained table capacity. Candidate slot indices remain stable, and final
+publication still performs no table allocation or arbitrary old-value destruction.
+
+The independent consumer lives at `tests/fixtures/render-composition-consumer`. It uses real
+source/processed Image owners to retain original inputs across successor publication and live-store
+retirement, checking actual old/new pixels through Host-owned readback. Its native window example
+uses actual windows, exact retained display occurrences and independent capture/display schedules.
+An image composition keeps an older paused/closed producer output while another advances. A clipped
+Nara-drawn Scene/control/popup tracer checks ordering and linear-premultiplied pixels before adding
+Editor widget/text behavior. Actual device-loss injection remains in owning native tests unless
+the independent public consumer has an admitted loss route. Full editable Inspector, material ABI,
+automatic shader inverses and unmeasured performance remain separate work.
+
+### Ordered Replacement
 
 1. Port the finite resource admission/compiler into the production backend with hostile owner,
    semantic, initialization, ordering and budget cases. Keep it internal while pairing typed

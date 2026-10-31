@@ -648,7 +648,7 @@ fn multiple_composites_certify_only_exact_sampled_images_in_one_window() {
         first_display.clone().occurrence(),
         first_display.occurrence()
     );
-    let window = WgpuEditorWindowPresentedReceipt::new(WindowId::PRIMARY, 3, 21, 4, 19);
+    let window = WgpuWindowPresentedReceipt::new(WindowId::PRIMARY, 3, 21, 4, 19);
     let mut generation = 0;
     let composites = join_composite_receipts(
         &mut generation,
@@ -753,7 +753,7 @@ fn composite_receipt_requires_the_exact_submitted_sample_and_window_namespace() 
         2,
         7,
     );
-    let window = WgpuEditorWindowPresentedReceipt::new(
+    let window = WgpuWindowPresentedReceipt::new(
         WindowId::PRIMARY,
         3,
         submitted.backend_instance_id(),
@@ -769,7 +769,7 @@ fn composite_receipt_requires_the_exact_submitted_sample_and_window_namespace() 
     );
     assert_eq!(presentation_generation, 0);
 
-    let foreign_window = WgpuEditorWindowPresentedReceipt::new(
+    let foreign_window = WgpuWindowPresentedReceipt::new(
         WindowId::PRIMARY,
         3,
         submitted.backend_instance_id().saturating_add(1),
@@ -793,7 +793,7 @@ fn composite_receipt_requires_the_exact_submitted_sample_and_window_namespace() 
     );
     assert_eq!(presentation_generation, 0);
 
-    let foreign_epoch = WgpuEditorWindowPresentedReceipt::new(
+    let foreign_epoch = WgpuWindowPresentedReceipt::new(
         WindowId::PRIMARY,
         3,
         submitted.backend_instance_id(),
@@ -1151,7 +1151,7 @@ fn editor_ui_presented_completion_requires_the_exact_final_composite() {
         4,
         12,
     );
-    let window = WgpuEditorWindowPresentedReceipt::new(
+    let window = WgpuWindowPresentedReceipt::new(
         WindowId::PRIMARY,
         5,
         submitted.backend_instance_id(),
@@ -1173,7 +1173,7 @@ fn editor_ui_presented_completion_requires_the_exact_final_composite() {
     assert_eq!(submission.image(), submitted);
     assert_eq!(submission.output(), &output);
     assert_eq!(submission.display(), &display);
-    let foreign = WgpuEditorCompositeReceipt::new(
+    let foreign = WgpuImageCompositeReceipt::new(
         WgpuSubmittedImageReceipt::new(
             WgpuRenderProducerId::new(1),
             image,
@@ -1192,14 +1192,14 @@ fn editor_ui_presented_completion_requires_the_exact_final_composite() {
         .presented(foreign)
         .expect_err("a foreign image receipt must not commit Runtime UI presentation");
     let submission = submission
-        .presented(WgpuEditorCompositeReceipt::new(
+        .presented(WgpuImageCompositeReceipt::new(
             submitted,
             mirror.occurrence(),
             window,
             1,
         ))
         .expect_err("a passive same-window mirror must not consume the original UI permit");
-    let exact = WgpuEditorCompositeReceipt::new(submitted, display.occurrence(), window, 1);
+    let exact = WgpuImageCompositeReceipt::new(submitted, display.occurrence(), window, 1);
 
     let completed = publish_editor_ui_outcomes(outcomes, submission.presented(exact).unwrap());
     assert_eq!(completed.len(), 1);
@@ -1295,7 +1295,7 @@ fn native_editor_ui_rejected_after_close_or_loss_retains_the_original_permit() {
             producer_closed: Arc::clone(&producer_closed),
             ui,
         };
-        let window = WgpuEditorWindowPresentedReceipt::new(
+        let window = WgpuWindowPresentedReceipt::new(
             WindowId::PRIMARY,
             1,
             namespace.backend_instance_id,
@@ -1303,7 +1303,7 @@ fn native_editor_ui_rejected_after_close_or_loss_retains_the_original_permit() {
             1,
         );
         let composite =
-            WgpuEditorCompositeReceipt::new(output.receipt(), display.occurrence(), window, 1);
+            WgpuImageCompositeReceipt::new(output.receipt(), display.occurrence(), window, 1);
         assert_eq!(
             read_output_pixel(&mut execution, &output, 16, 16),
             [255, 255, 255, 255]
@@ -1480,7 +1480,7 @@ fn composite_generation_exhaustion_cannot_publish_or_wrap() {
         1,
     );
     let display = WgpuImageDisplay::issue(allocated_test_output(&execution, &namespace, receipt));
-    let window = WgpuEditorWindowPresentedReceipt::new(
+    let window = WgpuWindowPresentedReceipt::new(
         WindowId::PRIMARY,
         1,
         namespace.backend_instance_id,

@@ -55,8 +55,8 @@ impl OffscreenGpu {
         })
     }
 
-    fn scope(&self) -> super::WgpuEditorDeviceScope<'_> {
-        super::WgpuEditorDeviceScope {
+    fn scope(&self) -> super::WgpuWindowDeviceScope<'_> {
+        super::WgpuWindowDeviceScope {
             instance: &self.instance,
             adapter: &self.adapter,
             device: &self.device,
@@ -216,7 +216,7 @@ fn renderer_shutdown_preserves_rejected_state_and_releases_bindings_idempotently
     let mut foreign = dear_imgui_rs::Context::create();
     assert!(matches!(
         renderer.shutdown(&mut foreign),
-        Err(super::WgpuRenderHostError::ToolkitPaint { .. })
+        Err(super::WgpuRenderHostError::WindowPaint { .. })
     ));
     assert!(!renderer.closed);
     assert_eq!(renderer.bindings, vec![(binding, display.clone())]);
@@ -242,7 +242,7 @@ fn renderer_shutdown_preserves_rejected_state_and_releases_bindings_idempotently
     let mut foreign = dear_imgui_rs::Context::create();
     assert!(matches!(
         renderer.shutdown(&mut foreign),
-        Err(super::WgpuRenderHostError::ToolkitPaint { message })
+        Err(super::WgpuRenderHostError::WindowPaint { message })
             if message == "the renderer belongs to another Context"
     ));
     drop(foreign);
@@ -253,7 +253,7 @@ fn renderer_shutdown_preserves_rejected_state_and_releases_bindings_idempotently
     ] {
         assert!(matches!(
             result,
-            Err(super::WgpuRenderHostError::ToolkitPaint { message })
+            Err(super::WgpuRenderHostError::WindowPaint { message })
                 if message == "the renderer is closed"
         ));
     }
@@ -279,7 +279,7 @@ fn renderer_shutdown_preserves_rejected_state_and_releases_bindings_idempotently
         .create_command_encoder(&wgpu::CommandEncoderDescriptor::default());
     let mut leading_command_buffers = Vec::new();
     let mut sampled_viewports = Vec::new();
-    let mut frame = super::WgpuEditorWindowFrame {
+    let mut frame = super::WgpuWindowFrame {
         device: &gpu.device,
         queue: &gpu.queue,
         encoder: &mut encoder,
@@ -296,7 +296,7 @@ fn renderer_shutdown_preserves_rejected_state_and_releases_bindings_idempotently
             &mut frame,
             wgpu::Color::BLACK,
         ),
-        Err(super::WgpuRenderHostError::ToolkitPaint { message })
+        Err(super::WgpuRenderHostError::WindowPaint { message })
             if message == "the renderer is closed"
     ));
     let mut successor_retirement = gpu.scope().gpu_retirement();
@@ -404,7 +404,7 @@ fn gpu_retirement_flush_tolerates_device_loss_before_submission() {
 
 #[test]
 fn owned_renderer_records_exact_external_binding_revisions_and_excludes_clipped_images() {
-    use super::{RendererOwner, WgpuEditorDeviceScope};
+    use super::{RendererOwner, WgpuWindowDeviceScope};
     use dear_imgui_rs::{Context, FontSource};
     use dear_imgui_wgpu::{FramebufferExtent, WgpuDrawDependencies};
 
@@ -438,7 +438,7 @@ fn owned_renderer_records_exact_external_binding_revisions_and_excludes_clipped_
         .font_atlas()
         .add_font(&[FontSource::default_font_with_size(16.0)]);
     context.io_mut().set_display_size([128.0, 128.0]);
-    let scope = WgpuEditorDeviceScope {
+    let scope = WgpuWindowDeviceScope {
         instance: &instance,
         adapter: &adapter,
         device: &device,
@@ -723,11 +723,11 @@ fn owned_renderer_paint_distinguishes_same_window_occurrences_and_retains_regist
             .device
             .create_command_encoder(&wgpu::CommandEncoderDescriptor::default());
         let mut leading_command_buffers = Vec::new();
-        let mut samples = Vec::new();
+        let mut samples = Vec::with_capacity(viewports.len());
         renderer
             .paint(
                 super::WgpuEditorImguiFrame(super::PreparedFrame::Docked(prepared)),
-                &mut super::WgpuEditorWindowFrame {
+                &mut super::WgpuWindowFrame {
                     device: &gpu.device,
                     queue: &gpu.queue,
                     encoder: &mut encoder,
@@ -754,7 +754,7 @@ fn owned_renderer_paint_distinguishes_same_window_occurrences_and_retains_regist
             &mut presentation_generation,
             &viewports,
             &samples,
-            super::WgpuEditorWindowPresentedReceipt::new(WindowId::PRIMARY, 1, 1, 1, 1),
+            super::WgpuWindowPresentedReceipt::new(WindowId::PRIMARY, 1, 1, 1, 1),
         )
         .unwrap();
         assert_eq!(
@@ -937,7 +937,7 @@ mod bare_primary {
         let instance_bytes = std::mem::size_of::<crate::quad::WgpuQuadInstance>() as u64;
         let mut targets = Vec::new();
         execution
-            .begin_editor_frame(window, 1)
+            .begin_window_frame(window, 1)
             .map_err(|error| error.to_string())?;
         execution.backend.set_instance_budget_limit(instance_bytes);
         for _ in 1..=2 {
@@ -1044,7 +1044,7 @@ mod bare_primary {
             "GPU completion cannot refund this frame's submitted demand"
         );
         execution
-            .begin_editor_frame(window, 2)
+            .begin_window_frame(window, 2)
             .map_err(|error| error.to_string())?;
         execution
             .backend
@@ -1338,7 +1338,7 @@ mod native {
             .unwrap();
             let view_id = RenderViewId::try_acquire().unwrap();
             let image_packet = image_packet(generation, view_id, target, 1);
-            execution.begin_editor_frame(packet, 1).unwrap();
+            execution.begin_window_frame(packet, 1).unwrap();
             let producer = execution.create_producer().unwrap();
             let reservation = execution
                 .reserve_viewport_target(
@@ -1394,7 +1394,7 @@ mod native {
             self.frame_index += 1;
             let packet = window_packet(&self.window);
             self.execution
-                .begin_editor_frame(packet, self.frame_index)
+                .begin_window_frame(packet, self.frame_index)
                 .unwrap();
             self.platform
                 .prepare_frame(&mut self.context, &self.window)
@@ -1528,7 +1528,7 @@ mod native {
                             &mut rejected,
                         );
                         assert!(
-                            matches!(&result, Err(WgpuRenderHostError::ToolkitPaint { message })
+                            matches!(&result, Err(WgpuRenderHostError::WindowPaint { message })
                             if message.contains("another GPU device or queue"))
                         );
                         drop(result);
@@ -1666,14 +1666,14 @@ mod native {
                     std::slice::from_ref(&self.mirror),
                     |frame| {
                         frame.encode(|_, queue, _, _| queue.write_buffer(&buffer, 0, &[7; 16]));
-                        Err(WgpuRenderHostError::toolkit_paint(
+                        Err(WgpuRenderHostError::window_paint(
                             "injected paint rejection after upload",
                         ))
                     },
                     || panic!("a rejected paint cannot reach native present"),
                 )
                 .unwrap_err();
-            assert!(matches!(error, WgpuRenderHostError::ToolkitPaint { .. }));
+            assert!(matches!(error, WgpuRenderHostError::WindowPaint { .. }));
             assert_eq!(self.execution.last_presentation_generation, presentation);
             assert_eq!(self.execution.frame_transaction_stats().presents(), before);
             let prefix = self
@@ -1742,7 +1742,7 @@ mod native {
     fn assert_toolkit_rejection(result: Result<(), WgpuRenderHostError>, expected: &str) {
         assert!(matches!(
             result,
-            Err(WgpuRenderHostError::ToolkitPaint { message }) if message.contains(expected)
+            Err(WgpuRenderHostError::WindowPaint { message }) if message.contains(expected)
         ));
     }
 

@@ -2,7 +2,7 @@
 
 **Status**: Accepted
 **Date**: 2026-08-16
-**Last Revised**: 2026-10-31
+**Last Revised**: 2026-11-01 (native compositor facts and immutable interaction mapping)
 **Owner**: Editor Host, `nara_render`, and `nara_render_wgpu`
 **Refines**: [ADR 0017](0017-render-graph-policy.md),
 [ADR 0040](0040-render-resource-lifetime-and-submitter-ownership.md),
@@ -132,12 +132,22 @@ native handle substitutes for the lease. Ordinary sampling is Host-validated and
 target. Exact-WGPU adapters remain trusted native Rust and obey the immutable-import protocol;
 native handle cloning alone is not a type-system proof against undeclared writes.
 
-Each Host-issued, non-reused display occurrence selects one exact output and binds its destination,
-placement, clip, DPI/content mapping and interactive or passive role. Each toolkit external binding
+Each display admission combines a Host-issued, non-reused occurrence selecting one exact output
+with the compositor's immutable destination, placement, clip, DPI/content mapping and interactive
+or passive role. Each toolkit external binding
 is associated with one occurrence. Two same-window mirrors of the same output must be distinguishable
 in actual draw dependencies; image equality and window filtering are insufficient. Changing the
 selected output or mapping requires newly admitted occurrence facts rather than silently retargeting
 an existing binding.
+
+The native Host's `WgpuImageDisplay` owns only the exact output and occurrence. Its
+`WgpuImageCompositeReceipt` proves the trusted compositor registered that occurrence's actual,
+non-fully-clipped sample in the returned window presentation. The compositor/interaction owner
+retains an immutable destination, placement, clip, DPI/content mapping, role and external-binding
+snapshot with that occurrence, and joins that original snapshot with the Host receipt. It cannot
+substitute the current mapping or use one occurrence for two independently positioned mirrors.
+Changing destination/mapping/role admits a new occurrence. The Host neither parses command buffers
+nor proves shader inverses; the same split applies to Nara-drawn composition without a toolkit.
 
 The serialized display transaction is:
 
@@ -145,8 +155,8 @@ The serialized display transaction is:
 2. admit its display occurrence and register the corresponding toolkit binding;
 3. verify actual, non-clipped drawing samples that occurrence's exact binding and output;
 4. submit and present the actual destination window;
-5. issue a composite receipt joining output, occurrence, mapping, toolkit binding, destination
-   presentation and Host/epoch only after these operations succeed.
+5. issue the Host sample/present receipt, then join it to the original immutable compositor mapping
+   and binding snapshot before granting interaction authority.
 
 Image publication does not count as surface presentation or physical GPU completion. A missing
 lease, unsampled occurrence, revoked epoch or mismatched destination cannot establish a composite.

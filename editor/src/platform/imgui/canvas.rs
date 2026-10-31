@@ -1,8 +1,8 @@
 use nara::{
     project_host::{EditorUiAuthoringFrame, EditorUiPreviewCandidate},
     render::{RenderFrameTarget, RenderWindowPacket},
-    render_wgpu::__private::{
-        WgpuDisplayOccurrence, WgpuEditorCompositeReceipt, WgpuImageDisplay, WgpuRenderHost,
+    render_wgpu::{
+        WgpuDisplayOccurrence, WgpuImageCompositeReceipt, WgpuImageDisplay, WgpuRenderHost,
     },
     scene::SceneAuthoringRevision,
     tooling::{EditorAction, EditorDocumentId, EditorGestureStamp, EditorNavigationAction},
@@ -36,7 +36,7 @@ struct PreparedCanvas {
 
 struct PresentedCanvas {
     prepared: PreparedCanvas,
-    receipt: WgpuEditorCompositeReceipt,
+    receipt: WgpuImageCompositeReceipt,
     confirmed: bool,
 }
 
@@ -99,7 +99,7 @@ impl ImguiUiCanvasPresenter {
     pub(super) fn promote(
         &mut self,
         target: &ImguiTarget,
-        receipts: impl IntoIterator<Item = WgpuEditorCompositeReceipt>,
+        receipts: impl IntoIterator<Item = WgpuImageCompositeReceipt>,
     ) -> Result<bool, EditorRunError> {
         let Some(pending) = self.pending.as_ref() else {
             let Some(presented) = self.presented.as_mut() else {
@@ -212,6 +212,6 @@ fn target_matches(target: &ImguiTarget, display: &WgpuImageDisplay) -> bool {
     target.matches_display(display)
 }
 
-fn matches_receipt(display: &WgpuImageDisplay, receipt: WgpuEditorCompositeReceipt) -> bool {
+fn matches_receipt(display: &WgpuImageDisplay, receipt: WgpuImageCompositeReceipt) -> bool {
     display.receipt() == receipt.image() && display.occurrence() == receipt.occurrence()
 }

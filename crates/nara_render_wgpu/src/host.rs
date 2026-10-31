@@ -35,15 +35,93 @@ use crate::{
     output::{OutputBudget, OutputReservation},
     output::{WgpuDisplayOccurrence, WgpuImageDisplay, WgpuImageOutput, WgpuImageStorage},
     policy::{BuiltPolicy, PolicyInstances},
-    presented::{
-        WgpuEditorCompositeReceipt, WgpuEditorWindowPresentedReceipt, WgpuSubmittedImageReceipt,
-    },
+    presented::{WgpuImageCompositeReceipt, WgpuSubmittedImageReceipt, WgpuWindowPresentedReceipt},
     retirement::WgpuGpuRetirement,
     submission::{WgpuSubmissionPrefix, WgpuSubmissionReservation},
 };
 
 const EDITOR_IMAGE_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Rgba8Unorm;
 const MAX_PENDING_NATIVE_SUBMISSIONS: usize = 256;
+const MAX_NATIVE_USE_ITEMS: usize = 256;
+
+fn native_use_count(count: usize, kind: &'static str) -> Result<(), WgpuRenderHostError> {
+    if count > MAX_NATIVE_USE_ITEMS {
+        return Err(WgpuRenderHostError::NativeUseLimit {
+            kind,
+            maximum: MAX_NATIVE_USE_ITEMS,
+        });
+    }
+    Ok(())
+}
+
+fn native_callback<T>(
+    stage: &'static str,
+    operation: impl FnOnce() -> Result<T, WgpuRenderHostError>,
+) -> Result<T, WgpuRenderHostError> {
+    std::panic::catch_unwind(std::panic::AssertUnwindSafe(operation)).unwrap_or_else(|payload| {
+        std::mem::forget(payload);
+        Err(WgpuRenderHostError::NativeCallbackPanicked { stage })
+    })
+}
+
+fn reserve_native_table<T>(count: usize) -> Result<Vec<T>, WgpuRenderHostError> {
+    let mut values = Vec::new();
+    values
+        .try_reserve_exact(count)
+        .map_err(|_| WgpuRenderHostError::OutputCapacity)?;
+    Ok(values)
+}
+
+struct WindowPaintStorage {
+    retained: Vec<WgpuImageDisplay>,
+    samples: Vec<ImageSample>,
+    commands: Vec<wgpu::CommandBuffer>,
+    composites: Vec<WgpuImageCompositeReceipt>,
+    reservation: OutputReservation,
+}
+
+impl WindowPaintStorage {
+    fn admit(
+        budget: &Arc<OutputBudget>,
+        displays: &[WgpuImageDisplay],
+    ) -> Result<Self, WgpuRenderHostError> {
+        native_use_count(displays.len(), "window image displays")?;
+        let metadata = Self::metadata_bytes(displays.len())?;
+        let reservation = budget
+            .reserve(metadata)
+            .ok_or(WgpuRenderHostError::OutputCapacity)?;
+        let mut retained = reserve_native_table(displays.len())?;
+        let samples = reserve_native_table(displays.len())?;
+        let composites = reserve_native_table(displays.len())?;
+        let commands = reserve_native_table(MAX_NATIVE_USE_ITEMS)?;
+        retained.extend_from_slice(displays);
+        Ok(Self {
+            retained,
+            samples,
+            commands,
+            composites,
+            reservation,
+        })
+    }
+
+    fn metadata_bytes(displays: usize) -> Result<u64, WgpuRenderHostError> {
+        native_use_count(displays, "window image displays")?;
+        let per_display = std::mem::size_of::<WgpuImageDisplay>()
+            + std::mem::size_of::<ImageSample>()
+            + std::mem::size_of::<WgpuImageCompositeReceipt>();
+        let bytes = WgpuSubmissionReservation::modeled_metadata_bytes::<(
+            Vec<WgpuImageDisplay>,
+            OutputReservation,
+        )>()
+        .checked_add(std::mem::size_of::<Self>())
+        .and_then(|bytes| {
+            bytes.checked_add(MAX_NATIVE_USE_ITEMS * std::mem::size_of::<wgpu::CommandBuffer>())
+        })
+        .and_then(|bytes| bytes.checked_add(displays * per_display))
+        .ok_or(WgpuRenderHostError::OutputCapacity)?;
+        u64::try_from(bytes).map_err(|_| WgpuRenderHostError::OutputCapacity)
+    }
+}
 
 struct ProgramSurfaceTarget<'a> {
     acquired: &'a WgpuEditorAcquiredSurface,
@@ -222,8 +300,12 @@ pub enum WgpuRenderHostError {
     StaleViewportReservation,
     #[error("an Editor Host render transaction must begin before image submission or presentation")]
     FrameTransactionUnavailable,
-    #[error("the Editor toolkit paint callback failed: {message}")]
-    ToolkitPaint { message: String },
+    #[error("the native window paint callback failed: {message}")]
+    WindowPaint { message: String },
+    #[error("the native {stage} callback panicked")]
+    NativeCallbackPanicked { stage: &'static str },
+    #[error("native {kind} exceeds the per-attempt limit of {maximum}")]
+    NativeUseLimit { kind: &'static str, maximum: usize },
     #[error("retained image output storage exceeds the Host byte limit")]
     OutputCapacity,
     #[error("the render producer is closed or belongs to another Host")]
@@ -257,8 +339,8 @@ impl WgpuRenderHostError {
         }
     }
     #[must_use]
-    pub fn toolkit_paint(message: impl Into<String>) -> Self {
-        Self::ToolkitPaint {
+    pub fn window_paint(message: impl Into<String>) -> Self {
+        Self::WindowPaint {
             message: message.into(),
         }
     }
@@ -528,7 +610,11 @@ impl WgpuUiSubmission {
             | WgpuRenderHostError::SourceHandoffGenerationExhausted
             | WgpuRenderHostError::PresentationGenerationExhausted
             | WgpuRenderHostError::FrameTransactionUnavailable
-            | WgpuRenderHostError::ToolkitPaint { .. } => UiPresentationBackendFaultDomain::Attempt,
+            | WgpuRenderHostError::WindowPaint { .. }
+            | WgpuRenderHostError::NativeCallbackPanicked { .. }
+            | WgpuRenderHostError::NativeUseLimit { .. } => {
+                UiPresentationBackendFaultDomain::Attempt
+            }
             WgpuRenderHostError::NativeExecution { .. } => UiPresentationBackendFaultDomain::Device,
         };
         self.backend_fault(None, domain, error.to_string())
@@ -565,7 +651,7 @@ impl WgpuUiImageSubmission {
 
     pub fn presented(
         self,
-        composite: WgpuEditorCompositeReceipt,
+        composite: WgpuImageCompositeReceipt,
     ) -> Result<Vec<UiCompletedBackendOutcome>, Self> {
         if composite.image() != self.image()
             || composite.occurrence() != self.display.occurrence()
@@ -635,9 +721,11 @@ impl WgpuUiSubmitFailure {
     }
 }
 
-/// One scoped view of the device namespace used to initialize the private Editor toolkit renderer.
-#[doc(hidden)]
-pub struct WgpuEditorDeviceScope<'frame> {
+/// Borrowed original native device facts for a trusted window frontend's initialization.
+///
+/// The frontend shares this Host's queue and retirement. It cannot select another device or
+/// independently submit work; ordinary render Features use their narrower preparation scopes.
+pub struct WgpuWindowDeviceScope<'frame> {
     instance: &'frame wgpu::Instance,
     adapter: &'frame wgpu::Adapter,
     device: &'frame wgpu::Device,
@@ -648,7 +736,7 @@ pub struct WgpuEditorDeviceScope<'frame> {
     device_epoch: u64,
 }
 
-impl<'frame> WgpuEditorDeviceScope<'frame> {
+impl<'frame> WgpuWindowDeviceScope<'frame> {
     #[must_use]
     pub const fn instance(&self) -> &'frame wgpu::Instance {
         self.instance
@@ -708,8 +796,8 @@ fn join_composite_receipt(
     last_presentation_generation: &mut u64,
     submitted_viewport: Option<WgpuSubmittedImageReceipt>,
     sampled_viewport: Option<ImageSample>,
-    window: WgpuEditorWindowPresentedReceipt,
-) -> Result<Option<WgpuEditorCompositeReceipt>, WgpuRenderHostError> {
+    window: WgpuWindowPresentedReceipt,
+) -> Result<Option<WgpuImageCompositeReceipt>, WgpuRenderHostError> {
     let sampled_viewport = sampled_viewport.filter(|sample| {
         submitted_viewport == Some(sample.image)
             && sample.image.backend_instance_id() == window.backend_instance_id()
@@ -722,7 +810,7 @@ fn join_composite_receipt(
         .checked_add(1)
         .ok_or(WgpuRenderHostError::PresentationGenerationExhausted)?;
     *last_presentation_generation = generation;
-    Ok(Some(WgpuEditorCompositeReceipt::new(
+    Ok(Some(WgpuImageCompositeReceipt::new(
         sample.image,
         sample.occurrence,
         window,
@@ -730,17 +818,41 @@ fn join_composite_receipt(
     )))
 }
 
+#[cfg(any(test, feature = "editor-imgui"))]
 fn join_composite_receipts(
     last_presentation_generation: &mut u64,
     submitted: &[WgpuImageDisplay],
     sampled: &[ImageSample],
-    window: WgpuEditorWindowPresentedReceipt,
-) -> Result<Vec<WgpuEditorCompositeReceipt>, WgpuRenderHostError> {
-    let mut composites = Vec::with_capacity(sampled.len());
+    window: WgpuWindowPresentedReceipt,
+) -> Result<Vec<WgpuImageCompositeReceipt>, WgpuRenderHostError> {
+    native_use_count(submitted.len(), "window image displays")?;
+    native_use_count(sampled.len(), "window image samples")?;
+    let mut composites = reserve_native_table(submitted.len())?;
+    join_composite_receipts_into(
+        last_presentation_generation,
+        submitted,
+        sampled,
+        window,
+        &mut composites,
+    )?;
+    Ok(composites)
+}
+
+fn join_composite_receipts_into(
+    last_presentation_generation: &mut u64,
+    submitted: &[WgpuImageDisplay],
+    sampled: &[ImageSample],
+    window: WgpuWindowPresentedReceipt,
+    composites: &mut Vec<WgpuImageCompositeReceipt>,
+) -> Result<(), WgpuRenderHostError> {
+    if !composites.is_empty() || composites.capacity() < submitted.len() {
+        return Err(WgpuRenderHostError::OutputCapacity);
+    }
+    let mut generation = *last_presentation_generation;
     for sample in sampled {
         if composites
             .iter()
-            .any(|composite: &WgpuEditorCompositeReceipt| {
+            .any(|composite: &WgpuImageCompositeReceipt| {
                 composite.occurrence() == sample.occurrence
             })
         {
@@ -752,16 +864,14 @@ fn join_composite_receipts(
                 display.receipt() == sample.image && display.occurrence() == sample.occurrence
             })
             .map(WgpuImageDisplay::receipt);
-        if let Some(composite) = join_composite_receipt(
-            last_presentation_generation,
-            candidate,
-            Some(*sample),
-            window,
-        )? {
+        if let Some(composite) =
+            join_composite_receipt(&mut generation, candidate, Some(*sample), window)?
+        {
             composites.push(composite);
         }
     }
-    Ok(composites)
+    *last_presentation_generation = generation;
+    Ok(())
 }
 
 fn next_source_handoff_generation(
@@ -806,9 +916,8 @@ fn next_viewport_reservation_stamp(
     })
 }
 
-/// Borrowed command-encoding scope for one Editor-window paint.
-#[doc(hidden)]
-pub struct WgpuEditorWindowFrame<'frame> {
+/// Borrowed native encoding for one window paint under its original Host transaction.
+pub struct WgpuWindowFrame<'frame> {
     device: &'frame wgpu::Device,
     queue: &'frame wgpu::Queue,
     encoder: &'frame mut wgpu::CommandEncoder,
@@ -820,7 +929,7 @@ pub struct WgpuEditorWindowFrame<'frame> {
     sampled_viewports: &'frame mut Vec<ImageSample>,
 }
 
-impl<'frame> WgpuEditorWindowFrame<'frame> {
+impl<'frame> WgpuWindowFrame<'frame> {
     #[must_use]
     pub const fn surface_format(&self) -> wgpu::TextureFormat {
         self.surface_format
@@ -846,17 +955,37 @@ impl<'frame> WgpuEditorWindowFrame<'frame> {
     pub fn prepend_command_buffers(
         &mut self,
         command_buffers: impl IntoIterator<Item = wgpu::CommandBuffer>,
-    ) {
-        self.leading_command_buffers.extend(command_buffers);
+    ) -> Result<(), WgpuRenderHostError> {
+        for commands in command_buffers {
+            native_use_count(
+                self.leading_command_buffers.len() + 1,
+                "window command buffers",
+            )?;
+            self.leading_command_buffers.push(commands);
+        }
+        Ok(())
     }
 
-    pub fn record_viewport_sample(
+    /// Records an actual, non-fully-clipped sample encoded by this trusted native compositor.
+    ///
+    /// Retain the display with its original destination, placement, clip, DPI and interaction
+    /// role. Changing those facts requires a new display admission. This declaration joins
+    /// sampling to successful window presentation; it does not prove shader or input mapping.
+    pub fn record_image_sample(
         &mut self,
         display: &WgpuImageDisplay,
     ) -> Result<(), WgpuRenderHostError> {
         if !self.viewports.contains(display) {
             return Err(WgpuRenderHostError::StaleImageSubmission);
         }
+        if self
+            .sampled_viewports
+            .iter()
+            .any(|sample| sample.occurrence == display.occurrence())
+        {
+            return Ok(());
+        }
+        native_use_count(self.sampled_viewports.len() + 1, "window image samples")?;
         self.sampled_viewports.push(ImageSample {
             image: display.receipt(),
             occurrence: display.occurrence(),
@@ -865,22 +994,21 @@ impl<'frame> WgpuEditorWindowFrame<'frame> {
     }
 }
 
-/// Terminal facts from one attempted Editor-window paint.
-#[doc(hidden)]
+/// Terminal facts from one attempted native-window paint.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
-pub struct WgpuEditorFrameOutcome {
-    window: Option<WgpuEditorWindowPresentedReceipt>,
-    composites: Vec<WgpuEditorCompositeReceipt>,
+pub struct WgpuWindowFrameOutcome {
+    window: Option<WgpuWindowPresentedReceipt>,
+    composites: Vec<WgpuImageCompositeReceipt>,
 }
 
-impl WgpuEditorFrameOutcome {
+impl WgpuWindowFrameOutcome {
     #[must_use]
-    pub const fn window(&self) -> Option<WgpuEditorWindowPresentedReceipt> {
+    pub const fn window(&self) -> Option<WgpuWindowPresentedReceipt> {
         self.window
     }
 
     #[must_use]
-    pub fn composites(&self) -> &[WgpuEditorCompositeReceipt] {
+    pub fn composites(&self) -> &[WgpuImageCompositeReceipt] {
         &self.composites
     }
 }
@@ -1119,6 +1247,8 @@ impl WgpuRenderHost {
     /// Charges include inactive output reservations, retained outputs, graph allocations, and
     /// prepared Image, glyph, fallback, instance and material allocations. Each allocation is
     /// charged once until its last owner or submitted-use responsibility releases it.
+    /// Window-paint and explicit image-use attempts also charge their bounded engine-owned
+    /// custody and receipt tables before cloning inputs or invoking native callbacks.
     /// Lowering the limit preserves existing allocations and refuses growth until they retire.
     /// Native pipeline/driver overhead and physical driver residency are outside this budget.
     #[must_use]
@@ -1279,7 +1409,7 @@ impl WgpuRenderHost {
         self.abandoned_submission_count
     }
 
-    /// Counts isolated destructor panics after publication or original submission completion.
+    /// Counts isolated destructor panics during failed-result, publication or submission cleanup.
     /// Includes settled prefixes still awaiting Host maintenance, without counting them twice.
     /// These faults do not revoke successful outputs or authorize replay.
     #[must_use]
@@ -2103,12 +2233,37 @@ impl WgpuRenderHost {
             &[&wgpu::TextureView],
         ) -> Result<R, WgpuRenderHostError>,
     ) -> Result<(R, WgpuSubmissionPrefix), WgpuRenderHostError> {
+        if self.backend.runtime_close_started() {
+            return Err(WgpuRenderError::BackendUnavailable.into());
+        }
+        native_use_count(outputs.len(), "image-use outputs")?;
+        self.maintain_producers()?;
+        let metadata = WgpuSubmissionReservation::modeled_metadata_bytes::<(
+            Vec<WgpuImageOutput>,
+            OutputReservation,
+        )>()
+        .checked_add(
+            outputs.len()
+                * (std::mem::size_of::<WgpuImageOutput>()
+                    + std::mem::size_of::<&wgpu::TextureView>()),
+        )
+        .ok_or(WgpuRenderHostError::OutputCapacity)?;
+        let metadata = self
+            .output_budget
+            .reserve(u64::try_from(metadata).map_err(|_| WgpuRenderHostError::OutputCapacity)?)
+            .ok_or(WgpuRenderHostError::OutputCapacity)?;
+        let mut retained = reserve_native_table(outputs.len())?;
+        let mut views = reserve_native_table(outputs.len())?;
+        retained.extend_from_slice(outputs);
         let namespace = self.prepare_namespace(None)?;
         for output in outputs {
             self.validate_viewport_submission(&namespace, output)?;
         }
-        let retention =
-            WgpuSubmissionReservation::new(&namespace.device, &namespace.queue, outputs.to_vec());
+        let retention = WgpuSubmissionReservation::new(
+            &namespace.device,
+            &namespace.queue,
+            (retained, metadata),
+        );
         let validation = namespace
             .device
             .push_error_scope(wgpu::ErrorFilter::Validation);
@@ -2124,24 +2279,47 @@ impl WgpuRenderHost {
                 .create_command_encoder(&wgpu::CommandEncoderDescriptor {
                     label: Some("nara_image_use"),
                 });
-        let views = outputs
-            .iter()
-            .map(|output| &output.0.view)
-            .collect::<Vec<_>>();
-        let result = operation(&namespace.device, &namespace.queue, &mut encoder, &views);
-        let prefix = if result.is_ok() {
-            retention.submitted(namespace.queue.submit([encoder.finish()]))
-        } else {
-            retention.submitted(namespace.queue.submit([]))
+        views.extend(outputs.iter().map(|output| &output.0.view));
+        let result = native_callback("image use", || {
+            operation(&namespace.device, &namespace.queue, &mut encoder, &views)
+        });
+        let submitted = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            let commands = result.as_ref().ok().map(|_| encoder.finish());
+            namespace.queue.submit(commands)
+        }));
+        let (prefix, submit_error) = match submitted {
+            Ok(index) => (retention.submitted(index), None),
+            Err(payload) => {
+                std::mem::forget(payload);
+                (
+                    retention.bind_current_prefix(),
+                    Some(WgpuRenderHostError::NativeExecution {
+                        message: "native image-use command finalization or submission panicked"
+                            .to_owned(),
+                    }),
+                )
+            }
         };
         self.native_prefix = Some(prefix.clone());
         self.retiring_prefixes.push(prefix.clone());
         let allocation_error = pollster::block_on(allocation.pop());
         let internal_error = pollster::block_on(internal.pop());
         let validation_error = pollster::block_on(validation.pop());
-        self.backend.check_device_health()?;
-        if let Some(error) = allocation_error.or(internal_error).or(validation_error) {
-            return Err(Self::native_error(error));
+        let terminal_error = self
+            .backend
+            .check_device_health()
+            .err()
+            .map(WgpuRenderHostError::from)
+            .or_else(|| {
+                allocation_error
+                    .or(internal_error)
+                    .or(validation_error)
+                    .map(Self::native_error)
+            })
+            .or(submit_error);
+        if let Some(error) = terminal_error {
+            self.release_publication_value(result);
+            return Err(error);
         }
         Ok((result?, prefix))
     }
@@ -2189,7 +2367,7 @@ impl WgpuRenderHost {
     }
 
     /// Begins the Host transaction once before submitting any of its independent view packets.
-    pub fn begin_editor_frame(
+    pub fn begin_window_frame(
         &mut self,
         window: RenderWindowPacket,
         host_frame_index: u64,
@@ -2205,12 +2383,12 @@ impl WgpuRenderHost {
     pub fn with_device<R>(
         &mut self,
         window: RenderWindowPacket,
-        operation: impl for<'frame> FnOnce(WgpuEditorDeviceScope<'frame>) -> R,
+        operation: impl for<'frame> FnOnce(WgpuWindowDeviceScope<'frame>) -> R,
     ) -> Result<R, WgpuRenderHostError> {
         let namespace = self.prepare_namespace(Some(window))?;
         let (surface_format, surface_extent) =
             namespace.surface.ok_or(WgpuRenderError::BackendNotReady)?;
-        Ok(operation(WgpuEditorDeviceScope {
+        Ok(operation(WgpuWindowDeviceScope {
             instance: &namespace.instance,
             adapter: &namespace.adapter,
             device: &namespace.device,
@@ -2690,24 +2868,34 @@ impl WgpuRenderHost {
     pub fn present_window(
         &mut self,
         window: RenderWindowPacket,
-        editor_frame_index: u64,
+        display_frame_index: u64,
         viewport_submissions: &[WgpuImageDisplay],
-        paint: impl for<'frame> FnOnce(
-            &mut WgpuEditorWindowFrame<'frame>,
-        ) -> Result<(), WgpuRenderHostError>,
+        paint: impl for<'frame> FnOnce(&mut WgpuWindowFrame<'frame>) -> Result<(), WgpuRenderHostError>,
         pre_present: impl FnOnce(),
-    ) -> Result<WgpuEditorFrameOutcome, WgpuRenderHostError> {
+    ) -> Result<WgpuWindowFrameOutcome, WgpuRenderHostError> {
+        if self.backend.runtime_close_started() {
+            return Err(WgpuRenderError::BackendUnavailable.into());
+        }
         self.host_frame_index
             .ok_or(WgpuRenderHostError::FrameTransactionUnavailable)?;
+        native_use_count(viewport_submissions.len(), "window image displays")?;
+        self.maintain_producers()?;
+        let WindowPaintStorage {
+            retained,
+            mut samples,
+            mut commands,
+            mut composites,
+            reservation,
+        } = WindowPaintStorage::admit(&self.output_budget, viewport_submissions)?;
         let namespace = self.prepare_namespace(Some(window))?;
         for display in viewport_submissions {
             self.validate_viewport_submission(&namespace, display.output())?;
         }
         if window.resolution.physical_width == 0 || window.resolution.physical_height == 0 {
-            return Ok(WgpuEditorFrameOutcome::default());
+            return Ok(WgpuWindowFrameOutcome::default());
         }
         let Some(acquired) = self.backend.acquire_editor_surface(window.id)? else {
-            return Ok(WgpuEditorFrameOutcome::default());
+            return Ok(WgpuWindowFrameOutcome::default());
         };
         let WgpuEditorAcquiredSurface {
             texture,
@@ -2734,37 +2922,63 @@ impl WgpuRenderHost {
                 .create_command_encoder(&wgpu::CommandEncoderDescriptor {
                     label: Some("nara_editor_window_encoder"),
                 });
-        let mut leading_command_buffers = Vec::new();
-        let mut sampled_viewports = Vec::new();
         let retention = WgpuSubmissionReservation::new(
             &namespace.device,
             &namespace.queue,
-            viewport_submissions.to_vec(),
+            (retained, reservation),
         );
-        let paint_result = paint(&mut WgpuEditorWindowFrame {
-            device: &namespace.device,
-            queue: &namespace.queue,
-            encoder: &mut encoder,
-            target_view: &target_view,
-            surface_format: format,
-            surface_extent: extent,
-            viewports: viewport_submissions,
-            leading_command_buffers: &mut leading_command_buffers,
-            sampled_viewports: &mut sampled_viewports,
+        let paint_result = native_callback("window paint", || {
+            paint(&mut WgpuWindowFrame {
+                device: &namespace.device,
+                queue: &namespace.queue,
+                encoder: &mut encoder,
+                target_view: &target_view,
+                surface_format: format,
+                surface_extent: extent,
+                viewports: viewport_submissions,
+                leading_command_buffers: &mut commands,
+                sampled_viewports: &mut samples,
+            })
         });
+        let window_receipt = WgpuWindowPresentedReceipt::new(
+            window.id,
+            surface_generation,
+            namespace.backend_instance_id,
+            namespace.device_epoch,
+            display_frame_index,
+        );
+        let mut presentation_generation = self.last_presentation_generation;
         let paint_result = paint_result.and_then(|()| {
-            self.last_presentation_generation
-                .checked_add(sampled_viewports.len() as u64)
-                .ok_or(WgpuRenderHostError::PresentationGenerationExhausted)
-                .map(|_| ())
+            join_composite_receipts_into(
+                &mut presentation_generation,
+                viewport_submissions,
+                &samples,
+                window_receipt,
+                &mut composites,
+            )
         });
-        let prefix = if paint_result.is_ok() {
-            let native_commands = leading_command_buffers
-                .into_iter()
-                .chain([encoder.finish()]);
-            retention.submitted(namespace.queue.submit(native_commands))
-        } else {
-            retention.submitted(namespace.queue.submit([]))
+        let submitted = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            let native_commands = if paint_result.is_ok() {
+                Some(commands.into_iter().chain([encoder.finish()]))
+            } else {
+                None
+            };
+            namespace
+                .queue
+                .submit(native_commands.into_iter().flatten())
+        }));
+        let (prefix, submit_error) = match submitted {
+            Ok(index) => (retention.submitted(index), None),
+            Err(payload) => {
+                std::mem::forget(payload);
+                (
+                    retention.bind_current_prefix(),
+                    Some(WgpuRenderHostError::NativeExecution {
+                        message: "native window command finalization or submission panicked"
+                            .to_owned(),
+                    }),
+                )
+            }
         };
         self.retiring_prefixes.push(prefix.clone());
         self.native_prefix = Some(prefix);
@@ -2775,8 +2989,14 @@ impl WgpuRenderHost {
         if let Some(error) = allocation_error.or(internal_error).or(validation_error) {
             return Err(Self::native_error(error));
         }
+        if let Some(error) = submit_error {
+            return Err(error);
+        }
         paint_result?;
-        pre_present();
+        native_callback("pre-present", || {
+            pre_present();
+            Ok(())
+        })?;
         let presentation_validation = namespace
             .device
             .push_error_scope(wgpu::ErrorFilter::Validation);
@@ -2787,20 +3007,8 @@ impl WgpuRenderHost {
             return Err(Self::native_error(error));
         }
         self.backend.record_editor_window_presentation();
-        let window_receipt = WgpuEditorWindowPresentedReceipt::new(
-            window.id,
-            surface_generation,
-            namespace.backend_instance_id,
-            namespace.device_epoch,
-            editor_frame_index,
-        );
-        let composites = join_composite_receipts(
-            &mut self.last_presentation_generation,
-            viewport_submissions,
-            &sampled_viewports,
-            window_receipt,
-        )?;
-        Ok(WgpuEditorFrameOutcome {
+        self.last_presentation_generation = presentation_generation;
+        Ok(WgpuWindowFrameOutcome {
             window: Some(window_receipt),
             composites,
         })
@@ -3040,3 +3248,5 @@ mod program_tests;
 mod publication_tests;
 #[cfg(test)]
 mod tests;
+#[cfg(test)]
+mod window_tests;

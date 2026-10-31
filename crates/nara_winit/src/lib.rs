@@ -1,4 +1,20 @@
 //! Winit runner and native window adapter for nara.
+//!
+//! A process owner can create one [`WinitEventLoop`] and move it through sequential native
+//! sessions. Only [`WinitSession::into_retired`] releases it, after Runtime, presentation,
+//! providers and native windows have all retired. An incomplete session retains the pump.
+//!
+//! Logical retirement leaves the physical loop running. In pinned Winit 0.30.13, Windows resets
+//! its runner after `PumpStatus::Exit`, but X11/Wayland pumping does not clear the exit flag.
+//! Normal handoff therefore does not request native exit or depend on platform-specific reset.
+//! A new session first drains pending events without a Runtime or windows, then creates its own
+//! window inside a real native callback on the already resumed loop. Actual suspend/resume
+//! callbacks remain synchronous; no lifecycle event or Runtime generation is fabricated.
+//!
+//! Window callbacks require the current session's native-window mapping. Draining before new
+//! native creation also prevents buffered events from acquiring meaning through reused native
+//! window identifiers. Accessibility wake tickets are allocated by this physical pump and never
+//! reused: even a late old proxy wake cannot drain another session's mailbox or request a frame.
 
 #[cfg(feature = "accessibility")]
 mod accessibility;
@@ -124,14 +140,174 @@ enum WinitShutdownState {
 #[derive(Debug)]
 enum WinitUserEvent {
     #[cfg(feature = "platform-accessibility")]
-    AccessibilityWake(WindowId),
+    AccessibilityWake(SessionWakeId),
     #[cfg(all(test, target_os = "windows"))]
     NativeTest(native_tests::NativeTestEvent),
 }
 
+#[cfg(any(feature = "platform-accessibility", all(test, target_os = "windows")))]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct SessionWakeId(u64);
+
 impl WinitShutdownState {
     const fn is_started(self) -> bool {
         !matches!(self, Self::Running)
+    }
+}
+
+/// One move-only, thread-bound physical Winit event pump.
+///
+/// Create it on the main thread and keep it on that thread. Like Winit's native loop, this owner
+/// is neither `Send` nor `Sync`. Creating a second loop in the same process is unsupported by
+/// Winit, including after the first has been dropped. Move the retired owner into
+/// [`WinitRunner::run_on`] to run another logical App instead.
+///
+/// No native loop, event proxy or raw handle is exposed through this API.
+#[must_use = "retain the physical event loop to run subsequent native sessions"]
+pub struct WinitEventLoop {
+    event_loop: EventLoop<WinitUserEvent>,
+    resumed: bool,
+    needs_drain: bool,
+    #[cfg(any(feature = "platform-accessibility", all(test, target_os = "windows")))]
+    next_wake_id: u64,
+}
+
+impl WinitEventLoop {
+    /// Creates the process's physical event loop on its native main thread.
+    ///
+    /// # Panics
+    ///
+    /// Winit requires the main thread and may panic if called from another thread.
+    pub fn new() -> Result<Self, AppRunError> {
+        EventLoop::<WinitUserEvent>::with_user_event()
+            .build()
+            .map(Self::from_native)
+            .map_err(|error| {
+                AppRunError::runner(format!("failed to create winit event loop: {error}"))
+            })
+    }
+
+    fn from_native(event_loop: EventLoop<WinitUserEvent>) -> Self {
+        Self {
+            event_loop,
+            resumed: false,
+            needs_drain: false,
+            #[cfg(any(feature = "platform-accessibility", all(test, target_os = "windows")))]
+            next_wake_id: 1,
+        }
+    }
+
+    fn bind(&mut self, app: &mut WinitApp) -> Result<(), AppRunError> {
+        #[cfg(any(feature = "platform-accessibility", all(test, target_os = "windows")))]
+        {
+            let next = self
+                .next_wake_id
+                .checked_add(1)
+                .ok_or_else(|| AppRunError::runner("winit session wake identity exhausted"))?;
+            app.session_wake_id = Some(SessionWakeId(self.next_wake_id));
+            self.next_wake_id = next;
+        }
+        app.event_proxy = Some(self.event_loop.create_proxy());
+        self.event_loop
+            .set_control_flow(app.control_flow.into_winit());
+        Ok(())
+    }
+
+    #[cfg(any(
+        target_os = "windows",
+        target_os = "macos",
+        target_os = "linux",
+        target_os = "android",
+        target_os = "freebsd",
+        target_os = "dragonfly",
+        target_os = "netbsd",
+        target_os = "openbsd"
+    ))]
+    fn prepare_handoff(&mut self, budget: Duration) -> Result<(), AppRunError> {
+        if !self.needs_drain {
+            return Ok(());
+        }
+        let now = Instant::now();
+        let deadline = now.checked_add(budget).unwrap_or(now);
+        loop {
+            // This handler has no Runtime, native windows or driver authority. Winit's Windows
+            // reset preserves its event buffer; HWND identities can also be reused. Drain before
+            // creating any new window, including after an unused owner's admission failure.
+            let mut drain = WinitHandoffDrain {
+                resumed: &mut self.resumed,
+                received_event: false,
+            };
+            let status = self
+                .event_loop
+                .pump_app_events(Some(Duration::ZERO), &mut drain);
+            let received_event = drain.received_event;
+            if let PumpStatus::Exit(code) = status {
+                self.resumed = false;
+                return Err(AppRunError::runner(format!(
+                    "winit event pump exited during session handoff (code {code})"
+                )));
+            }
+            if !received_event {
+                self.needs_drain = false;
+                return Ok(());
+            }
+            if Instant::now() >= deadline {
+                return Err(AppRunError::runner("winit session handoff budget expired"));
+            }
+        }
+    }
+
+    #[cfg(any(
+        target_os = "windows",
+        target_os = "macos",
+        target_os = "linux",
+        target_os = "android",
+        target_os = "freebsd",
+        target_os = "dragonfly",
+        target_os = "netbsd",
+        target_os = "openbsd"
+    ))]
+    fn pump(&mut self, timeout: Option<Duration>, app: &mut WinitApp) -> PumpStatus {
+        app.native_resumed = self.resumed;
+        let status = self.event_loop.pump_app_events(timeout, app);
+        self.resumed = !matches!(&status, PumpStatus::Exit(_)) && app.native_resumed;
+        status
+    }
+}
+
+impl std::fmt::Debug for WinitEventLoop {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter
+            .debug_struct("WinitEventLoop")
+            .finish_non_exhaustive()
+    }
+}
+
+struct WinitHandoffDrain<'a> {
+    resumed: &'a mut bool,
+    received_event: bool,
+}
+
+impl ApplicationHandler<WinitUserEvent> for WinitHandoffDrain<'_> {
+    fn resumed(&mut self, _event_loop: &ActiveEventLoop) {
+        *self.resumed = true;
+    }
+
+    fn suspended(&mut self, _event_loop: &ActiveEventLoop) {
+        *self.resumed = false;
+    }
+
+    fn window_event(
+        &mut self,
+        _event_loop: &ActiveEventLoop,
+        _window_id: WinitWindowId,
+        _event: WinitWindowEvent,
+    ) {
+        self.received_event = true;
+    }
+
+    fn user_event(&mut self, _event_loop: &ActiveEventLoop, _event: WinitUserEvent) {
+        self.received_event = true;
     }
 }
 
@@ -153,6 +329,23 @@ impl WinitRunner {
     /// instead. An incomplete return retains all owners and must be driven again with `execute`.
     #[must_use]
     pub fn run(self, runtime: RuntimeInstance) -> WinitSession {
+        self.run_platform_only(None, runtime)
+    }
+
+    /// Runs a platform-only session on an explicitly owned physical event loop.
+    ///
+    /// The supplied owner is retained even if initial validation fails before native use. It is
+    /// returned only by [`WinitSession::into_retired`], together with the stopped Runtime.
+    #[must_use]
+    pub fn run_on(self, event_loop: WinitEventLoop, runtime: RuntimeInstance) -> WinitSession {
+        self.run_platform_only(Some(event_loop), runtime)
+    }
+
+    fn run_platform_only(
+        self,
+        event_loop: Option<WinitEventLoop>,
+        runtime: RuntimeInstance,
+    ) -> WinitSession {
         let expects_presentation = runtime
             .world()
             .contains_resource::<WindowPresentationRequirement>();
@@ -167,23 +360,22 @@ impl WinitRunner {
                 "platform-only Winit run cannot own an expected presentation backend",
             ));
         }
-        WinitSession::start(app)
+        WinitSession::start(app, event_loop)
     }
 
     #[doc(hidden)]
     #[must_use]
-    pub fn __run_with_presentation(
+    pub fn __run_with_presentation_on(
         self,
         runtime: RuntimeInstance,
         driver: Box<dyn __WinitPresentationDriver>,
         native_retirement_budget: Duration,
+        event_loop: Option<WinitEventLoop>,
     ) -> WinitSession {
-        WinitSession::start(WinitApp::new(
-            runtime,
-            driver,
-            self.control_flow,
-            native_retirement_budget,
-        ))
+        WinitSession::start(
+            WinitApp::new(runtime, driver, self.control_flow, native_retirement_budget),
+            event_loop,
+        )
     }
 }
 
@@ -202,7 +394,7 @@ pub enum WinitRunProgress {
 #[must_use = "an incomplete native session must retain and retire its owners"]
 pub struct WinitSession {
     app: Option<WinitApp>,
-    event_loop: Option<EventLoop<WinitUserEvent>>,
+    event_loop: Option<WinitEventLoop>,
     executed: bool,
 }
 
@@ -211,6 +403,10 @@ pub struct WinitSession {
 pub struct WinitRetiredSession {
     pub runtime: RuntimeInstance,
     pub result: Result<AppExit, AppRunError>,
+    /// The original physical pump, released only after full retirement.
+    ///
+    /// `None` means no pump was supplied and native loop construction was skipped or failed.
+    pub event_loop: Option<WinitEventLoop>,
 }
 
 impl std::fmt::Debug for WinitSession {
@@ -225,24 +421,21 @@ impl std::fmt::Debug for WinitSession {
 }
 
 impl WinitSession {
-    fn start(mut app: WinitApp) -> Self {
-        let event_loop = if app.primary_failure.is_none() {
-            match EventLoop::<WinitUserEvent>::with_user_event().build() {
-                Ok(event_loop) => {
-                    event_loop.set_control_flow(app.control_flow.into_winit());
-                    app.event_proxy = Some(event_loop.create_proxy());
-                    Some(event_loop)
-                }
+    fn start(mut app: WinitApp, mut event_loop: Option<WinitEventLoop>) -> Self {
+        if event_loop.is_none() && app.primary_failure.is_none() {
+            match WinitEventLoop::new() {
+                Ok(created) => event_loop = Some(created),
                 Err(error) => {
-                    app.record_primary_failure(AppRunError::runner(format!(
-                        "failed to create winit event loop: {error}"
-                    )));
-                    None
+                    app.record_primary_failure(error);
                 }
             }
-        } else {
-            None
-        };
+        }
+        if app.primary_failure.is_none()
+            && let Some(event_loop) = event_loop.as_mut()
+            && let Err(error) = event_loop.bind(&mut app)
+        {
+            app.record_primary_failure(error);
+        }
         let mut session = Self {
             app: Some(app),
             event_loop,
@@ -287,10 +480,38 @@ impl WinitSession {
         {
             app.begin_shutdown_transition(Instant::now());
         }
+        #[cfg(any(
+            target_os = "windows",
+            target_os = "macos",
+            target_os = "linux",
+            target_os = "android",
+            target_os = "freebsd",
+            target_os = "dragonfly",
+            target_os = "netbsd",
+            target_os = "openbsd"
+        ))]
+        if !self.executed
+            && !app.shutdown.is_started()
+            && let Some(event_loop) = self.event_loop.as_mut()
+            && let Err(error) = event_loop.prepare_handoff(app.native_retirement_budget)
+        {
+            app.record_primary_failure(error);
+            app.begin_shutdown_transition(Instant::now());
+        }
+        let mut first_native_pump = !self.executed;
         self.executed = true;
 
         loop {
-            if let Some(event_loop) = self.event_loop.as_mut() {
+            if app.shutdown == WinitShutdownState::Complete {
+                return WinitRunProgress::Retired;
+            }
+            // Failed initial admission leaves a supplied physical loop unbound. Close only the
+            // original Runtime/driver; no platform callback is needed before any native target.
+            if let Some(event_loop) = self
+                .event_loop
+                .as_mut()
+                .filter(|_| app.event_proxy.is_some())
+            {
                 #[cfg(any(
                     target_os = "windows",
                     target_os = "macos",
@@ -303,21 +524,28 @@ impl WinitSession {
                 ))]
                 {
                     app.boundary_serviced = false;
-                    let status = event_loop.pump_app_events(app.pump_timeout(Instant::now()), app);
+                    // A running physical loop may wait before dispatching new_events. Give a
+                    // successor its first real callback before applying its configured Wait.
+                    let timeout = if std::mem::take(&mut first_native_pump) {
+                        Some(Duration::ZERO)
+                    } else {
+                        app.pump_timeout(Instant::now())
+                    };
+                    let status = event_loop.pump(timeout, app);
                     if !app.boundary_serviced {
                         if app.shutdown.is_started() {
                             app.poll_native_shutdown_once(Instant::now());
                         } else {
                             match app.maintain_transition(Instant::now()) {
                                 EventLoopDirective::Poll => {
-                                    event_loop.set_control_flow(ControlFlow::Poll)
+                                    event_loop.event_loop.set_control_flow(ControlFlow::Poll)
                                 }
                                 EventLoopDirective::Wait => {
-                                    event_loop.set_control_flow(ControlFlow::Wait)
+                                    event_loop.event_loop.set_control_flow(ControlFlow::Wait)
                                 }
-                                EventLoopDirective::WaitUntil(wake) => {
-                                    event_loop.set_control_flow(ControlFlow::WaitUntil(wake))
-                                }
+                                EventLoopDirective::WaitUntil(wake) => event_loop
+                                    .event_loop
+                                    .set_control_flow(ControlFlow::WaitUntil(wake)),
                                 EventLoopDirective::None | EventLoopDirective::Exit => {}
                             }
                         }
@@ -352,7 +580,6 @@ impl WinitSession {
                         "retained Winit event pumping is unavailable on this platform",
                     ));
                     app.begin_shutdown_transition(Instant::now());
-                    self.event_loop = None;
                 }
             } else {
                 app.begin_shutdown_transition(Instant::now());
@@ -365,7 +592,7 @@ impl WinitSession {
             if app.retirement_drive_incomplete(Instant::now()) {
                 return WinitRunProgress::Incomplete;
             }
-            if self.event_loop.is_none() {
+            if self.event_loop.is_none() || app.event_proxy.is_none() {
                 std::thread::sleep(
                     app.pump_timeout(Instant::now())
                         .unwrap_or(RUNTIME_CLOSE_POLL_INTERVAL),
@@ -383,9 +610,14 @@ impl WinitSession {
             return Err(self);
         };
         let result = app.failure().map_or(Ok(app.exit), Err);
+        let mut event_loop = self.event_loop.take();
+        if let Some(event_loop) = event_loop.as_mut() {
+            event_loop.needs_drain = true;
+        }
         Ok(WinitRetiredSession {
             runtime: app.runtime,
             result,
+            event_loop,
         })
     }
 }
@@ -484,9 +716,12 @@ struct WinitApp {
     providers_released: bool,
     boundary_serviced: bool,
     runtime_close_incomplete_observed: bool,
+    native_resumed: bool,
     input_gate: WinitInputGate,
     input_window_id: WindowId,
     event_proxy: Option<EventLoopProxy<WinitUserEvent>>,
+    #[cfg(any(feature = "platform-accessibility", all(test, target_os = "windows")))]
+    session_wake_id: Option<SessionWakeId>,
     #[cfg(feature = "platform-accessibility")]
     accessibility_activation: accessibility::__private::WinitAccessibilityActivation,
     #[cfg(feature = "platform-accessibility")]
@@ -631,9 +866,12 @@ impl WinitApp {
             providers_released: false,
             boundary_serviced: false,
             runtime_close_incomplete_observed: false,
+            native_resumed: false,
             input_gate: WinitInputGate::default(),
             input_window_id: WindowId::PRIMARY,
             event_proxy: None,
+            #[cfg(any(feature = "platform-accessibility", all(test, target_os = "windows")))]
+            session_wake_id: None,
             #[cfg(feature = "platform-accessibility")]
             accessibility_activation,
             #[cfg(feature = "platform-accessibility")]
@@ -705,7 +943,11 @@ impl WinitApp {
             let session = WinitPlatformAccessibilitySession::new(
                 event_loop,
                 &platform_window,
-                window_id,
+                // The platform adapter uses this argument only for wake routing. Logical
+                // WindowId values can repeat across Apps; this pump-owned ticket cannot.
+                self.session_wake_id.ok_or_else(|| {
+                    AppRunError::runner("winit session wake identity is unavailable")
+                })?,
                 event_proxy,
             );
             self.accessibility_sessions.insert(window_id, session);
@@ -901,6 +1143,22 @@ impl WinitApp {
         self.with_driver_scope(|scope| {
             accessibility::__private::queue_winit_accessibility_inputs(scope, batch)
         })
+    }
+
+    #[cfg(any(feature = "platform-accessibility", all(test, target_os = "windows")))]
+    fn handle_session_wake(&mut self, wake_id: SessionWakeId) -> Result<bool, AppRunError> {
+        if self.shutdown.is_started() || self.session_wake_id != Some(wake_id) {
+            return Ok(false);
+        }
+        #[cfg(feature = "platform-accessibility")]
+        {
+            let Some(window_id) = self.platform_windows.keys().copied().next() else {
+                return Ok(false);
+            };
+            self.handle_accessibility_wake(window_id)?;
+        }
+        self.frame_requested = true;
+        Ok(true)
     }
 
     fn handle_window_event(
@@ -1530,18 +1788,35 @@ fn apply_event_loop_directive(event_loop: &ActiveEventLoop, directive: EventLoop
         EventLoopDirective::WaitUntil(deadline) => {
             event_loop.set_control_flow(ControlFlow::WaitUntil(deadline));
         }
-        EventLoopDirective::Exit => event_loop.exit(),
+        // The aggregate, rather than a native exit flag, ends a logical session. Keeping the
+        // physical pump alive also works on X11/Wayland, whose pump exit flag is not reset.
+        EventLoopDirective::Exit => event_loop.set_control_flow(ControlFlow::Poll),
     }
 }
 
 impl ApplicationHandler<WinitUserEvent> for WinitApp {
+    fn new_events(&mut self, event_loop: &ActiveEventLoop, _cause: winit::event::StartCause) {
+        // A reused physical loop may already be resumed and will not emit another Resumed.
+        // Attach the logical App inside the current native callback without fabricating one.
+        if self.native_resumed
+            && let Err(error) = self.create_primary_window(event_loop)
+        {
+            self.fail(event_loop, error);
+        }
+    }
+
     fn resumed(&mut self, event_loop: &ActiveEventLoop) {
+        self.native_resumed = true;
         if !self.shutdown.is_started() {
             self.frame_requested = true;
         }
         if let Err(error) = self.create_primary_window(event_loop) {
             self.fail(event_loop, error);
         }
+    }
+
+    fn suspended(&mut self, _event_loop: &ActiveEventLoop) {
+        self.native_resumed = false;
     }
 
     fn window_event(
@@ -1558,11 +1833,8 @@ impl ApplicationHandler<WinitUserEvent> for WinitApp {
     fn user_event(&mut self, _event_loop: &ActiveEventLoop, event: WinitUserEvent) {
         match event {
             #[cfg(feature = "platform-accessibility")]
-            WinitUserEvent::AccessibilityWake(window_id) => {
-                if !self.shutdown.is_started() {
-                    self.frame_requested = true;
-                }
-                if let Err(error) = self.handle_accessibility_wake(window_id) {
+            WinitUserEvent::AccessibilityWake(wake_id) => {
+                if let Err(error) = self.handle_session_wake(wake_id) {
                     self.fail(_event_loop, error);
                 }
             }

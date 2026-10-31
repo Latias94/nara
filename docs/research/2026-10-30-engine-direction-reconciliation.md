@@ -243,3 +243,15 @@ integration correction belongs to [ADR0040](../architecture/adr/0040-render-reso
 original submitted resources can own the final Capture/Bindings after candidate disposal, so late
 destructor faults must be isolated at actual prefix release and observed separately from callback
 abandonment. This refines that owner implementation without a new roadmap, toolkit or registry.
+
+The same supplied archive was checked against `b34741c` and the native-composition work on
+2026-11-01: all91 manifest entries and all10 imported studies still match. Complete-consumer
+integration exposed two concrete lower-level corrections inside the existing R8 plan. Large
+inline producer slot tables overflowed the actual Windows callback/main-thread stack; heap tables
+preserve their stable indices and complete retained-capacity charge. Sequential ordinary Source
+and Processed desktop actions also require physical event-loop ownership independent of each
+logical Runtime, since native Winit does not admit a second loop in one process. ADRs0078/0084/
+0110 now select explicit transfer only after full native retirement, preserving source residency
+and exact receiving definitions. The [current render unit](../plans/2026-10-31-render-composition-and-host-execution-plan.md)
+owns their complete qualification. Neither correction justifies replacing Bevy ECS, relaxing
+Schema witnesses, adopting an embedded UI toolkit or promoting full0121.

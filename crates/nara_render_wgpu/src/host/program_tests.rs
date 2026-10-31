@@ -246,7 +246,7 @@ fn native_ordered_sprite_views_have_one_writer_and_keep_whole_attachment_clears(
 #[cfg(feature = "stock-sprite")]
 #[test]
 #[ignore = "requires an explicitly selected native GPU; acquisition failure is a failed prerequisite"]
-fn native_stock_known_custody_refuses_before_partial_realization() {
+fn native_stock_known_metadata_refuses_before_partial_realization() {
     use crate::{
         quad::{WgpuQuadBatch, WgpuQuadInstance, WgpuQuadMaterialKey, WgpuQuadTexture},
         sprite::{SpriteCapture, SpriteFeature},
@@ -259,15 +259,7 @@ fn native_stock_known_custody_refuses_before_partial_realization() {
             &WgpuFeatureDefinition::new(SpriteFeature::<Color>::new()),
         )
         .unwrap();
-    let mut builder = WgpuRenderProgramBuilder::new(
-        source(),
-        1,
-        GraphLimits {
-            max_modeled_metadata_bytes: usize::MAX,
-            ..Default::default()
-        },
-    )
-    .unwrap();
+    let mut builder = WgpuRenderProgramBuilder::new(source(), 1, GraphLimits::default()).unwrap();
     let target = builder.texture::<Color>(descriptor()).unwrap();
     let texture = WgpuQuadTexture::Fallback;
     let batch = WgpuQuadBatch {
@@ -287,6 +279,12 @@ fn native_stock_known_custody_refuses_before_partial_realization() {
         nara_render::ViewportRect::from_extent(nara_render::Extent2d::new(4, 4).unwrap()).unwrap(),
         vec![batch; 20_000].into(),
     );
+    let cost =
+        crate::stock_quad::StockPreparationCost::for_batches(capture.batches.iter()).unwrap();
+    assert!(
+        cost.modeled_metadata_bytes > 64 * 1024 * 1024,
+        "the complete stock table exceeds the engine's fixed metadata envelope"
+    );
     builder
         .operation(
             1,
@@ -299,12 +297,15 @@ fn native_stock_known_custody_refuses_before_partial_realization() {
     let program = builder.finish(&[target.output()]).unwrap();
     host.begin_frame(1).unwrap();
     let error = host.submit_program(&producer, &program).unwrap_err();
-    assert!(matches!(
-        error,
-        WgpuRenderHostError::Program(WgpuRenderProgramError::Graph(
-            crate::GraphError::LimitExceeded(crate::LimitKind::SubmissionResources)
-        ))
-    ));
+    assert!(
+        matches!(
+            error,
+            WgpuRenderHostError::Program(WgpuRenderProgramError::Graph(
+                crate::GraphError::LimitExceeded(crate::LimitKind::MetadataBytes)
+            ))
+        ),
+        "complete known metadata must reject before native budget admission: {error:?}"
+    );
     assert!(!error.is_deferred());
     assert!(error.is_content_rejected());
     assert_eq!(host.retained_resource_bytes(), 0);

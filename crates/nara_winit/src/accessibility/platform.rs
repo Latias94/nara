@@ -9,7 +9,6 @@ use accesskit::{
 };
 use accesskit_winit::Adapter;
 use nara_ui_kernel::{UiAccessibilityInput, UiRevision, UiSurfaceRetirementToken};
-use nara_window::WindowId;
 use thiserror::Error;
 use winit::{
     event::WindowEvent as WinitWindowEvent,
@@ -45,7 +44,7 @@ impl WinitPlatformAccessibilitySession {
     pub(crate) fn new(
         event_loop: &ActiveEventLoop,
         window: &Window,
-        window_id: WindowId,
+        wake_id: crate::SessionWakeId,
         proxy: EventLoopProxy<crate::WinitUserEvent>,
     ) -> Self {
         let callbacks = PlatformCallbackState::default();
@@ -59,7 +58,7 @@ impl WinitPlatformAccessibilitySession {
             PlatformActionHandler {
                 callbacks: callbacks.clone(),
                 actions: actions.clone(),
-                window_id,
+                wake_id,
                 proxy,
             },
             PlatformDeactivationHandler,
@@ -328,7 +327,7 @@ impl ActivationHandler for PlatformActivationHandler {
 struct PlatformActionHandler {
     callbacks: PlatformCallbackState,
     actions: PlatformActionMailbox,
-    window_id: WindowId,
+    wake_id: crate::SessionWakeId,
     proxy: EventLoopProxy<crate::WinitUserEvent>,
 }
 
@@ -351,7 +350,7 @@ impl ActionHandler for PlatformActionHandler {
             if should_wake {
                 let _ = self
                     .proxy
-                    .send_event(crate::WinitUserEvent::AccessibilityWake(self.window_id));
+                    .send_event(crate::WinitUserEvent::AccessibilityWake(self.wake_id));
             }
         }
     }

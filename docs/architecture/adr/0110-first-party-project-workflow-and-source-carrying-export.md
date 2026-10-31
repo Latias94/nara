@@ -11,6 +11,7 @@ creation terminality, build-input freshness and startup-closure ownership
 **Amended**: 2026-10-30 by finite authored Scene data capture and original Product travel admission
 **Amended**: 2026-10-31 by explicit Cargo selection and captured executable ownership
 **Amended**: 2026-10-31 by finite cooked-content assembly and captured Player package binding
+**Amended**: 2026-11-01 by explicit physical event-loop custody across sequential desktop actions
 **Owner**: root product workflow, `nara_project`, `nara_fs`, project content and Runtime Hosts
 **Refines**: [ADR 0020](0020-project-layout-and-package-format.md),
 [ADR 0035](0035-project-manifest-and-runtime-settings-authority.md),
@@ -215,6 +216,11 @@ actual consumer qualification; selecting this contract alone does not mark it co
   admitted startup content and live backend generation within a product-owned timeout, uses the real
   Winit/WGPU path and exits through normal App/Host shutdown; initialization alone or a test-private
   presenter cannot satisfy product evidence.
+- A caller may transfer one explicitly owned native event loop between fully retired desktop
+  actions. Source and processed actions retain their normal independent recipe, Schema, content
+  and residency admission. Only terminal cleanup returns the physical loop; incomplete native
+  retirement retains it. A source failure before native startup preserves an unused supplied loop.
+  This is sequential process-local hosting, not live replacement of content or execution authority.
 - The project-content owner produces a bounded `ProjectContentClosureReceipt` for one explicitly
   selected Scene and its required dependencies. Selection does not change manifest or settings
   lineage, and the snapshot binds the selected Scene path. `StartupContentClosureReceipt` is

@@ -181,6 +181,7 @@ fn deadline_close_incomplete_reports_shutdown_timeout() {
             startup_content_closure: None,
             presentation_verification: None,
             telemetry_seal: None,
+            event_loop: None,
         }
         .report();
         assert_eq!(report.outcome(), DesktopRunOutcome::CleanupIncomplete);
@@ -221,6 +222,7 @@ fn participant_close_incomplete_is_not_misclassified_as_timeout() {
         #[cfg(all(feature = "runtime-2d", feature = "serde"))]
         presentation_verification: None,
         telemetry_seal: None,
+        event_loop: None,
     }
     .report();
     assert_eq!(report.outcome(), DesktopRunOutcome::Failed);

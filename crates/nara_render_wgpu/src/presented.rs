@@ -176,7 +176,7 @@ impl WgpuSubmittedImageReceipt {
 
 /// Target identity whose presentation API was called by its owning backend.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum WgpuEditorWindowPresentationTarget {
+enum WgpuWindowPresentationTarget {
     HostSurface {
         generation: u64,
     },
@@ -187,33 +187,32 @@ enum WgpuEditorWindowPresentationTarget {
     },
 }
 
-/// Exact Editor-window submission and presentation-request facts.
-#[doc(hidden)]
+/// Exact native-window submission and presentation-request facts from its original Host.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub struct WgpuEditorWindowPresentedReceipt {
+pub struct WgpuWindowPresentedReceipt {
     window_id: WindowId,
-    target: WgpuEditorWindowPresentationTarget,
+    target: WgpuWindowPresentationTarget,
     backend_instance_id: u64,
     device_epoch: u64,
-    editor_frame_index: u64,
+    display_frame_index: u64,
 }
 
-impl WgpuEditorWindowPresentedReceipt {
+impl WgpuWindowPresentedReceipt {
     pub(crate) const fn new(
         window_id: WindowId,
         surface_generation: u64,
         backend_instance_id: u64,
         device_epoch: u64,
-        editor_frame_index: u64,
+        display_frame_index: u64,
     ) -> Self {
         Self {
             window_id,
-            target: WgpuEditorWindowPresentationTarget::HostSurface {
+            target: WgpuWindowPresentationTarget::HostSurface {
                 generation: surface_generation,
             },
             backend_instance_id,
             device_epoch,
-            editor_frame_index,
+            display_frame_index,
         }
     }
 
@@ -225,9 +224,9 @@ impl WgpuEditorWindowPresentedReceipt {
     #[must_use]
     pub const fn surface_generation(self) -> Option<u64> {
         match self.target {
-            WgpuEditorWindowPresentationTarget::HostSurface { generation } => Some(generation),
+            WgpuWindowPresentationTarget::HostSurface { generation } => Some(generation),
             #[cfg(feature = "editor-imgui")]
-            WgpuEditorWindowPresentationTarget::DelegatedNativeWindow { .. } => None,
+            WgpuWindowPresentationTarget::DelegatedNativeWindow { .. } => None,
         }
     }
 
@@ -235,10 +234,8 @@ impl WgpuEditorWindowPresentedReceipt {
     pub const fn delegated_native_instance(self) -> Option<u64> {
         match self.target {
             #[cfg(feature = "editor-imgui")]
-            WgpuEditorWindowPresentationTarget::DelegatedNativeWindow { instance } => {
-                Some(instance)
-            }
-            WgpuEditorWindowPresentationTarget::HostSurface { .. } => None,
+            WgpuWindowPresentationTarget::DelegatedNativeWindow { instance } => Some(instance),
+            WgpuWindowPresentationTarget::HostSurface { .. } => None,
         }
     }
 
@@ -248,14 +245,14 @@ impl WgpuEditorWindowPresentedReceipt {
         instance: u64,
         backend_instance_id: u64,
         device_epoch: u64,
-        editor_frame_index: u64,
+        display_frame_index: u64,
     ) -> Self {
         Self {
             window_id,
-            target: WgpuEditorWindowPresentationTarget::DelegatedNativeWindow { instance },
+            target: WgpuWindowPresentationTarget::DelegatedNativeWindow { instance },
             backend_instance_id,
             device_epoch,
-            editor_frame_index,
+            display_frame_index,
         }
     }
 
@@ -270,26 +267,27 @@ impl WgpuEditorWindowPresentedReceipt {
     }
 
     #[must_use]
-    pub const fn editor_frame_index(self) -> u64 {
-        self.editor_frame_index
+    pub const fn display_frame_index(self) -> u64 {
+        self.display_frame_index
     }
 }
 
-/// Unforgeable join proving the exact viewport image was sampled in a presented Editor window.
-#[doc(hidden)]
+/// Exact image occurrence sampled in one successfully presented native-window attempt.
+///
+/// This does not establish widget mapping, interaction authority or monitor scanout.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub struct WgpuEditorCompositeReceipt {
+pub struct WgpuImageCompositeReceipt {
     image: WgpuSubmittedImageReceipt,
     occurrence: crate::output::WgpuDisplayOccurrence,
-    window: WgpuEditorWindowPresentedReceipt,
+    window: WgpuWindowPresentedReceipt,
     presentation_generation: u64,
 }
 
-impl WgpuEditorCompositeReceipt {
+impl WgpuImageCompositeReceipt {
     pub(crate) const fn new(
         image: WgpuSubmittedImageReceipt,
         occurrence: crate::output::WgpuDisplayOccurrence,
-        window: WgpuEditorWindowPresentedReceipt,
+        window: WgpuWindowPresentedReceipt,
         presentation_generation: u64,
     ) -> Self {
         Self {
@@ -311,7 +309,7 @@ impl WgpuEditorCompositeReceipt {
     }
 
     #[must_use]
-    pub const fn window(self) -> WgpuEditorWindowPresentedReceipt {
+    pub const fn window(self) -> WgpuWindowPresentedReceipt {
         self.window
     }
 

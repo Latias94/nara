@@ -150,6 +150,15 @@ message. A retry must dispatch that message rather than immediately exiting agai
 Exit, budget expiry and actual destruction with this adapter; this source finding does not grant
 other-platform or panic-recovery guarantees.
 
+The physical pump is also independent of a logical run's lifetime. A move-only thread-bound
+`WinitEventLoop` transfers into a native session and can return only after that session physically
+retires. A successor normal desktop action may reuse the same loop with a fresh Runtime, target
+registry and presentation Host. Neither incomplete close nor logical `Stopped` releases the loop;
+an explicitly supplied unused loop remains recoverable if source admission fails first. This
+replaces per-run event-loop construction, which Winit rejects in one native process, without a
+global platform cache or weaker Source/Processed witness and residency checks. No native target,
+interaction permission or GPU epoch transfers to the successor.
+
 Distinguish ordinary frame demand from a maintenance deadline in the retained pump. A Wait-mode
 maintenance wake advances the presentation/READY/telemetry owner directly; it does not run gameplay,
 fixed updates or Last to obtain that progress. Poll-driven frames and actual frame/input demand keep

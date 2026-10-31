@@ -41,7 +41,7 @@ pub use workspace::{ImguiEditorPanel, ImguiEditorPanelContext};
 pub(crate) struct ImguiViewImage {
     pub(crate) texture: TextureId,
     pub(crate) extent: [u32; 2],
-    pub(crate) occurrence: Option<nara::render_wgpu::__private::WgpuDisplayOccurrence>,
+    pub(crate) occurrence: Option<nara::render_wgpu::WgpuDisplayOccurrence>,
 }
 
 #[derive(Default)]
@@ -63,7 +63,7 @@ pub(crate) struct ImguiFrontendOutput {
     pub(crate) scene_pick_point: Option<[f32; 2]>,
     pub(crate) scene_camera_changed: bool,
     pub(crate) authoring_viewport: Option<dear_imgui_rs::Id>,
-    pub(crate) authoring_occurrence: Option<nara::render_wgpu::__private::WgpuDisplayOccurrence>,
+    pub(crate) authoring_occurrence: Option<nara::render_wgpu::WgpuDisplayOccurrence>,
     pub(crate) panel_windows: Vec<(crate::workspace::EditorPanelInstanceId, dear_imgui_rs::Id)>,
     pub(crate) scene_extent: Option<[f32; 2]>,
     pub(crate) game_extent: Option<[f32; 2]>,
@@ -80,7 +80,7 @@ pub(crate) struct ImguiCanvasDisplay {
     viewport: dear_imgui_rs::Id,
     window: dear_imgui_rs::Id,
     pixels_per_point: f32,
-    occurrence: Option<nara::render_wgpu::__private::WgpuDisplayOccurrence>,
+    occurrence: Option<nara::render_wgpu::WgpuDisplayOccurrence>,
 }
 
 impl ImguiCanvasDisplay {
@@ -115,7 +115,7 @@ impl From<ImguiImageInteraction> for ImguiCanvasDisplay {
 
 #[derive(Clone, Copy)]
 pub(crate) struct ImguiImageInteraction {
-    pub(crate) occurrence: Option<nara::render_wgpu::__private::WgpuDisplayOccurrence>,
+    pub(crate) occurrence: Option<nara::render_wgpu::WgpuDisplayOccurrence>,
     pub(crate) rect: nara::render::DisplayRect,
     pub(crate) viewport: dear_imgui_rs::Id,
     pub(crate) viewport_origin: [f32; 2],
@@ -1366,7 +1366,7 @@ fn show_image(
 
 fn image_interaction(
     ui: &Ui,
-    occurrence: Option<nara::render_wgpu::__private::WgpuDisplayOccurrence>,
+    occurrence: Option<nara::render_wgpu::WgpuDisplayOccurrence>,
 ) -> ImguiImageInteraction {
     let (min, max) = ui.item_rect();
     let viewport = ui.window_viewport();

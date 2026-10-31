@@ -18,21 +18,19 @@ use winit::{
 use nara::{
     project_host::EditorGameViewCandidateIdentity,
     render::RenderWindowPacket,
-    render_wgpu::__private::{
-        WgpuDisplayOccurrence, WgpuEditorCompositeReceipt, WgpuRenderProducerId,
-    },
+    render_wgpu::{WgpuDisplayOccurrence, WgpuImageCompositeReceipt, WgpuRenderProducerId},
 };
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub(super) struct EditorGamePresentedStamp {
     identity: EditorGameViewCandidateIdentity,
-    receipt: WgpuEditorCompositeReceipt,
+    receipt: WgpuImageCompositeReceipt,
 }
 
 impl EditorGamePresentedStamp {
     pub(super) const fn new(
         identity: EditorGameViewCandidateIdentity,
-        receipt: WgpuEditorCompositeReceipt,
+        receipt: WgpuImageCompositeReceipt,
     ) -> Self {
         Self { identity, receipt }
     }
@@ -78,7 +76,7 @@ impl EditorGamePresentedStamp {
 struct EditorGameInputLease {
     // Exact occurrence matching happens before this lease is admitted. Compatible successor
     // displays keep the held-input route while the stamp advances to their exact occurrence.
-    view_id: nara::render_wgpu::__private::WgpuRenderProducerId,
+    view_id: WgpuRenderProducerId,
     window_id: nara::window::WindowId,
     runtime_generation: u64,
     source_handoff_generation: u64,

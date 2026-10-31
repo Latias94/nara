@@ -1,6 +1,6 @@
 use std::{sync::Arc, time::Instant};
 
-use nara_ecs::{Resource, SystemSet, World};
+use nara_ecs::{Res, Resource, SystemParam, SystemSet, World};
 #[cfg(feature = "stock-ui")]
 use nara_render::RenderFrameState;
 #[cfg(any(feature = "stock-ui", all(test, feature = "stock-sprite")))]
@@ -381,6 +381,30 @@ impl std::fmt::Debug for WgpuFramePacketSlot {
         #[cfg(feature = "stock-ui")]
         debug.field("ui_submissions", &self.ui_submissions);
         debug.finish()
+    }
+}
+
+/// Read-only observation of the current sealed CPU policy input.
+///
+/// Schedule after [`crate::WgpuPolicyCaptureSet::Seal`] and before [`crate::WgpuPolicyCaptureSet::Publish`]. Cloning the
+/// borrowed input retains replayable CPU meaning only: this reader never takes the original
+/// transport batch, UI completion sidecar or native presentation responsibility. After the
+/// publication owner takes the batch, no input remains observable here.
+#[derive(SystemParam)]
+pub struct WgpuPolicyFrameReader<'w> {
+    slot: Res<'w, WgpuFramePacketSlot>,
+}
+
+impl WgpuPolicyFrameReader<'_> {
+    pub fn read(&self) -> Result<Option<&WgpuRenderInput>, &WgpuFrameCaptureError> {
+        if self.slot.phase != CapturePhase::Sealed {
+            return Ok(None);
+        }
+        match self.slot.current.as_ref() {
+            Some(Ok(Some(frame))) => Ok(Some(&frame.input)),
+            Some(Err(error)) => Err(error),
+            Some(Ok(None)) | None => Ok(None),
+        }
     }
 }
 
@@ -784,6 +808,123 @@ pub(crate) const fn classify_ui_backend_fault(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn sealed_reader_preserves_capture_errors_without_taking_transport() {
+        let mut world = World::new();
+        world.init_resource::<WgpuFramePacketSlot>();
+        let mut state =
+            nara_ecs::bevy_ecs::system::SystemState::<WgpuPolicyFrameReader>::new(&mut world);
+        assert!(state.get(&world).unwrap().read().unwrap().is_none());
+        {
+            let mut slot = world.resource_mut::<WgpuFramePacketSlot>();
+            slot.reset();
+            slot.seal(Ok(Some(image_packet(1))), 1, Instant::now());
+        }
+        for _ in 0..2 {
+            assert!(matches!(
+                state.get(&world).unwrap().read(),
+                Err(WgpuFrameCaptureError::MissingPolicy)
+            ));
+        }
+        let batch = world
+            .resource_mut::<WgpuFramePacketSlot>()
+            .take_batch()
+            .unwrap();
+        assert!(matches!(
+            batch.captured,
+            Err(WgpuFrameCaptureError::MissingPolicy)
+        ));
+        assert!(state.get(&world).unwrap().read().unwrap().is_none());
+    }
+
+    #[cfg(feature = "stock-ui")]
+    #[test]
+    fn sealed_reader_clones_cpu_input_without_taking_the_original_ui_sidecar() {
+        let installation = crate::WgpuPolicyDefinition::new(crate::WgpuStockPolicy::default())
+            .install()
+            .unwrap();
+        let capture = Arc::new(crate::WgpuStockCapture::default());
+        let mut outcomes = UiPresentationOutcomes::default();
+        let packet = ui_packet();
+        let submissions = prepare_ui_submissions(&mut outcomes, &packet, 1);
+        let original_submissions = submissions.as_ptr();
+        let mut slot = WgpuFramePacketSlot::default();
+        slot.reset();
+        assert!(
+            slot.collect_policy_with_ui(
+                installation.accept(Arc::clone(&capture)).unwrap(),
+                WgpuUiSubmissionState::Prepared(submissions)
+            )
+            .is_ok()
+        );
+        slot.seal(Ok(Some(image_packet(1))), 7, Instant::now());
+        let mut world = World::new();
+        world.insert_resource(slot);
+        let mut state =
+            nara_ecs::bevy_ecs::system::SystemState::<WgpuPolicyFrameReader>::new(&mut world);
+        let input = state.get(&world).unwrap().read().unwrap().unwrap().clone();
+        assert!(std::ptr::eq(
+            input.captured::<crate::WgpuStockPolicy>().unwrap(),
+            capture.as_ref()
+        ));
+        assert_eq!(
+            world.resource::<WgpuFramePacketSlot>().phase,
+            CapturePhase::Sealed
+        );
+        world.resource_mut::<WgpuFramePacketSlot>().reset();
+        assert_eq!(
+            state
+                .get(&world)
+                .unwrap()
+                .read()
+                .unwrap()
+                .unwrap()
+                .packet()
+                .frame_index(),
+            1
+        );
+
+        let batch = world
+            .resource_mut::<WgpuFramePacketSlot>()
+            .take_batch()
+            .unwrap();
+        assert!(state.get(&world).unwrap().read().unwrap().is_none());
+        assert!(
+            world
+                .resource_mut::<WgpuFramePacketSlot>()
+                .take_batch()
+                .is_none()
+        );
+        let WgpuUiSubmissionState::Prepared(submissions) = batch.ui.unwrap() else {
+            panic!("the original UI sidecar must stay unsubmitted");
+        };
+        assert_eq!(submissions.as_ptr(), original_submissions);
+        for completed in complete_ui_submissions(
+            WgpuUiSubmissionState::Prepared(submissions),
+            WgpuUiCompletion::ContentRejected("the original owner settled its sidecar".to_owned()),
+        ) {
+            outcomes.commit_backend(completed);
+        }
+        world.insert_resource(outcomes);
+        assert!(matches!(
+            nara_ui_render::drain_ui_presentation_outcomes(&mut world)
+                .unwrap()
+                .as_slice(),
+            [nara_ui_render::UiPresentationOutcome::ContentRejected { .. }]
+        ));
+        assert_eq!(
+            input.packet().frame_index(),
+            1,
+            "CPU replay remains separate from one-shot completion"
+        );
+        drop(input);
+        assert!(
+            nara_ui_render::drain_ui_presentation_outcomes(&mut world)
+                .unwrap()
+                .is_empty()
+        );
+    }
 
     #[cfg(feature = "stock-ui")]
     #[test]

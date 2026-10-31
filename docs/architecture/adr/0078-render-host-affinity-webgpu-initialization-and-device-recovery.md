@@ -2,7 +2,7 @@
 
 **Status**: Accepted
 **Date**: 2026-07-11
-**Last Revised**: 2026-10-31 (coherent device domain and owned native run custody)
+**Last Revised**: 2026-11-01 (coherent device domain and public native-window composition)
 **Refines**: [ADR 0012](0012-render-crate-boundaries.md),
 [ADR 0032](0032-render-backend-integration-boundary.md),
 [ADR 0040](0040-render-resource-lifetime-and-submitter-ownership.md), and
@@ -58,6 +58,17 @@ keeps errors and its original retryable owner. Ordinary producer close waits onl
 prefix, while final Host close owns whole-queue drain. The
 [output guide](../../guides/render-image-outputs.md) describes that concrete consumer; the
 implementation ledger retains its actual qualification scope.
+
+The concrete public native frontend boundary includes bounded window painting and read-only use
+of exact output leases under that same Host. Public window scopes borrow its original device,
+queue, encoder and acquired target; they do not transfer submission or presentation authority.
+Initialization callbacks obey the original closed capability request and retain their own renderer
+resources through original-device retirement. Actual registered surfaces remain adapter-checked,
+target-local responsibilities. The Host bounds its complete per-attempt metadata before native
+work, binds original custody after callback or encoding failure, and publishes window/composite
+facts only after the actual destination succeeds. This finite exact-wgpu integration replaces the
+earlier private fixed Scene-image/window seam without admitting arbitrary Host replacement or
+browser-blocking initialization.
 
 nara uses one serialized GPU execution authority per live device domain, represented conceptually
 as `WgpuRenderHost`, to own all wgpu native state and consume owned backend-neutral frame packets.
@@ -135,6 +146,17 @@ quarantine to adopt external GPU/platform state. Terminal cleanup errors remain 
 physical completion. The [production ownership design](../render-host-ownership-design.md) selects
 the concrete transition; the implementation ledger records its actual qualification scope.
 
+The physical native event loop has an explicit move-only, thread-bound owner, independent of a
+logical Runtime run. A session owns that loop while any of its Runtime, presentation, surface,
+provider or window retirement is incomplete. Only a fully retired session may return it for a
+successor run. The successor creates its own Runtime generation, windows, presentation Host and
+GPU domain; pump reuse transfers none of those authorities. This supports sequential source and
+processed products in one process without reconstructing Winit's process-level event loop,
+weakening content admission or retaining a global cache. An unused supplied loop survives startup
+admission failure. Queued wakes from a retired run carry no successor Runtime mutation authority,
+and stale window events must not bind to a new target. Runtime `Stopped`, a logical exit request
+or an incomplete native deadline is insufficient to return the loop.
+
 Returned original CPU results join UI completion and first-present/READY at the post-Host boundary.
 Every maintenance service advances deadlines and pending publication with an optional None result
 and arranges its next required wake. This boundary neither reruns arbitrary Last systems nor drives
@@ -206,7 +228,8 @@ stateDiagram-v2
   flushes pending initialization uploads once and polls without GPU waits. Discard of an invalidated
   epoch explicitly destroys that captured device and discards unsubmitted uploads, then still
   requires its actual queue-empty observation for accepted work. Device loss alone is not a drain
-  completion fact. This is private first-party close plumbing, not a public raw-GPU authority.
+  completion fact. The public native initialization scope exposes this concrete original-device
+  retirement owner; it grants no replacement Host or independent queue-submission authority.
 - `wgpu::DeviceLostReason::Destroyed` is expected completion only when shutdown or replacement
   invalidated that host generation before destroying the device. It does not retry or publish a
   device-fault diagnostic. Every uncorrelated `Destroyed` callback and every other loss reason is
@@ -246,14 +269,17 @@ stateDiagram-v2
 ### Future wgpu/native integration
 
 ADR0094's finite typed program accepts scoped exact-native preparation/encoding with original
-Host custody and no ordinary submit/present entry. Broader public raw-wgpu callbacks, interop
+Host custody and no ordinary submit/present entry. The finite native frontend refinement above
+also admits window painting and read-only output callbacks through that original Host. Broader
+raw-wgpu interop
 sessions, queue modes, external native-handle carriers and replacement Render Host contracts
 remain evidence-gated candidates under ADR0094.
 The first production compute, video, XR, vendor, or external-resource workflow must compare a
 stock-Host feature path, a scoped exact-GPU path, and whole-Host ownership as applicable. Any
 accepted successor must define pre-device requirements, trust, resource and submission ordering,
 host/device epoch rejection, target authority, diagnostics, cancellation, and finite teardown.
-Until then, exact wgpu access remains private backend implementation detail.
+Outside the admitted Feature and native frontend scopes, exact wgpu access remains backend
+implementation detail.
 
 ### Frame packet and target ownership
 
@@ -261,9 +287,8 @@ Until then, exact wgpu access remains private backend implementation detail.
   backend-neutral data only. It never contains `Surface`,
   `SurfaceTexture`, `TextureView`, `Device`, `Queue`, an encoder, or a configured platform target.
 - Surface/offscreen acquisition, configuration, presentation, and discard remain inside the host's
-  target transaction. ADR 0111 admits one private fixed Scene-image-to-Editor-window order under a
-  single execution owner; broader computed cross-target dependency and submission ordering still
-  requires a separate focused decision under ADR 0094.
+  target transaction. ADRs0094/0111 admit finite typed program dependencies and exact image-to-window
+  composition under that same owner, with separate sampling/presentation and interaction facts.
 - A target is acquired at most once for one target frame and is presented or published only after
   its final consumer in the captured static plan.
 - The host must not reconfigure a surface while a prior acquired texture from that surface remains

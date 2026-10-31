@@ -5,8 +5,8 @@ use nara::{
         EditorPreviewCandidate, EditorPreviewContentStamp, EditorPreviewPresentation,
     },
     render::{DisplayMapping2d, Extent2d, RenderFrameTarget, RenderWindowPacket},
-    render_wgpu::__private::{
-        WgpuDisplayOccurrence, WgpuEditorCompositeReceipt, WgpuImageDisplay, WgpuRenderHost,
+    render_wgpu::{
+        WgpuDisplayOccurrence, WgpuImageCompositeReceipt, WgpuImageDisplay, WgpuRenderHost,
         WgpuSubmittedImageReceipt,
     },
     tooling::{EditorAction, EditorFrameModel, EditorNavigationAction},
@@ -25,7 +25,7 @@ struct PreparedScene {
 struct PresentedScene {
     content: EditorPreviewContentStamp,
     token: EditorPresentedToken,
-    receipt: WgpuEditorCompositeReceipt,
+    receipt: WgpuImageCompositeReceipt,
     display: WgpuImageDisplay,
     mapping: DisplayMapping2d,
     texture: ExternalTextureId,
@@ -171,7 +171,7 @@ impl ImguiScenePresenter {
     pub(super) fn promote(
         &mut self,
         target: &ImguiTarget,
-        receipts: impl IntoIterator<Item = WgpuEditorCompositeReceipt>,
+        receipts: impl IntoIterator<Item = WgpuImageCompositeReceipt>,
         mapping: DisplayMapping2d,
         expected_content: Option<&EditorPreviewContentStamp>,
     ) -> Result<bool, EditorRunError> {
@@ -318,7 +318,7 @@ fn matches_target(
     target.matches_display(display) && target.texture == Some(texture)
 }
 
-fn presentation_image(receipt: WgpuEditorCompositeReceipt) -> EditorPresentationImage {
+fn presentation_image(receipt: WgpuImageCompositeReceipt) -> EditorPresentationImage {
     let image = receipt.image();
     EditorPresentationImage {
         output_version: image.output_version(),
@@ -1027,7 +1027,7 @@ mod binding_tests {
                     let window = super::super::editor_window_packet(&self.native.window);
                     self.native
                         .gpu
-                        .begin_editor_frame(window, self.native.frame_index)
+                        .begin_window_frame(window, self.native.frame_index)
                         .map_err(|error| error.to_string())?;
                     self.native
                         .scene_presenter

@@ -2,7 +2,7 @@
 
 **Status**: Accepted
 **Date**: 2026-07-13
-**Last Revised**: 2026-10-26 (activation-scoped fault delivery and retained close observations)
+**Last Revised**: 2026-11-01 (explicit physical event-loop handoff after native retirement)
 **Owner**: `nara_app` and concrete executable hosts
 **Refined By**: [ADR 0117](0117-2d-foundation-ownership-and-authoring-contracts.md): 2D Foundation Ownership and Authoring Contracts
 **Admission Trigger**: RGD-U2 through RGD-U6 replaced the plan/World behavior split, removed
@@ -213,6 +213,10 @@ need it.
 - The platform event loop remains host-owned. It supplies events and elapsed real time through the
   runtime drive contract rather than becoming a second runtime owner. It does not retain `&mut App`
   or invoke `App::run_once` behind runtime control, fault, and close state.
+  A concrete move-only physical pump may outlive a logical Runtime and be passed to a successor
+  only after the preceding native session fully retires under ADR0078. Each run retains its own
+  Runtime and content authority; reusable platform custody does not imply reusable mutable World,
+  windows, presentation permissions or GPU state.
 - The selected Platform/Runner Adapter may be first-party or external. It is chosen before runtime
   candidate construction, drives `RuntimeInstance` through the same public control/drive/close
   contract, and cannot be replaced from a plugin hook. External candidates are not filtered by
