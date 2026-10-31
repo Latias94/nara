@@ -1,12 +1,4 @@
-use std::{
-    collections::BTreeMap,
-    ffi::OsStr,
-    sync::{
-        Arc, Mutex,
-        atomic::{AtomicBool, AtomicU64, Ordering},
-    },
-    time::Duration,
-};
+use std::{collections::BTreeMap, time::Duration};
 
 use nara_app::RuntimeGeneration;
 use nara_ecs::Resource;
@@ -32,6 +24,7 @@ use nara_window::{
 
 #[cfg(any(feature = "sprite-submitter", feature = "ui-submitter"))]
 use crate::budget::InstanceBudget;
+use crate::device::WgpuDeviceOwner;
 use crate::frame::{WgpuCapturedFrame, WgpuFramePayload};
 use crate::presented::WgpuPresentedFrameReceipt;
 #[cfg(any(feature = "sprite-submitter", feature = "ui-submitter"))]
@@ -55,115 +48,7 @@ use crate::{
     render_acquired_texture,
 };
 
-static NEXT_WGPU_BACKEND_INSTANCE_ID: AtomicU64 = AtomicU64::new(1);
-const WGPU_FORCE_FALLBACK_ADAPTER_ENV: &str = "NARA_WGPU_FORCE_FALLBACK";
-const INVALID_FALLBACK_ADAPTER_ENV: &str = "NARA_WGPU_FORCE_FALLBACK must be either 0 or 1";
 const TELEMETRY_COMPLETION_WAIT_TIMEOUT: Duration = Duration::from_secs(5);
-
-fn force_fallback_adapter_from_value(value: Option<&OsStr>) -> Result<bool, &'static str> {
-    match value {
-        None => Ok(false),
-        Some(value) if value == OsStr::new("0") => Ok(false),
-        Some(value) if value == OsStr::new("1") => Ok(true),
-        Some(_) => Err(INVALID_FALLBACK_ADAPTER_ENV),
-    }
-}
-
-fn force_fallback_adapter_from_environment() -> Result<bool, &'static str> {
-    let value = std::env::var_os(WGPU_FORCE_FALLBACK_ADAPTER_ENV);
-    force_fallback_adapter_from_value(value.as_deref())
-}
-
-#[derive(Debug)]
-struct WgpuBackendInstanceId(u64);
-
-impl Default for WgpuBackendInstanceId {
-    fn default() -> Self {
-        let id = NEXT_WGPU_BACKEND_INSTANCE_ID
-            .try_update(Ordering::Relaxed, Ordering::Relaxed, |current| {
-                current.checked_add(1)
-            })
-            .unwrap_or_else(|_| std::process::abort());
-        Self(id)
-    }
-}
-
-#[derive(Debug, Default)]
-struct DeviceLossSignal {
-    lost: AtomicBool,
-    presentations: Mutex<DeviceWorldPresentations>,
-}
-
-#[derive(Debug, Default)]
-struct DeviceWorldPresentations {
-    runtime: Option<nara_render::__private::WorldPresentationRevoker>,
-    editor: BTreeMap<
-        crate::editor_execution::WgpuEditorViewId,
-        nara_render::__private::WorldPresentationRevoker,
-    >,
-}
-
-impl DeviceLossSignal {
-    fn mark_lost(&self) {
-        self.lost.store(true, Ordering::Release);
-        let presentations = self
-            .presentations
-            .lock()
-            .unwrap_or_else(|error| error.into_inner());
-        if let Some(presentation) = &presentations.runtime {
-            presentation.invalidate();
-        }
-        for presentation in presentations.editor.values() {
-            presentation.invalidate();
-        }
-    }
-
-    fn is_lost(&self) -> bool {
-        self.lost.load(Ordering::Acquire)
-    }
-
-    fn retain_presentation(&self, revoker: nara_render::__private::WorldPresentationRevoker) {
-        let mut presentations = self
-            .presentations
-            .lock()
-            .unwrap_or_else(|error| error.into_inner());
-        if self.is_lost() {
-            revoker.invalidate();
-        } else {
-            if let Some(previous) = presentations.runtime.replace(revoker) {
-                previous.invalidate();
-            }
-        }
-    }
-
-    fn retain_editor_presentation(
-        &self,
-        view: crate::editor_execution::WgpuEditorViewId,
-        revoker: nara_render::__private::WorldPresentationRevoker,
-    ) {
-        let mut presentations = self
-            .presentations
-            .lock()
-            .unwrap_or_else(|error| error.into_inner());
-        if self.is_lost() {
-            revoker.invalidate();
-        } else if let Some(previous) = presentations.editor.insert(view, revoker) {
-            previous.invalidate();
-        }
-    }
-
-    fn retire_editor_presentation(&self, view: crate::editor_execution::WgpuEditorViewId) {
-        if let Some(previous) = self
-            .presentations
-            .lock()
-            .unwrap_or_else(|error| error.into_inner())
-            .editor
-            .remove(&view)
-        {
-            previous.invalidate();
-        }
-    }
-}
 
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
 pub enum WgpuBackendState {
@@ -484,20 +369,12 @@ impl WgpuCachedQuadPipeline {
 
 #[derive(Debug, Default, Resource)]
 pub struct WgpuRenderBackend {
-    instance_id: WgpuBackendInstanceId,
-    state: WgpuBackendState,
     // Rust drops fields in declaration order. Retire surfaces while their GPU owners are live.
     surfaces: BTreeMap<WindowId, WgpuSurfaceState>,
     world_canvas: crate::canvas::WorldCanvasCache,
     world_presentation_guard: Option<nara_render::__private::WorldPresentationGuard>,
     presented_world: Option<nara_render::__private::PresentedWorldFrame>,
     world_presentation_target: Option<(RenderWindowPacket, Option<nara_render::WorldCanvasFrame>)>,
-    instance: Option<wgpu::Instance>,
-    adapter: Option<wgpu::Adapter>,
-    device: Option<wgpu::Device>,
-    queue: Option<wgpu::Queue>,
-    device_loss_signal: Option<Arc<DeviceLossSignal>>,
-    device_epoch: u64,
     source_generation: Option<RenderFrameSourceGeneration>,
     last_frame_index: Option<u64>,
     frame_transaction_stats: WgpuFrameTransactionStats,
@@ -518,6 +395,8 @@ pub struct WgpuRenderBackend {
     #[cfg(any(feature = "sprite-submitter", feature = "ui-submitter"))]
     instance_budget: InstanceBudget,
     last_error: Option<String>,
+    // Keep the device domain alive through surface/cache field destruction on direct Drop too.
+    device_owner: WgpuDeviceOwner,
 }
 
 pub(super) struct WgpuEditorDeviceNamespace {
@@ -545,12 +424,12 @@ impl WgpuRenderBackend {
     /// diagnostic runtime state and must not be persisted or used as backend-neutral identity.
     #[must_use]
     pub const fn instance_id(&self) -> u64 {
-        self.instance_id.0
+        self.device_owner.instance_id()
     }
 
     #[must_use]
     pub const fn state(&self) -> WgpuBackendState {
-        self.state
+        self.device_owner.state()
     }
 
     #[must_use]
@@ -634,7 +513,7 @@ impl WgpuRenderBackend {
     /// receives a strictly newer value.
     #[must_use]
     pub const fn device_epoch(&self) -> u64 {
-        self.device_epoch
+        self.device_owner.device_epoch()
     }
 
     /// Returns bounded diagnostic information for the currently selected adapter.
@@ -643,18 +522,7 @@ impl WgpuRenderBackend {
     /// not be used to select or reconstruct a device.
     #[must_use]
     pub fn adapter_summary(&self) -> Option<WgpuAdapterSummary> {
-        self.adapter.as_ref().map(|adapter| {
-            let info = adapter.get_info();
-            WgpuAdapterSummary::from_parts(
-                &info.name,
-                info.vendor,
-                info.device,
-                device_type_label(info.device_type),
-                backend_label(info.backend),
-                &info.driver,
-                &info.driver_info,
-            )
-        })
+        self.device_owner.adapter_summary()
     }
 
     /// Enables finite GPU completion observations for this backend instance.
@@ -684,7 +552,7 @@ impl WgpuRenderBackend {
     /// reserved for an explicit measurement end boundary so the probe cannot turn normal frame
     /// timing into a CPU/GPU synchronization benchmark.
     pub fn poll_telemetry_completions(&self) -> Result<(), WgpuRenderError> {
-        let Some(device) = self.device.as_ref() else {
+        let Some((device, _)) = self.device_owner.device_queue() else {
             return Ok(());
         };
         device
@@ -703,9 +571,9 @@ impl WgpuRenderBackend {
     /// This is a bounded diagnostic drain for an explicit measurement end boundary. Normal frame
     /// execution must rely on regular queue submission and polling instead of calling it.
     pub fn wait_for_telemetry_completions(&self, timeout: Duration) -> Result<(), WgpuRenderError> {
-        let device = self
-            .device
-            .as_ref()
+        let (device, _) = self
+            .device_owner
+            .device_queue()
             .ok_or(WgpuRenderError::BackendNotReady)?;
         let timeout = timeout.min(TELEMETRY_COMPLETION_WAIT_TIMEOUT);
         if timeout.is_zero() {
@@ -727,9 +595,9 @@ impl WgpuRenderBackend {
 
     pub(super) fn wait_for_editor_idle(&self, timeout: Duration) -> Result<(), WgpuRenderError> {
         self.fail_if_device_lost()?;
-        let queue = self
-            .queue
-            .as_ref()
+        let (_, queue) = self
+            .device_owner
+            .device_queue()
             .ok_or(WgpuRenderError::BackendNotReady)?;
         // Toolkit initialization can leave write_texture/write_buffer transfers pending before
         // any rendered frame. Polling alone does not submit those transfers for completion.
@@ -765,18 +633,11 @@ impl WgpuRenderBackend {
     ) -> Result<(), WgpuRenderError> {
         let window_ids = self.surfaces.keys().copied().collect::<Vec<_>>();
         let retirement_result = self.retire_targets(&window_ids, reason);
-        if let Some(signal) = &self.device_loss_signal {
-            signal.mark_lost();
-        }
+        self.device_owner.invalidate_presentations();
         self.world_canvas.clear();
         self.world_presentation_guard = None;
         self.presented_world = None;
         self.world_presentation_target = None;
-        self.device_loss_signal = None;
-        self.queue = None;
-        self.device = None;
-        self.adapter = None;
-        self.instance = None;
         #[cfg(any(feature = "sprite-submitter", feature = "ui-submitter"))]
         {
             self.quad_texture_bind_group_layout = None;
@@ -787,6 +648,7 @@ impl WgpuRenderBackend {
         #[cfg(feature = "ui-submitter")]
         self.clear_submitted_ui_facts();
         self.presented_frame_this_transaction = None;
+        self.device_owner.clear();
         self.telemetry.retire_device_epoch();
         retirement_result
     }
@@ -815,7 +677,7 @@ impl WgpuRenderBackend {
     ) -> Result<WgpuEditorDeviceNamespace, WgpuRenderError> {
         self.fail_if_device_lost()?;
         self.retire_requested_surfaces()?;
-        if self.state == WgpuBackendState::Unavailable {
+        if self.state() == WgpuBackendState::Unavailable {
             return Err(WgpuRenderError::BackendUnavailable);
         }
         let size = surface_extent(
@@ -838,27 +700,12 @@ impl WgpuRenderBackend {
                 .ok_or(WgpuRenderError::BackendNotReady)?
         };
         let surface_format = self.surface_view_format(window.id)?;
+        let ready = self.device_owner.ready()?;
         Ok(WgpuEditorDeviceNamespace {
-            instance: self
-                .instance
-                .as_ref()
-                .ok_or(WgpuRenderError::BackendNotReady)?
-                .clone(),
-            adapter: self
-                .adapter
-                .as_ref()
-                .ok_or(WgpuRenderError::BackendNotReady)?
-                .clone(),
-            device: self
-                .device
-                .as_ref()
-                .ok_or(WgpuRenderError::BackendNotReady)?
-                .clone(),
-            queue: self
-                .queue
-                .as_ref()
-                .ok_or(WgpuRenderError::BackendNotReady)?
-                .clone(),
+            instance: self.device_owner.instance()?.clone(),
+            adapter: ready.adapter.clone(),
+            device: ready.device.clone(),
+            queue: ready.queue.clone(),
             surface_format,
             surface_extent: size,
             backend_instance_id: self.instance_id(),
@@ -976,12 +823,12 @@ impl WgpuRenderBackend {
         }
         self.frame_transaction_stats.packet_admissions = 1;
         self.fail_if_device_lost()?;
-        status.mark_state(WGPU_RENDER_BACKEND, render_backend_state(self.state));
+        status.mark_state(WGPU_RENDER_BACKEND, render_backend_state(self.state()));
         status.clear_skip();
 
         self.retire_requested_surfaces()?;
 
-        if self.state == WgpuBackendState::Unavailable {
+        if self.state() == WgpuBackendState::Unavailable {
             let message = self
                 .last_error
                 .clone()
@@ -1128,9 +975,7 @@ impl WgpuRenderBackend {
             self.presented_frame_this_transaction = Some(presented);
             self.world_presentation_guard = None;
             if let Some((snapshot, guard)) = world_presentation {
-                if let Some(signal) = &self.device_loss_signal {
-                    signal.retain_presentation(guard.revoker());
-                }
+                self.device_owner.retain_presentation(guard.revoker());
                 guard.mark_presented();
                 self.world_presentation_guard = Some(guard);
                 self.presented_world = Some(snapshot);
@@ -1281,92 +1126,27 @@ impl WgpuRenderBackend {
     }
 
     fn ensure_instance(&mut self) -> Result<(), WgpuRenderError> {
-        if self.state == WgpuBackendState::Unavailable {
-            return Err(WgpuRenderError::BackendUnavailable);
-        }
-        if self.instance.is_none() {
-            self.instance = Some(wgpu::Instance::new(
-                wgpu::InstanceDescriptor::new_without_display_handle_from_env(),
-            ));
-        }
-        Ok(())
+        self.device_owner.ensure_instance()
     }
 
     fn ensure_device(&mut self, window_id: WindowId) -> Result<(), WgpuRenderError> {
-        if self.state == WgpuBackendState::Ready {
-            return Ok(());
-        }
-        if self.state == WgpuBackendState::Unavailable {
+        if self.state() == WgpuBackendState::Unavailable {
             return Err(WgpuRenderError::BackendUnavailable);
         }
-
-        self.state = WgpuBackendState::Initializing;
-        self.ensure_instance()?;
-        let instance = self
-            .instance
-            .as_ref()
-            .ok_or(WgpuRenderError::BackendNotReady)?;
         let surface = self
             .surfaces
             .get(&window_id)
             .ok_or(WgpuRenderError::SurfaceMissing { window_id })?
             .surface(window_id)?;
-        let force_fallback_adapter =
-            force_fallback_adapter_from_environment().map_err(|message| {
-                WgpuRenderError::AdapterUnavailable {
-                    message: message.to_owned(),
-                }
-            })?;
-        let adapter = pollster::block_on(instance.request_adapter(&wgpu::RequestAdapterOptions {
-            compatible_surface: Some(surface),
-            force_fallback_adapter,
-            ..Default::default()
-        }))
-        .map_err(|error| WgpuRenderError::AdapterUnavailable {
-            message: error.to_string(),
-        })?;
-        let (device, queue) =
-            pollster::block_on(adapter.request_device(&wgpu::DeviceDescriptor::default()))
-                .map_err(|error| WgpuRenderError::DeviceUnavailable {
-                    message: error.to_string(),
-                })?;
-        let device_loss_signal = Arc::new(DeviceLossSignal::default());
-        let callback_signal = Arc::clone(&device_loss_signal);
-        device.set_device_lost_callback(move |_reason, _message| callback_signal.mark_lost());
-        let device_epoch = self
-            .device_epoch
-            .checked_add(1)
-            .ok_or(WgpuRenderError::DeviceEpochExhausted)?;
-        self.adapter = Some(adapter);
-        self.device = Some(device);
-        self.queue = Some(queue);
-        self.device_loss_signal = Some(device_loss_signal);
-        self.device_epoch = device_epoch;
-        self.telemetry.begin_device_epoch(device_epoch);
-        self.state = WgpuBackendState::Ready;
-        self.last_error = None;
+        if let Some(epoch) = self.device_owner.acquire(Some(surface))? {
+            self.telemetry.begin_device_epoch(epoch);
+            self.last_error = None;
+        }
         Ok(())
     }
 
     fn fail_if_device_lost(&self) -> Result<(), WgpuRenderError> {
-        // Device loss callbacks are delivered by polling. Observe them before admitting new
-        // allocations, including a destroyed device whose queue has no pending submissions.
-        let polled = self
-            .device
-            .as_ref()
-            .map(|device| device.poll(wgpu::PollType::Poll));
-        if self
-            .device_loss_signal
-            .as_ref()
-            .is_some_and(|signal| signal.is_lost())
-        {
-            Err(WgpuRenderError::DeviceLost)
-        } else {
-            polled
-                .transpose()
-                .map(|_| ())
-                .map_err(|_| WgpuRenderError::TelemetryCompletionPollFailed)
-        }
+        self.device_owner.fail_if_device_lost()
     }
 
     fn retire_requested_surfaces(&mut self) -> Result<(), WgpuRenderError> {
@@ -1424,17 +1204,12 @@ impl WgpuRenderBackend {
         work_started_at: std::time::Instant,
     ) -> Result<Option<WgpuPresentedFrameReceipt>, WgpuRenderError> {
         let backend_instance_id = self.instance_id();
-        let device_epoch = self.device_epoch;
-        let device = self
-            .device
-            .as_ref()
-            .ok_or(WgpuRenderError::BackendNotReady)?
-            .clone();
-        let queue = self
-            .queue
-            .as_ref()
-            .ok_or(WgpuRenderError::BackendNotReady)?
-            .clone();
+        let device_epoch = self.device_epoch();
+        let (device, queue) = self
+            .device_owner
+            .device_queue()
+            .ok_or(WgpuRenderError::BackendNotReady)?;
+        let (device, queue) = (device.clone(), queue.clone());
         let surface_state = self
             .surfaces
             .get_mut(&window_id)
@@ -1462,7 +1237,7 @@ impl WgpuRenderBackend {
                 if let Some(completion) = self.telemetry.begin_frame_submission(
                     app_frame_index,
                     render_transaction_frame_index,
-                    self.device_epoch,
+                    device_epoch,
                     work_started_at,
                 ) {
                     queue.on_submitted_work_done(move || completion.complete());
@@ -1477,7 +1252,7 @@ impl WgpuRenderBackend {
                 if let Some(completion) = self.telemetry.begin_frame_submission(
                     app_frame_index,
                     render_transaction_frame_index,
-                    self.device_epoch,
+                    device_epoch,
                     work_started_at,
                 ) {
                     queue.on_submitted_work_done(move || completion.complete());
@@ -1521,10 +1296,7 @@ impl WgpuRenderBackend {
                 }
                 Err(error) => return Err(error.into()),
             };
-            let instance = self
-                .instance
-                .as_ref()
-                .ok_or(WgpuRenderError::BackendNotReady)?;
+            let instance = self.device_owner.instance()?;
             let (handle_source, target) = binding.into_parts();
             let surface = create_surface(instance, handle_source, window.id)?;
             self.surfaces
@@ -1539,14 +1311,7 @@ impl WgpuRenderBackend {
         window: RenderWindowPacket,
         size: Extent2d,
     ) -> Result<(), WgpuRenderError> {
-        let adapter = self
-            .adapter
-            .as_ref()
-            .ok_or(WgpuRenderError::BackendNotReady)?;
-        let device = self
-            .device
-            .as_ref()
-            .ok_or(WgpuRenderError::BackendNotReady)?;
+        let ready = self.device_owner.ready()?;
         let surface = self
             .surfaces
             .get_mut(&window.id)
@@ -1556,8 +1321,8 @@ impl WgpuRenderBackend {
         if surface.needs_configuration(size, window.present_mode) {
             configure_surface(
                 surface,
-                adapter,
-                device,
+                &ready.adapter,
+                &ready.device,
                 window.id,
                 window.present_mode,
                 size,
@@ -1637,10 +1402,11 @@ impl WgpuRenderBackend {
         let world_format = if let Some(canvas) = packet.world_canvas() {
             prepared.canvas = Some(
                 canvas_cache.prepare(
-                    self.device
-                        .as_ref()
-                        .ok_or(WgpuRenderError::BackendNotReady)?,
-                    self.device_epoch,
+                    self.device_owner
+                        .device_queue()
+                        .ok_or(WgpuRenderError::BackendNotReady)?
+                        .0,
+                    self.device_epoch(),
                     packet.source_generation(),
                     format,
                     canvas,
@@ -1690,20 +1456,14 @@ impl WgpuRenderBackend {
         view: crate::editor_execution::WgpuEditorViewId,
         revoker: nara_render::__private::WorldPresentationRevoker,
     ) -> Result<(), WgpuRenderError> {
-        self.device_loss_signal
-            .as_ref()
-            .ok_or(WgpuRenderError::BackendNotReady)?
-            .retain_editor_presentation(view, revoker);
-        Ok(())
+        self.device_owner.retain_editor_presentation(view, revoker)
     }
 
     pub(super) fn retire_editor_world_presentation(
         &self,
         view: crate::editor_execution::WgpuEditorViewId,
     ) {
-        if let Some(signal) = &self.device_loss_signal {
-            signal.retire_editor_presentation(view);
-        }
+        self.device_owner.retire_editor_presentation(view);
     }
 
     pub(super) fn validate_world_presentation_current<'a>(
@@ -1728,11 +1488,9 @@ impl WgpuRenderBackend {
 
     #[cfg(test)]
     pub(crate) fn with_probe_device(device: wgpu::Device, queue: wgpu::Queue) -> Self {
-        Self {
-            device: Some(device),
-            queue: Some(queue),
-            ..Self::default()
-        }
+        let mut backend = Self::default();
+        backend.device_owner.install_probe_device(device, queue);
+        backend
     }
 
     #[cfg(any(test, not(any(feature = "sprite-submitter", feature = "ui-submitter"))))]
@@ -1803,16 +1561,11 @@ impl WgpuRenderBackend {
             self.ensure_quad_pipeline(*key)?;
         }
         let pipelines = self.quad_pipeline_draw_refs(&pipeline_keys)?;
-        let device = self
-            .device
-            .as_ref()
-            .ok_or(WgpuRenderError::BackendNotReady)?
-            .clone();
-        let queue = self
-            .queue
-            .as_ref()
-            .ok_or(WgpuRenderError::BackendNotReady)?
-            .clone();
+        let (device, queue) = self
+            .device_owner
+            .device_queue()
+            .ok_or(WgpuRenderError::BackendNotReady)?;
+        let (device, queue) = (device.clone(), queue.clone());
         let buffers = create_quad_batch_buffers(
             &device,
             &queue,
@@ -1851,9 +1604,9 @@ impl WgpuRenderBackend {
         if let Some(layout) = &self.quad_texture_bind_group_layout {
             return Ok(layout.clone());
         }
-        let device = self
-            .device
-            .as_ref()
+        let (device, _) = self
+            .device_owner
+            .device_queue()
             .ok_or(WgpuRenderError::BackendNotReady)?;
         let layout = create_quad_texture_bind_group_layout(device)?;
         self.quad_texture_bind_group_layout = Some(layout.clone());
@@ -1867,9 +1620,9 @@ impl WgpuRenderBackend {
         if let Some(layout) = &self.quad_material_bind_group_layout {
             return Ok(layout.clone());
         }
-        let device = self
-            .device
-            .as_ref()
+        let (device, _) = self
+            .device_owner
+            .device_queue()
             .ok_or(WgpuRenderError::BackendNotReady)?;
         let layout = create_material_bind_group_layout(device)?;
         self.quad_material_bind_group_layout = Some(layout.clone());
@@ -1895,9 +1648,9 @@ impl WgpuRenderBackend {
         }
         let texture_layout = self.ensure_quad_texture_bind_group_layout()?;
         let material_layout = self.ensure_quad_material_bind_group_layout()?;
-        let device = self
-            .device
-            .as_ref()
+        let (device, _) = self
+            .device_owner
+            .device_queue()
             .ok_or(WgpuRenderError::BackendNotReady)?;
         #[cfg(test)]
         {
@@ -1956,7 +1709,7 @@ impl WgpuRenderBackend {
         let cleanup_error = self
             .clear_gpu_resources(SurfaceDropReason::SurfaceOrDeviceLost)
             .err();
-        self.state = WgpuBackendState::Unavailable;
+        self.device_owner.mark_unavailable();
         let message = match cleanup_error {
             Some(cleanup_error) => {
                 format!("{error}; device invalidation cleanup failed: {cleanup_error}")
@@ -1965,27 +1718,6 @@ impl WgpuRenderBackend {
         };
         self.last_error = Some(message.clone());
         message
-    }
-}
-
-const fn device_type_label(device_type: wgpu::DeviceType) -> &'static str {
-    match device_type {
-        wgpu::DeviceType::Other => "other",
-        wgpu::DeviceType::IntegratedGpu => "integrated-gpu",
-        wgpu::DeviceType::DiscreteGpu => "discrete-gpu",
-        wgpu::DeviceType::VirtualGpu => "virtual-gpu",
-        wgpu::DeviceType::Cpu => "cpu",
-    }
-}
-
-const fn backend_label(backend: wgpu::Backend) -> &'static str {
-    match backend {
-        wgpu::Backend::Noop => "noop",
-        wgpu::Backend::Vulkan => "vulkan",
-        wgpu::Backend::Metal => "metal",
-        wgpu::Backend::Dx12 => "dx12",
-        wgpu::Backend::Gl => "gl",
-        wgpu::Backend::BrowserWebGpu => "browser-webgpu",
     }
 }
 
@@ -2005,7 +1737,7 @@ mod runtime_measurement;
 
 #[cfg(test)]
 mod tests {
-    use std::{ffi::OsStr, sync::Arc};
+    use std::{num::NonZeroU64, sync::Arc};
 
     use nara_app::{
         App, RuntimeAdmissionReservation, RuntimeCandidateRetirementState, RuntimeClosePolicy,
@@ -2142,9 +1874,9 @@ mod tests {
             .unwrap();
         assert!(backend.quad_pipelines.is_empty());
         render_to_rgba(|device, queue, _, _, _| {
-            backend.device = Some(device.clone());
-            backend.queue = Some(queue.clone());
-            backend.device_epoch += 1;
+            backend
+                .device_owner
+                .install_probe_device(device.clone(), queue.clone());
             for _ in 0..3 {
                 assert!(matches!(
                     backend.ensure_quad_pipeline(bad_key),
@@ -2203,9 +1935,7 @@ mod tests {
                 Err(WgpuRenderError::ContentRejected { .. })
             ));
             assert_eq!(backend.quad_pipeline_attempts, 2);
-            let signal = Arc::new(DeviceLossSignal::default());
-            signal.mark_lost();
-            backend.device_loss_signal = Some(signal);
+            backend.device_owner.mark_probe_lost();
             assert_eq!(
                 backend.ensure_quad_pipeline(key),
                 Err(WgpuRenderError::DeviceLost)
@@ -2216,27 +1946,6 @@ mod tests {
             Ok(())
         })
         .unwrap();
-    }
-
-    #[test]
-    fn fallback_adapter_environment_is_absent_or_explicitly_boolean() {
-        assert_eq!(force_fallback_adapter_from_value(None), Ok(false));
-        assert_eq!(
-            force_fallback_adapter_from_value(Some(OsStr::new("0"))),
-            Ok(false)
-        );
-        assert_eq!(
-            force_fallback_adapter_from_value(Some(OsStr::new("1"))),
-            Ok(true)
-        );
-    }
-
-    #[test]
-    fn fallback_adapter_environment_rejects_ambiguous_values() {
-        assert_eq!(
-            force_fallback_adapter_from_value(Some(OsStr::new("true"))),
-            Err(INVALID_FALLBACK_ADAPTER_ENV)
-        );
     }
 
     #[derive(Debug)]
@@ -2335,7 +2044,7 @@ mod tests {
     fn presented_receipt_is_current_transaction_and_target_scoped() {
         let runtime_generation = test_runtime_generation();
         let (mut backend, _handles) = backend_with_lease_only_surface(WindowId::PRIMARY);
-        backend.device_epoch = 7;
+        backend.device_owner = WgpuDeviceOwner::with_retired_epoch(NonZeroU64::new(7).unwrap());
         let surface_generation = backend
             .surfaces
             .get(&WindowId::PRIMARY)
@@ -2372,7 +2081,7 @@ mod tests {
     #[test]
     fn device_epoch_is_not_rewound_by_gpu_resource_cleanup() {
         let mut backend = WgpuRenderBackend {
-            device_epoch: 7,
+            device_owner: WgpuDeviceOwner::with_retired_epoch(NonZeroU64::new(7).unwrap()),
             ..WgpuRenderBackend::default()
         };
 
@@ -2381,6 +2090,8 @@ mod tests {
             .unwrap();
 
         assert_eq!(backend.device_epoch(), 7);
+        assert_eq!(backend.state(), WgpuBackendState::Uninitialized);
+        assert!(backend.device_owner.ready().is_err());
     }
 
     #[test]
@@ -2582,10 +2293,8 @@ mod tests {
 
         let predecessor_namespace;
         {
-            let mut predecessor = WgpuRenderBackend {
-                device_epoch: 1,
-                ..WgpuRenderBackend::default()
-            };
+            let mut predecessor =
+                WgpuRenderBackend::with_probe_device(device.clone(), queue.clone());
             let _binding = predecessor
                 .quad_textures
                 .bind_group(
@@ -2611,10 +2320,7 @@ mod tests {
 
         // The test-owned Device is deliberately shared. Runtime-local backend identity and cache
         // ownership must remain fresh even when a process parent outlives the predecessor.
-        let replacement = WgpuRenderBackend {
-            device_epoch: 1,
-            ..WgpuRenderBackend::default()
-        };
+        let replacement = WgpuRenderBackend::with_probe_device(device.clone(), queue.clone());
         let replacement_namespace = (replacement.instance_id(), replacement.device_epoch());
         assert_ne!(replacement_namespace, predecessor_namespace);
         assert_eq!(
@@ -2640,7 +2346,6 @@ mod tests {
         };
         let (_, (mut backend, old_binding)) = render_to_rgba(|device, queue, _, _, _| {
             let mut backend = WgpuRenderBackend::with_probe_device(device.clone(), queue.clone());
-            backend.device_epoch = 1;
             let layout = backend.ensure_quad_texture_bind_group_layout()?;
             let binding = backend
                 .quad_textures
@@ -2668,9 +2373,9 @@ mod tests {
                 ..Default::default()
             },
             |device, queue, _, _, _| {
-                backend.device = Some(device.clone());
-                backend.queue = Some(queue.clone());
-                backend.device_epoch += 1;
+                backend
+                    .device_owner
+                    .install_probe_device(device.clone(), queue.clone());
                 let layout = backend.ensure_quad_texture_bind_group_layout()?;
                 let error = backend
                     .quad_textures
@@ -2861,9 +2566,9 @@ mod tests {
         assert_eq!(backend.surface_count(), 1);
         assert_eq!(backend.state(), WgpuBackendState::Uninitialized);
         assert_eq!(backend.last_error(), None);
-        assert!(backend.instance.is_none());
-        assert!(backend.adapter.is_none());
-        assert!(backend.device.is_none());
+        assert!(backend.device_owner.instance().is_err());
+        assert!(backend.device_owner.ready().is_err());
+        assert!(backend.device_owner.device_queue().is_none());
         let snapshot = handles.snapshot(WindowId::PRIMARY).unwrap();
         assert!(snapshot.surface_active);
         assert_eq!(snapshot.surface_generation, surface_generation);
@@ -2887,10 +2592,8 @@ mod tests {
 
     #[test]
     fn device_loss_remains_rejected_until_the_owner_is_retired() {
-        let signal = Arc::new(DeviceLossSignal::default());
-        signal.mark_lost();
         let backend = WgpuRenderBackend {
-            device_loss_signal: Some(signal),
+            device_owner: WgpuDeviceOwner::with_loss_observation(),
             ..WgpuRenderBackend::default()
         };
         assert!(matches!(
@@ -2904,85 +2607,9 @@ mod tests {
     }
 
     #[test]
-    fn device_loss_revokes_runtime_and_editor_world_before_render_or_registration() {
-        use nara_ecs::{World, bevy_ecs::system::SystemState};
-        use nara_render::{
-            __private::prepare_world_presentation, ViewLoadOp, ViewMapping2d, WorldPointer,
-        };
-
-        for (editor, lost_before_registration) in
-            [(false, false), (false, true), (true, false), (true, true)]
-        {
-            let mut world = World::new();
-            let window = Window {
-                resolution: nara_window::WindowResolution::new(64, 64),
-                ..Default::default()
-            };
-            world.spawn(window.clone());
-            let camera = world.spawn_empty().id();
-            let viewport = ViewportRect::new(0, 0, 64, 64).unwrap();
-            let mut views = ExtractedViews::default();
-            views.push(ExtractedView {
-                camera_entity: camera,
-                target: RenderTarget::Window(window.id),
-                viewport,
-                mapping: ViewMapping2d::orthographic(nara_core::Mat3::IDENTITY, 64.0, viewport)
-                    .unwrap(),
-                order: 0,
-                load: ViewLoadOp::Clear(Color::BLACK),
-            });
-            let generation = test_runtime_generation();
-            let packet =
-                build_render_frame_packet(generation, 1, Some(window.id), [&window], &views)
-                    .unwrap()
-                    .unwrap();
-            world.insert_resource(generation);
-            let (frame, guard) = prepare_world_presentation(&packet).unwrap();
-            let signal = DeviceLossSignal::default();
-            if lost_before_registration {
-                signal.mark_lost();
-            }
-            let view = crate::editor_execution::WgpuEditorViewId::new(1);
-            if editor {
-                signal.retain_editor_presentation(view, guard.revoker());
-            } else {
-                signal.retain_presentation(guard.revoker());
-            }
-            guard.mark_presented();
-            world.insert_resource(frame);
-            let mut parameter = SystemState::<WorldPointer>::new(&mut world);
-            let point = nara_core::Vec2::splat(32.0);
-            if !lost_before_registration {
-                assert!(
-                    parameter
-                        .get(&world)
-                        .unwrap()
-                        .window_to_world(camera, point)
-                        .is_some()
-                );
-                signal.mark_lost();
-            }
-            // No backend Render invocation or device polling is needed to revoke gameplay input.
-            assert!(signal.is_lost());
-            assert!(
-                parameter
-                    .get(&world)
-                    .unwrap()
-                    .window_to_world(camera, point)
-                    .is_none()
-            );
-            signal.retire_editor_presentation(view);
-            assert!(signal.presentations.lock().unwrap().editor.is_empty());
-        }
-    }
-
-    #[test]
     fn device_loss_invalidates_surfaces_without_releasing_window_authority() {
         let (mut backend, handles) = backend_with_lease_only_surface(WindowId::PRIMARY);
-        let signal = Arc::new(DeviceLossSignal::default());
-        backend.state = WgpuBackendState::Ready;
-        backend.device_loss_signal = Some(Arc::clone(&signal));
-        signal.mark_lost();
+        backend.device_owner = WgpuDeviceOwner::with_loss_observation();
 
         let error = backend.fail_if_device_lost().unwrap_err();
         backend.mark_error(&error);
@@ -2995,7 +2622,8 @@ mod tests {
         assert_eq!(backend.state(), WgpuBackendState::Unavailable);
         assert_eq!(backend.surface_count(), 0);
         assert_eq!(backend.last_error(), Some("wgpu device was lost"));
-        assert!(backend.device_loss_signal.is_none());
+        assert_eq!(backend.fail_if_device_lost(), Ok(()));
+        assert!(backend.device_owner.device_queue().is_none());
     }
 
     #[test]
@@ -3007,12 +2635,8 @@ mod tests {
                 WindowHandleProvider::new(Arc::new(TestWindowSource)),
             )
             .unwrap();
-        let mut backend = WgpuRenderBackend {
-            instance: Some(wgpu::Instance::new(
-                wgpu::InstanceDescriptor::new_without_display_handle_from_env(),
-            )),
-            ..WgpuRenderBackend::default()
-        };
+        let mut backend = WgpuRenderBackend::default();
+        backend.ensure_instance().unwrap();
 
         assert!(matches!(
             backend.create_surface_if_missing(
@@ -3078,30 +2702,26 @@ mod tests {
 
     #[test]
     fn backend_error_cleanup_discards_partial_instance_initialization() {
-        let mut backend = WgpuRenderBackend {
-            state: WgpuBackendState::Initializing,
-            instance: Some(wgpu::Instance::new(
-                wgpu::InstanceDescriptor::new_without_display_handle_from_env(),
-            )),
-            ..WgpuRenderBackend::default()
-        };
+        let mut backend = WgpuRenderBackend::default();
+        backend.ensure_instance().unwrap();
+        assert!(backend.device_owner.instance().is_ok());
+        assert!(backend.device_owner.ready().is_err());
 
         backend.mark_error(&WgpuRenderError::BackendNotReady);
 
         assert_eq!(backend.state(), WgpuBackendState::Unavailable);
-        assert!(backend.instance.is_none());
-        assert!(backend.adapter.is_none());
-        assert!(backend.device.is_none());
-        assert!(backend.queue.is_none());
+        assert!(backend.device_owner.instance().is_err());
+        assert!(backend.device_owner.ready().is_err());
+        assert!(backend.device_owner.device_queue().is_none());
     }
 
     #[test]
     fn unavailable_backend_does_not_reenter_device_initialization() {
         let mut backend = WgpuRenderBackend {
-            state: WgpuBackendState::Unavailable,
             last_error: Some("device lost".to_owned()),
             ..WgpuRenderBackend::default()
         };
+        backend.device_owner.mark_unavailable();
 
         assert_eq!(
             backend.ensure_device(WindowId::PRIMARY),
@@ -3109,21 +2729,20 @@ mod tests {
         );
         assert_eq!(backend.state(), WgpuBackendState::Unavailable);
         assert_eq!(backend.last_error(), Some("device lost"));
-        assert!(backend.instance.is_none());
-        assert!(backend.adapter.is_none());
-        assert!(backend.device.is_none());
-        assert!(backend.queue.is_none());
+        assert!(backend.device_owner.instance().is_err());
+        assert!(backend.device_owner.ready().is_err());
+        assert!(backend.device_owner.device_queue().is_none());
     }
 
     #[test]
     fn unavailable_backend_rejects_an_admitted_frame() {
         let generation = test_runtime_generation();
         let mut backend = WgpuRenderBackend {
-            state: WgpuBackendState::Unavailable,
             source_generation: Some(generation.into()),
             last_error: Some("device lost".to_owned()),
             ..WgpuRenderBackend::default()
         };
+        backend.device_owner.mark_unavailable();
 
         assert_eq!(
             render_packet_without_surface(&mut backend, test_packet(generation, 1)),

@@ -2,7 +2,7 @@
 
 **Status**: Accepted
 **Date**: 2026-07-11
-**Last Revised**: 2026-10-25 (retained native graphics retirement)
+**Last Revised**: 2026-10-31 (coherent device-domain ownership)
 **Refines**: [ADR 0012](0012-render-crate-boundaries.md),
 [ADR 0032](0032-render-backend-integration-boundary.md),
 [ADR 0040](0040-render-resource-lifetime-and-submitter-ownership.md), and
@@ -70,6 +70,17 @@ flowchart LR
 
 - Exactly one execution authority owns each live wgpu instance/device domain, surface set, physical
   cache set, queue-submission order, and device epoch.
+- Ready owns one complete Adapter/Device/Queue/loss-observation aggregate. An Instance may exist
+  before device creation for initial surface compatibility. Independent optional native fields
+  must not describe a partially Ready device. The non-reused owner identity and monotonically
+  consumed epoch outlive retired device objects; cleanup cannot reset either identity axis.
+  Native object IDs/equality are not this namespace: independent native contexts may reuse their
+  object IDs. Cross-generation admission uses the issued Host identity and epoch.
+- Device initialization accepts an explicitly surface-less native request as well as an initial
+  compatible surface. A later target must fit the selected adapter/device or return an explicit
+  refusal/reconstruction requirement. It cannot silently replace a healthy device domain. The
+  [production ownership design](../render-host-ownership-design.md) orders this internal change
+  before complete runner-local/offscreen consumer qualification; the design is not that evidence.
 - Ordinary plugins and render domains cannot acquire Device/Queue, target, submission,
   presentation, recovery, or placement authority. Future exact-GPU and replacement-Host roles are
   separate ADR 0094 admission questions rather than part of this contract.

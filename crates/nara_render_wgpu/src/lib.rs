@@ -8,6 +8,7 @@ mod backend;
 #[cfg(any(feature = "sprite-submitter", feature = "ui-submitter"))]
 mod budget;
 mod canvas;
+mod device;
 mod editor_execution;
 mod error;
 mod frame;

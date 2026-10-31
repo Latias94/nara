@@ -4,6 +4,7 @@ use super::*;
 use std::{
     fs::File,
     io::{BufWriter, Write},
+    sync::Arc,
     time::Instant,
 };
 
@@ -270,7 +271,6 @@ fn tilemap_and_changing_hud_costs() {
             };
             let mut runtime = runtime(population, changing);
             let mut backend = WgpuRenderBackend::with_probe_device(device.clone(), queue.clone());
-            backend.device_epoch = 1;
             backend.configure_telemetry(WgpuBackendTelemetryConfig::new(8, 32).unwrap());
             backend.telemetry.begin_device_epoch(1);
             let mut planner = UiPresentationPlanner::default();
