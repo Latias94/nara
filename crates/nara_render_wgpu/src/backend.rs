@@ -1,17 +1,19 @@
-use std::{collections::BTreeMap, sync::Arc, time::Duration};
+use std::{
+    collections::BTreeMap,
+    sync::Arc,
+    time::{Duration, Instant},
+};
 
+#[cfg(test)]
 use nara_app::RuntimeGeneration;
 #[cfg(all(test, any(feature = "sprite-submitter", feature = "ui-submitter")))]
 use nara_material::AlphaMode2d;
 #[cfg(test)]
-use nara_render::Color;
-#[cfg(any(test, not(any(feature = "sprite-submitter", feature = "ui-submitter"))))]
-use nara_render::RenderTarget;
 use nara_render::{
-    Extent2d, FrameStats, RenderBackendState, RenderBackendStatus, RenderFrame,
-    RenderFrameSkipReason, RenderFrameSourceGeneration, RenderFrameTarget, RenderWindowPacket,
-    ViewportRect,
+    Color, FrameStats, RenderBackendStatus, RenderFrame, RenderFrameSkipReason,
+    RenderFrameSourceGeneration, RenderFrameTarget, RenderTarget, ViewportRect,
 };
+use nara_render::{Extent2d, RenderBackendState, RenderWindowPacket};
 #[cfg(feature = "ui-submitter")]
 use nara_ui_render::{
     UiBackendSubmissionIdentity, UiPaintPacketIdentity, UiPresentationBackendGeneration,
@@ -21,7 +23,9 @@ use nara_window::{
     backend::{BackendWindowHandles, WindowTargetError},
 };
 
+use crate::WgpuRenderError;
 use crate::device::WgpuDeviceOwner;
+#[cfg(test)]
 use crate::frame::{WgpuCapturedFrame, WgpuFramePayload};
 use crate::presented::WgpuPresentedFrameReceipt;
 #[cfg(all(test, any(feature = "sprite-submitter", feature = "ui-submitter")))]
@@ -29,8 +33,7 @@ use crate::quad::create_quad_texture_bind_group_layout;
 #[cfg(any(feature = "sprite-submitter", feature = "ui-submitter"))]
 use crate::stock_quad::StockQuadResources;
 use crate::surface::{
-    SurfaceDropReason, WgpuConfiguredPresentMode, WgpuSurfaceState, configure_surface,
-    create_surface, surface_extent,
+    SurfaceDropReason, WgpuSurfaceState, configure_surface, create_surface, surface_extent,
 };
 use crate::telemetry::{
     WgpuAdapterSummary, WgpuBackendTelemetry, WgpuBackendTelemetryConfig,
@@ -38,9 +41,9 @@ use crate::telemetry::{
 };
 #[cfg(all(test, any(feature = "sprite-submitter", feature = "ui-submitter")))]
 use crate::texture::WgpuSpriteTextureCache;
+#[cfg(test)]
 use crate::{
-    PreparedSubmitterDraw, PreparedTargetDraw, WGPU_RENDER_BACKEND, WgpuRenderError,
-    render_acquired_texture,
+    PreparedSubmitterDraw, PreparedTargetDraw, WGPU_RENDER_BACKEND, render_acquired_texture,
 };
 
 const TELEMETRY_COMPLETION_WAIT_TIMEOUT: Duration = Duration::from_secs(5);
@@ -143,6 +146,10 @@ impl WgpuSubmittedFrameFacts {
 
 #[cfg(feature = "ui-submitter")]
 impl WgpuSubmittedUiFacts {
+    pub(crate) fn set_resource_bytes(&mut self, texture_bytes: u64, instance_buffer_bytes: u64) {
+        self.submitted_texture_bytes = texture_bytes;
+        self.submitted_instance_buffer_bytes = instance_buffer_bytes;
+    }
     #[must_use]
     pub const fn submission(self) -> UiBackendSubmissionIdentity {
         self.submission
@@ -344,14 +351,21 @@ impl WgpuFrameTransactionStats {
 
 /// Concrete GPU execution owner. Runners and Editor Hosts retain it outside gameplay World.
 #[derive(Debug, Default)]
-pub struct WgpuRenderBackend {
+pub(crate) struct WgpuRenderBackend {
     // Rust drops fields in declaration order. Retire surfaces while their GPU owners are live.
     surfaces: BTreeMap<WindowId, WgpuSurfaceState>,
+    // Private legacy oracle state. Production Canvas and presentation custody belong to the Host.
+    #[cfg(test)]
     world_canvas: crate::canvas::WorldCanvasCache,
+    #[cfg(test)]
     world_presentation_guard: Option<nara_render::__private::WorldPresentationGuard>,
+    #[cfg(test)]
     presented_world: Option<nara_render::__private::PresentedWorldFrame>,
+    #[cfg(test)]
     world_presentation_target: Option<(RenderWindowPacket, Option<nara_render::WorldCanvasFrame>)>,
+    #[cfg(test)]
     source_generation: Option<RenderFrameSourceGeneration>,
+    #[cfg(test)]
     last_frame_index: Option<u64>,
     frame_transaction_stats: WgpuFrameTransactionStats,
     presented_frame_this_transaction: Option<WgpuPresentedFrameReceipt>,
@@ -365,6 +379,8 @@ pub struct WgpuRenderBackend {
     runtime_close_started: bool,
     runtime_retirement: Option<crate::retirement::WgpuGpuRetirement>,
     resource_budget: Arc<crate::output::OutputBudget>,
+    // Private legacy oracle prefixes; production submitted custody belongs to the Host.
+    #[cfg(test)]
     resource_prefixes: Vec<crate::WgpuSubmissionPrefix>,
     // Keep the device domain alive through surface/cache field destruction on direct Drop too.
     device_owner: WgpuDeviceOwner,
@@ -393,12 +409,14 @@ impl WgpuRenderBackend {
         &self.resource_budget
     }
 
+    #[cfg(test)]
     fn retain_resource_prefix(&mut self, prefix: crate::WgpuSubmissionPrefix) {
         self.resource_prefixes
             .retain(|prefix| !prefix.is_complete());
         self.resource_prefixes.push(prefix);
     }
 
+    #[cfg(test)]
     fn maintain_resource_prefixes(&mut self) -> Result<(), WgpuRenderError> {
         for prefix in &self.resource_prefixes {
             let result = if prefix.callback_abandoned() {
@@ -442,9 +460,12 @@ impl WgpuRenderBackend {
                 return Ok(false);
             }
         }
-        self.maintain_resource_prefixes()?;
-        if !self.resource_prefixes.is_empty() {
-            return Ok(false);
+        #[cfg(test)]
+        {
+            self.maintain_resource_prefixes()?;
+            if !self.resource_prefixes.is_empty() {
+                return Ok(false);
+            }
         }
         self.retire_targets(window_ids, SurfaceDropReason::TargetShutdown)?;
         self.clear_gpu_resources(SurfaceDropReason::BackendCleanup)?;
@@ -465,6 +486,7 @@ impl WgpuRenderBackend {
         self.device_owner.state()
     }
 
+    #[cfg(test)]
     #[must_use]
     pub fn last_error(&self) -> Option<&str> {
         self.last_error.as_deref()
@@ -481,27 +503,6 @@ impl WgpuRenderBackend {
             .get(&window_id)
             .filter(|surface| surface.config.is_some())
             .map(|surface| surface.size)
-    }
-
-    /// Last requested mode accepted by surface configuration, independently of its selected fallback.
-    #[must_use]
-    pub fn requested_surface_present_mode(
-        &self,
-        window_id: WindowId,
-    ) -> Option<nara_window::PresentMode> {
-        self.surfaces.get(&window_id)?.requested_present_mode
-    }
-
-    #[must_use]
-    pub fn configured_surface_present_mode(
-        &self,
-        window_id: WindowId,
-    ) -> Option<WgpuConfiguredPresentMode> {
-        self.surfaces
-            .get(&window_id)?
-            .config
-            .as_ref()
-            .map(|config| WgpuConfiguredPresentMode::from_wgpu(config.present_mode))
     }
 
     #[must_use]
@@ -680,7 +681,10 @@ impl WgpuRenderBackend {
             self.stock_quad.reset_instance_budget();
         }
         self.presented_frame_this_transaction = None;
-        self.presented_world = None;
+        #[cfg(test)]
+        {
+            self.presented_world = None;
+        }
         #[cfg(feature = "ui-submitter")]
         self.clear_submitted_ui_facts();
     }
@@ -697,10 +701,13 @@ impl WgpuRenderBackend {
         let window_ids = self.surfaces.keys().copied().collect::<Vec<_>>();
         let retirement_result = self.retire_targets(&window_ids, reason);
         self.device_owner.invalidate_presentations();
-        self.world_canvas.clear();
-        self.world_presentation_guard = None;
-        self.presented_world = None;
-        self.world_presentation_target = None;
+        #[cfg(test)]
+        {
+            self.world_canvas.clear();
+            self.world_presentation_guard = None;
+            self.presented_world = None;
+            self.world_presentation_target = None;
+        }
         #[cfg(any(feature = "sprite-submitter", feature = "ui-submitter"))]
         {
             self.stock_quad.clear();
@@ -718,13 +725,7 @@ impl WgpuRenderBackend {
         self.submitted_ui_facts.clear();
     }
 
-    #[cfg(any(feature = "sprite-submitter", feature = "ui-submitter"))]
-    #[must_use]
-    pub fn texture_count(&self) -> usize {
-        self.stock_quad.texture_count()
-    }
-
-    #[cfg(any(feature = "sprite-submitter", feature = "ui-submitter"))]
+    #[cfg(all(test, any(feature = "sprite-submitter", feature = "ui-submitter")))]
     #[must_use]
     pub fn texture_stats(&self) -> crate::WgpuRenderTextureCacheStats {
         self.stock_quad.texture_stats()
@@ -880,6 +881,8 @@ impl WgpuRenderBackend {
         }
     }
 
+    /// Private legacy Runtime transaction oracle for packet admission and custody tests.
+    #[cfg(test)]
     pub(super) fn render_packet(
         &mut self,
         handles: Option<&BackendWindowHandles>,
@@ -1187,6 +1190,7 @@ impl WgpuRenderBackend {
         self.submitted_ui_facts = facts;
     }
 
+    #[cfg(test)]
     pub(super) fn admit_packet(
         &mut self,
         generation: RenderFrameSourceGeneration,
@@ -1228,6 +1232,63 @@ impl WgpuRenderBackend {
             .frame_transaction_stats
             .queue_submissions
             .saturating_add(1);
+    }
+
+    pub(crate) fn record_runtime_packet_admission(&mut self) {
+        self.frame_transaction_stats.packet_admissions = self
+            .frame_transaction_stats
+            .packet_admissions
+            .saturating_add(1);
+    }
+
+    pub(crate) fn record_runtime_program_submission(&mut self) {
+        self.frame_transaction_stats.queue_submissions = self
+            .frame_transaction_stats
+            .queue_submissions
+            .saturating_add(1);
+    }
+
+    /// Publishes an actual Runtime surface present after program submission was counted.
+    pub(crate) fn commit_runtime_presentation(&mut self, receipt: WgpuPresentedFrameReceipt) {
+        self.presented_frame_this_transaction = Some(receipt);
+        self.frame_transaction_stats.presents =
+            self.frame_transaction_stats.presents.saturating_add(1);
+    }
+
+    #[cfg(feature = "ui-submitter")]
+    pub(crate) fn record_runtime_ui_payload(&mut self, facts: crate::frame::WgpuUiPayloadFacts) {
+        self.frame_transaction_stats.record_ui_payload(facts);
+    }
+
+    /// Tracks already submitted work on the original queue without submitting or counting again.
+    pub(crate) fn track_runtime_submission(
+        &self,
+        app_frame_index: u64,
+        render_transaction_frame_index: u64,
+        work_started_at: Instant,
+    ) -> Result<(), WgpuRenderError> {
+        let (_, queue) = self
+            .device_owner
+            .device_queue()
+            .ok_or(WgpuRenderError::BackendNotReady)?;
+        if let Some(completion) = self.telemetry.begin_frame_submission(
+            app_frame_index,
+            render_transaction_frame_index,
+            self.device_epoch(),
+            work_started_at,
+        ) {
+            queue.on_submitted_work_done(move || completion.complete());
+        }
+        Ok(())
+    }
+
+    pub(crate) fn observe_program_resources(&self, texture_bytes: u64, instance_buffer_bytes: u64) {
+        self.telemetry
+            .observe_gpu_resources(texture_bytes, instance_buffer_bytes);
+    }
+
+    pub(crate) fn finish_program_resources(&self) {
+        self.telemetry.finish_prepared_gpu_resources();
     }
 
     #[cfg(any(feature = "sprite-submitter", feature = "ui-submitter"))]
@@ -1323,10 +1384,13 @@ impl WgpuRenderBackend {
         window_id: WindowId,
         reason: SurfaceDropReason,
     ) -> Result<(), WgpuRenderError> {
-        self.world_canvas.clear();
-        self.world_presentation_guard = None;
-        self.presented_world = None;
-        self.world_presentation_target = None;
+        #[cfg(test)]
+        {
+            self.world_canvas.clear();
+            self.world_presentation_guard = None;
+            self.presented_world = None;
+            self.world_presentation_target = None;
+        }
         if self
             .presented_frame_this_transaction
             .is_some_and(|receipt| receipt.window_id() == window_id)
@@ -1339,6 +1403,8 @@ impl WgpuRenderBackend {
         surface.retire(reason)
     }
 
+    /// Private legacy surface oracle reached only through the test-only packet executor.
+    #[cfg(test)]
     fn render_window(
         &mut self,
         window_id: WindowId,
@@ -1491,6 +1557,8 @@ impl WgpuRenderBackend {
         Ok(config.format.add_srgb_suffix())
     }
 
+    /// Private legacy draw oracle for native readback, Canvas and resource-budget comparisons.
+    #[cfg(test)]
     pub(super) fn prepare_target_draw(
         &mut self,
         format: wgpu::TextureFormat,
@@ -1512,6 +1580,7 @@ impl WgpuRenderBackend {
         result
     }
 
+    #[cfg(test)]
     pub(super) fn prepare_target_draw_with_canvas_cache(
         &mut self,
         format: wgpu::TextureFormat,
@@ -1631,12 +1700,6 @@ impl WgpuRenderBackend {
         Ok(prepared)
     }
 
-    pub(super) fn take_presented_world(
-        &mut self,
-    ) -> Option<nara_render::__private::PresentedWorldFrame> {
-        self.presented_world.take()
-    }
-
     pub(super) fn retain_editor_world_presentation(
         &self,
         view: crate::host::WgpuRenderProducerId,
@@ -1649,26 +1712,6 @@ impl WgpuRenderBackend {
         self.device_owner.retire_editor_presentation(view);
     }
 
-    pub(super) fn validate_world_presentation_current(
-        &mut self,
-        current: Option<RenderWindowPacket>,
-        canvas: Option<nara_render::WorldCanvas>,
-    ) {
-        let Some((presented, captured_canvas)) = self.world_presentation_target else {
-            return;
-        };
-        let captured_canvas = captured_canvas.map(|frame| (frame.extent(), frame.bar_color()));
-        let current_canvas = canvas.map(|canvas| (canvas.extent(), canvas.bar_color()));
-        if current.is_none_or(|window| {
-            window.id != presented.id || window.resolution != presented.resolution
-        }) || captured_canvas != current_canvas
-        {
-            self.world_presentation_guard = None;
-            self.world_presentation_target = None;
-            self.presented_world = None;
-        }
-    }
-
     #[cfg(test)]
     pub(crate) fn with_probe_device(device: wgpu::Device, queue: wgpu::Queue) -> Self {
         let mut backend = Self::default();
@@ -1676,7 +1719,7 @@ impl WgpuRenderBackend {
         backend
     }
 
-    #[cfg(any(test, not(any(feature = "sprite-submitter", feature = "ui-submitter"))))]
+    #[cfg(test)]
     pub(super) fn prepare_submitter_draw(
         &mut self,
         view_format: wgpu::TextureFormat,
@@ -1707,7 +1750,7 @@ impl WgpuRenderBackend {
         }
     }
 
-    #[cfg(any(feature = "sprite-submitter", feature = "ui-submitter"))]
+    #[cfg(all(test, any(feature = "sprite-submitter", feature = "ui-submitter")))]
     fn prepare_submitter_draw_lowered(
         &mut self,
         view_format: wgpu::TextureFormat,
@@ -1725,12 +1768,14 @@ impl WgpuRenderBackend {
         )
     }
 
-    fn logical_texture_bytes(&self) -> u64 {
+    pub(crate) fn logical_texture_bytes(&self) -> u64 {
         #[cfg(any(feature = "sprite-submitter", feature = "ui-submitter"))]
         let images = self.stock_quad.logical_texture_bytes();
         #[cfg(not(any(feature = "sprite-submitter", feature = "ui-submitter")))]
         let images: u64 = 0;
-        images.saturating_add(self.world_canvas.logical_bytes())
+        #[cfg(test)]
+        let images = images.saturating_add(self.world_canvas.logical_bytes());
+        images
     }
 
     pub(super) fn mark_error(&mut self, error: &WgpuRenderError) -> String {

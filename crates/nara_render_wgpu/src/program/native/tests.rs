@@ -427,6 +427,8 @@ fn native_host_local_binding_validates_provenance_and_reuses_exact_storage() {
         #[cfg(any(feature = "sprite-submitter", feature = "ui-submitter"))]
         &mut stock,
         Some(&target),
+        NativePreparationCost::default(),
+        |_, _, _| Ok(()),
     )
     .unwrap();
     assert!(Arc::ptr_eq(&encoded.resources[0], &target.storage));
@@ -466,4 +468,60 @@ fn finite_native_vectors_reject_capacity_overflow_before_allocating() {
         reserved::<ProgramOperationReport>(usize::MAX),
         Err(WgpuRenderProgramError::ResourceCapacity)
     ));
+}
+
+#[test]
+#[ignore = "requires an explicitly selected native GPU; acquisition failure is a failed prerequisite"]
+fn native_final_consumer_cost_rejects_before_allocation_or_finalization() {
+    let mut backend = crate::WgpuRenderBackend::default();
+    let namespace = backend.prepare_image_device().unwrap();
+    let source = nara_render::RenderFrameSourceGeneration::try_acquire().unwrap();
+    let producer = WgpuRenderProducerId::new(1);
+    let mut builder =
+        super::super::WgpuRenderProgramBuilder::new(source, 1, GraphLimits::default()).unwrap();
+    let output = builder.buffer::<Values>(buffer_descriptor(16)).unwrap();
+    builder
+        .initialize(1, &[output.zero(AccessRole::StorageWrite)])
+        .unwrap();
+    let program = builder.finish(&[output.output()]).unwrap();
+    for (cost, expected) in [
+        (
+            NativePreparationCost::new(0, program.0.max_modeled_metadata_bytes),
+            crate::LimitKind::MetadataBytes,
+        ),
+        (
+            NativePreparationCost::new(crate::submission::MAX_SUBMISSION_RESOURCES, 0),
+            crate::LimitKind::SubmissionResources,
+        ),
+    ] {
+        let budget = Arc::new(OutputBudget::new(16));
+        let mut states = NativeFeatureStates::default();
+        let mut attempt = FeaturePreparationAttempt::default();
+        let mut reservation =
+            WgpuSubmissionReservation::new(&namespace.device, &namespace.queue, ());
+        #[cfg(any(feature = "sprite-submitter", feature = "ui-submitter"))]
+        let mut stock = crate::stock_quad::StockQuadResources::default();
+        let result = prepare_and_encode(
+            &program,
+            &namespace,
+            producer,
+            &mut states,
+            &budget,
+            &mut reservation,
+            &mut attempt,
+            1,
+            #[cfg(any(feature = "sprite-submitter", feature = "ui-submitter"))]
+            &mut stock,
+            None,
+            cost,
+            |_, _, _| panic!("a refused final consumer cannot execute"),
+        );
+        assert!(matches!(
+            result,
+            Err(WgpuRenderProgramError::Graph(GraphError::LimitExceeded(actual)))
+                if actual == expected
+        ));
+        assert!(!attempt.native_started);
+        assert_eq!(budget.retained(), 0);
+    }
 }

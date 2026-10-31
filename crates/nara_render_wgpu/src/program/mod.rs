@@ -25,8 +25,8 @@ use feature::{CapturedOperation, FeatureInstanceIdentity, OperationReport};
 pub use feature::{
     WgpuFeatureDefinition, WgpuFeatureInstance, WgpuNativeResources, WgpuRenderFeature,
 };
-pub(crate) use native::FeaturePreparationAttempt;
 pub(crate) use native::prepare_and_encode;
+pub(crate) use native::{FeaturePreparationAttempt, NativePreparationCost};
 pub use native::{
     WgpuFeatureEncodeContext, WgpuFeaturePreflightContext, WgpuFeaturePrepareContext,
     WgpuOperationResources,

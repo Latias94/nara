@@ -8,7 +8,7 @@ whole workload through public APIs without a World, Runtime, window or private e
 
 This guide covers the bounded prerequisite admitted by
 [ADR0094](../architecture/adr/0094-minimal-render-execution-boundary-and-evidence-gated-extensions.md#finite-captured-wgpu-programs).
-Stock Runtime/Editor migration, alternate policy, history and complete custom-drawn Editor
+Typed policy capture installation, alternate policy, history and complete custom-drawn Editor
 composition remain work in the [render unit](../plans/2026-10-31-render-composition-and-host-execution-plan.md).
 
 ## Definitions, Instances And Captures
@@ -66,9 +66,10 @@ Complete main/material Image demand and known automatic custody/engine records a
 native work. The shared stock cost calculation also serves existing Runtime/Editor consumers
 during policy migration. Arbitrary external extra retention remains fallible dynamic work.
 
-Stock image execution for Scene, authoring Canvas, embedded Game and independent image consumers
-uses that same native program transaction. Ordered world Views share one Sprite writer. A fixed
-WorldCanvas uses declared world/physical-resolution textures and the original nearest composite;
+Stock execution for ordinary Runtime windows, Scene, authoring Canvas, embedded Game and
+independent image consumers uses that same native program transaction. Ordered world Views share
+one Sprite writer. A fixed WorldCanvas uses declared world/physical-resolution textures and the
+original nearest composite;
 UI then writes a distinct final version at physical resolution. Its automatic mapping custody and
 engine metadata join preflight even without Sprite/UI support. Current Canvas destination scope
 is RGBA8/BGRA8 in linear or sRGB formats, preserving its declared alpha interpretation.
@@ -76,8 +77,16 @@ is RGBA8/BGRA8 in linear or sRGB formats, preserving its declared alpha interpre
 The Host may bind already-reserved target storage as a private local output. It still needs its
 normal writer and initialization; it grants no public raw initialized import. A pure preflight
 refusal preserves that reservation. Later outputs allocate after preflight and image receipts
-share the actual program storage guard. Runtime/window capture and general policy installation
+share the actual program storage guard. Typed policy capture and general policy installation
 remain the following migration work; the existing stock facade names are not a new policy API.
+
+For an ordinary Runtime window, the acquired surface is the Host's final consumer of the exact
+physical-resolution program image. It joins the same encoder and native submission. Output
+admission, actual surface present, original UI completion and physical GPU completion remain
+separate observations. World-picking permission belongs to its producer and target lifetime.
+Presenting in another window cannot replace it; a successful successor in the same physical window
+revokes the displaced frame. Producer Drop revokes permission before returning. The managed Runtime owns capture identity,
+while the Host clock only ages its private caches.
 
 Both `create_state` and `prepare` receive `WgpuFeaturePrepareContext`. Use `device()` for pipelines,
 `resources()` for declared versions and scoped uploads for private inputs. Reserve native payload
@@ -116,9 +125,10 @@ returned native bindings/views retain their use through cache removal and physic
 The former per-Image completion callbacks are removed. Shared cache age uses the Host maintenance
 frame, independently of producer capture/frame identities.
 
-Toolkit-owned resources and the legacy Runtime/window WorldCanvas cache retain their separate accounting
-during the stock-policy transition. This budget covers the represented native payload owners;
-it is not a promise that every device allocation is admitted by one complete GPU-memory budget.
+Toolkit-owned resources retain their separate accounting. The mutable WorldCanvas cache and old
+quad/window executor are private test oracles and are absent from production compilation. This
+budget covers the represented native payload owners; it is not a promise that every device
+allocation is admitted by one complete GPU-memory budget.
 
 ## Admission, Outputs And Close
 

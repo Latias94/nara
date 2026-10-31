@@ -58,6 +58,7 @@ pub(crate) struct NativePreparation<'a> {
 }
 
 impl<'a> NativePreparation<'a> {
+    #[cfg(test)]
     pub(crate) fn reserve_entries(&mut self, count: usize) -> Result<(), NativePreparationError> {
         self.reservation
             .reserve_entries(count)

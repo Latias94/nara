@@ -143,6 +143,7 @@ pub(crate) struct WgpuQuadBatchBuffer {
     alpha_mode: AlphaMode2d,
     scissor: Option<WgpuScissorRect>,
     instance_count: u32,
+    #[cfg(test)]
     logical_bytes: u64,
 }
 
@@ -178,6 +179,7 @@ pub(crate) fn create_material_bind_group_layout(
     })
 }
 
+#[cfg(test)]
 impl WgpuQuadBatchBuffer {
     pub(crate) const fn logical_bytes(&self) -> u64 {
         self.logical_bytes
@@ -395,6 +397,7 @@ pub(crate) fn create_quad_batch_buffers(
                     (None, None, None, None)
                 };
             let instance_count = saturating_u32(batch.instances.len());
+            #[cfg(test)]
             let logical_bytes = quad_instance_byte_len(batch.instances.len());
             let (buffer, instance_allocation) = preparation.create_buffer_with_data(
                 "nara_wgpu_quad_instances",
@@ -417,6 +420,7 @@ pub(crate) fn create_quad_batch_buffers(
                 alpha_mode: batch.material.alpha_mode,
                 scissor: batch.scissor,
                 instance_count,
+                #[cfg(test)]
                 logical_bytes,
             })
         })

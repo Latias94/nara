@@ -281,8 +281,20 @@ impl WgpuRuntimeConnection {
     }
 }
 
-pub enum ConnectionInput {
-    Take,
+/// Original requests are constructed only by the Runtime exchange owner.
+///
+/// ```compile_fail
+/// use nara_app::{RuntimeGeneration, __RuntimeDriverPort};
+/// use nara_render_wgpu::__private::WgpuRuntimeConnection;
+/// type Input = <WgpuRuntimeConnection as __RuntimeDriverPort>::Input;
+/// fn forge(generation: RuntimeGeneration) -> Input {
+///     Input::Take(generation)
+/// }
+/// ```
+pub struct ConnectionInput(ConnectionOperation);
+
+enum ConnectionOperation {
+    Take(RuntimeGeneration),
     Return(WgpuRuntimeResult, bool),
 }
 
@@ -305,12 +317,14 @@ impl __RuntimeDriverPort for WgpuRuntimeConnection {
     type Output = ConnectionOutput;
 
     fn accepts_driver_input(state: RuntimeState, input: &Self::Input) -> bool {
-        match input {
-            ConnectionInput::Take => matches!(state, RuntimeState::Running | RuntimeState::Paused),
-            ConnectionInput::Return(_, true) => {
+        match &input.0 {
+            ConnectionOperation::Take(_) => {
                 matches!(state, RuntimeState::Running | RuntimeState::Paused)
             }
-            ConnectionInput::Return(_, false) => matches!(
+            ConnectionOperation::Return(_, true) => {
+                matches!(state, RuntimeState::Running | RuntimeState::Paused)
+            }
+            ConnectionOperation::Return(_, false) => matches!(
                 state,
                 RuntimeState::Faulted | RuntimeState::Stopping | RuntimeState::CloseIncomplete
             ),
@@ -326,8 +340,8 @@ fn apply_connection(
     world: &mut World,
     input: ConnectionInput,
 ) -> Result<ConnectionOutput, (RuntimeWorldAccessError, ConnectionInput)> {
-    Ok(match input {
-        ConnectionInput::Take => {
+    Ok(match input.0 {
+        ConnectionOperation::Take(runtime) => {
             if !world
                 .get_resource::<ConnectionAuthority>()
                 .is_some_and(|original| {
@@ -338,17 +352,9 @@ fn apply_connection(
                     WgpuRuntimeExchangeError::OwnerChanged,
                 )));
             }
-            let Some(runtime) = world.get_resource::<RuntimeGeneration>().copied() else {
-                return Err((
-                    RuntimeWorldAccessError::MissingResource {
-                        type_name: std::any::type_name::<RuntimeGeneration>(),
-                    },
-                    ConnectionInput::Take,
-                ));
-            };
             ConnectionOutput::Taken(world.resource_mut::<WgpuRuntimeConnection>().take(runtime))
         }
-        ConnectionInput::Return(result, present) => {
+        ConnectionOperation::Return(result, present) => {
             #[cfg(feature = "ui-submitter")]
             let mut result = result;
             let connection = world.resource::<WgpuRuntimeConnection>();
@@ -488,7 +494,9 @@ pub fn take_runtime_frame(
     runtime: &mut RuntimeInstance,
 ) -> Result<RuntimeScopeOutcome<Option<WgpuRuntimeCapture>>, WgpuRuntimeCaptureFailure> {
     let outcome = runtime
-        .__with_owned_driver_port::<WgpuRuntimeConnection>(ConnectionInput::Take)
+        .__with_owned_driver_port::<WgpuRuntimeConnection>(ConnectionInput(
+            ConnectionOperation::Take(runtime.generation()),
+        ))
         .map_err(|(error, _)| WgpuRuntimeCaptureFailure {
             error: WgpuRuntimeExchangeError::Scope(error),
             post_operation_fault: None,
@@ -519,11 +527,11 @@ pub fn complete_runtime_frame(
         runtime.state(),
         RuntimeState::Running | RuntimeState::Paused
     );
-    let outcome = match runtime
-        .__with_owned_driver_port::<WgpuRuntimeConnection>(ConnectionInput::Return(result, present))
-    {
+    let outcome = match runtime.__with_owned_driver_port::<WgpuRuntimeConnection>(ConnectionInput(
+        ConnectionOperation::Return(result, present),
+    )) {
         Ok(outcome) => outcome,
-        Err((error, ConnectionInput::Return(result, _))) => {
+        Err((error, ConnectionInput(ConnectionOperation::Return(result, _)))) => {
             return Err(WgpuRuntimeResultFailure {
                 error: WgpuRuntimeExchangeError::Scope(error),
                 result,
@@ -534,7 +542,7 @@ pub fn complete_runtime_frame(
     };
     let output = match outcome.output {
         Ok(output) => output,
-        Err((error, ConnectionInput::Return(result, _))) => {
+        Err((error, ConnectionInput(ConnectionOperation::Return(result, _)))) => {
             return Err(WgpuRuntimeResultFailure {
                 error: WgpuRuntimeExchangeError::Port(error),
                 result,

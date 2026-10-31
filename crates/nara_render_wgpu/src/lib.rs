@@ -14,6 +14,7 @@ mod observation;
 mod output;
 mod plugin;
 mod preparation;
+mod presentation;
 mod presented;
 mod program;
 #[cfg(any(feature = "sprite-submitter", feature = "ui-submitter"))]
@@ -40,32 +41,31 @@ mod ui;
 #[cfg(all(test, feature = "sprite-submitter"))]
 mod view_probe;
 
-use crate::backend::render_backend_state;
+use crate::backend::{WgpuRenderBackend, render_backend_state};
 use crate::frame::{WgpuFrameCaptureError, WgpuFramePacketSlot};
 #[cfg(any(feature = "sprite-submitter", feature = "ui-submitter"))]
-use crate::quad::{
-    WgpuQuadBatch, WgpuQuadBatchBuffer, WgpuQuadPipelineDrawRef, draw_quad_batch_buffers,
-};
-use crate::surface::{SurfaceDropReason, WgpuSurfaceState};
+use crate::quad::WgpuQuadBatch;
+#[cfg(all(test, any(feature = "sprite-submitter", feature = "ui-submitter")))]
+use crate::quad::{WgpuQuadBatchBuffer, WgpuQuadPipelineDrawRef, draw_quad_batch_buffers};
+use crate::surface::SurfaceDropReason;
+#[cfg(test)]
+use crate::surface::WgpuSurfaceState;
 use nara_app::{
     App, CoreStage, FrameExecutionStart, Plugin, PluginError, RuntimeFault, RuntimeFaultKind,
     RuntimeFaultReporter, RuntimeGeneration,
 };
 use nara_ecs::{Query, Res, ResMut, schedule::IntoScheduleConfigs};
 use nara_render::{
-    ExtractedViews, FrameStats, RenderBackendState, RenderBackendStatus, RenderFrame,
-    RenderFrameSkipReason, build_render_frame_packet_with_world_canvas,
+    ExtractedViews, RenderBackendState, RenderBackendStatus, RenderFrame, RenderFrameSkipReason,
+    build_render_frame_packet_with_world_canvas,
 };
 #[cfg(feature = "ui-submitter")]
 use nara_ui_render::__private::UiBackendSubmissionReader;
-#[cfg(feature = "ui-submitter")]
-use nara_ui_render::{UiPresentationBackendFaultDomain, UiPresentationBackendGeneration};
-use nara_window::{
-    PrimaryWindowId, Window, WindowId,
-    backend::{BackendWindowHandles, WindowPresentationRequirement},
-};
+#[cfg(test)]
+use nara_window::WindowId;
+use nara_window::{PrimaryWindowId, Window, backend::WindowPresentationRequirement};
 
-pub use crate::backend::{WgpuBackendState, WgpuFrameTransactionStats, WgpuRenderBackend};
+pub use crate::backend::{WgpuBackendState, WgpuFrameTransactionStats};
 pub use crate::error::WgpuRenderError;
 pub use crate::graph::{
     AccessRole, GraphError, GraphLimits, LimitKind, TextureAlpha, TextureTransfer,
@@ -116,6 +116,7 @@ pub mod __private {
     pub use crate::host::{
         WgpuEditorImguiFrame, WgpuEditorImguiRenderer, WgpuEditorImguiRendererFailure,
     };
+    pub use crate::host::{WgpuRuntimeHostFacts, WgpuRuntimeMaintenance};
     pub use crate::{
         host::{
             WgpuEditorDeviceScope, WgpuEditorFrameOutcome, WgpuEditorWindowFrame,
@@ -231,6 +232,7 @@ impl Plugin for WgpuRenderPlugin {
     }
 }
 
+#[cfg(test)]
 impl PreparedSubmitterDraw {
     fn instance_buffer_bytes(&self) -> u64 {
         #[cfg(any(feature = "sprite-submitter", feature = "ui-submitter"))]
@@ -386,6 +388,9 @@ fn publish_wgpu_capture(
     });
 }
 
+// Private legacy quad oracle for native readback, allocation and Runtime custody tests.
+// Production execution uses typed programs through WgpuRenderHost.
+#[cfg(test)]
 #[derive(Debug, Default)]
 struct PreparedSubmitterDraw {
     #[cfg(any(feature = "sprite-submitter", feature = "ui-submitter"))]
@@ -402,6 +407,7 @@ struct PreparedSubmitterDraw {
     instance_reservation: Option<budget::InstanceReservation>,
 }
 
+#[cfg(test)]
 #[derive(Debug)]
 struct PreparedViewDraw {
     viewport: nara_render::ViewportRect,
@@ -409,6 +415,7 @@ struct PreparedViewDraw {
     draw: PreparedSubmitterDraw,
 }
 
+#[cfg(test)]
 #[derive(Debug, Default)]
 struct PreparedTargetDraw {
     views: Vec<PreparedViewDraw>,
@@ -421,6 +428,7 @@ struct PreparedTargetDraw {
     ui_packets: Vec<ui::WgpuLoweredUiPacketFacts>,
 }
 
+#[cfg(test)]
 impl PreparedTargetDraw {
     #[cfg(any(feature = "sprite-submitter", feature = "ui-submitter"))]
     fn commit_instance_reservations(&mut self) {
@@ -458,7 +466,8 @@ impl PreparedTargetDraw {
     }
 }
 
-/// Encodes the complete ordered transaction. Runtime, Editor, and native readback share this path.
+/// Private legacy ordered-draw oracle for native readback and comparison tests.
+#[cfg(test)]
 fn encode_target_draw(
     encoder: &mut wgpu::CommandEncoder,
     target: &wgpu::TextureView,
@@ -474,6 +483,7 @@ fn encode_target_draw(
     }
 }
 
+#[cfg(test)]
 fn encode_view_draws(
     encoder: &mut wgpu::CommandEncoder,
     target: &wgpu::TextureView,
@@ -516,99 +526,6 @@ fn encode_view_draws(
             &view.draw.buffers,
             view.viewport,
         );
-    }
-}
-
-impl WgpuRenderBackend {
-    /// Executes one original CPU capture on this concrete local GPU owner.
-    ///
-    /// The returned move-only result must be reconciled with the original Runtime even if its
-    /// state changed while native execution was in progress. Native execution never borrows World.
-    #[doc(hidden)]
-    pub fn execute_runtime_frame(
-        &mut self,
-        handles: &BackendWindowHandles,
-        mut capture: runtime::WgpuRuntimeCapture,
-    ) -> runtime::WgpuRuntimeResult {
-        if !capture.allows_execution() || self.runtime_close_started() {
-            return runtime::cancel_runtime_frame(capture);
-        }
-        let mut frame = capture.pending.frame;
-        let mut stats = FrameStats::default();
-        let mut status = RenderBackendStatus::default();
-        status.mark_state(WGPU_RENDER_BACKEND, render_backend_state(self.state()));
-        self.validate_world_presentation_current(capture.pending.window, capture.pending.canvas);
-        self.begin_frame_transaction(frame.index, None);
-        #[cfg(feature = "ui-submitter")]
-        let mut ui = capture.pending.ui.take();
-        let mut fault = None;
-        self.begin_runtime_execution();
-        let result = match std::mem::replace(&mut capture.pending.captured, Ok(None)) {
-            Ok(Some(packet)) => self.render_packet(
-                Some(handles),
-                packet,
-                #[cfg(feature = "ui-submitter")]
-                ui.as_mut(),
-                &mut frame,
-                &mut stats,
-                &mut status,
-            ),
-            Ok(None) => {
-                status.mark_skipped_with_message(
-                    frame.index,
-                    RenderFrameSkipReason::NoViews,
-                    "no admitted render frame packet",
-                );
-                frame.mark_skipped();
-                Ok(())
-            }
-            Err(error) => {
-                self.reject_captured_packet();
-                status.mark_skipped_with_message(
-                    frame.index,
-                    RenderFrameSkipReason::InvalidTopology,
-                    error.to_string(),
-                );
-                fault = Some(RuntimeFault::engine(
-                    RuntimeFaultKind::System,
-                    "nara.render.frame-packet",
-                ));
-                frame.mark_skipped();
-                Err(WgpuRenderError::ContentRejected {
-                    message: error.to_string(),
-                })
-            }
-        };
-        let presented_world = self.take_presented_world();
-        #[cfg(feature = "ui-submitter")]
-        if let Some(ui) = ui {
-            let device_fault_generation = result.as_ref().err().and_then(|error| {
-                (frame::classify_ui_backend_fault(error)
-                    == UiPresentationBackendFaultDomain::Device)
-                    .then(|| {
-                        UiPresentationBackendGeneration::new(
-                            self.instance_id(),
-                            self.device_epoch(),
-                        )
-                    })
-                    .flatten()
-            });
-            let completion = frame::ui_completion(
-                &ui,
-                &result,
-                frame.state,
-                device_fault_generation,
-                status.last_skip().and_then(|skip| skip.message()),
-            );
-            frame::complete_ui_submissions_into(ui, completion, &mut capture.completed);
-        }
-        if let Err(error) = result {
-            let render_fault = handle_wgpu_render_error(self, error, frame.index, &mut status);
-            fault = fault.or(render_fault);
-            frame.mark_skipped();
-        }
-        let observation = self.take_observation();
-        capture.into_result(frame, stats, status, observation, presented_world, fault)
     }
 }
 
@@ -703,6 +620,8 @@ fn required_quad_pipeline_keys(
     keys
 }
 
+/// Private legacy surface-submit oracle used by the test-only backend transaction.
+#[cfg(test)]
 fn render_acquired_texture(
     device: &wgpu::Device,
     queue: &wgpu::Queue,

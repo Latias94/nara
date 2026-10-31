@@ -203,6 +203,16 @@ storage has exact shared custody and survives pure preflight refusal. Continue o
 window and typed policy capture installation next, removing the central payload and combined
 facades with their remaining consumers before qualifying general policy/history replacement.
 
+The [ordinary Runtime/window successor](../knowledge/engineering/verification/2026-10/2026-10-31T165610Z-runtime-window-programs-and-synchronous-producer-world-permission-qualification-c05b8d29194543bc9fb11fbbc79414de.md)
+now uses that same staged program and final surface-consumer submission. Original capture/result,
+UI/Input, READY, telemetry seal and native close remain with Root's owned run session. World
+presentation is producer-local, synchronously revoked at Drop, and displaced only when another
+successful presentation replaces its physical window. The concrete Backend and old mutable
+window/Canvas executor are absent from the public/production path. Continue typed policy capture
+installation and actual alternate-policy consumers before deleting the central capture payload,
+combined image facades and remaining private numerical oracles. View/history groups, complete
+independent streams and custom-drawn composition retain their full outcome above.
+
 The [first executable comparison](../knowledge/engineering/verification/2026-10/2026-10-31T060722Z-private-render-graph-buffer-history-and-viable-controls-comparison-on-dx12-d6aca1996b2342659bd07933b33e0e64.md)
 records 61 unique CPU tests, seven actual DX12 tests and one subsequent actual submission-failure
 test. Image/buffer kernels, independent numeric controls, logical history groups and accepted-

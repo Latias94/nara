@@ -212,6 +212,7 @@ impl<S: 'static> WgpuRenderFeature for SpriteFeature<S> {
     }
 }
 
+#[cfg(test)]
 pub(crate) fn collect_sprite_quad_batches(
     batches: &SpriteBatches,
     view_index: usize,

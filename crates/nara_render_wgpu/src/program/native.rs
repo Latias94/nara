@@ -71,10 +71,19 @@ impl WgpuFeaturePreflightContext<'_> {
     }
 }
 
-#[derive(Default)]
+#[derive(Default, Clone, Copy)]
 pub(crate) struct NativePreparationCost {
     custody_entries: usize,
     metadata_bytes: usize,
+}
+
+impl NativePreparationCost {
+    pub(crate) const fn new(custody_entries: usize, metadata_bytes: usize) -> Self {
+        Self {
+            custody_entries,
+            metadata_bytes,
+        }
+    }
 }
 
 /// The exact native resources declared by one operation in one compiled program.
@@ -333,6 +342,12 @@ pub(crate) fn prepare_and_encode(
     #[cfg(any(feature = "sprite-submitter", feature = "ui-submitter"))]
     stock_resources: &mut crate::stock_quad::StockQuadResources,
     local_target: Option<&HostProgramTexture>,
+    finalization_cost: NativePreparationCost,
+    finalize: impl FnOnce(
+        &[Arc<ProgramResourceStorage>],
+        &mut wgpu::CommandEncoder,
+        &mut crate::preparation::NativePreparation<'_>,
+    ) -> Result<(), WgpuRenderProgramError>,
 ) -> Result<EncodedProgram, WgpuRenderProgramError> {
     let compiled = &program.0;
     let graph = &compiled.graph;
@@ -371,7 +386,7 @@ pub(crate) fn prepare_and_encode(
     }
 
     let enabled_limits = namespace.device.limits();
-    let mut known_cost = NativePreparationCost::default();
+    let mut known_cost = finalization_cost;
     #[cfg(any(feature = "sprite-submitter", feature = "ui-submitter"))]
     let mut stock_images = crate::stock_quad::StockImagePreflight::new(compiled.operations.len())?;
     let mut preflight = WgpuFeaturePreflightContext {
@@ -570,6 +585,16 @@ pub(crate) fn prepare_and_encode(
             report,
         });
     }
+    finalize(
+        &resources,
+        &mut encoder,
+        &mut crate::preparation::NativePreparation::new(
+            &namespace.device,
+            &namespace.queue,
+            budget,
+            reservation,
+        ),
+    )?;
     Ok(EncodedProgram {
         commands: encoder.finish(),
         resources,

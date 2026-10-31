@@ -179,6 +179,14 @@ publication, surface presentation, exact UI settlement and physical completion s
 implement stock migration by chaining public submit_program and the incumbent image/window path;
 that would retain multiple admission/submission authorities.
 
+Runtime world-presentation guards belong to the actual producer, not a backend-wide last-frame
+slot. Target loss, incompatible window/canvas facts, producer close and device loss revoke their
+original permissions. Another producer may keep presenting and retiring independently. Bind the
+Host's native window authority only after it actually admits a surface; a missing first target
+cannot reserve a foreign registry. Construct exchange identity from the managed Runtime owner,
+and keep the associated request opaque so a caller cannot substitute a replaceable World resource
+or forge an owner generation through the driver-port input type.
+
 The concrete UI bridge joins reports to permits by packet identity and original logical target,
 validating uniqueness and result capacity before native submission. Replayed packets with no new
 permit still draw; a fully clipped packet still has exact facts. The bridge never zips packets

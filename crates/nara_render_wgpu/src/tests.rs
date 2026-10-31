@@ -577,7 +577,8 @@ fn managed_frame_captures_before_local_execution_publishes_its_terminal_state() 
     install_test_plugins(&mut app, false);
     let candidate = admit_runtime(app);
     let mut runtime = candidate.complete_startup().unwrap().promote();
-    let mut backend = WgpuRenderBackend::default();
+    let mut host = WgpuRenderHost::offscreen();
+    let producer = host.create_producer().unwrap();
     let handles = BackendWindowHandles::default();
 
     runtime.drive(std::time::Duration::ZERO).unwrap();
@@ -595,7 +596,7 @@ fn managed_frame_captures_before_local_execution_publishes_its_terminal_state() 
 
     let capture = take_captured_frame(&mut runtime);
     let identity = capture.identity();
-    let result = backend.execute_runtime_frame(&handles, capture);
+    let result = host.execute_runtime_frame(&producer, &handles, capture);
     assert_eq!(result.identity(), identity);
     let completion = complete_runtime_frame(&mut runtime, result).unwrap();
     assert!(completion.post_operation_fault.is_none());
@@ -621,7 +622,7 @@ fn managed_frame_captures_before_local_execution_publishes_its_terminal_state() 
             .world()
             .resource::<WgpuRenderObservation>()
             .instance_id(),
-        backend.instance_id(),
+        host.backend_instance_id(),
     );
     runtime.finish().unwrap();
 }
@@ -631,13 +632,14 @@ fn delayed_result_preserves_the_current_frame_and_survives_the_next_capture_rese
     let mut app = App::new();
     install_test_plugins(&mut app, false);
     let mut runtime = admit_runtime(app).complete_startup().unwrap().promote();
-    let mut backend = WgpuRenderBackend::default();
+    let mut host = WgpuRenderHost::offscreen();
+    let producer = host.create_producer().unwrap();
     let handles = BackendWindowHandles::default();
 
     runtime.drive(std::time::Duration::ZERO).unwrap();
     let completed_frame = runtime.world().resource::<RenderFrame>().index;
     let capture = take_captured_frame(&mut runtime);
-    let result = backend.execute_runtime_frame(&handles, capture);
+    let result = host.execute_runtime_frame(&producer, &handles, capture);
 
     runtime.drive(std::time::Duration::ZERO).unwrap();
     let current_frame = *runtime.world().resource::<RenderFrame>();
@@ -666,7 +668,7 @@ fn delayed_result_preserves_the_current_frame_and_survives_the_next_capture_rese
         "a new CPU capture must preserve the last completed native observation",
     );
     let capture = take_captured_frame(&mut runtime);
-    let result = backend.execute_runtime_frame(&handles, capture);
+    let result = host.execute_runtime_frame(&producer, &handles, capture);
     assert_eq!(
         result
             .observation()
@@ -695,12 +697,13 @@ fn exact_fixed_step_does_not_require_app_and_render_frame_counters_to_match() {
     ));
     let candidate = admit_runtime(app);
     let mut runtime = candidate.complete_startup().unwrap().promote();
-    let mut backend = WgpuRenderBackend::default();
+    let mut host = WgpuRenderHost::offscreen();
+    let producer = host.create_producer().unwrap();
     let handles = BackendWindowHandles::default();
 
     runtime.drive(std::time::Duration::ZERO).unwrap();
     let capture = take_captured_frame(&mut runtime);
-    let result = backend.execute_runtime_frame(&handles, capture);
+    let result = host.execute_runtime_frame(&producer, &handles, capture);
     let completion = complete_runtime_frame(&mut runtime, result).unwrap();
     assert!(completion.post_operation_fault.is_none());
     assert!(matches!(
@@ -709,7 +712,7 @@ fn exact_fixed_step_does_not_require_app_and_render_frame_counters_to_match() {
     ));
     runtime.drive(std::time::Duration::ZERO).unwrap();
     let capture = take_captured_frame(&mut runtime);
-    let result = backend.execute_runtime_frame(&handles, capture);
+    let result = host.execute_runtime_frame(&producer, &handles, capture);
     let completion = complete_runtime_frame(&mut runtime, result).unwrap();
     assert!(completion.post_operation_fault.is_none());
     assert!(matches!(
@@ -729,7 +732,7 @@ fn exact_fixed_step_does_not_require_app_and_render_frame_counters_to_match() {
         capture.identity().runtime_generation(),
         runtime.generation()
     );
-    let result = backend.execute_runtime_frame(&handles, capture);
+    let result = host.execute_runtime_frame(&producer, &handles, capture);
     let transaction = result.observation().unwrap().frame_transaction_stats();
     assert_eq!(transaction.app_frame_index(), Some(app_frame));
     assert_eq!(
@@ -763,13 +766,14 @@ fn captured_topology_is_immutable_and_next_frame_rejects_before_surface_work() {
     .unwrap();
     let candidate = admit_runtime(app);
     let mut runtime = candidate.complete_startup().unwrap().promote();
-    let mut backend = WgpuRenderBackend::default();
+    let mut host = WgpuRenderHost::offscreen();
+    let producer = host.create_producer().unwrap();
     let handles = BackendWindowHandles::default();
 
     runtime.drive(std::time::Duration::ZERO).unwrap();
     let first_frame = *runtime.world().resource::<RenderFrame>();
     let capture = take_captured_frame(&mut runtime);
-    let result = backend.execute_runtime_frame(&handles, capture);
+    let result = host.execute_runtime_frame(&producer, &handles, capture);
     let first = result.observation().unwrap().frame_transaction_stats();
     let completion = complete_runtime_frame(&mut runtime, result).unwrap();
     assert!(completion.post_operation_fault.is_none());
@@ -787,7 +791,7 @@ fn captured_topology_is_immutable_and_next_frame_rejects_before_surface_work() {
     runtime.drive(std::time::Duration::ZERO).unwrap();
     let rejected_frame = *runtime.world().resource::<RenderFrame>();
     let capture = take_captured_frame(&mut runtime);
-    let result = backend.execute_runtime_frame(&handles, capture);
+    let result = host.execute_runtime_frame(&producer, &handles, capture);
     let rejected = result.observation().unwrap().frame_transaction_stats();
     assert_eq!(
         runtime.fault(),

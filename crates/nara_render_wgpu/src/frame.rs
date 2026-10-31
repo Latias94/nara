@@ -6,9 +6,11 @@ use std::sync::Arc;
 use nara_ecs::{Resource, SystemSet};
 #[cfg(feature = "ui-submitter")]
 use nara_render::RenderFrameState;
+#[cfg(any(feature = "ui-submitter", all(test, feature = "sprite-submitter")))]
+use nara_render::RenderTarget;
+#[cfg(all(test, any(feature = "sprite-submitter", feature = "ui-submitter")))]
+use nara_render::ViewportRect;
 use nara_render::{ExtractedViews, RenderFramePacket, RenderFramePacketError};
-#[cfg(any(feature = "sprite-submitter", feature = "ui-submitter"))]
-use nara_render::{RenderTarget, ViewportRect};
 #[cfg(feature = "sprite-submitter")]
 use nara_sprite_render::__private::SpriteBatches;
 #[cfg(all(test, feature = "ui-submitter"))]
@@ -26,11 +28,11 @@ use nara_ui_render::{
 #[cfg(feature = "ui-submitter")]
 use nara_window::WindowId;
 
-#[cfg(any(feature = "sprite-submitter", feature = "ui-submitter"))]
+#[cfg(any(feature = "ui-submitter", all(test, feature = "sprite-submitter")))]
 use crate::WgpuRenderError;
-#[cfg(any(feature = "sprite-submitter", feature = "ui-submitter"))]
+#[cfg(all(test, any(feature = "sprite-submitter", feature = "ui-submitter")))]
 use crate::quad::WgpuQuadBatch;
-#[cfg(feature = "ui-submitter")]
+#[cfg(all(test, feature = "ui-submitter"))]
 use crate::ui::WgpuLoweredUiPacketFacts;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, SystemSet)]
@@ -521,7 +523,8 @@ impl WgpuFramePayload {
         self.ui_logical_target.unwrap_or(execution_target)
     }
 
-    #[cfg(any(feature = "sprite-submitter", feature = "ui-submitter"))]
+    /// Private legacy lowering oracle for ordered quad readback and Runtime comparison tests.
+    #[cfg(all(test, any(feature = "sprite-submitter", feature = "ui-submitter")))]
     pub(crate) fn lower_draw(
         &self,
         target: RenderTarget,
@@ -571,7 +574,8 @@ impl WgpuFramePayload {
     }
 }
 
-#[cfg(any(feature = "sprite-submitter", feature = "ui-submitter"))]
+/// Private legacy combined draw used only by the native/unit comparison oracle.
+#[cfg(all(test, any(feature = "sprite-submitter", feature = "ui-submitter")))]
 #[derive(Debug, Default)]
 pub(crate) struct WgpuLoweredFrameDraw {
     pub(crate) batches: Vec<WgpuQuadBatch>,

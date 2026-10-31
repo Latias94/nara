@@ -1,23 +1,29 @@
-//! Shared nearest composite and the transition cache's fixed world raster.
+//! Shared nearest composite for graph-owned world and destination textures.
 
 mod program;
 
 pub(crate) use program::{CanvasCompositeCapture, CanvasCompositeFeature};
 
+#[cfg(test)]
 use std::sync::Arc;
 
-use nara_render::{Extent2d, RenderFrameSourceGeneration, WorldCanvasFrame};
+use nara_render::WorldCanvasFrame;
+#[cfg(test)]
+use nara_render::{Extent2d, RenderFrameSourceGeneration};
 
 use crate::{WgpuRenderError, allocation::checked_resource as checked};
 
 pub(crate) const WORLD_CANVAS_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Rgba8UnormSrgb;
 const CANVAS_MAPPING_BYTES: u64 = 16;
 
+// The old mutable raster remains only as an independent native comparison oracle.
+#[cfg(test)]
 #[derive(Debug, Default)]
 pub(crate) struct WorldCanvasCache {
     resources: Option<Arc<WorldCanvasResources>>,
 }
 
+#[cfg(test)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 struct CanvasKey {
     extent: Extent2d,
@@ -26,6 +32,7 @@ struct CanvasKey {
     device_epoch: u64,
 }
 
+#[cfg(test)]
 #[derive(Debug)]
 struct WorldCanvasResources {
     key: CanvasKey,
@@ -34,6 +41,7 @@ struct WorldCanvasResources {
     composite: Arc<CanvasCompositePipeline>,
 }
 
+#[cfg(test)]
 #[derive(Debug)]
 pub(crate) struct PreparedWorldCanvas {
     resources: Arc<WorldCanvasResources>,
@@ -56,6 +64,7 @@ struct CanvasCompositeMapping {
     binding: wgpu::BindGroup,
 }
 
+#[cfg(test)]
 impl WorldCanvasCache {
     pub(crate) fn clear(&mut self) {
         self.resources = None;
@@ -104,6 +113,7 @@ impl WorldCanvasCache {
     }
 }
 
+#[cfg(test)]
 impl WorldCanvasResources {
     fn create(device: &wgpu::Device, key: CanvasKey) -> Result<Self, WgpuRenderError> {
         let maximum = device.limits().max_texture_dimension_2d;
@@ -329,6 +339,7 @@ impl CanvasCompositePipeline {
     }
 }
 
+#[cfg(test)]
 impl PreparedWorldCanvas {
     pub(crate) fn view(&self) -> &wgpu::TextureView {
         &self.resources.view

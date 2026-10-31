@@ -57,6 +57,7 @@ struct DeviceLossSignal {
 
 #[derive(Debug, Default)]
 struct DeviceWorldPresentations {
+    #[cfg(test)]
     runtime: Option<nara_render::__private::WorldPresentationRevoker>,
     editor: BTreeMap<WgpuRenderProducerId, nara_render::__private::WorldPresentationRevoker>,
 }
@@ -68,6 +69,7 @@ impl DeviceLossSignal {
             .presentations
             .lock()
             .unwrap_or_else(|error| error.into_inner());
+        #[cfg(test)]
         if let Some(presentation) = &presentations.runtime {
             presentation.invalidate();
         }
@@ -80,6 +82,7 @@ impl DeviceLossSignal {
         self.lost.load(Ordering::Acquire)
     }
 
+    #[cfg(test)]
     fn retain_presentation(&self, revoker: nara_render::__private::WorldPresentationRevoker) {
         let mut presentations = self
             .presentations
@@ -379,6 +382,7 @@ impl WgpuDeviceOwner {
         }
     }
 
+    #[cfg(test)]
     pub(super) fn retain_presentation(
         &self,
         revoker: nara_render::__private::WorldPresentationRevoker,

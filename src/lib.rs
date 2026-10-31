@@ -476,7 +476,8 @@ pub mod backend_prelude {
     #[cfg(feature = "render-wgpu")]
     pub use nara_render_wgpu::{
         SurfaceAcquireAction, SurfaceResizeAction, SurfaceTextureStatus, WgpuBackendState,
-        WgpuFrameTransactionStats, WgpuRenderBackend, WgpuRenderError, WgpuRenderPlugin,
+        WgpuFrameTransactionStats, WgpuRenderError, WgpuRenderHost, WgpuRenderPlugin,
+        WgpuRenderProducer,
     };
     pub use nara_window::{
         PresentMode, PrimaryWindow, PrimaryWindowId, Window, WindowCloseRequest,

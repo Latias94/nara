@@ -196,6 +196,7 @@ pub enum WgpuConfiguredPresentMode {
 }
 
 impl WgpuConfiguredPresentMode {
+    #[cfg(test)]
     pub(crate) const fn from_wgpu(mode: wgpu::PresentMode) -> Self {
         match mode {
             wgpu::PresentMode::AutoVsync => Self::AutoVsync,

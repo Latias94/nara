@@ -1,4 +1,6 @@
 use std::collections::BTreeMap;
+mod runtime;
+pub use runtime::{WgpuRuntimeHostFacts, WgpuRuntimeMaintenance};
 #[cfg(feature = "editor-imgui")]
 mod imgui;
 #[cfg(feature = "editor-imgui")]
@@ -46,6 +48,15 @@ use crate::{
 
 const EDITOR_IMAGE_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Rgba8Unorm;
 const MAX_PENDING_NATIVE_SUBMISSIONS: usize = 256;
+
+struct ProgramSurfaceTarget<'a> {
+    acquired: &'a WgpuEditorAcquiredSurface,
+    final_version: &'a crate::graph::ResourceVersion,
+    instance_buffer_bytes: u64,
+    app_frame_index: u64,
+    work_started_at: std::time::Instant,
+    submitted_texture_bytes: &'a mut u64,
+}
 
 #[cfg(test)]
 std::thread_local! {
@@ -120,6 +131,7 @@ pub struct WgpuRenderProducer {
     id: WgpuRenderProducerId,
     backend_instance_id: u64,
     closed: Arc<AtomicBool>,
+    world_presentation: Arc<WorldPresentationSlot>,
 }
 
 impl WgpuRenderProducer {
@@ -132,6 +144,42 @@ impl WgpuRenderProducer {
 impl Drop for WgpuRenderProducer {
     fn drop(&mut self) {
         self.closed.store(true, Ordering::Release);
+        self.world_presentation.invalidate();
+    }
+}
+
+/// Producer Drop revokes interaction synchronously, independently of native maintenance.
+#[derive(Debug, Default)]
+struct WorldPresentationSlot(
+    std::sync::Mutex<Option<nara_render::__private::WorldPresentationRevoker>>,
+);
+
+impl WorldPresentationSlot {
+    fn replace(
+        &self,
+        closed: &AtomicBool,
+        revoker: nara_render::__private::WorldPresentationRevoker,
+    ) -> Result<(), WgpuRenderHostError> {
+        let mut current = self.0.lock().unwrap_or_else(|error| error.into_inner());
+        if closed.load(Ordering::Acquire) {
+            revoker.invalidate();
+            return Err(WgpuRenderHostError::ProducerClosed);
+        }
+        if let Some(previous) = current.replace(revoker) {
+            previous.invalidate();
+        }
+        Ok(())
+    }
+
+    fn invalidate(&self) {
+        if let Some(current) = self
+            .0
+            .lock()
+            .unwrap_or_else(|error| error.into_inner())
+            .take()
+        {
+            current.invalidate();
+        }
     }
 }
 
@@ -845,7 +893,8 @@ struct ProducerState {
     admission: ProducerAdmission,
     target: Option<ImageTarget>,
     stock_policy: Option<crate::stock_policy::StockPolicyInstances>,
-    world_presentation: Option<nara_render::__private::WorldPresentationRevoker>,
+    world_presentation: Arc<WorldPresentationSlot>,
+    runtime_presentation: Option<runtime::RuntimeWorldPresentation>,
     submitted_prefix: Option<WgpuSubmissionPrefix>,
     interaction: Arc<AtomicBool>,
 }
@@ -853,9 +902,7 @@ struct ProducerState {
 impl Drop for ProducerState {
     fn drop(&mut self) {
         self.interaction.store(false, Ordering::Release);
-        if let Some(presentation) = self.world_presentation.take() {
-            presentation.invalidate();
-        }
+        self.world_presentation.invalidate();
     }
 }
 
@@ -868,7 +915,8 @@ pub struct WgpuRenderHost {
     #[cfg(feature = "editor-imgui")]
     primary_window_id: WindowId,
     backend: WgpuRenderBackend,
-    handles: BackendWindowHandles,
+    handles: Option<BackendWindowHandles>,
+    presentation: crate::presentation::SurfacePresentationCache,
     views: BTreeMap<WgpuRenderProducerId, ProducerState>,
     host_frame_index: Option<u64>,
     last_presentation_generation: u64,
@@ -927,11 +975,13 @@ impl WgpuRenderHost {
         let closed = Arc::new(AtomicBool::new(false));
         let mut view = ProducerState::default();
         view.closed = Arc::clone(&closed);
+        let world_presentation = Arc::clone(&view.world_presentation);
         self.views.insert(id, view);
         Ok(WgpuRenderProducer {
             id,
             backend_instance_id: self.backend.instance_id(),
             closed,
+            world_presentation,
         })
     }
 
@@ -961,7 +1011,8 @@ impl WgpuRenderHost {
             #[cfg(feature = "editor-imgui")]
             primary_window_id: window_id,
             backend,
-            handles,
+            handles: Some(handles),
+            presentation: crate::presentation::SurfacePresentationCache::default(),
             views: BTreeMap::new(),
             host_frame_index: None,
             last_presentation_generation: 0,
@@ -984,7 +1035,8 @@ impl WgpuRenderHost {
             #[cfg(feature = "editor-imgui")]
             primary_window_id: WindowId::PRIMARY,
             backend,
-            handles: BackendWindowHandles::default(),
+            handles: None,
+            presentation: crate::presentation::SurfacePresentationCache::default(),
             views: BTreeMap::new(),
             host_frame_index: None,
             last_presentation_generation: 0,
@@ -1007,7 +1059,9 @@ impl WgpuRenderHost {
         if self.backend.runtime_close_started() {
             return Err(WgpuRenderError::BackendUnavailable.into());
         }
-        self.handles.insert(window_id, provider)?;
+        self.handles
+            .get_or_insert_with(BackendWindowHandles::default)
+            .insert(window_id, provider)?;
         Ok(())
     }
 
@@ -1038,6 +1092,15 @@ impl WgpuRenderHost {
         &mut self,
         window: Option<RenderWindowPacket>,
     ) -> Result<WgpuDeviceNamespace, WgpuRenderHostError> {
+        let handles = self.handles.clone();
+        self.prepare_namespace_with_authority(window, handles.as_ref())
+    }
+
+    fn prepare_namespace_with_authority(
+        &mut self,
+        window: Option<RenderWindowPacket>,
+        handles: Option<&BackendWindowHandles>,
+    ) -> Result<WgpuDeviceNamespace, WgpuRenderHostError> {
         self.maintain_producers()?;
         if self.backend.runtime_close_started() {
             return Err(WgpuRenderError::BackendUnavailable.into());
@@ -1054,7 +1117,12 @@ impl WgpuRenderHost {
             }
         })?;
         Ok(match window {
-            Some(window) => self.backend.prepare_editor_window(&self.handles, window)?,
+            Some(window) => self.backend.prepare_editor_window(
+                handles.ok_or(WgpuRenderError::SurfaceMissing {
+                    window_id: window.id,
+                })?,
+                window,
+            )?,
             None => self.backend.prepare_image_device()?,
         })
     }
@@ -1185,7 +1253,7 @@ impl WgpuRenderHost {
             .admission
             .admit(program.source_generation(), program.frame_index())?;
         let namespace = self.prepare_namespace(None)?;
-        self.execute_program_in_namespace(id, &namespace, program, None)
+        self.execute_program_in_namespace(id, &namespace, program, None, None)
     }
 
     /// Output publication and stock image publication use the same original native transaction.
@@ -1195,6 +1263,7 @@ impl WgpuRenderHost {
         namespace: &WgpuDeviceNamespace,
         program: &crate::WgpuRenderProgram,
         local_target: Option<&crate::program::HostProgramTexture>,
+        mut surface: Option<ProgramSurfaceTarget<'_>>,
     ) -> Result<crate::WgpuProgramOutputs, WgpuRenderHostError> {
         let host_frame_index = self
             .host_frame_index
@@ -1204,6 +1273,31 @@ impl WgpuRenderHost {
             .try_reserve_exact(program.0.graph.outputs().len())
             .map_err(|_| crate::GraphError::AllocationFailed)
             .map_err(crate::WgpuRenderProgramError::from)?;
+        if let Some(surface) = &surface {
+            let resource = program
+                .0
+                .graph
+                .resource(surface.final_version)
+                .map_err(crate::WgpuRenderProgramError::from)?;
+            let crate::graph::ResourceDescriptor::Texture {
+                native, meaning, ..
+            } = &resource.desc
+            else {
+                return Err(crate::WgpuRenderProgramError::ResourceKind.into());
+            };
+            if !program.0.graph.outputs().contains(surface.final_version)
+                || native.format != surface.acquired.format
+                || native.size.width != surface.acquired.extent.width
+                || native.size.height != surface.acquired.extent.height
+                || !native.usage.contains(wgpu::TextureUsages::TEXTURE_BINDING)
+                || (meaning.transfer == crate::TextureTransfer::Srgb) != native.format.is_srgb()
+            {
+                return Err(crate::WgpuRenderProgramError::feature(
+                    "the final program image does not match its acquired surface",
+                )
+                .into());
+            }
+        }
 
         let validation = namespace
             .device
@@ -1217,6 +1311,16 @@ impl WgpuRenderHost {
         let mut reservation =
             WgpuSubmissionReservation::new(&namespace.device, &namespace.queue, program.clone());
         let mut feature_attempt = crate::program::FeaturePreparationAttempt::default();
+        let presentation = &mut self.presentation;
+        let finalization_cost = if surface.is_some() {
+            crate::program::NativePreparationCost::new(
+                1,
+                crate::presentation::SurfacePresentationCache::modeled_metadata_bytes()
+                    + std::mem::size_of::<ProgramSurfaceTarget<'_>>(),
+            )
+        } else {
+            crate::program::NativePreparationCost::default()
+        };
         let prepared = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
             crate::program::prepare_and_encode(
                 program,
@@ -1230,9 +1334,65 @@ impl WgpuRenderHost {
                 #[cfg(any(feature = "sprite-submitter", feature = "ui-submitter"))]
                 self.backend.stock_quad_resources(),
                 local_target,
+                finalization_cost,
+                |resources, encoder, preparation| {
+                    if let Some(surface) = &surface {
+                        let storage = resources
+                            .get(surface.final_version.index())
+                            .ok_or(crate::WgpuRenderProgramError::UnpublishedResource)?;
+                        let crate::program::NativeResource::Texture { texture, view } =
+                            &storage.native
+                        else {
+                            return Err(crate::WgpuRenderProgramError::ResourceKind);
+                        };
+                        let prepared = presentation.prepare(
+                            &namespace.device,
+                            namespace.device_epoch,
+                            surface.acquired.format,
+                            view,
+                            Extent2d::new(texture.width(), texture.height())
+                                .expect("admitted texture extent"),
+                            surface.acquired.extent,
+                        )?;
+                        let target = crate::allocation::checked_resource(
+                            &namespace.device,
+                            "nara_program_surface_view",
+                            || {
+                                surface.acquired.texture.texture.create_view(
+                                    &wgpu::TextureViewDescriptor {
+                                        format: Some(surface.acquired.format),
+                                        ..Default::default()
+                                    },
+                                )
+                            },
+                        )?;
+                        prepared.encode(encoder, &target);
+                        preparation.retain(prepared)?;
+                    }
+                    Ok(())
+                },
             )
         }))
         .unwrap_or(Err(crate::WgpuRenderProgramError::FeaturePanicked));
+        if let Some(surface) = &mut surface {
+            let texture_bytes =
+                self.backend
+                    .logical_texture_bytes()
+                    .saturating_add(if prepared.is_ok() {
+                        program.modeled_resource_bytes()
+                    } else {
+                        0
+                    });
+            *surface.submitted_texture_bytes = texture_bytes;
+            self.backend.observe_program_resources(
+                texture_bytes,
+                if prepared.is_ok() {
+                    surface.instance_buffer_bytes
+                } else {
+                    0
+                },
+            );
+        }
 
         #[cfg(test)]
         PROGRAM_SUBMISSION_FAILURE.with(|failure| {
@@ -1310,6 +1470,13 @@ impl WgpuRenderHost {
                 return Err(error.into());
             }
             let (resources, reports) = staged?;
+            if let Some(surface) = &surface {
+                self.backend.track_runtime_submission(
+                    surface.app_frame_index,
+                    program.frame_index(),
+                    surface.work_started_at,
+                )?;
+            }
             for version in program.0.graph.outputs() {
                 outputs.push((version.clone(), Arc::clone(&resources[version.index()])));
             }
@@ -1320,13 +1487,20 @@ impl WgpuRenderHost {
                 .admission;
             admission.source_generation = Some(program.source_generation());
             admission.last_frame_index = Some(program.frame_index());
-            self.backend.record_editor_image_submission();
+            if surface.is_some() {
+                self.backend.record_runtime_program_submission();
+            } else {
+                self.backend.record_editor_image_submission();
+            }
             Ok(crate::WgpuProgramOutputs {
                 outputs,
                 reports,
                 prefix,
             })
         })();
+        if surface.is_some() {
+            self.backend.finish_program_resources();
+        }
         if local_target.is_some() && feature_attempt.native_started {
             // A pure preflight/capacity refusal preserves separately admitted initial storage.
             // Once native work starts, the original prefix owns the attempt, including failure.
@@ -1447,19 +1621,25 @@ impl WgpuRenderHost {
     /// Stops this Host and polls its final original queue drain without waiting for later work.
     /// Producer-local close uses the frozen prefix returned by [`Self::retire_producer`] instead.
     pub fn poll_retirement(&mut self) -> Result<bool, WgpuRenderHostError> {
+        self.poll_retirement_for_targets(&[])
+    }
+
+    fn poll_retirement_for_targets(
+        &mut self,
+        window_ids: &[WindowId],
+    ) -> Result<bool, WgpuRenderHostError> {
         if self.retired {
             return Ok(true);
         }
         for view in self.views.values_mut() {
             view.closed.store(true, Ordering::Release);
             view.interaction.store(false, Ordering::Release);
-            if let Some(presentation) = view.world_presentation.take() {
-                presentation.invalidate();
-            }
+            view.world_presentation.invalidate();
         }
+        self.presentation.clear();
         self.maintain_producers()?;
         // Platform surfaces are retired by their retained native session, after this queue drain.
-        let queue_complete = self.backend.poll_runtime_retirement(&[])?;
+        let queue_complete = self.backend.poll_runtime_retirement(window_ids)?;
         self.maintain_producers()?;
         self.retired = queue_complete && self.retiring_prefixes.is_empty();
         Ok(self.retired)
@@ -1582,9 +1762,8 @@ impl WgpuRenderHost {
         view.interaction.store(false, Ordering::Release);
         view.interaction = Arc::new(AtomicBool::new(true));
         if view.admission.source_generation != Some(reservation.stamp.source_generation) {
-            if let Some(presentation) = view.world_presentation.take() {
-                presentation.invalidate();
-            }
+            view.world_presentation.invalidate();
+            view.runtime_presentation = None;
             self.backend
                 .retire_editor_world_presentation(reservation.stamp.view_id);
         }
@@ -1673,9 +1852,8 @@ impl WgpuRenderHost {
             .views
             .get_mut(&view_id)
             .expect("the registered view remains owned");
-        if let Some(previous) = view.world_presentation.replace(revoker) {
-            previous.invalidate();
-        }
+        view.world_presentation.replace(&view.closed, revoker)?;
+        view.runtime_presentation = None;
         Ok(())
     }
 
@@ -1897,6 +2075,7 @@ impl WgpuRenderHost {
             namespace,
             &stock.program,
             local_target.as_ref(),
+            None,
         )?;
         let storage = outputs
             .outputs
@@ -2082,9 +2261,8 @@ impl WgpuRenderHost {
         if let Some(view) = self.views.get_mut(&view_id) {
             view.interaction.store(false, Ordering::Release);
             view.target = None;
-            if let Some(presentation) = view.world_presentation.take() {
-                presentation.invalidate();
-            }
+            view.world_presentation.invalidate();
+            view.runtime_presentation = None;
         }
         self.backend.retire_editor_world_presentation(view_id);
     }

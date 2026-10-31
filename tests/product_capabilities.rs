@@ -67,7 +67,7 @@ fn server_bundle_stays_free_of_raw_client_resources() {
 #[cfg(feature = "render-wgpu")]
 #[test]
 fn wgpu_bundle_installs_cpu_exchange_without_making_the_gpu_owner_a_resource() {
-    static_assertions::assert_not_impl_any!(nara::render_wgpu::WgpuRenderBackend: nara::ecs::Resource);
+    static_assertions::assert_not_impl_any!(nara::render_wgpu::WgpuRenderHost: nara::ecs::Resource);
 
     let mut app = App::new();
     app.add_plugins((nara::MinimalPlugins, nara::WgpuBackendPlugins))

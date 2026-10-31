@@ -1279,7 +1279,13 @@ mod native {
             let packet = window_packet(&window);
             let namespace = execution
                 .backend
-                .prepare_editor_window(&execution.handles, packet)
+                .prepare_editor_window(
+                    execution
+                        .handles
+                        .as_ref()
+                        .expect("registered window authority"),
+                    packet,
+                )
                 .unwrap();
             let mut renderer = execution
                 .with_device(packet, |scope| {

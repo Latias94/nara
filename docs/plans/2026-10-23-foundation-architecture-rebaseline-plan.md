@@ -756,9 +756,11 @@ transition through these owners. Proposed0121 and the complete foundation Goal s
 Accepted ADR0094 now selects the finite typed texture/buffer program prerequisite through that same
 Host. Follow its [production design](../architecture/render-program-production-design.md) for actual
 stock adapters, including a whole-candidate Image preflight before any upload/state creation,
-shared native realization and submission-boundary instance accounting. A public offscreen Feature
-is evidence for this prerequisite; stock Runtime/Editor, policy, View/history and custom composition
-still close the complete R8 outcome rather than becoming parallel permanent render paths.
+shared native realization and submission-boundary instance accounting. Stock Runtime windows and
+Scene/Canvas/Game/image consumers now use that program transaction, including its final surface
+consumer and producer-local world permissions. Continue typed policy capture installation, actual
+alternate-policy consumers, View/history and custom composition to close the complete R8 outcome.
+The remaining central capture fields and facade family retire with those consumers.
 
 ADR 0121's [identity, wiring and candidate boundaries](../architecture/adr/0121-composable-render-programs-and-host-execution.md#identity-wiring-and-candidate-boundaries)
 close three remaining shared contracts before interface freeze: stable Feature-instance and

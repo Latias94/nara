@@ -15,7 +15,8 @@ use nara_render_wgpu::{
         cancel_runtime_frame, complete_runtime_frame, take_runtime_frame,
     },
     WgpuAdapterSummary, WgpuBackendTelemetryConfig, WgpuFrameCompletionSample,
-    WgpuFrameCompletionStats, WgpuGpuResourceStats, WgpuRenderBackend, WgpuRenderObservation,
+    WgpuFrameCompletionStats, WgpuGpuResourceStats, WgpuRenderHost, WgpuRenderObservation,
+    WgpuRenderProducer,
 };
 use nara_window::{WindowId, backend::BackendWindowHandles};
 use nara_winit::__private::{__WinitPresentationDriver, __WinitPresentationProgress};
@@ -42,7 +43,7 @@ pub enum DesktopPresentationControl {
 /// Read-only facts at the actual post-Host boundary, including maintenance without a frame.
 ///
 /// `world()` is available only while Runtime is Running or Paused. Completion samples are drained
-/// once from the original local backend and belong to this callback invocation; their exact App,
+/// once from the original local Host and belong to this callback invocation; their exact App,
 /// render and device identities are retained. The final telemetry seal is delivered once, before
 /// epoch cleanup; it remains available in the run report. No native GPU handle is exposed.
 pub struct DesktopPresentationObservation<'a> {
@@ -197,7 +198,7 @@ impl fmt::Debug for DesktopPresentationOptions {
     }
 }
 
-/// This shared value holds CPU diagnostics only. WinitSession alone owns the live backend.
+/// This shared value holds CPU diagnostics only. WinitSession alone owns the live Host.
 #[derive(Clone, Default)]
 pub(super) struct DesktopPresentationReports(Rc<RefCell<DesktopPresentationReportState>>);
 
@@ -228,7 +229,8 @@ struct TelemetrySeal {
 }
 
 pub(super) struct DesktopPresentationDriver {
-    backend: WgpuRenderBackend,
+    host: WgpuRenderHost,
+    producer: Option<WgpuRenderProducer>,
     pending_result: Option<WgpuRuntimeResult>,
     #[cfg(all(feature = "runtime-2d", feature = "serde"))]
     verification: Option<DesktopFirstPresentVerification>,
@@ -253,10 +255,10 @@ impl DesktopPresentationDriver {
         >,
         reports: DesktopPresentationReports,
     ) -> Self {
-        let mut backend = WgpuRenderBackend::default();
+        let mut host = WgpuRenderHost::offscreen();
         let telemetry = options.telemetry;
         if let Some(config) = telemetry {
-            backend.configure_telemetry(config);
+            host.configure_telemetry(config);
         }
         #[cfg(feature = "presentation-ui")]
         let (ui, attachment_failure) =
@@ -269,7 +271,8 @@ impl DesktopPresentationDriver {
         #[cfg(not(feature = "presentation-ui"))]
         let attachment_failure = None;
         Self {
-            backend,
+            host,
+            producer: None,
             pending_result: None,
             #[cfg(all(feature = "runtime-2d", feature = "serde"))]
             verification,
@@ -355,11 +358,38 @@ impl DesktopPresentationDriver {
         })?;
         let fault = outcome.post_operation_fault;
         if let Some(capture) = outcome.output {
-            self.pending_result = Some(if fault.is_some() {
-                cancel_runtime_frame(capture)
+            if fault.is_some() {
+                self.pending_result = Some(cancel_runtime_frame(capture));
             } else {
-                self.backend.execute_runtime_frame(handles, capture)
-            });
+                if self.producer.is_none() {
+                    match self.host.create_producer() {
+                        Ok(producer) => self.producer = Some(producer),
+                        Err(error) => {
+                            // Return the original capture's obligations before reporting failure.
+                            self.pending_result = Some(cancel_runtime_frame(capture));
+                            let completion = self.complete_pending(runtime);
+                            let error = AppRunError::runner(format!(
+                                "WGPU Runtime producer creation failed: {error}"
+                            ));
+                            return Err(match completion {
+                                Ok(_) => error,
+                                Err(completion_error) => {
+                                    AppRunError::runner_teardown(error, completion_error)
+                                }
+                            });
+                        }
+                    }
+                }
+                self.pending_result = Some(
+                    self.host.execute_runtime_frame(
+                        self.producer
+                            .as_ref()
+                            .expect("the original Runtime producer was just admitted"),
+                        handles,
+                        capture,
+                    ),
+                );
+            }
         }
         let completion = self.complete_pending(runtime);
         if let Some(fault) = fault {
@@ -376,11 +406,12 @@ impl DesktopPresentationDriver {
         if self.seal.is_some() || self.reports.0.borrow().telemetry_seal.is_some() {
             return;
         }
+        let facts = self.host.runtime_facts();
         self.seal = Some(TelemetrySeal {
             deadline,
             exit,
-            instance_id: self.backend.instance_id(),
-            epoch: self.backend.device_epoch(),
+            instance_id: facts.backend_instance_id,
+            epoch: facts.device_epoch,
             samples: Vec::new(),
         });
     }
@@ -393,12 +424,13 @@ impl DesktopPresentationDriver {
     ) -> Option<AppExit> {
         let seal = self.seal.as_mut()?;
         seal.samples.extend_from_slice(samples);
-        let completion = self.backend.frame_completion_stats();
-        let resources = self.backend.gpu_resource_stats();
+        let facts = self.host.runtime_facts();
+        let completion = facts.completion;
+        let resources = facts.resources;
         let outcome = if poll_failed {
             Some(DesktopTelemetrySealOutcome::PollFailed)
-        } else if self.backend.instance_id() != seal.instance_id
-            || self.backend.device_epoch() != seal.epoch
+        } else if facts.backend_instance_id != seal.instance_id
+            || facts.device_epoch != seal.epoch
             || completion.device_epoch() != seal.epoch
             || resources.device_epoch() != seal.epoch
         {
@@ -428,9 +460,9 @@ impl DesktopPresentationDriver {
             completion,
             resources,
             samples: seal.samples,
-            instance_id: self.backend.instance_id(),
-            device_epoch: self.backend.device_epoch(),
-            adapter: self.backend.adapter_summary(),
+            instance_id: facts.backend_instance_id,
+            device_epoch: facts.device_epoch,
+            adapter: facts.adapter,
         });
         seal.exit.map(|exit| {
             if outcome == DesktopTelemetrySealOutcome::Complete {
@@ -458,14 +490,19 @@ impl DesktopPresentationDriver {
             progress.next_wake = verified.next_wake;
         }
 
-        let poll = self.backend.poll_telemetry_completions();
-        let samples = self.backend.drain_frame_completion_samples();
+        let maintenance = self.host.poll_runtime_maintenance();
+        let samples = maintenance.samples;
         let now = Instant::now().max(now);
-        progress.exit = merge_exit(progress.exit, self.poll_seal(now, poll.is_err(), &samples));
+        progress.exit = merge_exit(
+            progress.exit,
+            self.poll_seal(now, maintenance.error.is_some(), &samples),
+        );
         let progress = self.observe_consumer(runtime, presented, now, &samples, progress);
-        poll.map_err(|error| {
-            AppRunError::runner(format!("WGPU telemetry polling failed: {error}"))
-        })?;
+        if let Some(error) = maintenance.error {
+            return Err(AppRunError::runner(format!(
+                "WGPU telemetry polling failed: {error}"
+            )));
+        }
         Ok(progress)
     }
 
@@ -480,6 +517,7 @@ impl DesktopPresentationDriver {
     ) -> __WinitPresentationProgress {
         let report = self.reports.telemetry_seal();
         let live = is_live(runtime);
+        let facts = self.host.runtime_facts();
         if (report.is_none() || !self.seal_report_delivered)
             && let Some(observer) = &mut self.observer
         {
@@ -491,9 +529,9 @@ impl DesktopPresentationDriver {
                 presented: presented.filter(|_| live),
                 completion_samples: samples,
                 telemetry_seal: report.as_ref(),
-                adapter: self.backend.adapter_summary(),
-                completion: self.backend.frame_completion_stats(),
-                resources: self.backend.gpu_resource_stats(),
+                adapter: facts.adapter,
+                completion: facts.completion,
+                resources: facts.resources,
             });
             match control {
                 DesktopPresentationControl::Continue => {}
@@ -586,11 +624,11 @@ impl __WinitPresentationDriver for DesktopPresentationDriver {
             );
         }
         let observed = self.observe(runtime, None, now);
-        // Seal CPU evidence while the original epoch/counters still exist.
-        let native = if self.seal.is_some() {
+        // Settle original results and observe the seal before whole-Host producer/native close.
+        let native = if self.seal.is_some() || self.pending_result.is_some() {
             Ok(false)
         } else {
-            self.backend
+            self.host
                 .poll_runtime_retirement(window_ids)
                 .map_err(|error| {
                     AppRunError::runner(format!("WGPU native retirement failed: {error}"))

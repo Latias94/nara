@@ -188,6 +188,18 @@ cross-owner composition work; this subsection does not promote that entire propo
   guard. Pure preflight/capacity refusal preserves the initial reservation; native preparation
   transfers that attempt to original-prefix custody even when later work fails. Successor output
   allocation follows complete preflight through the same program realization path.
+- Ordinary Runtime windows use that same staged program transaction. The Host acquires the
+  surface once and encodes its final physical-resolution image consumer into the program's
+  original command encoder and submission. Known final-consumer metadata and retention admit
+  before native work. A successful output submission does not establish surface presentation:
+  the exact Runtime receipt, world-picking permission and one-shot UI completion still require
+  successful present. Each producer owns and revokes its own world-presentation permission;
+  producer Drop revokes it before returning, independently of Host maintenance. A successful
+  present replacing another producer in the same physical window revokes the displaced frame;
+  presentations in other windows remain valid. Close cannot revoke the target's successor.
+  Capture identity comes from the managed Runtime owner, independently of replaceable World
+  resources. Host cache age,
+  App frame and render transaction clocks retain their separate meanings.
 - Each candidate has one complete output group and one independently validated native submission.
   Failed preparation, encoding or submission publishes none of it and leaves its successful
   capture watermark unchanged. Even failures flush and retain original uploads through the

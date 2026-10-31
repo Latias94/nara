@@ -9,7 +9,7 @@ use nara_app::{
 use nara_window::backend::BackendWindowHandles;
 
 use super::*;
-use crate::WgpuRenderBackend;
+use crate::WgpuRenderHost;
 
 #[derive(Resource)]
 struct HarnessControl;
@@ -21,6 +21,7 @@ enum HarnessMutation {
     RemoveStats,
     RestoreStats,
     BackendStatus(RenderBackendStatus),
+    RuntimeGeneration(RuntimeGeneration),
     Fault,
 }
 
@@ -60,6 +61,10 @@ fn mutate(
             world.insert_resource(status);
             None
         }
+        HarnessMutation::RuntimeGeneration(generation) => {
+            world.insert_resource(generation);
+            None
+        }
         HarnessMutation::Fault => {
             world
                 .resource::<RuntimeFaultReporter>()
@@ -77,7 +82,7 @@ fn return_then_fault(
     world: &mut World,
     input: ConnectionInput,
 ) -> Result<ConnectionOutput, (RuntimeWorldAccessError, ConnectionInput)> {
-    let returning = matches!(input, ConnectionInput::Return(..));
+    let returning = matches!(input.0, ConnectionOperation::Return(..));
     let output = apply_connection(world, input);
     if returning {
         world
@@ -175,8 +180,159 @@ fn capture(runtime: &mut RuntimeInstance) -> WgpuRuntimeCapture {
 }
 
 fn result(runtime: &mut RuntimeInstance) -> WgpuRuntimeResult {
-    WgpuRenderBackend::default()
-        .execute_runtime_frame(&BackendWindowHandles::default(), capture(runtime))
+    let mut host = WgpuRenderHost::offscreen();
+    let producer = host.create_producer().unwrap();
+    host.execute_runtime_frame(
+        &producer,
+        &BackendWindowHandles::default(),
+        capture(runtime),
+    )
+}
+
+fn window_capture(runtime: &mut RuntimeInstance, source: RuntimeGeneration) -> WgpuRuntimeCapture {
+    use nara_render::{
+        ExtractedView, ExtractedViews, RenderTarget, ViewLoadOp, ViewMapping2d, ViewportRect,
+    };
+    let viewport = ViewportRect::new(0, 0, 8, 8).unwrap();
+    let mut views = ExtractedViews::default();
+    views.push(ExtractedView {
+        camera_entity: nara_ecs::Entity::PLACEHOLDER,
+        target: RenderTarget::PrimaryWindow,
+        viewport,
+        mapping: ViewMapping2d::orthographic(nara_core::Mat3::IDENTITY, 8.0, viewport).unwrap(),
+        order: 0,
+        load: ViewLoadOp::Clear(nara_core::Color::BLACK),
+    });
+    let window =
+        nara_window::Window::new("captured window", nara_window::WindowResolution::new(8, 8));
+    let packet = nara_render::build_render_frame_packet(
+        source,
+        1,
+        Some(nara_window::WindowId::PRIMARY),
+        [&window],
+        &views,
+    )
+    .unwrap()
+    .unwrap();
+    let mut capture = capture(runtime);
+    capture.pending.captured = Ok(Some(crate::frame::WgpuCapturedFrame {
+        topology: packet,
+        payload: crate::frame::WgpuFramePayload::default(),
+        app_frame_index: 1,
+        work_started_at: std::time::Instant::now(),
+    }));
+    capture
+}
+
+#[test]
+fn replacing_world_generation_faults_before_a_foreign_capture_can_be_issued() {
+    let mut owner = runtime(false);
+    let foreign = runtime(false);
+    control(
+        &mut owner,
+        HarnessMutation::RuntimeGeneration(foreign.generation()),
+    );
+    assert_eq!(owner.state(), RuntimeState::Faulted);
+    let failure = take_runtime_frame(&mut owner).unwrap_err();
+    assert!(matches!(failure.error, WgpuRuntimeExchangeError::Port(_)));
+    let generation = owner.generation();
+    control(&mut owner, HarnessMutation::RuntimeGeneration(generation));
+    finish(owner);
+    finish(foreign);
+}
+
+#[test]
+fn host_rejects_foreign_captured_source_before_native_authority_and_returns_original_result() {
+    let mut owner = runtime(false);
+    let foreign = runtime(false);
+    let capture = window_capture(&mut owner, foreign.generation());
+    let identity = capture.identity();
+    let mut host = crate::WgpuRenderHost::offscreen();
+    let producer = host.create_producer().unwrap();
+    let result = host.execute_runtime_frame(&producer, &BackendWindowHandles::default(), capture);
+    assert_eq!(result.identity(), identity);
+    assert_eq!(result.observation().unwrap().device_epoch(), 0);
+    assert_eq!(
+        result
+            .observation()
+            .unwrap()
+            .frame_transaction_stats()
+            .packet_rejections(),
+        1
+    );
+    let outcome = complete_runtime_frame(&mut owner, result).unwrap();
+    assert!(outcome.output.presented.is_none());
+    assert!(outcome.post_operation_fault.is_some());
+    assert!(
+        host.create_producer().is_ok(),
+        "one invalid source cannot retire a healthy Host"
+    );
+    drop(host);
+    finish(owner);
+    finish(foreign);
+}
+
+#[test]
+fn a_foreign_runtime_producer_does_not_poison_the_receiving_host() {
+    let mut owner = runtime(false);
+    let generation = owner.generation();
+    let capture = window_capture(&mut owner, generation);
+    let mut original = crate::WgpuRenderHost::offscreen();
+    let foreign_producer = original.create_producer().unwrap();
+    let mut receiving = crate::WgpuRenderHost::offscreen();
+    let result = receiving.execute_runtime_frame(
+        &foreign_producer,
+        &BackendWindowHandles::default(),
+        capture,
+    );
+    assert_eq!(result.observation().unwrap().device_epoch(), 0);
+    assert_ne!(
+        result.observation().unwrap().state(),
+        crate::WgpuBackendState::Unavailable
+    );
+    assert!(receiving.create_producer().is_ok());
+    let completed = complete_runtime_frame(&mut owner, result).unwrap();
+    assert!(completed.post_operation_fault.is_none());
+    drop((original, receiving));
+    finish(owner);
+}
+
+#[test]
+fn a_missing_first_runtime_window_does_not_bind_foreign_registry_authority() {
+    let mut host = crate::WgpuRenderHost::offscreen();
+    let producer = host.create_producer().unwrap();
+    for handles in [
+        BackendWindowHandles::default(),
+        BackendWindowHandles::default(),
+    ] {
+        let mut owner = runtime(false);
+        let generation = owner.generation();
+        let capture = window_capture(&mut owner, generation);
+        let result = host.execute_runtime_frame(&producer, &handles, capture);
+        assert_eq!(
+            result
+                .status
+                .as_ref()
+                .unwrap()
+                .last_skip()
+                .unwrap()
+                .reason(),
+            nara_render::RenderFrameSkipReason::SurfaceUnavailable,
+            "each missing registry must reach target admission instead of a foreign-authority refusal"
+        );
+        assert_eq!(result.observation().unwrap().device_epoch(), 0);
+        assert_eq!(
+            result
+                .observation()
+                .unwrap()
+                .frame_transaction_stats()
+                .queue_submissions(),
+            0
+        );
+        let completed = complete_runtime_frame(&mut owner, result).unwrap();
+        assert!(completed.post_operation_fault.is_none());
+        finish(owner);
+    }
 }
 
 fn stop(runtime: &mut RuntimeInstance) {
@@ -311,13 +467,13 @@ fn close_revokes_an_unexecuted_capture_without_issuing_gpu_observation() {
     let capture = capture(&mut runtime);
     stop(&mut runtime);
     assert_eq!(runtime.state(), RuntimeState::CloseIncomplete);
-    let mut backend = WgpuRenderBackend::default();
-    let result = backend.execute_runtime_frame(&BackendWindowHandles::default(), capture);
+    let mut host = WgpuRenderHost::offscreen();
+    let producer = host.create_producer().unwrap();
+    let result = host.execute_runtime_frame(&producer, &BackendWindowHandles::default(), capture);
     assert!(result.observation().is_none());
-    assert_eq!(backend.frame_transaction_stats().queue_submissions(), 0);
+    assert_eq!(host.frame_transaction_stats().queue_submissions(), 0);
     assert_eq!(
-        backend
-            .frame_transaction_stats()
+        host.frame_transaction_stats()
             .render_transaction_frame_index(),
         None
     );

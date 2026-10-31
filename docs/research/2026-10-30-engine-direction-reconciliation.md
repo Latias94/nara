@@ -198,3 +198,13 @@ metadata admission, partial known-resource reservations, hard-limit deferral and
 cleanup. The stock migration adds an explicit complete Image preflight barrier before uploads;
 View/history, policy and custom composition remain in the current R8 unit. This is development
 against the imported F1/F3 direction, not another research-only roadmap or a full0121 completion claim.
+
+The [ordinary Runtime/window program successor](../knowledge/engineering/verification/2026-10/2026-10-31T165610Z-runtime-window-programs-and-synchronous-producer-world-permission-qualification-c05b8d29194543bc9fb11fbbc79414de.md)
+joins the stock image migration through one actual native submission owner. Review corrected
+producer-local world interaction, synchronous Drop revocation, physical-window displacement,
+capture-owner identity, initial window authority and resource-fact timing. The same archive hash
+still matches the receiving input; these are concrete F1/F2/F3 implementation refinements inside
+the existing plan, without another roadmap or imported toolkit. Typed policy capture and complete
+history/custom composition stay open, as do the named Schema/Prefab, joint motion/executor and
+editable Nara-drawn Inspector workflows. No historical source snapshot is reclassified as a fresh
+current-platform qualification.

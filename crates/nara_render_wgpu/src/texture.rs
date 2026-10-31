@@ -49,20 +49,7 @@ impl WgpuSpriteTextureCache {
         }
     }
 
-    #[must_use]
-    pub(crate) fn image_count(&self) -> usize {
-        self.resident_image_count() + {
-            #[cfg(feature = "ui-submitter")]
-            {
-                self.glyph_pages.len()
-            }
-            #[cfg(not(feature = "ui-submitter"))]
-            {
-                0
-            }
-        }
-    }
-
+    #[cfg(test)]
     #[must_use]
     pub(crate) fn stats(&self) -> WgpuTextureCacheStats {
         let mut stats = self.stats;

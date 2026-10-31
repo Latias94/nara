@@ -28,6 +28,36 @@ pub(crate) struct StockPolicyInstances {
     ui: crate::WgpuFeatureInstance<crate::ui::UiFeature<FinalComposite>>,
 }
 
+#[derive(Default, Clone, Copy)]
+pub(crate) struct StockDrawFacts {
+    pub(crate) draw_calls: u32,
+    pub(crate) sprites: u32,
+    pub(crate) image_sprites: u32,
+    pub(crate) instance_buffer_bytes: u64,
+}
+
+impl StockDrawFacts {
+    #[cfg(any(feature = "sprite-submitter", feature = "ui-submitter"))]
+    fn add(
+        &mut self,
+        batches: &[crate::quad::WgpuQuadBatch],
+    ) -> Result<(), WgpuRenderProgramError> {
+        let stats = crate::quad::quad_batch_draw_stats(batches);
+        self.draw_calls = self.draw_calls.saturating_add(stats.draw_calls);
+        self.sprites = self.sprites.saturating_add(stats.sprites);
+        self.image_sprites = self.image_sprites.saturating_add(stats.image_sprites);
+        let bytes = crate::quad::admit_quad_instance_buffers(batches)
+            .map_err(|error| WgpuRenderProgramError::feature(error.to_string()))?;
+        self.instance_buffer_bytes =
+            self.instance_buffer_bytes
+                .checked_add(bytes)
+                .ok_or_else(|| {
+                    WgpuRenderProgramError::feature("stock instance bytes cannot be represented")
+                })?;
+        Ok(())
+    }
+}
+
 impl StockPolicyInstances {
     pub(crate) fn new(
         backend_instance_id: u64,
@@ -64,6 +94,7 @@ impl StockPolicyInstances {
         payload: &WgpuFramePayload,
         format: wgpu::TextureFormat,
     ) -> Result<StockProgram, WgpuRenderProgramError> {
+        let mut facts = StockDrawFacts::default();
         let mut builder = WgpuRenderProgramBuilder::new(
             packet.source_generation(),
             packet.frame_index(),
@@ -115,6 +146,7 @@ impl StockPolicyInstances {
                 packet.views(),
                 scene.clone(),
             )?;
+            facts.add(&capture.batches)?;
             builder.operation(
                 1,
                 &self.world,
@@ -144,6 +176,7 @@ impl StockPolicyInstances {
             )?;
         }
         let resolved = if let Some(frame) = packet.world_canvas() {
+            facts.draw_calls = facts.draw_calls.saturating_add(1);
             let resolved = builder.texture::<ResolvedSceneColor>(descriptor.clone())?;
             builder.operation(
                 2,
@@ -178,6 +211,7 @@ impl StockPolicyInstances {
                 ViewportRect::from_extent(extent).expect("admitted target extent"),
             )?;
             let ui_facts = Arc::clone(&capture.packet_facts);
+            facts.add(&capture.batches)?;
             let initialized = match &resolved {
                 Some(resolved) => final_color.preserve(resolved, AccessRole::Attachment),
                 None => final_color.preserve(&scene, AccessRole::Attachment),
@@ -187,6 +221,7 @@ impl StockPolicyInstances {
                 program: builder.finish(&[final_color.output()])?,
                 final_version: final_color.version.clone(),
                 ui_facts,
+                facts,
             });
         }
         if let Some(resolved) = resolved {
@@ -195,6 +230,7 @@ impl StockPolicyInstances {
                 final_version: resolved.version.clone(),
                 #[cfg(feature = "ui-submitter")]
                 ui_facts: Arc::from([]),
+                facts,
             });
         }
         Ok(StockProgram {
@@ -202,6 +238,7 @@ impl StockPolicyInstances {
             final_version: scene.version.clone(),
             #[cfg(feature = "ui-submitter")]
             ui_facts: Arc::from([]),
+            facts,
         })
     }
 }
@@ -209,6 +246,7 @@ impl StockPolicyInstances {
 pub(crate) struct StockProgram {
     pub(crate) program: WgpuRenderProgram,
     pub(crate) final_version: ResourceVersion,
+    pub(crate) facts: StockDrawFacts,
     #[cfg(feature = "ui-submitter")]
     pub(crate) ui_facts: Arc<[crate::ui::WgpuLoweredUiPacketFacts]>,
 }

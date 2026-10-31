@@ -3,9 +3,8 @@
 use std::{mem::size_of, ops::Range, sync::Arc};
 
 use crate::{
-    GraphError, LimitKind, PreparedSubmitterDraw, WgpuRenderError, WgpuRenderProgramError,
+    GraphError, LimitKind, WgpuRenderError, WgpuRenderProgramError,
     budget::{InstanceBudget, InstanceReservation},
-    frame::WgpuLoweredFrameDraw,
     output::OutputReservation,
     preparation::WgpuFeatureAllocation,
     quad::{
@@ -20,6 +19,8 @@ use crate::{
         stock_texture_record_metadata_bytes,
     },
 };
+#[cfg(test)]
+use crate::{PreparedSubmitterDraw, frame::WgpuLoweredFrameDraw};
 
 /// Shared quad native work. Domain facts and one-shot completion remain in the domain adapter.
 #[derive(Debug, Default)]
@@ -299,10 +300,7 @@ impl StockQuadResources {
         self.textures.clear();
     }
 
-    pub(crate) fn texture_count(&self) -> usize {
-        self.textures.image_count()
-    }
-
+    #[cfg(test)]
     pub(crate) fn texture_stats(&self) -> crate::WgpuRenderTextureCacheStats {
         self.textures.stats()
     }
@@ -311,9 +309,8 @@ impl StockQuadResources {
         self.textures.logical_texture_bytes()
     }
 
-    /// Realizes the captured draw against the caller's exact native namespace.
-    ///
-    /// The read-only health check retains the original epoch's pipeline failure precedence.
+    /// Private legacy draw adapter for native/unit oracles; production uses `prepare_batches`.
+    #[cfg(test)]
     pub(crate) fn prepare(
         &mut self,
         preparation: &mut crate::preparation::NativePreparation<'_>,
@@ -322,10 +319,7 @@ impl StockQuadResources {
         lowered: WgpuLoweredFrameDraw,
         frame_index: u64,
     ) -> Result<PreparedSubmitterDraw, WgpuRenderError> {
-        #[cfg(test)]
         let batches = crate::allocation::take_test_batches().unwrap_or(lowered.batches);
-        #[cfg(not(test))]
-        let batches = lowered.batches;
         #[cfg(feature = "ui-submitter")]
         let ui_packets = lowered.ui_packets;
         let prepared = self.prepare_batches(
