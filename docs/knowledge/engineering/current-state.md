@@ -3,7 +3,7 @@ type: "Current State"
 title: "Current Engineering State"
 description: "Derived summary of immutable engineering-memory shards."
 tags: ["engineering-memory", "derived"]
-source_fingerprint: "75ec8840c54ee3b9be0115184fb782e25a53275e352218f3bf64209e44caf514"
+source_fingerprint: "12819191a14600afe0723cade2e5be84520eb7c1e1e7f3d5a6bd14bc4f07c5db"
 ---
 
 # Current State
@@ -12,8 +12,8 @@ source_fingerprint: "75ec8840c54ee3b9be0115184fb782e25a53275e352218f3bf64209e44c
 
 This file is derived from immutable shards. Record new facts in shards, then render during integration.
 
-- Source fingerprint: `75ec8840c54ee3b9be0115184fb782e25a53275e352218f3bf64209e44caf514`
-- Immutable records: 1143
+- Source fingerprint: `12819191a14600afe0723cade2e5be84520eb7c1e1e7f3d5a6bd14bc4f07c5db`
+- Immutable records: 1148
 - Active lane heads: 2
 
 # Active Registrations
@@ -51,7 +51,7 @@ This file is derived from immutable shards. Record new facts in shards, then ren
 - [Editor foundation U9 and U1-U8 complete with exact-source external acceptance](registry/2026-10/2026-10-17T102710Z-nara-editor-foundation-implementation-codex-root-76fa1ccb656c4ebd8c2b5f77f83287f7.md): `completed` (nara-editor-foundation-implementation-codex-root; producer `codex-root`)
 - [Editor foundation research and refactor planning complete](registry/2026-10/2026-10-16T044159Z-nara-editor-foundation-planning-codex-root-d0e8f37adfd54751b67d7ae647f06d83.md): `completed` (nara-editor-foundation-planning-codex-root; producer `codex-root`)
 - [First 2D author workflow complete with clean committed-source acceptance](registry/2026-10/2026-10-16T025148Z-nara-first-2d-author-workflow-codex-root-fe7312236c5d4906b8e950d366111171.md): `completed` (nara-first-2d-author-workflow-codex-root; producer `codex-root`)
-- [Captured View history qualified and complete foundation work continuing](registry/2026-10/2026-10-31T211538Z-nara-foundation-rebaseline-codex-main-cfd7154ad052484e8b7411bec7980299.md): `active` (nara-foundation-rebaseline-codex-main; producer `codex-foundation-main`)
+- [Native composition qualified; full foundation and public stock composition remain active](registry/2026-10/2026-10-31T230036Z-nara-foundation-rebaseline-codex-main-d9cacda514e14b31be3d1143f78aae7d.md): `active` (nara-foundation-rebaseline-codex-main; producer `codex-foundation-main`)
 - [Ordinary structural authoring qualified](registry/2026-10/2026-10-20T053614Z-ordinary-authoring-codex-root-ac405c79936d43b09f6cfb4197d747ed.md): `completed` (ordinary-authoring-codex-root; producer `codex-root`)
 - [Persistent checkpoint consumer qualified on Windows](registry/2026-10/2026-10-21T032628Z-persistent-two-level-game-codex-root-1ac997abdab142e590af8a6c21f9f443.md): `complete` (persistent-two-level-game-codex-root; producer `codex-root`)
 - [N05 plugin failure facts qualified](registry/2026-10/2026-10-19T172945Z-plugin-error-facts-codex-root-c20974513f104398967edbed73efccaa.md): `completed` (plugin-error-facts-codex-root; producer `codex-root`)
@@ -70,6 +70,9 @@ This file is derived from immutable shards. Record new facts in shards, then ren
 
 # Recent Evidence
 
+- **Verification Evidence**: [Native composition physical pump handoff and retained stock input qualification](verification/2026-10/2026-10-31T225517Z-native-composition-physical-pump-handoff-and-retained-stock-input-qualification-f0cd93c17a3c47fa905993cee07e6c5c.md) - Production native-window ownership, sequential Source/Processed runs and independent numeric composition qualified with honest platform and performance limits.
+- **Work Progress**: [Native composition stack correction and physical pump ownership integration](progress/2026-10/2026-10-31T221831Z-native-composition-stack-correction-and-physical-pump-ownership-integration-33af692382f5443998b6c1bd125f7550.md) - Records actual native stack reproduction, heap slot correction, external drawing qualification and the selected reusable physical event-loop successor.
+- **Work Progress**: [Public native window composition and complete independent consumers integrating](progress/2026-10/2026-10-31T214041Z-public-native-window-composition-and-complete-independent-consumers-integrating-d3f6a6a45a4a4f5c9797bbd00deac863.md) - Bounded native paint/read-use and sealed CPU observation are implemented; actual multi-window, content and clipped drawing qualification remains in progress.
 - **Verification Evidence**: [Captured View histories and original submission cleanup production qualification](verification/2026-10/2026-10-31T210034Z-captured-view-histories-and-original-submission-cleanup-production-qualification-5c061376803446c0bff1a95495ca55c7.md) - Scoped production history candidates, independent numeric and Runtime consumers, and final submitted-custody cleanup evidence.
 - **Work Progress**: [History View leases independent numeric qualification and publication review corrections](progress/2026-10/2026-10-31T203210Z-history-view-leases-independent-numeric-qualification-and-publication-review-corrections-a0e84fabb63d49f6b893582e58a20926.md) - Six independent GPU history cases pass; publication cleanup, program budget and final storage corrections remain in final integration.
 - **Work Progress**: [Captured View lifetimes and production history candidates in integration](progress/2026-10/2026-10-31T200950Z-captured-view-lifetimes-and-production-history-candidates-in-integration-adb17185d2534fb5bd768a08ed6e22dc.md) - Neutral View ownership verified; original logical declarations, move-owned candidates and complete Host history publication are integrating.
@@ -79,9 +82,6 @@ This file is derived from immutable shards. Record new facts in shards, then ren
 - **Work Progress**: [Typed policy capture and original installation custody replacement in progress](progress/2026-10/2026-10-31T173542Z-typed-policy-capture-and-original-installation-custody-replacement-in-progress-30844a32a42b458ba9fb6361183f0673.md) - The next render replacement removes central package payloads and combined image facades; code and consumers remain under integration and unqualified.
 - **Verification Evidence**: [Runtime window programs and synchronous producer world permission qualification](verification/2026-10/2026-10-31T165610Z-runtime-window-programs-and-synchronous-producer-world-permission-qualification-c05b8d29194543bc9fb11fbbc79414de.md) - Verification Evidence for Runtime window programs and synchronous producer world permission qualification.
 - **Work Progress**: [Runtime windows share program execution and producer-local world permissions](progress/2026-10/2026-10-31T163643Z-runtime-windows-share-program-execution-and-producer-local-world-permissions-0e74956d20af46cbad08c17a9da21368.md) - Work Progress for Runtime windows share program execution and producer-local world permissions.
-- **Verification Evidence**: [Stock image consumers and declared WorldCanvas through shared programs qualification](verification/2026-10/2026-10-31T153613Z-stock-image-consumers-and-declared-worldcanvas-through-shared-programs-qualification-f6cfe4185aad459587db367d807aeb60.md) - Verification Evidence for Stock image consumers and declared WorldCanvas through shared programs qualification.
-- **Work Progress**: [Ordinary stock image consumers through typed programs integration](progress/2026-10/2026-10-31T152937Z-ordinary-stock-image-consumers-through-typed-programs-integration-158cff8e7dbd4b6fb373f8908539f5af.md) - Work Progress for Ordinary stock image consumers through typed programs integration.
-- **Verification Evidence**: [Shared stock native preparation and whole-candidate preflight qualification](verification/2026-10/2026-10-31T144610Z-shared-stock-native-preparation-and-whole-candidate-preflight-qualification-01b79b28279b48618dd19ec377ad2cc8.md) - Verification Evidence for Shared stock native preparation and whole-candidate preflight qualification.
 
 # Integration Notes
 

@@ -849,6 +849,15 @@ presentation, window and GPU retirement. It must not rebuild Winit's process-lev
 synthetic captures or bypass receiving Schema/content residency to arrange the interleaving. The
 owning render unit also verifies unused-pump recovery after startup admission failure.
 
+The [native-composition checkpoint](../knowledge/engineering/verification/2026-10/2026-10-31T225517Z-native-composition-physical-pump-handoff-and-retained-stock-input-qualification-f0cd93c17a3c47fa905993cee07e6c5c.md)
+at `2d9f251` qualifies that handoff, actual Source/Processed retained-capture replay, independent
+two-window/image streams and clipped numeric composition within its recorded Windows/DX12 scope.
+It replaces stack-heavy inline policy tables with bounded heap storage and keeps complete native
+retirement separate from each logical Runtime. The next
+[public stock-composition unit](../architecture/render-program-production-design.md#next-production-unit-public-stock-composition)
+must expose shared world/Canvas/UI lowering and original capture selection to an ordinary external
+Scene-effect package. Full R8/R9, material declarations and the editable Inspector remain open.
+
 Acceptance: Runtime/Scene View/offscreen, intermediate textures, independent renderer policy,
 two producer streams/two windows/image target, one-stream close, old packets and device loss.
 Reject cycles/uninitialized input and unauthorized acquire/submit/present. Generated/history

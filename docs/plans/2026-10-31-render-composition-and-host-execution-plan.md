@@ -1,9 +1,11 @@
 # Render Composition And Host Execution
 
 Date: 2026-10-31. Last reviewed: 2026-11-01. Status: private CPU/DX12/cost comparison, native
-ownership, immutable outputs, finite typed programs and original policy capture qualified in
-their recorded scopes, followed by the selected captured View/history transaction. Complete
-source/processed interleaving, independent streams and custom composition remain in development.
+ownership, immutable outputs, finite typed programs, original policy capture and captured
+View/history transactions qualified in their recorded scopes. Complete Source/Processed capture
+interleaving, independent native streams, clipped numeric drawing and physical-pump handoff now
+have their own scoped qualification. Public stock-stage Scene effects and the editable
+Nara-drawn Inspector remain open.
 Baseline: `a0995e7b65288ae67a5786b5312e6166b679d171`.
 Parent: [foundation R8/R9a](2026-10-23-foundation-architecture-rebaseline-plan.md#r8-external-render-feature-and-host-local-execution).
 Candidate: Proposed [ADR0121](../architecture/adr/0121-composable-render-programs-and-host-execution.md).
@@ -236,8 +238,9 @@ candidate registry or another Runtime in-flight barrier. This refines the remain
 rather than reopening the graph decision. Its
 [production qualification](../knowledge/engineering/verification/2026-10/2026-10-31T210034Z-captured-view-histories-and-original-submission-cleanup-production-qualification-5c061376803446c0bff1a95495ca55c7.md)
 separates the actual four-chain numeric/Runtime consumers, owner corrections and native evidence
-from the private comparison. Complete source/processed interleaving, independently paced
-two-window/image composition and the Nara-drawn editable Inspector remain open.
+from the private comparison. Its native-composition successor below supplies the selected
+source/processed interleaving and independent streams; the complete Scene-effect workflow and
+Nara-drawn editable Inspector remain open.
 
 Include cleanup after both synchronous publication and later original-prefix completion. The
 candidate/input may already be gone when native polling releases the last Capture or Bindings.
@@ -256,6 +259,16 @@ four original stock captures, then interleave those captures on the same offscre
 live stores and owned backing retire. Preserve each mode's existing witness and residency rules;
 neither a private transport drain nor a synthetic direct-App substitute qualifies this workflow.
 Exercise incomplete-close refusal and failed startup recovery as well as the successful handoff.
+
+The [native-composition qualification](../knowledge/engineering/verification/2026-10/2026-10-31T225517Z-native-composition-physical-pump-handoff-and-retained-stock-input-qualification-f0cd93c17a3c47fa905993cee07e6c5c.md)
+records that production replacement at `2d9f251`: public window/read-use scopes, bounded receipt
+preparation, heap-owned stable policy slots, a read-only original-input reader and explicit
+physical-loop transfer through ordinary desktop actions. The independent consumer completes real
+Source/Processed publication and retained-input replay, two-window/image progression and clipped
+premultiplied drawing with numeric readback. Windows/DX12, owner and selected Editor gates pass
+within their recorded scopes. A release-only measurement was incorrectly selected by a broad
+debug command and refused its prerequisite; no performance result or fully green broad run is
+claimed. This checkpoint does not close the complete outcome or promote Proposed0121.
 
 The next [public stock-composition unit](../architecture/render-program-production-design.md#next-production-unit-public-stock-composition)
 must close the remaining actual API gap: stock world/Canvas/UI lowering is currently fixed inside

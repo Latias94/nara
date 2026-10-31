@@ -255,3 +255,11 @@ logical Runtime, since native Winit does not admit a second loop in one process.
 and exact receiving definitions. The [current render unit](../plans/2026-10-31-render-composition-and-host-execution-plan.md)
 owns their complete qualification. Neither correction justifies replacing Bevy ECS, relaxing
 Schema witnesses, adopting an embedded UI toolkit or promoting full0121.
+
+Their [production qualification](../knowledge/engineering/verification/2026-10/2026-10-31T225517Z-native-composition-physical-pump-handoff-and-retained-stock-input-qualification-f0cd93c17a3c47fa905993cee07e6c5c.md)
+now records `2d9f251`, complete independent Source/Processed retained-input replay, actual native
+streams and clipped numeric drawing. It preserves the failed debug measurement selection and
+platform limits. The next [public stock-composition seam](../architecture/render-program-production-design.md#next-production-unit-public-stock-composition)
+replaces fixed stock world/Canvas/UI wiring through the same external Scene-effect consumers.
+This advances F1/F2/F3 without closing the report's Schema/Prefab evolution, joint motion/execution,
+durable material or editable Nara-drawn Inspector gates.
