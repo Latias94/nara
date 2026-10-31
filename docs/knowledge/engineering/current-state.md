@@ -3,7 +3,7 @@ type: "Current State"
 title: "Current Engineering State"
 description: "Derived summary of immutable engineering-memory shards."
 tags: ["engineering-memory", "derived"]
-source_fingerprint: "455faec700391732c80dfe4c54de6898cc842946ffb61d3bb6291b090fa4ee63"
+source_fingerprint: "9d5fc0c85005f556145085e4353ecd87c21a461fdba8825b917b548d508de4fe"
 ---
 
 # Current State
@@ -12,8 +12,8 @@ source_fingerprint: "455faec700391732c80dfe4c54de6898cc842946ffb61d3bb6291b090fa
 
 This file is derived from immutable shards. Record new facts in shards, then render during integration.
 
-- Source fingerprint: `455faec700391732c80dfe4c54de6898cc842946ffb61d3bb6291b090fa4ee63`
-- Immutable records: 1108
+- Source fingerprint: `9d5fc0c85005f556145085e4353ecd87c21a461fdba8825b917b548d508de4fe`
+- Immutable records: 1111
 - Active lane heads: 2
 
 # Active Registrations
@@ -51,7 +51,7 @@ This file is derived from immutable shards. Record new facts in shards, then ren
 - [Editor foundation U9 and U1-U8 complete with exact-source external acceptance](registry/2026-10/2026-10-17T102710Z-nara-editor-foundation-implementation-codex-root-76fa1ccb656c4ebd8c2b5f77f83287f7.md): `completed` (nara-editor-foundation-implementation-codex-root; producer `codex-root`)
 - [Editor foundation research and refactor planning complete](registry/2026-10/2026-10-16T044159Z-nara-editor-foundation-planning-codex-root-d0e8f37adfd54751b67d7ae647f06d83.md): `completed` (nara-editor-foundation-planning-codex-root; producer `codex-root`)
 - [First 2D author workflow complete with clean committed-source acceptance](registry/2026-10/2026-10-16T025148Z-nara-first-2d-author-workflow-codex-root-fe7312236c5d4906b8e950d366111171.md): `completed` (nara-first-2d-author-workflow-codex-root; producer `codex-root`)
-- [Original UI result custody qualified; owned native render session next](registry/2026-10/2026-10-31T083005Z-nara-foundation-rebaseline-codex-main-8fb47fdf8ca1423c8fd55872e8cc6d8b.md): `active` (nara-foundation-rebaseline-codex-main; producer `codex-foundation-main`)
+- [Original result and late retirement qualified; owned native session remains active](registry/2026-10/2026-10-31T091929Z-nara-foundation-rebaseline-codex-main-5c32ed7fb76649829caba7ebc9f14f3c.md): `active` (nara-foundation-rebaseline-codex-main; producer `codex-foundation-main`)
 - [Ordinary structural authoring qualified](registry/2026-10/2026-10-20T053614Z-ordinary-authoring-codex-root-ac405c79936d43b09f6cfb4197d747ed.md): `completed` (ordinary-authoring-codex-root; producer `codex-root`)
 - [Persistent checkpoint consumer qualified on Windows](registry/2026-10/2026-10-21T032628Z-persistent-two-level-game-codex-root-1ac997abdab142e590af8a6c21f9f443.md): `complete` (persistent-two-level-game-codex-root; producer `codex-root`)
 - [N05 plugin failure facts qualified](registry/2026-10/2026-10-19T172945Z-plugin-error-facts-codex-root-c20974513f104398967edbed73efccaa.md): `completed` (plugin-error-facts-codex-root; producer `codex-root`)
@@ -70,6 +70,8 @@ This file is derived from immutable shards. Record new facts in shards, then ren
 
 # Recent Evidence
 
+- **Verification Evidence**: [Late presentation retirement admission and exact Step outcomes](verification/2026-10/2026-10-31T091550Z-late-presentation-retirement-admission-and-exact-step-outcomes-817901432b684d17b69c2f87f4427408.md) - Verification Evidence for Late presentation retirement admission and exact Step outcomes.
+- **Verification Evidence**: [Shared concrete GPU queue retirement qualification](verification/2026-10/2026-10-31T084653Z-shared-concrete-gpu-queue-retirement-qualification-ab68d8adf25f406d9222df6b3b2fcc70.md) - Verification Evidence for Shared concrete GPU queue retirement qualification.
 - **Verification Evidence**: [Original UI result custody and logical close qualification](verification/2026-10/2026-10-31T082117Z-original-ui-result-custody-and-logical-close-qualification-6e1965c6428841ec9138088bef20f90c.md) - Verification Evidence for Original UI result custody and logical close qualification.
 - **Work Progress**: [Original UI result custody and logical close integration in progress](progress/2026-10/2026-10-31T074252Z-original-ui-result-custody-and-logical-close-integration-in-progress-6c98208b5b114df5b2814eb024bfaa55.md) - Work Progress for Original UI result custody and logical close integration in progress.
 - **Verification Evidence**: [Coherent WGPU device ownership and render cost comparison qualification](verification/2026-10/2026-10-31T064658Z-coherent-wgpu-device-ownership-and-render-cost-comparison-qualification-18760d4fdea7435b90fb9bd2bee64510.md) - Verification Evidence for Coherent WGPU device ownership and render cost comparison qualification.
@@ -80,8 +82,6 @@ This file is derived from immutable shards. Record new facts in shards, then ren
 - **Verification Evidence**: [Explicit Cargo builds captured executables and supervised protocol qualification](verification/2026-10/2026-10-31T035034Z-explicit-cargo-builds-captured-executables-and-supervised-protocol-qualification-4cfff5128fa64423b6f234ea7b312c63.md) - Cargo-authoritative target selection, captured input and executable binding, exact bounded Editor protocol and real native consumers.
 - **Work Progress**: [Native Cargo metadata exposes lossy protocol transport and requires owned queue replacement](progress/2026-10/2026-10-31T030020Z-native-cargo-metadata-exposes-lossy-protocol-transport-and-requires-owned-queue-replacement-566938962bc9455cbfb9516d2fbae4ee.md) - Work Progress for Native Cargo metadata exposes lossy protocol transport and requires owned queue replacement.
 - **Work Progress**: [Explicit Cargo contracts independently reviewed with actual native and foreign consumers](progress/2026-10/2026-10-31T020011Z-explicit-cargo-contracts-independently-reviewed-with-actual-native-and-foreign-consumers-ca2e1780a12140d6acee32ad39c35481.md) - Work Progress for Explicit Cargo contracts independently reviewed with actual native and foreign consumers.
-- **Work Progress**: [Explicit Cargo selection and captured executable ownership replacement in progress](progress/2026-10/2026-10-31T002716Z-explicit-cargo-selection-and-captured-executable-ownership-replacement-in-progress-29b2a117d6af41679ca9fef5d1250965.md) - Replaces fixed desktop selectors through native build, source Export and supervised Editor consumers; independent and foreign artifact qualification pending.
-- **Verification Evidence**: [Tracked local artifact builds and complete-group publication qualification](verification/2026-10/2026-10-30T231610Z-tracked-local-artifact-builds-and-complete-group-publication-qualification-d3fcd08e15e04d45812ae09d7c81e944.md) - Finite typed compound and Image execution, current-input reuse, whole-group publication and original Runtime custody.
 
 # Integration Notes
 

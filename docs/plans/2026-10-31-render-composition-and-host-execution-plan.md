@@ -34,7 +34,7 @@ The source-backed incumbent at this baseline constrains the replacement:
 | `WgpuRenderBackend::ensure_device(window_id)` | Reuse epoch/loss/caches, separate device initialization from surface configuration. Production adapter selection currently requires a window surface. Test-only `with_probe_device` is not Ready/epoch/loss qualification. |
 | `WgpuFramePayload` and `prepare_target_draw_with_canvas_cache` | Retain stock immutable captured inputs and prepare/encode behavior as the oracle. Replace package-specific Sprite/UI payload fields and collection/encoding matches through the selected contribution boundary. |
 | `WgpuEditorViewportTarget` | It currently owns one reusable texture and validates only the last submitted receipt. An old TextureView clone does not retain old pixels; exact cross-capture outputs need separately held physical versions. |
-| `WgpuEditorGpuRetirement` | Preserve flush-before-close and real physical completion. Whole-queue-empty drain remains the final Host close boundary, not a producer-local completion proof while other streams continue. |
+| Concrete GPU retirement (now `WgpuGpuRetirement`) | Preserve flush-before-close and real physical completion. Whole-queue-empty drain remains the final Host close boundary, not a producer-local completion proof while other streams continue. |
 | Root desktop observation and Runtime driver port | Move GPU storage only with its first-present/UI facts/surface retirement/close observations. Resource absence must not impersonate physical completion after ownership moves to a runner. |
 | Per-View Editor admission and exact target receipts | Retain their independent source/frame clocks and target/source/Host/epoch identities; they do not yet prove multi-stream output retention or local physical retirement. |
 
@@ -124,6 +124,16 @@ is implemented at `8e9d840`: original nominal batch storage, retained receivers,
 settlement and CPU WGPU observations have final owner/neutral and selected native evidence.
 Continue with the complete owned native session, capture/result execution and runner migration;
 GPU ECS storage and public offscreen/Feature/output workflows are still open.
+
+The [shared concrete drain](../knowledge/engineering/verification/2026-10/2026-10-31T084653Z-shared-concrete-gpu-queue-retirement-qualification-ab68d8adf25f406d9222df6b3b2fcc70.md)
+is extracted at `96bd0bf` with its actual Editor consumer and adapter/native retirement evidence.
+The Runtime Host must still capture that owner before first use; extracting the shared mechanism
+does not establish the native session or producer-local retirement.
+
+The [late-result admission successor](../knowledge/engineering/verification/2026-10/2026-10-31T091550Z-late-presentation-retirement-admission-and-exact-step-outcomes-817901432b684d17b69c2f87f4427408.md)
+at `525cd6f` separates consumed retirement from presentation and closes the actual first-Stop and
+unavailable-close-port windows, including a real pending-Step outcome. This strengthens the same
+prerequisite; actual native run/session relocation remains the next complete production unit.
 
 1. Implement the private graph/access model and hostile cases together with a real window-free
    GPU readback harness. Compare actual pinned Bevy/Godot mechanisms and challenge the proposed

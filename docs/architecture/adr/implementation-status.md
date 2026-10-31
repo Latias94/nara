@@ -143,6 +143,18 @@ facts without native custody. Statistics cannot block logical settlement. GPU st
 ECS and first-present remains scheduled in Last; owned native sessions, post-Host maintenance and
 the complete output/producer/Feature transition are still open.
 
+Its [late-result successor](../../knowledge/engineering/verification/2026-10/2026-10-31T091550Z-late-presentation-retirement-admission-and-exact-step-outcomes-817901432b684d17b69c2f87f4427408.md)
+at `525cd6f` closes the first-Stop and unavailable-close-port publication windows. Exact lifecycle
+admission accepts original transport for retirement without reviving UI/World presentation, and
+the private consumed result prevents a pending Step from reporting a false presentation success.
+Final Root37, native critical3, no-UI build and correctness checks pass in the recorded scope.
+The [shared concrete GPU drain](../../knowledge/engineering/verification/2026-10/2026-10-31T084653Z-shared-concrete-gpu-queue-retirement-qualification-ab68d8adf25f406d9222df6b3b2fcc70.md)
+at `96bd0bf` removes the toolkit-specific drain owner with actual Editor adapter8/native6 evidence.
+ADRs0032/0040/0078 now select owned native sessions and outside-World execution; complete native
+session/capture/result and post-Host observation implementation remains open. Astra/max's finite
+telemetry seal, exact startup notification and separate timeout contracts are design requirements,
+not implemented capabilities.
+
 The reviewed recommendation to amend/replace another ADR is not silently counted as implementation.
 The October 27 [UI](../../research/2026-10-27-custom-drawn-editor-ui-boundaries.md) and
 [language/extension](../../research/2026-10-27-language-extension-product-boundaries.md) studies

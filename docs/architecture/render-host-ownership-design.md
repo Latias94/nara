@@ -148,6 +148,42 @@ resource membership are independent of that custody. Consumer telemetry configur
 initialization input, and bounded samples/statistics return as observations; GPU polling is not
 reintroduced as a World operation.
 
+### Existing Product Observers And Code-First Runs
+
+The actual Reference Game candidate/measurement and render-probe consumers currently read the
+backend and current `RenderFrame` from Last, and poll/drain GPU telemetry there. Moving execution
+after managed drive makes that schedule precede the current native result. Migrate those consumers
+to the last completed CPU observation, with its own exact app/render/capture identities and bounded
+completion samples. Preserve their duplicate-sample and lost-sample checks. Do not relabel a newly
+captured simulation frame as submitted, reset away a completed observation at capture start, or run
+Last again to manufacture a same-frame result. Root's authoritative UI/first-present joins still
+run at the actual post-Host boundary, independently of a product's later diagnostic read.
+
+Two existing consumers require stronger timing than a later observation read. The startup marker
+is emitted at the actual presented boundary; its parent measures message arrival, so deferring it
+to a subsequent Last invocation changes the measured endpoint even with exact frame identity.
+Provide a narrow direct CPU presentation observation for that consumer, without a universal new
+schedule. The measurement candidate also has a finite sealing phase: stop new submissions, poll
+the original telemetry through maintenance/wakes, require pending/lost checks under the existing
+deadline, and seal the final CPU evidence before epoch cleanup changes counters. A recent completed
+snapshot alone does not establish that later pending submissions drained. Choose the concrete
+finite result/report delivery with that actual consumer before freezing the interface.
+
+Prefer one concrete Root desktop action for source, processed and code-first Runtime inputs.
+The existing `DesktopRun` may take an already-started Runtime with ordinary desktop execution
+options; examples must not rebuild a second close loop around the retired borrowed Winit entry.
+Source/processed startup transfers the Runtime and its retained content/configuration context
+together, without leaving a visible Running publication whose Runtime has been consumed.
+Diagnostic telemetry configuration is CPU execution input to the local driver, separate from
+persistent recipe/data meaning. The platform-only control remains explicit about having no
+presentation owner; removing an expected WGPU endpoint cannot select that control.
+
+An already-started Runtime retains the logical close policy selected at construction. Native
+session retirement budgets are separately named and apply to a finite session drive; they do not
+silently rewrite or ignore the existing Runtime policy. Source/processed construction may select
+both explicitly before transfer. A short native budget can return the incomplete session while
+the Runtime's own logical-close deadline remains unexpired.
+
 ## Outputs, Recovery And Completion
 
 Each published output owns distinct physical storage while a predecessor is retained. Its issued

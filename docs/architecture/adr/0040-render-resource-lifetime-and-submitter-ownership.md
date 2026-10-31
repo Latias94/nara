@@ -2,7 +2,7 @@
 
 **Status**: Accepted
 **Date**: 2026-07-09
-**Last Revised**: 2026-08-16
+**Last Revised**: 2026-10-31 (local Host custody and CPU contribution ownership)
 **Refines**: ADR 0010, ADR 0017, ADR 0032, ADR 0033, ADR 0037
 **Refined By**: ADR 0046: Plugin Metadata and Default Plugin Groups; ADR 0053: Visibility,
 Culling, and Tilemap Render Cache (Superseded); ADR 0054: GPU Upload Budget and Buffer Allocation Policy; ADR
@@ -21,9 +21,10 @@ Scene View Execution and Picking Authority
 ## ADR 0106 Product-Contribution Refinement
 
 ADR 0106 distinguishes a closed first-party contribution plugin from an independently replaceable
-submitter SPI. `WgpuRenderPlugin` owns device, queue, surface, cache and the sealed backend frame
+submitter SPI. `WgpuRenderPlugin` installs CPU capture, status and the finite result connection.
+The concrete local WGPU Host owns device, queue, surface, cache and the sealed backend frame
 transaction. Concrete `WgpuSpriteSubmitterPlugin` and `WgpuUiSubmitterPlugin` may install the
-first-party systems that contribute already-owned domain packets to that private transaction, but
+first-party systems that contribute already-owned CPU domain packets to that transaction, but
 they expose no submitter trait, registry, dynamic phase or backend-replacement contract. Their
 installation is selected by the requested product closure, never by whether their Cargo code was
 compiled. A compiled but uninstalled contribution cannot drain, clear, bind or complete its domain
@@ -80,8 +81,9 @@ Rules:
   and recreate only the surface while retaining a valid provider; controlled shutdown must drop
   every acquired target and surface before the platform adapter releases its provider. A target
   atomically admits only one non-cloneable surface owner plus control lease. The owner's `Drop`
-  records actual release, and first-party backend resource replacement uses that same surface-first
-  fallback rather than allowing a caller to fabricate acknowledgement.
+  records actual release, and first-party native Host replacement uses that same surface-first
+  fallback rather than allowing a caller to fabricate acknowledgement. The retained local Host
+  owns that fallback; removing an ECS endpoint cannot stand in for native queue retirement.
 - Cache identity is based on prepared resource identity plus descriptor/generation data, not raw
   file paths or runtime entity IDs.
 - Resource invalidation is generation-based and observable. Reload failure preserves last-good typed
@@ -102,11 +104,17 @@ Rules:
   lifetimes require a new focused comparison of extended static phases, independent target
   transactions, a minimal execution kernel, and a logical graph. The pressure does not itself
   select `RenderGraph`.
-- `WgpuRenderPlugin` owns wgpu device/surface/backend resources. Sprite, tilemap, UI, text, gizmo,
-  and future 3D domains own extraction and batch data. Stock wgpu may encode concrete batches in
+- The local WGPU Host owns native device/surface/backend resources; `WgpuRenderPlugin` owns their
+  CPU capture/result protocol. Sprite, tilemap, UI, text, gizmo, and future 3D domains own extraction
+  and batch data. Stock wgpu may encode concrete batches in
   private feature-gated modules whose concrete first-party contribution plugins are installed only
   by the requested product closure. An independently replaceable submitter SPI still requires a
   complete external feature tracer rather than being inferred from domain ownership.
+- Logical completion, native queue retirement and diagnostic observation have separate custody.
+  Establish original Device/Queue drain custody before initialization uploads or accepted submit,
+  independently of telemetry and namespace cleanup. Runtime Stopped requires original one-shot
+  UI/Input settlement; external native dependencies remain retained until their own physical
+  retirement. A diagnostic capacity failure or missing observation cannot release those owners.
 - Internal aliasing such as using sprite-like quad instances for UI is acceptable as a backend
   implementation detail. Public UI render contracts must remain UI-owned (`UiBatches`, UI material
   keys, clip data, text runs later) rather than exposing sprite semantics as UI API.

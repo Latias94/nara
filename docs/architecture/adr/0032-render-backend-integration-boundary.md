@@ -2,7 +2,7 @@
 
 **Status**: Accepted
 **Date**: 2026-07-08
-**Last Revised**: 2026-07-16
+**Last Revised**: 2026-10-31 (owned native execution and finite CPU result connection)
 **Refines**: ADR 0012
 **Refined By**: ADR 0040: Render Resource Lifetime and Submitter Ownership; ADR 0044: Root Facade
 and Prelude Layering Policy; ADR 0053: Visibility, Culling, and Tilemap Render Cache (Superseded); ADR 0077:
@@ -18,6 +18,22 @@ future render world. Arbitrary phase/pass construction is not an extension promi
 feature can participate through capture, ordering, encoding, target lifetime, and diagnostics using
 only public APIs.
 
+## Owned Native Execution Refinement
+
+The [selected Host transition](../render-host-ownership-design.md) retains CPU extraction in the
+managed World and moves stock native execution to one concrete local owner. A finite typed
+capture/result connection authenticates its original incarnation, Runtime generation and capture
+sequence. Returned results carry CPU facts and original completion obligations, not GPU handles.
+Owned input refusal and consumed output accompanied by a fault are distinct outcomes; an applied
+result cannot be replayed as an uninvoked call.
+
+The native run session owns Runtime, its concrete presentation driver, actual registered target
+authority, windows and the event pump. An incomplete exit returns that owner for actual continued
+retirement under the original affinity. Root assembles the Winit and WGPU participants through a
+narrow frame-maintenance/target-retirement/wake boundary; this is not a universal Runner or GPU
+service interface. [Implementation evidence](implementation-status.md) distinguishes the qualified
+original-result prerequisite from the still-unimplemented complete native transition.
+
 ## Context
 
 nara now has a Bevy ECS substrate, nara-owned app lifecycle, and render-facing authoring data.
@@ -29,8 +45,10 @@ Phase 1 uses explicit main-world extraction data and backend adapter crates rath
 
 Rules:
 
-- `nara_app` owns the fallible runner contract: `App::run` consumes `App`, while the installed runner
-  borrows `&mut App` and returns `Result<AppExit, AppRunError>` before once-only plugin cleanup.
+- `nara_app` owns configuration and managed Runtime execution. `App` is configuration-only; the
+  concrete platform runner consumes a managed Runtime into an owned run session. Runtime logical
+  close and external native retirement remain explicit owners. A borrowed run returning only an
+  exit/error cannot replace the session while GPU, completion or platform dependencies remain.
 - `nara_window` owns normalized window data, safe owning handle providers, and the backend target
   lifecycle keyed by `WindowId`. It never stores an unowned raw-handle snapshot or grants provider
   release before renderer acknowledgement. Atomic acquisition issues only one non-cloneable native
@@ -39,9 +57,9 @@ Rules:
   exclusivity is enforced per shared target authority and `WindowId`; the executable/platform host
   must not register one native target in independent authorities.
 - Backend-neutral app, window, input, and render crates do not depend on `winit`. `nara_winit` is the
-  first-party desktop integration and current direct-dependency gateway: it owns live platform
-  windows, registers owning handle providers, and releases provider/native ownership only after
-  surface retirement. An external Platform/Runner may use another platform stack or a future public
+  first-party desktop integration and current direct-dependency gateway: its retained native
+  session owns live platform windows, registers owning handle providers, and releases provider/native
+  ownership only after actual graphics retirement. An external Platform/Runner may use another platform stack or a future public
   exact-version `nara_winit` bridge. The first docking/multi-viewport or external-winit tracer decides
   whether an exact direct dependency is also required; external runner reachability is not a
   first-party reservation. Each runner calls the backend-neutral retirement driver and waits only
@@ -59,10 +77,11 @@ Rules:
   contract under ADR 0094; dependency isolation alone does not promise such a public API.
 - The stock `nara_render_wgpu` Adapter consumes `nara_window::backend` non-cloneable surface handle
   sources by value through wgpu's safe owning surface path, registers the scoped retirement driver,
-  and writes wgpu skipped-frame/backend-error state into `RenderBackendStatus`. The actual handle
-  owner acknowledges from `Drop`, including when the backend resource is removed or replaced; the
-  paired lease then verifies the transition. The current native surface system and retirement
-  driver are main-thread operations; broader host placement remains governed by ADR 0078.
+  and returns wgpu skipped-frame/backend-error facts to `RenderBackendStatus`. The actual handle
+  owner acknowledges from `Drop`; the paired lease then verifies that surface transition. Missing
+  or replaced World resources cannot establish native submitted-work completion. Native surface
+  and retirement operations belong to the retained local owner; placement remains governed by
+  ADR 0078.
 - The root `nara` facade keeps `winit` and `wgpu` behind explicit optional features. Default `MinimalPlugins` stays headless and backend-free.
 
 wgpu initialization may use `pollster` for the first native-desktop slice.

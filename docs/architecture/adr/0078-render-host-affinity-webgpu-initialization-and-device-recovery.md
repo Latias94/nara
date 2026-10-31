@@ -2,7 +2,7 @@
 
 **Status**: Accepted
 **Date**: 2026-07-11
-**Last Revised**: 2026-10-31 (coherent device-domain ownership)
+**Last Revised**: 2026-10-31 (coherent device domain and owned native run custody)
 **Refines**: [ADR 0012](0012-render-crate-boundaries.md),
 [ADR 0032](0032-render-backend-integration-boundary.md),
 [ADR 0040](0040-render-resource-lifetime-and-submitter-ownership.md), and
@@ -88,16 +88,35 @@ flowchart LR
   uses one JavaScript agent and local executor. Native backends may use the runner thread or a
   render worker when their adapter proves that placement and any quiescent migration are legal.
 - The public render contract does not require the host or its handles to implement `Send` or `Sync`.
-- The host is not stored as an ordinary `Send + Sync` ECS resource on targets where wgpu objects do
-  not satisfy those traits.
-- Host storage is an adapter detail. The first corrective implementation may use a non-send ECS
-  resource driven on the platform-local executor; a future runner- or editor-owned host may live
-  outside the gameplay world while consuming the same owned packet contract.
+- The live Host belongs to the concrete runner, Editor or offscreen owner outside the gameplay
+  World. The World retains finite CPU capture/result endpoints and read-only observations.
+  Send/Sync properties of CPU values do not grant placement authority over native state. A
+  non-send ECS wrapper around the old backend is not the selected production replacement.
 - nara does not manually implement `Send`/`Sync` for browser wgpu objects and does not enable
   `fragile-send-sync-non-atomic-wasm` as an architectural workaround.
 - Platform raw-handle providers do not grant permission to call platform APIs from an arbitrary
   thread. Surface creation and use require the placement authority declared by the platform
   adapter.
+
+### Owned native run custody
+
+One native run session retains Runtime, the local presentation Host, original target registry and
+registered IDs, platform windows and the event pump through incomplete exit. Stop closes capture
+admission and settles original UI/Input obligations before Runtime Stopped. Native queue, surface,
+provider and window retirement can continue after that logical boundary; resource absence cannot
+prove any of those physical facts. Capture original Device/Queue custody before first use, so an
+error clearing the current device namespace cannot erase pending retirement.
+
+Early EventLoop return or close deadline expiry returns a move-only incomplete owner with actual
+poll/retry under its original affinity. It cannot drop unfinished dependencies or rely on Runtime-only
+quarantine to adopt external GPU/platform state. Terminal cleanup errors remain distinct from
+physical completion. The [production ownership design](../render-host-ownership-design.md) selects
+the concrete transition; the implementation ledger records its still-open qualification scope.
+
+Returned original CPU results join UI completion and first-present/READY at the post-Host boundary.
+Every maintenance service advances deadlines and pending publication with an optional None result
+and arranges its next required wake. This boundary neither reruns arbitrary Last systems nor drives
+an extra simulation frame to publish readiness.
 
 ### Initialization state machine
 
@@ -305,9 +324,11 @@ entire device domain, even when the surface still exists.
   inputs, but they cannot concurrently own the same Device, target lease, surface, or publication
   slot.
 
-### Current native baseline
+### Historical native baseline
 
-RGF-U11 implements the first narrow native subset without claiming the complete host:
+The following list records RGF-U11's original narrow native subset, including its then-current
+App runner and ECS placement. It does not override the owned native refinement above. Use the
+[implementation ledger](implementation-status.md) for current qualification and remaining gaps.
 
 - `nara_window::backend::WindowHandleProvider` owns a typed window/display handle source and is
   consumed by registration. Atomic surface acquisition internally clones the source guard exactly
