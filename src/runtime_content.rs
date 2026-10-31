@@ -346,6 +346,45 @@ impl fmt::Debug for RuntimeContentBase {
 }
 
 impl RuntimeContentBase {
+    /// Crate-owned assembly of exact bytes in canonical catalog member order.
+    ///
+    /// This is the same catalog/executable admission as local capture, without filesystem I/O.
+    /// It grants no public admission bypass. The caller admits allocation overlap before moving
+    /// its buffers here; all supplied members are rechecked before the captured base is exposed.
+    #[cfg(feature = "project-workflow")]
+    pub(crate) fn capture_members(
+        catalog_bytes: Vec<u8>,
+        members: Vec<Vec<u8>>,
+        expected: &RuntimeContentExpectation,
+        recipe: ProductRecipe,
+        limits: RuntimeContentLimits,
+    ) -> Result<(Self, usize), RuntimeContentError> {
+        let (_, catalog_limits) = admission::input_limits(expected, limits)?;
+        let admitted = admission::AdmittedCatalog::new(
+            catalog_bytes,
+            expected,
+            recipe,
+            limits,
+            catalog_limits,
+        )?;
+        let retained = admitted.retained_bytes(true)?;
+        if members.len() != admitted.catalog.members().len() {
+            return Err(RuntimeContentError::ProductIdentityMismatch);
+        }
+        for (bytes, member) in members.iter().zip(admitted.catalog.members()) {
+            if ContentDigest::of_bytes(bytes) != member.digest() {
+                return Err(RuntimeContentError::MemberDigestMismatch);
+            }
+        }
+        Ok((
+            admitted.publish(
+                EncodedBacking::Captured(members.into_boxed_slice()),
+                retained,
+            ),
+            retained,
+        ))
+    }
+
     /// Captures and verifies a trusted local base before any domain decode or App construction.
     ///
     /// The supplied Rust recipe is executable authority. The catalog only declares compatible

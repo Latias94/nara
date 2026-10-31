@@ -33,6 +33,7 @@ const PREFAB_PATH: &str = "prefabs/external.prefab.ron";
 static TEMP_SEQUENCE: AtomicU64 = AtomicU64::new(0);
 
 #[test]
+#[cfg(feature = "tooling")]
 fn prepared_documents_keep_the_actual_read_leaf_until_host_admission_or_rejection() {
     use crate::project_host::persistence::{PrefabPersistenceHost, ScenePersistenceHost};
     use nara_tooling::{EditorDocumentSourceBinding, EditorPersistenceFailureStage};
@@ -122,6 +123,7 @@ fn prepared_documents_keep_the_actual_read_leaf_until_host_admission_or_rejectio
 }
 
 #[test]
+#[cfg(feature = "tooling")]
 fn binding_rejects_a_replaced_name_while_the_prepared_read_object_is_still_alive() {
     use crate::project_host::persistence::{PrefabPersistenceHost, ScenePersistenceHost};
     use nara_tooling::{EditorDocumentSourceBinding, EditorPersistenceFailureStage};

@@ -1,9 +1,16 @@
 # Cooked Content And Captured Player Delivery
 
-Date: 2026-10-31. Status: next R7 unit; source-backed design, not implemented or qualified.
+Date: 2026-10-31. Status: implemented and qualified for the finite Windows native headless
+single-Player/base-pack consumer. Broader target/platform delivery remains open.
 Parent: [foundation R7](2026-10-23-foundation-architecture-rebaseline-plan.md#r7-target-build-and-base-source-free-delivery).
 Prerequisite: [explicit Cargo selection](2026-10-31-explicit-cargo-build-selection-plan.md).
 Broader direction: Proposed [ADR 0088](../architecture/adr/0088-target-build-cook-package-and-runtime-content-catalog.md).
+
+The [qualification](../knowledge/engineering/verification/2026-10/2026-10-31T050529Z-cooked-content-assembly-captured-player-binding-and-relocatable-source-free-delivery-qualification-816fbb7867fb4c3288a2b2b34f27e1ff.md)
+records final106 owner tests, actual independent cooked delivery, original custom/foreign and
+seven-case processed regressions, independent reviews and explicit native/budget/freshness limits.
+The [guide](../guides/cooked-player-delivery.md) documents the production interfaces. This closes
+the selected finite outcome without completing all R7 or the full foundation Goal.
 
 ## Complete Consumer
 
@@ -119,6 +126,15 @@ complete captured backing's stronger availability after file deletion or mutatio
   candidate members and unsupported facets. Startup rejects catalog/target/extent and demanded
   content failures before Startup effects. A later corrupt Deferred payload rejects its acquisition
   and preserves current Scene/resources. Original-file backing does not promise perpetual availability.
+- Deep-validation member coverage must equal the delivered member set. Extra compound siblings
+  require actual roots/dependencies or reject; opening a valid catalog cannot substitute for
+  decoding every candidate payload. Verify the original staged pack against the expected exact
+  pack bytes. Define malformed-producer fixtures as pre-publication rejection, and inject later
+  Deferred corruption only after complete publication to exercise demand-time failure.
+- Bind the canonical generated-input path and digest/length from actual Cargo provenance and
+  compare the whole requested selection. Trusted Player inclusion/use remains explicit; no binary
+  inspection or Rust include-analysis proof is introduced. Keep original Host content observations
+  and selection fences distinct from code inventory, including metadata and auxiliary reads.
 - Interrupt cook, Cargo, staging and publication. No partial package is success; existing package,
   Runtime Scene/resources and executable last-good remain under their original owners.
 - Retain base/acquisition A while building B and deleting cache. Escaped resources and subsequent

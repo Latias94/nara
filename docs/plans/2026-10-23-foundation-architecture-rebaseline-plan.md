@@ -630,12 +630,16 @@ includes captured input binding and separate bounded Editor protocol transport, 
 native/foreign builds, source Export and final supervised Windows/DX12 trajectories. Source
 observations, logical bounds and foreign build-only evidence keep their explicit limits.
 
-The next [cooked Player delivery unit](2026-10-31-cooked-player-delivery-plan.md) joins retained
+The qualified [cooked Player delivery unit](2026-10-31-cooked-player-delivery-plan.md) joins retained
 target content, a generated independent Player expectation and captured executable bytes through
 one finite directory publication owner. Catalog preparation precedes Player compilation, and
 exact generated-input/code/content binding rejects old Player A with new catalog B. Reuse the
-existing pack, admission, Scene and last-good owners; this plan is not package implementation or
-target-runner qualification.
+existing pack, admission, Scene and last-good owners. Its
+[qualification](../knowledge/engineering/verification/2026-10/2026-10-31T050529Z-cooked-content-assembly-captured-player-binding-and-relocatable-source-free-delivery-qualification-816fbb7867fb4c3288a2b2b34f27e1ff.md)
+records complete member/decoder coverage, exact code/content binding and three-file publication,
+actual relocated source-free driver-input/Scene travel, Deferred corruption and retained original
+custody on Windows headless. Foreign artifacts remain build-only; additional native libraries,
+server stripping, desktop presentation and further platforms keep separate qualification.
 
 Separate Host tool selection, target executable artifacts, content cook, release candidate and
 target-runner activation. Keep a source-carrying option but move fixed starter assumptions into

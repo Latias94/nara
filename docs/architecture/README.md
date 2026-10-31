@@ -64,6 +64,7 @@ their completion conditions do not automatically apply to later tasks.
 | Managed runtime, immutable composition, assets, hierarchy, 2D order and views | [ADR 0117](adr/0117-2d-foundation-ownership-and-authoring-contracts.md) |
 | Project creation, compiled schema, editing, Check and Export | [Product recipe guide](../guides/rust-product-recipes.md) |
 | Explicit package/bin/profile/target builds and captured executable ownership | [Cargo build guide](../guides/cargo-builds.md); [ADR 0110](adr/0110-first-party-project-workflow-and-source-carrying-export.md#explicit-cargo-selection-and-captured-build-results) |
+| Finite cooked content, compiled Player expectations and complete directory publication | [Cooked Player guide](../guides/cooked-player-delivery.md); [current unit plan](../plans/2026-10-31-cooked-player-delivery-plan.md); [ADR 0110](adr/0110-first-party-project-workflow-and-source-carrying-export.md#finite-cooked-player-delivery) |
 | Persistent schema, codecs and custom scalar authoring | [Component guide](../guides/persistent-components.md) |
 | Workspace/frontend boundaries, creation templates, panels and native views | [ADR 0118](adr/0118-editor-workspaces-frontends-and-creation-templates.md); [native qualification procedure](../verification/native-editor-qualification.md) |
 | Source-built stateful native panel composition | [Editor panel guide](../guides/editor-panels.md) |

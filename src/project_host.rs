@@ -89,6 +89,10 @@ pub use product_launch::{
     ProductProjectRootError, ProductProjectRootSource, resolve_product_project_root,
 };
 pub use product_launch::{open_explicit_product_project_root, open_product_project_root};
+#[cfg(all(feature = "runtime-2d", feature = "serde"))]
+mod runtime_pack;
+#[cfg(all(feature = "runtime-2d", feature = "serde"))]
+pub use runtime_pack::open_executable_relative_runtime_pack;
 #[cfg(feature = "runtime-ui")]
 #[doc(hidden)]
 pub const PROJECT_PRIMARY_UI_SURFACE_ID: u64 = crate::product::PROJECT_PRIMARY_UI_SURFACE_ID;

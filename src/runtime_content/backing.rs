@@ -34,6 +34,24 @@ impl AsRef<[u8]> for EncodedMember<'_> {
 }
 
 impl RuntimeContentBase {
+    /// Returns the exact encoded size of this base's version-one pack.
+    ///
+    /// This uses the original admitted catalog bytes and member extents. It does not allocate a
+    /// pack, decode products or grant directory publication authority.
+    pub fn pack_encoded_bytes(&self) -> Result<u64, RuntimeContentError> {
+        self.inner.catalog.members().iter().try_fold(
+            HEADER_BYTES
+                .checked_add(self.inner.catalog_bytes.len() as u64)
+                .ok_or(RuntimeContentError::PackExtentMismatch)?,
+            |total, member| {
+                total
+                    .checked_add(member.digest().length())
+                    .filter(|length| *length <= i64::MAX as u64)
+                    .ok_or(RuntimeContentError::PackExtentMismatch)
+            },
+        )
+    }
+
     pub(super) fn encoded_member(
         &self,
         index: usize,

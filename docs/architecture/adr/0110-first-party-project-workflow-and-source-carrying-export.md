@@ -10,6 +10,7 @@ creation terminality, build-input freshness and startup-closure ownership
 **Amended**: 2026-10-21 by explicit complete-frame headless execution
 **Amended**: 2026-10-30 by finite authored Scene data capture and original Product travel admission
 **Amended**: 2026-10-31 by explicit Cargo selection and captured executable ownership
+**Amended**: 2026-10-31 by finite cooked-content assembly and captured Player package binding
 **Owner**: root product workflow, `nara_project`, `nara_fs`, project content and Runtime Hosts
 **Refines**: [ADR 0020](0020-project-layout-and-package-format.md),
 [ADR 0035](0035-project-manifest-and-runtime-settings-authority.md),
@@ -88,6 +89,12 @@ Each captured result remains unchanged if Cargo overwrites its original output. 
 owns those captured bytes through staging rather than reopening a mutable Cargo output file.
 Its native product observations and exact source/startup agreements remain separately required.
 
+Failed Cargo compilation also preserves actual process status, bounded structured diagnostics
+with explicit truncation/loss facts and any protocol rejection. A nonzero exit does not discard
+the already captured machine stream before interpreting its diagnostics. Raw output remains
+temporary under the same work admission; escaped failure summaries use retained allowance.
+Unconfirmed physical child cleanup keeps its separate original custody.
+
 Every build uses an existing lockfile with `--locked`. Initial creation of a starter lockfile
 is an explicit Cargo authoring action before build, not an unlocked-build fallback. The Host
 revalidates its selected input inventory before/after work and at return, including manifest,
@@ -102,6 +109,56 @@ This bounded refinement extracts explicit target builds from Proposed ADR 0086. 
 activation/last-good records, complete packaged Player delivery, remote runners and executable
 hermeticity remain separate. It introduces no new package resolver, universal exporter,
 execution kernel, ABI or Runtime Cargo dependency.
+
+### Finite Cooked Player Delivery
+
+The finite delivery owner composes already verified artifact groups, concrete Scene/Input/
+TileSet encoders and the original Runtime catalog/base admission. Required and Reference edges
+both impose delivery membership; their Immediate/Deferred semantics govern current preparation.
+Complete pre-publication deep validation is distinct from authenticated demand-time pack reads.
+Every delivered member must belong to that validated closure; surplus group members reject unless
+explicitly selected through actual roots or dependencies. A validation report for fewer members
+cannot qualify a larger package. Native resource publication and gameplay effects remain separate.
+The assembler owns deterministic portable member facts and explicit allocation bounds, not source
+import execution, a universal cooker, a build scheduler or another Runtime loader.
+
+Cooked content is fixed before the selected Player build. A bounded generated Rust input carries
+an independently expected catalog digest/length, content target/profile and relative pack location.
+The trusted Player explicitly compiles and uses that input with its own selected recipe. The
+package binder finds its exact canonical relative path in captured Cargo provenance and compares
+digest/length with this content preparation. It compares the complete expected Cargo package,
+binary, profile, target, default-feature policy and requested features; actual compiled features
+and tool observations remain separate recorded facts. Cargo and content profiles stay independent.
+The Player does not accept a manifest or argument that overrides its compiled expectation.
+This is a trusted implementation contract, not proof that arbitrary code consumed the input,
+hermetic compilation, global freshness or remote authenticity. The catalog never includes the final
+executable digest; the delivery manifest records both afterward, without a digest cycle.
+
+One package owner stages exact captured executable bytes, the original admitted v1 pack and a
+bounded delivery manifest through existing capability-relative directory publication. Success
+means complete directory publication with its actual durability evidence. Errors preserve clean
+rejection, orphaned candidate or unresolved begin outcomes; no recursive name-based cleanup is
+introduced. Original code/content captures remain valid independently of mutable build/cache paths.
+The compiled Host retains its complete finite content observation/selection envelope and controls
+current-selection fences before/after Cargo, before staging and immediately before publication.
+Code inputs and content observations remain separate. Package bounds include their own retained
+content, generated input, captured executable/provenance, encoding metadata and each admitted
+next-owner work promise. Shared allocations retain original leases; equal digests do not merge
+independent copies. Pack writing is streamed, with an independently computed expected digest and
+exact staged-file verification. Memory/work and staged disk-byte bounds are distinct.
+
+`package.json` uses the shared canonical version-one `player_package` envelope and is complete
+before directory publication. Physical filesystem receipts remain in the external return value,
+not a postpublication manifest rewrite. No callback failure after
+publication can erase the publication receipt. Delivery does not activate a Host, promote last-good,
+or qualify a foreign target. Extra native libraries require explicit finite members before support
+is claimed; output-directory scanning cannot discover a package closure.
+
+This adopts only the consumed local single-Player/base-pack boundary from Proposed ADR 0088.
+Source-carrying Export remains available. Reusable prebuilt Player trust, patch/mount-set services,
+general remote execution and target-runner qualification remain separate. The
+[cooked Player plan](../../plans/2026-10-31-cooked-player-delivery-plan.md) owns implementation and
+actual consumer qualification; selecting this contract alone does not mark it complete.
 
 ### Starter and dependency authority
 

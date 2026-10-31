@@ -159,3 +159,11 @@ publication. It preserves the existing reference/demand, pack, Runtime and last-
 The supplied ZIP was rechecked at `0c36715`: all 91 manifest entries and ten repository study
 documents still match. No additional research file or roadmap reset is required. The remaining
 Schema/Prefab, motion/execution, rendering and editable Nara-drawn Editor units stay open.
+
+The finite [cooked Player successor is now qualified](../knowledge/engineering/verification/2026-10/2026-10-31T050529Z-cooked-content-assembly-captured-player-binding-and-relocatable-source-free-delivery-qualification-816fbb7867fb4c3288a2b2b34f27e1ff.md):
+production assembly covers every delivered decoder, generated independent expectations bind
+actual captured Cargo inputs, and existing directory publication produces a relocatable three-file
+Windows headless product. Actual source/cache/toolchain-free execution, shared content, driver-event
+Input and Deferred acquisition failure are covered. This implements the next complete consumer;
+it does not reset the remaining authored evolution, joint execution/motion, render/output or
+self-drawn editable Editor design gates in the research disposition above.

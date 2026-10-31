@@ -343,8 +343,13 @@ separate decodes of one Product remain independently charged.
 
 These are modeled content-owner costs, not allocator capacity or RSS. Compiled plugin/Schema
 construction and allocations inside trusted native code retain their existing owner contracts.
-Native GPU/device objects, additional concrete family residency, broader Input device/replay workflows, the
-complete packaged Player/build entry, target stripping/build selection, CAS, patch/DLC and remote authenticity
+Native GPU/device objects, additional concrete family residency, broader Input device/replay workflows,
+additional target stripping/package policies, patch/DLC and remote authenticity
 remain separate work in the [ordered delivery plan](../plans/2026-10-29-asset-import-and-runtime-delivery-plan.md).
 The current local base neither adds a universal decoder registry nor implements a second asset
 transaction, package resolver or Rust dependency resolver.
+
+The finite [cooked Player successor](cooked-player-delivery.md) now supplies complete production
+assembly and a compiled-expectation Player/package join using this same base and pack. Its
+[qualification](../knowledge/engineering/verification/2026-10/2026-10-31T050529Z-cooked-content-assembly-captured-player-binding-and-relocatable-source-free-delivery-qualification-816fbb7867fb4c3288a2b2b34f27e1ff.md)
+adds actual relocated Windows headless delivery; the broader limits above retain their own scope.

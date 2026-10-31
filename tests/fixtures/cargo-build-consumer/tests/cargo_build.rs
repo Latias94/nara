@@ -179,7 +179,9 @@ fn custom_workspace_captures_host_tool_and_runs_native_player_after_source_remov
     );
     let failed_b = build_executable(&request, |_| Ok(())).unwrap_err();
     assert!(
-        matches!(failed_b, CargoBuildFailure::ProcessFailed),
+        matches!(&failed_b, CargoBuildFailure::Compilation { status, diagnostics, .. }
+            if !status.success() && diagnostics.entries().iter()
+                .any(|diagnostic| diagnostic.message() == "intentional bad B consumer")),
         "{failed_b:?}",
     );
     assert_retained_a(&a, &original_bytes, original_digest, original_provenance);
@@ -199,7 +201,7 @@ fn custom_workspace_captures_host_tool_and_runs_native_player_after_source_remov
     )
     .unwrap_err();
     assert!(
-        matches!(missing_feature, CargoBuildFailure::ProcessFailed,),
+        matches!(missing_feature, CargoBuildFailure::Compilation { status, .. } if !status.success()),
         "{missing_feature:?}",
     );
     assert_retained_a(&a, &original_bytes, original_digest, original_provenance);

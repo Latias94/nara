@@ -118,6 +118,11 @@ impl CargoBuildRequest {
         &self.selection
     }
 
+    #[must_use]
+    pub const fn limits(&self) -> CargoBuildLimits {
+        self.limits
+    }
+
     pub fn with_target_directory(
         mut self,
         directory: impl Into<PathBuf>,
@@ -318,6 +323,13 @@ pub enum CargoBuildFailure {
     InvalidToolIdentity,
     #[error("the selected build process failed")]
     ProcessFailed,
+    #[error("the selected Cargo compilation failed or its protocol was rejected")]
+    Compilation {
+        status: ExitStatus,
+        diagnostics: CargoDiagnostics,
+        #[source]
+        protocol: Option<CargoBuildError>,
+    },
     #[error("another cooperating build owns this Cargo output directory")]
     TargetBusy,
     #[error("the build child has not yet returned; cleanup ownership is retained")]
@@ -328,8 +340,6 @@ pub enum CargoBuildFailure {
     Metadata(#[from] CargoMetadataFactsError),
     #[error(transparent)]
     Invocation(#[from] CargoInvocationError),
-    #[error(transparent)]
-    Messages(#[from] CargoBuildError),
     #[error("the captured executable was empty")]
     EmptyExecutable,
     #[error("the selected build was revoked by its Host")]
@@ -584,7 +594,8 @@ fn build_executable_inner(
         request.limits.work_bytes,
         "Cargo output work",
     )?;
-    let output = bounded_output(&mut build, request.limits.cargo_output_bytes.get())?;
+    let (status, output) =
+        bounded_status_output(&mut build, request.limits.cargo_output_bytes.get())?;
     check(
         output
             .len()
@@ -601,8 +612,25 @@ fn build_executable_inner(
         "Cargo interpretation work",
     )?;
     let mut decoder = CargoBuildDecoder::new(invocation);
-    decoder.push(&output)?;
-    let observed = decoder.finish()?;
+    let decoded = decoder.push(&output).and_then(|()| decoder.finish());
+    if !status.success() || decoded.is_err() {
+        // Decoding has the same admitted interpretation promise on success and failure. Keep the
+        // bounded structured diagnostics rather than discard Cargo's JSON stdout at a nonzero
+        // exit. Only this escaped summary uses retained allowance; raw output remains temporary.
+        let diagnostics = decoder.diagnostics();
+        check(
+            diagnostics_allocation(&diagnostics)?
+                .checked_add(std::mem::size_of::<CargoBuildFailure>()),
+            request.limits.retained_bytes,
+            "failed compilation diagnostics",
+        )?;
+        return Err(CargoBuildFailure::Compilation {
+            status,
+            diagnostics,
+            protocol: decoded.err(),
+        });
+    }
+    let observed = decoded.expect("successful process and admitted Cargo protocol");
     drop(decoder);
     drop(output);
     tools.verify(&request.tools)?;

@@ -8,6 +8,7 @@
 #[path = "cargo_facts.rs"]
 pub mod cargo;
 mod check;
+pub mod cooked_content;
 mod creation;
 mod dependency;
 mod export;

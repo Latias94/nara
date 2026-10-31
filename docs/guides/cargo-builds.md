@@ -79,6 +79,13 @@ observations, declared input digests and metadata digest. Metadata's workspace f
 can include features absent from the selected compiler unit. Only the selected compiler artifact
 supplies the built feature set. Dependency-qualified `required-features` are left to Cargo.
 
+`CargoBuildFailure::Compilation` preserves the actual process exit status, bounded structured
+compiler diagnostics and any protocol rejection. Diagnostics include explicit dropped/truncated
+counts; raw JSON stdout is not retained in the error. A failed compile therefore remains
+actionable without treating a nonzero exit as a successful artifact or discarding its messages.
+Tool/version/metadata commands keep their own non-compilation failures, and unconfirmed child
+cleanup retains separate custody as described below.
+
 Declared inputs are checked before and after work and at return. This is a per-file revalidation
 envelope, not an instantaneous workspace snapshot or a hermetic build. Ambient trusted Cargo
 configuration, build scripts, proc macros, native tools, toolchain libraries and inputs outside
@@ -115,3 +122,7 @@ foreign WASI build without execution, retained A after failed B, and processed-c
 after source removal. See [ADR 0110](../architecture/adr/0110-first-party-project-workflow-and-source-carrying-export.md#explicit-cargo-selection-and-captured-build-results)
 for the contract and the [unit plan](../plans/2026-10-31-explicit-cargo-build-selection-plan.md)
 for qualification scope.
+
+For complete cooked content plus a Player whose expectation is compiled as an exact declared
+input, use the separate [cooked Player workflow](cooked-player-delivery.md). Content preparation,
+code/content binding, package publication and Runtime/native qualification remain distinct.

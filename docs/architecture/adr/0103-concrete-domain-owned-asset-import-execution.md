@@ -302,6 +302,19 @@ Escaped groups, admitted Runtime bases and decoded/native values retain their ow
 owners across cache deletion or replacement. This adds no global semantic budget manager,
 remote cache, VFS, generic importer registry or Runtime build fallback.
 
+A returned verified group proves its captured historical recipe/output facts, not that those
+facts are still the Host's current package selection. The finite delivery Host retains its
+source, metadata, auxiliary-presence/digest and actual processed-member selection envelope, then
+revalidates it around Player construction and before package publication. Group observations
+alone do not reproduce that complete envelope: metadata used in seed construction need not be a
+recorded raw-read observation. Scene, Input and TileSet source observations belong to the same
+Host request. Code declared inputs and content observations remain separate inventories; their
+path sets need not match. Checks establish their stated per-file/fence envelope, not a simultaneous
+cross-file snapshot, ABA detection, hermetic compilation or global latest-state authority.
+The assembler may prepare exact captured historical content without claiming freshness. Current
+selection and its original observation custody remain with the compiled Host, as specified by
+[ADR 0110](0110-first-party-project-workflow-and-source-carrying-export.md#finite-cooked-player-delivery).
+
 ## Alternatives Considered
 
 ### Option 1: Keep the generic registry as a future-facing placeholder

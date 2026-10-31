@@ -122,9 +122,10 @@ is required before readiness or a native platform support claim.
 
 ### Dependency Closure and Cooking
 
-- Runtime-required edges enter the transitive closure. Runtime-soft/addressable edges enter only
-  when selected by an explicit root/group. Build-only edges may influence cook without becoming
-  runtime dependencies.
+- Required and Reference edges both enter the transitive delivery closure. Immediate/Deferred
+  demand controls current materialization, not whether a valid destination is delivered. Soft
+  metadata alone permits absence; explicit addressable roots add their complete mandatory
+  closure. Build-only observations may influence cook without becoming Runtime dependencies.
 - Dynamic content that code cannot statically discover must be declared through explicit roots or
   addressable groups. Missing required dependencies fail the build; they are not silently stripped.
 - Client, server, headless, and other capability profiles remove forbidden roots/members before
@@ -158,7 +159,7 @@ dependency metadata for the candidate mount set. Its digest is bound into that
 eviction; ADR 0037 owns those runtime concerns.
 
 The initial base is one immutable directory/member set with a complete catalog. Each product maps
-to one admitted member; duplicates reject, required dependencies close, and Host expectations bind
+to one admitted member; duplicates reject, Required/Reference dependencies close, and Host expectations bind
 the selected base identity/digest and target/schema. Directory layout is not permission to access
 authoring source. Patch/DLC overlay fields and algorithms are not prerequisites of this base format.
 
@@ -170,13 +171,18 @@ large allocation, member decode, or mount publication.
 
 ### Base Catalog Mount, Integrity, and Trust
 
-- The runtime constructs and verifies the complete base catalog/member snapshot before boot.
-- Wrong target/profile, incompatible engine/schema/plugin range, missing required member, digest
-  mismatch or catalog collision rejects the candidate before runtime acquisition/publication.
+- The Runtime admits the complete catalog/extent mapping before boot. Captured backing verifies
+  and retains all encoded members; retained-pack backing authenticates each original-file member
+  when demanded. Producer pre-publication deep validation covers every delivered payload through
+  its selected decoder. Neither original-file availability nor deferred residency follows from
+  catalog admission.
+- Wrong target/profile, incompatible engine/schema/plugin range, missing mandatory catalog member
+  or catalog collision rejects the base. Demanded payload failures reject the corresponding
+  startup/acquisition before publication; a later Deferred corruption need not be observed at boot.
 - The Host supplies the expected local base identity/digest and allowed namespace independently
   of package bytes. A manifest cannot authorize itself. The first slice is trusted local build
   output, not proof of freshness/authenticity for remote or adversarial package delivery.
-- Runtime acquisition resolves required/soft/addressable references through the admitted catalog.
+- Runtime acquisition resolves admitted Products and their actual current demand through the catalog.
   It succeeds with source, `.meta`, generated import cache and Cargo inaccessible on the run
   machine. Source-carrying Export remains a distinct supported mode, not evidence for this slice.
 - In-flight loads capture the immutable base snapshot and retain their required members. Catalog
@@ -185,6 +191,12 @@ large allocation, member decode, or mount publication.
   store credentials, and signature operations belong to trusted release/platform adapters.
 - Package filesystem access follows ADR 0050/0070 containment and guarantee tiers. Native code
   packages remain explicitly trusted executable extensions, not sandboxed catalog content.
+
+Accepted [ADR 0110](0110-first-party-project-workflow-and-source-carrying-export.md#finite-cooked-player-delivery)
+selects the consumed finite single-Player/pack join: generated compiled independent expectations,
+exact captured Cargo-input/selection binding, complete candidate validation, explicit Host
+freshness fences, bounded streaming and existing whole-directory publication custody. It does
+not accept this proposal's broader mount/patch/remote-trust or universal build-provider contracts.
 
 ### Later Patch, DLC, and Resolver Qualification
 

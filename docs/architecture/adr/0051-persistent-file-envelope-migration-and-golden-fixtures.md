@@ -4,7 +4,8 @@
 **Date**: 2026-07-09
 **Amended**: 2026-08-20 for the EIR-U0 canonical typed asset-metadata reset; 2026-10-24 for
 the unreleased schema-catalog envelope reset; 2026-10-29 for processed Runtime kinds and compact
-Image metadata framing; 2026-10-30 for distinct source and processed action-map contracts
+Image metadata framing; 2026-10-30 for distinct source and processed action-map contracts;
+2026-10-31 for the finite cooked Player delivery description
 **Implemented Slices**: RGF-U1 scene, prefab, scene-patch, and component-catalog envelopes; RGF-U12
 asset-metadata envelope
 **Refines**: ADR 0006, ADR 0007, ADR 0011, ADR 0037, ADR 0043, ADR 0045
@@ -83,6 +84,13 @@ Rules:
 | `runtime_image` metadata | 1 | 1 | none; compact Image-owned metadata envelope plus exact raw RGBA |
 | `action_map` | 1 | 1 | none; Input-owned native JSON definition with intrinsic primary Product |
 | `runtime_action_map` | 1 | 1 | none; Input-owned processed JSON with complete primary Product |
+| `player_package` | 1 | no Runtime reader | finite delivery description; compiled Player expectation is independent |
+
+The finite Player delivery manifest uses the same envelope under canonical kind `player_package`.
+Its bounded writer records exact executable/catalog/pack facts and captured Cargo provenance;
+the independent consumer checks a nonempty emitted envelope and physical file digests. The Player
+does not parse this manifest or use it as expected-catalog authority. A reusable manifest-reader,
+remote trust scheme or historical compatibility reader is not introduced by this producer slice.
 
 `action_map` payload records and domain containers are bounded before their allocations. Its
 payload contains a complete primary Product, explicit context declarations and ordered bindings;

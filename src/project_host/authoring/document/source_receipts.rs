@@ -12,6 +12,7 @@ const SCENE_STABLE_ID: &str = "bf136559-bc6e-41b9-9171-e46e176576a8";
 const PREFAB_STABLE_ID: &str = "74773fbe-6783-4324-9300-50a23804bcbc";
 
 #[test]
+#[cfg(feature = "tooling")]
 fn startup_fresh_admission_transfers_its_read_leaf_without_retaining_the_catalogue() {
     use crate::project_host::persistence::ScenePersistenceHost;
 

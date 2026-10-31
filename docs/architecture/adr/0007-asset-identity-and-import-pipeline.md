@@ -299,6 +299,22 @@ still validates every cell and duplicate coordinate; its maximum actual tile is 
 membership witness. Summary and parser work overlap subsequent decoder promises under the shared
 limit. A deep report grants no native residency, GPU allocation or gameplay-success authority.
 
+The finite cooked-content assembler admits a captured base through this same owner. Its prepared
+result requires deep-validation coverage of every delivered member, including Deferred payloads;
+members outside the selected mandatory closure reject rather than silently escape validation.
+This is a pre-publication producer guarantee. Ordinary pack startup still authenticates the
+catalog, exact extent table and current demand, while later acquisitions authenticate their own
+original-file payloads. A later mutation of a Deferred payload may therefore reject that
+acquisition while leaving the current Scene intact; startup does not promise perpetual file
+availability or an eager decode of all later resources.
+
+For the finite Player workflow, an explicitly generated Rust build input supplies the independent
+catalog digest/length, content target/profile and relative pack location. The trusted Player
+compiles and uses these facts with its own recipe. Neither the catalog, delivery manifest nor
+runtime arguments can replace that expectation. Cargo's checked declared-input facts do not prove
+arbitrary Rust code inclusion or executed control flow. The package contract and qualification
+belong to [ADR 0110](0110-first-party-project-workflow-and-source-carrying-export.md#finite-cooked-player-delivery).
+
 The immutable base and decoded candidates retain explicit encoded, work and logical retained-byte
 bounds. Compiled recipe/Schema construction and domain codec promises keep their existing limits;
 these ledgers do not intercept arbitrary native allocations or measure RSS. Encoded integrity,
@@ -319,8 +335,9 @@ base; mutable context/revision state has a separate allowance. Global Input sele
 of Scene residency and is not reinstalled during travel. The processed Input plan owns actual
 implementation and source-free physical process qualification.
 
-This adopts local capture/acquisition, shared composition/Scene retention and the concrete Input
-startup contract above. Automatic resource residency, a packaged Player entry, target cooking/stripping, CAS,
+This adopts local capture/acquisition, shared composition/Scene retention, concrete Input startup
+and the finite cooked-base producer contract above. Automatic resource residency, general
+target cooking/stripping, CAS,
 resolver replacement, patch/DLC and remote trust still need their complete workflows and evidence
 under the ordered delivery plan. Proposed ADR 0088 is not accepted wholesale.
 
