@@ -14,7 +14,8 @@ pub use canvas::{WorldCanvas, WorldCanvasFrame};
 use frame::build_render_frame_packet_for_source;
 pub use frame::{
     MAX_VIEWS_PER_TARGET, RenderFramePacket, RenderFramePacketError, RenderFrameSourceGeneration,
-    build_render_frame_packet, build_render_frame_packet_with_world_canvas,
+    build_image_render_frame_packet, build_render_frame_packet,
+    build_render_frame_packet_with_world_canvas,
 };
 pub use presentation::{DisplayMapping2d, DisplayRect, DisplaySampling, DisplayScale};
 pub use target::{

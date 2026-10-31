@@ -770,7 +770,11 @@ impl ImguiUiAuthoringPanels {
             self.cancel_drag(frame, EditorGestureCancelReason::FocusLost, actions);
         } else if ui.is_key_pressed(Key::Escape) {
             self.cancel_drag(frame, EditorGestureCancelReason::Escape, actions);
-        } else if input.notice.is_some() || self.displayed != Some(display) {
+        } else if input.notice.is_some()
+            || self
+                .displayed
+                .is_none_or(|previous| !previous.same_mapping(display))
+        {
             self.cancel_drag(frame, EditorGestureCancelReason::TargetRetired, actions);
         } else {
             self.advance_drag(ui, frame, selection.as_ref(), presented, released, actions);
@@ -1871,6 +1875,7 @@ mod tests {
                             image: Some(ImguiViewImage {
                                 texture: dear_imgui_rs::TextureId::new(1),
                                 extent: [320, 240],
+                                occurrence: None,
                             }),
                             presented: true,
                             notice: None,

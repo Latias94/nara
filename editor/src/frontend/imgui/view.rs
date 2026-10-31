@@ -18,6 +18,7 @@ impl Default for ImguiSceneView {
 pub(super) struct ImguiSceneViewOutput {
     pub desired_extent: Option<[f32; 2]>,
     pub mapping: Option<DisplayMapping2d>,
+    pub occurrence: Option<nara::render_wgpu::__private::WgpuDisplayOccurrence>,
     pub pick_point: Option<[f32; 2]>,
     pub camera_changed: bool,
 }
@@ -93,6 +94,7 @@ impl ImguiSceneView {
         ImguiSceneViewOutput {
             desired_extent,
             mapping,
+            occurrence: image.zip(mapping).and_then(|(image, _)| image.occurrence),
             pick_point,
             camera_changed: self.uv != before,
         }

@@ -225,7 +225,7 @@ impl GameInputWorkflow<'_> {
         let opened = self.observe()?;
         require_continuity(
             opened.submitted.identity.start() == start
-                && opened.submitted.image.view_id() == initial.submitted.image.view_id()
+                && opened.submitted.image.producer_id() == initial.submitted.image.producer_id()
                 && opened.submitted.image.target() == initial.submitted.image.target(),
             "Prefab Open replaced the exact Game start or native target",
         )?;
@@ -283,7 +283,7 @@ impl GameInputWorkflow<'_> {
         let before_close = opened.submitted.image;
         require_continuity(
             continued.submitted.identity.start() == start
-                && image.view_id() == before_close.view_id()
+                && image.producer_id() == before_close.producer_id()
                 && image.target() == before_close.target()
                 && image.target_generation() == before_close.target_generation()
                 && image.source_generation() == before_close.source_generation()
@@ -330,11 +330,14 @@ impl GameInputWorkflow<'_> {
                         operation: EditorPlayOperation::Stop,
                     })
                 && self.application.active_game_start_request() == Some(start)
-                && self.native.gpu.viewport_target_matches(
-                    image.view_id(),
-                    image.source_generation(),
-                    image.target(),
-                ),
+                && self.native.game.view.as_ref().is_some_and(|producer| {
+                    producer.id() == image.producer_id()
+                        && self.native.gpu.image_target_matches(
+                            producer,
+                            image.source_generation(),
+                            image.target(),
+                        )
+                }),
             "associated Close removed its source before requesting exact Runtime Stop",
         )?;
         // At every completed native frame, source removal requires the exact target to be gone.
@@ -363,12 +366,7 @@ impl GameInputWorkflow<'_> {
                         && self.native.game.texture.is_none()
                         && self.native.game.submitted.is_none()
                         && self.native.game_candidate.is_none()
-                        && !self.native.input.is_captured()
-                        && !self.native.gpu.viewport_target_matches(
-                            image.view_id(),
-                            image.source_generation(),
-                            image.target(),
-                        ),
+                        && !self.native.input.is_captured(),
                     "source removal became visible without exact Stop and native target retirement",
                 );
             }

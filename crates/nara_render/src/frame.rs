@@ -1,5 +1,8 @@
 use nara_app::RuntimeGeneration;
 use nara_window::{Window, WindowId};
+use std::sync::atomic::{AtomicU64, Ordering};
+
+static NEXT_RENDER_SOURCE: AtomicU64 = AtomicU64::new(1);
 
 use crate::{
     Extent2d, ExtractedView, ExtractedViews, RenderFrameTarget, RenderImagePacket, RenderTarget,
@@ -13,6 +16,7 @@ pub const MAX_VIEWS_PER_TARGET: usize = 16;
 enum RenderFrameSourceKind {
     Runtime(RuntimeGeneration),
     EditorPreview(u64),
+    Independent(u64),
 }
 
 /// Exact producer generation for one immutable render-frame packet stream.
@@ -20,6 +24,15 @@ enum RenderFrameSourceKind {
 pub struct RenderFrameSourceGeneration(RenderFrameSourceKind);
 
 impl RenderFrameSourceGeneration {
+    /// Allocates one non-reused process-local stream without constructing a gameplay Runtime.
+    pub fn try_acquire() -> Option<Self> {
+        NEXT_RENDER_SOURCE
+            .try_update(Ordering::Relaxed, Ordering::Relaxed, |value| {
+                value.checked_add(1)
+            })
+            .ok()
+            .map(|value| Self(RenderFrameSourceKind::Independent(value)))
+    }
     pub(crate) const fn runtime(generation: RuntimeGeneration) -> Self {
         Self(RenderFrameSourceKind::Runtime(generation))
     }
@@ -32,9 +45,34 @@ impl RenderFrameSourceGeneration {
     pub const fn runtime_generation(self) -> Option<RuntimeGeneration> {
         match self.0 {
             RenderFrameSourceKind::Runtime(generation) => Some(generation),
-            RenderFrameSourceKind::EditorPreview(_) => None,
+            RenderFrameSourceKind::EditorPreview(_) | RenderFrameSourceKind::Independent(_) => None,
         }
     }
+}
+
+/// Captures one image transaction without a platform window or gameplay Runtime.
+pub fn build_image_render_frame_packet(
+    generation: RenderFrameSourceGeneration,
+    frame_index: u64,
+    views: &ExtractedViews,
+    target: RenderImagePacket,
+) -> Result<Option<RenderFramePacket>, RenderFramePacketError> {
+    let packet = build_render_frame_packet_for_source(
+        generation,
+        frame_index,
+        None,
+        std::iter::empty(),
+        views,
+        Some(target),
+        None,
+    )?;
+    if packet
+        .as_ref()
+        .is_some_and(|packet| !matches!(packet.target(), RenderFrameTarget::Image(_)))
+    {
+        return Err(RenderFramePacketError::ImageTargetMismatch);
+    }
+    Ok(packet)
 }
 
 impl From<RuntimeGeneration> for RenderFrameSourceGeneration {

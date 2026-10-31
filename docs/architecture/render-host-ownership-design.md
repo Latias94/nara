@@ -209,6 +209,42 @@ the Runtime's own logical-close deadline remains unexpired.
 
 ## Outputs, Recovery And Completion
 
+### Selected Immutable-Output Replacement
+
+The current replacement separates configuration admission from output publication. Target
+preparation reserves the first native allocation for the coordinated Runtime/target start, but
+does not register a texture as the identity of all future frames. Every successful image
+realization transfers a distinct allocation into a retained output. Further realizations allocate
+new storage; no fixed frame ring or cloned view can overwrite a retained predecessor. A shared
+Host byte limit charges inactive reservations, retained outputs and submitted uses until their last
+physical lease releases. Lowering that limit preserves existing allocations and refuses growth.
+
+Each display selection retains an exact output and a non-reused occurrence. Toolkit registration
+belongs to that selection. Two registrations of the same pixels represent distinct occurrences,
+including within one window. Actual draw dependencies must identify the registered occurrence;
+neither equal texture handles nor output-level deduplication establishes that a designated
+interactive placement was displayed. Renderer-neutral picking facts preserve both output version
+and display occurrence without importing native resources into the document Session.
+
+The public image-only path uses the same stock device owner and draw implementation, with no
+Runtime, Winit, hidden window or dummy Surface. Exact immutable CPU input is borrowed during
+realization and may be retained independently for reconstruction. Native WGPU interoperation is
+an explicitly trusted adapter seam; its handle clones are not permission to mutate an imported
+output. The production graph/Feature replacement remains the subsequent step, rather than a
+second offscreen implementation or an implicit public topology freeze.
+
+Reserve original device, queue, output and input custody before draw preparation can enqueue
+uploads. A later preparation rejection still flushes those original writes into an owned prefix.
+Native scopes cover preparation, encoding and submission, and device health is checked before
+publishing an output or advancing the producer's successful-frame watermark. A callback settles
+the original responsibility only; it does not publish pixels, history, picking or UI success.
+The serialized segment binds its completion callback before another producer can enqueue work.
+Prefix polling never flushes again or follows later submissions. Final Host close retains its
+separate stopped-admission whole-queue boundary.
+
+This subsection selects implementation contracts. Qualification is recorded separately after
+the actual retained-pixel, failure, independent-consumer and Editor workflows run.
+
 Each published output owns distinct physical storage while a predecessor is retained. Its issued
 identity binds Host/epoch, producer incarnation, capture, logical output slot and non-reused output
 version. A mutable target generation cannot substitute for that pixel version. The ordinary API
@@ -244,6 +280,12 @@ consumes those exact CPU facts and produces a new epoch/output identity. It cann
 permissions, reuse GPU history or resolve current source/assets as the meaning of an old capture.
 When the caller has retired the input, report recovery unavailable. The first consumer must
 release live stores and ordinary frame captures to expose accidental dependence on them.
+
+The selected Rust image interface makes that availability explicit through ownership: realization
+requires a borrowed retained input owner, and an output exposes no operation to recover missing
+CPU input. Dynamic consumers may keep an optional/weak reconstruction owner and observe its
+absence; they cannot silently re-resolve current assets. Qualify actual input release while its
+pixels remain leased, separately from loss followed by replay of a retained original input.
 
 ## Implementation And Deletion Order
 
@@ -292,6 +334,13 @@ submit and after accepted submit but before completion. New Ready must not relea
 physical custody or restore its UI/picking authority.
 
 ## Evidence
+
+- The [immutable-output and original-prefix qualification](../knowledge/engineering/verification/2026-10/2026-10-31T121248Z-immutable-render-outputs-owning-producers-and-original-native-prefix-qualification-1b4de7f4305740698abba87b589f9459.md)
+  closes transition step3's native image/Editor owner in its recorded scope: exact pixel leases,
+  irreversible producer admission, borrowed final activation, designated display/UI joins,
+  original CPU reconstruction, submitted-use custody and final Drop. It includes actual independent
+  no-window execution and selected Windows/DX12 consumers; the production graph/Feature and
+  complete R8/R9 remain open.
 
 - The [owned native desktop qualification](../knowledge/engineering/verification/2026-10/2026-10-31T105632Z-owned-native-desktop-execution-and-post-host-presentation-qualification-4db921de03c94598b2ee20d7e82508c5.md)
   qualifies `37ca8bb` through the stock single-Runtime window path, common minimal/project owner,

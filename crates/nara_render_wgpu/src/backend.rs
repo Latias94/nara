@@ -402,13 +402,13 @@ pub struct WgpuRenderBackend {
     device_owner: WgpuDeviceOwner,
 }
 
-pub(super) struct WgpuEditorDeviceNamespace {
+pub(super) struct WgpuDeviceNamespace {
+    pub(super) epoch_lost: std::sync::Arc<std::sync::atomic::AtomicBool>,
     pub(super) instance: wgpu::Instance,
     pub(super) adapter: wgpu::Adapter,
     pub(super) device: wgpu::Device,
     pub(super) queue: wgpu::Queue,
-    pub(super) surface_format: wgpu::TextureFormat,
-    pub(super) surface_extent: Extent2d,
+    pub(super) surface: Option<(wgpu::TextureFormat, Extent2d)>,
     pub(super) backend_instance_id: u64,
     pub(super) device_epoch: u64,
 }
@@ -729,7 +729,7 @@ impl WgpuRenderBackend {
         &mut self,
         handles: &BackendWindowHandles,
         window: RenderWindowPacket,
-    ) -> Result<WgpuEditorDeviceNamespace, WgpuRenderError> {
+    ) -> Result<WgpuDeviceNamespace, WgpuRenderError> {
         self.fail_if_device_lost()?;
         self.retire_requested_surfaces()?;
         if self.state() == WgpuBackendState::Unavailable {
@@ -756,16 +756,41 @@ impl WgpuRenderBackend {
         };
         let surface_format = self.surface_view_format(window.id)?;
         let ready = self.device_owner.ready()?;
-        Ok(WgpuEditorDeviceNamespace {
+        Ok(WgpuDeviceNamespace {
+            epoch_lost: self.device_owner.output_epoch_guard()?,
             instance: self.device_owner.instance()?.clone(),
             adapter: ready.adapter.clone(),
             device: ready.device.clone(),
             queue: ready.queue.clone(),
-            surface_format,
-            surface_extent: size,
+            surface: Some((surface_format, size)),
             backend_instance_id: self.instance_id(),
             device_epoch: self.device_epoch(),
         })
+    }
+
+    /// Uses the normal device owner without manufacturing a platform target or Surface.
+    pub(super) fn prepare_image_device(&mut self) -> Result<WgpuDeviceNamespace, WgpuRenderError> {
+        self.device_owner.fail_if_device_lost()?;
+        if let Some(epoch) = self.device_owner.acquire(None)? {
+            self.telemetry.begin_device_epoch(epoch);
+            self.last_error = None;
+        }
+        self.retain_runtime_retirement()?;
+        let ready = self.device_owner.ready()?;
+        Ok(WgpuDeviceNamespace {
+            epoch_lost: self.device_owner.output_epoch_guard()?,
+            instance: self.device_owner.instance()?.clone(),
+            adapter: ready.adapter.clone(),
+            device: ready.device.clone(),
+            queue: ready.queue.clone(),
+            surface: None,
+            backend_instance_id: self.instance_id(),
+            device_epoch: self.device_epoch(),
+        })
+    }
+
+    pub(super) fn check_device_health(&self) -> Result<(), WgpuRenderError> {
+        self.device_owner.fail_if_device_lost()
     }
 
     pub(super) fn acquire_editor_surface(
@@ -1523,16 +1548,13 @@ impl WgpuRenderBackend {
 
     pub(super) fn retain_editor_world_presentation(
         &self,
-        view: crate::editor_execution::WgpuEditorViewId,
+        view: crate::host::WgpuRenderProducerId,
         revoker: nara_render::__private::WorldPresentationRevoker,
     ) -> Result<(), WgpuRenderError> {
         self.device_owner.retain_editor_presentation(view, revoker)
     }
 
-    pub(super) fn retire_editor_world_presentation(
-        &self,
-        view: crate::editor_execution::WgpuEditorViewId,
-    ) {
+    pub(super) fn retire_editor_world_presentation(&self, view: crate::host::WgpuRenderProducerId) {
         self.device_owner.retire_editor_presentation(view);
     }
 

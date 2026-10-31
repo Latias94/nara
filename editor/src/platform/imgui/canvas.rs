@@ -2,7 +2,7 @@ use nara::{
     project_host::{EditorUiAuthoringFrame, EditorUiPreviewCandidate},
     render::{RenderFrameTarget, RenderWindowPacket},
     render_wgpu::__private::{
-        WgpuEditorCompositeReceipt, WgpuEditorExecution, WgpuSubmittedImageReceipt,
+        WgpuDisplayOccurrence, WgpuEditorCompositeReceipt, WgpuImageDisplay, WgpuRenderHost,
     },
     scene::SceneAuthoringRevision,
     tooling::{EditorAction, EditorDocumentId, EditorGestureStamp, EditorNavigationAction},
@@ -30,7 +30,7 @@ impl CanvasIdentity {
 
 struct PreparedCanvas {
     identity: CanvasIdentity,
-    image: WgpuSubmittedImageReceipt,
+    display: WgpuImageDisplay,
     canvas: UiAuthoringCanvasReady,
 }
 
@@ -52,44 +52,37 @@ impl ImguiUiCanvasPresenter {
     pub(super) fn prepare(
         &mut self,
         target: &mut ImguiTarget,
-        gpu: &mut WgpuEditorExecution,
+        gpu: &mut WgpuRenderHost,
         renderer: &mut ImguiRenderer,
         window: RenderWindowPacket,
         candidate: EditorUiPreviewCandidate,
-        next_view: &mut u64,
     ) -> Result<(), EditorRunError> {
-        // A new submission may overwrite the same allocation. Its predecessor's receipt no
-        // longer certifies the content, even when target and document identities are unchanged.
-        self.retire();
-        target.submitted = None;
         let (document, revision, gesture, generation, packet, paint, canvas) =
             candidate.into_parts();
         let RenderFrameTarget::Image(image_target) = packet.target() else {
             return Err(imgui_error("the UI Canvas candidate has no image target"));
         };
-        target.ensure(
-            gpu,
-            renderer,
-            window,
-            packet.source_generation(),
-            image_target,
-            next_view,
-        )?;
+        target.ensure(gpu, window, packet.source_generation(), image_target)?;
         let view = target
             .view
+            .as_ref()
             .ok_or_else(|| imgui_error("the UI Canvas has no committed render view"))?;
-        let image = gpu
+        let output = gpu
             .submit_authoring_ui_image(view, window, packet, paint)
             .map_err(platform_gpu_error)?;
         if !target
             .identity
-            .is_some_and(|identity| identity.matches_submission(image))
+            .is_some_and(|identity| identity.matches_submission(output.receipt()))
         {
             return Err(imgui_error(
                 "the submitted UI Canvas does not match its committed target",
             ));
         }
-        target.submitted = Some(image);
+        let display = gpu.display_image(output).map_err(platform_gpu_error)?;
+        target.select_display(renderer, display.clone())?;
+        if let Some(presented) = self.presented.as_mut() {
+            presented.confirmed = false;
+        }
         self.pending = Some(PreparedCanvas {
             identity: CanvasIdentity {
                 document,
@@ -97,7 +90,7 @@ impl ImguiUiCanvasPresenter {
                 gesture,
                 generation,
             },
-            image,
+            display,
             canvas,
         });
         Ok(())
@@ -114,13 +107,13 @@ impl ImguiUiCanvasPresenter {
             let Some(presented) = self.presented.as_mut() else {
                 return Ok(false);
             };
-            if !target_matches(target, presented.prepared.image) {
-                self.retire();
+            if !target_matches(target, &presented.prepared.display) {
+                presented.confirmed = false;
                 return Ok(false);
             }
             let receipt = receipts
                 .into_iter()
-                .find(|receipt| receipt.image() == presented.prepared.image);
+                .find(|receipt| matches_receipt(&presented.prepared.display, *receipt));
             let was_confirmed = presented.confirmed;
             presented.confirmed = receipt.is_some();
             if let Some(receipt) = receipt {
@@ -128,15 +121,22 @@ impl ImguiUiCanvasPresenter {
             }
             return Ok(!was_confirmed && presented.confirmed);
         };
-        if !target_matches(target, pending.image) {
-            self.retire();
-            return Err(imgui_error(
-                "the UI Canvas target changed before presentation confirmation",
-            ));
+        if !target_matches(target, &pending.display) {
+            if let Some(presented) = self.presented.as_mut() {
+                let receipt = receipts.into_iter().find(|receipt| {
+                    target_matches(target, &presented.prepared.display)
+                        && matches_receipt(&presented.prepared.display, *receipt)
+                });
+                presented.confirmed = receipt.is_some();
+                if let Some(receipt) = receipt {
+                    presented.receipt = receipt;
+                }
+            }
+            return Ok(false);
         }
         let Some(receipt) = receipts
             .into_iter()
-            .find(|receipt| receipt.image() == pending.image)
+            .find(|receipt| matches_receipt(&pending.display, *receipt))
         else {
             return Ok(false);
         };
@@ -156,8 +156,8 @@ impl ImguiUiCanvasPresenter {
         self.presented.as_ref().is_some_and(|presented| {
             presented.confirmed
                 && presented.prepared.identity.matches(frame)
-                && presented.receipt.image() == presented.prepared.image
-                && target_matches(target, presented.prepared.image)
+                && matches_receipt(&presented.prepared.display, presented.receipt)
+                && target_matches(target, &presented.prepared.display)
         })
     }
 
@@ -168,9 +168,15 @@ impl ImguiUiCanvasPresenter {
     ) -> bool {
         self.presented.as_ref().is_some_and(|presented| {
             presented.prepared.identity.matches(frame)
-                && target_matches(target, presented.prepared.image)
+                && target_matches(target, &presented.prepared.display)
         }) || self.pending.as_ref().is_some_and(|pending| {
-            pending.identity.matches(frame) && target_matches(target, pending.image)
+            pending.identity.matches(frame) && target_matches(target, &pending.display)
+        })
+    }
+
+    pub(super) fn matches_occurrence(&self, occurrence: Option<WgpuDisplayOccurrence>) -> bool {
+        self.presented.as_ref().is_some_and(|presented| {
+            presented.confirmed && Some(presented.prepared.display.occurrence()) == occurrence
         })
     }
 
@@ -204,10 +210,10 @@ impl ImguiUiCanvasPresenter {
     }
 }
 
-fn target_matches(target: &ImguiTarget, image: WgpuSubmittedImageReceipt) -> bool {
-    target.submitted == Some(image)
-        && target.texture.is_some()
-        && target
-            .identity
-            .is_some_and(|identity| identity.matches_submission(image))
+fn target_matches(target: &ImguiTarget, display: &WgpuImageDisplay) -> bool {
+    target.matches_display(display)
+}
+
+fn matches_receipt(display: &WgpuImageDisplay, receipt: WgpuEditorCompositeReceipt) -> bool {
+    display.receipt() == receipt.image() && display.occurrence() == receipt.occurrence()
 }

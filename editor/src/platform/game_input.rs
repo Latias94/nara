@@ -18,7 +18,9 @@ use winit::{
 use nara::{
     project_host::EditorGameViewCandidateIdentity,
     render::RenderWindowPacket,
-    render_wgpu::__private::{WgpuEditorCompositeReceipt, WgpuEditorViewId},
+    render_wgpu::__private::{
+        WgpuDisplayOccurrence, WgpuEditorCompositeReceipt, WgpuRenderProducerId,
+    },
 };
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -35,8 +37,12 @@ impl EditorGamePresentedStamp {
         Self { identity, receipt }
     }
 
-    pub(super) const fn view_id(self) -> WgpuEditorViewId {
-        self.receipt.image().view_id()
+    pub(super) const fn producer_id(self) -> WgpuRenderProducerId {
+        self.receipt.image().producer_id()
+    }
+
+    pub(super) const fn occurrence(self) -> WgpuDisplayOccurrence {
+        self.receipt.occurrence()
     }
 
     pub(super) const fn window_id(self) -> nara::window::WindowId {
@@ -70,7 +76,9 @@ impl EditorGamePresentedStamp {
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 struct EditorGameInputLease {
-    view_id: nara::render_wgpu::__private::WgpuEditorViewId,
+    // Exact occurrence matching happens before this lease is admitted. Compatible successor
+    // displays keep the held-input route while the stamp advances to their exact occurrence.
+    view_id: nara::render_wgpu::__private::WgpuRenderProducerId,
     window_id: nara::window::WindowId,
     runtime_generation: u64,
     source_handoff_generation: u64,
@@ -82,7 +90,7 @@ struct EditorGameInputLease {
 impl EditorGameInputLease {
     fn from_stamp(stamp: EditorGamePresentedStamp, route_generation: u64) -> Self {
         Self {
-            view_id: stamp.view_id(),
+            view_id: stamp.producer_id(),
             window_id: stamp.window_id(),
             runtime_generation: stamp.runtime_generation(),
             source_handoff_generation: stamp.source_handoff_generation(),
@@ -93,7 +101,7 @@ impl EditorGameInputLease {
     }
 
     fn accepts(self, stamp: EditorGamePresentedStamp) -> bool {
-        self.view_id == stamp.view_id()
+        self.view_id == stamp.producer_id()
             && self.window_id == stamp.window_id()
             && self.runtime_generation == stamp.runtime_generation()
             && self.source_handoff_generation == stamp.source_handoff_generation()

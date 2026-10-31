@@ -15,10 +15,10 @@ use nara::{
         Extent2d, RenderFrameSourceGeneration, RenderImagePacket, RenderWindowPacket,
     },
     render_wgpu::__private::{
-        WgpuEditorExecution, WgpuEditorExecutionError, WgpuEditorFrameOutcome,
-        WgpuEditorImguiFrame, WgpuEditorImguiRenderer, WgpuEditorUiImageSubmission,
-        WgpuEditorViewId, WgpuEditorViewportIdentity, WgpuEditorWindowFrame, WgpuGpuRetirement,
-        WgpuSubmittedImageReceipt,
+        WgpuEditorFrameOutcome, WgpuEditorImguiFrame, WgpuEditorImguiRenderer,
+        WgpuEditorUiImageSubmission, WgpuEditorWindowFrame, WgpuGpuRetirement, WgpuImageDisplay,
+        WgpuImageTargetActivation, WgpuImageTargetIdentity, WgpuRenderHost, WgpuRenderHostError,
+        WgpuRenderProducer, WgpuSubmittedImageReceipt,
     },
     tooling::{EditorActionBatch, EditorPlayState, EditorRuntimeAvailability},
     window::{WindowId as NaraWindowId, backend::WindowHandleProvider},
@@ -488,7 +488,6 @@ struct ImguiRetainedState {
     layout: String,
     saved_layout: Option<crate::workspace::EditorWorkspaceLayout>,
     frame_index: u64,
-    next_view: u64,
 }
 
 struct NativeImgui {
@@ -496,7 +495,7 @@ struct NativeImgui {
     context: Context,
     platform: WinitPlatform,
     renderer: ImguiRenderer,
-    gpu: WgpuEditorExecution,
+    gpu: WgpuRenderHost,
     frontend: ImguiEditorFrontend,
     scene: ImguiTarget,
     game: ImguiTarget,
@@ -507,7 +506,6 @@ struct NativeImgui {
     last_frame: Instant,
     detachment: &'static str,
     layout: Option<crate::workspace::EditorWorkspaceLayout>,
-    next_view: u64,
     scene_extent: Option<Extent2d>,
     close: NativeClose,
     rejected_completion: Option<EditorGameViewCompletion>,
@@ -532,9 +530,12 @@ impl ImguiRenderer {
             .ok_or_else(|| imgui_error("the Editor renderer has not been initialized"))
     }
 
-    fn register(&mut self, view: &wgpu::TextureView) -> Result<ExternalTextureId, EditorRunError> {
+    fn register(
+        &mut self,
+        display: &WgpuImageDisplay,
+    ) -> Result<ExternalTextureId, EditorRunError> {
         self.owner()?
-            .register_external_texture(view)
+            .register_image(display)
             .map_err(platform_gpu_error)
     }
 
@@ -546,11 +547,11 @@ impl ImguiRenderer {
 
     fn prepare<'frame>(
         &mut self,
-        gpu: &mut WgpuEditorExecution,
+        gpu: &mut WgpuRenderHost,
         window: RenderWindowPacket,
         event_loop: &ActiveEventLoop,
         frame: dear_imgui_rs::FrameToken<'frame>,
-        submissions: &[WgpuSubmittedImageReceipt],
+        submissions: &[WgpuImageDisplay],
         outcomes: &mut Vec<WgpuEditorFrameOutcome>,
     ) -> Result<WgpuEditorImguiFrame<'frame>, EditorRunError> {
         gpu.prepare_imgui_frame(
@@ -568,7 +569,7 @@ impl ImguiRenderer {
         &mut self,
         prepared: WgpuEditorImguiFrame<'_>,
         frame: &mut WgpuEditorWindowFrame<'_>,
-    ) -> Result<(), WgpuEditorExecutionError> {
+    ) -> Result<(), WgpuRenderHostError> {
         let clear = wgpu::Color {
             r: 0.055,
             g: 0.06,
@@ -577,9 +578,7 @@ impl ImguiRenderer {
         };
         self.0
             .as_mut()
-            .ok_or_else(|| {
-                WgpuEditorExecutionError::toolkit_paint("the renderer is uninitialized")
-            })?
+            .ok_or_else(|| WgpuRenderHostError::toolkit_paint("the renderer is uninitialized"))?
             .paint(prepared, frame, clear)
     }
 
@@ -593,112 +592,162 @@ impl ImguiRenderer {
 
 #[derive(Default)]
 struct ImguiTarget {
-    view: Option<WgpuEditorViewId>,
-    identity: Option<WgpuEditorViewportIdentity>,
+    view: Option<WgpuRenderProducer>,
+    identity: Option<WgpuImageTargetIdentity>,
     source: Option<RenderFrameSourceGeneration>,
     target: Option<RenderImagePacket>,
     texture: Option<ExternalTextureId>,
     submitted: Option<WgpuSubmittedImageReceipt>,
+    display: Option<WgpuImageDisplay>,
+    obsolete: Vec<(ExternalTextureId, WgpuImageDisplay)>,
 }
 
 impl ImguiTarget {
     fn image(&self) -> Option<ImguiViewImage> {
         let texture = self.texture?;
-        let extent = self.target?.extent();
-        self.submitted?;
+        let display = self.display.as_ref()?;
+        let extent = display.receipt().target().extent();
         Some(ImguiViewImage {
             texture: texture.texture_id(),
             extent: [extent.width, extent.height],
+            occurrence: Some(display.occurrence()),
         })
+    }
+
+    fn select_display(
+        &mut self,
+        renderer: &mut ImguiRenderer,
+        display: WgpuImageDisplay,
+    ) -> Result<(), EditorRunError> {
+        if self.display.as_ref() == Some(&display) && self.texture.is_some() {
+            return Ok(());
+        }
+        let texture = renderer.register(&display)?;
+        if let Some(old) = self.texture.replace(texture) {
+            self.obsolete.push((
+                old,
+                self.display
+                    .take()
+                    .expect("a registered image retains its display"),
+            ));
+        }
+        self.submitted = Some(display.receipt());
+        self.display = Some(display);
+        Ok(())
+    }
+
+    fn matches_display(&self, display: &WgpuImageDisplay) -> bool {
+        self.display.as_ref() == Some(display) && self.texture.is_some()
+    }
+
+    // Called before a new toolkit frame: every previous main/secondary frame has settled.
+    fn release_obsolete(&mut self, renderer: &mut ImguiRenderer) -> Result<(), EditorRunError> {
+        while let Some((texture, _)) = self.obsolete.last() {
+            renderer.unregister(*texture)?;
+            self.obsolete.pop();
+        }
+        Ok(())
+    }
+
+    fn prepare_configuration<'host>(
+        &'host mut self,
+        gpu: &'host mut WgpuRenderHost,
+        window: RenderWindowPacket,
+        source: RenderFrameSourceGeneration,
+        target: RenderImagePacket,
+    ) -> Result<Option<WgpuImageTargetActivation<'host>>, EditorRunError> {
+        if self.source == Some(source) && self.target == Some(target) && self.identity.is_some() {
+            return Ok(None);
+        }
+        if self.view.is_none() {
+            self.view = Some(gpu.create_producer().map_err(platform_gpu_error)?);
+        }
+        let view = self.view.as_ref().expect("the render producer is retained");
+        let reservation = gpu
+            .reserve_viewport_target(view, window, source, target)
+            .map_err(platform_gpu_error)?;
+        let activation = gpu
+            .prepare_image_target_activation(view, reservation)
+            .map_err(platform_gpu_error)?;
+        Ok(Some(activation))
     }
 
     fn ensure(
         &mut self,
-        gpu: &mut WgpuEditorExecution,
-        renderer: &mut ImguiRenderer,
+        gpu: &mut WgpuRenderHost,
         window: RenderWindowPacket,
         source: RenderFrameSourceGeneration,
         target: RenderImagePacket,
-        next_view: &mut u64,
     ) -> Result<(), EditorRunError> {
-        if self.source == Some(source) && self.target == Some(target) && self.identity.is_some() {
-            return Ok(());
-        }
-        let view = match self.view {
-            Some(view) => view,
-            None => {
-                *next_view = next_view
-                    .checked_add(1)
-                    .ok_or_else(|| imgui_error("render view identity exhausted"))?;
-                let view = WgpuEditorViewId::new(*next_view);
-                self.view = Some(view);
-                view
-            }
-        };
-        let (reservation, texture) = gpu
-            .reserve_viewport_target_with_texture(view, window, source, target, |_, texture| {
-                renderer.register(texture.view())
-            })
-            .map_err(platform_gpu_error)?;
-        let texture = texture?;
-        let identity = reservation.identity();
-        if let Err(error) = gpu
-            .prepare_viewport_target_activation(reservation)
+        let identity = self
+            .prepare_configuration(gpu, window, source, target)?
             .map(|activation| {
-                gpu.retire_viewport_target(view);
-                gpu.commit_viewport_target_activation(activation);
-            })
-        {
-            renderer.unregister(texture)?;
-            return Err(platform_gpu_error(error));
+                let identity = activation.identity();
+                activation.commit();
+                identity
+            });
+        if let Some(identity) = identity {
+            self.identity = Some(identity);
+            self.source = Some(source);
+            self.target = Some(target);
         }
-        if let Some(old) = self.texture.replace(texture) {
-            renderer.unregister(old)?;
-        }
-        self.identity = Some(identity);
-        self.source = Some(source);
-        self.target = Some(target);
-        self.submitted = None;
         Ok(())
     }
 
     fn retire(
         &mut self,
-        gpu: &mut WgpuEditorExecution,
+        gpu: &mut WgpuRenderHost,
         renderer: &mut ImguiRenderer,
     ) -> Result<(), EditorRunError> {
+        self.release_obsolete(renderer)?;
         if let Some(texture) = self.texture {
             renderer.unregister(texture)?;
             self.texture = None;
         }
         if let Some(view) = self.view.take() {
-            gpu.retire_view(view);
+            // NativeImgui retains the original device/queue drain through final Host close.
+            // Per-submission callbacks retain resources; view close does not wait on other views.
+            drop(gpu.retire_producer(&view));
         }
         self.identity = None;
         self.source = None;
         self.target = None;
         self.submitted = None;
+        self.display = None;
         Ok(())
     }
 }
 
 struct PendingGameImage {
     identity: EditorGameViewCandidateIdentity,
-    image: WgpuSubmittedImageReceipt,
+    display: WgpuImageDisplay,
     ui: Option<WgpuEditorUiImageSubmission>,
 }
 
 impl PendingGameImage {
+    fn matches(&self, receipt: nara::render_wgpu::__private::WgpuEditorCompositeReceipt) -> bool {
+        receipt.image() == self.display.receipt()
+            && receipt.occurrence() == self.display.occurrence()
+    }
+
+    fn composite(
+        &self,
+        receipts: impl IntoIterator<Item = nara::render_wgpu::__private::WgpuEditorCompositeReceipt>,
+    ) -> Option<nara::render_wgpu::__private::WgpuEditorCompositeReceipt> {
+        receipts.into_iter().find(|receipt| self.matches(*receipt))
+    }
+
     fn finish(
         self,
         receipt: Option<nara::render_wgpu::__private::WgpuEditorCompositeReceipt>,
     ) -> EditorGameViewCompletion {
+        let receipt = receipt.filter(|receipt| self.matches(*receipt));
         match (self.ui, receipt) {
             (Some(ui), Some(receipt)) => match ui.presented(receipt) {
                 Ok(outcomes) => EditorGameViewCompletion::with_ui(self.identity, outcomes),
                 Err(ui) => EditorGameViewCompletion::with_ui_failed(
                     self.identity,
-                    ui.failed(&WgpuEditorExecutionError::StaleImageSubmission),
+                    ui.failed(&WgpuRenderHostError::StaleImageSubmission),
                 ),
             },
             (Some(ui), None) => EditorGameViewCompletion::with_ui_deferred(
@@ -712,8 +761,19 @@ impl PendingGameImage {
         }
     }
 
+    fn finish_after_error(
+        self,
+        receipts: impl IntoIterator<Item = nara::render_wgpu::__private::WgpuEditorCompositeReceipt>,
+        error: &EditorRunError,
+    ) -> EditorGameViewCompletion {
+        match self.composite(receipts) {
+            Some(receipt) => self.finish(Some(receipt)),
+            None => self.fail(error),
+        }
+    }
+
     fn fail(self, error: &EditorRunError) -> EditorGameViewCompletion {
-        let toolkit = WgpuEditorExecutionError::toolkit_paint(error.to_string());
+        let toolkit = WgpuRenderHostError::toolkit_paint(error.to_string());
         let error = match error {
             EditorRunError::Gpu(error) => error,
             _ => &toolkit,
@@ -744,7 +804,7 @@ impl NativeImgui {
     ) -> Result<Self, NativeInitializationFailure> {
         // Context teardown may own deferred renderer resources after an initialization error.
         // Declare the engine GPU owner first so those resources retire before it on every return.
-        let gpu = WgpuEditorExecution::new(
+        let gpu = WgpuRenderHost::new(
             NaraWindowId::PRIMARY,
             WindowHandleProvider::new(Arc::clone(&window)),
         )
@@ -790,7 +850,6 @@ impl NativeImgui {
                 "Native detachment unavailable on this profile; in-window docking remains enabled"
             },
             layout: None,
-            next_view: 0,
             scene_extent: None,
             close: NativeClose::default(),
             rejected_completion: None,
@@ -890,8 +949,9 @@ impl NativeImgui {
                 };
                 let view = target
                     .view
+                    .as_ref()
                     .filter(|_| panel.is_visible() && target.identity.is_some())
-                    .map(|view| crate::workspace::EditorRenderViewId(view.get()));
+                    .map(|view| crate::workspace::EditorRenderViewId(view.id().get()));
                 Some((panel.id(), view))
             })
             .collect::<Vec<_>>();
@@ -907,6 +967,8 @@ impl NativeImgui {
         #[cfg(test)] before_new_frame: impl FnOnce(&mut Context),
     ) -> Result<bool, EditorRunError> {
         self.presented = false;
+        self.scene.release_obsolete(&mut self.renderer)?;
+        self.game.release_obsolete(&mut self.renderer)?;
         #[cfg(test)]
         {
             self.lifecycle_frame = None;
@@ -1000,7 +1062,6 @@ impl NativeImgui {
                         &mut self.renderer,
                         window_packet,
                         candidate,
-                        &mut self.next_view,
                     )?;
                 } else {
                     self.scene_presenter.retire();
@@ -1049,7 +1110,7 @@ impl NativeImgui {
             self.platform
                 .prepare_render(frame.ui(), &self.window)
                 .map_err(imgui_error)?;
-            let submissions = [self.scene.submitted, self.game.submitted]
+            let submissions = [self.scene.display.clone(), self.game.display.clone()]
                 .into_iter()
                 .flatten()
                 .collect::<Vec<_>>();
@@ -1104,15 +1165,13 @@ impl NativeImgui {
                     }
                 }
                 if let Some(pending) = pending_game {
-                    let exact = secondary_outcomes
-                        .iter()
-                        .flat_map(WgpuEditorFrameOutcome::composites)
-                        .copied()
-                        .find(|receipt| receipt.image() == pending.image);
-                    let completion = match exact {
-                        Some(receipt) => pending.finish(Some(receipt)),
-                        None => pending.fail(&error),
-                    };
+                    let completion = pending.finish_after_error(
+                        secondary_outcomes
+                            .iter()
+                            .flat_map(WgpuEditorFrameOutcome::composites)
+                            .copied(),
+                        &error,
+                    );
                     self.return_game_completion(application, completion)?;
                 }
                 self.input.flush(application)?;
@@ -1158,7 +1217,10 @@ impl NativeImgui {
                     .flat_map(WgpuEditorFrameOutcome::composites),
             )
             .copied()
-            .filter(|receipt| Some(receipt.window().window_id()) == authoring_window)
+            .filter(|receipt| {
+                Some(receipt.window().window_id()) == authoring_window
+                    && Some(receipt.occurrence()) == output.authoring_occurrence
+            })
             .collect::<Vec<_>>();
         let scene_promoted = if let Some(mapping) = output.scene_mapping {
             self.scene_presenter.promote(
@@ -1206,16 +1268,17 @@ impl NativeImgui {
             }
         }
         if let Some(pending) = pending_game {
-            let receipt = outcome
-                .composites()
-                .iter()
-                .chain(
-                    secondary_outcomes
-                        .iter()
-                        .flat_map(WgpuEditorFrameOutcome::composites),
-                )
-                .copied()
-                .find(|receipt| receipt.image() == pending.image);
+            let receipt = pending.composite(
+                outcome
+                    .composites()
+                    .iter()
+                    .chain(
+                        secondary_outcomes
+                            .iter()
+                            .flat_map(WgpuEditorFrameOutcome::composites),
+                    )
+                    .copied(),
+            );
             self.return_game_completion(application, pending.finish(receipt))?;
         }
         if pending_identity.is_some() {
@@ -1240,8 +1303,12 @@ impl NativeImgui {
             )
             .copied()
             .find(|receipt| {
-                Some(receipt.image()) == self.game.submitted
-                    && Some(receipt.window().window_id()) == game_window
+                self.game.display.as_ref().is_some_and(|display| {
+                    receipt.image() == display.receipt()
+                        && receipt.occurrence() == display.occurrence()
+                }) && Some(receipt.window().window_id()) == game_window
+                    && Some(receipt.occurrence())
+                        == output.game_image.and_then(|image| image.occurrence)
             });
         self.input.observe(
             output.game_image,
@@ -1348,6 +1415,9 @@ impl NativeImgui {
             self.window.request_redraw();
         }
         if let Some((point, mapping)) = output.scene_pick_point.zip(output.scene_mapping)
+            && self
+                .scene_presenter
+                .matches_occurrence(output.authoring_occurrence)
             && let Some(frame) = application.current_frame()
             && let Some(action) = self.scene_presenter.resolve_pick(
                 &frame,
@@ -1363,6 +1433,7 @@ impl NativeImgui {
             output.actions = Some(EditorActionBatch::new(revision, actions));
         }
         if let Some(uv) = output.canvas_pick_uv
+            && self.canvas.matches_occurrence(output.authoring_occurrence)
             && let Some(frame) = application.current_ui_authoring_frame()
             && let Some(action) = self.canvas.resolve_pick(&self.scene, &frame, uv)
             && let Some(batch) = output.actions.take()
@@ -1449,7 +1520,6 @@ impl NativeImgui {
             let resized = application.resize_game_view(extent).map_err(imgui_error)?;
             if resized {
                 self.game_candidate = None;
-                self.game.submitted = None;
                 self.window.request_redraw();
             }
             resized
@@ -1507,7 +1577,6 @@ impl NativeImgui {
             &mut self.renderer,
             window,
             candidate,
-            &mut self.next_view,
         )?;
         Ok(false)
     }
@@ -1531,20 +1600,26 @@ impl NativeImgui {
         }
         if let Some(request) = application.pending_game_start_request() {
             let (source, target) = game_target(request, &self.game)?;
-            if self.frontend.game_open(application.panel_workspace()) {
-                self.game.ensure(
-                    &mut self.gpu,
-                    &mut self.renderer,
-                    window,
-                    source,
-                    target,
-                    &mut self.next_view,
-                )?;
-            }
+            let configuration = if self.frontend.game_open(application.panel_workspace()) {
+                self.game
+                    .prepare_configuration(&mut self.gpu, window, source, target)?
+            } else {
+                None
+            };
             let activation = application
                 .prepare_game_start_activation(request)
                 .map_err(imgui_error)?;
             application.commit_game_start_activation(activation);
+            let identity = configuration.map(|activation| {
+                let identity = activation.identity();
+                activation.commit();
+                identity
+            });
+            if let Some(identity) = identity {
+                self.game.identity = Some(identity);
+                self.game.source = Some(source);
+                self.game.target = Some(target);
+            }
             self.game_source_active = true;
         }
         if let Some(request) = application.active_game_start_request() {
@@ -1569,14 +1644,7 @@ impl NativeImgui {
                 application.drive_editor_frame(Duration::ZERO, false, true);
             }
             let (source, target) = game_target(request, &self.game)?;
-            self.game.ensure(
-                &mut self.gpu,
-                &mut self.renderer,
-                window,
-                source,
-                target,
-                &mut self.next_view,
-            )?;
+            self.game.ensure(&mut self.gpu, window, source, target)?;
         }
         Ok(())
     }
@@ -1608,11 +1676,11 @@ impl NativeImgui {
             sprites.as_ref(),
             runtime_ui.as_ref().is_some_and(|frame| frame.has_packets()),
         );
-        let Some((view, target)) = self.game.view.zip(self.game.target) else {
+        let Some((view, target)) = self.game.view.as_ref().zip(self.game.target) else {
             let completion = match runtime_ui {
                 Some(ui) => EditorGameViewCompletion::with_ui_failed(
                     identity,
-                    WgpuEditorExecution::reject_editor_ui_frame(ui, "Game has no live target"),
+                    WgpuRenderHost::reject_editor_ui_frame(ui, "Game has no live target"),
                 ),
                 None => EditorGameViewCompletion::without_ui_failed(identity),
             };
@@ -1625,7 +1693,7 @@ impl NativeImgui {
                 let completion = match runtime_ui {
                     Some(ui) => EditorGameViewCompletion::with_ui_failed(
                         identity,
-                        WgpuEditorExecution::reject_editor_ui_frame(ui, error.to_string()),
+                        WgpuRenderHost::reject_editor_ui_frame(ui, error.to_string()),
                     ),
                     None => EditorGameViewCompletion::without_ui_failed(identity),
                 };
@@ -1641,7 +1709,7 @@ impl NativeImgui {
                 let completion = match runtime_ui {
                     Some(ui) => EditorGameViewCompletion::with_ui_failed(
                         identity,
-                        WgpuEditorExecution::reject_editor_ui_frame(ui, error.to_string()),
+                        WgpuRenderHost::reject_editor_ui_frame(ui, error.to_string()),
                     ),
                     None => EditorGameViewCompletion::without_ui_failed(identity),
                 };
@@ -1649,7 +1717,7 @@ impl NativeImgui {
                 return Err(platform_gpu_error(error));
             }
         }
-        let (image, ui) = match (sprites, runtime_ui) {
+        let (display, ui) = match (sprites, runtime_ui) {
             (sprites, Some(ui)) => {
                 let submitted = match sprites {
                     Some(sprites) => self
@@ -1658,7 +1726,7 @@ impl NativeImgui {
                     None => self.gpu.submit_ui_image(view, window, packet, ui),
                 };
                 match submitted {
-                    Ok(ui) => (ui.image(), Some(ui)),
+                    Ok(ui) => (ui.display().clone(), Some(ui)),
                     Err(failure) => {
                         let (error, outcomes) = failure.complete();
                         self.return_game_completion(
@@ -1675,7 +1743,16 @@ impl NativeImgui {
                     None => self.gpu.submit_image(view, window, packet),
                 };
                 match submitted {
-                    Ok(image) => (image, None),
+                    Ok(image) => match self.gpu.display_image(image) {
+                        Ok(display) => (display, None),
+                        Err(error) => {
+                            self.return_game_completion(
+                                application,
+                                EditorGameViewCompletion::without_ui_failed(identity),
+                            )?;
+                            return Err(platform_gpu_error(error));
+                        }
+                    },
                     Err(error) => {
                         self.return_game_completion(
                             application,
@@ -1686,20 +1763,28 @@ impl NativeImgui {
                 }
             }
         };
-        self.game.submitted = Some(image);
+        let pending = PendingGameImage {
+            identity,
+            display,
+            ui,
+        };
+        if let Err(error) = self
+            .game
+            .select_display(&mut self.renderer, pending.display.clone())
+        {
+            self.return_game_completion(application, pending.fail(&error))?;
+            return Err(error);
+        }
         #[cfg(all(test, target_os = "windows"))]
         {
             self.submitted_game_observation = Some(game_input_tests::SubmittedGameObservation {
-                image,
+                image: pending.display.receipt(),
+                occurrence: pending.display.occurrence(),
                 identity,
                 content,
             });
         }
-        Ok(Some(PendingGameImage {
-            identity,
-            image,
-            ui,
-        }))
+        Ok(Some(pending))
     }
 
     fn return_game_completion(
@@ -1766,7 +1851,6 @@ impl NativeEditorHost {
                     native.frontend = retained.frontend;
                     native.layout = retained.saved_layout;
                     native.frame_index = retained.frame_index;
-                    native.next_view = retained.next_view;
                     native.layout_loaded = true;
                 }
             }
@@ -1820,7 +1904,6 @@ impl NativeEditorHost {
                     layout,
                     saved_layout: native.layout.take(),
                     frame_index: native.frame_index,
-                    next_view: native.next_view,
                 }));
             }
         }
@@ -1904,7 +1987,7 @@ impl NativeEditorHost {
         if let Some(native) = &mut self.native {
             native.close.device_lost = matches!(
                 &error,
-                EditorRunError::Gpu(WgpuEditorExecutionError::Backend(
+                EditorRunError::Gpu(WgpuRenderHostError::Backend(
                     nara::render_wgpu::WgpuRenderError::DeviceLost
                 ))
             );

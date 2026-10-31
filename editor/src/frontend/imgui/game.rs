@@ -58,7 +58,7 @@ impl ImguiGameView {
                     content.max[1] - content.min[1],
                 ],
             );
-            let interaction = super::image_interaction(ui);
+            let interaction = super::image_interaction(ui, image.occurrence);
             if self.integer_scaling {
                 draw.set_sampler_linear();
             }
@@ -250,6 +250,7 @@ mod tests {
                     Some(ImguiViewImage {
                         texture: GAME_TEXTURE,
                         extent: [128, 64],
+                        occurrence: None,
                     }),
                     play,
                     captured,

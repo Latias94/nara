@@ -746,9 +746,12 @@ Use pinned Bevy and Godot as primary architecture evidence without copying a his
 The [native ownership qualification](../knowledge/engineering/verification/2026-10/2026-10-31T105632Z-owned-native-desktop-execution-and-post-host-presentation-qualification-4db921de03c94598b2ee20d7e82508c5.md)
 at `37ca8bb` moves stock execution outside World through a retained Runtime/Host/window/pump session
 and exact CPU capture/result connection. Post-Host UI/READY, finite telemetry seal, code-first and
-project consumers have owner/public and selected Windows evidence. This closes that native unit;
-immutable outputs, original reconstruction, producer-prefix retirement and external Features remain
-the next integrated production work. Proposed0121 and the complete foundation Goal stay open.
+project consumers have owner/public and selected Windows evidence. Its
+[immutable-output successor](../knowledge/engineering/verification/2026-10/2026-10-31T121248Z-immutable-render-outputs-owning-producers-and-original-native-prefix-qualification-1b4de7f4305740698abba87b589f9459.md)
+now qualifies exact pixels/display occurrences, owned producer admission, borrowed final target
+activation, original reconstruction and submitted-prefix responsibility through actual native and
+independent public consumers. Continue the production graph/typed Feature and alternate-policy
+transition through these owners. Proposed0121 and the complete foundation Goal stay open.
 
 ADR 0121's [identity, wiring and candidate boundaries](../architecture/adr/0121-composable-render-programs-and-host-execution.md#identity-wiring-and-candidate-boundaries)
 close three remaining shared contracts before interface freeze: stable Feature-instance and

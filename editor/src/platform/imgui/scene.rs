@@ -6,7 +6,8 @@ use nara::{
     },
     render::{DisplayMapping2d, Extent2d, RenderFrameTarget, RenderWindowPacket},
     render_wgpu::__private::{
-        WgpuEditorCompositeReceipt, WgpuEditorExecution, WgpuSubmittedImageReceipt,
+        WgpuDisplayOccurrence, WgpuEditorCompositeReceipt, WgpuImageDisplay, WgpuRenderHost,
+        WgpuSubmittedImageReceipt,
     },
     tooling::{EditorAction, EditorFrameModel, EditorNavigationAction},
 };
@@ -17,6 +18,7 @@ struct PreparedScene {
     content: EditorPreviewContentStamp,
     accepted: EditorAcceptedPreview,
     submission: WgpuSubmittedImageReceipt,
+    display: WgpuImageDisplay,
     texture: ExternalTextureId,
 }
 
@@ -24,8 +26,10 @@ struct PresentedScene {
     content: EditorPreviewContentStamp,
     token: EditorPresentedToken,
     receipt: WgpuEditorCompositeReceipt,
+    display: WgpuImageDisplay,
     mapping: DisplayMapping2d,
     texture: ExternalTextureId,
+    confirmed: bool,
 }
 
 #[derive(Default)]
@@ -43,50 +47,40 @@ impl ImguiScenePresenter {
     pub(super) fn prepare(
         &mut self,
         target: &mut ImguiTarget,
-        gpu: &mut WgpuEditorExecution,
+        gpu: &mut WgpuRenderHost,
         renderer: &mut ImguiRenderer,
         window: RenderWindowPacket,
         candidate: EditorPreviewCandidate,
-        next_view: &mut u64,
     ) -> Result<(), EditorRunError> {
         let content = candidate.content_stamp();
         if self.prepared.as_ref().is_some_and(|prepared| {
             prepared.content == content
-                && matches_target(target, prepared.submission, prepared.texture)
+                && matches_target(target, &prepared.display, prepared.texture)
         }) || self.presented.as_ref().is_some_and(|presented| {
             presented.content == content
-                && matches_target(target, presented.receipt.image(), presented.texture)
+                && matches_target(target, &presented.display, presented.texture)
                 && self.authority.token(
                     candidate.document(),
                     candidate.revision(),
-                    presentation_image(presented.receipt.image()),
+                    presentation_image(presented.receipt),
                     presented.mapping,
                 ) == Some(presented.token)
         }) {
             return Ok(());
         }
-        self.retire();
         let (accepted, packet, sprites) = self.authority.accept(candidate).map_err(imgui_error)?;
         let RenderFrameTarget::Image(image) = packet.target() else {
             return Err(imgui_error("Scene preview did not retain an image target"));
         };
-        target.ensure(
-            gpu,
-            renderer,
-            window,
-            packet.source_generation(),
-            image,
-            next_view,
-        )?;
+        target.ensure(gpu, window, packet.source_generation(), image)?;
         let view = target
             .view
+            .as_ref()
             .ok_or_else(|| imgui_error("Scene target has no render view"))?;
-        let texture = target
-            .texture
-            .ok_or_else(|| imgui_error("Scene target has no toolkit texture"))?;
-        let submission = gpu
+        let output = gpu
             .submit_sprite_image(view, window, packet, sprites)
             .map_err(platform_gpu_error)?;
+        let submission = output.receipt();
         if !target
             .identity
             .is_some_and(|identity| identity.matches_submission(submission))
@@ -95,11 +89,19 @@ impl ImguiScenePresenter {
                 "Scene submission did not match its committed target",
             ));
         }
-        target.submitted = Some(submission);
+        let display = gpu.display_image(output).map_err(platform_gpu_error)?;
+        target.select_display(renderer, display.clone())?;
+        let texture = target
+            .texture
+            .expect("the selected Scene image is registered");
+        if let Some(presented) = self.presented.as_mut() {
+            presented.confirmed = false;
+        }
         self.prepared = Some(PreparedScene {
             content,
             accepted,
             submission,
+            display,
             texture,
         });
         Ok(())
@@ -126,14 +128,14 @@ impl ImguiScenePresenter {
             prepared.accepted.document() == scene.document
                 && prepared.accepted.revision() == scene.revision
                 && requested_extent == Some(prepared.submission.target().extent())
-                && matches_target(target, prepared.submission, prepared.texture)
+                && matches_target(target, &prepared.display, prepared.texture)
         } else if let Some(presented) = self.presented.as_ref() {
             requested_extent == Some(presented.receipt.image().target().extent())
-                && matches_target(target, presented.receipt.image(), presented.texture)
+                && matches_target(target, &presented.display, presented.texture)
                 && self.authority.token(
                     scene.document,
                     scene.revision,
-                    presentation_image(presented.receipt.image()),
+                    presentation_image(presented.receipt),
                     presented.mapping,
                 ) == Some(presented.token)
         } else {
@@ -154,6 +156,16 @@ impl ImguiScenePresenter {
     ) -> bool {
         self.is_current(target, frame, requested_extent, expected_content)
             && self.prepared.is_none()
+            && self
+                .presented
+                .as_ref()
+                .is_some_and(|presented| presented.confirmed)
+    }
+
+    pub(super) fn matches_occurrence(&self, occurrence: Option<WgpuDisplayOccurrence>) -> bool {
+        self.presented.as_ref().is_some_and(|presented| {
+            presented.confirmed && Some(presented.display.occurrence()) == occurrence
+        })
     }
 
     /// The caller supplies receipts only for the window that displayed this mapping.
@@ -167,30 +179,39 @@ impl ImguiScenePresenter {
         if !self.require_current_content(expected_content) {
             return Ok(false);
         }
-        let Some(submission) = target.submitted else {
+        let Some(display) = target.display.as_ref() else {
             self.retire();
             return Ok(false);
         };
+        let submission = display.receipt();
         let Some(texture) = target.texture else {
             self.retire();
             return Ok(false);
         };
-        if !matches_target(target, submission, texture)
+        if !matches_target(target, display, texture)
             || mapping.target() != submission.target().extent()
         {
             self.retire();
             return Ok(false);
         }
-        let Some(receipt) = receipts
-            .into_iter()
-            .find(|receipt| receipt.image() == submission)
-        else {
-            self.authority.retire();
-            self.presented = None;
+        let Some(receipt) = receipts.into_iter().find(|receipt| {
+            receipt.image() == submission && receipt.occurrence() == display.occurrence()
+        }) else {
+            if let Some(presented) = self.presented.as_mut() {
+                presented.confirmed = false;
+            }
             return Ok(false);
         };
-        if let Some(prepared) = self.prepared.take() {
-            if prepared.submission != receipt.image() || prepared.texture != texture {
+        if self
+            .prepared
+            .as_ref()
+            .is_some_and(|prepared| prepared.display == *display)
+        {
+            let prepared = self.prepared.take().expect("the exact Scene is prepared");
+            if prepared.submission != receipt.image()
+                || prepared.display.occurrence() != receipt.occurrence()
+                || prepared.texture != texture
+            {
                 self.retire();
                 return Err(imgui_error(
                     "Scene display did not match its accepted preview",
@@ -198,42 +219,37 @@ impl ImguiScenePresenter {
             }
             let token = self
                 .authority
-                .finish(
-                    prepared.accepted,
-                    presentation_image(receipt.image()),
-                    mapping,
-                )
+                .finish(prepared.accepted, presentation_image(receipt), mapping)
                 .map_err(imgui_error)?;
             self.presented = Some(PresentedScene {
                 content: prepared.content,
                 token,
                 receipt,
+                display: prepared.display,
                 mapping,
                 texture,
+                confirmed: true,
             });
             return Ok(true);
         }
         let Some(presented) = self.presented.as_mut() else {
             return Ok(false);
         };
-        if presented.receipt.image() != receipt.image() || presented.texture != texture {
-            self.retire();
+        if presented.display != *display || presented.texture != texture {
             return Ok(false);
         }
+        let was_confirmed = presented.confirmed;
         let mapping_changed = presented.mapping != mapping;
         if mapping_changed {
             presented.token = self
                 .authority
-                .redisplay(
-                    presented.token,
-                    presentation_image(receipt.image()),
-                    mapping,
-                )
+                .redisplay(presented.token, presentation_image(receipt), mapping)
                 .map_err(imgui_error)?;
             presented.mapping = mapping;
         }
         presented.receipt = receipt;
-        Ok(mapping_changed)
+        presented.confirmed = true;
+        Ok(mapping_changed || !was_confirmed)
     }
 
     pub(super) fn resolve_pick(
@@ -247,7 +263,11 @@ impl ImguiScenePresenter {
             return None;
         }
         let presented = self.presented.as_ref()?;
-        if presented.mapping != mapping {
+        if !presented.confirmed
+            || self.prepared.is_some()
+            || Some(&presented.content) != expected_content
+            || presented.mapping != mapping
+        {
             return None;
         }
         let scene = frame.workspace().scene(frame.scene_preview_document()?)?;
@@ -257,7 +277,7 @@ impl ImguiScenePresenter {
         let token = self.authority.token(
             scene.document,
             scene.revision,
-            presentation_image(presented.receipt.image()),
+            presentation_image(presented.receipt),
             mapping,
         )?;
         if token != presented.token {
@@ -293,20 +313,17 @@ impl ImguiScenePresenter {
 
 fn matches_target(
     target: &ImguiTarget,
-    submission: WgpuSubmittedImageReceipt,
+    display: &WgpuImageDisplay,
     texture: ExternalTextureId,
 ) -> bool {
-    target.submitted == Some(submission)
-        && target.texture == Some(texture)
-        && target.target == Some(submission.target())
-        && target.source == Some(submission.source_generation())
-        && target
-            .identity
-            .is_some_and(|identity| identity.matches_submission(submission))
+    target.matches_display(display) && target.texture == Some(texture)
 }
 
-fn presentation_image(image: WgpuSubmittedImageReceipt) -> EditorPresentationImage {
+fn presentation_image(receipt: WgpuEditorCompositeReceipt) -> EditorPresentationImage {
+    let image = receipt.image();
     EditorPresentationImage {
+        output_version: image.output_version(),
+        display_occurrence: receipt.occurrence().get(),
         target: image.target(),
         target_generation: image.target_generation(),
         source_generation: image.source_generation(),
@@ -1021,7 +1038,6 @@ mod binding_tests {
                             &mut self.native.renderer,
                             window,
                             candidate,
-                            &mut self.native.next_view,
                         )
                         .map_err(|error| error.to_string())?;
                     if self.native.scene_presenter.prepared.is_none() {
@@ -1156,6 +1172,12 @@ mod binding_tests {
                 }
                 self.wait_for_scene_presentation()?;
                 let submitted = self.native.scene.submitted;
+                let current_texture = self.native.scene.texture;
+                if submitted == image || current_texture.is_none() || current_texture == texture {
+                    return Err(
+                        "changed dependency pixels reused an old output or registration".to_owned(),
+                    );
+                }
                 let token = self
                     .native
                     .scene_presenter
@@ -1167,7 +1189,7 @@ mod binding_tests {
                     self.paint()?;
                     if self.native.scene.submitted != submitted
                         || self.native.scene.identity != identity
-                        || self.native.scene.texture != texture
+                        || self.native.scene.texture != current_texture
                         || self
                             .native
                             .scene_presenter
@@ -1197,11 +1219,6 @@ mod binding_tests {
                 .scene
                 .identity
                 .ok_or("the Scene has no target identity")?;
-            let texture = self
-                .native
-                .scene
-                .texture
-                .ok_or("the Scene has no texture registration")?;
             // Reproduce a rejected-source observation without changing the retained source.
             let previous = self.native.scene_presenter.presented.as_ref().unwrap();
             let old_token = previous.token;
@@ -1215,7 +1232,7 @@ mod binding_tests {
                 .token(
                     document,
                     mismatched_revision,
-                    presentation_image(previous.receipt.image()),
+                    presentation_image(previous.receipt),
                     mapping,
                 )
                 .is_some()
@@ -1258,6 +1275,8 @@ mod binding_tests {
                         .as_ref()
                         .ok_or("the Scene has no presented token")?;
                     let old_token = previous.token;
+                    let old_texture = previous.texture;
+                    let old_output = previous.display.output().clone();
                     let mapping = previous.mapping;
                     let content = mapping.content_rect();
                     let point = [
@@ -1330,9 +1349,11 @@ mod binding_tests {
                         }
                     }
                     if self.native.scene.identity != Some(identity)
-                        || self.native.scene.texture != Some(texture)
+                        || self.native.scene.texture.is_none()
+                        || self.native.scene.texture == Some(old_texture)
+                        || self.native.scene.submitted == Some(old_output.receipt())
                     {
-                        return Err("a disposable identity epoch rebuilt the unchanged native image target or texture registration".to_owned());
+                        return Err("a source epoch must retain its target configuration and publish a distinct output registration".to_owned());
                     }
                     if self
                         .native

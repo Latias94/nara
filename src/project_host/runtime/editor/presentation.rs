@@ -22,6 +22,8 @@ pub struct EditorPresentedToken(u64);
 #[doc(hidden)]
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct EditorPresentationImage {
+    pub output_version: u64,
+    pub display_occurrence: u64,
     pub target: RenderImagePacket,
     pub target_generation: u64,
     pub source_generation: RenderFrameSourceGeneration,
@@ -143,6 +145,8 @@ impl EditorPreviewPresentation {
             || image.backend_instance_id == 0
             || image.device_epoch == 0
             || image.source_handoff_generation == 0
+            || image.output_version == 0
+            || image.display_occurrence == 0
             || self
                 .presented
                 .as_ref()

@@ -126,6 +126,16 @@ pub struct RenderImagePacket {
 }
 
 impl RenderImagePacket {
+    pub fn new(
+        image: Handle<RenderImage2d>,
+        extent: Extent2d,
+    ) -> Result<Self, crate::RenderFramePacketError> {
+        if extent.is_empty() {
+            return Err(crate::RenderFramePacketError::ImageTargetHasZeroExtent);
+        }
+        Ok(Self { image, extent })
+    }
+
     #[must_use]
     pub const fn image(self) -> Handle<RenderImage2d> {
         self.image

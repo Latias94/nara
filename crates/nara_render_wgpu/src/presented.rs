@@ -1,8 +1,11 @@
 use nara_app::RuntimeGeneration;
+use std::sync::atomic::{AtomicU64, Ordering};
+
+static NEXT_IMAGE_OUTPUT: AtomicU64 = AtomicU64::new(1);
 use nara_render::{RenderFrameSourceGeneration, RenderImagePacket};
 use nara_window::WindowId;
 
-use crate::editor_execution::WgpuEditorViewId;
+use crate::host::WgpuRenderProducerId;
 
 /// Exact process-local facts for one WGPU surface submission and present call.
 ///
@@ -78,14 +81,14 @@ impl WgpuPresentedFrameReceipt {
     }
 }
 
-/// Exact process-local facts for one submitted Editor image target.
+/// Exact process-local facts for one successfully published immutable image output.
 ///
 /// This receipt proves queue submission for the image target. It deliberately carries no surface
 /// or present fact.
-#[doc(hidden)]
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct WgpuSubmittedImageReceipt {
-    view_id: WgpuEditorViewId,
+    output_version: u64,
+    view_id: WgpuRenderProducerId,
     target: RenderImagePacket,
     target_generation: u64,
     source_generation: RenderFrameSourceGeneration,
@@ -96,8 +99,8 @@ pub struct WgpuSubmittedImageReceipt {
 }
 
 impl WgpuSubmittedImageReceipt {
-    pub(crate) const fn new(
-        view_id: WgpuEditorViewId,
+    pub(crate) fn new(
+        view_id: WgpuRenderProducerId,
         target: RenderImagePacket,
         target_generation: u64,
         source_generation: RenderFrameSourceGeneration,
@@ -106,7 +109,13 @@ impl WgpuSubmittedImageReceipt {
         device_epoch: u64,
         render_transaction_frame_index: u64,
     ) -> Self {
+        let output_version = NEXT_IMAGE_OUTPUT
+            .try_update(Ordering::Relaxed, Ordering::Relaxed, |value| {
+                value.checked_add(1)
+            })
+            .unwrap_or_else(|_| std::process::abort());
         Self {
+            output_version,
             view_id,
             target,
             target_generation,
@@ -118,8 +127,14 @@ impl WgpuSubmittedImageReceipt {
         }
     }
 
+    /// Identifies exact pixels, independently of the target's configuration generation.
     #[must_use]
-    pub const fn view_id(self) -> WgpuEditorViewId {
+    pub const fn output_version(self) -> u64 {
+        self.output_version
+    }
+
+    #[must_use]
+    pub const fn producer_id(self) -> WgpuRenderProducerId {
         self.view_id
     }
 
@@ -265,6 +280,7 @@ impl WgpuEditorWindowPresentedReceipt {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct WgpuEditorCompositeReceipt {
     image: WgpuSubmittedImageReceipt,
+    occurrence: crate::output::WgpuDisplayOccurrence,
     window: WgpuEditorWindowPresentedReceipt,
     presentation_generation: u64,
 }
@@ -272,14 +288,21 @@ pub struct WgpuEditorCompositeReceipt {
 impl WgpuEditorCompositeReceipt {
     pub(crate) const fn new(
         image: WgpuSubmittedImageReceipt,
+        occurrence: crate::output::WgpuDisplayOccurrence,
         window: WgpuEditorWindowPresentedReceipt,
         presentation_generation: u64,
     ) -> Self {
         Self {
             image,
+            occurrence,
             window,
             presentation_generation,
         }
+    }
+
+    #[must_use]
+    pub const fn occurrence(self) -> crate::output::WgpuDisplayOccurrence {
+        self.occurrence
     }
 
     #[must_use]

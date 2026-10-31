@@ -182,3 +182,10 @@ original CPU capture/results, actual UI/READY/startup boundaries and finite tele
 Minimal code-first, project, Reference and selected native Editor consumers share that owner.
 The repeated-display/output/producer/Feature and editable Nara-drawn Editor gates above remain
 open. This successor advances F1/F2/F3 without restarting the imported research or claiming full R8.
+
+The [immutable-output successor](../knowledge/engineering/verification/2026-10/2026-10-31T121248Z-immutable-render-outputs-owning-producers-and-original-native-prefix-qualification-1b4de7f4305740698abba87b589f9459.md)
+now replaces writable viewport aliases with exact retained pixels and display occurrences. Owned
+producer admission, borrowed activation, native-use/prefix custody, original input through loss and
+M-before-D UI completion have independent public and selected native evidence. This implements
+the next F2/F3 ownership consumer; graph/Feature, full history groups and the editable Nara-drawn
+Editor retain their existing gates. The research still requires no roadmap reset or toolkit adoption.

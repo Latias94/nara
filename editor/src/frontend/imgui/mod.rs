@@ -41,6 +41,7 @@ pub use workspace::{ImguiEditorPanel, ImguiEditorPanelContext};
 pub(crate) struct ImguiViewImage {
     pub(crate) texture: TextureId,
     pub(crate) extent: [u32; 2],
+    pub(crate) occurrence: Option<nara::render_wgpu::__private::WgpuDisplayOccurrence>,
 }
 
 #[derive(Default)]
@@ -62,6 +63,7 @@ pub(crate) struct ImguiFrontendOutput {
     pub(crate) scene_pick_point: Option<[f32; 2]>,
     pub(crate) scene_camera_changed: bool,
     pub(crate) authoring_viewport: Option<dear_imgui_rs::Id>,
+    pub(crate) authoring_occurrence: Option<nara::render_wgpu::__private::WgpuDisplayOccurrence>,
     pub(crate) panel_windows: Vec<(crate::workspace::EditorPanelInstanceId, dear_imgui_rs::Id)>,
     pub(crate) scene_extent: Option<[f32; 2]>,
     pub(crate) game_extent: Option<[f32; 2]>,
@@ -78,6 +80,16 @@ pub(crate) struct ImguiCanvasDisplay {
     viewport: dear_imgui_rs::Id,
     window: dear_imgui_rs::Id,
     pixels_per_point: f32,
+    occurrence: Option<nara::render_wgpu::__private::WgpuDisplayOccurrence>,
+}
+
+impl ImguiCanvasDisplay {
+    fn same_mapping(self, other: Self) -> bool {
+        self.rect == other.rect
+            && self.viewport == other.viewport
+            && self.window == other.window
+            && self.pixels_per_point == other.pixels_per_point
+    }
 }
 
 impl From<ImguiImageInteraction> for ImguiCanvasDisplay {
@@ -96,12 +108,14 @@ impl From<ImguiImageInteraction> for ImguiCanvasDisplay {
             viewport: image.viewport,
             window: image.window,
             pixels_per_point: image.pixels_per_point,
+            occurrence: image.occurrence,
         }
     }
 }
 
 #[derive(Clone, Copy)]
 pub(crate) struct ImguiImageInteraction {
+    pub(crate) occurrence: Option<nara::render_wgpu::__private::WgpuDisplayOccurrence>,
     pub(crate) rect: nara::render::DisplayRect,
     pub(crate) viewport: dear_imgui_rs::Id,
     pub(crate) viewport_origin: [f32; 2],
@@ -1127,6 +1141,7 @@ fn paint_authoring_view(ui: &Ui, context: &mut ImguiEditorPanelContext<'_, '_>) 
             context.model.instance().target().clone(),
         ));
         context.output.canvas_display = canvas.display;
+        context.output.authoring_occurrence = canvas.display.and_then(|display| display.occurrence);
         context.output.scene_extent = canvas.desired_extent;
         context.output.canvas_pick_uv = canvas.pick_uv;
     } else {
@@ -1145,6 +1160,7 @@ fn paint_authoring_view(ui: &Ui, context: &mut ImguiEditorPanelContext<'_, '_>) 
         );
         context.output.scene_extent = scene.desired_extent;
         context.output.scene_mapping = scene.mapping;
+        context.output.authoring_occurrence = scene.occurrence;
         context.output.scene_pick_point = scene.pick_point;
         context.output.scene_camera_changed = scene.camera_changed;
     }
@@ -1341,18 +1357,22 @@ fn show_image(
                 image.extent[1] as f32 * scale,
             ],
         );
-        return (Some(extent), Some(image_interaction(ui)));
+        return (Some(extent), Some(image_interaction(ui, image.occurrence)));
     } else {
         ui.text(unavailable);
     }
     (Some(extent), None)
 }
 
-fn image_interaction(ui: &Ui) -> ImguiImageInteraction {
+fn image_interaction(
+    ui: &Ui,
+    occurrence: Option<nara::render_wgpu::__private::WgpuDisplayOccurrence>,
+) -> ImguiImageInteraction {
     let (min, max) = ui.item_rect();
     let viewport = ui.window_viewport();
     let origin = viewport.pos();
     ImguiImageInteraction {
+        occurrence,
         rect: nara::render::DisplayRect {
             min: [min[0] - origin[0], min[1] - origin[1]],
             max: [max[0] - origin[0], max[1] - origin[1]],

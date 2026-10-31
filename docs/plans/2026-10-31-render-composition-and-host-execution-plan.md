@@ -131,6 +131,18 @@ removed. Minimal code-first and Source/Processed products share the owner. Conti
 immutable outputs, original reconstruction inputs and producer-prefix custody; public window-free,
 external Feature, alternate policy and complete graph/output workflows remain open.
 
+The [production image-output replacement](../knowledge/engineering/verification/2026-10/2026-10-31T121248Z-immutable-render-outputs-owning-producers-and-original-native-prefix-qualification-1b4de7f4305740698abba87b589f9459.md)
+is qualified under the selected
+[immutable-output contracts](../architecture/render-host-ownership-design.md#selected-immutable-output-replacement).
+It replaces mutable viewport storage with exact retained outputs, makes producer admission an
+owned irreversible lifetime, and holds an exclusive Host/producer borrow through final target
+activation. Ordinary native output use gains Host-owned submission custody; raw interoperation
+does not become the normal read-only consumer protocol. Actual qualification covers paint/upload failure,
+OOM/Internal classification, callback-abandonment recovery, retained byte limits and same-capture
+retry alongside A1/A2, designated D/passive M and producer-local close. Ordinary478, Root445,
+selected native27 and independent public3 pass in the linked scope. Continue the production
+graph/Feature seam; the complete resource/history/policy workload remains open.
+
 The [shared concrete drain](../knowledge/engineering/verification/2026-10/2026-10-31T084653Z-shared-concrete-gpu-queue-retirement-qualification-ab68d8adf25f406d9222df6b3b2fcc70.md)
 is extracted at `96bd0bf` with its actual Editor consumer and adapter/native retirement evidence.
 The Runtime Host must still capture that owner before first use; extracting the shared mechanism

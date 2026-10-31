@@ -37,6 +37,28 @@ contract.
 
 ## Decision
 
+The concrete native image-output owner now uses the same stock device-domain and drawing path as
+the first-party Editor. Normal surface-less acquisition requires no gameplay Runtime, Winit,
+hidden window or dummy Surface. A later native window is checked against the original Adapter;
+an incompatible target cannot silently replace a healthy device used by other producers. This
+concrete public consumer does not accept a replacement-Host role, public graph/Feature protocol,
+multi-device scheduler or browser-blocking initialization.
+
+Producer admission is an owned, non-reused lifetime separate from copyable receipt facts. Final
+configuration publication retains exclusive Host and producer borrows; stopped producers cannot
+be reopened through stale identities or reservations. Immutable output storage may remain leased
+after producer close, while original device loss and final Host retirement revoke its authority.
+Exact reconstruction inputs remain independently owned and never include old one-shot UI permits.
+
+Final native Host Drop follows the retained Session policy: stop admission, revoke interaction,
+drive the original retained queue and unresolved prefixes, then release dependencies only after
+actual completion. A finite drive-budget expiry or callback unwind is fail-stop; it is not an
+assertion that native destructors or callbacks have a strict wall-clock bound. Explicit retirement
+keeps errors and its original retryable owner. Ordinary producer close waits only its frozen
+prefix, while final Host close owns whole-queue drain. The
+[output guide](../../guides/render-image-outputs.md) describes that concrete consumer; the
+implementation ledger retains its actual qualification scope.
+
 nara uses one serialized GPU execution authority per live device domain, represented conceptually
 as `WgpuRenderHost`, to own all wgpu native state and consume owned backend-neutral frame packets.
 `nara_render_wgpu` owns the accepted stock implementation. ADR 0094 preserves future replacement

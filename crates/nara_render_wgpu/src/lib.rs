@@ -6,10 +6,11 @@ mod backend;
 mod budget;
 mod canvas;
 mod device;
-mod editor_execution;
 mod error;
 mod frame;
+mod host;
 mod observation;
+mod output;
 mod plugin;
 mod presented;
 #[cfg(any(feature = "sprite-submitter", feature = "ui-submitter"))]
@@ -22,6 +23,7 @@ mod runtime;
 mod sprite;
 #[cfg(all(test, feature = "sprite-submitter"))]
 mod sprite_probe;
+mod submission;
 mod surface;
 mod telemetry;
 #[cfg(any(feature = "sprite-submitter", feature = "ui-submitter"))]
@@ -58,7 +60,12 @@ use nara_window::{
 
 pub use crate::backend::{WgpuBackendState, WgpuFrameTransactionStats, WgpuRenderBackend};
 pub use crate::error::WgpuRenderError;
+pub use crate::host::{
+    WgpuImageTargetActivation, WgpuImageTargetIdentity, WgpuImageTargetReservation, WgpuRenderHost,
+    WgpuRenderHostError, WgpuRenderProducer, WgpuRenderProducerId,
+};
 pub use crate::observation::WgpuRenderObservation;
+pub use crate::output::{WgpuDisplayOccurrence, WgpuImageDisplay, WgpuImageInput, WgpuImageOutput};
 #[cfg(feature = "sprite-submitter")]
 pub use crate::plugin::{
     WGPU_SPRITE_SUBMITTER_PLUGIN_DECLARATION, WGPU_SPRITE_SUBMITTER_PLUGIN_ID,
@@ -68,6 +75,8 @@ pub use crate::plugin::{
 pub use crate::plugin::{
     WGPU_UI_SUBMITTER_PLUGIN_DECLARATION, WGPU_UI_SUBMITTER_PLUGIN_ID, WgpuUiSubmitterPlugin,
 };
+pub use crate::presented::WgpuSubmittedImageReceipt;
+pub use crate::submission::{WgpuSubmissionPrefix, WgpuSubmissionPrefixError};
 pub use crate::telemetry::{
     MAX_ADAPTER_SUMMARY_FIELD_BYTES, MAX_BUFFERED_FRAME_COMPLETIONS, MAX_PENDING_FRAME_COMPLETIONS,
     WgpuAdapterSummary, WgpuBackendTelemetryConfig, WgpuFrameCompletionSample,
@@ -85,16 +94,16 @@ pub use crate::texture::WgpuTextureCacheStats as WgpuRenderTextureCacheStats;
 #[doc(hidden)]
 pub mod __private {
     #[cfg(feature = "editor-imgui")]
-    pub use crate::editor_execution::{
+    pub use crate::host::{
         WgpuEditorImguiFrame, WgpuEditorImguiRenderer, WgpuEditorImguiRendererFailure,
     };
     pub use crate::{
-        editor_execution::{
-            WgpuEditorDeviceScope, WgpuEditorExecution, WgpuEditorExecutionError,
-            WgpuEditorFrameOutcome, WgpuEditorReservedViewportTexture, WgpuEditorViewId,
-            WgpuEditorViewportIdentity, WgpuEditorViewportTargetActivation,
-            WgpuEditorViewportTargetReservation, WgpuEditorWindowFrame,
+        host::{
+            WgpuEditorDeviceScope, WgpuEditorFrameOutcome, WgpuEditorWindowFrame,
+            WgpuImageTargetActivation, WgpuImageTargetIdentity, WgpuImageTargetReservation,
+            WgpuRenderHost, WgpuRenderHostError, WgpuRenderProducer, WgpuRenderProducerId,
         },
+        output::{WgpuDisplayOccurrence, WgpuImageDisplay, WgpuImageInput, WgpuImageOutput},
         presented::{
             WgpuEditorCompositeReceipt, WgpuEditorWindowPresentedReceipt,
             WgpuPresentedFrameReceipt, WgpuSubmittedImageReceipt,
@@ -112,7 +121,7 @@ pub mod __private {
     pub use crate::backend::WgpuSubmittedUiFacts;
 
     #[cfg(feature = "ui-submitter")]
-    pub use crate::editor_execution::{
+    pub use crate::host::{
         WgpuEditorUiImageSubmission, WgpuEditorUiSubmission, WgpuEditorUiSubmitFailure,
     };
 

@@ -2,7 +2,10 @@
 
 use super::*;
 use crate::{EditorLaunchOptions, frontend::imgui::UiProject};
-use nara::tooling::{EditorAction, EditorPlayAction};
+use nara::{
+    render_wgpu::__private::WgpuRenderProducerId,
+    tooling::{EditorAction, EditorPlayAction},
+};
 use windows_sys::Win32::UI::WindowsAndMessaging::{
     SW_SHOWMINNOACTIVE, SW_SHOWNOACTIVATE, ShowWindow,
 };
@@ -24,11 +27,11 @@ struct NativeLifecycleProof {
     recovered_frames: u32,
     retired_backend: Option<u64>,
     first_present_ms: Option<u128>,
-    stale_receipt_rejected: bool,
-    last_game: Option<WgpuSubmittedImageReceipt>,
-    initial_scene_view: Option<WgpuEditorViewId>,
-    initial_game_view: Option<WgpuEditorViewId>,
-    reopened_game_view: Option<WgpuEditorViewId>,
+    retained_display_accepted: bool,
+    last_game: Option<WgpuImageDisplay>,
+    initial_scene_view: Option<WgpuRenderProducerId>,
+    initial_game_view: Option<WgpuRenderProducerId>,
+    reopened_game_view: Option<WgpuRenderProducerId>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -63,7 +66,7 @@ impl NativeLifecycleProof {
             recovered_frames: 0,
             retired_backend: None,
             first_present_ms: None,
-            stale_receipt_rejected: false,
+            retained_display_accepted: false,
             last_game: None,
             initial_scene_view: None,
             initial_game_view: None,
@@ -89,36 +92,41 @@ impl NativeLifecycleProof {
             };
             let expected = target
                 .filter(|_| panel.is_visible())
-                .and_then(|target| target.view.filter(|_| target.identity.is_some()))
-                .map(|view| crate::workspace::EditorRenderViewId(view.get()));
+                .and_then(|target| target.view.as_ref().filter(|_| target.identity.is_some()))
+                .map(|view| crate::workspace::EditorRenderViewId(view.id().get()));
             if panel.render_view() != expected {
                 return Err(imgui_error(
                     "the panel did not publish its exact live GPU view identity",
                 ));
             }
         }
-        if let Some(old) = self.last_game.filter(|old| {
-            native.game.submitted.is_some_and(|new| new != *old)
+        if let Some(old) = self.last_game.as_ref().filter(|old| {
+            !self.retained_display_accepted
                 && native
                     .game
-                    .identity
-                    .is_some_and(|target| target.matches_submission(*old))
+                    .submitted
+                    .is_some_and(|new| new != old.receipt())
+                && old.receipt().backend_instance_id() == native.gpu.backend_instance_id()
+                && old.receipt().device_epoch() == native.gpu.device_epoch()
         }) {
-            let stale = native.gpu.present_window(
-                window_packet,
-                native.frame_index,
-                &[old],
-                |_| panic!("a stale image receipt reached paint"),
-                || {},
-            );
-            if !matches!(stale, Err(WgpuEditorExecutionError::StaleImageSubmission)) {
+            let retained = native
+                .gpu
+                .present_window(
+                    window_packet,
+                    native.frame_index,
+                    std::slice::from_ref(old),
+                    |_| Ok(()),
+                    || {},
+                )
+                .map_err(platform_gpu_error)?;
+            if !retained.composites().is_empty() {
                 return Err(imgui_error(
-                    "a repeated image allocation accepted a superseded receipt",
+                    "an unsampled retained display acquired presentation authority",
                 ));
             }
-            self.stale_receipt_rejected = true;
+            self.retained_display_accepted = true;
         }
-        self.last_game = native.game.submitted;
+        self.last_game = native.game.display.clone();
         let mut action = None;
         let proof = self;
         {
@@ -140,18 +148,33 @@ impl NativeLifecycleProof {
             }
             let scene = native.scene.submitted;
             let game = native.game.submitted;
-            let primary_scene = outcome
-                .composites()
-                .iter()
-                .any(|receipt| Some(receipt.image()) == scene);
-            let primary_game = outcome
-                .composites()
-                .iter()
-                .any(|receipt| Some(receipt.image()) == game);
+            let primary_scene = outcome.composites().iter().any(|receipt| {
+                Some(receipt.image()) == scene
+                    && native
+                        .scene
+                        .display
+                        .as_ref()
+                        .is_some_and(|display| display.occurrence() == receipt.occurrence())
+            });
+            let primary_game = outcome.composites().iter().any(|receipt| {
+                Some(receipt.image()) == game
+                    && native
+                        .game
+                        .display
+                        .as_ref()
+                        .is_some_and(|display| display.occurrence() == receipt.occurrence())
+            });
             let secondary_game = secondary_outcomes
                 .iter()
                 .flat_map(WgpuEditorFrameOutcome::composites)
-                .any(|receipt| Some(receipt.image()) == game);
+                .any(|receipt| {
+                    Some(receipt.image()) == game
+                        && native
+                            .game
+                            .display
+                            .as_ref()
+                            .is_some_and(|display| display.occurrence() == receipt.occurrence())
+                });
             if let Some(frame) = application.current_frame() {
                 if frame.play().state() == EditorPlayState::Empty
                     && proof.phase == LifecyclePhase::Primary
@@ -170,10 +193,17 @@ impl NativeLifecycleProof {
                         native
                             .scene
                             .view
-                            .expect("a presented Scene has its GPU view"),
+                            .as_ref()
+                            .expect("a presented Scene has its GPU view")
+                            .id(),
                     );
                     proof.initial_game_view.get_or_insert(
-                        native.game.view.expect("a presented Game has its GPU view"),
+                        native
+                            .game
+                            .view
+                            .as_ref()
+                            .expect("a presented Game has its GPU view")
+                            .id(),
                     );
                     proof.primary_frames += 1;
                     if proof.primary_frames >= 4 {
@@ -208,9 +238,9 @@ impl NativeLifecycleProof {
                 LifecyclePhase::Returned if primary_scene && primary_game => {
                     proof.returned_frames += 1;
                     if proof.returned_frames >= 4 {
-                        if !proof.stale_receipt_rejected {
+                        if !proof.retained_display_accepted {
                             return Err(imgui_error(
-                                "the native lifecycle did not reject an overwritten image receipt",
+                                "the native lifecycle did not admit a retained old display",
                             ));
                         }
                         proof.phase = LifecyclePhase::GameClosed;
@@ -228,7 +258,9 @@ impl NativeLifecycleProof {
                     {
                         return Err(imgui_error("closing Game stopped its Runtime"));
                     }
-                    if native.scene.view != proof.initial_scene_view {
+                    if native.scene.view.as_ref().map(WgpuRenderProducer::id)
+                        != proof.initial_scene_view
+                    {
                         return Err(imgui_error(
                             "closing Game replaced Scene's independent view",
                         ));
@@ -240,14 +272,17 @@ impl NativeLifecycleProof {
                     }
                 }
                 LifecyclePhase::GameReopening if primary_scene && primary_game => {
-                    if native.game.view == proof.initial_game_view
-                        || native.scene.view != proof.initial_scene_view
+                    if native.game.view.as_ref().map(WgpuRenderProducer::id)
+                        == proof.initial_game_view
+                        || native.scene.view.as_ref().map(WgpuRenderProducer::id)
+                            != proof.initial_scene_view
                     {
                         return Err(imgui_error(
                             "reopening Game reused its retired identity or replaced Scene",
                         ));
                     }
-                    proof.reopened_game_view = native.game.view;
+                    proof.reopened_game_view =
+                        native.game.view.as_ref().map(WgpuRenderProducer::id);
                     set_panel_open(
                         application.panel_workspace_mut(),
                         "nara.authoring-view",
@@ -256,7 +291,9 @@ impl NativeLifecycleProof {
                     proof.phase = LifecyclePhase::SceneClosed;
                 }
                 LifecyclePhase::SceneClosed if primary_game && native.scene.view.is_none() => {
-                    if native.game.view != proof.reopened_game_view {
+                    if native.game.view.as_ref().map(WgpuRenderProducer::id)
+                        != proof.reopened_game_view
+                    {
                         return Err(imgui_error(
                             "closing Scene replaced Game's independent view",
                         ));
@@ -272,8 +309,10 @@ impl NativeLifecycleProof {
                     }
                 }
                 LifecyclePhase::Reopened if primary_scene && primary_game => {
-                    if native.scene.view == proof.initial_scene_view
-                        || native.game.view != proof.reopened_game_view
+                    if native.scene.view.as_ref().map(WgpuRenderProducer::id)
+                        == proof.initial_scene_view
+                        || native.game.view.as_ref().map(WgpuRenderProducer::id)
+                            != proof.reopened_game_view
                     {
                         return Err(imgui_error(
                             "reopening Scene reused its retired identity or replaced Game",
@@ -677,7 +716,7 @@ fn native_views_detach_minimize_reopen_recover_and_retire_with_exact_receipts() 
     assert!(test.proof.scene_closed_frames >= 4);
     assert!(test.proof.reopened_frames >= 4);
     assert!(test.proof.recovered_frames >= 4);
-    assert!(test.proof.stale_receipt_rejected);
+    assert!(test.proof.retained_display_accepted);
     assert!(test.proof.retired_backend.is_some());
     assert_ne!(test.proof.initial_scene_view, test.proof.initial_game_view);
     assert_ne!(test.proof.initial_game_view, test.proof.reopened_game_view);
@@ -687,4 +726,82 @@ fn native_views_detach_minimize_reopen_recover_and_retire_with_exact_receipts() 
         cleanup_order,
         "all graphics/native view leases must retire in owner order"
     );
+}
+
+/// Exercises the real renderer dependency join for retained outputs and independent occurrences.
+pub(super) fn present_registered_images(
+    native: &mut NativeImgui,
+    event_loop: &ActiveEventLoop,
+    images: &[(ExternalTextureId, WgpuImageDisplay)],
+) -> Result<WgpuEditorFrameOutcome, String> {
+    native.frame_index += 1;
+    let window = editor_window_packet(&native.window);
+    native
+        .gpu
+        .begin_editor_frame(window, native.frame_index)
+        .map_err(|error| error.to_string())?;
+    native
+        .platform
+        .prepare_frame(&mut native.context, &native.window)
+        .map_err(|error| error.to_string())?;
+    let frame = native.context.begin_frame();
+    // The ordinary menu bar reserves viewport work area. Keep that reservation too: omitting it
+    // changes next-frame dock geometry even when the existing dock tree itself stays alive.
+    frame
+        .ui()
+        .main_menu_bar(|| frame.ui().text("Render output qualification"));
+    // This focused compositor omits the ordinary panels for one frame. Preserve their dock tree
+    // so the next normal frame does not resize targets merely because its host was omitted.
+    frame
+        .ui()
+        .dockspace()
+        .flags(dear_imgui_rs::DockNodeFlags::KEEP_ALIVE_ONLY)
+        .build()
+        .map_err(|error| error.to_string())?;
+    let origin = frame.ui().main_viewport().pos();
+    {
+        let draw = frame.ui().get_foreground_draw_list();
+        for (index, (texture, _)) in images.iter().enumerate() {
+            let x = origin[0] + 20.0 + index as f32 * 80.0;
+            draw.add_image(
+                texture.texture_id(),
+                [x, origin[1] + 20.0],
+                [x + 64.0, origin[1] + 84.0],
+                [0.0, 0.0],
+                [1.0, 1.0],
+                [1.0, 1.0, 1.0, 1.0],
+            );
+        }
+    }
+    native
+        .platform
+        .prepare_render(frame.ui(), &native.window)
+        .map_err(|error| error.to_string())?;
+    let displays = images
+        .iter()
+        .map(|(_, display)| display.clone())
+        .collect::<Vec<_>>();
+    let mut secondary = Vec::new();
+    let prepared = native
+        .renderer
+        .prepare(
+            &mut native.gpu,
+            window,
+            event_loop,
+            frame,
+            &displays,
+            &mut secondary,
+        )
+        .map_err(|error| error.to_string())?;
+    let renderer = &mut native.renderer;
+    native
+        .gpu
+        .present_window(
+            window,
+            native.frame_index,
+            &displays,
+            |frame| renderer.paint(prepared, frame),
+            || native.window.pre_present_notify(),
+        )
+        .map_err(|error| error.to_string())
 }

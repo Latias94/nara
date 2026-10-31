@@ -131,6 +131,43 @@ struct SceneImageWorkflow<'a> {
 }
 
 impl SceneImageWorkflow<'_> {
+    fn verify_config_only_admission(&mut self) -> Result<(), String> {
+        let mut target = super::ImguiTarget::default();
+        let source = nara::render::RenderFrameSourceGeneration::try_acquire()
+            .ok_or("the configuration fixture exhausted source identities")?;
+        let image =
+            nara::render::RenderImage2d::allocate_handle().map_err(|error| error.to_string())?;
+        for size in [64, 128] {
+            let packet = super::editor_viewport_image_target(
+                image,
+                nara::render::Extent2d::new(size, size).unwrap(),
+            )
+            .map_err(|error| error.to_string())?;
+            target
+                .ensure(
+                    &mut self.native.gpu,
+                    super::editor_window_packet(&self.native.window),
+                    source,
+                    packet,
+                )
+                .map_err(|error| error.to_string())?;
+            if target.identity.is_none()
+                || target.texture.is_some()
+                || target.submitted.is_some()
+                || target.display.is_some()
+                || target.image().is_some()
+            {
+                return Err(
+                    "configuration admission registered pixels before a native submission"
+                        .to_owned(),
+                );
+            }
+        }
+        target
+            .retire(&mut self.native.gpu, &mut self.native.renderer)
+            .map_err(|error| error.to_string())
+    }
+
     fn paint(&mut self) -> Result<(), String> {
         self.application.advance_project_open();
         self.application
@@ -272,6 +309,7 @@ impl SceneImageWorkflow<'_> {
     }
 
     fn run(&mut self, project: &Path) -> Result<(), String> {
+        self.verify_config_only_admission()?;
         let original_scene = fs::read(project.join("scenes/startup.scene.json"))
             .map_err(|error| error.to_string())?;
         let deadline = Instant::now() + Duration::from_secs(10);
@@ -355,6 +393,16 @@ impl SceneImageWorkflow<'_> {
         if first_display == before_import {
             return Err("successful image publication retained the old Scene submission despite a new prepared image".to_owned());
         }
+        let retained = self
+            .native
+            .gpu
+            .display_image(self.native.scene.display.as_ref().unwrap().output().clone())
+            .map_err(|error| error.to_string())?;
+        let retained_texture = self
+            .native
+            .renderer
+            .register(&retained)
+            .map_err(|error| error.to_string())?;
         fs::write(project.join(IMAGE), REPLACEMENT_PNG).map_err(|error| error.to_string())?;
         let replacement = self.import()?;
         if replacement.resource().pixels() != [17, 220, 33, 255]
@@ -369,13 +417,74 @@ impl SceneImageWorkflow<'_> {
         if replacement_display == first_display {
             return Err("green-pixel Reimport retained the old blue Scene submission".to_owned());
         }
+        let current = self.native.scene.display.as_ref().unwrap().clone();
+        let current_texture = self.native.scene.texture.unwrap();
+        if current_texture == retained_texture
+            || retained.receipt() != first_display
+            || current.receipt().output_version() == retained.receipt().output_version()
+        {
+            return Err("Scene reimport reused a retained output or its registration".to_owned());
+        }
+        let outcome = super::lifecycle_tests::present_registered_images(
+            self.native,
+            self.event_loop,
+            &[
+                (retained_texture, retained.clone()),
+                (current_texture, current.clone()),
+            ],
+        )?;
+        let old_receipt = outcome
+            .composites()
+            .iter()
+            .copied()
+            .find(|receipt| {
+                receipt.image() == first_display && receipt.occurrence() == retained.occurrence()
+            })
+            .ok_or("the retained pre-reimport Scene output was not displayed")?;
+        if !outcome.composites().iter().any(|receipt| {
+            receipt.image() == replacement_display && receipt.occurrence() == current.occurrence()
+        }) {
+            return Err("displaying old Scene pixels omitted its independent successor".to_owned());
+        }
+        let mapping = nara::render::DisplayMapping2d::fit(
+            current.receipt().target().extent(),
+            nara::render::DisplayRect::UNIT,
+            1.0,
+            nara::render::DisplayScale::Fit,
+        )
+        .ok_or("the retained Scene display has no valid rejection-test mapping")?;
+        if self
+            .native
+            .scene_presenter
+            .promote(
+                &self.native.scene,
+                [old_receipt],
+                mapping,
+                self.application
+                    .current_scene_preview_content_stamp()
+                    .as_ref(),
+            )
+            .map_err(|error| error.to_string())?
+        {
+            return Err("a retained passive Scene display promoted successor geometry".to_owned());
+        }
+        self.native
+            .renderer
+            .unregister(retained_texture)
+            .map_err(|error| error.to_string())?;
+        // The raw composition frame intentionally did not draw the ordinary docked panels.
+        // Wait for their actual mapping and sampling to return before asserting pixel reuse.
+        let restored = self.wait_displayed()?;
+        if restored != replacement_display {
+            return Err(format!(
+                "retained Scene display testing replaced the current output: before={replacement_display:?}, after={restored:?}"
+            ));
+        }
         let target = self.native.scene.identity;
-        let next_view = self.native.next_view;
         for _ in 0..4 {
             self.paint()?;
             if self.displayed()? != replacement_display
                 || self.native.scene.identity != target
-                || self.native.next_view != next_view
                 || self
                     .native
                     .gpu

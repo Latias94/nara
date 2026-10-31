@@ -191,7 +191,9 @@ impl ImguiInput {
                 primary_viewport,
                 secondary_windows,
             )
-            .filter(|(_, window)| *window == stamp.window_id())
+            .filter(|(_, window)| {
+                *window == stamp.window_id() && image.occurrence == Some(stamp.occurrence())
+            })
             .map(|(window, _)| (image, stamp, window))
         });
         let Some((image, stamp, window)) = presented else {

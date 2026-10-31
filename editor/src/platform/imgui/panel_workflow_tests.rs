@@ -290,7 +290,6 @@ fn run_native_panels(
         );
         let old_backend = host.native.as_ref().unwrap().gpu.backend_instance_id();
         let old_frame = host.native.as_ref().unwrap().frame_index;
-        let old_next_view = host.native.as_ref().unwrap().next_view;
         let replacement_deadline = Instant::now() + Duration::from_secs(5);
         host.replace_native(event_loop);
         while host.native.is_none() {
@@ -311,9 +310,8 @@ fn run_native_panels(
             }
         }
         configure_test_input(&mut host)?;
-        let reconstruction_preserved_frame_counter = host.native.as_ref().unwrap().frame_index
-            == old_frame
-            && host.native.as_ref().unwrap().next_view == old_next_view;
+        let reconstruction_preserved_frame_counter =
+            host.native.as_ref().unwrap().frame_index == old_frame;
         for _ in 0..4 {
             presents += paint(&mut host, event_loop, [-1000.0, -1000.0], None)?;
         }

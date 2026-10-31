@@ -41,7 +41,7 @@ pub(crate) enum WgpuFrameSet {
     Seal,
 }
 
-#[derive(Debug, Default)]
+#[derive(Debug, Default, Clone)]
 pub(crate) struct WgpuFramePayload {
     #[cfg(feature = "ui-submitter")]
     pub(crate) primary_window_id: Option<WindowId>,

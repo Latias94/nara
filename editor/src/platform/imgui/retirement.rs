@@ -159,11 +159,14 @@ impl NativeImgui {
             // Successful bulk shutdown already revoked texture registrations and adapter bindings.
             // No fallible per-texture unregister is needed at the final aggregate boundary.
             for target in [&mut self.scene, &mut self.game] {
-                if let Some(view) = target.view {
-                    self.gpu.retire_view(view);
+                if let Some(view) = target.view.as_ref() {
+                    // The original Host drain already completed before this phase.
+                    drop(self.gpu.retire_producer(view));
                 }
                 *target = ImguiTarget::default();
             }
+            self.scene_presenter.retire();
+            self.canvas.retire();
             self.close.phase = Phase::Platform;
         }
         if self.close.phase == Phase::Platform {

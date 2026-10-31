@@ -165,6 +165,7 @@ impl CanvasAdmission {
                 Some(ImguiViewImage {
                     texture: TextureId::new(1),
                     extent: [960, 540],
+                    occurrence: None,
                 }),
                 None,
                 false,

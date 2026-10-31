@@ -10,7 +10,7 @@ use std::{
 };
 
 use crate::{
-    WgpuRenderError, backend::WgpuBackendState, editor_execution::WgpuEditorViewId,
+    WgpuRenderError, backend::WgpuBackendState, host::WgpuRenderProducerId,
     telemetry::WgpuAdapterSummary,
 };
 
@@ -48,14 +48,14 @@ impl Default for WgpuBackendInstanceId {
 
 #[derive(Debug, Default)]
 struct DeviceLossSignal {
-    lost: AtomicBool,
+    lost: Arc<AtomicBool>,
     presentations: Mutex<DeviceWorldPresentations>,
 }
 
 #[derive(Debug, Default)]
 struct DeviceWorldPresentations {
     runtime: Option<nara_render::__private::WorldPresentationRevoker>,
-    editor: BTreeMap<WgpuEditorViewId, nara_render::__private::WorldPresentationRevoker>,
+    editor: BTreeMap<WgpuRenderProducerId, nara_render::__private::WorldPresentationRevoker>,
 }
 
 impl DeviceLossSignal {
@@ -91,7 +91,7 @@ impl DeviceLossSignal {
 
     fn retain_editor_presentation(
         &self,
-        view: WgpuEditorViewId,
+        view: WgpuRenderProducerId,
         revoker: nara_render::__private::WorldPresentationRevoker,
     ) {
         let mut presentations = self
@@ -105,7 +105,7 @@ impl DeviceLossSignal {
         }
     }
 
-    fn retire_editor_presentation(&self, view: WgpuEditorViewId) {
+    fn retire_editor_presentation(&self, view: WgpuRenderProducerId) {
         if let Some(previous) = self
             .presentations
             .lock()
@@ -155,6 +155,11 @@ pub(super) struct WgpuDeviceOwner {
 }
 
 impl WgpuDeviceOwner {
+    pub(super) fn output_epoch_guard(&self) -> Result<Arc<AtomicBool>, WgpuRenderError> {
+        self.loss_signal()
+            .map(|loss| Arc::clone(&loss.lost))
+            .ok_or(WgpuRenderError::BackendNotReady)
+    }
     pub(super) const fn instance_id(&self) -> u64 {
         self.instance_id.0
     }
@@ -319,7 +324,7 @@ impl WgpuDeviceOwner {
 
     pub(super) fn retain_editor_presentation(
         &self,
-        view: WgpuEditorViewId,
+        view: WgpuRenderProducerId,
         revoker: nara_render::__private::WorldPresentationRevoker,
     ) -> Result<(), WgpuRenderError> {
         self.loss_signal()
@@ -328,7 +333,7 @@ impl WgpuDeviceOwner {
         Ok(())
     }
 
-    pub(super) fn retire_editor_presentation(&self, view: WgpuEditorViewId) {
+    pub(super) fn retire_editor_presentation(&self, view: WgpuRenderProducerId) {
         if let Some(loss) = self.loss_signal() {
             loss.retire_editor_presentation(view);
         }
@@ -609,7 +614,7 @@ mod tests {
             if lost_before_registration {
                 signal.mark_lost();
             }
-            let view = WgpuEditorViewId::new(1);
+            let view = WgpuRenderProducerId::new(1);
             if editor {
                 signal.retain_editor_presentation(view, guard.revoker());
             } else {

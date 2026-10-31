@@ -132,7 +132,7 @@ fn run_native_canvas(
         }
     };
     application.native_shell_ready();
-    let result = record_pending_canvas(&mut native, &mut application);
+    let result = record_pending_canvas(&mut native, &mut application, event_loop);
     let shutdown = finish_graphics_for_test(&mut native);
     drop(native);
     drop(window);
@@ -159,6 +159,7 @@ fn run_native_canvas(
 fn record_pending_canvas(
     native: &mut NativeImgui,
     application: &mut EditorApplication,
+    event_loop: &ActiveEventLoop,
 ) -> Result<Vec<CanvasObservation>, String> {
     let frame = application
         .current_frame()
@@ -213,6 +214,129 @@ fn record_pending_canvas(
             surface_acquires: stats.surface_acquire_attempts(),
             presents: stats.presents(),
         });
+    }
+    let authoring = application
+        .current_ui_authoring_frame()
+        .ok_or("the occurrence fixture lost its UI authoring frame")?;
+    let display = native.scene.display.as_ref().unwrap().clone();
+    let texture = native.scene.texture.unwrap();
+    let mirror = native
+        .gpu
+        .display_image(display.output().clone())
+        .map_err(|error| error.to_string())?;
+    let mirror_texture = native
+        .renderer
+        .register(&mirror)
+        .map_err(|error| error.to_string())?;
+    let mirror_outcome = super::lifecycle_tests::present_registered_images(
+        native,
+        event_loop,
+        &[(mirror_texture, mirror)],
+    )?;
+    native
+        .renderer
+        .unregister(mirror_texture)
+        .map_err(|error| error.to_string())?;
+    if native
+        .canvas
+        .promote(&native.scene, mirror_outcome.composites().iter().copied())
+        .map_err(|error| error.to_string())?
+        || native.canvas.is_current(&native.scene, &authoring)
+        || native
+            .canvas
+            .resolve_pick(&native.scene, &authoring, [0.5, 0.5])
+            .is_some()
+    {
+        return Err("a passive mirror confirmed the Canvas's pending occurrence".to_owned());
+    }
+    let outcome = super::lifecycle_tests::present_registered_images(
+        native,
+        event_loop,
+        &[(texture, display.clone())],
+    )?;
+    if !native
+        .canvas
+        .promote(&native.scene, outcome.composites().iter().copied())
+        .map_err(|error| error.to_string())?
+        || !native.canvas.is_current(&native.scene, &authoring)
+        || native
+            .canvas
+            .resolve_pick(&native.scene, &authoring, [0.5, 0.5])
+            .is_none()
+    {
+        return Err("the exact Canvas occurrence did not confirm its retained geometry".to_owned());
+    }
+    let deadline = Instant::now() + Duration::from_secs(10);
+    let candidate = loop {
+        if let Some(candidate) = application.take_editor_ui_preview_candidate() {
+            break candidate;
+        }
+        if Instant::now() >= deadline {
+            return Err(
+                "the Canvas owner did not rebuild an explicitly requested candidate".to_owned(),
+            );
+        }
+        application.drive_editor_frame(Duration::ZERO, false, false);
+        std::thread::sleep(Duration::from_millis(1));
+    };
+    native.frame_index += 1;
+    native
+        .gpu
+        .begin_editor_frame(window, native.frame_index)
+        .map_err(|error| error.to_string())?;
+    native
+        .canvas
+        .prepare(
+            &mut native.scene,
+            &mut native.gpu,
+            &mut native.renderer,
+            window,
+            candidate,
+        )
+        .map_err(|error| error.to_string())?;
+    let successor = native.scene.display.as_ref().unwrap().clone();
+    let successor_texture = native.scene.texture.unwrap();
+    if successor.receipt() == display.receipt()
+        || successor_texture == texture
+        || native.canvas.is_current(&native.scene, &authoring)
+    {
+        return Err(
+            "a prepared Canvas successor reused old pixels or old picking authority".to_owned(),
+        );
+    }
+    let outcome = super::lifecycle_tests::present_registered_images(
+        native,
+        event_loop,
+        &[
+            (texture, display.clone()),
+            (successor_texture, successor.clone()),
+        ],
+    )?;
+    let old_receipt = outcome
+        .composites()
+        .iter()
+        .copied()
+        .find(|receipt| {
+            receipt.image() == display.receipt() && receipt.occurrence() == display.occurrence()
+        })
+        .ok_or("the old Canvas registration did not survive its prepared successor")?;
+    if native
+        .canvas
+        .promote(&native.scene, [old_receipt])
+        .map_err(|error| error.to_string())?
+        || native
+            .canvas
+            .resolve_pick(&native.scene, &authoring, [0.5, 0.5])
+            .is_some()
+    {
+        return Err("an old Canvas occurrence confirmed its prepared successor".to_owned());
+    }
+    if !native
+        .canvas
+        .promote(&native.scene, outcome.composites().iter().copied())
+        .map_err(|error| error.to_string())?
+    {
+        return Err("the Canvas successor did not retain its own pending geometry".to_owned());
     }
     Ok(observations)
 }

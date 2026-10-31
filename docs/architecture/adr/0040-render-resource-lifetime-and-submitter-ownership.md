@@ -38,6 +38,32 @@ compatibility promises because the stock capture/encode path cannot consume arbi
 passes. Domain plugins own their batch data; a submitter SPI requires a complete external feature
 tracer before admission.
 
+## Immutable Output And Submitted-Use Refinement
+
+An output version owns exact immutable physical storage, independently of target configuration,
+latest-output policy, producer admission and interaction authority. Retained predecessors cannot
+be overwritten or redirected by later frames, resize or producer close. Shared logical output
+allocation accounting follows inactive reservations, output leases and actual submitted uses
+until their last physical responsibility settles. This is not a measurement of driver residency.
+
+The Host reserves original submission custody before preparation can enqueue uploads. Failed
+preparation/paint still flushes its own writes once into an owned prefix. Native validation,
+allocation/internal errors and device loss determine publication independently of completion
+callbacks. The Host owns normal imported-output submissions; consumers do not rebuild their own
+budget/retention protocol for ordinary read-only use.
+
+Producer retirement stops its owned admission and freezes its actual submitted prefix while
+others progress. Retained sampled outputs remain independent obligations. Keep every unresolved
+original prefix recoverable, including when a later native prefix subsumes its ordered work:
+the later callback does not own an abandoned predecessor callback's CPU custody. A discarded
+callback reports abandonment; explicit original-device fence evidence can settle resources but
+cannot mint output, history, presentation or UI success. Whole-queue retirement remains final
+Host close, with an explicitly reported uncertainty fallback for an un-waitable rejected index.
+
+These accepted responsibilities are being implemented under the
+[render ownership design](../render-host-ownership-design.md). Their current evidence belongs in
+the implementation ledger; they do not accept the Proposed0121 graph/Feature interface.
+
 ## Context
 
 ADR 0017 intentionally deferred a full render graph while requiring graph-ready phases. ADR 0032

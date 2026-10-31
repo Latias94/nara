@@ -3,7 +3,7 @@ use std::time::{Duration, Instant};
 use nara::{
     project_host::TrustedCompiledEditorProjectIntent,
     render::RenderWindowPacket,
-    render_wgpu::__private::WgpuEditorExecutionError,
+    render_wgpu::__private::WgpuRenderHostError,
     tooling::{EditorPersistenceOperation, EditorPlayState},
     window::{PresentMode, WindowId as NaraWindowId, WindowResolution},
 };
@@ -38,7 +38,7 @@ pub enum EditorRunError {
     #[error("native Editor platform failed: {0}")]
     Platform(String),
     #[error("native Editor GPU execution failed: {0}")]
-    Gpu(#[source] WgpuEditorExecutionError),
+    Gpu(#[source] WgpuRenderHostError),
     #[error("{primary}; Editor cleanup also failed: {cleanup}")]
     Cleanup {
         #[source]
@@ -185,7 +185,7 @@ fn editor_window_packet(window: &Window) -> RenderWindowPacket {
     }
 }
 
-fn platform_gpu_error(error: WgpuEditorExecutionError) -> EditorRunError {
+fn platform_gpu_error(error: WgpuRenderHostError) -> EditorRunError {
     EditorRunError::Gpu(error)
 }
 

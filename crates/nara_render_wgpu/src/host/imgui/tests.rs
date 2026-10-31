@@ -69,6 +69,38 @@ impl OffscreenGpu {
     }
 }
 
+fn test_image_output(
+    texture: wgpu::Texture,
+    backend_instance_id: u64,
+    device_epoch: u64,
+) -> crate::output::WgpuImageOutput {
+    let target = nara_render::__private::editor_viewport_image_target(
+        nara_render::RenderImage2d::allocate_handle().unwrap(),
+        nara_render::Extent2d::new(texture.width(), texture.height()).unwrap(),
+    )
+    .unwrap();
+    let receipt = crate::presented::WgpuSubmittedImageReceipt::new(
+        crate::host::WgpuRenderProducerId::new(1),
+        target,
+        1,
+        nara_render::RenderFrameSourceGeneration::try_acquire().unwrap(),
+        1,
+        backend_instance_id,
+        device_epoch,
+        1,
+    );
+    let view = texture.create_view(&wgpu::TextureViewDescriptor::default());
+    crate::output::WgpuImageOutput(std::sync::Arc::new(crate::output::WgpuImageStorage {
+        epoch_lost: std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)),
+        _reservation: std::sync::Arc::new(crate::output::OutputBudget::default())
+            .reserve(u64::from(texture.width()) * u64::from(texture.height()) * 4)
+            .unwrap(),
+        receipt,
+        texture,
+        view,
+    }))
+}
+
 fn drain_gpu(retirement: &mut crate::retirement::WgpuGpuRetirement) {
     let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
     while !retirement.poll().unwrap() {
@@ -168,8 +200,9 @@ fn renderer_shutdown_preserves_rejected_state_and_releases_bindings_idempotently
         usage: wgpu::TextureUsages::TEXTURE_BINDING,
         view_formats: &[],
     });
-    let view = texture.create_view(&wgpu::TextureViewDescriptor::default());
-    let id = renderer.register_external_texture(&view).unwrap();
+    let display = crate::output::WgpuImageDisplay::issue(test_image_output(texture, 1, 1));
+    let view = display.output().0.view.clone();
+    let id = renderer.register_image(&display).unwrap();
     let binding = renderer.external_binding(id).unwrap();
     let observed_scope = dear_imgui_wgpu::WgpuFrameScope {
         context_id: context.id(),
@@ -181,10 +214,10 @@ fn renderer_shutdown_preserves_rejected_state_and_releases_bindings_idempotently
     let mut foreign = dear_imgui_rs::Context::create();
     assert!(matches!(
         renderer.shutdown(&mut foreign),
-        Err(super::WgpuEditorExecutionError::ToolkitPaint { .. })
+        Err(super::WgpuRenderHostError::ToolkitPaint { .. })
     ));
     assert!(!renderer.closed);
-    assert_eq!(renderer.bindings, vec![(binding, view.clone())]);
+    assert_eq!(renderer.bindings, vec![(binding, display.clone())]);
     assert_eq!(renderer.last_secondary_scope, Some(observed_scope));
     drop(foreign);
     let mut context = suspended.activate().unwrap();
@@ -207,18 +240,18 @@ fn renderer_shutdown_preserves_rejected_state_and_releases_bindings_idempotently
     let mut foreign = dear_imgui_rs::Context::create();
     assert!(matches!(
         renderer.shutdown(&mut foreign),
-        Err(super::WgpuEditorExecutionError::ToolkitPaint { message })
+        Err(super::WgpuRenderHostError::ToolkitPaint { message })
             if message == "the renderer belongs to another Context"
     ));
     drop(foreign);
     let mut context = suspended.activate().unwrap();
     for result in [
-        renderer.register_external_texture(&view).map(|_| ()),
+        renderer.register_image(&display).map(|_| ()),
         renderer.unregister_external_texture(id),
     ] {
         assert!(matches!(
             result,
-            Err(super::WgpuEditorExecutionError::ToolkitPaint { message })
+            Err(super::WgpuRenderHostError::ToolkitPaint { message })
                 if message == "the renderer is closed"
         ));
     }
@@ -252,7 +285,6 @@ fn renderer_shutdown_preserves_rejected_state_and_releases_bindings_idempotently
         surface_format: wgpu::TextureFormat::Rgba8Unorm,
         surface_extent: nara_render::Extent2d::new(1, 1).unwrap(),
         viewports: &[],
-        viewport_textures: &[],
         leading_command_buffers: &mut leading_command_buffers,
         sampled_viewports: &mut sampled_viewports,
     };
@@ -262,7 +294,7 @@ fn renderer_shutdown_preserves_rejected_state_and_releases_bindings_idempotently
             &mut frame,
             wgpu::Color::BLACK,
         ),
-        Err(super::WgpuEditorExecutionError::ToolkitPaint { message })
+        Err(super::WgpuRenderHostError::ToolkitPaint { message })
             if message == "the renderer is closed"
     ));
     let mut successor_retirement = gpu.scope().gpu_retirement();
@@ -429,8 +461,24 @@ fn owned_renderer_records_exact_external_binding_revisions_and_excludes_clipped_
         usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::RENDER_ATTACHMENT,
         view_formats: &[],
     });
-    let canonical = texture.create_view(&wgpu::TextureViewDescriptor::default());
-    let alias = texture.create_view(&wgpu::TextureViewDescriptor::default());
+    for (backend_instance_id, device_epoch) in [(2, 1), (1, 2)] {
+        let foreign = crate::output::WgpuImageDisplay::issue(test_image_output(
+            texture.clone(),
+            backend_instance_id,
+            device_epoch,
+        ));
+        assert!(matches!(
+            renderer.register_image(&foreign),
+            Err(super::WgpuRenderHostError::StaleImageSubmission)
+        ));
+        assert!(renderer.bindings.is_empty());
+    }
+    let image = test_image_output(texture, 1, 1);
+    let designated = crate::output::WgpuImageDisplay::issue(image.clone());
+    let mirror = crate::output::WgpuImageDisplay::issue(image.clone());
+    let unregistered = crate::output::WgpuImageDisplay::issue(image.clone());
+    assert_eq!(designated.output(), mirror.output());
+    assert_ne!(designated.occurrence(), mirror.occurrence());
     let output = device.create_texture(&wgpu::TextureDescriptor {
         label: Some("nara_imgui_binding_output"),
         usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
@@ -450,29 +498,34 @@ fn owned_renderer_records_exact_external_binding_revisions_and_excludes_clipped_
         }
     });
     let output_view = output.create_view(&wgpu::TextureViewDescriptor::default());
-    let id = renderer.register_external_texture(&canonical).unwrap();
+    let id = renderer.register_image(&designated).unwrap();
+    let mirror_id = renderer.register_image(&mirror).unwrap();
+    assert_ne!(id, mirror_id);
     let first_binding = renderer.external_binding(id).unwrap();
+    let mirror_binding = renderer.external_binding(mirror_id).unwrap();
     let render = |context: &mut Context,
                   renderer: &mut super::WgpuEditorImguiRenderer,
-                  clipped: bool|
+                  images: &[(dear_imgui_wgpu::ExternalTextureId, bool)]|
      -> WgpuDrawDependencies {
         let frame = context.begin_frame();
         {
             let draw_list = frame.ui().get_foreground_draw_list();
-            let draw_image = || {
-                draw_list.add_image(
-                    id.texture_id(),
-                    [8.0, 8.0],
-                    [40.0, 40.0],
-                    [0.0, 0.0],
-                    [1.0, 1.0],
-                    [1.0, 1.0, 1.0, 1.0],
-                );
-            };
-            if clipped {
-                draw_list.with_clip_rect([160.0, 160.0], [180.0, 180.0], draw_image);
-            } else {
-                draw_image();
+            for &(texture, clipped) in images {
+                let draw_image = || {
+                    draw_list.add_image(
+                        texture.texture_id(),
+                        [8.0, 8.0],
+                        [40.0, 40.0],
+                        [0.0, 0.0],
+                        [1.0, 1.0],
+                        [1.0, 1.0, 1.0, 1.0],
+                    );
+                };
+                if clipped {
+                    draw_list.with_clip_rect([160.0, 160.0], [180.0, 180.0], draw_image);
+                } else {
+                    draw_image();
+                }
             }
         }
         let RendererOwner::Docked(inner) = &mut renderer.owner else {
@@ -506,34 +559,233 @@ fn owned_renderer_records_exact_external_binding_revisions_and_excludes_clipped_
         queue.submit([encoder.finish()]);
         recorded.dependencies
     };
-    let initial = render(&mut context, &mut renderer, false);
+    let initial = render(&mut context, &mut renderer, &[(id, false)]);
     assert_eq!(initial.external_bindings, vec![first_binding]);
-    assert!(renderer.samples(&initial, &canonical));
-    assert!(!renderer.samples(&initial, &alias));
-    renderer.update_external_texture(id, &alias).unwrap();
+    assert!(renderer.samples(&initial, &designated.clone()));
+    assert!(!renderer.samples(&initial, &mirror));
+    assert!(!renderer.samples(&initial, &unregistered));
+    let both = render(
+        &mut context,
+        &mut renderer,
+        &[(id, false), (mirror_id, false)],
+    );
+    assert_eq!(both.external_bindings.len(), 2);
+    assert!(both.external_bindings.contains(&first_binding));
+    assert!(both.external_bindings.contains(&mirror_binding));
+    assert!(renderer.samples(&both, &designated));
+    assert!(renderer.samples(&both, &mirror));
+    let mirror_only = render(
+        &mut context,
+        &mut renderer,
+        &[(id, true), (mirror_id, false)],
+    );
+    assert_eq!(mirror_only.external_bindings, vec![mirror_binding]);
+    assert!(!renderer.samples(&mirror_only, &designated));
+    assert!(renderer.samples(&mirror_only, &mirror));
+    // Rebinding to another occurrence of the same pixels still advances the SDK revision.
+    renderer.update_image(id, &mirror).unwrap();
     let replacement = renderer.external_binding(id).unwrap();
     assert_eq!(replacement.texture, first_binding.texture);
     assert!(replacement.revision > first_binding.revision);
-    assert!(!renderer.samples(&initial, &canonical));
+    assert!(!renderer.samples(&initial, &designated));
     assert!(
-        !renderer.samples(&initial, &alias),
+        !renderer.samples(&initial, &mirror),
         "old mapping evidence cannot certify a replacement"
     );
-    let updated = render(&mut context, &mut renderer, false);
+    let updated = render(&mut context, &mut renderer, &[(id, false)]);
     assert_eq!(updated.external_bindings, vec![replacement]);
-    assert!(renderer.samples(&updated, &alias));
-    assert!(!renderer.samples(&updated, &canonical));
-    let clipped = render(&mut context, &mut renderer, true);
+    assert!(renderer.samples(&updated, &mirror));
+    assert!(!renderer.samples(&updated, &designated));
+    let mismatched_output = crate::output::WgpuImageDisplay {
+        output: crate::output::WgpuImageOutput(std::sync::Arc::new(
+            crate::output::WgpuImageStorage {
+                epoch_lost: std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)),
+                _reservation: std::sync::Arc::new(crate::output::OutputBudget::default())
+                    .reserve(
+                        u64::from(image.0.texture.width())
+                            * u64::from(image.0.texture.height())
+                            * 4,
+                    )
+                    .unwrap(),
+                receipt: test_image_output(image.0.texture.clone(), 1, 1).receipt(),
+                texture: image.0.texture.clone(),
+                view: image.0.view.clone(),
+            },
+        )),
+        occurrence: mirror.occurrence(),
+    };
+    assert!(!renderer.samples(&updated, &mismatched_output));
+    let clipped = render(&mut context, &mut renderer, &[(id, true)]);
     assert!(clipped.external_bindings.is_empty());
-    assert!(!renderer.samples(&clipped, &alias));
+    assert!(!renderer.samples(&clipped, &mirror));
     renderer.unregister_external_texture(id).unwrap();
-    assert!(!renderer.samples(&updated, &alias));
+    assert!(!renderer.samples(&updated, &mirror));
+    assert!(renderer.samples(&mirror_only, &mirror));
+    renderer.unregister_external_texture(mirror_id).unwrap();
+    assert!(!renderer.samples(&mirror_only, &mirror));
     device
         .poll(wgpu::PollType::Wait {
             submission_index: None,
             timeout: Some(std::time::Duration::from_secs(10)),
         })
         .unwrap();
+    renderer.shutdown(&mut context).unwrap();
+}
+
+#[test]
+fn owned_renderer_paint_distinguishes_same_window_occurrences_and_retains_registered_outputs() {
+    use crate::output::WgpuImageDisplay;
+
+    let Some(gpu) = OffscreenGpu::new() else {
+        return;
+    };
+    let mut context = lifetime_context();
+    let mut renderer = gpu
+        .scope()
+        .create_imgui_renderer(&mut context, None)
+        .unwrap();
+    let descriptor = wgpu::TextureDescriptor {
+        label: Some("nara_imgui_occurrence_source"),
+        size: wgpu::Extent3d {
+            width: 128,
+            height: 128,
+            depth_or_array_layers: 1,
+        },
+        mip_level_count: 1,
+        sample_count: 1,
+        dimension: wgpu::TextureDimension::D2,
+        format: wgpu::TextureFormat::Rgba8Unorm,
+        usage: wgpu::TextureUsages::TEXTURE_BINDING,
+        view_formats: &[],
+    };
+    let image = test_image_output(gpu.device.create_texture(&descriptor), 1, 1);
+    let retained = std::sync::Arc::downgrade(&image.0);
+    let designated = WgpuImageDisplay::issue(image.clone());
+    let mirror = WgpuImageDisplay::issue(image.clone());
+    let unregistered = WgpuImageDisplay::issue(image.clone());
+    let designated_texture = renderer.register_image(&designated).unwrap();
+    let mirror_texture = renderer.register_image(&mirror).unwrap();
+    assert_ne!(designated_texture, mirror_texture);
+    let viewports = [designated.clone(), mirror.clone(), unregistered.clone()];
+    let destination = gpu.device.create_texture(&wgpu::TextureDescriptor {
+        label: Some("nara_imgui_occurrence_destination"),
+        usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
+        ..descriptor
+    });
+    let destination_view = destination.create_view(&wgpu::TextureViewDescriptor::default());
+    let mut presentation_generation = 0;
+    for (show_designated, show_mirror, expected) in [
+        (false, true, vec![mirror.occurrence()]),
+        (
+            true,
+            true,
+            vec![designated.occurrence(), mirror.occurrence()],
+        ),
+        (true, false, vec![designated.occurrence()]),
+        (false, false, Vec::new()),
+    ] {
+        let frame = context.begin_frame();
+        {
+            let draw_list = frame.ui().get_foreground_draw_list();
+            for (texture, visible, x) in [
+                (designated_texture, show_designated, 8.0),
+                (mirror_texture, show_mirror, 56.0),
+            ] {
+                let draw_image = || {
+                    draw_list.add_image(
+                        texture.texture_id(),
+                        [x, 8.0],
+                        [x + 32.0, 40.0],
+                        [0.0, 0.0],
+                        [1.0, 1.0],
+                        [1.0, 1.0, 1.0, 1.0],
+                    );
+                };
+                if visible {
+                    draw_image();
+                } else {
+                    draw_list.with_clip_rect([160.0, 160.0], [180.0, 180.0], draw_image);
+                }
+            }
+        }
+        let super::RendererOwner::Docked(inner) = &mut renderer.owner else {
+            unreachable!()
+        };
+        let pending = frame
+            .try_render(inner.renderer_consumer().unwrap())
+            .unwrap();
+        let prepared = inner.reconcile_frame(pending).unwrap();
+        let mut encoder = gpu
+            .device
+            .create_command_encoder(&wgpu::CommandEncoderDescriptor::default());
+        let mut leading_command_buffers = Vec::new();
+        let mut samples = Vec::new();
+        renderer
+            .paint(
+                super::WgpuEditorImguiFrame(super::PreparedFrame::Docked(prepared)),
+                &mut super::WgpuEditorWindowFrame {
+                    device: &gpu.device,
+                    queue: &gpu.queue,
+                    encoder: &mut encoder,
+                    target_view: &destination_view,
+                    surface_format: wgpu::TextureFormat::Rgba8Unorm,
+                    surface_extent: nara_render::Extent2d::new(128, 128).unwrap(),
+                    viewports: &viewports,
+                    leading_command_buffers: &mut leading_command_buffers,
+                    sampled_viewports: &mut samples,
+                },
+                wgpu::Color::BLACK,
+            )
+            .unwrap();
+        gpu.queue.submit([encoder.finish()]);
+        assert_eq!(
+            samples
+                .iter()
+                .map(|sample| sample.occurrence)
+                .collect::<Vec<_>>(),
+            expected
+        );
+        assert!(samples.iter().all(|sample| sample.image == image.receipt()));
+        let composites = super::join_composite_receipts(
+            &mut presentation_generation,
+            &viewports,
+            &samples,
+            super::WgpuEditorWindowPresentedReceipt::new(WindowId::PRIMARY, 1, 1, 1, 1),
+        )
+        .unwrap();
+        assert_eq!(
+            composites
+                .iter()
+                .map(|composite| composite.occurrence())
+                .collect::<Vec<_>>(),
+            expected
+        );
+    }
+    let mut retirement = gpu.scope().gpu_retirement();
+    drain_gpu(&mut retirement);
+    drop(viewports);
+    drop(unregistered);
+    drop(designated);
+    drop(mirror);
+    drop(image);
+    assert!(
+        retained.upgrade().is_some(),
+        "SDK bindings must retain the exact output lease"
+    );
+    renderer
+        .unregister_external_texture(designated_texture)
+        .unwrap();
+    assert!(
+        retained.upgrade().is_some(),
+        "the mirror owns its own retained lease"
+    );
+    renderer
+        .unregister_external_texture(mirror_texture)
+        .unwrap();
+    assert!(
+        retained.upgrade().is_none(),
+        "the final unregister releases the output lease"
+    );
     renderer.shutdown(&mut context).unwrap();
 }
 
@@ -552,7 +804,7 @@ mod bare_primary {
         window::{Window, WindowId as NativeWindowId},
     };
 
-    use super::super::WgpuEditorExecution;
+    use super::super::WgpuRenderHost;
 
     #[test]
     #[ignore = "requires an interactive Windows desktop and a working WGPU adapter"]
@@ -607,7 +859,7 @@ mod bare_primary {
                         )
                         .map_err(|error| error.to_string())?,
                 );
-                let mut execution = WgpuEditorExecution::new(
+                let mut execution = WgpuRenderHost::new(
                     WindowId::PRIMARY,
                     WindowHandleProvider::new(Arc::clone(&window)),
                 )
@@ -663,10 +915,10 @@ mod bare_primary {
 
     #[cfg(all(feature = "sprite-submitter", feature = "ui-submitter"))]
     fn verify_instance_budget(
-        execution: &mut WgpuEditorExecution,
+        execution: &mut WgpuRenderHost,
         window: RenderWindowPacket,
     ) -> Result<(), String> {
-        use crate::editor_execution::{WgpuEditorExecutionError, WgpuEditorViewId};
+        use crate::host::WgpuRenderHostError;
         use nara_ecs::Entity;
         use nara_render::{
             __private::{
@@ -684,7 +936,7 @@ mod bare_primary {
             .begin_editor_frame(window, 1)
             .map_err(|error| error.to_string())?;
         execution.backend.set_instance_budget_limit(instance_bytes);
-        for index in 1..=2 {
+        for _ in 1..=2 {
             let image = RenderImage2d::allocate_handle().unwrap();
             let target =
                 editor_viewport_image_target(image, Extent2d::new(64, 64).unwrap()).unwrap();
@@ -706,26 +958,20 @@ mod bare_primary {
             let packet = build_editor_render_frame_packet(generation, 1, &views, target)
                 .unwrap()
                 .unwrap();
-            let view_id = WgpuEditorViewId::new(index);
-            let (reservation, ()) = execution
-                .reserve_viewport_target_with_texture(
-                    view_id,
-                    window,
-                    packet.source_generation(),
-                    target,
-                    |_, _| (),
-                )
+            let producer = execution.create_producer().unwrap();
+            let reservation = execution
+                .reserve_viewport_target(&producer, window, packet.source_generation(), target)
                 .map_err(|error| error.to_string())?;
             execution
-                .activate_viewport_target(reservation)
+                .activate_image_target(&producer, reservation)
                 .map_err(|error| error.to_string())?;
-            targets.push((view_id, target, views, packet));
+            targets.push((producer, target, views, packet));
         }
 
         let (first_view, first_target, first_views, first_packet) = targets.remove(0);
         let first = execution
             .submit_authoring_ui_image(
-                first_view,
+                &first_view,
                 window,
                 first_packet,
                 crate::view_probe::overlay_packet(RenderTarget::Image(first_target.image())),
@@ -746,7 +992,7 @@ mod bare_primary {
         let (second_view, second_target, second_views, second_packet) = targets.remove(0);
         let error = execution
             .submit_authoring_ui_image(
-                second_view,
+                &second_view,
                 window,
                 second_packet,
                 crate::view_probe::overlay_packet(RenderTarget::Image(second_target.image())),
@@ -754,7 +1000,7 @@ mod bare_primary {
             .expect_err("a second target must share the first submitted target's demand");
         assert!(matches!(
             error,
-            WgpuEditorExecutionError::Backend(crate::WgpuRenderError::ContentRejected { .. })
+            WgpuRenderHostError::Backend(crate::WgpuRenderError::ContentRejected { .. })
         ));
         assert_eq!(execution.frame_transaction_stats().queue_submissions(), 1);
         assert_eq!(
@@ -764,12 +1010,8 @@ mod bare_primary {
             instance_bytes
         );
         assert_eq!(
-            execution.views[&first_view]
-                .target
-                .as_ref()
-                .unwrap()
-                .last_submitted_frame_index,
-            Some(first.render_transaction_frame_index())
+            execution.views[&first_view.id()].admission.last_frame_index,
+            Some(first.receipt().render_transaction_frame_index())
         );
 
         execution
@@ -800,7 +1042,7 @@ mod bare_primary {
                 .unwrap();
         execution
             .submit_authoring_ui_image(
-                first_view,
+                &first_view,
                 window,
                 next_first_packet,
                 crate::view_probe::overlay_packet(RenderTarget::Image(first_target.image())),
@@ -812,7 +1054,7 @@ mod bare_primary {
                 .unwrap();
         execution
             .submit_authoring_ui_image(
-                second_view,
+                &second_view,
                 window,
                 next_packet,
                 crate::view_probe::overlay_packet(RenderTarget::Image(second_target.image())),
@@ -866,10 +1108,9 @@ mod native {
     };
 
     use super::super::{
-        PreparedFrame, WgpuEditorExecution, WgpuEditorExecutionError, WgpuEditorImguiRenderer,
-        WgpuSubmittedImageReceipt,
+        PreparedFrame, WgpuEditorImguiRenderer, WgpuRenderHost, WgpuRenderHostError,
     };
-    use crate::editor_execution::WgpuEditorViewId;
+    use crate::output::{WgpuImageDisplay, WgpuImageOutput};
 
     #[test]
     #[ignore = "requires an interactive Windows desktop and a working WGPU adapter"]
@@ -976,13 +1217,16 @@ mod native {
         window: Arc<Window>,
         platform: WinitPlatform,
         renderer: WgpuEditorImguiRenderer,
-        execution: WgpuEditorExecution,
+        execution: WgpuRenderHost,
+        producer: crate::host::WgpuRenderProducer,
         foreign_device: wgpu::Device,
         foreign_queue: wgpu::Queue,
         texture: ExternalTextureId,
+        mirror_texture: ExternalTextureId,
         alias: wgpu::TextureView,
-        canonical: wgpu::TextureView,
-        image: WgpuSubmittedImageReceipt,
+        display: WgpuImageDisplay,
+        mirror: WgpuImageDisplay,
+        successor: Option<WgpuImageOutput>,
         generation: EditorRenderGeneration,
         target: RenderImagePacket,
         frame_index: u64,
@@ -994,7 +1238,8 @@ mod native {
     enum Phase {
         Exact,
         Alias,
-        Overwritten,
+        RetainedAfterAdvance,
+        RetainedAfterClose,
     }
 
     impl NativeFixture {
@@ -1022,7 +1267,7 @@ mod native {
                 .unwrap();
             context.enable_multi_viewport();
             platform.enable_viewports(&mut context).unwrap();
-            let mut execution = WgpuEditorExecution::new(
+            let mut execution = WgpuRenderHost::new(
                 WindowId::PRIMARY,
                 WindowHandleProvider::new(Arc::clone(&window)),
             )
@@ -1053,38 +1298,46 @@ mod native {
             .unwrap();
             let image_packet = image_packet(generation, target, 1);
             execution.begin_editor_frame(packet, 1).unwrap();
-            let (reservation, _) = execution
-                .reserve_viewport_target_with_texture(
-                    WgpuEditorViewId::new(1),
+            let producer = execution.create_producer().unwrap();
+            let reservation = execution
+                .reserve_viewport_target(
+                    &producer,
                     packet,
                     image_packet.source_generation(),
                     target,
-                    |_, _| (),
                 )
                 .unwrap();
-            execution.activate_viewport_target(reservation).unwrap();
-            let image = execution
-                .submit_image(WgpuEditorViewId::new(1), packet, image_packet)
+            execution
+                .activate_image_target(&producer, reservation)
                 .unwrap();
-            let image_target = execution.views[&image.view_id()].target.as_ref().unwrap();
-            let canonical = image_target.view.clone();
-            let alias = image_target
-                ._texture
+            let image = execution
+                .submit_image(&producer, packet, image_packet)
+                .unwrap();
+            let alias = image
+                .0
+                .texture
                 .create_view(&wgpu::TextureViewDescriptor::default());
-            assert_ne!(alias, canonical);
-            let texture = renderer.register_external_texture(&canonical).unwrap();
+            assert_ne!(alias, image.0.view);
+            let display = execution.display_image(image.clone()).unwrap();
+            let mirror = execution.display_image(image).unwrap();
+            let texture = renderer.register_image(&display).unwrap();
+            let mirror_texture = renderer.register_image(&mirror).unwrap();
+            assert_ne!(texture, mirror_texture);
             Self {
                 window,
                 context,
                 platform,
                 renderer,
                 execution,
+                producer,
                 foreign_device,
                 foreign_queue,
                 texture,
+                mirror_texture,
                 alias,
-                canonical,
-                image,
+                display,
+                mirror,
+                successor: None,
                 generation,
                 target,
                 frame_index: 1,
@@ -1102,7 +1355,12 @@ mod native {
                 .prepare_frame(&mut self.context, &self.window)
                 .unwrap();
             let frame = self.context.begin_frame();
-            draw_secondary_image(frame.ui(), self.texture);
+            draw_secondary_images(
+                frame.ui(),
+                self.texture,
+                self.mirror_texture,
+                matches!(self.phase, Phase::RetainedAfterClose),
+            );
             self.platform
                 .prepare_render(frame.ui(), &self.window)
                 .unwrap();
@@ -1114,7 +1372,7 @@ mod native {
                     &mut self.renderer,
                     event_loop,
                     frame,
-                    &[self.image],
+                    &[self.display.clone(), self.mirror.clone()],
                     &mut outcomes,
                 )
                 .unwrap();
@@ -1160,17 +1418,24 @@ mod native {
             );
             assert_eq!(self.execution.frame_transaction_stats().presents(), 1);
             let dependencies = &presented[0].dependencies;
-            if !self.renderer.samples(dependencies, &self.canonical)
-                && !self.renderer.samples(dependencies, &self.alias)
-            {
+            if !self.renderer.samples(dependencies, &self.mirror) {
                 assert!(outcomes[0].composites.is_empty());
                 return false;
             }
             match self.phase {
                 Phase::Exact => {
-                    assert!(self.renderer.samples(dependencies, &self.canonical));
-                    assert_eq!(outcomes[0].composites.len(), 1);
-                    assert_eq!(outcomes[0].composites[0].image(), self.image);
+                    assert!(self.renderer.samples(dependencies, &self.display));
+                    assert_eq!(outcomes[0].composites.len(), 2);
+                    assert_eq!(outcomes[0].composites[0].image(), self.display.receipt());
+                    assert_eq!(outcomes[0].composites[1].image(), self.mirror.receipt());
+                    assert_eq!(
+                        outcomes[0].composites[0].occurrence(),
+                        self.display.occurrence()
+                    );
+                    assert_eq!(
+                        outcomes[0].composites[1].occurrence(),
+                        self.mirror.occurrence()
+                    );
                     let accepted = (
                         self.execution.last_presentation_generation,
                         self.execution.frame_transaction_stats(),
@@ -1181,7 +1446,7 @@ mod native {
                             &mut self.renderer,
                             self.frame_index,
                             report,
-                            &[self.image],
+                            &[self.display.clone(), self.mirror.clone()],
                             &mut replayed,
                         ),
                         "already consumed",
@@ -1214,11 +1479,11 @@ mod native {
                             &mut self.renderer,
                             event_loop,
                             frame,
-                            &[self.image],
+                            &[self.display.clone(), self.mirror.clone()],
                             &mut rejected,
                         );
                         assert!(
-                            matches!(&result, Err(WgpuEditorExecutionError::ToolkitPaint { message })
+                            matches!(&result, Err(WgpuRenderHostError::ToolkitPaint { message })
                             if message.contains("another GPU device or queue"))
                         );
                         drop(result);
@@ -1227,30 +1492,53 @@ mod native {
                         self.renderer.queue = queue;
                         self.complete_rejected_frame(event_loop);
                     }
-                    self.renderer
+                    // A raw SDK mutation is deliberately outside the occurrence bridge. Even an
+                    // alias of the same storage must not certify its original display binding.
+                    let super::super::RendererOwner::Native(route) = &mut self.renderer.owner
+                    else {
+                        unreachable!()
+                    };
+                    route
                         .update_external_texture(self.texture, &self.alias)
                         .unwrap();
                     self.phase = Phase::Alias;
                 }
                 Phase::Alias => {
-                    assert!(self.renderer.samples(dependencies, &self.alias));
-                    assert!(!self.renderer.samples(dependencies, &self.canonical));
-                    assert!(outcomes[0].composites.is_empty());
+                    assert!(
+                        dependencies
+                            .external_bindings
+                            .contains(&self.renderer.external_binding(self.texture).unwrap())
+                    );
+                    assert!(!self.renderer.samples(dependencies, &self.display));
+                    assert_eq!(outcomes[0].composites.len(), 1);
+                    assert_eq!(
+                        outcomes[0].composites[0].occurrence(),
+                        self.mirror.occurrence()
+                    );
                     drop(prepared);
-                    let old = self.image;
-                    self.image = self
+                    let successor = self
                         .execution
                         .submit_image(
-                            old.view_id(),
+                            &self.producer,
                             packet,
                             image_packet(self.generation, self.target, 2),
                         )
                         .unwrap();
-                    assert_eq!(old.target_generation(), self.image.target_generation());
-                    assert_ne!(
-                        old.render_transaction_frame_index(),
-                        self.image.render_transaction_frame_index()
+                    assert_eq!(
+                        self.display.receipt().target_generation(),
+                        successor.receipt().target_generation()
                     );
+                    assert_ne!(
+                        self.display.receipt().output_version(),
+                        successor.receipt().output_version()
+                    );
+                    assert_ne!(self.display.output().0.view, successor.0.view);
+                    self.successor = Some(successor);
+                    let stale = WgpuImageDisplay::issue(super::test_image_output(
+                        self.display.output().0.texture.clone(),
+                        self.renderer.backend_instance_id,
+                        self.renderer.device_epoch + 1,
+                    ));
                     self.platform
                         .prepare_frame(&mut self.context, &self.window)
                         .unwrap();
@@ -1262,25 +1550,112 @@ mod native {
                             &mut self.renderer,
                             event_loop,
                             frame,
-                            &[old],
+                            &[stale],
                             &mut rejected
                         ),
-                        Err(WgpuEditorExecutionError::StaleImageSubmission)
+                        Err(WgpuRenderHostError::StaleImageSubmission)
                     ));
                     assert!(rejected.is_empty());
                     self.complete_rejected_frame(event_loop);
                     self.renderer
-                        .update_external_texture(self.texture, &self.canonical)
+                        .update_image(self.texture, &self.display)
                         .unwrap();
-                    self.phase = Phase::Overwritten;
+                    self.phase = Phase::RetainedAfterAdvance;
                 }
-                Phase::Overwritten => {
+                Phase::RetainedAfterAdvance => {
+                    assert!(self.renderer.samples(dependencies, &self.display));
+                    assert_eq!(outcomes[0].composites.len(), 2);
+                    for composite in outcomes[0].composites() {
+                        assert_eq!(composite.image(), self.display.receipt());
+                        assert_ne!(
+                            composite.image(),
+                            self.successor.as_ref().unwrap().receipt()
+                        );
+                    }
+                    drop(prepared);
+                    let view_id = self.display.receipt().producer_id();
+                    assert!(self.execution.retire_producer(&self.producer).is_some());
+                    assert!(!self.execution.views.contains_key(&view_id));
+                    self.phase = Phase::RetainedAfterClose;
+                }
+                Phase::RetainedAfterClose => {
+                    assert!(!self.renderer.samples(dependencies, &self.display));
                     assert_eq!(outcomes[0].composites.len(), 1);
-                    assert_eq!(outcomes[0].composites[0].image(), self.image);
+                    assert_eq!(outcomes[0].composites[0].image(), self.mirror.receipt());
+                    assert_eq!(
+                        outcomes[0].composites[0].occurrence(),
+                        self.mirror.occurrence()
+                    );
+                    drop(prepared);
+                    self.verify_failed_paint_flush(packet);
                     return true;
                 }
             }
             false
+        }
+
+        fn verify_failed_paint_flush(&mut self, window: RenderWindowPacket) {
+            let output = self.mirror.output().clone();
+            let buffer = self
+                .execution
+                .with_image(&output, |device, _, _| {
+                    device.create_buffer(&wgpu::BufferDescriptor {
+                        label: Some("failed-window-paint-upload"),
+                        size: 16,
+                        usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ,
+                        mapped_at_creation: false,
+                    })
+                })
+                .unwrap();
+            let presentation = self.execution.last_presentation_generation;
+            let before = self.execution.frame_transaction_stats().presents();
+            let error = self
+                .execution
+                .present_window(
+                    window,
+                    self.frame_index,
+                    std::slice::from_ref(&self.mirror),
+                    |frame| {
+                        frame.encode(|_, queue, _, _| queue.write_buffer(&buffer, 0, &[7; 16]));
+                        Err(WgpuRenderHostError::toolkit_paint(
+                            "injected paint rejection after upload",
+                        ))
+                    },
+                    || panic!("a rejected paint cannot reach native present"),
+                )
+                .unwrap_err();
+            assert!(matches!(error, WgpuRenderHostError::ToolkitPaint { .. }));
+            assert_eq!(self.execution.last_presentation_generation, presentation);
+            assert_eq!(self.execution.frame_transaction_stats().presents(), before);
+            let prefix = self
+                .execution
+                .native_prefix
+                .as_ref()
+                .expect("failed paint retains its own native prefix")
+                .clone();
+            let (sender, receiver) = std::sync::mpsc::sync_channel(1);
+            buffer.map_async(wgpu::MapMode::Read, .., move |result| {
+                sender.send(result).unwrap();
+            });
+            let deadline = Instant::now() + Duration::from_secs(10);
+            loop {
+                self.execution
+                    .with_image(&output, |device, _, _| device.poll(wgpu::PollType::Poll))
+                    .unwrap()
+                    .unwrap();
+                match receiver.try_recv() {
+                    Ok(result) => {
+                        result.unwrap();
+                        break;
+                    }
+                    Err(std::sync::mpsc::TryRecvError::Empty) => assert!(Instant::now() < deadline),
+                    Err(error) => panic!("failed-paint readback disappeared: {error}"),
+                }
+                std::thread::yield_now();
+            }
+            assert_eq!(&*buffer.get_mapped_range(..).unwrap(), &[7; 16]);
+            buffer.unmap();
+            assert!(prefix.poll().unwrap());
         }
 
         /// A rejected renderer admission consumes no route preparation, so the native platform
@@ -1315,14 +1690,19 @@ mod native {
         }
     }
 
-    fn assert_toolkit_rejection(result: Result<(), WgpuEditorExecutionError>, expected: &str) {
+    fn assert_toolkit_rejection(result: Result<(), WgpuRenderHostError>, expected: &str) {
         assert!(matches!(
             result,
-            Err(WgpuEditorExecutionError::ToolkitPaint { message }) if message.contains(expected)
+            Err(WgpuRenderHostError::ToolkitPaint { message }) if message.contains(expected)
         ));
     }
 
-    fn draw_secondary_image(ui: &Ui, texture: ExternalTextureId) {
+    fn draw_secondary_images(
+        ui: &Ui,
+        designated: ExternalTextureId,
+        mirror: ExternalTextureId,
+        clip_designated: bool,
+    ) {
         let viewport = ui.main_viewport();
         ui.window("Actual secondary image")
             .position(
@@ -1332,8 +1712,19 @@ mod native {
                 ],
                 Condition::Always,
             )
-            .size([180.0, 140.0], Condition::Always)
-            .build(|| ui.image(texture.texture_id(), [64.0, 64.0]));
+            .size([180.0, 220.0], Condition::Always)
+            .build(|| {
+                if clip_designated {
+                    ui.get_window_draw_list().with_clip_rect(
+                        [100_000.0, 100_000.0],
+                        [100_001.0, 100_001.0],
+                        || ui.image(designated.texture_id(), [64.0, 64.0]),
+                    );
+                } else {
+                    ui.image(designated.texture_id(), [64.0, 64.0]);
+                }
+                ui.image(mirror.texture_id(), [64.0, 64.0]);
+            });
     }
 
     fn window_packet(window: &Window) -> RenderWindowPacket {

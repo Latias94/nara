@@ -717,7 +717,7 @@ qualification after each internal commit. Report untested platforms explicitly.
 
 | Unit | Delivers | Existing owning files and consumers | Dependencies |
 | --- | --- | --- | --- |
-| E1 | N01 source graph rejection, N08 allocation-error result, N09 terminal failure cache as separate reviewable changes | `crates/nara_scene/src/prefab.rs`, `validation.rs`, Scene tests; `crates/nara_render_wgpu/src/editor_execution.rs`, `texture.rs`, `backend.rs`, `quad.rs`, native allocation/pipeline tests | None |
+| E1 | N01 source graph rejection, N08 allocation-error result, N09 terminal failure cache as separate reviewable changes | `crates/nara_scene/src/prefab.rs`, `validation.rs`, Scene tests; `crates/nara_render_wgpu/src/host.rs`, `texture.rs`, `backend.rs`, `quad.rs`, native allocation/pipeline tests | None |
 | E2 | N02 correct Reset/Remove using authored state | `editor/src/frontend/imgui/authoring.rs`, tooling Inspector projections, native interaction and persistence consumers | None |
 | E3 | D2 opaque frontend candidate, correlated dispatch, post-drive lifetime checks and closing-filter settlement | `editor/src/frontend/imgui/mod.rs`, `workspace.rs`, `editor/src/app.rs`, native dispatch path; existing tooling batch reports; independent panel fixture | None; use existing actions |
 | E4 | D1 stable draft/widget identity, exact-basis conflict and default field helper | `editor/src/frontend/imgui/mod.rs`, `authoring.rs`, `authoring/recursive_controls.rs`, native IME/interactions and external panel fixture | E2, E3 |

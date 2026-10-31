@@ -18,7 +18,9 @@ use nara::{
     input::{ButtonInput, KeyCode},
     project_host::{EditorGameViewCandidateIdentity, TrustedCompiledEditorProjectIntent},
     render::{Camera2d, DisplayRect},
-    render_wgpu::__private::{WgpuEditorCompositeReceipt, WgpuSubmittedImageReceipt},
+    render_wgpu::__private::{
+        WgpuDisplayOccurrence, WgpuEditorCompositeReceipt, WgpuSubmittedImageReceipt,
+    },
     sprite::Sprite,
     sprite_render::__private::SpriteBatches,
     tooling::{
@@ -81,6 +83,7 @@ impl GameCandidateContent {
 #[derive(Clone, Copy)]
 pub(super) struct SubmittedGameObservation {
     pub(super) image: WgpuSubmittedImageReceipt,
+    pub(super) occurrence: WgpuDisplayOccurrence,
     pub(super) identity: EditorGameViewCandidateIdentity,
     pub(super) content: GameCandidateContent,
 }
@@ -224,12 +227,12 @@ fn qualify_game_input(project: &Path, canvas_buttons: bool) {
     assert!(observed.moved.center_x > observed.initial.center_x + f32::EPSILON);
     assert!(observed.moved.runtime_frame() > observed.initial.runtime_frame());
     assert_ne!(
-        observed.reopened.submitted.image.view_id(),
-        observed.moved.submitted.image.view_id()
+        observed.reopened.submitted.image.producer_id(),
+        observed.moved.submitted.image.producer_id()
     );
     assert_eq!(
-        observed.reopened.scene.view_id(),
-        observed.initial.scene.view_id()
+        observed.reopened.scene.producer_id(),
+        observed.initial.scene.producer_id()
     );
     assert!(observed.reopened.runtime_frame() > observed.moved.runtime_frame());
     assert!(observed.moved_after_reopen.center_x > observed.reopened.center_x + f32::EPSILON);
@@ -261,8 +264,8 @@ fn qualify_game_input(project: &Path, canvas_buttons: bool) {
         observed.paused.submitted.image.target().extent()
     );
     assert_eq!(
-        observed.resized.scene.view_id(),
-        observed.paused.scene.view_id()
+        observed.resized.scene.producer_id(),
+        observed.paused.scene.producer_id()
     );
     assert_eq!(
         observed.resized.scene.target(),
@@ -315,8 +318,12 @@ fn qualify_game_input(project: &Path, canvas_buttons: bool) {
         assert!(frame.submitted.content.sprite_instances > 0);
         assert!(frame.submitted.content.runtime_ui_present);
         assert!(frame.center_x.is_finite());
-        assert_ne!(frame.scene.view_id(), frame.submitted.image.view_id());
+        assert_ne!(
+            frame.scene.producer_id(),
+            frame.submitted.image.producer_id()
+        );
         assert_eq!(frame.receipt.image(), frame.submitted.image);
+        assert_eq!(frame.receipt.occurrence(), frame.submitted.occurrence);
     }
 }
 
@@ -431,6 +438,181 @@ struct GameInputWorkflow<'a> {
 }
 
 impl GameInputWorkflow<'_> {
+    fn verify_display_occurrences(&mut self) -> Result<(), String> {
+        self.application
+            .drive_editor_frame(Duration::from_millis(20), false, true);
+        self.native.frame_index += 1;
+        let window = super::editor_window_packet(&self.native.window);
+        self.native
+            .gpu
+            .begin_editor_frame(window, self.native.frame_index)
+            .map_err(|error| error.to_string())?;
+        let mut pending = self
+            .native
+            .submit_game(self.application, window)
+            .map_err(|error| error.to_string())?
+            .ok_or("the occurrence fixture has no Game candidate")?;
+        let designated = pending.display.clone();
+        let mirror = self
+            .native
+            .gpu
+            .display_image(designated.output().clone())
+            .map_err(|error| error.to_string())?;
+        let mirror_texture = self
+            .native
+            .renderer
+            .register(&mirror)
+            .map_err(|error| error.to_string())?;
+        let designated_texture = self
+            .native
+            .game
+            .texture
+            .ok_or("the Game output has no registered display")?;
+        // Actually present M while D is absent, before the later window paint containing D.
+        let mirror_only = super::lifecycle_tests::present_registered_images(
+            self.native,
+            self.event_loop,
+            &[(mirror_texture, mirror.clone())],
+        )?;
+        let mirror_only_receipt = mirror_only
+            .composites()
+            .iter()
+            .copied()
+            .find(|receipt| receipt.occurrence() == mirror.occurrence())
+            .ok_or("the first passive mirror did not reach native presentation")?;
+        if pending
+            .composite(mirror_only.composites().iter().copied())
+            .is_some()
+        {
+            return Err(
+                "a mirror-only native paint completed the absent designated display".to_owned(),
+            );
+        }
+        let ui = pending
+            .ui
+            .take()
+            .ok_or("the mirror-first fixture has no original UI permit")?;
+        pending.ui = Some(match ui.presented(mirror_only_receipt) {
+            Err(ui) => ui,
+            Ok(_) => {
+                return Err("mirror-first presentation consumed the pending UI permit".to_owned());
+            }
+        });
+        let outcome = super::lifecycle_tests::present_registered_images(
+            self.native,
+            self.event_loop,
+            &[
+                (mirror_texture, mirror.clone()),
+                (designated_texture, designated.clone()),
+            ],
+        )?;
+        self.native
+            .renderer
+            .unregister(mirror_texture)
+            .map_err(|error| error.to_string())?;
+        let mirror_receipt = outcome
+            .composites()
+            .iter()
+            .copied()
+            .find(|receipt| receipt.occurrence() == mirror.occurrence())
+            .ok_or("the passive Game mirror was not composited")?;
+        let designated_receipt = pending
+            .composite(outcome.composites().iter().copied())
+            .ok_or("the designated Game display was not composited")?;
+        if mirror_receipt.image() != designated_receipt.image()
+            || mirror_receipt.occurrence() == designated_receipt.occurrence()
+            || pending.composite([mirror_receipt]).is_some()
+            || pending.composite([mirror_receipt, designated_receipt]) != Some(designated_receipt)
+        {
+            return Err(
+                "Game completion did not select its exact occurrence among identical pixels"
+                    .to_owned(),
+            );
+        }
+        let ui = pending
+            .ui
+            .take()
+            .ok_or("the Game fixture has no Runtime UI permit")?;
+        let ui = match ui.presented(mirror_receipt) {
+            Err(ui) => ui,
+            Ok(_) => {
+                return Err("a passive mirror consumed the designated Runtime UI permit".to_owned());
+            }
+        };
+        if ui.display() != &designated
+            || ui.output() != designated.output()
+            || ui.image() != designated.receipt()
+        {
+            return Err("UI permit rejection changed its original output or display".to_owned());
+        }
+        pending.ui = Some(ui);
+
+        let mut input = super::input::ImguiInput::default();
+        let native_window = self.native.window.id();
+        let viewport = self.native.context.main_viewport().id();
+        let scale = self.native.context.io().display_framebuffer_scale()[0];
+        input.handle_event(
+            native_window,
+            &WindowEvent::CursorMoved {
+                device_id: DeviceId::dummy(),
+                position: PhysicalPosition::new(32.0 * f64::from(scale), 32.0 * f64::from(scale)),
+            },
+            &self.native.context,
+        );
+        let mut interaction = crate::frontend::imgui::ImguiImageInteraction {
+            occurrence: Some(mirror.occurrence()),
+            rect: DisplayRect {
+                min: [0.0, 0.0],
+                max: [64.0, 64.0],
+            },
+            viewport,
+            viewport_origin: [0.0, 0.0],
+            pixels_per_point: scale,
+            owns_pointer: true,
+            capture_requested: true,
+            window: dear_imgui_rs::Id::from(1),
+        };
+        let stamp = super::EditorGamePresentedStamp::new(pending.identity, designated_receipt);
+        input.observe(
+            Some(interaction),
+            None,
+            Some(stamp),
+            native_window,
+            viewport,
+            &[],
+            true,
+            false,
+            self.application.active_game_start_request(),
+        );
+        if input.is_captured() {
+            return Err(
+                "a mirror interaction captured input using another occurrence's receipt".to_owned(),
+            );
+        }
+        interaction.occurrence = Some(designated.occurrence());
+        input.observe(
+            Some(interaction),
+            None,
+            Some(stamp),
+            native_window,
+            viewport,
+            &[],
+            true,
+            false,
+            self.application.active_game_start_request(),
+        );
+        if !input.is_captured() {
+            return Err("the exact designated interaction did not capture input".to_owned());
+        }
+        let completion = pending.finish_after_error(
+            [mirror_receipt, designated_receipt],
+            &super::imgui_error("primary paint failed after secondary Game presentation"),
+        );
+        self.native
+            .return_game_completion(self.application, completion)
+            .map_err(|error| error.to_string())
+    }
+
     fn frame_error(&self, operation: &str, error: impl std::fmt::Display) -> String {
         format!(
             "stage={}; interaction={}; operation={operation}; host frame={}; error={error}; active geometry={:?}; candidate geometry={:?}; captured={}",
@@ -619,13 +801,23 @@ impl GameInputWorkflow<'_> {
             .iter()
             .chain(secondary.iter().flat_map(|outcome| outcome.composites()))
             .copied()
-            .find(|receipt| receipt.image() == submitted.image)
+            .find(|receipt| {
+                receipt.image() == submitted.image && receipt.occurrence() == submitted.occurrence
+            })
             .ok_or("the exact Runtime sprite/UI image was not actually composited")?;
         let scene = primary
             .composites()
             .iter()
             .copied()
-            .find(|receipt| Some(receipt.image()) == self.native.scene.submitted)
+            .find(|receipt| {
+                Some(receipt.image()) == self.native.scene.submitted
+                    && self
+                        .native
+                        .scene
+                        .display
+                        .as_ref()
+                        .is_some_and(|display| receipt.occurrence() == display.occurrence())
+            })
             .ok_or("Game omitted the concurrent independent Scene composite")?
             .image();
         let center_x = submitted
@@ -643,6 +835,9 @@ impl GameInputWorkflow<'_> {
     fn run(mut self) -> Result<InputObservation, String> {
         self.settle()?;
         self.click("embedded:Play")?;
+        self.stage = "independent Game display occurrences";
+        self.verify_display_occurrences()?;
+        self.settle()?;
         let initial = self.observe()?;
         let game_image = control_rect("embedded:Game image")
             .ok_or("the actual Game image geometry is missing")?;
@@ -686,11 +881,8 @@ impl GameInputWorkflow<'_> {
         let closed_target_retired = self.native.game.view.is_none()
             && self.native.game.texture.is_none()
             && !self.native.input.is_captured()
-            && !self.native.gpu.viewport_target_matches(
-                moved.submitted.image.view_id(),
-                moved.submitted.image.source_generation(),
-                moved.submitted.image.target(),
-            )
+            && self.native.game.identity.is_none()
+            && self.native.game.display.is_none()
             && self
                 .application
                 .current_frame()

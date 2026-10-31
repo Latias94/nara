@@ -43,6 +43,7 @@ struct FakeToolkit {
     presentation: EditorPreviewPresentation,
     target: Option<CpuTarget>,
     next_target_generation: u64,
+    next_output_version: u64,
     device_epoch: u64,
     source: Option<RenderFrameSourceGeneration>,
     source_handoff: u64,
@@ -61,6 +62,7 @@ impl FakeToolkit {
             presentation: EditorPreviewPresentation::new(),
             target: None,
             next_target_generation: 0,
+            next_output_version: 0,
             device_epoch: 1,
             source: None,
             source_handoff: 0,
@@ -128,11 +130,14 @@ impl FakeToolkit {
                 }
             }
         }
+        self.next_output_version += 1;
         DisplayCommand {
             accepted,
             mapping,
             pixels: target.pixels.clone(),
             image: EditorPresentationImage {
+                output_version: self.next_output_version,
+                display_occurrence: self.next_output_version,
                 target: image,
                 target_generation: target.generation,
                 source_generation: packet.source_generation(),

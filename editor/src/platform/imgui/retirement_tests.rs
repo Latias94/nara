@@ -803,7 +803,6 @@ fn native_partial_initialization_preserves_fresh_and_recovered_frontends() {
             .as_mut()
             .ok_or("explicit installation failed after partial retirement")?;
         native.frame_index = 7;
-        native.next_view = 11;
         host.retire_native();
         drive_retirement(host, event_loop)?;
         let layout = match &host.retained {
@@ -813,7 +812,7 @@ fn native_partial_initialization_preserves_fresh_and_recovered_frontends() {
         reject_partial_initialization(host, event_loop)?;
         check(
             matches!(&host.retained, Some(PendingImguiFrontend::Recovered(retained))
-                if retained.frame_index == 7 && retained.next_view == 11 && retained.layout == layout),
+                if retained.frame_index == 7 && retained.layout == layout),
             "partial initialization overwrote the predecessor's recovered frontend state",
         )?;
         host.install_native(event_loop)
@@ -823,7 +822,7 @@ fn native_partial_initialization_preserves_fresh_and_recovered_frontends() {
             .as_ref()
             .ok_or("explicit recovery installation failed")?;
         check(
-            native.frame_index == 7 && native.next_view == 11 && native.layout_loaded,
+            native.frame_index == 7 && native.layout_loaded,
             "successful installation did not restore the retained frontend state",
         )
     });
