@@ -43,10 +43,14 @@ fn packet_world() -> World {
     let mut routes = UiPresentationRoutes::default();
     routes.routes.insert(surface_id, route);
     let mut world = World::new();
-    world.insert_resource(UiPresentationState(UiPresentationPlanner::default()));
+    world.insert_resource(UiPresentationState(
+        UiPresentationPlanner::default(),
+        Arc::new(()),
+    ));
     world.insert_resource(routes);
     world.insert_resource(UiPresentationOutcomes::default());
-    world.insert_resource(UiBackendSubmissionQueue::default());
+    let receiver = world.resource::<UiPresentationOutcomes>().receiver.clone();
+    world.insert_resource(UiBackendSubmissionQueue::new(receiver));
     world
 }
 
@@ -360,6 +364,399 @@ fn host_external_backend_frame_returns_each_outcome_to_its_owning_runtime_once()
     assert!(matches!(
         outcomes[0],
         UiPresentationOutcome::Deferred { .. }
+    ));
+}
+
+#[test]
+fn identical_submission_identities_cannot_return_into_a_replacement_outcome_owner() {
+    let mut world = packet_world();
+    compile_ui_paint_packets(
+        &mut world,
+        &[frame(
+            1,
+            1,
+            UiVisual::solid(UiColor::rgba(1.0, 1.0, 1.0, 1.0)),
+        )],
+    )
+    .unwrap();
+    let packet = world
+        .resource::<UiPresentationState>()
+        .0
+        .planned(RenderTarget::Window(WindowId::PRIMARY))
+        .unwrap();
+    let original = prepared_submission(Arc::clone(&packet), 91, 9);
+    let replacement = prepared_submission(packet, 91, 9);
+    assert_eq!(original.identity(), replacement.identity());
+    let mut old = world.remove_resource::<UiPresentationOutcomes>().unwrap();
+    let mut new = UiPresentationOutcomes::default();
+    let mut old_permits = old
+        .reserve_backend(std::slice::from_ref(&original))
+        .unwrap();
+    let mut new_permits = new
+        .reserve_backend(std::slice::from_ref(&replacement))
+        .unwrap();
+    let old_submission = UiBackendSubmission::pair(original, old_permits.pop().unwrap()).unwrap();
+    let new_submission =
+        UiBackendSubmission::pair(replacement, new_permits.pop().unwrap()).unwrap();
+    world.insert_resource(new);
+
+    let returned = commit_ui_backend_outcome(
+        &mut world,
+        old_submission.content_rejected("old".to_owned()),
+    )
+    .expect_err("equal value identities do not authorize a different reserved storage owner");
+    assert_eq!(old.pending_backend_count(), 1);
+    assert_eq!(
+        world
+            .resource::<UiPresentationOutcomes>()
+            .pending_backend_count(),
+        1
+    );
+    drop(returned);
+    let mut abandoned = old.drain().unwrap();
+    assert_eq!(abandoned.len(), 1);
+    assert!(
+        matches!(abandoned.pop().unwrap(), UiPresentationOutcome::Aborted { attempt, .. }
+        if attempt.admission_id().unwrap().get() == 91)
+    );
+    assert!(drain_ui_presentation_outcomes(&mut world).is_err());
+    commit_ui_backend_outcome(
+        &mut world,
+        new_submission.content_rejected("new".to_owned()),
+    )
+    .unwrap();
+    assert!(matches!(
+        drain_ui_presentation_outcomes(&mut world)
+            .unwrap()
+            .pop()
+            .unwrap(),
+        UiPresentationOutcome::ContentRejected { .. }
+    ));
+}
+
+#[test]
+fn dropping_an_external_frame_returns_its_original_reserved_outcomes_after_resource_removal() {
+    let mut world = packet_world();
+    compile_ui_paint_packets(
+        &mut world,
+        &[frame(
+            1,
+            1,
+            UiVisual::solid(UiColor::rgba(1.0, 1.0, 1.0, 1.0)),
+        )],
+    )
+    .unwrap();
+    let packet = world
+        .resource::<UiPresentationState>()
+        .0
+        .planned(RenderTarget::Window(WindowId::PRIMARY))
+        .unwrap();
+    replace_ui_backend_frame(
+        &mut world,
+        vec![Arc::clone(&packet)],
+        vec![prepared_submission(packet, 92, 9)],
+    )
+    .unwrap();
+    let external = take_ui_backend_presentation_frame(&mut world).unwrap();
+    let mut original = world.remove_resource::<UiPresentationOutcomes>().unwrap();
+    world.insert_resource(UiPresentationOutcomes::default());
+    drop(external);
+    assert_eq!(original.pending_backend_count(), 0);
+    let original = original.drain().unwrap();
+    assert_eq!(original.len(), 1);
+    assert!(
+        matches!(&original[0], UiPresentationOutcome::Aborted { attempt, .. }
+        if attempt.admission_id().unwrap().get() == 92)
+    );
+    assert!(
+        drain_ui_presentation_outcomes(&mut world)
+            .unwrap()
+            .is_empty()
+    );
+}
+
+#[test]
+fn outcome_storage_survives_its_world_resource_until_the_last_abandoned_permission() {
+    let mut world = packet_world();
+    compile_ui_paint_packets(
+        &mut world,
+        &[frame(
+            1,
+            1,
+            UiVisual::solid(UiColor::rgba(1.0, 1.0, 1.0, 1.0)),
+        )],
+    )
+    .unwrap();
+    let packet = world
+        .resource::<UiPresentationState>()
+        .0
+        .planned(RenderTarget::Window(WindowId::PRIMARY))
+        .unwrap();
+    let submissions = [
+        prepared_submission(Arc::clone(&packet), 93, 9),
+        prepared_submission(packet, 94, 10),
+    ];
+    let permits = world
+        .resource_mut::<UiPresentationOutcomes>()
+        .reserve_backend(&submissions)
+        .unwrap();
+    let mut external = submissions
+        .into_iter()
+        .zip(permits)
+        .map(|(submission, permit)| UiBackendSubmission::pair(submission, permit).unwrap())
+        .collect::<Vec<_>>();
+    let retained = Arc::downgrade(&external[0].permit.owner);
+    drop(world.remove_resource::<UiPresentationOutcomes>().unwrap());
+    drop(world);
+    drop(external.pop());
+    assert!(retained.upgrade().is_some());
+    drop(external);
+    assert!(retained.upgrade().is_none());
+}
+
+#[test]
+fn original_receiver_keeps_returned_outcomes_after_world_ingress_and_candidate_are_dropped() {
+    let mut world = packet_world();
+    let receiver = backend_outcome_receiver(&world).unwrap();
+    compile_ui_paint_packets(
+        &mut world,
+        &[frame(
+            1,
+            1,
+            UiVisual::solid(UiColor::rgba(1.0, 1.0, 1.0, 1.0)),
+        )],
+    )
+    .unwrap();
+    let packet = world
+        .resource::<UiPresentationState>()
+        .0
+        .planned(RenderTarget::Window(WindowId::PRIMARY))
+        .unwrap();
+    replace_ui_backend_frame(
+        &mut world,
+        vec![Arc::clone(&packet)],
+        vec![prepared_submission(packet, 98, 9)],
+    )
+    .unwrap();
+    let external = take_ui_backend_presentation_frame(&mut world).unwrap();
+    drop(world.remove_resource::<UiPresentationOutcomes>().unwrap());
+    drop(world);
+
+    receiver.begin_close();
+    assert_eq!(receiver.pending_backend_count(), 1);
+    assert_eq!(
+        receiver.drain().unwrap_err(),
+        UiPresentationIntegrationError::OutstandingBackendOutcomeReservations { count: 1 }
+    );
+    drop(external);
+    assert_eq!(receiver.pending_backend_count(), 0);
+    let returned = receiver.drain().unwrap();
+    assert_eq!(returned.len(), 1);
+    assert!(
+        matches!(&returned[0], UiPresentationOutcome::Aborted { attempt, .. }
+        if attempt.admission_id().unwrap().get() == 98)
+    );
+    assert!(receiver.drain().unwrap().is_empty());
+}
+
+#[test]
+fn original_receiver_close_refuses_new_reservations_through_its_surviving_ingress() {
+    let mut world = packet_world();
+    let receiver = backend_outcome_receiver(&world).unwrap();
+    receiver.begin_close();
+    assert!(matches!(
+        world
+            .resource_mut::<UiPresentationOutcomes>()
+            .reserve_backend(&[]),
+        Err(UiPresentationIntegrationError::BackendOutcomeAdmissionClosed)
+    ));
+    assert_eq!(receiver.pending_backend_count(), 0);
+    assert!(receiver.drain().unwrap().is_empty());
+}
+
+#[test]
+fn replacing_outcome_ingress_before_transfer_refuses_without_consuming_the_original_queue() {
+    let mut world = packet_world();
+    let receiver = backend_outcome_receiver(&world).unwrap();
+    compile_ui_paint_packets(
+        &mut world,
+        &[frame(
+            1,
+            1,
+            UiVisual::solid(UiColor::rgba(1.0, 1.0, 1.0, 1.0)),
+        )],
+    )
+    .unwrap();
+    let packet = world
+        .resource::<UiPresentationState>()
+        .0
+        .planned(RenderTarget::Window(WindowId::PRIMARY))
+        .unwrap();
+    replace_ui_backend_frame(
+        &mut world,
+        vec![Arc::clone(&packet)],
+        vec![prepared_submission(packet, 99, 9)],
+    )
+    .unwrap();
+    let original = world.remove_resource::<UiPresentationOutcomes>().unwrap();
+    world.insert_resource(UiPresentationOutcomes::default());
+    let planned = world
+        .resource::<UiPresentationState>()
+        .0
+        .planned(RenderTarget::Window(WindowId::PRIMARY))
+        .unwrap();
+    assert!(matches!(
+        compile_ui_paint_packets(
+            &mut world,
+            &[frame(
+                1,
+                2,
+                UiVisual::solid(UiColor::rgba(1.0, 1.0, 1.0, 1.0))
+            )],
+        ),
+        Err(UiPresentationIntegrationError::BackendOutcomeOwnerChanged)
+    ));
+    assert!(Arc::ptr_eq(
+        &planned,
+        &world
+            .resource::<UiPresentationState>()
+            .0
+            .planned(RenderTarget::Window(WindowId::PRIMARY))
+            .unwrap()
+    ));
+    assert!(matches!(
+        take_ui_backend_presentation_frame(&mut world),
+        Err(UiPresentationIntegrationError::BackendOutcomeOwnerChanged)
+    ));
+    assert_eq!(
+        world
+            .resource::<UiBackendSubmissionQueue>()
+            .submissions
+            .len(),
+        1
+    );
+    assert_eq!(receiver.pending_backend_count(), 0);
+    assert_eq!(
+        world
+            .resource::<UiPresentationOutcomes>()
+            .pending_backend_count(),
+        0
+    );
+
+    world.insert_resource(original);
+    let external = take_ui_backend_presentation_frame(&mut world).unwrap();
+    assert_eq!(receiver.pending_backend_count(), 1);
+    drop(external);
+    assert!(matches!(
+        receiver.drain().unwrap().pop().unwrap(),
+        UiPresentationOutcome::Aborted { .. }
+    ));
+}
+
+#[test]
+fn last_permit_return_cannot_admit_a_new_compile_before_its_original_outcome_is_drained() {
+    use std::sync::Barrier;
+
+    let mut world = packet_world();
+    let white = UiColor::rgba(1.0, 1.0, 1.0, 1.0);
+    compile_ui_paint_packets(&mut world, &[frame(1, 1, UiVisual::solid(white))]).unwrap();
+    let original = world
+        .resource::<UiPresentationState>()
+        .0
+        .planned(RenderTarget::Window(WindowId::PRIMARY))
+        .unwrap();
+    let next = frame(1, 2, UiVisual::solid(white));
+    for admission in 100..132 {
+        let submissions = [prepared_submission(
+            Arc::clone(&original),
+            admission,
+            admission,
+        )];
+        let mut permits = world
+            .resource_mut::<UiPresentationOutcomes>()
+            .reserve_backend(&submissions)
+            .unwrap();
+        let permit = permits.pop().unwrap();
+        let barrier = Arc::new(Barrier::new(2));
+        std::thread::scope(|scope| {
+            let releasing = Arc::clone(&barrier);
+            let release = scope.spawn(move || {
+                releasing.wait();
+                drop(permit);
+            });
+            barrier.wait();
+            assert!(matches!(
+                compile_ui_paint_packets(&mut world, &[Arc::clone(&next)]),
+                Err(
+                    UiPresentationIntegrationError::OutstandingBackendOutcomeReservations {
+                        count: 1
+                    } | UiPresentationIntegrationError::PendingPresentationOutcomes { count: 1 }
+                )
+            ));
+            release.join().unwrap();
+        });
+        let retained = world
+            .resource::<UiPresentationState>()
+            .0
+            .planned(RenderTarget::Window(WindowId::PRIMARY))
+            .unwrap();
+        assert!(Arc::ptr_eq(&retained, &original));
+        assert_eq!(drain_ui_presentation_outcomes(&mut world).unwrap().len(), 1);
+    }
+}
+
+#[test]
+fn mixed_owner_batch_refuses_before_any_commit_and_abandonment_remains_owner_local() {
+    let mut world = packet_world();
+    compile_ui_paint_packets(
+        &mut world,
+        &[frame(
+            1,
+            1,
+            UiVisual::solid(UiColor::rgba(1.0, 1.0, 1.0, 1.0)),
+        )],
+    )
+    .unwrap();
+    let packet = world
+        .resource::<UiPresentationState>()
+        .0
+        .planned(RenderTarget::Window(WindowId::PRIMARY))
+        .unwrap();
+    let a = [
+        prepared_submission(Arc::clone(&packet), 95, 9),
+        prepared_submission(Arc::clone(&packet), 96, 10),
+    ];
+    let b = [prepared_submission(packet, 97, 11)];
+    let mut original = UiPresentationOutcomes::default();
+    let mut foreign = UiPresentationOutcomes::default();
+    let permits = original.reserve_backend(&a).unwrap();
+    let mut a = a
+        .into_iter()
+        .zip(permits)
+        .map(|(submission, permit)| UiBackendSubmission::pair(submission, permit).unwrap());
+    let mut permits = foreign.reserve_backend(&b).unwrap();
+    let [b] = b;
+    let b = UiBackendSubmission::pair(b, permits.pop().unwrap()).unwrap();
+    let returned = original
+        .try_commit_backend_batch(vec![
+            a.next().unwrap().content_rejected("a".to_owned()),
+            b.content_rejected("b".to_owned()),
+        ])
+        .unwrap_err();
+    assert_eq!(original.pending_backend_count(), 2);
+    assert_eq!(foreign.pending_backend_count(), 1);
+    drop(returned);
+    original.commit_backend(a.next().unwrap().content_rejected("second".to_owned()));
+    let original = original.drain().unwrap();
+    assert_eq!(original.len(), 2);
+    assert!(matches!(original[0], UiPresentationOutcome::Aborted { .. }));
+    assert!(matches!(
+        original[1],
+        UiPresentationOutcome::ContentRejected { .. }
+    ));
+    assert!(matches!(
+        foreign.drain().unwrap().pop().unwrap(),
+        UiPresentationOutcome::Aborted { .. }
     ));
 }
 

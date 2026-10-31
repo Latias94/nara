@@ -312,6 +312,19 @@ pub(crate) struct WgpuFramePacketSlot {
 }
 
 impl WgpuFramePacketSlot {
+    pub(crate) fn close(&mut self) {
+        // Return every original UI permission before the Runtime's logical close barrier.
+        // Their original pre-admitted result storage remains alive independently of this slot.
+        self.payload = WgpuFramePayload::default();
+        self.current = None;
+        self.collection_error = None;
+        #[cfg(feature = "ui-submitter")]
+        {
+            self.ui_submissions = None;
+            self.ui_terminal = None;
+        }
+    }
+
     pub(crate) fn reset(&mut self) {
         #[cfg(feature = "ui-submitter")]
         if self.ui_submissions.is_some() || self.ui_terminal.is_some() {

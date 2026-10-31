@@ -2,7 +2,7 @@
 
 **Status**: Accepted
 **Date**: 2026-08-04
-**Last Revised**: 2026-10-30
+**Last Revised**: 2026-10-31
 **Amended**: 2026-08-05 by the NUI-U8 post-decision checkpoint; 2026-08-06 by the NUI-U17 pre-implementation ownership checkpoint; 2026-08-07 by the NUI-U15A example-first interface-proof checkpoint; 2026-08-08 by the focused U15A focus-identity refreeze and UI Foundation rebaseline; 2026-08-10 by the UIF-U5 public-inventory and Host-authority audit; 2026-08-12 by the UIFD immutable dynamic-text projection correction; 2026-10-25 by the complete source/occurrence/placement key adoption
 **Owner**: UI authoring, text, widget behavior, input routing, presentation packets, and platform adapters
 **Refines**: [ADR 0012](0012-render-crate-boundaries.md),
@@ -49,6 +49,31 @@ Current presentation is validated through the receipt/session, never by requirin
 to remain installed after commit. This naming and consumer correction belongs to the same
 qualified inventory. The Reference observer resolves the retained Runtime/session/frame facts;
 ordinary authoring changes do not manufacture a new backend presentation.
+
+### Original Backend Outcome Ownership
+
+The [render Host transition](../render-host-ownership-design.md) refines the hidden backend
+exchange under the existing exact-presentation and bounded-admission invariants. Before a backend
+candidate leaves the Runtime, reserve its result slots, collection storage and abandonment outcomes
+in one original nominal owner. Each move-only permit retains that storage through Prepared,
+Submitted and Completed states. A replacement World resource or equal submission value cannot
+receive another owner's permit. Explicit refusal returns the complete original result for retry
+or cancellation. Abandonment returns one prebuilt Aborted outcome to its original slot without
+allocating or requiring a live World; it cannot manufacture Presented or retry authority.
+
+The original logical-close consumer independently retains the outcome receiver before transfer.
+Receiving every backend result is distinct from settling the corresponding Runtime UI/Input
+authority. Stop closes new admission, settles buffered and returned attempts through the original
+consumer, and waits for outstanding permits before allowing Runtime Stopped. Deferred work is
+terminalized during close rather than requeued. Removal of an ingress resource is not completion;
+missing or foreign authority retains the close obligation for explicit recovery. GPU submitted-
+prefix retirement is a separate owner and may continue after logical settlement.
+Statistics and diagnostic observations do not own those obligations; their absence cannot prevent
+original UI/Input settlement or manufacture completion.
+
+These are backend lifecycle semantics, not a new ordinary UI authoring/presenter API. The owning,
+independent hidden-exchange and actual Root/Editor consumers must qualify them; result-storage
+tests alone do not establish interaction settlement or the complete runner-local Host transition.
 
 ## Context
 

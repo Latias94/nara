@@ -12,6 +12,7 @@ mod device;
 mod editor_execution;
 mod error;
 mod frame;
+mod observation;
 mod plugin;
 mod presented;
 #[cfg(any(feature = "sprite-submitter", feature = "ui-submitter"))]
@@ -82,6 +83,7 @@ use nara_window::{
 
 pub use crate::backend::{WgpuBackendState, WgpuFrameTransactionStats, WgpuRenderBackend};
 pub use crate::error::WgpuRenderError;
+pub use crate::observation::WgpuRenderObservation;
 #[cfg(feature = "sprite-submitter")]
 pub use crate::plugin::{
     WGPU_SPRITE_SUBMITTER_PLUGIN_DECLARATION, WGPU_SPRITE_SUBMITTER_PLUGIN_ID,
@@ -136,7 +138,7 @@ pub mod __private {
     #[cfg(feature = "ui-submitter")]
     #[must_use]
     pub fn submitted_ui_facts(
-        backend: &crate::WgpuRenderBackend,
+        backend: &crate::WgpuRenderObservation,
         submission: nara_ui_render::UiBackendSubmissionIdentity,
         backend_generation: nara_ui_render::UiPresentationBackendGeneration,
     ) -> Option<WgpuSubmittedUiFacts> {
@@ -146,7 +148,7 @@ pub mod __private {
     /// Returns the exact surface presentation published by the current render transaction.
     #[must_use]
     pub fn presented_frame_this_transaction(
-        backend: &crate::WgpuRenderBackend,
+        backend: &crate::WgpuRenderObservation,
     ) -> Option<WgpuPresentedFrameReceipt> {
         backend.presented_frame_this_transaction()
     }
@@ -181,6 +183,7 @@ impl Plugin for WgpuRenderPlugin {
 
     fn build(&self, app: &mut App) -> Result<(), PluginError> {
         app.init_resource::<WgpuRenderBackend>()?;
+        app.init_resource::<WgpuRenderObservation>()?;
         app.init_resource::<WgpuFramePacketSlot>()?;
         app.init_resource::<RenderBackendStatus>()?;
         let world = app.world_mut()?;
@@ -226,6 +229,12 @@ impl Plugin for WgpuRenderPlugin {
     }
 
     fn shutdown(&self, context: &mut PluginShutdownContext<'_>) -> Result<(), PluginError> {
+        if let Some(mut slot) = context
+            .world_mut()
+            .get_resource_mut::<WgpuFramePacketSlot>()
+        {
+            slot.close();
+        }
         if let Some(mut backend) = context.world_mut().get_resource_mut::<WgpuRenderBackend>() {
             backend
                 .clear_gpu_resources(SurfaceDropReason::BackendCleanup)
@@ -293,8 +302,12 @@ impl PreparedSubmitterDraw {
     }
 }
 
-fn reset_wgpu_frame_packet(mut slot: ResMut<WgpuFramePacketSlot>) {
+fn reset_wgpu_frame_packet(
+    mut slot: ResMut<WgpuFramePacketSlot>,
+    mut observation: ResMut<WgpuRenderObservation>,
+) {
     slot.reset();
+    *observation = WgpuRenderObservation::default();
 }
 
 #[cfg(feature = "sprite-submitter")]
@@ -510,6 +523,7 @@ fn render_wgpu_surfaces(
     windows: Query<&Window>,
     world_canvas: Option<Res<nara_render::WorldCanvas>>,
     mut backend: ResMut<WgpuRenderBackend>,
+    mut observation: ResMut<WgpuRenderObservation>,
     handles: Option<Res<BackendWindowHandles>>,
     mut packet_slot: ResMut<WgpuFramePacketSlot>,
     mut frame: ResMut<RenderFrame>,
@@ -601,6 +615,7 @@ fn render_wgpu_surfaces(
         );
         frame.mark_skipped();
     }
+    *observation = backend.take_observation();
 }
 
 #[cfg(feature = "ui-submitter")]
@@ -1148,6 +1163,56 @@ mod tests {
             [UiPresentationOutcome::ContentRejected { attempt, .. }]
                 if attempt.admission_id().is_some_and(|id| id.get() == 71)
         ));
+    }
+
+    #[cfg(feature = "ui-submitter")]
+    #[test]
+    fn managed_shutdown_returns_buffered_ui_permissions_before_world_destruction() {
+        use std::time::Duration;
+
+        use nara_app::{RuntimeControl, RuntimeControlRequestResult};
+        use nara_ui_render::__private::backend_outcome_receiver;
+
+        let mut app = App::new();
+        install_test_plugins(&mut app, false);
+        let receiver = backend_outcome_receiver(app.world()).unwrap();
+        let packet = ui_outcome_packet();
+        let submission = {
+            let mut outcomes = app
+                .world_mut()
+                .unwrap()
+                .resource_mut::<UiPresentationOutcomes>();
+            admit_ui_attempt(
+                &mut outcomes,
+                prepared_ui_attempt(Arc::clone(&packet), 72, 52),
+            )
+        };
+        app.world_mut()
+            .unwrap()
+            .resource_mut::<WgpuFramePacketSlot>()
+            .collect_ui(vec![packet], vec![submission]);
+        assert_eq!(receiver.pending_backend_count(), 1);
+
+        let mut runtime = admit_runtime(app).complete_startup().unwrap().promote();
+        assert!(matches!(
+            runtime.request_control(RuntimeControl::Stop),
+            RuntimeControlRequestResult::Accepted(_)
+        ));
+        let deadline = std::time::Instant::now() + Duration::from_secs(5);
+        while runtime.state() != RuntimeState::Stopped {
+            runtime.drive(Duration::ZERO).unwrap();
+            assert!(std::time::Instant::now() < deadline);
+        }
+        // Stopped still retains this World. Plugin shutdown, rather than World destruction,
+        // must have returned the original permission held in its private frame slot.
+        assert!(runtime.world().contains_resource::<WgpuFramePacketSlot>());
+        assert_eq!(receiver.pending_backend_count(), 0);
+        assert!(matches!(
+            receiver.drain().unwrap().as_slice(),
+            [UiPresentationOutcome::Aborted { attempt, .. }]
+                if attempt.admission_id().is_some_and(|id| id.get() == 72)
+        ));
+        runtime.finish().unwrap();
     }
 
     #[test]

@@ -1,6 +1,6 @@
 use std::{
     collections::{BTreeMap, HashMap, HashSet},
-    sync::Arc,
+    sync::{Arc, Mutex},
 };
 
 use nara_app::{App, Plugin, PluginDefinition, PluginDefinitionId, PluginError};
@@ -73,14 +73,125 @@ struct UiPresentationRoutes {
 }
 
 #[derive(Resource)]
-struct UiPresentationState(UiPresentationPlanner);
+struct UiPresentationState(UiPresentationPlanner, Arc<()>);
+
+/// Non-forgeable original planner owner used only by retained logical-close plumbing.
+#[doc(hidden)]
+#[derive(Clone, Debug)]
+pub struct UiPresentationPlannerClaim(Arc<()>);
+
+impl UiPresentationPlannerClaim {
+    #[must_use]
+    pub fn is_current(&self, world: &World) -> bool {
+        world
+            .get_resource::<UiPresentationState>()
+            .is_some_and(|state| Arc::ptr_eq(&state.1, &self.0))
+    }
+}
+
+#[doc(hidden)]
+#[must_use]
+pub fn presentation_planner_claim(world: &World) -> Option<UiPresentationPlannerClaim> {
+    world
+        .get_resource::<UiPresentationState>()
+        .map(|state| UiPresentationPlannerClaim(Arc::clone(&state.1)))
+}
 
 #[doc(hidden)]
 #[derive(Debug, Default, Resource)]
 pub struct UiPresentationOutcomes {
     outcomes: Vec<UiPresentationOutcome>,
-    reserved_backend: HashSet<UiBackendSubmissionIdentity>,
-    backend_commit_scratch: HashSet<UiBackendSubmissionIdentity>,
+    backend: Option<Arc<Mutex<BackendOutcomeBatch>>>,
+    receiver: UiBackendOutcomeReceiver,
+}
+
+#[derive(Debug)]
+struct BackendOutcomeBatch {
+    slots: Vec<BackendOutcomeSlot>,
+    outcomes: Vec<UiPresentationOutcome>,
+    pending: usize,
+}
+
+#[derive(Debug)]
+struct BackendOutcomeSlot {
+    identity: UiBackendSubmissionIdentity,
+    returned: bool,
+}
+
+#[derive(Debug, Default)]
+struct BackendOutcomeTracking {
+    current: Option<Arc<Mutex<BackendOutcomeBatch>>>,
+    closing: bool,
+}
+
+/// Original backend-result custody retained by the Runtime's logical close consumer.
+///
+/// This receiver retains CPU outcomes through removal of the World ingress resource. Receiving
+/// every backend result does not itself settle UI/Input authority; the original consumer does.
+#[doc(hidden)]
+#[derive(Clone, Debug, Default)]
+pub struct UiBackendOutcomeReceiver {
+    tracking: Arc<Mutex<BackendOutcomeTracking>>,
+}
+
+impl UiBackendOutcomeReceiver {
+    pub fn begin_close(&self) {
+        self.tracking
+            .lock()
+            .unwrap_or_else(|error| error.into_inner())
+            .closing = true;
+    }
+
+    #[must_use]
+    pub fn pending_backend_count(&self) -> usize {
+        self.current().map_or(0, |owner| {
+            owner
+                .lock()
+                .unwrap_or_else(|error| error.into_inner())
+                .pending
+        })
+    }
+
+    /// Backend transport remains outstanding until original results have also been drained.
+    #[must_use]
+    pub fn has_unsettled_backend_results(&self) -> bool {
+        self.current().is_some_and(|owner| {
+            let batch = owner.lock().unwrap_or_else(|error| error.into_inner());
+            batch.pending != 0 || !batch.outcomes.is_empty()
+        })
+    }
+
+    pub fn drain(&self) -> Result<Vec<UiPresentationOutcome>, UiPresentationIntegrationError> {
+        let Some(owner) = self.current() else {
+            return Ok(Vec::new());
+        };
+        let mut batch = owner.lock().unwrap_or_else(|error| error.into_inner());
+        if batch.pending != 0 {
+            return Err(
+                UiPresentationIntegrationError::OutstandingBackendOutcomeReservations {
+                    count: batch.pending,
+                },
+            );
+        }
+        Ok(std::mem::take(&mut batch.outcomes))
+    }
+
+    fn current(&self) -> Option<Arc<Mutex<BackendOutcomeBatch>>> {
+        self.tracking
+            .lock()
+            .unwrap_or_else(|error| error.into_inner())
+            .current
+            .clone()
+    }
+}
+
+/// Captures the original receiver before a backend candidate can leave the Runtime.
+#[doc(hidden)]
+#[must_use]
+pub fn backend_outcome_receiver(world: &World) -> Option<UiBackendOutcomeReceiver> {
+    world
+        .get_resource::<UiBackendSubmissionQueue>()
+        .map(|queue| queue.receiver.clone())
 }
 
 /// Move-only permission to publish exactly one backend outcome for one admitted submission.
@@ -88,12 +199,32 @@ pub struct UiPresentationOutcomes {
 #[derive(Debug)]
 pub struct UiBackendOutcomePermit {
     identity: UiBackendSubmissionIdentity,
+    owner: Arc<Mutex<BackendOutcomeBatch>>,
+    slot: usize,
+    abandoned: Option<UiPresentationOutcome>,
 }
 
 impl UiBackendOutcomePermit {
     #[must_use]
     pub const fn identity(&self) -> UiBackendSubmissionIdentity {
         self.identity
+    }
+}
+
+impl Drop for UiBackendOutcomePermit {
+    fn drop(&mut self) {
+        let Some(abandoned) = self.abandoned.take() else {
+            return;
+        };
+        let mut owner = self.owner.lock().unwrap_or_else(|error| error.into_inner());
+        let slot = &mut owner.slots[self.slot];
+        debug_assert_eq!(slot.identity, self.identity);
+        debug_assert!(!slot.returned);
+        // The slot and fallback were admitted before the permit left its original owner.
+        // Returning an abandoned permission needs neither a live World nor an allocation.
+        slot.returned = true;
+        owner.outcomes.push(abandoned);
+        owner.pending -= 1;
     }
 }
 
@@ -340,13 +471,22 @@ impl UiBackendSubmission {
 
 /// Move-only frame exchange populated by the Host and drained once by the concrete backend.
 #[doc(hidden)]
-#[derive(Debug, Default, Resource)]
+#[derive(Debug, Resource)]
 pub(crate) struct UiBackendSubmissionQueue {
     packets: Vec<Arc<UiPaintPacket>>,
     submissions: Vec<UiPreparedBackendSubmission>,
+    receiver: UiBackendOutcomeReceiver,
 }
 
 impl UiBackendSubmissionQueue {
+    fn new(receiver: UiBackendOutcomeReceiver) -> Self {
+        Self {
+            packets: Vec::new(),
+            submissions: Vec::new(),
+            receiver,
+        }
+    }
+
     /// Replaces the next backend frame and returns prepared attempts that never reached submit.
     fn replace(
         &mut self,
@@ -404,12 +544,17 @@ impl UiPresentationOutcomes {
         &mut self,
         completed: UiCompletedBackendOutcome,
     ) -> Result<(), UiCompletedBackendOutcome> {
-        if !self.reserved_backend.remove(&completed.permit.identity) {
+        let Some(owner) = &self.backend else {
+            return Err(completed);
+        };
+        if !Arc::ptr_eq(owner, &completed.permit.owner) {
             return Err(completed);
         }
-        let UiCompletedBackendOutcome { permit, outcome } = completed;
-        let _ = permit;
-        self.outcomes.push(outcome);
+        let mut batch = owner.lock().unwrap_or_else(|error| error.into_inner());
+        if !batch.accepts(&completed.permit) {
+            return Err(completed);
+        }
+        batch.commit(completed);
         Ok(())
     }
 
@@ -417,25 +562,30 @@ impl UiPresentationOutcomes {
         &mut self,
         completed: Vec<UiCompletedBackendOutcome>,
     ) -> Result<(), Vec<UiCompletedBackendOutcome>> {
-        self.backend_commit_scratch.clear();
-        if self
-            .backend_commit_scratch
-            .try_reserve(completed.len())
-            .is_err()
-            || completed.iter().any(|outcome| {
-                !self.reserved_backend.contains(&outcome.permit.identity)
-                    || !self.backend_commit_scratch.insert(outcome.permit.identity)
-            })
+        let Some(owner) = &self.backend else {
+            return if completed.is_empty() {
+                Ok(())
+            } else {
+                Err(completed)
+            };
+        };
+        if completed
+            .iter()
+            .any(|outcome| !Arc::ptr_eq(owner, &outcome.permit.owner))
         {
-            self.backend_commit_scratch.clear();
             return Err(completed);
         }
-        self.backend_commit_scratch.clear();
+        let mut batch = owner.lock().unwrap_or_else(|error| error.into_inner());
+        if completed
+            .iter()
+            .any(|outcome| !batch.accepts(&outcome.permit))
+        {
+            return Err(completed);
+        }
+        // Each private slot issues exactly one move-only permit. A caller cannot duplicate it;
+        // complete owner/slot preflight therefore admits the whole batch without new scratch.
         for completed in completed {
-            self.reserved_backend.remove(&completed.permit.identity);
-            let UiCompletedBackendOutcome { permit, outcome } = completed;
-            let _ = permit;
-            self.outcomes.push(outcome);
+            batch.commit(completed);
         }
         Ok(())
     }
@@ -444,13 +594,15 @@ impl UiPresentationOutcomes {
         &mut self,
         outcomes: Vec<UiPresentationOutcome>,
     ) -> Result<(), UiPresentationIntegrationError> {
-        if !self.reserved_backend.is_empty() {
+        let pending = self.pending_backend_count();
+        if pending != 0 {
             return Err(
                 UiPresentationIntegrationError::OutstandingBackendOutcomeReservations {
-                    count: self.reserved_backend.len(),
+                    count: pending,
                 },
             );
         }
+        self.collect_backend();
         if !self.outcomes.is_empty() {
             return Err(
                 UiPresentationIntegrationError::PendingPresentationOutcomes {
@@ -466,12 +618,36 @@ impl UiPresentationOutcomes {
         &mut self,
         submissions: &[UiPreparedBackendSubmission],
     ) -> Result<Vec<UiBackendOutcomePermit>, UiPresentationIntegrationError> {
-        if !self.reserved_backend.is_empty() {
+        if self
+            .receiver
+            .tracking
+            .lock()
+            .unwrap_or_else(|error| error.into_inner())
+            .closing
+        {
+            return Err(UiPresentationIntegrationError::BackendOutcomeAdmissionClosed);
+        }
+        let pending = self.pending_backend_count();
+        if pending != 0 {
             return Err(
                 UiPresentationIntegrationError::OutstandingBackendOutcomeReservations {
-                    count: self.reserved_backend.len(),
+                    count: pending,
                 },
             );
+        }
+        if let Some(owner) = &self.backend {
+            let count = owner
+                .lock()
+                .unwrap_or_else(|error| error.into_inner())
+                .outcomes
+                .len();
+            if count != 0 {
+                return Err(UiPresentationIntegrationError::PendingPresentationOutcomes { count });
+            }
+        }
+        self.collect_backend();
+        if submissions.is_empty() {
+            return Ok(Vec::new());
         }
         self.outcomes.try_reserve(submissions.len()).map_err(|_| {
             UiPresentationIntegrationError::OutcomeCapacityUnavailable {
@@ -492,24 +668,142 @@ impl UiPresentationOutcomes {
                 });
             }
         }
-        self.reserved_backend = identities;
-        Ok(submissions
-            .iter()
-            .map(|submission| UiBackendOutcomePermit {
+        let mut slots = Vec::new();
+        let mut abandoned = Vec::new();
+        let mut permits = Vec::new();
+        let mut completed = Vec::new();
+        abandoned
+            .try_reserve_exact(submissions.len())
+            .map_err(
+                |_| UiPresentationIntegrationError::OutcomeCapacityUnavailable {
+                    additional: submissions.len(),
+                },
+            )?;
+        permits.try_reserve_exact(submissions.len()).map_err(|_| {
+            UiPresentationIntegrationError::OutcomeCapacityUnavailable {
+                additional: submissions.len(),
+            }
+        })?;
+        completed
+            .try_reserve_exact(submissions.len())
+            .map_err(
+                |_| UiPresentationIntegrationError::OutcomeCapacityUnavailable {
+                    additional: submissions.len(),
+                },
+            )?;
+        slots.try_reserve_exact(submissions.len()).map_err(|_| {
+            UiPresentationIntegrationError::OutcomeCapacityUnavailable {
+                additional: submissions.len(),
+            }
+        })?;
+        for submission in submissions {
+            let mut message = String::new();
+            message
+                .try_reserve_exact(BACKEND_ABANDONED_MESSAGE.len())
+                .map_err(
+                    |_| UiPresentationIntegrationError::OutcomeCapacityUnavailable {
+                        additional: submissions.len(),
+                    },
+                )?;
+            message.push_str(BACKEND_ABANDONED_MESSAGE);
+            abandoned.push(UiPresentationOutcome::Aborted {
+                attempt: UiPresentationAttemptIdentity::backend(submission.identity()),
+                message,
+            });
+            slots.push(BackendOutcomeSlot {
                 identity: submission.identity(),
-            })
-            .collect())
+                returned: false,
+            });
+        }
+        let owner = Arc::new(Mutex::new(BackendOutcomeBatch {
+            slots,
+            outcomes: completed,
+            pending: submissions.len(),
+        }));
+        for (slot, (submission, abandoned)) in submissions.iter().zip(abandoned).enumerate() {
+            permits.push(UiBackendOutcomePermit {
+                identity: submission.identity(),
+                owner: Arc::clone(&owner),
+                slot,
+                abandoned: Some(abandoned),
+            });
+        }
+        let mut tracking = self
+            .receiver
+            .tracking
+            .lock()
+            .unwrap_or_else(|error| error.into_inner());
+        if tracking.closing {
+            return Err(UiPresentationIntegrationError::BackendOutcomeAdmissionClosed);
+        }
+        tracking.current = Some(Arc::clone(&owner));
+        self.backend = Some(owner);
+        Ok(permits)
     }
 
     fn drain(&mut self) -> Result<Vec<UiPresentationOutcome>, UiPresentationIntegrationError> {
-        if !self.reserved_backend.is_empty() {
+        let pending = self.pending_backend_count();
+        if pending != 0 {
             return Err(
                 UiPresentationIntegrationError::OutstandingBackendOutcomeReservations {
-                    count: self.reserved_backend.len(),
+                    count: pending,
                 },
             );
         }
+        self.collect_backend();
         Ok(std::mem::take(&mut self.outcomes))
+    }
+
+    fn pending_backend_count(&self) -> usize {
+        self.backend.as_ref().map_or(0, |owner| {
+            owner
+                .lock()
+                .unwrap_or_else(|error| error.into_inner())
+                .pending
+        })
+    }
+
+    fn admission_state(&self) -> (usize, usize) {
+        let Some(owner) = &self.backend else {
+            return (self.outcomes.len(), 0);
+        };
+        // Observe both axes together: a last permit can return from another thread between
+        // independent completed/pending reads, before the planner is allowed to mutate.
+        let batch = owner.lock().unwrap_or_else(|error| error.into_inner());
+        (self.outcomes.len() + batch.outcomes.len(), batch.pending)
+    }
+
+    fn collect_backend(&mut self) {
+        let Some(owner) = self.backend.take() else {
+            return;
+        };
+        let completed = {
+            let mut batch = owner.lock().unwrap_or_else(|error| error.into_inner());
+            debug_assert_eq!(batch.pending, 0);
+            std::mem::take(&mut batch.outcomes)
+        };
+        self.outcomes.extend(completed);
+    }
+}
+
+const BACKEND_ABANDONED_MESSAGE: &str = "the owning backend attempt was abandoned";
+
+impl BackendOutcomeBatch {
+    fn accepts(&self, permit: &UiBackendOutcomePermit) -> bool {
+        self.slots
+            .get(permit.slot)
+            .is_some_and(|slot| slot.identity == permit.identity && !slot.returned)
+    }
+
+    fn commit(&mut self, completed: UiCompletedBackendOutcome) {
+        let UiCompletedBackendOutcome {
+            mut permit,
+            outcome,
+        } = completed;
+        permit.abandoned = None;
+        self.slots[permit.slot].returned = true;
+        self.outcomes.push(outcome);
+        self.pending -= 1;
     }
 }
 
@@ -560,16 +854,21 @@ pub fn compile_ui_paint_packets(
     if !world.contains_resource::<UiPresentationState>()
         || !world.contains_resource::<UiPresentationOutcomes>()
         || !world.contains_resource::<UiPresentationRoutes>()
+        || !world.contains_resource::<UiBackendSubmissionQueue>()
     {
         return Err(UiPresentationIntegrationError::Unavailable);
     }
-    let (pending_outcomes, outstanding_backend) = {
-        let outcome_state = world.resource::<UiPresentationOutcomes>();
-        (
-            outcome_state.outcomes.len(),
-            outcome_state.reserved_backend.len(),
-        )
-    };
+    if !Arc::ptr_eq(
+        &world
+            .resource::<UiBackendSubmissionQueue>()
+            .receiver
+            .tracking,
+        &world.resource::<UiPresentationOutcomes>().receiver.tracking,
+    ) {
+        return Err(UiPresentationIntegrationError::BackendOutcomeOwnerChanged);
+    }
+    let (pending_outcomes, outstanding_backend) =
+        world.resource::<UiPresentationOutcomes>().admission_state();
     if pending_outcomes != 0 {
         return Err(
             UiPresentationIntegrationError::PendingPresentationOutcomes {
@@ -807,6 +1106,8 @@ pub fn abort_ui_planned_packet(
 pub enum UiPresentationIntegrationError {
     #[error("UI presentation integration is unavailable because UiRenderPlugin is not installed")]
     Unavailable,
+    #[error("the original UI backend outcome owner has closed admission")]
+    BackendOutcomeAdmissionClosed,
     #[error("UI backend attempt {admission_id} appears more than once in one submitted frame")]
     DuplicateBackendAttempt { admission_id: u64 },
     #[error(
@@ -840,6 +1141,8 @@ pub enum UiPresentationIntegrationError {
         "UI backend outcome capacity for {additional} submissions could not be reserved before submit"
     )]
     OutcomeCapacityUnavailable { additional: usize },
+    #[error("the UI backend queue no longer matches its original outcome receiver")]
+    BackendOutcomeOwnerChanged,
 }
 
 fn target_conflicts(
@@ -931,6 +1234,9 @@ fn take_backend_presentation_frame(
     queue: &mut UiBackendSubmissionQueue,
     outcomes: &mut UiPresentationOutcomes,
 ) -> Result<UiBackendPresentationFrame, UiPresentationIntegrationError> {
+    if !Arc::ptr_eq(&queue.receiver.tracking, &outcomes.receiver.tracking) {
+        return Err(UiPresentationIntegrationError::BackendOutcomeOwnerChanged);
+    }
     let permits = outcomes.reserve_backend(&queue.submissions)?;
     let (packets, submissions) = queue.take();
     let submissions = submissions
@@ -996,10 +1302,15 @@ impl Plugin for UiRenderPlugin {
             plugin: UI_RENDER_PLUGIN_ID,
             message: error.to_string(),
         })?;
-        app.insert_resource(UiPresentationState(planner))?;
+        app.insert_resource(UiPresentationState(planner, Arc::new(())))?;
         app.init_resource::<UiPresentationRoutes>()?;
         app.init_resource::<UiPresentationOutcomes>()?;
-        app.init_resource::<UiBackendSubmissionQueue>()?;
+        let receiver = app
+            .world()
+            .resource::<UiPresentationOutcomes>()
+            .receiver
+            .clone();
+        app.insert_resource(UiBackendSubmissionQueue::new(receiver))?;
         Ok(())
     }
 }

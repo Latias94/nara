@@ -502,20 +502,12 @@ fn real_domain_rejection_postfault_returns_exact_completion_and_ui_outcomes() {
 }
 
 #[test]
-fn stopped_scope_entry_returns_uninvoked_completion_and_ui_outcomes() {
+fn stopped_scope_entry_returns_uninvoked_completion() {
     let project = TestProject::new("game-view-completion-scope-rejection");
-    #[cfg(feature = "presentation-ui")]
-    project.write_ui_authoring_documents(None, None);
-    let mut editor = open_game(&project, cfg!(feature = "presentation-ui"));
+    let mut editor = open_game(&project, false);
     let completion =
         take_candidate(&mut editor).content_rejected("uninvoked scope retains custody");
     let identity = completion.identity();
-    #[cfg(feature = "presentation-ui")]
-    let (allocation, outcome_count, outcome_debug) = {
-        let outcomes = completion.test_ui_outcomes();
-        assert!(!outcomes.is_empty());
-        (outcomes.as_ptr(), outcomes.len(), format!("{outcomes:?}"))
-    };
     stop_lower_runtime(&mut editor);
     assert!(!editor.test_game_view_bridge_is_idle());
     assert!(editor.test_game_view_runtime().fault().is_none());
@@ -529,12 +521,6 @@ fn stopped_scope_entry_returns_uninvoked_completion_and_ui_outcomes() {
         returned.disposition(),
         EditorGameViewCompletionDisposition::ContentRejected
     );
-    #[cfg(feature = "presentation-ui")]
-    {
-        assert_eq!(returned.test_ui_outcomes().as_ptr(), allocation);
-        assert_eq!(returned.test_ui_outcomes().len(), outcome_count);
-        assert_eq!(format!("{:?}", returned.test_ui_outcomes()), outcome_debug);
-    }
     assert_eq!(editor.test_game_view_in_flight(), Some(identity));
     assert!(!editor.test_game_view_bridge_is_idle());
     assert!(
@@ -542,5 +528,50 @@ fn stopped_scope_entry_returns_uninvoked_completion_and_ui_outcomes() {
         "the post-port injection cannot run when scope entry rejects the input"
     );
     drop(returned);
+    drive_editor_close_to_completion(&mut editor);
+}
+
+#[cfg(feature = "presentation-ui")]
+#[test]
+fn lower_runtime_close_waits_for_the_original_game_view_ui_completion() {
+    let project = TestProject::new("game-view-original-ui-completion-close");
+    project.write_ui_authoring_documents(None, None);
+    let mut editor = open_game(&project, true);
+    let completion = take_candidate(&mut editor).content_rejected("complete during logical close");
+    let identity = completion.identity();
+    assert!(!completion.test_ui_outcomes().is_empty());
+    let receiver = nara_ui_render::__private::backend_outcome_receiver(
+        editor.test_game_view_runtime().world(),
+    )
+    .unwrap();
+    assert!(receiver.pending_backend_count() != 0);
+    {
+        let runtime = editor.test_game_view_runtime();
+        assert!(matches!(
+            runtime.request_control(RuntimeControl::Stop),
+            RuntimeControlRequestResult::Accepted(_)
+        ));
+        for _ in 0..3 {
+            assert_eq!(
+                runtime.drive(Duration::ZERO).unwrap().state(),
+                RuntimeState::Stopping
+            );
+        }
+    }
+    assert_eq!(editor.test_game_view_in_flight(), Some(identity));
+    assert!(receiver.pending_backend_count() != 0);
+    editor
+        .complete_game_view_candidate(completion)
+        .expect("the closing Runtime must still accept its original Game completion");
+    assert_eq!(editor.test_game_view_in_flight(), None);
+    assert_eq!(receiver.pending_backend_count(), 0);
+    stop_lower_runtime(&mut editor);
+    assert!(!receiver.has_unsettled_backend_results());
+    assert!(
+        crate::ui_presentation::latest_presented_ui_observation(
+            editor.test_game_view_runtime().world(),
+        )
+        .is_none()
+    );
     drive_editor_close_to_completion(&mut editor);
 }

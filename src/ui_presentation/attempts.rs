@@ -109,6 +109,8 @@ impl<T> UiPresentationAttemptInsertError<T> {
 
 #[derive(Resource)]
 pub(super) struct UiPresentationAttemptLedger {
+    owner: Arc<()>,
+    closing: bool,
     next_attempt_id: u64,
     next_presentation_epoch: u64,
     capability_generation: UiPresentationCapabilityGeneration,
@@ -118,6 +120,8 @@ pub(super) struct UiPresentationAttemptLedger {
 impl Default for UiPresentationAttemptLedger {
     fn default() -> Self {
         Self {
+            owner: Arc::new(()),
+            closing: false,
             next_attempt_id: 1,
             next_presentation_epoch: 1,
             capability_generation: UiPresentationCapabilityGeneration::new(
@@ -130,11 +134,38 @@ impl Default for UiPresentationAttemptLedger {
 }
 
 impl UiPresentationAttemptLedger {
+    pub(super) fn owner(&self) -> Arc<()> {
+        Arc::clone(&self.owner)
+    }
+
+    pub(super) fn is_owned_by(&self, owner: &Arc<()>) -> bool {
+        Arc::ptr_eq(&self.owner, owner)
+    }
+
+    pub(super) fn begin_close(&mut self) {
+        self.closing = true;
+    }
+
+    pub(super) const fn is_closing(&self) -> bool {
+        self.closing
+    }
+
+    pub(super) fn active(&self) -> impl Iterator<Item = &UiPresentationAttempt> {
+        self.active.iter()
+    }
+
+    pub(super) fn first_attempt_id(&self) -> Option<UiPresentationAttemptId> {
+        self.active.first().map(UiPresentationAttempt::attempt_id)
+    }
+
     pub(super) fn reserve(
         &mut self,
         surface_id: UiSurfaceId,
         runtime_generation: UiPresentationRuntimeGeneration,
     ) -> Result<UiPresentationAttemptReservation, UiPresentationAttemptLedgerError> {
+        if self.closing {
+            return Err(UiPresentationAttemptLedgerError::Closing);
+        }
         if self.active.len() >= MAX_ACTIVE_PRESENTATION_ATTEMPTS {
             return Err(UiPresentationAttemptLedgerError::CapacityExceeded);
         }
@@ -171,6 +202,9 @@ impl UiPresentationAttemptLedger {
         &self,
         identity: UiBackendSubmissionIdentity,
     ) -> Result<(), UiPresentationAttemptLedgerError> {
+        if self.closing {
+            return Err(UiPresentationAttemptLedgerError::Closing);
+        }
         if self.active.len() >= MAX_ACTIVE_PRESENTATION_ATTEMPTS {
             return Err(UiPresentationAttemptLedgerError::CapacityExceeded);
         }
@@ -316,14 +350,6 @@ impl UiPresentationAttemptLedger {
         }
     }
 
-    pub(super) fn submitted_ids(&self) -> Vec<UiPresentationAttemptId> {
-        self.active
-            .iter()
-            .filter(|attempt| attempt.is_submitted())
-            .map(UiPresentationAttempt::attempt_id)
-            .collect()
-    }
-
     pub(super) fn deferred_ids(&self) -> Vec<UiPresentationAttemptId> {
         self.active
             .iter()
@@ -371,6 +397,7 @@ fn same_frame(frame: &Arc<UiFrame>, packet: &Arc<UiPaintPacket>) -> bool {
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(super) enum UiPresentationAttemptLedgerError {
+    Closing,
     CapacityExceeded,
     SurfaceAlreadyActive { surface_id: UiSurfaceId },
     DuplicateAttempt { attempt_id: UiPresentationAttemptId },
@@ -383,6 +410,7 @@ pub(super) enum UiPresentationAttemptLedgerError {
 impl fmt::Display for UiPresentationAttemptLedgerError {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
+            Self::Closing => formatter.write_str("UI presentation admission has closed"),
             Self::CapacityExceeded => write!(
                 formatter,
                 "UI presentation attempt capacity of {MAX_ACTIVE_PRESENTATION_ATTEMPTS} was exceeded"

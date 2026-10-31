@@ -10,7 +10,7 @@ use nara_app::{
 };
 use nara_ecs::{Res, ResMut, Resource};
 use nara_fs::DirectoryCapability;
-use nara_render_wgpu::{WGPU_RENDER_PLUGIN_ID, WgpuRenderBackend};
+use nara_render_wgpu::{WGPU_RENDER_PLUGIN_ID, WgpuRenderObservation};
 
 use super::super::{
     ProductSupervisedDesktopReadyAdvance, ProductSupervisedDesktopReadyPublication,
@@ -283,11 +283,11 @@ impl Plugin for DesktopFirstPresentPlugin {
 
 fn verify_first_present(
     runtime_generation: Res<RuntimeGeneration>,
-    backend: Res<WgpuRenderBackend>,
+    observation: Res<WgpuRenderObservation>,
     verification: Res<DesktopFirstPresentResource>,
     mut exit_requests: ResMut<AppExitRequests>,
 ) {
-    let presented = nara_render_wgpu::__private::presented_frame_this_transaction(&backend);
+    let presented = nara_render_wgpu::__private::presented_frame_this_transaction(&observation);
     let action = advance(
         &verification.shared,
         *runtime_generation,

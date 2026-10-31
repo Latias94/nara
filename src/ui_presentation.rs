@@ -11,6 +11,7 @@ use nara_ui_render::{
 #[cfg(feature = "desktop-winit")]
 mod accessibility;
 mod attempts;
+mod close;
 mod observation;
 mod surfaces;
 
@@ -70,7 +71,8 @@ pub(crate) const UI_PRESENTATION_BRIDGE_PLUGIN_DECLARATION: nara_app::PluginDecl
         nara_app::PluginCategory::Render,
     )
     .requires_plugins(UI_PRESENTATION_BRIDGE_PLUGIN_REQUIREMENTS)
-    .requires_product_capabilities(UI_PRESENTATION_BRIDGE_PRODUCT_REQUIREMENTS);
+    .requires_product_capabilities(UI_PRESENTATION_BRIDGE_PRODUCT_REQUIREMENTS)
+    .shutdown_obligations(&[close::UI_PRESENTATION_CLOSE_OBLIGATION]);
 
 impl Plugin for UiPresentationBridgePlugin {
     fn declaration() -> &'static nara_app::PluginDeclaration {
@@ -81,6 +83,7 @@ impl Plugin for UiPresentationBridgePlugin {
         app.init_resource::<UiPresentationBridgeStats>()?;
         app.init_resource::<UiPresentationAttemptLedger>()?;
         app.init_resource::<observation::PresentedUiObservationStore>()?;
+        close::install(app)?;
         app.add_systems(
             CoreStage::First,
             surfaces::synchronize_runtime_ui_surface_metrics
@@ -158,6 +161,9 @@ impl Plugin for WinitUiAccessibilityContributionPlugin {
 }
 
 fn compile_runtime_ui_packets(world: &mut World) {
+    if world.resource::<UiPresentationAttemptLedger>().is_closing() {
+        return;
+    }
     world.resource_mut::<UiPresentationBridgeStats>().last_error = None;
     if let Err(error) = surfaces::synchronize_runtime_ui_routes(world) {
         record_bridge_error(world, error);
@@ -166,6 +172,32 @@ fn compile_runtime_ui_packets(world: &mut World) {
     if let Err(error) = clear_unconsumed_backend_frame(world) {
         record_bridge_error(world, error);
         return;
+    }
+    if world
+        .resource::<UiPresentationAttemptLedger>()
+        .active()
+        .any(UiPresentationAttempt::is_submitted)
+    {
+        let Some(receiver) = nara_ui_render::__private::backend_outcome_receiver(world) else {
+            record_bridge_error(
+                world,
+                "the original backend outcome owner is unavailable".to_owned(),
+            );
+            return;
+        };
+        if receiver.has_unsettled_backend_results() {
+            return;
+        }
+        // The transport has already returned and its result was drained. A delayed one-shot
+        // acceptance no longer pins capture admission; supersede its remaining original UI
+        // authority before preparing the successor, so a later old commit fails closed.
+        let stranded = world
+            .resource::<UiPresentationAttemptLedger>()
+            .active()
+            .filter(|attempt| attempt.is_submitted())
+            .map(UiPresentationAttempt::attempt_id)
+            .collect::<Vec<_>>();
+        abort_prepared_attempts(world, &stranded, AttemptTermination::Aborted);
     }
     let frames = match nara_ui::ui_candidate_frames(world) {
         Ok(frames) => frames,
@@ -419,10 +451,6 @@ fn clear_unconsumed_backend_frame(world: &mut World) -> Result<(), String> {
         nara_ui_render::__private::replace_ui_backend_frame(world, Vec::new(), Vec::new())
             .map_err(|error| error.to_string())?;
     abort_unconsumed_backend_submissions(world, unconsumed);
-    let stranded = world
-        .resource::<UiPresentationAttemptLedger>()
-        .submitted_ids();
-    abort_prepared_attempts(world, &stranded, AttemptTermination::Aborted);
     Ok(())
 }
 
@@ -469,6 +497,16 @@ fn upsert_draw_packet(packets: &mut Vec<Arc<UiPaintPacket>>, packet: Arc<UiPaint
 }
 
 pub(crate) fn commit_runtime_ui_presentations(world: &mut World) {
+    let Some(ledger) = world.get_resource::<UiPresentationAttemptLedger>() else {
+        record_bridge_error(
+            world,
+            "the UI presentation attempt owner is unavailable".to_owned(),
+        );
+        return;
+    };
+    if ledger.is_closing() {
+        return;
+    }
     let outcomes = match nara_ui_render::drain_ui_presentation_outcomes(world) {
         Ok(outcomes) => outcomes,
         Err(error) => {
@@ -646,10 +684,11 @@ fn terminate_attempt(
         },
     }
     let _ = nara_ui_render::__private::abort_ui_planned_packet(world, attempt_identity);
-    let mut bridge = world.resource_mut::<UiPresentationBridgeStats>();
-    match termination {
-        AttemptTermination::Aborted => bridge.aborted_packets += 1,
-        AttemptTermination::Superseded => bridge.superseded_packets += 1,
+    if let Some(mut bridge) = world.get_resource_mut::<UiPresentationBridgeStats>() {
+        match termination {
+            AttemptTermination::Aborted => bridge.aborted_packets += 1,
+            AttemptTermination::Superseded => bridge.superseded_packets += 1,
+        }
     }
 }
 

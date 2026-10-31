@@ -486,6 +486,20 @@ impl WgpuRenderBackend {
         stats
     }
 
+    /// Transfers already admitted CPU facts to the World without exposing native execution.
+    pub(crate) fn take_observation(&mut self) -> crate::WgpuRenderObservation {
+        crate::WgpuRenderObservation::from_parts(
+            self.instance_id(),
+            self.device_epoch(),
+            self.state(),
+            self.frame_transaction_stats(),
+            self.presented_frame_this_transaction,
+            #[cfg(feature = "ui-submitter")]
+            std::mem::take(&mut self.submitted_ui_facts),
+        )
+    }
+
+    #[cfg(test)]
     pub(crate) const fn presented_frame_this_transaction(
         &self,
     ) -> Option<WgpuPresentedFrameReceipt> {
@@ -493,7 +507,7 @@ impl WgpuRenderBackend {
     }
 
     /// Returns the exact submitted facts for one presentation attempt in the latest transaction.
-    #[cfg(feature = "ui-submitter")]
+    #[cfg(all(test, feature = "ui-submitter"))]
     #[doc(hidden)]
     #[must_use]
     pub(crate) fn submitted_ui_facts(
@@ -1051,7 +1065,10 @@ impl WgpuRenderBackend {
 
     #[cfg(feature = "ui-submitter")]
     pub(crate) fn publish_submitted_ui_facts(&mut self, facts: Vec<WgpuSubmittedUiFacts>) {
-        self.submitted_ui_facts.extend(facts);
+        // The closed Runtime transaction prepares one complete batch before native submission.
+        // Move that buffer through publication; extend would allocate again after acceptance.
+        debug_assert!(self.submitted_ui_facts.is_empty());
+        self.submitted_ui_facts = facts;
     }
 
     pub(super) fn admit_packet(

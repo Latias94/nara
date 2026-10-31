@@ -188,10 +188,10 @@ pub mod __private {
     pub use crate::runtime::{
         UiDeferredPresentationAuthority, UiDeferredPresentationRetry,
         UiPreparedPresentationAuthority, UiPresentationCommit, UiPresentationInvalidationReason,
-        abort_prepared_ui_presentation, commit_prepared_ui_presentation,
-        defer_prepared_ui_presentation, prepare_ui_presentation, retired_ui_surface_token,
-        retry_deferred_ui_presentation, supersede_deferred_ui_presentation,
-        supersede_prepared_ui_presentation,
+        abort_prepared_ui_presentation, can_abort_prepared_ui_presentation,
+        commit_prepared_ui_presentation, defer_prepared_ui_presentation, prepare_ui_presentation,
+        retired_ui_surface_token, retry_deferred_ui_presentation,
+        supersede_deferred_ui_presentation, supersede_prepared_ui_presentation,
     };
 }
 

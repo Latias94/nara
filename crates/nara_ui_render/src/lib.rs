@@ -31,13 +31,14 @@ pub mod __private {
     use std::sync::Arc;
 
     pub use crate::integration::{
-        UiBackendOutcomePermit, UiBackendPresentationFrame, UiBackendSubmission,
-        UiBackendSubmissionBatchBindError, UiBackendSubmissionReader, UiCompletedBackendOutcome,
-        UiPaintPacketSnapshots, UiPresentationOutcomes, UiPresentationRoute,
-        UiPresentationRouteError, UiSubmittedBackendSubmission, abort_ui_planned_packet,
+        UiBackendOutcomePermit, UiBackendOutcomeReceiver, UiBackendPresentationFrame,
+        UiBackendSubmission, UiBackendSubmissionBatchBindError, UiBackendSubmissionReader,
+        UiCompletedBackendOutcome, UiPaintPacketSnapshots, UiPresentationOutcomes,
+        UiPresentationPlannerClaim, UiPresentationRoute, UiPresentationRouteError,
+        UiSubmittedBackendSubmission, abort_ui_planned_packet, backend_outcome_receiver,
         bind_backend_submission_batch, commit_ui_backend_outcome, commit_ui_backend_outcomes,
-        commit_ui_backend_presentation, discard_ui_backend_acceptance, replace_ui_backend_frame,
-        replace_ui_presentation_routes, snapshot_ui_paint_packets,
+        commit_ui_backend_presentation, discard_ui_backend_acceptance, presentation_planner_claim,
+        replace_ui_backend_frame, replace_ui_presentation_routes, snapshot_ui_paint_packets,
         take_ui_backend_presentation_frame,
     };
     pub use crate::planner::UiPlannedPacketAbortOutcome;

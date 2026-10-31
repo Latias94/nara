@@ -753,6 +753,18 @@ fn prepare_input_route(
     .map_err(UiAdapterError::from)
 }
 
+/// Checks that the original Input owner still retains this authority's exact route reservation.
+#[doc(hidden)]
+#[must_use]
+pub fn can_abort_prepared_ui_presentation(
+    world: &World,
+    authority: &UiPreparedPresentationAuthority,
+) -> bool {
+    world.get_resource::<InputTimeline>().is_some_and(|input| {
+        nara_input::__private::owns_prepared_route(input, &authority.input_route)
+    })
+}
+
 /// Aborts one prepared presentation before backend acceptance.
 pub fn abort_prepared_ui_presentation(
     world: &mut World,

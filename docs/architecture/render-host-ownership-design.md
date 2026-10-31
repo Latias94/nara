@@ -107,6 +107,47 @@ same existing local retirement/quarantine policy rather than drop pending Host/w
 The native adapter must qualify this path; ordinary `Result<(), AppRunError>` alone is insufficient
 evidence that an external GPU owner is safe to release.
 
+The next production unit joins one owned native run session to one finite stock capture/result
+connection. It may retain the current single-Runtime, window-only, serial drawing support while
+the subsequent immutable-output and producer-prefix work remains open. The connection carries a
+non-reused incarnation, Runtime generation and monotonic capture sequence; a render-frame index
+alone cannot authenticate a returned result. Its CPU result carries exact frame/status facts,
+world-presentation evidence, original UI outcomes and the read-only WGPU observation, without GPU
+handles. Remove the backend's `Resource` and World driver implementations rather than retaining
+them behind a second Host facade.
+
+Root assembles the concrete WGPU presentation driver and Winit runner. Winit's integration needs
+only local frame maintenance, target retirement and the next necessary wake, without depending on
+WGPU or mirroring its GPU operations. Maintenance must both advance `observe(None, now)` and arrange
+the corresponding `WaitUntil`; an observation callback with no subsequent wake cannot enforce a
+first-present or READY publication deadline. Its close action reaches the runner directly, without
+requiring another simulation frame to consume an exit request.
+
+The native event pump belongs to the retained session alongside the actual handle registry,
+registered target IDs and platform windows. The locked Winit consuming `run_app` entry cannot
+return that pump after an incomplete exit, and `run_app_on_demand` does not establish permission to
+carry live windows between separate runs. Use the platform's retained pump entry for this native
+workflow and qualify real retirement on the same affinity. A one-time Runtime publication transfer
+stays consumed; cleanup drives the session rather than restoring a Runtime into that publication
+slot or reducing it prematurely to Runtime-only retirement. A terminal platform failure may remain
+incomplete, with its dependencies retained; it must not invent native completion.
+
+For the locked Winit 0.30.13 Windows adapter, `pump_app_events` resets its exit state before
+returning `Exit`, so retirement can resume through the same retained pump. Its subsequent
+`Init`/`Resumed` callbacks must not recreate a retiring Runtime or window. Keep target mappings
+until actual `Destroyed` observation: dropping the last window owner only posts its destruction
+message. A retry must dispatch that message rather than immediately exiting again. Qualify early
+Exit, budget expiry and actual destruction with this adapter; this source finding does not grant
+other-platform or panic-recovery guarantees.
+
+Establish original Device/Queue retirement custody while the device is Ready and before its first
+accepted submission. Existing backend error handling can clear the device namespace before
+`render_packet` returns; capturing retirement only on that error path is too late. Share the
+existing concrete Editor queue-drain mechanism privately. Telemetry, observation capacity and World
+resource membership are independent of that custody. Consumer telemetry configuration becomes CPU
+initialization input, and bounded samples/statistics return as observations; GPU polling is not
+reintroduced as a World operation.
+
 ## Outputs, Recovery And Completion
 
 Each published output owns distinct physical storage while a predecessor is retained. Its issued

@@ -919,6 +919,24 @@ impl RuntimeCloseContext<'_> {
         self.world
     }
 
+    /// Applies one configured typed operation under closing admission.
+    ///
+    /// The operation uses the same registered dispatch as a Runtime driver scope. State or
+    /// resource admission failure returns the original owned input without invoking the port.
+    /// This context belongs to a retained close participant; it does not permit driver access
+    /// after the Runtime has stopped.
+    #[doc(hidden)]
+    pub fn __apply_owned_port<P: __RuntimeDriverPort>(
+        &mut self,
+        input: P::Input,
+    ) -> Result<P::Output, (RuntimeWorldAccessError, P::Input)> {
+        RuntimeDriverScope {
+            world: &mut *self.world,
+            state: RuntimeState::Stopping,
+        }
+        .__apply_owned_port::<P>(input)
+    }
+
     pub fn get_resource_mut<R: Resource<Mutability = Mutable>>(
         &mut self,
     ) -> Result<Option<Mut<'_, R>>, RuntimeWorldAccessError> {
@@ -2952,6 +2970,209 @@ mod tests {
         } else {
             Ok(input)
         }
+    }
+
+    #[derive(Resource)]
+    struct ClosingInputPort;
+
+    impl __RuntimeDriverPort for ClosingInputPort {
+        type Input = Box<OwnedDriverInput>;
+        type Output = Box<OwnedDriverInput>;
+
+        fn accepts_driver_state(state: RuntimeState) -> bool {
+            state == RuntimeState::Stopping
+        }
+
+        fn apply_driver_input(&mut self, _input: Self::Input) -> Self::Output {
+            panic!("closing must use this port's configured dispatch")
+        }
+    }
+
+    fn apply_closing_input(
+        _world: &mut World,
+        input: Box<OwnedDriverInput>,
+    ) -> Result<Box<OwnedDriverInput>, (RuntimeWorldAccessError, Box<OwnedDriverInput>)> {
+        if input.reject {
+            Err((
+                RuntimeWorldAccessError::MissingResource {
+                    type_name: "fixture",
+                },
+                input,
+            ))
+        } else {
+            Ok(input)
+        }
+    }
+
+    #[test]
+    fn close_context_uses_registered_dispatch_and_returns_domain_rejections_unchanged() {
+        let mut app = App::new();
+        app.insert_resource(ClosingInputPort).unwrap();
+        app.__register_driver_port::<ClosingInputPort>(apply_closing_input)
+            .unwrap();
+        for reject in [false, true] {
+            let drops = Arc::new(AtomicUsize::new(0));
+            let input = Box::new(OwnedDriverInput {
+                drops: drops.clone(),
+                reject,
+            });
+            let original = std::ptr::from_ref(&*input);
+            let mut context = RuntimeCloseContext {
+                world: app.world_mut().unwrap(),
+            };
+            let result = context.__apply_owned_port::<ClosingInputPort>(input);
+            let returned = match result {
+                Ok(input) => {
+                    assert!(!reject);
+                    input
+                }
+                Err((error, input)) => {
+                    assert!(reject);
+                    assert_eq!(
+                        error,
+                        RuntimeWorldAccessError::MissingResource {
+                            type_name: "fixture"
+                        }
+                    );
+                    input
+                }
+            };
+            assert_eq!(original, std::ptr::from_ref(&*returned));
+            assert_eq!(drops.load(Ordering::SeqCst), 0);
+            drop(returned);
+            assert_eq!(drops.load(Ordering::SeqCst), 1);
+        }
+    }
+
+    #[test]
+    fn close_context_keeps_owned_input_on_state_and_resource_admission_refusal() {
+        let mut app = App::new();
+        app.insert_resource(OwnedInputPort).unwrap();
+        let drops = Arc::new(AtomicUsize::new(0));
+        let input = Box::new(OwnedDriverInput {
+            drops: drops.clone(),
+            reject: false,
+        });
+        let original = std::ptr::from_ref(&*input);
+        let mut context = RuntimeCloseContext {
+            world: app.world_mut().unwrap(),
+        };
+        let (error, input) = context
+            .__apply_owned_port::<OwnedInputPort>(input)
+            .unwrap_err();
+        assert_eq!(
+            error,
+            RuntimeWorldAccessError::PortUnavailable {
+                type_name: type_name::<OwnedInputPort>(),
+                state: RuntimeState::Stopping,
+            }
+        );
+        assert_eq!(original, std::ptr::from_ref(&*input));
+        assert_eq!(drops.load(Ordering::SeqCst), 0);
+        let (error, input) = context
+            .__apply_owned_port::<ClosingInputPort>(input)
+            .unwrap_err();
+        assert_eq!(
+            error,
+            RuntimeWorldAccessError::MissingResource {
+                type_name: type_name::<ClosingInputPort>(),
+            }
+        );
+        assert_eq!(original, std::ptr::from_ref(&*input));
+        assert_eq!(drops.load(Ordering::SeqCst), 0);
+        drop(input);
+        assert_eq!(drops.load(Ordering::SeqCst), 1);
+    }
+
+    struct OwnedInputClose {
+        input: Option<Box<OwnedDriverInput>>,
+    }
+
+    impl OwnedInputClose {
+        fn drive(&mut self, context: &mut RuntimeCloseContext<'_>) -> RuntimeCloseProgress {
+            let input = self
+                .input
+                .take()
+                .expect("pending close retains its original input");
+            match context.__apply_owned_port::<ClosingInputPort>(input) {
+                Ok(input) => {
+                    drop(input);
+                    RuntimeCloseProgress::Complete
+                }
+                Err((_, input)) => {
+                    self.input = Some(input);
+                    RuntimeCloseProgress::Pending
+                }
+            }
+        }
+    }
+
+    impl RuntimeCloseParticipant for OwnedInputClose {
+        fn begin_close(
+            &mut self,
+            context: &mut RuntimeCloseContext<'_>,
+        ) -> Result<RuntimeCloseProgress, RuntimeCloseParticipantError> {
+            Ok(self.drive(context))
+        }
+
+        fn poll_close(
+            &mut self,
+            context: &mut RuntimeCloseContext<'_>,
+        ) -> Result<RuntimeCloseProgress, RuntimeCloseParticipantError> {
+            Ok(self.drive(context))
+        }
+    }
+
+    #[test]
+    fn stopped_waits_for_the_close_participants_original_owned_port_input() {
+        let drops = Arc::new(AtomicUsize::new(0));
+        let mut obligations = RuntimeObligationLedger::new();
+        obligations
+            .register(
+                RuntimeCloseParticipantId::new("nara.test.owned-port-logical-close"),
+                OwnedInputClose {
+                    input: Some(Box::new(OwnedDriverInput {
+                        drops: drops.clone(),
+                        reject: false,
+                    })),
+                },
+            )
+            .unwrap();
+        let mut app = App::new_with_runtime_obligations(obligations);
+        app.insert_resource(ClosingInputPort).unwrap();
+        app.__register_driver_port::<ClosingInputPort>(apply_closing_input)
+            .unwrap();
+        let mut runtime = RuntimeInstance::start(app).unwrap();
+        let port = runtime
+            .owner
+            .world
+            .remove_resource::<ClosingInputPort>()
+            .unwrap();
+        assert!(matches!(
+            runtime.request_control(RuntimeControl::Stop),
+            RuntimeControlRequestResult::Accepted(_)
+        ));
+        assert_eq!(
+            runtime.drive(Duration::ZERO).unwrap().state(),
+            RuntimeState::Stopping
+        );
+        assert_eq!(
+            runtime.drive(Duration::ZERO).unwrap().state(),
+            RuntimeState::Stopping
+        );
+        assert_eq!(drops.load(Ordering::SeqCst), 0);
+        runtime.owner.world.insert_resource(port);
+        assert_eq!(
+            runtime.drive(Duration::ZERO).unwrap().state(),
+            RuntimeState::Stopped
+        );
+        assert_eq!(drops.load(Ordering::SeqCst), 1);
+        assert!(
+            runtime
+                .with_driver_scope(|_| panic!("Stopped must refuse driver access"))
+                .is_err()
+        );
+        runtime.finish().unwrap();
     }
 
     #[test]

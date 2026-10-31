@@ -12,9 +12,9 @@ mod types;
 use owner::HeldInput;
 pub use owner::{
     InputEndpointClaim, InputRouteCommit, InputTimeline, PreparedInputRoutePublication,
-    abort_presented_route, claim_input_endpoint, commit_presented_route, prepare_claimed_route,
-    prepare_presented_route, prepared_route_invalidation, retire_claimed_endpoint,
-    supersede_presented_route, unbind_claimed_endpoint,
+    abort_presented_route, claim_input_endpoint, commit_presented_route, owns_prepared_route,
+    prepare_claimed_route, prepare_presented_route, prepared_route_invalidation,
+    retire_claimed_endpoint, supersede_presented_route, unbind_claimed_endpoint,
 };
 #[doc(hidden)]
 pub use types::{__InputDriverEvent, __InputDriverOutput};

@@ -1904,6 +1904,23 @@ pub fn prepared_route_invalidation(
     timeline.route_reservation(token).invalidation
 }
 
+/// Checks original route custody without consuming the token or asserting on a foreign owner.
+#[doc(hidden)]
+#[must_use]
+pub fn owns_prepared_route(
+    timeline: &InputTimeline,
+    token: &PreparedInputRoutePublication,
+) -> bool {
+    Arc::ptr_eq(&timeline.owner, &token.owner)
+        && timeline
+            .prepared_routes
+            .get(&(
+                token.declaration.route.window(),
+                token.declaration.route.seat(),
+            ))
+            .is_some_and(|reservation| reservation.declaration == token.declaration)
+}
+
 #[doc(hidden)]
 pub fn claim_input_endpoint(
     timeline: &InputTimeline,
