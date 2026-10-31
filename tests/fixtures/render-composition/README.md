@@ -13,7 +13,7 @@ Use the installed Rust1.95.0 toolchain, one Cargo process/job, and the repositor
 $env:CARGO_BUILD_JOBS = '1'
 $env:CARGO_TARGET_DIR = (Join-Path (Get-Location).Path 'target')
 cargo +1.95.0 nextest run --locked --manifest-path tests/fixtures/render-composition/Cargo.toml --tests --test-threads=1
-cargo +1.95.0 nextest run --locked --manifest-path tests/fixtures/render-composition/Cargo.toml --tests --run-ignored only --test-threads=1
+cargo +1.95.0 nextest run --locked --manifest-path tests/fixtures/render-composition/Cargo.toml --test effects --test gpu_harness --test graph_gpu --test native_admission --run-ignored only --test-threads=1
 ```
 
 The first command runs CPU model checks. Real-GPU cases are ignored by default and execute only
@@ -30,3 +30,12 @@ The image/buffer kernels execute through graph, ordered, slot and ECS-schedule p
 versions, fixed history groups, late failures/canaries and accepted-prefix retention have direct
 tests. Performance comparison, production GPU Host/epoch authority and full native Editor/Runtime
 integration remain open; this private workspace is not their replacement or a public extension API.
+
+The separate [CPU-stage comparison](../../../docs/benchmarks/2026-10-31-render-composition.md)
+runs the same kernels with fresh outputs for every variant and a reused ECS schedule topology.
+It excludes setup/readback/drain from samples and reports repeated-process variation without
+selecting a speed or memory winner. Run its optimized entry explicitly:
+
+```powershell
+cargo +1.95.0 nextest run --locked --release --manifest-path tests/fixtures/render-composition/Cargo.toml --test measure --run-ignored only --test-threads=1 --no-capture
+```

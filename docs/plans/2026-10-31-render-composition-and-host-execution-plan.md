@@ -103,6 +103,18 @@ interface freeze for attribution; it does not weaken identity or lifetime invari
 
 ## Ordered Work And Exit Evidence
 
+The [production ownership design](../architecture/render-host-ownership-design.md) orders the
+internal device-domain extraction, owned capture/result and runner transition, immutable output/
+producer-prefix custody, and graph/Feature migration. It keeps actual production consumers
+together rather than introducing a second offscreen backend. Its internal first step can proceed
+while comparative costs are measured; public graph/Feature interfaces do not freeze before the
+measurement and complete consumer gates below.
+
+The first [optimized CPU-stage comparison](../benchmarks/2026-10-31-render-composition.md)
+completed three processes with 36,000 samples, equal fresh outputs and reused ECS topology. Large
+repeated P95 variation prevents a stable speed or tail-cost winner. It does not block the private
+device-owner extraction or qualify the production/public boundary below.
+
 1. Implement the private graph/access model and hostile cases together with a real window-free
    GPU readback harness. Compare actual pinned Bevy/Godot mechanisms and challenge the proposed
    identity/initialization/history contracts. Record unresolved design questions before public APIs.
