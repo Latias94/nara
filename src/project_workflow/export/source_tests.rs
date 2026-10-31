@@ -6,7 +6,7 @@ use std::{
 
 use crate::{
     ProductRecipe,
-    fs::{DirectoryCapability, FsError, RelativeComponent, RelativePath},
+    fs::{ContentDigest, DirectoryCapability, FsError, RelativeComponent, RelativePath},
     project_host::{StartupContentClosureReceipt, ingest_project_manifest, resolve_product_recipe},
     project_tooling::host_fs,
     project_workflow::{ProjectCheckRequest, check_project},
@@ -976,6 +976,345 @@ fn build_binding_rejects_a_product_schema_fingerprint_different_from_its_startup
     assert!(!project.root.join("candidate").exists());
 }
 
+#[test]
+fn export_stages_captured_executable_bytes_after_cargo_outputs_change_or_disappear() {
+    let project = SourceProject::new();
+    let root = host_fs::readable_directory(&project.root).unwrap();
+    let checked = project.check(&root);
+    let build = project
+        .synthetic_build(
+            checked.startup_content(),
+            &checked.schema_fingerprint().to_string(),
+        )
+        .unwrap();
+    let executables = build.executables();
+    for executable in executables {
+        let bytes = format!("synthetic {:?} bytes", executable.target());
+        assert_eq!(
+            executable.digest(),
+            ContentDigest::of_bytes(bytes.as_bytes())
+        );
+        assert_eq!(
+            executable.build_provenance_digest(),
+            ContentDigest::of_bytes(b"synthetic export build provenance; no Cargo build ran")
+        );
+    }
+    fs::write(
+        project.root.join("build-products/headless"),
+        b"replaced before preparation",
+    )
+    .unwrap();
+    fs::remove_file(project.root.join("build-products/desktop")).unwrap();
+    build.revalidate(checked.startup_content()).unwrap();
+    let prepared = prepare_project_export(ProjectExportRequest::new(
+        host_fs::writable_directory(&project.root).unwrap(),
+        RelativeComponent::new("captured").unwrap(),
+        checked,
+        build,
+    ))
+    .unwrap();
+    fs::remove_file(project.root.join("build-products/headless")).unwrap();
+    let published = match prepared.publish() {
+        super::ProjectExportOutcome::Published(receipt) => receipt,
+        other => panic!("captured executable bytes must remain exportable: {other:?}"),
+    };
+    for executable in executables {
+        let kind = match executable.target() {
+            ProjectExportBinaryTarget::Headless => {
+                super::ProjectExportMemberKind::HeadlessExecutable
+            }
+            ProjectExportBinaryTarget::Desktop => super::ProjectExportMemberKind::DesktopExecutable,
+        };
+        let member = published
+            .plan()
+            .members()
+            .iter()
+            .find(|member| member.kind() == kind)
+            .unwrap();
+        assert_eq!(member.digest(), executable.digest());
+        assert_eq!(
+            fs::read(project.root.join("captured").join(member.path().as_str())).unwrap(),
+            format!("synthetic {:?} bytes", executable.target()).as_bytes()
+        );
+    }
+}
+
+#[test]
+fn build_receipt_accepts_explicit_profiles_and_feature_sets() {
+    let project = SourceProject::new();
+    let root = host_fs::readable_directory(&project.root).unwrap();
+    let checked = project.check(&root);
+    let schema = checked.schema_fingerprint().to_string();
+    let custom = project
+        .synthetic_build_with_selection(
+            checked.startup_content(),
+            &schema,
+            "shipping",
+            &["game", "domain", "game"],
+        )
+        .unwrap();
+    assert_eq!(custom.profile(), "shipping");
+    assert_eq!(custom.features(), ["domain", "game"]);
+    custom.revalidate(checked.startup_content()).unwrap();
+    let minimal = project
+        .synthetic_build_with_selection(checked.startup_content(), &schema, "dev", &[])
+        .unwrap();
+    assert_eq!(minimal.profile(), "dev");
+    assert!(minimal.features().is_empty());
+    minimal.revalidate(checked.startup_content()).unwrap();
+}
+
+#[test]
+fn build_binding_rejects_superseded_artifacts_even_when_product_agreements_still_match() {
+    for stale_role in [
+        None,
+        Some(ProjectExportBinaryTarget::Headless),
+        Some(ProjectExportBinaryTarget::Desktop),
+    ] {
+        let project = SourceProject::new();
+        let root = host_fs::readable_directory(&project.root).unwrap();
+        let original = project.check(&root);
+        let schema = original.schema_fingerprint().to_string();
+        let inputs = project.write_synthetic_build_inputs();
+        let old_preparation =
+            ProjectExportBuildPreparation::capture(original.startup_content(), inputs.clone())
+                .unwrap();
+        let ([old_headless, old_desktop], [old_headless_agreement, old_desktop_agreement]) =
+            project.synthetic_artifacts(
+                original.startup_content(),
+                &schema,
+                "shipping",
+                &["desktop"],
+                &old_preparation,
+            );
+
+        fs::write(
+            project.root.join("src/lib.rs"),
+            "pub fn revision() -> u8 { 2 }\n",
+        )
+        .unwrap();
+        let current = project.check(&root);
+        assert_eq!(original.manifest_digest(), current.manifest_digest());
+        assert_eq!(original.schema_fingerprint(), current.schema_fingerprint());
+        assert_eq!(
+            original.startup_content().content_digest(),
+            current.startup_content().content_digest()
+        );
+        assert_eq!(
+            original.startup_content().closure_plan_digest(),
+            current.startup_content().closure_plan_digest()
+        );
+        assert_eq!(
+            original.startup_content().runtime_schema_bundle_digest(),
+            current.startup_content().runtime_schema_bundle_digest()
+        );
+        let current_preparation =
+            ProjectExportBuildPreparation::capture(current.startup_content(), inputs).unwrap();
+        assert_ne!(
+            old_preparation.build_input_digest(),
+            current_preparation.build_input_digest()
+        );
+        current_preparation.verify_build_inputs(&root).unwrap();
+        let ([new_headless, new_desktop], [new_headless_agreement, new_desktop_agreement]) =
+            project.synthetic_artifacts(
+                current.startup_content(),
+                &schema,
+                "shipping",
+                &["desktop"],
+                &current_preparation,
+            );
+        let (artifacts, agreements, expected_role) = match stale_role {
+            None => (
+                [old_headless, old_desktop],
+                [old_headless_agreement, old_desktop_agreement],
+                ProjectExportBinaryTarget::Headless,
+            ),
+            Some(ProjectExportBinaryTarget::Headless) => (
+                [old_headless, new_desktop],
+                [old_headless_agreement, new_desktop_agreement],
+                ProjectExportBinaryTarget::Headless,
+            ),
+            Some(ProjectExportBinaryTarget::Desktop) => (
+                [new_headless, old_desktop],
+                [new_headless_agreement, old_desktop_agreement],
+                ProjectExportBinaryTarget::Desktop,
+            ),
+        };
+        assert!(matches!(
+            current_preparation.bind(artifacts, agreements),
+            Err(ProjectExportBuildError::ArtifactBuildInputsMismatch { target })
+                if target == expected_role
+        ));
+        assert!(!project.root.join("candidate").exists());
+    }
+}
+
+#[test]
+fn build_binding_requires_the_exact_declared_inventory_not_only_overlapping_digests() {
+    let project = SourceProject::new();
+    let root = host_fs::readable_directory(&project.root).unwrap();
+    let checked = project.check(&root);
+    project.write_synthetic_build_inputs();
+    fs::write(project.root.join("src/extra.rs"), b"extra").unwrap();
+    for captured_paths in [
+        vec!["Cargo.toml", "Cargo.lock"],
+        vec!["Cargo.toml", "Cargo.lock", "src/lib.rs", "src/extra.rs"],
+        vec!["Cargo.toml", "Cargo.lock", "src/extra.rs"],
+    ] {
+        let captured_preparation = ProjectExportBuildPreparation::capture(
+            checked.startup_content(),
+            captured_paths
+                .into_iter()
+                .map(|path| RelativePath::new(path).unwrap()),
+        )
+        .unwrap();
+        let (artifacts, agreements) = project.synthetic_artifacts(
+            checked.startup_content(),
+            &checked.schema_fingerprint().to_string(),
+            "shipping",
+            &["desktop"],
+            &captured_preparation,
+        );
+        let preparation = ProjectExportBuildPreparation::capture(
+            checked.startup_content(),
+            ["Cargo.toml", "Cargo.lock", "src/lib.rs"].map(|path| RelativePath::new(path).unwrap()),
+        )
+        .unwrap();
+        assert!(matches!(
+            preparation.bind(artifacts, agreements),
+            Err(ProjectExportBuildError::ArtifactBuildInputsMismatch {
+                target: ProjectExportBinaryTarget::Headless,
+            })
+        ));
+    }
+}
+
+#[test]
+fn build_preparation_revalidates_only_its_declared_dynamic_inventory() {
+    let project = SourceProject::new();
+    let root = host_fs::readable_directory(&project.root).unwrap();
+    let checked = project.check(&root);
+    project.write_synthetic_build_inputs();
+    fs::write(project.root.join("src/selected.rs"), b"selected input A").unwrap();
+    let paths = ["Cargo.toml", "Cargo.lock", "src/selected.rs"];
+    let preparation = ProjectExportBuildPreparation::capture(
+        checked.startup_content(),
+        paths.map(|path| RelativePath::new(path).unwrap()),
+    )
+    .unwrap();
+    let reordered = ProjectExportBuildPreparation::capture(
+        checked.startup_content(),
+        paths
+            .into_iter()
+            .rev()
+            .map(|path| RelativePath::new(path).unwrap()),
+    )
+    .unwrap();
+    assert_eq!(
+        preparation.build_input_digest(),
+        reordered.build_input_digest()
+    );
+    fs::write(project.root.join("src/lib.rs"), b"unlisted source changed").unwrap();
+    fs::write(project.root.join("src/unlisted.rs"), b"new unlisted source").unwrap();
+    preparation
+        .verify_build_inputs(&host_fs::readable_directory(&project.root).unwrap())
+        .unwrap();
+    fs::write(project.root.join("src/selected.rs"), b"selected input B").unwrap();
+    assert!(matches!(
+        preparation.verify_build_inputs(&root),
+        Err(ProjectExportBuildError::BuildInputsChanged)
+    ));
+}
+
+#[test]
+fn build_preparation_rejects_replacing_an_original_file_with_identical_bytes() {
+    let project = SourceProject::new();
+    let root = host_fs::readable_directory(&project.root).unwrap();
+    let checked = project.check(&root);
+    let inputs = project.write_synthetic_build_inputs();
+    let preparation =
+        ProjectExportBuildPreparation::capture(checked.startup_content(), inputs).unwrap();
+    let original = project.root.join("Cargo.lock");
+    let bytes = fs::read(&original).unwrap();
+    fs::rename(&original, project.root.join("previous.lock")).unwrap();
+    fs::write(&original, bytes).unwrap();
+    assert!(matches!(
+        preparation.verify_build_inputs(&root),
+        Err(ProjectExportBuildError::BuildInputsChanged)
+    ));
+}
+
+#[test]
+fn build_preparation_rejects_invalid_inventories_before_reading_files() {
+    let project = SourceProject::new();
+    let root = host_fs::readable_directory(&project.root).unwrap();
+    let checked = project.check(&root);
+    for (provided, missing) in [("Cargo.toml", "Cargo.lock"), ("Cargo.lock", "Cargo.toml")] {
+        let error = ProjectExportBuildPreparation::capture(
+            checked.startup_content(),
+            [RelativePath::new(provided).unwrap()],
+        )
+        .unwrap_err();
+        assert!(matches!(
+            error,
+            ProjectExportBuildError::MissingBuildInput { path } if path == missing
+        ));
+    }
+    let error = ProjectExportBuildPreparation::capture(
+        checked.startup_content(),
+        ["Cargo.toml", "Cargo.lock", "Cargo.toml"].map(|path| RelativePath::new(path).unwrap()),
+    )
+    .unwrap_err();
+    assert!(matches!(
+        error,
+        ProjectExportBuildError::DuplicateBuildInput { path } if path == "Cargo.toml"
+    ));
+    let error = ProjectExportBuildPreparation::capture(
+        checked.startup_content(),
+        (0..1025).map(|index| RelativePath::new(format!("declared/{index}.rs")).unwrap()),
+    )
+    .unwrap_err();
+    assert!(matches!(
+        error,
+        ProjectExportBuildError::BuildInputCountExceeded
+    ));
+    assert!(!project.root.join("Cargo.toml").exists());
+    assert!(!project.root.join("Cargo.lock").exists());
+}
+
+#[test]
+fn build_preparation_bounds_total_declared_bytes_and_rejects_later_growth() {
+    let project = SourceProject::new();
+    let root = host_fs::readable_directory(&project.root).unwrap();
+    let checked = project.check(&root);
+    let half_limit = 32 * 1024 * 1024;
+    for path in ["Cargo.toml", "Cargo.lock"] {
+        fs::File::create(project.root.join(path))
+            .unwrap()
+            .set_len(half_limit)
+            .unwrap();
+    }
+    let inputs = || ["Cargo.toml", "Cargo.lock"].map(|path| RelativePath::new(path).unwrap());
+    let preparation =
+        ProjectExportBuildPreparation::capture(checked.startup_content(), inputs()).unwrap();
+    fs::OpenOptions::new()
+        .write(true)
+        .open(project.root.join("Cargo.toml"))
+        .unwrap()
+        .set_len(half_limit + 1)
+        .unwrap();
+    assert!(matches!(
+        preparation.verify_build_inputs(&root),
+        Err(ProjectExportBuildError::BuildInputsChanged)
+    ));
+    let error =
+        ProjectExportBuildPreparation::capture(checked.startup_content(), inputs()).unwrap_err();
+    assert!(matches!(
+        error,
+        ProjectExportBuildError::BuildInputByteLimitExceeded
+    ));
+}
+
 struct SourceProject {
     root: PathBuf,
     temporary_parent: PathBuf,
@@ -996,21 +1335,35 @@ impl SourceProject {
         startup: &StartupContentClosureReceipt,
         schema_fingerprint: &str,
     ) -> Result<ProjectExportBuildReceipt, ProjectExportBuildError> {
-        fs::create_dir_all(self.root.join("src/bin")).unwrap();
+        self.synthetic_build_with_selection(startup, schema_fingerprint, "release", &["desktop"])
+    }
+
+    fn synthetic_build_with_selection(
+        &self,
+        startup: &StartupContentClosureReceipt,
+        schema_fingerprint: &str,
+        profile: &str,
+        features: &[&str],
+    ) -> Result<ProjectExportBuildReceipt, ProjectExportBuildError> {
+        let inputs = self.write_synthetic_build_inputs();
+        let preparation = ProjectExportBuildPreparation::capture(startup, inputs)?;
+        let (artifacts, agreements) =
+            self.synthetic_artifacts(startup, schema_fingerprint, profile, features, &preparation);
+        preparation.bind(artifacts, agreements)
+    }
+
+    fn synthetic_artifacts(
+        &self,
+        startup: &StartupContentClosureReceipt,
+        schema_fingerprint: &str,
+        profile: &str,
+        features: &[&str],
+        preparation: &ProjectExportBuildPreparation,
+    ) -> (
+        [ProjectExportCargoArtifact; 2],
+        [ProjectExportProductAgreement; 2],
+    ) {
         fs::create_dir_all(self.root.join("build-products")).unwrap();
-        for (path, bytes) in [
-            (
-                "Cargo.toml",
-                "[package]\nname = \"owner-test\"\nversion = \"0.1.0\"\n",
-            ),
-            ("Cargo.lock", "version = 4\n"),
-            ("src/lib.rs", "// Synthetic build input.\n"),
-            ("src/bin/headless.rs", "fn main() {}\n"),
-            ("src/bin/desktop.rs", "fn main() {}\n"),
-        ] {
-            fs::write(self.root.join(path), bytes).unwrap();
-        }
-        let preparation = ProjectExportBuildPreparation::capture(startup)?;
         let root = startup.project_root();
         let [(headless, headless_agreement), (desktop, desktop_agreement)] = [
             ProjectExportBinaryTarget::Headless,
@@ -1021,13 +1374,14 @@ impl SourceProject {
             fs::write(self.root.join(&path), format!("synthetic {target:?} bytes")).unwrap();
             let file = root.open_file(&RelativePath::new(path).unwrap()).unwrap();
             let digest = file.digest(1024).unwrap();
-            let artifact = ProjectExportCargoArtifact::new(
+            let artifact = ProjectExportCargoArtifact::from_file(
                 target,
                 "synthetic-owner-package",
                 "x86_64-unknown-linux-gnu",
-                "release",
-                ["desktop".to_owned()],
+                profile,
+                features.iter().map(|feature| (*feature).to_owned()),
                 file,
+                preparation,
             )
             .unwrap();
             let agreement = ProjectExportProductAgreement::new(
@@ -1043,7 +1397,25 @@ impl SourceProject {
             .unwrap();
             (artifact, agreement)
         });
-        preparation.bind([headless, desktop], [headless_agreement, desktop_agreement])
+        ([headless, desktop], [headless_agreement, desktop_agreement])
+    }
+
+    fn write_synthetic_build_inputs(&self) -> [RelativePath; 5] {
+        fs::create_dir_all(self.root.join("src/bin")).unwrap();
+        [
+            (
+                "Cargo.toml",
+                "[package]\nname = \"owner-test\"\nversion = \"0.1.0\"\n",
+            ),
+            ("Cargo.lock", "version = 4\n"),
+            ("src/lib.rs", "// Synthetic build input.\n"),
+            ("src/bin/headless.rs", "fn main() {}\n"),
+            ("src/bin/desktop.rs", "fn main() {}\n"),
+        ]
+        .map(|(path, bytes)| {
+            fs::write(self.root.join(path), bytes).unwrap();
+            RelativePath::new(path).unwrap()
+        })
     }
 
     fn new() -> Self {

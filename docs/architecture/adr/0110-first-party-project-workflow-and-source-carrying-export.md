@@ -9,6 +9,7 @@ creation terminality, build-input freshness and startup-closure ownership
 **Amended**: 2026-10-21 by finite declared Scene delivery for the persistent two-level consumer
 **Amended**: 2026-10-21 by explicit complete-frame headless execution
 **Amended**: 2026-10-30 by finite authored Scene data capture and original Product travel admission
+**Amended**: 2026-10-31 by explicit Cargo selection and captured executable ownership
 **Owner**: root product workflow, `nara_project`, `nara_fs`, project content and Runtime Hosts
 **Refines**: [ADR 0020](0020-project-layout-and-package-format.md),
 [ADR 0035](0035-project-manifest-and-runtime-settings-authority.md),
@@ -60,6 +61,47 @@ flowchart LR
   Cargo --> Workflow
   Workflow --> Receipt[Linked typed receipts]
 ```
+
+### Explicit Cargo Selection And Captured Build Results
+
+The compiled native build Host selects package, binary, Cargo profile, target triple,
+default-feature policy, requested features and actual Cargo/rustc tools explicitly. Cargo
+metadata owns the selected manifest/package/target and its workspace-level feature observation.
+The selected `compiler-artifact` supplies actual compiled features, which can differ from that
+observation. Cargo decides target eligibility, including dependency-qualified `required-features`;
+Nara does not implement feature closure or infer code enablement from product profile labels. Build-only
+target artifacts are separate from native product qualification, Host activation and Runtime
+Ready. A foreign-target build can finish without an available runner and must not execute
+its output on the build Host.
+
+The pure selection/invocation/incremental decoder belongs to `project_workflow::cargo`. Native
+finite execution belongs to `project_tooling::cargo_build`; the Editor keeps its supervised
+process and cancellation owner while consuming the same facts. Remove fixed desktop decoder
+types and duplicate artifact selectors. Starter defaults remain explicit adapter policy:
+the closed source Export still selects its two roles, while other trusted callers may select
+custom package/bin/profile/features independently of that starter.
+
+The native build result captures exact selected executable bytes, digest/length, actual tool
+observations, requested/resolved features and a finite declared-input revision. Original Cargo
+paths are transient facts, never immutable output authority or persisted public diagnostics.
+Each captured result remains unchanged if Cargo overwrites its original output. Source Export
+owns those captured bytes through staging rather than reopening a mutable Cargo output file.
+Its native product observations and exact source/startup agreements remain separately required.
+
+Every build uses an existing lockfile with `--locked`. Initial creation of a starter lockfile
+is an explicit Cargo authoring action before build, not an unlocked-build fallback. The Host
+revalidates its selected input inventory before/after work and at return, including manifest,
+lock and selected target source. This proves its stated per-file envelope, not simultaneous
+workspace capture, hermetic compilation or interception of ambient trusted build-script,
+proc-macro, configuration/native-tool/environment inputs. Exact inventory and unsupported
+inputs remain visible in provenance. The
+[implementation plan](../../plans/2026-10-31-explicit-cargo-build-selection-plan.md) owns actual
+consumer/native qualification; this contract selection alone does not mark that work complete.
+
+This bounded refinement extracts explicit target builds from Proposed ADR 0086. General target
+activation/last-good records, complete packaged Player delivery, remote runners and executable
+hermeticity remain separate. It introduces no new package resolver, universal exporter,
+execution kernel, ABI or Runtime Cargo dependency.
 
 ### Starter and dependency authority
 

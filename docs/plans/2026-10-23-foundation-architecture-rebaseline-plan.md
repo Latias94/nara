@@ -618,8 +618,24 @@ native trust. Delete duplicate root/domain registrations and incorrect recipe/co
 
 **Design:** D12. **State:** in progress; immutable local base and bounded first-party startup/travel
 qualified, including finite source Scene references and global source/processed Input;
-target-build selection and packaged delivery remain open.
+explicit Cargo build/capture is qualified; packaged delivery remains open.
 **Owners:** Cargo tooling, Host capture/cook and Runtime loader.
+
+The [explicit Cargo selection unit](2026-10-31-explicit-cargo-build-selection-plan.md) now owns
+the qualified finite replacement: general Cargo-authoritative facts, current supervised/source
+Export consumers and exact captured native/foreign artifacts. It retains separate target
+execution and complete packaged delivery qualification.
+Its [qualification](../knowledge/engineering/verification/2026-10/2026-10-31T035034Z-explicit-cargo-builds-captured-executables-and-supervised-protocol-qualification-4cfff5128fa64423b6f234ea7b312c63.md)
+includes captured input binding and separate bounded Editor protocol transport, actual custom
+native/foreign builds, source Export and final supervised Windows/DX12 trajectories. Source
+observations, logical bounds and foreign build-only evidence keep their explicit limits.
+
+The next [cooked Player delivery unit](2026-10-31-cooked-player-delivery-plan.md) joins retained
+target content, a generated independent Player expectation and captured executable bytes through
+one finite directory publication owner. Catalog preparation precedes Player compilation, and
+exact generated-input/code/content binding rejects old Player A with new catalog B. Reuse the
+existing pack, admission, Scene and last-good owners; this plan is not package implementation or
+target-runner qualification.
 
 Separate Host tool selection, target executable artifacts, content cook, release candidate and
 target-runner activation. Keep a source-carrying option but move fixed starter assumptions into

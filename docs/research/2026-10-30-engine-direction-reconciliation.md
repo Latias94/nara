@@ -147,3 +147,15 @@ Schema/claim evolution, joint motion/executor selection, exact render-output/UI 
 material ABI evolution and the editable Nara-drawn Inspector retain their existing consumer
 gates. This current checkpoint supersedes the historical execution order above; it does not
 rewrite its receiving-baseline observations or treat planned capabilities as implemented.
+
+The next R7 checkpoint now has an [explicit Cargo unit](../plans/2026-10-31-explicit-cargo-build-selection-plan.md)
+and [cooked Player successor](../plans/2026-10-31-cooked-player-delivery-plan.md). The former
+replaces fixed shared selectors with explicit Cargo facts and captured executable ownership;
+its [actual qualification](../knowledge/engineering/verification/2026-10/2026-10-31T035034Z-explicit-cargo-builds-captured-executables-and-supervised-protocol-qualification-4cfff5128fa64423b6f234ea7b312c63.md)
+includes custom native/foreign builds, source Export and selected native supervised flows. The successor supplies
+the missing production catalog/package join: complete target content, a generated independent
+Player expectation as a declared build input, exact code/content binding and whole-directory
+publication. It preserves the existing reference/demand, pack, Runtime and last-good owners.
+The supplied ZIP was rechecked at `0c36715`: all 91 manifest entries and ten repository study
+documents still match. No additional research file or roadmap reset is required. The remaining
+Schema/Prefab, motion/execution, rendering and editable Nara-drawn Editor units stay open.

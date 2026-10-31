@@ -3,6 +3,7 @@ use std::{
     ffi::{OsStr, OsString, c_void},
     io,
     mem::{size_of, size_of_val},
+    num::NonZeroUsize,
     os::windows::{
         ffi::OsStrExt,
         io::{AsRawHandle, FromRawHandle, OwnedHandle, RawHandle},
@@ -124,6 +125,13 @@ pub(super) struct PlatformProcess {
 
 impl PlatformProcess {
     #[cfg(test)]
+    pub(super) fn test_enqueue_stdout(&self, bytes: Vec<u8>) {
+        self.output
+            .push(SupervisedProcessStream::Stdout, bytes)
+            .unwrap();
+    }
+
+    #[cfg(test)]
     pub(super) fn test_enqueue_loss(&self) {
         self.output
             .push_loss(
@@ -195,7 +203,11 @@ impl PlatformProcess {
     pub(super) fn readers_stopped(&mut self) -> bool {
         self.stdout_reader.join_if_finished(&self.output);
         self.stderr_reader.join_if_finished(&self.output);
-        self.stdout_reader.joined() && self.stderr_reader.joined() && self.output.is_drained()
+        self.stdout_reader.joined() && self.stderr_reader.joined()
+    }
+
+    pub(super) fn output_drained(&self) -> bool {
+        self.output.is_drained()
     }
 
     pub(super) fn containment_empty(&mut self) -> io::Result<bool> {
@@ -325,6 +337,7 @@ pub(super) fn spawn(
         command.arguments_ref(),
         environment,
         command.bootstrap_requested(),
+        command.protocol_stdout_limit(),
         None,
         wake,
     )
@@ -344,17 +357,23 @@ pub(super) fn spawn_exact_generation(
         command.arguments_ref(),
         environment,
         true,
+        None,
         Some(guards),
         wake,
     )
 }
 
+#[allow(
+    clippy::too_many_arguments,
+    reason = "Native spawn keeps command, output policy and exact generation authority explicit."
+)]
 fn spawn_windows(
     executable: &Path,
     working_directory: &Path,
     arguments: &[OsString],
     environment: Vec<u16>,
     bootstrap_requested: bool,
+    protocol_stdout_limit: Option<NonZeroUsize>,
     exact_generation: Option<ExactGenerationLaunchGuards>,
     wake: crate::supervised_play::wake::SupervisedPlayWake,
 ) -> io::Result<SpawnedProcess> {
@@ -426,6 +445,7 @@ fn spawn_windows(
     let output = Arc::new(PlatformOutputQueue::with_wake(
         OUTPUT_QUEUE_RECORD_LIMIT,
         OUTPUT_QUEUE_BYTE_LIMIT,
+        protocol_stdout_limit,
         wake,
     ));
     let mut stdout_reader = OutputReaderOwner::spawn(
@@ -1719,7 +1739,7 @@ mod tests {
 
     #[test]
     fn cancelled_output_capture_publishes_an_explicit_loss_marker() {
-        let output = PlatformOutputQueue::new(4, 1024);
+        let output = PlatformOutputQueue::new(4, 1024, None);
         record_cancelled_stream(&output, SupervisedProcessStream::Stdout)
             .expect("the cancellation marker is retained");
 
@@ -1730,6 +1750,29 @@ mod tests {
         assert_eq!(marker.stream, SupervisedProcessStream::Stdout);
         assert!(marker.loss);
         assert!(String::from_utf8_lossy(&marker.bytes).contains("cancelled before EOF"));
+    }
+
+    #[test]
+    fn cancelled_protocol_capture_retains_its_marker_without_remaining_stdout_capacity() {
+        let output = PlatformOutputQueue::new(1, 1024, NonZeroUsize::new(1));
+        output
+            .push(SupervisedProcessStream::Stdout, vec![b'x'])
+            .unwrap();
+        record_cancelled_stream(&output, SupervisedProcessStream::Stdout).unwrap();
+        for _ in 0..4 {
+            output
+                .push(SupervisedProcessStream::Stderr, vec![b'e'; 1024])
+                .unwrap();
+        }
+
+        let marker = output.pop().unwrap().unwrap();
+        assert_eq!(marker.stream, SupervisedProcessStream::Stdout);
+        assert!(marker.loss);
+        assert!(String::from_utf8_lossy(&marker.bytes).contains("cancelled before EOF"));
+        let prefix = output.pop().unwrap().unwrap();
+        assert_eq!(prefix.bytes, b"x");
+        while output.pop().unwrap().is_some() {}
+        assert!(output.is_drained());
     }
 
     fn encode_argument(argument: &str) -> String {

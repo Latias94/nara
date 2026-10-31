@@ -34,6 +34,24 @@ fn helper_process() {
                 eprintln!("fedcba9876543210");
             }
         }
+        "protocol-burst" => {
+            use std::io::Write;
+
+            let mut stdout = std::io::stdout().lock();
+            stdout.write_all(b"<protocol>").unwrap();
+            stdout.write_all(&vec![b'X'; 1024 * 1024]).unwrap();
+            stdout.write_all(b"</protocol>").unwrap();
+            stdout.flush().unwrap();
+            std::io::stderr()
+                .lock()
+                .write_all(&vec![b'E'; 1024 * 1024])
+                .unwrap();
+            std::fs::write(
+                env::var_os("NARA_SUPERVISED_BURST_FINISHED").unwrap(),
+                b"output flushed",
+            )
+            .unwrap();
+        }
         "spawn-descendant-and-exit" => {
             let executable = env::current_exe().expect("the test executable is available");
             let descendant = Command::new(executable)
@@ -141,6 +159,85 @@ fn supervised_process_raw_output_preserves_stream_and_loss_facts() {
                 .any(|window| window == b"helper stderr")
     }));
     assert!(outputs.iter().all(|output| !output.loss()));
+}
+
+#[test]
+fn protocol_burst_survives_delayed_polling_and_lossy_stderr_tail() {
+    let marker = env::temp_dir().join(format!(
+        "nara-protocol-burst-{}-{}",
+        std::process::id(),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos(),
+    ));
+    struct Marker(PathBuf);
+    impl Drop for Marker {
+        fn drop(&mut self) {
+            let _ = std::fs::remove_file(&self.0);
+        }
+    }
+    let _marker = Marker(marker.clone());
+    let command = helper_command("protocol-burst")
+        .environment("NARA_SUPERVISED_BURST_FINISHED", marker.as_os_str())
+        .bounded_stdout(NonZeroUsize::new(2 * 1024 * 1024).unwrap());
+    let mut owner = SupervisedProcessOwner::spawn(&command, log_limits()).unwrap();
+    let deadline = Instant::now() + Duration::from_secs(10);
+    // Do not drain the process owner until the child has flushed output well above the log cap.
+    while !marker.is_file() {
+        assert!(Instant::now() < deadline, "the burst child failed to flush");
+        thread::sleep(Duration::from_millis(5));
+    }
+    let mut stdout = Vec::new();
+    let mut stderr_loss = false;
+    let mut first_batch = true;
+    while owner.state() != SupervisedProcessState::Complete {
+        let (_, outputs) = owner.advance_with_output(Instant::now()).unwrap();
+        assert!(
+            outputs.len() <= 64,
+            "process output remains bounded per drive"
+        );
+        if first_batch {
+            assert!(
+                outputs
+                    .iter()
+                    .any(|output| output.stream() == ProcessOutputStream::Stderr),
+                "queued diagnostics must be visible before the complete protocol backlog drains",
+            );
+            first_batch = false;
+        }
+        for output in outputs {
+            match output.stream() {
+                ProcessOutputStream::Stdout => {
+                    assert!(!output.loss(), "admitted protocol bytes cannot be evicted");
+                    assert!(output.bytes().len() <= 16 * 1024);
+                    stdout.extend_from_slice(output.bytes());
+                }
+                ProcessOutputStream::Stderr => stderr_loss |= output.loss(),
+            }
+        }
+        assert!(Instant::now() < deadline, "burst cleanup timed out");
+        thread::sleep(Duration::from_millis(5));
+    }
+    let begin = stdout
+        .windows(10)
+        .position(|bytes| bytes == b"<protocol>")
+        .unwrap()
+        + 10;
+    let end = stdout
+        .windows(11)
+        .position(|bytes| bytes == b"</protocol>")
+        .unwrap();
+    assert_eq!(end - begin, 1024 * 1024);
+    assert!(stdout[begin..end].iter().all(|byte| *byte == b'X'));
+    assert!(
+        stderr_loss,
+        "the independent stderr tail remains bounded and explicit"
+    );
+    assert!(owner.logs().stats().retained_bytes() <= 4 * 1024);
+    let receipt = owner.cleanup_receipt().unwrap();
+    assert!(receipt.exit().success());
+    assert!(receipt.containment_empty() && receipt.readers_stopped());
 }
 
 #[test]

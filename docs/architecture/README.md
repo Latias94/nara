@@ -63,6 +63,7 @@ their completion conditions do not automatically apply to later tasks.
 | Current architecture and implementation | [Foundation summary](nara-foundation.md), [ADR catalogue](adr/README.md), [implementation ledger](adr/implementation-status.md) |
 | Managed runtime, immutable composition, assets, hierarchy, 2D order and views | [ADR 0117](adr/0117-2d-foundation-ownership-and-authoring-contracts.md) |
 | Project creation, compiled schema, editing, Check and Export | [Product recipe guide](../guides/rust-product-recipes.md) |
+| Explicit package/bin/profile/target builds and captured executable ownership | [Cargo build guide](../guides/cargo-builds.md); [ADR 0110](adr/0110-first-party-project-workflow-and-source-carrying-export.md#explicit-cargo-selection-and-captured-build-results) |
 | Persistent schema, codecs and custom scalar authoring | [Component guide](../guides/persistent-components.md) |
 | Workspace/frontend boundaries, creation templates, panels and native views | [ADR 0118](adr/0118-editor-workspaces-frontends-and-creation-templates.md); [native qualification procedure](../verification/native-editor-qualification.md) |
 | Source-built stateful native panel composition | [Editor panel guide](../guides/editor-panels.md) |

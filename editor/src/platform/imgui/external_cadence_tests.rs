@@ -294,7 +294,7 @@ impl ExternalCadenceHost {
         }
         let maintenance_before = self.host.application.next_supervised_play_deadline();
         let maintenance_due = maintenance_before.is_some_and(|deadline| now >= deadline);
-        self.host.about_to_wait(event_loop);
+        self.host.advance_and_schedule_at(event_loop, now);
         self.trace_phase();
         if let Some(error) = &self.host.error {
             return self.fail(event_loop, error.to_string());
@@ -347,12 +347,36 @@ impl ExternalCadenceHost {
                                 "quiet maintenance lost its process observation deadline",
                             );
                         };
+                        // Other owners can require an earlier maintenance wake without a redraw.
+                        // Use the same clock as production to keep the earliest-deadline proof exact.
+                        let expected_deadline = imgui_next_deadline(
+                            &self.host.application,
+                            self.host.native.as_ref(),
+                            now,
+                        );
                         if next_observation <= now
                             || maintenance_before.is_some_and(|before| next_observation <= before)
-                            || !matches!(event_loop.control_flow(), ControlFlow::WaitUntil(deadline) if deadline == next_observation)
+                            || !matches!(event_loop.control_flow(), ControlFlow::WaitUntil(deadline) if Some(deadline) == expected_deadline)
                             || self.host.repaint_deadline.is_some()
+                            || imgui_next_presentation_deadline(
+                                &self.host.application,
+                                Some(native),
+                                now,
+                            )
+                            .is_some()
                         {
-                            return self.fail(event_loop, "quiet maintenance did not advance its exact observation deadline without presentation");
+                            return self.fail(
+                                event_loop,
+                                format!(
+                                    "quiet maintenance did not advance its observation and select the earliest owner deadline without presentation: now={now:?}; before={maintenance_before:?}; next={next_observation:?}; expected={expected_deadline:?}; flow={:?}; repaint={:?}; frame_maintenance={:?}; presentation={:?}; preview_pending={}; preview_recheck={:?}",
+                                    event_loop.control_flow(),
+                                    self.host.repaint_deadline,
+                                    imgui_frame_maintenance_deadline(&frame, now),
+                                    imgui_next_presentation_deadline(&self.host.application, Some(native), now),
+                                    frame.scene_preview_work_pending(),
+                                    frame.scene_preview_recheck_after(),
+                                ),
+                            );
                         }
                         self.maintenance_cycles += 1;
                         eprintln!(

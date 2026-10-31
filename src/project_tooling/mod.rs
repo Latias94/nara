@@ -17,6 +17,7 @@ use crate::{
 use thiserror::Error;
 
 mod bootstrap;
+pub mod cargo_build;
 mod export;
 pub mod host_fs;
 mod product_observation;

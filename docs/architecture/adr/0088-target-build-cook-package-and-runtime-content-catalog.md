@@ -2,7 +2,7 @@
 
 **Status**: Proposed
 **Date**: 2026-07-13
-**Last Revised**: 2026-10-23
+**Last Revised**: 2026-10-31
 **Owner**: product build hosts, `nara_asset`, cook providers, and runtime content adapters
 **Admission Trigger**: A local immutable base catalog proves declared dependency closure, target
 cooking/stripping, verified Runtime bytes and source-free boot; patch/DLC, remote authenticity,
@@ -13,6 +13,15 @@ adapter proves that the logical package/mount-set model cannot express its requi
 ADR 0068, ADR 0070, ADR 0079, ADR 0082, ADR 0083, ADR 0084, ADR 0086, ADR 0087, ADR 0091
 
 ## Context
+
+Accepted ADRs 0007/0033/0103 and their implementation evidence now own the finite local Runtime
+base, tracked local artifact builds and concrete target-sensitive CPU Image cook. ADR 0110's
+[explicit Cargo selection](0110-first-party-project-workflow-and-source-carrying-export.md#explicit-cargo-selection-and-captured-build-results)
+extracts the build-only executable/captured-byte boundary through its separate qualification plan.
+Those slices do not accept this proposal's complete target-content planning, packaged Player,
+mount-set/patch model or general target-runner activation. Follow the
+[ordered delivery plan](../../plans/2026-10-29-asset-import-and-runtime-delivery-plan.md) for the
+remaining complete consumers rather than treating every boundary below as unimplemented or adopted.
 
 ADR 0020 intentionally owns only the source project layout. ADR 0087 proposes immutable imported
 product groups. Neither defines the production path from a validated project revision to target-

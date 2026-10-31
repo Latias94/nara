@@ -6,26 +6,28 @@
 
 use std::path::Path;
 
-mod desktop_build;
+#[path = "cargo_facts/build.rs"]
+mod build;
+#[path = "cargo_facts/messages.rs"]
 mod messages;
+#[path = "cargo_facts/metadata.rs"]
 mod metadata;
+#[path = "cargo_facts/selection.rs"]
+mod selection;
 
-pub use desktop_build::{
-    CargoArtifactMismatchField, CargoDesktopArtifactFacts, CargoDesktopBuildDecoder,
-    CargoDesktopBuildError, CargoDesktopBuildFacts, CargoDesktopBuildInvocation,
-    CargoDesktopInvocationError,
+pub use build::{
+    CargoArtifactFacts, CargoArtifactMismatchField, CargoBuildDecoder, CargoBuildError,
+    CargoBuildFacts, CargoBuildInvocation, CargoInvocationError,
 };
 pub use messages::{
     CargoCompilerArtifactFacts, CargoCompilerDiagnostic, CargoDiagnosticLevel, CargoDiagnostics,
     CargoJsonMessage, CargoJsonMessageError,
 };
 pub use metadata::{
-    CargoHeadlessMetadataFacts, CargoMetadataFacts, CargoMetadataFactsError, CargoPackageGraphFact,
-    CargoPackageSourceKind,
+    CargoMetadataFacts, CargoMetadataFactsError, CargoPackageGraphFact, CargoPackageSourceKind,
 };
+pub use selection::{CargoBuildSelection, CargoBuildSelectionError};
 
-const DESKTOP_TARGET: &str = "desktop";
-const DESKTOP_FEATURE: &str = "desktop";
 const DEV_PROFILE: &str = "dev";
 const DEV_PROFILE_DIRECTORY: &str = "debug";
 
@@ -38,7 +40,6 @@ const MAX_PACKAGE_NAME_BYTES: usize = 256;
 const MAX_VERSION_BYTES: usize = 256;
 const MAX_PATH_BYTES: usize = 128 * 1024;
 const MAX_FEATURE_BYTES: usize = 256;
-const MAX_HOST_TARGET_BYTES: usize = 256;
 
 const MAX_JSON_STREAM_BYTES: usize = 64 * 1024 * 1024;
 const MAX_JSON_RECORD_BYTES: usize = 4 * 1024 * 1024;

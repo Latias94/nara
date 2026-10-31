@@ -2,7 +2,7 @@
 
 **Status**: Proposed
 **Date**: 2026-07-13
-**Last Revised**: 2026-10-23
+**Last Revised**: 2026-10-31
 **Owner**: executable hosts, build tooling, and Rust project composition
 **Admission Trigger**: Scoped fixtures separately prove Cargo-authoritative Host tool construction,
 immutable target executable build/provenance, and target-runner activation/last-good behavior;
@@ -13,6 +13,12 @@ requires a different executable activation topology
 ADR 0068, ADR 0070, ADR 0079, ADR 0082, ADR 0084, ADR 0088, ADR 0093
 
 ## Context
+
+The finite explicit Cargo selection, captured build artifact and source-Export ownership slice
+is selected by [ADR 0110](0110-first-party-project-workflow-and-source-carrying-export.md#explicit-cargo-selection-and-captured-build-results).
+Its implementation/qualification remains with the linked current plan. This proposal continues
+to own the remaining general activation, last-good, target-runner and broader executable
+generation model; it is not accepted wholesale by that extraction.
 
 Rust is Nara's complete game-authoring language. Data and asset edits can reload directly, but a
 structural Rust edit changes code, layout, plugin topology, features, or dependencies and therefore

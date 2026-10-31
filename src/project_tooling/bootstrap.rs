@@ -1,22 +1,23 @@
 use std::{
-    fs,
-    io::{self, Read},
+    fs, io,
     path::{Path, PathBuf},
-    process::{Command, ExitStatus, Stdio},
+    process::Command,
 };
 
-use serde_json::Value;
 use thiserror::Error;
 
+use super::cargo_build::{
+    CargoBuildFailure, CargoBuildTools, bounded_status_output as bounded_output, parse_host_target,
+};
 use super::{ProjectToolFailure, ProjectToolRequest, ProjectToolSummary, protocol};
-use crate::project_workflow::__private::{CargoHeadlessMetadataFacts, CargoJsonMessage};
+use crate::project_workflow::cargo::{CargoBuildDecoder, CargoBuildSelection, CargoMetadataFacts};
 
 #[derive(Debug, Error)]
 pub enum ProjectToolInvocationError {
     #[error("failed to resolve the explicit project or export directory")]
     Resolve(#[source] io::Error),
-    #[error("failed to execute the project tool or Cargo bootstrap")]
-    Process(#[source] io::Error),
+    #[error(transparent)]
+    ProcessOwner(#[from] CargoBuildFailure),
     #[error("{0}")]
     Bootstrap(String),
     #[error("{0}")]
@@ -81,7 +82,7 @@ pub fn invoke_project_tool(
             command.arg("--replacement").arg(replacement);
         }
     }
-    let (status, bytes) = bounded_output(&mut command, protocol::MAX_RESPONSE_BYTES)?;
+    let (status, bytes) = bounded_output(&mut command, protocol::MAX_RESPONSE_BYTES as usize)?;
     finish_response(status.success(), &bytes, request.operation())
 }
 
@@ -144,20 +145,49 @@ mod completion_tests {
 
 fn build_headless(project: &Path, desktop: bool) -> Result<PathBuf, ProjectToolInvocationError> {
     let manifest = project.join("Cargo.toml");
-    let locked = project.join("Cargo.lock").is_file();
-    let mut metadata = Command::new("cargo");
+    let tools = CargoBuildTools::discover_in(project)?;
+    if !project.join("Cargo.lock").is_file() {
+        // Starter initialization is an explicit authoring operation, separate from every locked
+        // build below. Cargo remains the sole dependency/lock authority.
+        let mut initialize = Command::new(tools.cargo_path());
+        initialize
+            .current_dir(project)
+            .args(["generate-lockfile", "--manifest-path"])
+            .arg(&manifest)
+            .env("RUSTC", tools.rustc_path());
+        let (status, _) = bounded_output(&mut initialize, 16 * 1024 * 1024)?;
+        if !status.success() {
+            return Err(ProjectToolInvocationError::Bootstrap(
+                "Cargo could not initialize the project lockfile".to_owned(),
+            ));
+        }
+    }
+    let mut identity = Command::new(tools.rustc_path());
+    identity.arg("-vV");
+    let (status, bytes) = bounded_output(&mut identity, 16 * 1024)?;
+    if !status.success() {
+        return Err(ProjectToolInvocationError::Bootstrap(
+            "Rust compiler identity was unavailable".to_owned(),
+        ));
+    }
+    let host = parse_host_target(&bytes)?;
+    let mut metadata = Command::new(tools.cargo_path());
     metadata
         .current_dir(project)
         .args([
             "metadata",
-            "--no-deps",
+            "--locked",
+            "--no-default-features",
             "--format-version",
             "1",
             "--manifest-path",
         ])
-        .arg(&manifest);
-    if locked {
-        metadata.arg("--locked");
+        .arg(&manifest)
+        .arg("--filter-platform")
+        .arg(&host)
+        .env("RUSTC", tools.rustc_path());
+    if desktop {
+        metadata.args(["--features", "desktop"]);
     }
     let (status, bytes) = bounded_output(&mut metadata, 16 * 1024 * 1024)?;
     if !status.success() {
@@ -165,147 +195,70 @@ fn build_headless(project: &Path, desktop: bool) -> Result<PathBuf, ProjectToolI
             "Cargo could not discover the project's headless tool target".to_owned(),
         ));
     }
-    let facts = CargoHeadlessMetadataFacts::parse(&bytes, &manifest)
+    let package = CargoMetadataFacts::package_name_for_manifest(&bytes, &manifest)
         .map_err(|error| ProjectToolInvocationError::Bootstrap(error.to_string()))?;
-    if !paths_match(facts.source_path(), &project.join("src/bin/headless.rs")) {
+    // This is the desktop-2D starter's tool policy. The generic Cargo contract neither names
+    // these binaries/features nor derives them from a product profile label.
+    let features: Vec<&str> = if desktop { vec!["desktop"] } else { Vec::new() };
+    let selection = CargoBuildSelection::new(package, "headless", "dev", &host, features, false)
+        .map_err(|error| ProjectToolInvocationError::Bootstrap(error.to_string()))?;
+    let facts = CargoMetadataFacts::parse(&bytes, &manifest, &selection)
+        .map_err(|error| ProjectToolInvocationError::Bootstrap(error.to_string()))?;
+    if facts.project_tool_protocol() != Some(1) {
+        return Err(ProjectToolInvocationError::Bootstrap(
+            "the project does not declare supported package.metadata.nara.project-tool-protocol = 1".to_owned(),
+        ));
+    }
+    let invocation = facts
+        .build_invocation(selection)
+        .map_err(|error| ProjectToolInvocationError::Bootstrap(error.to_string()))?;
+    if !paths_match(
+        invocation.source_path(),
+        &project.join("src/bin/headless.rs"),
+    ) {
         return Err(ProjectToolInvocationError::Bootstrap(
             "the headless target must use src/bin/headless.rs".to_owned(),
         ));
     }
-    let mut build = Command::new("cargo");
+    let mut build = Command::new(tools.cargo_path());
     build
         .current_dir(project)
         .args([
             "build",
+            "--locked",
             "--no-default-features",
             "--bin",
             "headless",
             "--message-format=json",
             "--manifest-path",
         ])
-        .arg(&manifest);
-    if locked {
-        build.arg("--locked");
-    }
+        .arg(&manifest)
+        .arg("--package")
+        .arg(invocation.package_name())
+        .arg("--profile")
+        .arg(invocation.profile())
+        .arg("--target")
+        .arg(invocation.target_triple())
+        .env("RUSTC", tools.rustc_path())
+        .env("CARGO_TARGET_DIR", invocation.target_directory());
     if desktop {
         build.args(["--features", "desktop"]);
     }
     let (status, bytes) = bounded_output(&mut build, 64 * 1024 * 1024)?;
-    let selected = select_headless(
-        &bytes,
-        facts.package_id(),
-        &manifest,
-        facts.source_path(),
-        desktop,
-    );
     if !status.success() {
         return Err(ProjectToolInvocationError::Bootstrap("the project headless bootstrap build failed; fix its Cargo diagnostics before running the project tool".to_owned()));
     }
-    selected
-}
-
-fn select_headless(
-    bytes: &[u8],
-    package: &str,
-    manifest: &Path,
-    source: &Path,
-    desktop: bool,
-) -> Result<PathBuf, ProjectToolInvocationError> {
-    let mut executable = None;
-    let mut finished = None;
-    for value in serde_json::Deserializer::from_slice(bytes).into_iter::<Value>() {
-        let message =
-            value.map_err(|error| ProjectToolInvocationError::Bootstrap(error.to_string()))?;
-        match CargoJsonMessage::parse(message)
-            .map_err(|error| ProjectToolInvocationError::Bootstrap(error.to_string()))?
-        {
-            CargoJsonMessage::CompilerArtifact(artifact)
-                if artifact.package_id() == package
-                    && paths_match(artifact.manifest_path(), manifest)
-                    && artifact.target_name() == "headless" =>
-            {
-                let expected_features: &[&str] = if desktop { &["desktop"] } else { &[] };
-                if artifact.target_kind() != ["bin"]
-                    || artifact.target_crate_types() != ["bin"]
-                    || !paths_match(artifact.target_source_path(), source)
-                    || artifact
-                        .features()
-                        .iter()
-                        .map(String::as_str)
-                        .ne(expected_features.iter().copied())
-                    || artifact.profile_test()
-                {
-                    return Err(ProjectToolInvocationError::Bootstrap(
-                        "Cargo headless artifact does not match the selected bootstrap invocation"
-                            .to_owned(),
-                    ));
-                }
-                let selected = artifact
-                    .executable()
-                    .filter(|path| path.is_absolute())
-                    .ok_or_else(|| {
-                        ProjectToolInvocationError::Bootstrap(
-                            "Cargo headless artifact has no absolute executable path".to_owned(),
-                        )
-                    })?;
-                if executable.replace(selected.to_owned()).is_some() {
-                    return Err(ProjectToolInvocationError::Bootstrap(
-                        "Cargo repeated the headless artifact".to_owned(),
-                    ));
-                }
-            }
-            CargoJsonMessage::BuildFinished { success } => {
-                if finished.replace(success).is_some() {
-                    return Err(ProjectToolInvocationError::Bootstrap(
-                        "Cargo repeated its build completion".to_owned(),
-                    ));
-                }
-            }
-            CargoJsonMessage::CompilerDiagnostic(diagnostic) => {
-                eprintln!("{}", diagnostic.message());
-            }
-            _ => {}
-        }
+    let mut decoder = CargoBuildDecoder::new(invocation);
+    decoder
+        .push(&bytes)
+        .map_err(|error| ProjectToolInvocationError::Bootstrap(error.to_string()))?;
+    let selected = decoder
+        .finish()
+        .map_err(|error| ProjectToolInvocationError::Bootstrap(error.to_string()))?;
+    for diagnostic in selected.diagnostics().entries() {
+        eprintln!("{}", diagnostic.message());
     }
-    if finished != Some(true) {
-        return Err(ProjectToolInvocationError::Bootstrap(
-            "Cargo did not complete the headless bootstrap".to_owned(),
-        ));
-    }
-    executable.ok_or_else(|| {
-        ProjectToolInvocationError::Bootstrap(
-            "Cargo did not report the selected headless executable".to_owned(),
-        )
-    })
-}
-
-fn bounded_output(
-    command: &mut Command,
-    limit: u64,
-) -> Result<(ExitStatus, Vec<u8>), ProjectToolInvocationError> {
-    let mut child = command
-        .stdout(Stdio::piped())
-        .stdin(Stdio::null())
-        .spawn()
-        .map_err(ProjectToolInvocationError::Process)?;
-    let mut bytes = Vec::new();
-    let read = child
-        .stdout
-        .take()
-        .expect("piped child stdout is available")
-        .take(limit + 1)
-        .read_to_end(&mut bytes);
-    if read.is_err() || bytes.len() as u64 > limit {
-        let _ = child.kill();
-    }
-    let status = child.wait().map_err(ProjectToolInvocationError::Process)?;
-    read.map_err(ProjectToolInvocationError::Process)?;
-    if bytes.len() as u64 > limit {
-        return Err(ProjectToolInvocationError::Protocol(
-            "project tool or Cargo output exceeded its bounded size",
-        ));
-    }
-    Ok((status, bytes))
+    Ok(selected.artifact().executable().to_owned())
 }
 
 fn paths_match(left: &Path, right: &Path) -> bool {

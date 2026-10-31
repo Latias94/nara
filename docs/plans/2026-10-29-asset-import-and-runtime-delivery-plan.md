@@ -453,12 +453,22 @@ The complete [processed unit](2026-10-30-processed-input-startup-and-process-pro
 qualified in that scope. Physical endpoint/contribution growth remains a separate R10 correction;
 this Input result does not complete target delivery or the packaged Player.
 
-Target-build selection remains separate: current export adapters hardcode starter bins,
-release/dev assumptions, desktop features and the Host triple. Select package/bin/profile,
-features, target and toolchain explicitly, distinguish Host tools from target artifacts and
-separate cross-build from target execution qualification. Runtime content configuration and
+At this successor's starting baseline, export adapters hardcoded starter bins, release/dev,
+desktop features and the Host triple. The selected replacement makes package/bin/profile,
+features, target and toolchain explicit, distinguishes Host tools from target artifacts and
+separates cross-build from target execution qualification. Runtime content configuration and
 run APIs never invoke Cargo. A processed input process fixture consumes a prebuilt executable;
 it does not establish a general build/export product.
+
+The [explicit Cargo unit](2026-10-31-explicit-cargo-build-selection-plan.md) extracts those fixed
+selection assumptions into shared facts and explicit starter adapters. Its
+[qualification](../knowledge/engineering/verification/2026-10/2026-10-31T035034Z-explicit-cargo-builds-captured-executables-and-supervised-protocol-qualification-4cfff5128fa64423b6f234ea7b312c63.md)
+records actual custom native/foreign builds and the migrated source/native owners. This build
+consumer does not supply the production catalog/package owner. The subsequent
+[cooked Player plan](2026-10-31-cooked-player-delivery-plan.md) fixes that join: complete target
+content first, generated independent expectation as a declared Player build input, then captured
+code/content binding and whole-directory publication. Neither plan accepts all of Proposed 0088
+or changes the existing Runtime/Ready/last-good owners.
 
 ## Owning Decisions
 

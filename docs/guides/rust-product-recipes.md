@@ -337,10 +337,13 @@ and migration registration in the contribution's provider callback. Its runtime 
 register that provider again.
 
 `nara check`, `nara export`, and `nara repair startup-scene` first discover and build the existing
-`headless` target. A new project can generate its initial lockfile during bootstrap; existing
-lockfiles are respected with `--locked`. Strict checking then runs inside that executable with its
-native schema. Export retains the checked closure, build agreement, and publication capabilities in
-that process. The parent CLI receives bounded display summaries, never reconstructed authority.
+`headless` target. A new project generates its initial lockfile as a separate Cargo authoring
+operation; all subsequent metadata/build commands use `--locked`. Strict checking then runs inside
+that executable with its native schema. Export retains the checked closure, captured executable
+bytes, exact build-input agreement, and publication capabilities in that process. The parent CLI
+receives bounded display summaries, never reconstructed authority. The [explicit Cargo build
+guide](cargo-builds.md) covers custom package/bin/profile/target selection independently of this
+starter tool policy and native execution qualification.
 
 Default tools require no window, graphics backend, or editor toolkit. Explicitly checking the
 `desktop` profile builds the matching Cargo feature. Missing or unsupported tool metadata rejects

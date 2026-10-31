@@ -1,6 +1,6 @@
 #[cfg(feature = "project-tooling")]
 use std::array;
-use std::fmt;
+use std::{fmt, sync::Arc};
 
 use nara_fs::{
     ContentDigest, DirectoryCapability, FileCapability, FileIdentity, FsError, RelativePath,
@@ -9,22 +9,17 @@ use nara_fs::{
 use nara_reflect::SchemaCompositionFingerprint;
 
 use crate::project_host::StartupContentClosureReceipt;
+#[cfg(feature = "project-tooling")]
+use crate::project_tooling::cargo_build::CapturedCargoExecutable;
 
-const MAX_BUILD_INPUT_BYTES: u64 = 4 * 1024 * 1024;
+#[cfg(feature = "project-tooling")]
+const MAX_BUILD_INPUT_COUNT: usize = 1024;
+#[cfg(feature = "project-tooling")]
+const MAX_BUILD_INPUT_BYTES: u64 = 64 * 1024 * 1024;
+#[cfg(feature = "project-tooling")]
 const MAX_EXECUTABLE_BYTES: u64 = 512 * 1024 * 1024;
+#[cfg(feature = "project-tooling")]
 const BUILD_INPUT_DOMAIN: &[u8] = b"nara.project-export-build-input.v1\0";
-#[cfg(feature = "project-tooling")]
-const EXPECTED_PROFILE: &str = "release";
-#[cfg(feature = "project-tooling")]
-const EXPECTED_FEATURE: &str = "desktop";
-
-const BUILD_INPUT_PATHS: [&str; 5] = [
-    "Cargo.toml",
-    "Cargo.lock",
-    "src/lib.rs",
-    "src/bin/headless.rs",
-    "src/bin/desktop.rs",
-];
 
 /// The two executable roles admitted by the closed desktop-2D export contract.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
@@ -55,6 +50,7 @@ impl ProjectExportBinaryTarget {
 pub struct ProjectExportExecutableReceipt {
     target: ProjectExportBinaryTarget,
     digest: ContentDigest,
+    build_provenance_digest: ContentDigest,
 }
 
 impl ProjectExportExecutableReceipt {
@@ -67,13 +63,20 @@ impl ProjectExportExecutableReceipt {
     pub const fn digest(self) -> ContentDigest {
         self.digest
     }
+
+    /// Identifies the captured build observation separately from executable bytes and startup.
+    #[must_use]
+    pub const fn build_provenance_digest(self) -> ContentDigest {
+        self.build_provenance_digest
+    }
 }
 
 /// Exact build facts consumed by one startup-closure export attempt.
 ///
-/// The receipt owns the opened executable handles privately. It is deliberately move-only: an
+/// The receipt owns the exact captured executable bytes privately. It is deliberately move-only: an
 /// export consumes one exact Cargo selection rather than accepting caller-authored executable
-/// paths or rediscovering target-directory contents.
+/// paths or rediscovering target-directory contents. Captured build observations do not establish
+/// Runtime Ready; separately executed products must still agree with the startup inputs.
 pub struct ProjectExportBuildReceipt {
     project_root_identity: FileIdentity,
     build_input_revision: BuildInputRevision,
@@ -111,6 +114,7 @@ impl ProjectExportBuildReceipt {
         &self.profile
     }
 
+    /// The normalized requested features shared by both builds, separate from Cargo's resolution.
     #[must_use]
     pub fn features(&self) -> &[String] {
         &self.features
@@ -135,13 +139,6 @@ impl ProjectExportBuildReceipt {
             .ok_or(ProjectExportBuildError::RuntimeSchemaAgreementMissing)?;
         let schema_fingerprint = startup_content.schema_fingerprint().to_string();
         for executable in &self.executables {
-            executable
-                .file
-                .verify_digest(executable.receipt.digest, MAX_EXECUTABLE_BYTES)
-                .map_err(|source| ProjectExportBuildError::ExecutableChanged {
-                    target: executable.receipt.target,
-                    source,
-                })?;
             let agreement = &self.product_agreements[executable.receipt.target.index()];
             if !agreement.matches_inputs(
                 &executable.receipt,
@@ -159,8 +156,8 @@ impl ProjectExportBuildReceipt {
         Ok(())
     }
 
-    pub(super) fn executable(&self, target: ProjectExportBinaryTarget) -> &FileCapability {
-        &self.executables[target.index()].file
+    pub(super) fn executable_bytes(&self, target: ProjectExportBinaryTarget) -> &[u8] {
+        &self.executables[target.index()].bytes
     }
 }
 
@@ -183,10 +180,13 @@ impl fmt::Debug for ProjectExportBuildReceipt {
 
 struct PreparedExecutable {
     receipt: ProjectExportExecutableReceipt,
-    file: FileCapability,
+    bytes: Arc<[u8]>,
 }
 
-/// Build-input checkpoint captured before the private Cargo Adapter starts `cargo build --locked`.
+/// Declared build-input checkpoint captured before the Cargo Adapter starts a locked build.
+///
+/// The inventory is explicit and bounded, with per-file identity and digest revalidation. It is
+/// not a complete source snapshot or an inventory of Cargo's build-script and environment inputs.
 #[doc(hidden)]
 #[cfg(feature = "project-tooling")]
 pub struct ProjectExportBuildPreparation {
@@ -203,9 +203,10 @@ pub struct ProjectExportBuildPreparation {
 impl ProjectExportBuildPreparation {
     pub fn capture(
         startup_content: &StartupContentClosureReceipt,
+        inputs: impl IntoIterator<Item = RelativePath>,
     ) -> Result<Self, ProjectExportBuildError> {
         let project_root = startup_content.project_root();
-        let revision = BuildInputRevision::capture(&project_root)?;
+        let revision = BuildInputRevision::capture(&project_root, inputs)?;
         let authoring_schema_bundle_digest = startup_content
             .runtime_schema_bundle_digest()
             .ok_or(ProjectExportBuildError::RuntimeSchemaAgreementMissing)?;
@@ -244,24 +245,28 @@ impl ProjectExportBuildPreparation {
     ) -> Result<ProjectExportBuildReceipt, ProjectExportBuildError> {
         self.revision.revalidate(&self.project_root)?;
         let [first, second] = artifacts;
-        let invocation = ArtifactInvocation::matching(&first, &second)?;
+        let selection = ArtifactSelection::matching(&first, &second)?;
         let mut executables: [Option<PreparedExecutable>; 2] = array::from_fn(|_| None);
         for artifact in [first, second] {
             let target = artifact.target;
+            // Startup agreement cannot prove which Rust input revision produced these bytes.
+            if !self
+                .revision
+                .matches_declared_inputs(&artifact.declared_inputs)
+            {
+                return Err(ProjectExportBuildError::ArtifactBuildInputsMismatch { target });
+            }
             let index = target.index();
             if executables[index].is_some() {
                 return Err(ProjectExportBuildError::DuplicateExecutable { target });
             }
-            let digest = artifact
-                .file
-                .digest(MAX_EXECUTABLE_BYTES)
-                .map_err(|source| ProjectExportBuildError::ExecutableUnavailable {
-                    target,
-                    source,
-                })?;
             executables[index] = Some(PreparedExecutable {
-                receipt: ProjectExportExecutableReceipt { target, digest },
-                file: artifact.file,
+                receipt: ProjectExportExecutableReceipt {
+                    target,
+                    digest: artifact.digest,
+                    build_provenance_digest: artifact.build_provenance_digest,
+                },
+                bytes: artifact.bytes,
             });
         }
         let [headless, desktop] = executables;
@@ -283,10 +288,10 @@ impl ProjectExportBuildPreparation {
         Ok(ProjectExportBuildReceipt {
             project_root_identity: self.project_root.identity(),
             build_input_revision: self.revision,
-            package_identity_digest: ContentDigest::of_bytes(invocation.package_id.as_bytes()),
-            target_triple: invocation.target_triple,
-            profile: invocation.profile,
-            features: invocation.features,
+            package_identity_digest: ContentDigest::of_bytes(selection.package.as_bytes()),
+            target_triple: selection.target_triple,
+            profile: selection.profile,
+            features: selection.features,
             executables: [headless, desktop],
             product_agreements: agreements,
         })
@@ -443,72 +448,169 @@ fn bind_product_agreements(
     ])
 }
 
-/// One structurally matched Cargo compiler-artifact selected by the private Adapter.
+/// One exact captured Cargo executable selected by the private Adapter.
 #[doc(hidden)]
 #[cfg(feature = "project-tooling")]
 pub struct ProjectExportCargoArtifact {
     target: ProjectExportBinaryTarget,
-    package_id: String,
+    package: String,
     target_triple: String,
     profile: String,
     features: Box<[String]>,
-    file: FileCapability,
+    default_features: bool,
+    bytes: Arc<[u8]>,
+    digest: ContentDigest,
+    build_provenance_digest: ContentDigest,
+    declared_inputs: Box<[CapturedBuildInput]>,
 }
 
 #[cfg(feature = "project-tooling")]
 impl ProjectExportCargoArtifact {
-    pub fn new(
+    /// Retains captured bytes and bounded declared-input facts without reopening Cargo output.
+    pub fn from_captured(
         target: ProjectExportBinaryTarget,
-        package_id: impl Into<String>,
+        captured: CapturedCargoExecutable,
+    ) -> Result<Self, ProjectExportBuildError> {
+        let provenance = captured.provenance();
+        let selection = provenance.selection();
+        if selection.target() != target.cargo_target_name() {
+            return Err(ProjectExportBuildError::ArtifactTargetMismatch { target });
+        }
+        let digest = captured.digest();
+        if digest.length() > MAX_EXECUTABLE_BYTES {
+            return Err(ProjectExportBuildError::ExecutableUnavailable {
+                target,
+                source: FsError::ByteLimitExceeded {
+                    limit: MAX_EXECUTABLE_BYTES,
+                },
+            });
+        }
+        let declared_inputs = captured_build_inputs(
+            provenance
+                .declared_inputs()
+                .iter()
+                .map(|input| (input.path(), input.digest())),
+        )?;
+        Ok(Self {
+            target,
+            package: selection.package().to_owned(),
+            target_triple: selection.target_triple().to_owned(),
+            profile: selection.profile().to_owned(),
+            features: selection.features().to_vec().into_boxed_slice(),
+            default_features: selection.default_features(),
+            bytes: captured.shared_bytes(),
+            digest,
+            build_provenance_digest: provenance.digest(),
+            declared_inputs,
+        })
+    }
+
+    // Synthetic owner fixtures have no Cargo observation. Keep file-based construction out of
+    // the production API and mark its provenance explicitly rather than fabricating build facts.
+    #[cfg(test)]
+    pub(super) fn from_file(
+        target: ProjectExportBinaryTarget,
+        package: impl Into<String>,
         target_triple: impl Into<String>,
         profile: impl Into<String>,
         features: impl IntoIterator<Item = String>,
         file: FileCapability,
+        preparation: &ProjectExportBuildPreparation,
     ) -> Result<Self, ProjectExportBuildError> {
-        let package_id = bounded_ascii(package_id.into(), "Cargo package identity", 4096)?;
+        let package = bounded_ascii(package.into(), "Cargo package selection", 4096)?;
         let target_triple = bounded_ascii(target_triple.into(), "Cargo target triple", 256)?;
         let profile = bounded_ascii(profile.into(), "Cargo profile", 64)?;
-        if profile != EXPECTED_PROFILE {
-            return Err(ProjectExportBuildError::UnexpectedProfile);
-        }
         let features = normalize_features(features)?;
-        if features.as_ref() != [EXPECTED_FEATURE] {
-            return Err(ProjectExportBuildError::UnexpectedFeatures);
-        }
+        let bytes = file
+            .read_to_end_bounded(MAX_EXECUTABLE_BYTES)
+            .map_err(|source| ProjectExportBuildError::ExecutableUnavailable { target, source })?;
+        let digest = ContentDigest::of_bytes(&bytes);
+        let declared_inputs = captured_build_inputs(
+            preparation
+                .revision
+                .members
+                .iter()
+                .map(|member| (member.path.as_str(), member.digest)),
+        )?;
         Ok(Self {
             target,
-            package_id,
+            package,
             target_triple,
             profile,
             features,
-            file,
+            default_features: false,
+            bytes: bytes.into(),
+            digest,
+            build_provenance_digest: ContentDigest::of_bytes(
+                b"synthetic export build provenance; no Cargo build ran",
+            ),
+            declared_inputs,
         })
     }
 }
 
 #[cfg(feature = "project-tooling")]
-struct ArtifactInvocation {
-    package_id: String,
+struct CapturedBuildInput {
+    path: String,
+    digest: ContentDigest,
+}
+
+#[cfg(feature = "project-tooling")]
+fn captured_build_inputs<'a>(
+    inputs: impl IntoIterator<Item = (&'a str, ContentDigest)>,
+) -> Result<Box<[CapturedBuildInput]>, ProjectExportBuildError> {
+    let mut captured = Vec::new();
+    let mut total_bytes = 0_u64;
+    for (index, (path, digest)) in inputs.into_iter().enumerate() {
+        if index >= MAX_BUILD_INPUT_COUNT {
+            return Err(ProjectExportBuildError::BuildInputCountExceeded);
+        }
+        RelativePath::new(path).map_err(|_| ProjectExportBuildError::InvalidBuildInputPath)?;
+        total_bytes = total_bytes
+            .checked_add(digest.length())
+            .filter(|total| *total <= MAX_BUILD_INPUT_BYTES)
+            .ok_or(ProjectExportBuildError::BuildInputByteLimitExceeded)?;
+        captured.push(CapturedBuildInput {
+            path: path.to_owned(),
+            digest,
+        });
+    }
+    captured.sort_unstable_by(|left, right| left.path.cmp(&right.path));
+    if let Some(pair) = captured
+        .windows(2)
+        .find(|pair| pair[0].path == pair[1].path)
+    {
+        return Err(ProjectExportBuildError::DuplicateBuildInput {
+            path: pair[0].path.clone(),
+        });
+    }
+    Ok(captured.into_boxed_slice())
+}
+
+#[cfg(feature = "project-tooling")]
+struct ArtifactSelection {
+    package: String,
     target_triple: String,
     profile: String,
     features: Box<[String]>,
 }
 
 #[cfg(feature = "project-tooling")]
-impl ArtifactInvocation {
+impl ArtifactSelection {
     fn matching(
         first: &ProjectExportCargoArtifact,
         second: &ProjectExportCargoArtifact,
     ) -> Result<Self, ProjectExportBuildError> {
-        if first.package_id != second.package_id
+        if first.package != second.package
             || first.target_triple != second.target_triple
             || first.profile != second.profile
             || first.features != second.features
+            || first.default_features != second.default_features
         {
             return Err(ProjectExportBuildError::ArtifactInvocationMismatch);
         }
         Ok(Self {
-            package_id: first.package_id.clone(),
+            package: first.package.clone(),
             target_triple: first.target_triple.clone(),
             profile: first.profile.clone(),
             features: first.features.clone(),
@@ -522,23 +624,77 @@ struct BuildInputRevision {
 }
 
 impl BuildInputRevision {
-    fn capture(project_root: &DirectoryCapability) -> Result<Self, ProjectExportBuildError> {
-        let mut members = Vec::with_capacity(BUILD_INPUT_PATHS.len());
+    #[cfg(feature = "project-tooling")]
+    fn matches_declared_inputs(&self, captured: &[CapturedBuildInput]) -> bool {
+        self.members.len() == captured.len()
+            && self
+                .members
+                .iter()
+                .zip(captured)
+                .all(|(member, input)| member.path == input.path && member.digest == input.digest)
+    }
+
+    #[cfg(feature = "project-tooling")]
+    fn capture(
+        project_root: &DirectoryCapability,
+        inputs: impl IntoIterator<Item = RelativePath>,
+    ) -> Result<Self, ProjectExportBuildError> {
+        let mut paths = Vec::new();
+        for relative in inputs {
+            if paths.len() >= MAX_BUILD_INPUT_COUNT {
+                return Err(ProjectExportBuildError::BuildInputCountExceeded);
+            }
+            let mut path = String::new();
+            for component in relative.components() {
+                if !path.is_empty() {
+                    path.push('/');
+                }
+                path.push_str(
+                    component
+                        .to_str()
+                        .ok_or(ProjectExportBuildError::InvalidBuildInputPath)?,
+                );
+            }
+            paths.push((path, relative));
+        }
+        paths.sort_unstable_by(|left, right| left.0.cmp(&right.0));
+        if let Some(pair) = paths.windows(2).find(|pair| pair[0].0 == pair[1].0) {
+            return Err(ProjectExportBuildError::DuplicateBuildInput {
+                path: pair[0].0.clone(),
+            });
+        }
+        for required in ["Cargo.toml", "Cargo.lock"] {
+            if !paths.iter().any(|(path, _)| path == required) {
+                return Err(ProjectExportBuildError::MissingBuildInput { path: required });
+            }
+        }
+        let mut members = Vec::with_capacity(paths.len());
+        let mut total_bytes = 0;
         let mut framed = Vec::new();
         framed.extend_from_slice(BUILD_INPUT_DOMAIN);
-        for path in BUILD_INPUT_PATHS {
-            let relative = RelativePath::new(path)
-                .expect("the closed project build input inventory uses valid paths");
-            let file = project_root.open_file(&relative).map_err(|source| {
-                ProjectExportBuildError::BuildInputUnavailable { path, source }
+        for (path, relative) in paths {
+            let file = project_root.open_file_exact(&relative).map_err(|source| {
+                ProjectExportBuildError::BuildInputUnavailable {
+                    path: path.clone(),
+                    source,
+                }
             })?;
-            let digest = file.digest(MAX_BUILD_INPUT_BYTES).map_err(|source| {
-                ProjectExportBuildError::BuildInputUnavailable { path, source }
-            })?;
+            let digest = file
+                .digest(MAX_BUILD_INPUT_BYTES - total_bytes)
+                .map_err(|source| match source {
+                    FsError::ByteLimitExceeded { .. } => {
+                        ProjectExportBuildError::BuildInputByteLimitExceeded
+                    }
+                    source => ProjectExportBuildError::BuildInputUnavailable {
+                        path: path.clone(),
+                        source,
+                    },
+                })?;
+            total_bytes += digest.length();
             append_frame(&mut framed, path.as_bytes());
             append_frame(&mut framed, &digest.length().to_le_bytes());
             append_frame(&mut framed, digest.as_bytes());
-            members.push(BuildInputMember { path, digest });
+            members.push(BuildInputMember { path, file, digest });
         }
         Ok(Self {
             members: members.into_boxed_slice(),
@@ -550,28 +706,47 @@ impl BuildInputRevision {
         &self,
         project_root: &DirectoryCapability,
     ) -> Result<(), ProjectExportBuildError> {
-        let current = Self::capture(project_root)?;
-        if current.digest == self.digest
-            && current
-                .members
-                .iter()
-                .zip(self.members.iter())
-                .all(|(current, expected)| current == expected)
-        {
-            Ok(())
-        } else {
-            Err(ProjectExportBuildError::BuildInputsChanged)
+        for member in &self.members {
+            let relative = RelativePath::new(&member.path)
+                .expect("captured build input paths retain their validated exact spelling");
+            let current = project_root.open_file_exact(&relative).map_err(|source| {
+                ProjectExportBuildError::BuildInputUnavailable {
+                    path: member.path.clone(),
+                    source,
+                }
+            })?;
+            let same_file = current.same_object(&member.file).map_err(|source| {
+                ProjectExportBuildError::BuildInputUnavailable {
+                    path: member.path.clone(),
+                    source,
+                }
+            })?;
+            if !same_file {
+                return Err(ProjectExportBuildError::BuildInputsChanged);
+            }
+            current
+                .verify_digest(member.digest, member.digest.length())
+                .map_err(|source| match source {
+                    FsError::DigestMismatch { .. } | FsError::ByteLimitExceeded { .. } => {
+                        ProjectExportBuildError::BuildInputsChanged
+                    }
+                    source => ProjectExportBuildError::BuildInputUnavailable {
+                        path: member.path.clone(),
+                        source,
+                    },
+                })?;
         }
+        Ok(())
     }
 }
 
-#[derive(PartialEq, Eq)]
 struct BuildInputMember {
-    path: &'static str,
+    path: String,
+    file: FileCapability,
     digest: ContentDigest,
 }
 
-#[cfg(feature = "project-tooling")]
+#[cfg(all(test, feature = "project-tooling"))]
 fn normalize_features(
     features: impl IntoIterator<Item = String>,
 ) -> Result<Box<[String]>, ProjectExportBuildError> {
@@ -584,7 +759,7 @@ fn normalize_features(
     Ok(features.into_boxed_slice())
 }
 
-#[cfg(feature = "project-tooling")]
+#[cfg(all(test, feature = "project-tooling"))]
 fn bounded_ascii(
     value: String,
     field: &'static str,
@@ -597,6 +772,7 @@ fn bounded_ascii(
     }
 }
 
+#[cfg(feature = "project-tooling")]
 fn append_frame(target: &mut Vec<u8>, bytes: &[u8]) {
     target.extend_from_slice(&(bytes.len() as u64).to_le_bytes());
     target.extend_from_slice(bytes);
@@ -608,32 +784,38 @@ pub enum ProjectExportBuildError {
     RuntimeSchemaAgreementMissing,
     #[error("project export build input {path} is unavailable")]
     BuildInputUnavailable {
-        path: &'static str,
+        path: String,
         #[source]
         source: FsError,
     },
     #[error("project export build inputs changed after preparation")]
     BuildInputsChanged,
-    #[error("the Cargo artifact set does not belong to one exact invocation")]
+    #[error("project export build input paths must have exact UTF-8 spellings")]
+    InvalidBuildInputPath,
+    #[error("project export build inputs exceed the 1024-member limit")]
+    BuildInputCountExceeded,
+    #[error("project export build inputs exceed the 64 MiB total byte limit")]
+    BuildInputByteLimitExceeded,
+    #[error("project export build input {path} was declared more than once")]
+    DuplicateBuildInput { path: String },
+    #[error("project export build inputs must declare {path}")]
+    MissingBuildInput { path: &'static str },
+    #[error(
+        "the Cargo artifacts do not share one package, target triple, profile and feature selection"
+    )]
     ArtifactInvocationMismatch,
+    #[error("the captured Cargo binary does not match the {target:?} export role")]
+    ArtifactTargetMismatch { target: ProjectExportBinaryTarget },
+    #[error("the {target:?} captured build inputs do not match the export preparation")]
+    ArtifactBuildInputsMismatch { target: ProjectExportBinaryTarget },
     #[error("the Cargo artifact field {field} is invalid")]
     InvalidArtifactField { field: &'static str },
-    #[error("the Cargo build profile is not the closed release profile")]
-    UnexpectedProfile,
-    #[error("the Cargo feature set is not the closed desktop export set")]
-    UnexpectedFeatures,
     #[error("Cargo produced the {target:?} executable more than once")]
     DuplicateExecutable { target: ProjectExportBinaryTarget },
     #[error("Cargo did not produce the {target:?} executable")]
     MissingExecutable { target: ProjectExportBinaryTarget },
     #[error("the {target:?} executable is unavailable")]
     ExecutableUnavailable {
-        target: ProjectExportBinaryTarget,
-        #[source]
-        source: FsError,
-    },
-    #[error("the {target:?} executable changed after Cargo selection")]
-    ExecutableChanged {
         target: ProjectExportBinaryTarget,
         #[source]
         source: FsError,

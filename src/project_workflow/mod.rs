@@ -1,10 +1,12 @@
 //! First-party project creation, checking, export, and repair transactions.
 //!
-//! The initial public surface owns only the immutable `desktop-2d/v1` creation plan. Native paths,
-//! Cargo process messages, CLI parsing, and desktop presentation remain Adapter concerns.
+//! Native process execution, CLI parsing and desktop presentation remain Adapter concerns.
+//! The `cargo` submodule supplies bounded pure facts for explicitly selected trusted builds;
+//! build output does not grant product activation or Runtime readiness.
 
 #[cfg(feature = "project-workflow-cargo-facts")]
-mod cargo_facts;
+#[path = "cargo_facts.rs"]
+pub mod cargo;
 mod check;
 mod creation;
 mod dependency;
@@ -54,21 +56,13 @@ pub use starter::{
     ProjectStarter,
 };
 
-/// Adapter-only construction surface for the first-party Cargo integration.
+/// Adapter-only construction surface for source Export product agreements.
 ///
-/// This Module is not a product extension seam. Public workflow consumers receive the resulting
-/// opaque build receipt and never parse Cargo JSON or import executable native paths themselves.
+/// This module is not a product extension seam. Workflow consumers receive the resulting opaque
+/// receipt; explicit Cargo selection and pure messages belong to the separate `cargo` module.
 #[doc(hidden)]
 #[cfg(feature = "project-workflow-cargo-facts")]
 pub mod __private {
-    pub use super::cargo_facts::{
-        CargoArtifactMismatchField, CargoCompilerArtifactFacts, CargoCompilerDiagnostic,
-        CargoDesktopArtifactFacts, CargoDesktopBuildDecoder, CargoDesktopBuildError,
-        CargoDesktopBuildFacts, CargoDesktopBuildInvocation, CargoDesktopInvocationError,
-        CargoDiagnosticLevel, CargoDiagnostics, CargoHeadlessMetadataFacts, CargoJsonMessage,
-        CargoJsonMessageError, CargoMetadataFacts, CargoMetadataFactsError, CargoPackageGraphFact,
-        CargoPackageSourceKind,
-    };
     #[cfg(feature = "project-tooling")]
     pub use super::export::{
         ProjectExportBuildPreparation, ProjectExportCargoArtifact, ProjectExportProductAgreement,

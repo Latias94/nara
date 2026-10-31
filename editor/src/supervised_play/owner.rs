@@ -1556,7 +1556,7 @@ fn generation_manifest(
     source: &SupervisedDesktopSourceAuthority,
 ) -> GenerationManifestInput {
     let invocation = candidate.invocation();
-    let package = invocation.root_package();
+    let package = invocation.package();
     let package_identity = format!("{}@{}", package.name(), package.version());
     let target = GenerationTargetFacts::new(
         GenerationPackageFacts::new(
@@ -1566,13 +1566,9 @@ fn generation_manifest(
             "Cargo.toml",
         ),
         invocation.target_name(),
-        candidate.toolchain().host_target(),
+        invocation.target_triple(),
         invocation.profile(),
-        invocation
-            .features()
-            .into_iter()
-            .map(str::to_owned)
-            .collect(),
+        candidate.artifact().features().to_vec(),
     );
     let source_facts = GenerationSourceFacts::new(
         DESKTOP_SUPERVISED_PLAY_V1_CONTRACT,

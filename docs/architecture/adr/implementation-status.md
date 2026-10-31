@@ -96,6 +96,17 @@ owner20, minimal features and workspace/strict-consumer Clippy pass within the r
 ADRs0007/0103 own this accepted finite contract; the remainder of Proposed0087, general scheduling,
 target executable selection and packaged delivery remain separate.
 
+The [explicit Cargo unit](../../plans/2026-10-31-explicit-cargo-build-selection-plan.md) is
+qualified under ADRs0110/0116. Shared pure explicit selection replaces fixed decoders; native
+execution captures exact executable/input facts, Export stages captured bytes, and the Editor
+separates complete machine stdout from diagnostic tails. Its
+[evidence](../../knowledge/engineering/verification/2026-10/2026-10-31T035034Z-explicit-cargo-builds-captured-executables-and-supervised-protocol-qualification-4cfff5128fa64423b6f234ea7b312c63.md)
+records final owner151, deadline6, actual custom native/foreign2, original processed process,
+source CLI Export/relocation and final Windows/DX12 supervised2, plus feature/Clippy/format limits.
+Foreign output is build-only; source Export remains source-carrying. The
+[cooked Player successor](../../plans/2026-10-31-cooked-player-delivery-plan.md), general activation
+and the rest of Proposed0086/0088 remain separate. The full foundation Goal stays active.
+
 The [October 29 rendering review](../../research/2026-10-29-render-architecture-and-refactor-plan-review.md)
 and long-horizon refinement prefer a finite explicit resource graph, typed contributions and
 runner-owned execution in Proposed 0121. Design covers foreseeable shared/cross-view output,

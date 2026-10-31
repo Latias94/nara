@@ -1,9 +1,7 @@
 use std::{collections::VecDeque, path::Path};
 
 use nara::{
-    project_workflow::__private::{
-        CargoCompilerDiagnostic, CargoDiagnosticLevel, CargoDiagnostics,
-    },
+    project_workflow::cargo::{CargoCompilerDiagnostic, CargoDiagnosticLevel, CargoDiagnostics},
     tooling::{
         EditorExternalPlayCompilerLevel, EditorExternalPlayDiagnostics, EditorExternalPlayMessage,
         EditorExternalPlayMessageKind, EditorExternalPlayOutput,
@@ -615,7 +613,7 @@ fn truncate_utf8(mut text: String, byte_limit: usize) -> (String, bool) {
 mod tests {
     use std::num::NonZeroUsize;
 
-    use nara::project_workflow::__private::CargoJsonMessage;
+    use nara::project_workflow::cargo::CargoJsonMessage;
     use serde_json::json;
 
     use super::*;

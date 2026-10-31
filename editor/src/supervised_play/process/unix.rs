@@ -18,6 +18,7 @@ use std::{
     ffi::{CString, OsStr, OsString, c_char, c_int, c_long, c_uint},
     fs,
     io::{Read, Write},
+    num::NonZeroUsize,
     os::{
         fd::{AsRawFd as _, OwnedFd},
         unix::{
@@ -231,6 +232,13 @@ pub(super) struct PlatformProcess {
 
 impl PlatformProcess {
     #[cfg(all(test, target_os = "linux", target_arch = "x86_64"))]
+    pub(super) fn test_enqueue_stdout(&self, bytes: Vec<u8>) {
+        self.output
+            .push(SupervisedProcessStream::Stdout, bytes)
+            .unwrap();
+    }
+
+    #[cfg(all(test, target_os = "linux", target_arch = "x86_64"))]
     pub(super) fn test_enqueue_loss(&self) {
         self.output
             .push_loss(
@@ -380,7 +388,7 @@ impl PlatformProcess {
         #[cfg(all(target_os = "linux", target_arch = "x86_64"))]
         {
             let stopped = self.output_reader_stopped.load(Ordering::Acquire);
-            if !stopped || !self.output.is_drained() {
+            if !stopped {
                 return false;
             }
             let Some(reader) = self.output_reader.take() else {
@@ -393,6 +401,18 @@ impl PlatformProcess {
                 "the supervised process output reader panicked",
             ));
             false
+        }
+
+        #[cfg(not(all(target_os = "linux", target_arch = "x86_64")))]
+        {
+            false
+        }
+    }
+
+    pub(super) fn output_drained(&self) -> bool {
+        #[cfg(all(target_os = "linux", target_arch = "x86_64"))]
+        {
+            self.output.is_drained()
         }
 
         #[cfg(not(all(target_os = "linux", target_arch = "x86_64")))]
@@ -531,6 +551,7 @@ fn spawn_supported(
     spawn_native(
         native,
         command.bootstrap_requested(),
+        command.protocol_stdout_limit(),
         wake,
         close_non_stdio_on_exec,
     )
@@ -547,7 +568,7 @@ fn spawn_exact_generation_supported(
     let mut native = Command::new("/proc/self/exe");
     native.current_dir(command.working_directory()).env_clear();
 
-    let spawned = spawn_native(native, true, wake, move || {
+    let spawned = spawn_native(native, true, None, wake, move || {
         close_non_stdio_on_exec()?;
         // SAFETY: the executable descriptor and every C string/pointer array remain live through
         // this call. `AT_EMPTY_PATH` instructs Linux to execute the already-opened object rather
@@ -572,6 +593,7 @@ fn spawn_exact_generation_supported(
 fn spawn_native(
     mut native: Command,
     bootstrap_requested: bool,
+    protocol_stdout_limit: Option<NonZeroUsize>,
     wake: crate::supervised_play::wake::SupervisedPlayWake,
     child_setup: impl FnMut() -> io::Result<()> + Send + Sync + 'static,
 ) -> io::Result<SpawnedProcess> {
@@ -623,6 +645,7 @@ fn spawn_native(
     let output = Arc::new(PlatformOutputQueue::with_wake(
         MAX_PENDING_OUTPUT_RECORDS,
         MAX_PENDING_OUTPUT_BYTES,
+        protocol_stdout_limit,
         wake,
     ));
     let output_reader_stopped = Arc::new(AtomicBool::new(false));

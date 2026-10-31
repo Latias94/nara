@@ -71,6 +71,7 @@ pub(super) struct SupervisedProcessCommand {
     working_directory: PathBuf,
     environment: Vec<(OsString, OsString)>,
     bootstrap: bool,
+    protocol_stdout_limit: Option<NonZeroUsize>,
 }
 
 /// Selects the only ambient environment facts a supervised product may observe.
@@ -193,6 +194,7 @@ impl SupervisedProcessCommand {
             working_directory: working_directory.into(),
             environment: Vec::new(),
             bootstrap: false,
+            protocol_stdout_limit: None,
         }
     }
 
@@ -216,6 +218,18 @@ impl SupervisedProcessCommand {
     ) -> Self {
         self.environment.push((name.into(), value.into()));
         self
+    }
+
+    /// Captures exact protocol stdout up to a cumulative byte limit, separately from tail logs.
+    /// Consuming output does not replenish the allowance; overflow or cancellation seals capture
+    /// and reports reliable stdout loss before any remaining admitted bytes.
+    pub(super) fn bounded_stdout(mut self, limit: NonZeroUsize) -> Self {
+        self.protocol_stdout_limit = Some(limit);
+        self
+    }
+
+    pub(super) const fn protocol_stdout_limit(&self) -> Option<NonZeroUsize> {
+        self.protocol_stdout_limit
     }
 
     #[cfg(test)]
@@ -376,6 +390,7 @@ pub(super) struct SupervisedProcessOwner {
     observation_deadline: Instant,
     containment_observed_empty: bool,
     readers_observed_stopped: bool,
+    output_observed_drained: bool,
     output_cancel_requested: bool,
     output_loss_observed: bool,
     force_killed: bool,
@@ -441,6 +456,7 @@ impl SupervisedProcessOwner {
             observation_deadline: Instant::now() + Duration::from_millis(250),
             containment_observed_empty: false,
             readers_observed_stopped: false,
+            output_observed_drained: false,
             output_cancel_requested: false,
             output_loss_observed: false,
             force_killed: false,
@@ -594,6 +610,10 @@ impl SupervisedProcessOwner {
         if self.state == SupervisedProcessState::Draining {
             let readers_stopped = self.process.readers_stopped();
             self.readers_observed_stopped = readers_stopped;
+            let output_drained = self.process.output_drained();
+            self.output_observed_drained = output_drained;
+            // Reader cancellation deadlines concern physical readers, not bounded output still
+            // awaiting the consumer's per-poll budget. Completion requires both below.
             if !readers_stopped && self.drain_deadline.is_some_and(|deadline| now >= deadline) {
                 if !self.output_cancel_requested {
                     self.process
@@ -635,7 +655,7 @@ impl SupervisedProcessOwner {
                 ));
             }
 
-            if readers_stopped && containment_empty {
+            if readers_stopped && output_drained && containment_empty {
                 let exit = self.exit.ok_or(SupervisedProcessError::CleanupIncomplete(
                     "cleanup cannot complete before the direct child is reaped",
                 ))?;
@@ -681,6 +701,7 @@ impl SupervisedProcessOwner {
                 (!self.readers_observed_stopped)
                     .then_some(self.drain_deadline)
                     .flatten(),
+                (!self.output_observed_drained).then_some(self.observation_deadline),
             ]
             .into_iter()
             .flatten()
@@ -827,7 +848,17 @@ pub(super) fn default_log_limits() -> ProcessLogLimits {
 
 #[cfg(test)]
 mod policy_tests {
-    use super::SupervisedProductEnvironmentPolicy;
+    use super::{SupervisedProcessCommand, SupervisedProductEnvironmentPolicy};
+
+    #[test]
+    fn protocol_stdout_capture_is_explicit_and_retained_by_the_command() {
+        let command = SupervisedProcessCommand::new("cargo", ".");
+        assert_eq!(command.protocol_stdout_limit(), None);
+        let limit = std::num::NonZeroUsize::new(16 * 1024 * 1024).unwrap();
+        let command = command.bounded_stdout(limit);
+        assert_eq!(command.protocol_stdout_limit(), Some(limit));
+        assert_eq!(command.clone(), command);
+    }
 
     #[test]
     fn product_environment_allowlist_excludes_authority_and_injection_variables() {
@@ -895,6 +926,7 @@ mod loss_observation_tests {
         owner.force_killed = true;
         assert_eq!(owner.next_deadline(), owner.force_kill_deadline);
         owner.state = super::SupervisedProcessState::Draining;
+        owner.output_observed_drained = true;
         assert_eq!(owner.next_deadline(), owner.force_kill_deadline);
         owner.state = super::SupervisedProcessState::Complete;
         let completed_deadline = owner.next_deadline();
@@ -915,5 +947,62 @@ mod loss_observation_tests {
 
         assert!(observation.output_loss_observed());
         assert!(owner.output_loss_observed());
+    }
+
+    #[test]
+    fn stopped_readers_with_pending_protocol_bytes_do_not_hit_the_reader_deadline() {
+        let command = crate::supervised_play::tests::helper_command("exit-success")
+            .bounded_stdout(std::num::NonZeroUsize::new(4 * 1024 * 1024).unwrap());
+        let mut owner = SupervisedProcessOwner::spawn(&command, default_log_limits()).unwrap();
+        let deadline = Instant::now() + std::time::Duration::from_secs(10);
+        loop {
+            let exited = owner.process.try_wait().unwrap().is_some();
+            if exited
+                && owner.process.readers_stopped()
+                && owner.process.containment_empty().unwrap()
+            {
+                break;
+            }
+            assert!(Instant::now() < deadline, "the helper must physically stop");
+            std::thread::sleep(std::time::Duration::from_millis(5));
+        }
+        while owner.process.try_output().unwrap().is_some() {}
+        let expected = vec![b'X'; 3 * 1024 * 1024];
+        owner.process.test_enqueue_stdout(expected.clone());
+
+        let now = Instant::now();
+        let mut captured = Vec::new();
+        for seconds in [0, 2] {
+            let observed_at = now + std::time::Duration::from_secs(seconds);
+            let (observation, outputs) = owner.advance_with_output(observed_at).unwrap();
+            assert_eq!(observation.state, super::SupervisedProcessState::Draining);
+            assert!(
+                outputs.len() <= 64,
+                "the per-poll record budget is unchanged"
+            );
+            for output in outputs {
+                assert!(!output.loss());
+                captured.extend_from_slice(output.bytes());
+            }
+            assert!(!owner.output_cancel_requested);
+            assert!(owner.cleanup_receipt().is_none());
+            assert!(
+                owner
+                    .next_deadline()
+                    .is_some_and(|deadline| deadline > observed_at)
+            );
+        }
+        let (observation, outputs) = owner
+            .advance_with_output(now + std::time::Duration::from_secs(4))
+            .unwrap();
+        for output in outputs {
+            assert!(!output.loss());
+            captured.extend_from_slice(output.bytes());
+        }
+        assert_eq!(captured, expected);
+        assert_eq!(observation.state, super::SupervisedProcessState::Complete);
+        assert!(!owner.output_cancel_requested);
+        let receipt = owner.cleanup_receipt().unwrap();
+        assert!(receipt.containment_empty() && receipt.readers_stopped());
     }
 }

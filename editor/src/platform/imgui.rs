@@ -2163,7 +2163,12 @@ impl ApplicationHandler<EditorUserEvent> for NativeEditorHost {
             }
             return;
         }
-        let now = Instant::now();
+        self.advance_and_schedule_at(event_loop, Instant::now());
+    }
+}
+
+impl NativeEditorHost {
+    fn advance_and_schedule_at(&mut self, event_loop: &ActiveEventLoop, now: Instant) {
         let play_before = self
             .application
             .current_frame()

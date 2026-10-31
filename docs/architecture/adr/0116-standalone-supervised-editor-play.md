@@ -2,6 +2,7 @@
 
 **Status**: Accepted
 **Date**: 2026-08-21
+**Amended**: 2026-10-31 by separate bounded build-protocol capture and diagnostic-tail retention
 **Owner**: private `nara-editor`, the project Host, executable product Hosts, UI-neutral tooling,
 and platform process adapters
 **Refines**: [ADR 0082](0082-process-host-authority-and-runtime-construction-topology.md),
@@ -94,6 +95,17 @@ development generation never falls back to its compile-time manifest directory o
 location.
 
 ### Immutable generation and activation evidence
+
+Build-tool stdout is a machine protocol, distinct from the diagnostic log tail. Identity,
+metadata and Cargo-build phases select explicit cumulative byte limits. Admitted stdout bytes
+must arrive intact even when the Editor polls late or stderr overflows its independent bounded
+tail. Coalesce small reads under the byte allowance rather than making protocol validity depend
+on OS read boundaries or a diagnostic record count. Exceeding the protocol limit or cancelling
+capture before EOF rejects the build and retains ordinary physical cleanup custody. Reader
+progress and cancellation must not depend on a blocked producer queue or an Editor redraw.
+Raw display logs keep their existing bounded truncation policy; diagnostic stderr loss does not
+invalidate otherwise complete Cargo stdout. Product stdout/stderr remain diagnostics and never
+replace the separate one-shot READY bootstrap authority.
 
 Cargo output is only an input to publication. The running executable is copied into an
 Editor-owned immutable generation and bound to its executable digest, trusted target selection,

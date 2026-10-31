@@ -1,9 +1,11 @@
 use std::{
     collections::{BTreeMap, BTreeSet},
-    io::{self, Read, Write},
+    io::{self, Cursor, Read, Write},
 };
 
-use nara_fs::{DirectoryCapability, FsError, FsOperation, RelativeComponent, RelativePath};
+use nara_fs::{
+    CapabilityReader, DirectoryCapability, FsError, FsOperation, RelativeComponent, RelativePath,
+};
 use nara_project::ProjectPath;
 
 use super::{ProjectExportBuildReceipt, ProjectExportMemberSource, ProjectExportPlanReceipt};
@@ -67,6 +69,20 @@ struct ExportDirectories {
     creation_order: Vec<String>,
 }
 
+enum ExportMemberReader<'a> {
+    Executable(Cursor<&'a [u8]>),
+    Content(CapabilityReader<'a>),
+}
+
+impl Read for ExportMemberReader<'_> {
+    fn read(&mut self, buffer: &mut [u8]) -> io::Result<usize> {
+        match self {
+            Self::Executable(reader) => reader.read(buffer),
+            Self::Content(reader) => reader.read(buffer),
+        }
+    }
+}
+
 pub(super) fn stage_export_tree(
     staging: DirectoryCapability,
     plan: &ProjectExportPlanReceipt,
@@ -89,8 +105,10 @@ pub(super) fn stage_export_tree(
             .get(parent_path)
             .expect("the export planner creates every member parent");
         let content_source;
-        let source_file = match source {
-            ProjectExportMemberSource::Executable(target) => build.executable(*target),
+        let mut source_reader = match source {
+            ProjectExportMemberSource::Executable(target) => {
+                ExportMemberReader::Executable(Cursor::new(build.executable_bytes(*target)))
+            }
             ProjectExportMemberSource::Content(source_path) => {
                 content_source = delivery_content
                     .project_root()
@@ -102,16 +120,14 @@ pub(super) fn stage_export_tree(
                         path: source_path.clone(),
                         source,
                     })?;
-                &content_source
+                ExportMemberReader::Content(content_source.reader().map_err(|source| {
+                    ProjectExportStageError::OpenSource {
+                        path: source_path.clone(),
+                        source,
+                    }
+                })?)
             }
         };
-        let mut source_reader =
-            source_file
-                .reader()
-                .map_err(|source| ProjectExportStageError::OpenSource {
-                    path: member.path.clone(),
-                    source,
-                })?;
         let target_file = match member.kind {
             super::ProjectExportMemberKind::HeadlessExecutable
             | super::ProjectExportMemberKind::DesktopExecutable => {

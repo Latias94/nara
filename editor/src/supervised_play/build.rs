@@ -3,6 +3,7 @@ mod source;
 
 use std::{
     fs, io,
+    num::NonZeroUsize,
     path::{Path, PathBuf},
     time::{Duration, Instant},
 };
@@ -10,10 +11,10 @@ use std::{
 use nara::{
     fs::ContentDigest,
     project_host::MAX_SUPERVISED_DESKTOP_EXECUTABLE_BYTES,
-    project_workflow::__private::{
-        CargoDesktopBuildDecoder, CargoDesktopBuildError, CargoDesktopBuildFacts,
-        CargoDesktopBuildInvocation, CargoDesktopInvocationError, CargoDiagnostics,
-        CargoMetadataFacts, CargoMetadataFactsError,
+    project_workflow::cargo::{
+        CargoArtifactFacts, CargoBuildDecoder, CargoBuildError, CargoBuildFacts,
+        CargoBuildInvocation, CargoBuildSelectionError, CargoDiagnostics, CargoInvocationError,
+        CargoMetadataFactsError,
     },
 };
 use thiserror::Error;
@@ -33,6 +34,7 @@ pub(super) use source::*;
 
 const MAX_TOOL_IDENTITY_BYTES: usize = 16 * 1024;
 const MAX_METADATA_BYTES: usize = 16 * 1024 * 1024;
+const MAX_CARGO_STDOUT_BYTES: usize = 64 * 1024 * 1024;
 const MAX_MANIFEST_BYTES: u64 = 4 * 1024 * 1024;
 const MAX_LOCKFILE_BYTES: u64 = 64 * 1024 * 1024;
 const MAX_TOOL_PATH_BYTES: usize = 32 * 1024;
@@ -119,7 +121,6 @@ pub(super) enum DesktopBuildRequestError {
 pub(super) struct DesktopBuildToolchainFacts {
     cargo_version_digest: ContentDigest,
     rustc_verbose_version_digest: ContentDigest,
-    host_target: String,
 }
 
 impl DesktopBuildToolchainFacts {
@@ -130,10 +131,6 @@ impl DesktopBuildToolchainFacts {
     pub(super) const fn rustc_verbose_version_digest(&self) -> ContentDigest {
         self.rustc_verbose_version_digest
     }
-
-    pub(super) fn host_target(&self) -> &str {
-        &self.host_target
-    }
 }
 
 #[derive(Debug)]
@@ -143,9 +140,9 @@ pub(super) struct VerifiedDesktopBuildCandidate {
     lockfile_path: PathBuf,
     toolchain: DesktopBuildToolchainFacts,
     metadata_digest: ContentDigest,
-    invocation: CargoDesktopBuildInvocation,
+    invocation: CargoBuildInvocation,
     invocation_digest: ContentDigest,
-    build: CargoDesktopBuildFacts,
+    build: CargoBuildFacts,
 }
 
 impl VerifiedDesktopBuildCandidate {
@@ -179,7 +176,7 @@ impl VerifiedDesktopBuildCandidate {
         self.metadata_digest
     }
 
-    pub(super) const fn invocation(&self) -> &CargoDesktopBuildInvocation {
+    pub(super) const fn invocation(&self) -> &CargoBuildInvocation {
         &self.invocation
     }
 
@@ -187,8 +184,12 @@ impl VerifiedDesktopBuildCandidate {
         self.invocation_digest
     }
 
+    pub(super) fn artifact(&self) -> &CargoArtifactFacts {
+        self.build.artifact()
+    }
+
     pub(super) fn artifact_path(&self) -> &Path {
-        self.build.artifact().executable()
+        self.artifact().executable()
     }
 }
 
@@ -247,10 +248,14 @@ pub(super) enum DesktopBuildFailure {
     InvalidToolIdentity { phase: DesktopBuildPhase },
     #[error("Cargo metadata could not be admitted")]
     Metadata(#[source] CargoMetadataFactsError),
+    #[error("the trusted desktop Cargo selection could not be admitted")]
+    Selection(#[source] CargoBuildSelectionError),
     #[error("the exact desktop Cargo invocation could not be derived")]
-    Invocation(#[source] CargoDesktopInvocationError),
+    Invocation(#[source] CargoInvocationError),
+    #[error("the selected desktop target does not match the observed native Rust compiler Host")]
+    NonNativeTarget,
     #[error("the exact desktop Cargo JSON stream could not be admitted")]
-    CargoMessages(#[source] CargoDesktopBuildError),
+    CargoMessages(#[source] CargoBuildError),
     #[error("the selected desktop artifact is not one regular executable file")]
     ArtifactNotExecutable,
     #[error("the selected desktop artifact exceeded the generation byte limit")]
@@ -279,7 +284,9 @@ impl DesktopBuildFailure {
             Self::UnterminatedCargoMessage => DesktopBuildFailureKind::UnterminatedCargoMessage,
             Self::InvalidToolIdentity { .. } => DesktopBuildFailureKind::InvalidToolIdentity,
             Self::Metadata(_) => DesktopBuildFailureKind::Metadata,
-            Self::Invocation(_) => DesktopBuildFailureKind::Invocation,
+            Self::Selection(_) | Self::Invocation(_) | Self::NonNativeTarget => {
+                DesktopBuildFailureKind::Invocation
+            }
             Self::CargoMessages(_) => DesktopBuildFailureKind::CargoMessages,
             Self::ArtifactNotExecutable => DesktopBuildFailureKind::ArtifactNotExecutable,
             Self::ArtifactTooLarge => DesktopBuildFailureKind::ArtifactTooLarge,
@@ -330,7 +337,7 @@ pub(super) struct DesktopBuildAttempt {
     process: Option<SupervisedProcessOwner>,
     wake: SupervisedPlayWake,
     phase_stdout: BoundedStdout,
-    cargo_decoder: Option<CargoDesktopBuildDecoder>,
+    cargo_decoder: Option<CargoBuildDecoder>,
     cargo_stdout_observed: bool,
     cargo_stdout_ended_with_newline: bool,
     raw_logs: ProcessLogRing,
@@ -341,9 +348,8 @@ pub(super) struct DesktopBuildAttempt {
     candidate: Option<VerifiedDesktopBuildCandidate>,
     cargo_identity: Option<ToolIdentityFact>,
     rustc_identity: Option<RustcIdentityFact>,
-    metadata: Option<CargoMetadataFacts>,
     metadata_digest: Option<ContentDigest>,
-    invocation: Option<CargoDesktopBuildInvocation>,
+    invocation: Option<CargoBuildInvocation>,
     invocation_digest: Option<ContentDigest>,
 }
 
@@ -362,7 +368,9 @@ impl DesktopBuildAttempt {
             .checked_add(PROCESS_SPAWN_TIMEOUT)
             .ok_or(DesktopBuildStartError::SpawnDeadlineOverflow)?;
         let spawn = SupervisedProcessSpawnOwner::start_command(
-            cargo_identity_command(&request),
+            cargo_identity_command(&request).bounded_stdout(
+                NonZeroUsize::new(MAX_TOOL_IDENTITY_BYTES).expect("non-zero tool output bound"),
+            ),
             default_log_limits(),
             spawn_deadline,
             wake.clone(),
@@ -408,7 +416,6 @@ impl DesktopBuildAttempt {
             candidate: None,
             cargo_identity: None,
             rustc_identity: None,
-            metadata: None,
             metadata_digest: None,
             invocation: None,
             invocation_digest: None,
@@ -489,7 +496,7 @@ impl DesktopBuildAttempt {
     pub(super) fn diagnostics_snapshot(&self) -> Option<CargoDiagnostics> {
         self.cargo_decoder
             .as_ref()
-            .map(CargoDesktopBuildDecoder::diagnostics)
+            .map(CargoBuildDecoder::diagnostics)
             .or_else(|| self.terminal_diagnostics.clone())
     }
 
@@ -540,7 +547,10 @@ impl DesktopBuildAttempt {
         };
         for output in outputs {
             self.raw_logs.append(output.stream(), output.bytes())?;
-            if output.loss() && self.pending_terminal.is_none() {
+            if output.loss()
+                && output.stream() == ProcessOutputStream::Stdout
+                && self.pending_terminal.is_none()
+            {
                 self.pending_terminal =
                     Some(PendingTerminal::Failed(DesktopBuildFailure::OutputLoss {
                         phase: self.phase,
@@ -639,7 +649,7 @@ impl DesktopBuildAttempt {
                 self.terminal_diagnostics = self
                     .cargo_decoder
                     .as_ref()
-                    .map(CargoDesktopBuildDecoder::diagnostics);
+                    .map(CargoBuildDecoder::diagnostics);
                 self.pending_terminal = Some(PendingTerminal::Failed(
                     DesktopBuildFailure::CargoMessages(source),
                 ));
@@ -750,10 +760,11 @@ impl DesktopBuildAttempt {
             ));
             return Ok(());
         };
+        let command = metadata_command(&self.request, &identity.host_target);
         self.rustc_identity = Some(identity);
         self.start_phase(
             DesktopBuildPhase::Metadata,
-            metadata_command(&self.request),
+            command,
             MAX_METADATA_BYTES,
             None,
             now,
@@ -767,35 +778,32 @@ impl DesktopBuildAttempt {
         }
         let metadata_bytes = self.phase_stdout.take();
         let metadata_digest = ContentDigest::of_bytes(&metadata_bytes);
-        let metadata = match CargoMetadataFacts::parse(&metadata_bytes, &self.request.manifest_path)
-        {
-            Ok(metadata) => metadata,
-            Err(error) => {
-                self.terminal = Some(DesktopBuildTerminal::Failed(DesktopBuildFailure::Metadata(
-                    error,
-                )));
-                return Ok(());
-            }
-        };
         let host_target = self
             .rustc_identity
             .as_ref()
             .ok_or(DesktopBuildAdvanceError::InvalidState)?
             .host_target
-            .clone();
-        let invocation = match metadata.desktop_invocation(host_target) {
+            .as_str();
+        let invocation = match desktop_build_invocation(
+            &metadata_bytes,
+            &self.request.manifest_path,
+            host_target,
+        ) {
             Ok(invocation) => invocation,
-            Err(error) => {
-                self.terminal = Some(DesktopBuildTerminal::Failed(
-                    DesktopBuildFailure::Invocation(error),
-                ));
+            Err(failure) => {
+                self.terminal = Some(DesktopBuildTerminal::Failed(failure));
+                return Ok(());
+            }
+        };
+        let command = match cargo_build_command(&self.request, &invocation, host_target) {
+            Ok(command) => command,
+            Err(failure) => {
+                self.terminal = Some(DesktopBuildTerminal::Failed(failure));
                 return Ok(());
             }
         };
         let invocation_digest = digest_build_invocation(&invocation);
-        let decoder = CargoDesktopBuildDecoder::new(invocation.clone());
-        let command = cargo_build_command(&self.request, &invocation);
-        self.metadata = Some(metadata);
+        let decoder = CargoBuildDecoder::new(invocation.clone());
         self.metadata_digest = Some(metadata_digest);
         self.invocation = Some(invocation);
         self.invocation_digest = Some(invocation_digest);
@@ -823,7 +831,7 @@ impl DesktopBuildAttempt {
             self.terminal_diagnostics = self
                 .cargo_decoder
                 .as_ref()
-                .map(CargoDesktopBuildDecoder::diagnostics);
+                .map(CargoBuildDecoder::diagnostics);
             return Ok(());
         }
 
@@ -868,7 +876,6 @@ impl DesktopBuildAttempt {
         let toolchain = DesktopBuildToolchainFacts {
             cargo_version_digest: cargo_identity.digest,
             rustc_verbose_version_digest: rustc_identity.identity.digest,
-            host_target: rustc_identity.host_target,
         };
         let _ = cargo_identity.text;
         let _ = rustc_identity.identity.text;
@@ -901,7 +908,7 @@ impl DesktopBuildAttempt {
         phase: DesktopBuildPhase,
         command: SupervisedProcessCommand,
         stdout_limit: usize,
-        decoder: Option<CargoDesktopBuildDecoder>,
+        decoder: Option<CargoBuildDecoder>,
         now: Instant,
     ) -> Result<(), DesktopBuildAdvanceError> {
         self.phase = phase;
@@ -917,7 +924,14 @@ impl DesktopBuildAttempt {
             return Ok(());
         };
         match SupervisedProcessSpawnOwner::start_command(
-            command,
+            command.bounded_stdout(
+                NonZeroUsize::new(if phase == DesktopBuildPhase::CargoBuild {
+                    MAX_CARGO_STDOUT_BYTES
+                } else {
+                    stdout_limit
+                })
+                .expect("every build phase has a non-zero protocol output bound"),
+            ),
             default_log_limits(),
             spawn_deadline,
             self.wake.clone(),

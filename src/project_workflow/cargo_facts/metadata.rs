@@ -6,10 +6,12 @@ use std::{
 use serde_json::{Map, Value};
 use thiserror::Error;
 
+use super::build::{CargoBuildInvocation, CargoInvocationError};
+use super::selection::{CargoBuildSelection, is_name};
 use super::{
-    DESKTOP_FEATURE, DESKTOP_TARGET, MAX_FEATURE_BYTES, MAX_FEATURE_COUNT, MAX_METADATA_BYTES,
-    MAX_PACKAGE_COUNT, MAX_PACKAGE_ID_BYTES, MAX_PACKAGE_NAME_BYTES, MAX_PATH_BYTES,
-    MAX_TARGET_COUNT, MAX_VERSION_BYTES, paths_match,
+    MAX_FEATURE_BYTES, MAX_FEATURE_COUNT, MAX_METADATA_BYTES, MAX_PACKAGE_COUNT,
+    MAX_PACKAGE_ID_BYTES, MAX_PACKAGE_NAME_BYTES, MAX_PATH_BYTES, MAX_TARGET_COUNT,
+    MAX_VERSION_BYTES, paths_match,
 };
 
 /// Path-safe classification retained for one package in the bounded Cargo graph observation.
@@ -21,7 +23,7 @@ pub enum CargoPackageSourceKind {
     Other,
 }
 
-/// One bounded, path-safe package observation from Cargo metadata.
+/// A package observation without package IDs, absolute paths or source URLs.
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
 pub struct CargoPackageGraphFact {
     name: String,
@@ -43,190 +45,139 @@ impl CargoPackageGraphFact {
     }
 }
 
-/// Bounded Cargo metadata facts admitted for the closed supervised desktop build convention.
+/// Bounded full Cargo metadata for one explicit package/bin selection.
+///
+/// The caller obtains metadata with the same feature/default-feature/target selection used for
+/// the build. The selected resolve node observes workspace features, not the features compiled
+/// for one binary. Cargo owns feature resolution and target eligibility; this parser only retains
+/// bounded declarations and observations. Operational paths and IDs remain transient facts.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CargoMetadataFacts {
-    pub(super) root_package_id: String,
-    pub(super) root_package: CargoPackageGraphFact,
-    pub(super) package_graph: Box<[CargoPackageGraphFact]>,
+    pub(super) selection: CargoBuildSelection,
+    pub(super) package_id: String,
+    pub(super) package: CargoPackageGraphFact,
+    package_graph: Box<[CargoPackageGraphFact]>,
     pub(super) manifest_path: PathBuf,
+    pub(super) workspace_root: PathBuf,
     pub(super) target_directory: PathBuf,
-    pub(super) selected_source_path: PathBuf,
+    pub(super) source_path: PathBuf,
+    pub(super) required_features: Box<[String]>,
+    pub(super) metadata_features: Box<[String]>,
+    package_source: Option<String>,
+    project_tool_protocol: Option<u64>,
 }
 
 impl CargoMetadataFacts {
     pub fn parse(
         metadata: &[u8],
-        expected_manifest_path: &Path,
+        expected_package_manifest: &Path,
+        selection: &CargoBuildSelection,
     ) -> Result<Self, CargoMetadataFactsError> {
-        Self::parse_selected(metadata, expected_manifest_path, true)
-    }
-
-    fn parse_selected(
-        metadata: &[u8],
-        expected_manifest_path: &Path,
-        desktop: bool,
-    ) -> Result<Self, CargoMetadataFactsError> {
-        if metadata.len() > MAX_METADATA_BYTES {
-            return Err(CargoMetadataFactsError::InputLimitExceeded);
+        let value = metadata_document(metadata, expected_package_manifest)?;
+        let selected = manifest_owner(&value, expected_package_manifest)?;
+        if selection.package() != selected.package.name() {
+            return Err(CargoMetadataFactsError::SelectedPackageMismatch);
         }
-        validate_absolute_metadata_path(expected_manifest_path, "expected_manifest_path")?;
-
-        let value = serde_json::from_slice::<Value>(metadata)
-            .map_err(CargoMetadataFactsError::MalformedJson)?;
-        let object = value
-            .as_object()
-            .ok_or(CargoMetadataFactsError::InvalidField { field: "metadata" })?;
-        if u64_field(object.get("version"), "version")? != 1 {
-            return Err(CargoMetadataFactsError::UnsupportedFormatVersion);
-        }
-
-        let workspace_root = metadata_path_field(object.get("workspace_root"), "workspace_root")?;
-        let expected_workspace_root =
-            expected_manifest_path
-                .parent()
-                .ok_or(CargoMetadataFactsError::InvalidField {
-                    field: "expected_manifest_path",
-                })?;
-        if !paths_match(&workspace_root, expected_workspace_root) {
-            return Err(CargoMetadataFactsError::WorkspaceRootMismatch);
-        }
-
-        let target_directory =
-            metadata_path_field(object.get("target_directory"), "target_directory")?;
-        let resolved_root_package_id = optional_resolved_root_package_id(object.get("resolve"))?;
-
-        let workspace_members = metadata_string_array(
-            object.get("workspace_members"),
-            "workspace_members",
-            MAX_PACKAGE_COUNT,
-            MAX_PACKAGE_ID_BYTES,
-        )?;
-        let packages = object
-            .get("packages")
-            .and_then(Value::as_array)
-            .ok_or(CargoMetadataFactsError::InvalidField { field: "packages" })?;
-        if packages.len() > MAX_PACKAGE_COUNT {
-            return Err(CargoMetadataFactsError::PackageLimitExceeded);
-        }
-
-        let mut package_ids = BTreeSet::new();
-        let mut package_graph = Vec::with_capacity(packages.len());
-        let mut root_package_id = None;
-        let mut root_package = None;
-        let mut selected_source_path = None;
-
-        for package in packages {
-            let package = package
-                .as_object()
-                .ok_or(CargoMetadataFactsError::InvalidField {
-                    field: "packages[]",
-                })?;
-            let package_id =
-                metadata_string_field(package.get("id"), "packages[].id", MAX_PACKAGE_ID_BYTES)?;
-            if !package_ids.insert(package_id.to_owned()) {
-                return Err(CargoMetadataFactsError::DuplicatePackageId);
-            }
-            let fact = CargoPackageGraphFact {
-                name: metadata_string_field(
-                    package.get("name"),
-                    "packages[].name",
-                    MAX_PACKAGE_NAME_BYTES,
-                )?
-                .to_owned(),
-                version: metadata_string_field(
-                    package.get("version"),
-                    "packages[].version",
-                    MAX_VERSION_BYTES,
-                )?
-                .to_owned(),
-                source_kind: package_source_kind(package.get("source"))?,
-            };
-            let manifest_path =
-                metadata_path_field(package.get("manifest_path"), "packages[].manifest_path")?;
-            if paths_match(&manifest_path, expected_manifest_path) {
-                if root_package.replace(fact.clone()).is_some() {
-                    return Err(CargoMetadataFactsError::DuplicateRootPackage);
-                }
-                root_package_id = Some(package_id.to_owned());
-                if desktop {
-                    require_desktop_feature(package)?;
-                } else if package
-                    .get("metadata")
-                    .and_then(|metadata| metadata.get("nara"))
-                    .and_then(|metadata| metadata.get("project-tool-protocol"))
-                    .and_then(Value::as_u64)
-                    != Some(1)
-                {
-                    return Err(CargoMetadataFactsError::ProjectToolProtocol);
-                }
-                selected_source_path = Some(select_target(package, desktop)?);
-            }
-            package_graph.push(fact);
-        }
-
-        let root_package_id = root_package_id.ok_or(CargoMetadataFactsError::MissingRootPackage)?;
-        if resolved_root_package_id
-            .as_deref()
-            .is_some_and(|resolved| resolved != root_package_id.as_str())
-        {
-            return Err(CargoMetadataFactsError::RootResolutionMismatch);
-        }
-        if !workspace_members
-            .iter()
-            .any(|member| member == &root_package_id)
-        {
-            return Err(CargoMetadataFactsError::RootPackageNotWorkspaceMember);
-        }
-        let root_package = root_package.ok_or(CargoMetadataFactsError::MissingRootPackage)?;
-        let selected_source_path = selected_source_path.ok_or(if desktop {
-            CargoMetadataFactsError::MissingDesktopTarget
-        } else {
-            CargoMetadataFactsError::MissingHeadlessTarget
-        })?;
-        package_graph.sort_unstable();
-
+        // resolve.root may identify a different workspace package or be null. The selected
+        // package's node is a workspace observation, not an expected single-build feature set.
+        let metadata_features =
+            selected_metadata_features(value.get("resolve"), selected.package_id)?;
+        let (source_path, required_features) =
+            select_binary(selected.metadata, selection.target())?;
+        let project_tool_protocol = selected
+            .metadata
+            .get("metadata")
+            .and_then(|metadata| metadata.get("nara"))
+            .and_then(|nara| nara.get("project-tool-protocol"))
+            .and_then(Value::as_u64);
         Ok(Self {
-            root_package_id,
-            root_package,
-            package_graph: package_graph.into_boxed_slice(),
-            manifest_path: expected_manifest_path.to_path_buf(),
-            target_directory,
-            selected_source_path,
+            selection: selection.clone(),
+            package_id: selected.package_id.to_owned(),
+            package: selected.package,
+            package_graph: selected.package_graph,
+            manifest_path: selected.manifest_path,
+            workspace_root: selected.workspace_root,
+            target_directory: selected.target_directory,
+            source_path,
+            required_features,
+            metadata_features,
+            package_source: selected.source.map(str::to_owned),
+            project_tool_protocol,
         })
     }
 
-    pub fn root_package(&self) -> &CargoPackageGraphFact {
-        &self.root_package
+    /// Discovers the manifest's exact workspace package without assuming any binary convention.
+    ///
+    /// Starter adapters can then construct an explicit selection and parse the full resolved facts.
+    pub fn package_name_for_manifest(
+        metadata: &[u8],
+        expected_package_manifest: &Path,
+    ) -> Result<String, CargoMetadataFactsError> {
+        let value = metadata_document(metadata, expected_package_manifest)?;
+        Ok(manifest_owner(&value, expected_package_manifest)?
+            .package
+            .name)
+    }
+
+    pub fn package(&self) -> &CargoPackageGraphFact {
+        &self.package
+    }
+
+    /// Returns Cargo's transient, potentially path-bearing package ID.
+    pub fn package_id(&self) -> &str {
+        &self.package_id
     }
 
     pub fn package_name(&self) -> &str {
-        self.root_package.name()
+        self.package.name()
     }
 
     pub fn package_version(&self) -> &str {
-        self.root_package.version()
+        self.package.version()
     }
 
     pub fn package_graph(&self) -> &[CargoPackageGraphFact] {
         &self.package_graph
     }
-}
 
-/// Bounded discovery facts for the existing project's headless tool entry.
-#[derive(Debug)]
-pub struct CargoHeadlessMetadataFacts(CargoMetadataFacts);
-
-impl CargoHeadlessMetadataFacts {
-    pub fn parse(metadata: &[u8], manifest_path: &Path) -> Result<Self, CargoMetadataFactsError> {
-        CargoMetadataFacts::parse_selected(metadata, manifest_path, false).map(Self)
+    pub fn manifest_path(&self) -> &Path {
+        &self.manifest_path
     }
 
-    pub fn package_id(&self) -> &str {
-        &self.0.root_package_id
+    pub fn workspace_root(&self) -> &Path {
+        &self.workspace_root
     }
+
+    pub fn target_directory(&self) -> &Path {
+        &self.target_directory
+    }
+
     pub fn source_path(&self) -> &Path {
-        &self.0.selected_source_path
+        &self.source_path
+    }
+
+    /// Returns a transient source URL, separate from the path-safe package graph.
+    pub fn package_source(&self) -> Option<&str> {
+        self.package_source.as_deref()
+    }
+
+    /// Returns the selected package's features observed by workspace metadata.
+    ///
+    /// The selected binary's actual compiled features are reported by its compiler artifact.
+    pub fn metadata_features(&self) -> &[String] {
+        &self.metadata_features
+    }
+
+    /// Optional starter bootstrap declaration; generic Cargo facts do not enforce its version.
+    pub const fn project_tool_protocol(&self) -> Option<u64> {
+        self.project_tool_protocol
+    }
+
+    pub fn build_invocation(
+        &self,
+        selection: CargoBuildSelection,
+    ) -> Result<CargoBuildInvocation, CargoInvocationError> {
+        CargoBuildInvocation::new(self, selection)
     }
 }
 
@@ -246,56 +197,163 @@ pub enum CargoMetadataFactsError {
     PackageLimitExceeded,
     #[error("Cargo metadata repeated a package identity")]
     DuplicatePackageId,
-    #[error("Cargo metadata did not identify one root package")]
-    MissingRootPackage,
+    #[error("Cargo metadata did not identify the package owning the selected manifest")]
+    MissingSelectedPackage,
     #[error("Cargo metadata repeated the package that owns the selected manifest")]
-    DuplicateRootPackage,
-    #[error("the resolved Cargo root package is not a workspace member")]
-    RootPackageNotWorkspaceMember,
-    #[error("the Cargo workspace root does not match the selected project manifest")]
-    WorkspaceRootMismatch,
-    #[error("Cargo resolve.root does not match the package that owns the selected manifest")]
-    RootResolutionMismatch,
-    #[error("the Cargo root package does not declare the `desktop` feature")]
-    MissingDesktopFeature,
-    #[error("the Cargo root package did not define the exact `desktop` binary target")]
-    MissingDesktopTarget,
-    #[error("the Cargo root package did not define the exact `headless` binary target")]
-    MissingHeadlessTarget,
-    #[error(
-        "the project does not declare supported package.metadata.nara.project-tool-protocol = 1; update its headless tool entry before invoking project tools"
-    )]
-    ProjectToolProtocol,
-    #[error("the Cargo root package defined the `desktop` target more than once")]
-    DuplicateDesktopTarget,
-    #[error("the Cargo `desktop` target field `{field}` did not match the closed convention")]
-    DesktopTargetMismatch { field: &'static str },
+    DuplicateSelectedPackage,
+    #[error("the selected Cargo package is not a workspace member")]
+    SelectedPackageNotWorkspaceMember,
+    #[error("the requested Cargo package does not own the selected manifest")]
+    SelectedPackageMismatch,
+    #[error("Cargo metadata did not include the selected package's resolve node")]
+    MissingSelectedResolveNode,
+    #[error("Cargo metadata repeated a resolve node identity")]
+    DuplicateResolveNode,
+    #[error("the selected Cargo package did not define the requested binary")]
+    MissingSelectedTarget,
+    #[error("the selected Cargo package defined the requested binary more than once")]
+    DuplicateSelectedTarget,
+    #[error("the selected Cargo binary field `{field}` was invalid")]
+    SelectedTargetMismatch { field: &'static str },
     #[error("Cargo metadata path field `{field}` was not absolute")]
     NonAbsolutePath { field: &'static str },
 }
 
-fn require_desktop_feature(package: &Map<String, Value>) -> Result<(), CargoMetadataFactsError> {
-    let features = package.get("features").and_then(Value::as_object).ok_or(
-        CargoMetadataFactsError::InvalidField {
-            field: "packages[].features",
-        },
-    )?;
-    if features.len() > MAX_FEATURE_COUNT {
-        return Err(CargoMetadataFactsError::FieldLimitExceeded {
-            field: "packages[].features",
-        });
+fn metadata_document(
+    metadata: &[u8],
+    expected_package_manifest: &Path,
+) -> Result<Value, CargoMetadataFactsError> {
+    if metadata.len() > MAX_METADATA_BYTES {
+        return Err(CargoMetadataFactsError::InputLimitExceeded);
     }
-    if !features.contains_key(DESKTOP_FEATURE) {
-        return Err(CargoMetadataFactsError::MissingDesktopFeature);
+    validate_absolute_metadata_path(expected_package_manifest, "expected_package_manifest")?;
+    let value = serde_json::from_slice::<Value>(metadata)
+        .map_err(CargoMetadataFactsError::MalformedJson)?;
+    let object = value
+        .as_object()
+        .ok_or(CargoMetadataFactsError::InvalidField { field: "metadata" })?;
+    let version = object
+        .get("version")
+        .and_then(Value::as_u64)
+        .ok_or(CargoMetadataFactsError::InvalidField { field: "version" })?;
+    if version != 1 {
+        return Err(CargoMetadataFactsError::UnsupportedFormatVersion);
     }
-    Ok(())
+    Ok(value)
 }
 
-fn select_target(
+struct ManifestOwner<'a> {
+    package_id: &'a str,
+    package: CargoPackageGraphFact,
+    package_graph: Box<[CargoPackageGraphFact]>,
+    manifest_path: PathBuf,
+    workspace_root: PathBuf,
+    target_directory: PathBuf,
+    metadata: &'a Map<String, Value>,
+    source: Option<&'a str>,
+}
+
+fn manifest_owner<'a>(
+    value: &'a Value,
+    expected_package_manifest: &Path,
+) -> Result<ManifestOwner<'a>, CargoMetadataFactsError> {
+    let workspace_root = metadata_path_field(value.get("workspace_root"), "workspace_root")?;
+    let target_directory = metadata_path_field(value.get("target_directory"), "target_directory")?;
+    let workspace_members = metadata_string_array(
+        value.get("workspace_members"),
+        "workspace_members",
+        MAX_PACKAGE_COUNT,
+        MAX_PACKAGE_ID_BYTES,
+    )?;
+    if workspace_members.iter().collect::<BTreeSet<_>>().len() != workspace_members.len() {
+        return Err(CargoMetadataFactsError::InvalidField {
+            field: "workspace_members",
+        });
+    }
+    let packages = value
+        .get("packages")
+        .and_then(Value::as_array)
+        .ok_or(CargoMetadataFactsError::InvalidField { field: "packages" })?;
+    if packages.len() > MAX_PACKAGE_COUNT {
+        return Err(CargoMetadataFactsError::PackageLimitExceeded);
+    }
+
+    let mut package_ids = BTreeSet::new();
+    let mut package_graph = Vec::with_capacity(packages.len());
+    let mut selected = None;
+    for package in packages {
+        let package = package
+            .as_object()
+            .ok_or(CargoMetadataFactsError::InvalidField {
+                field: "packages[]",
+            })?;
+        let package_id =
+            metadata_string_field(package.get("id"), "packages[].id", MAX_PACKAGE_ID_BYTES)?;
+        if !package_ids.insert(package_id) {
+            return Err(CargoMetadataFactsError::DuplicatePackageId);
+        }
+        let name = metadata_string_field(
+            package.get("name"),
+            "packages[].name",
+            MAX_PACKAGE_NAME_BYTES,
+        )?;
+        let version = metadata_string_field(
+            package.get("version"),
+            "packages[].version",
+            MAX_VERSION_BYTES,
+        )?;
+        if !is_name(name, false) {
+            return Err(CargoMetadataFactsError::InvalidField {
+                field: "packages[].name",
+            });
+        }
+        if !version
+            .bytes()
+            .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'.' | b'-' | b'+'))
+        {
+            return Err(CargoMetadataFactsError::InvalidField {
+                field: "packages[].version",
+            });
+        }
+        let source = package_source(package.get("source"))?;
+        let fact = CargoPackageGraphFact {
+            name: name.to_owned(),
+            version: version.to_owned(),
+            source_kind: package_source_kind(source),
+        };
+        let manifest_path =
+            metadata_path_field(package.get("manifest_path"), "packages[].manifest_path")?;
+        if paths_match(&manifest_path, expected_package_manifest) {
+            if selected.is_some() {
+                return Err(CargoMetadataFactsError::DuplicateSelectedPackage);
+            }
+            selected = Some((package_id, fact.clone(), manifest_path, package, source));
+        }
+        package_graph.push(fact);
+    }
+
+    let (package_id, package, manifest_path, metadata, source) =
+        selected.ok_or(CargoMetadataFactsError::MissingSelectedPackage)?;
+    if !workspace_members.iter().any(|member| member == package_id) {
+        return Err(CargoMetadataFactsError::SelectedPackageNotWorkspaceMember);
+    }
+    package_graph.sort_unstable();
+    Ok(ManifestOwner {
+        package_id,
+        package,
+        package_graph: package_graph.into_boxed_slice(),
+        manifest_path,
+        workspace_root,
+        target_directory,
+        metadata,
+        source,
+    })
+}
+
+fn select_binary(
     package: &Map<String, Value>,
-    desktop: bool,
-) -> Result<PathBuf, CargoMetadataFactsError> {
-    let selected_name = if desktop { DESKTOP_TARGET } else { "headless" };
+    selected_name: &str,
+) -> Result<(PathBuf, Box<[String]>), CargoMetadataFactsError> {
     let targets = package.get("targets").and_then(Value::as_array).ok_or(
         CargoMetadataFactsError::InvalidField {
             field: "packages[].targets",
@@ -306,7 +364,6 @@ fn select_target(
             field: "packages[].targets",
         });
     }
-
     let mut selected = None;
     for target in targets {
         let target = target
@@ -314,114 +371,100 @@ fn select_target(
             .ok_or(CargoMetadataFactsError::InvalidField {
                 field: "packages[].targets[]",
             })?;
-        let name = metadata_string_field(
+        if metadata_string_field(
             target.get("name"),
             "packages[].targets[].name",
             MAX_PACKAGE_NAME_BYTES,
-        )?;
-        if name != selected_name {
+        )? != selected_name
+        {
             continue;
         }
+        let kind = normalized_metadata_features(target.get("kind"), "packages[].targets[].kind")?;
+        if !kind.iter().any(|kind| kind == "bin") {
+            continue;
+        }
+        if kind.as_ref() != ["bin"] {
+            return Err(CargoMetadataFactsError::SelectedTargetMismatch { field: "kind" });
+        }
         if selected.is_some() {
-            return Err(CargoMetadataFactsError::DuplicateDesktopTarget);
+            return Err(CargoMetadataFactsError::DuplicateSelectedTarget);
         }
-        if metadata_string_array(
-            target.get("kind"),
-            "packages[].targets[].kind",
-            MAX_FEATURE_COUNT,
-            MAX_FEATURE_BYTES,
-        )?
-        .as_slice()
-            != ["bin"]
-        {
-            return Err(CargoMetadataFactsError::DesktopTargetMismatch { field: "kind" });
-        }
-        if metadata_string_array(
+        if normalized_metadata_features(
             target.get("crate_types"),
             "packages[].targets[].crate_types",
-            MAX_FEATURE_COUNT,
-            MAX_FEATURE_BYTES,
         )?
-        .as_slice()
+        .as_ref()
             != ["bin"]
         {
-            return Err(CargoMetadataFactsError::DesktopTargetMismatch {
+            return Err(CargoMetadataFactsError::SelectedTargetMismatch {
                 field: "crate_types",
             });
         }
-        let required_features = if !desktop && target.get("required-features").is_none() {
-            Box::default()
-        } else {
-            normalized_metadata_features(
-                target.get("required-features"),
-                "packages[].targets[].required-features",
-            )?
-        };
-        let expected_features = if desktop {
-            &[DESKTOP_FEATURE][..]
-        } else {
-            &[][..]
-        };
-        if required_features.as_ref() != expected_features {
-            return Err(CargoMetadataFactsError::DesktopTargetMismatch {
-                field: "required-features",
-            });
-        }
-        selected = Some(metadata_path_field(
-            target.get("src_path"),
-            "packages[].targets[].src_path",
-        )?);
-    }
-    selected.ok_or(if desktop {
-        CargoMetadataFactsError::MissingDesktopTarget
-    } else {
-        CargoMetadataFactsError::MissingHeadlessTarget
-    })
-}
-
-fn optional_resolved_root_package_id(
-    value: Option<&Value>,
-) -> Result<Option<String>, CargoMetadataFactsError> {
-    let Some(value) = value else {
-        return Ok(None);
-    };
-    let Value::Object(resolve) = value else {
-        if value.is_null() {
-            return Ok(None);
-        }
-        return Err(CargoMetadataFactsError::InvalidField { field: "resolve" });
-    };
-    match resolve.get("root") {
-        Some(Value::Null) | None => Ok(None),
-        Some(root) => metadata_string_field(Some(root), "resolve.root", MAX_PACKAGE_ID_BYTES)
-            .map(|root| Some(root.to_owned())),
-    }
-}
-
-fn package_source_kind(
-    value: Option<&Value>,
-) -> Result<CargoPackageSourceKind, CargoMetadataFactsError> {
-    match value {
-        Some(Value::Null) | None => Ok(CargoPackageSourceKind::Path),
-        Some(Value::String(source)) => {
-            if source.len() > MAX_PATH_BYTES {
-                return Err(CargoMetadataFactsError::FieldLimitExceeded {
-                    field: "packages[].source",
-                });
-            }
-            Ok(if source.starts_with("registry+") {
-                CargoPackageSourceKind::Registry
-            } else if source.starts_with("git+") {
-                CargoPackageSourceKind::Git
-            } else if source.starts_with("path+") {
-                CargoPackageSourceKind::Path
-            } else {
-                CargoPackageSourceKind::Other
+        let required_features = target
+            .get("required-features")
+            .map(|features| {
+                normalized_metadata_features(
+                    Some(features),
+                    "packages[].targets[].required-features",
+                )
             })
+            .transpose()?
+            .unwrap_or_default();
+        selected = Some((
+            metadata_path_field(target.get("src_path"), "packages[].targets[].src_path")?,
+            required_features,
+        ));
+    }
+    selected.ok_or(CargoMetadataFactsError::MissingSelectedTarget)
+}
+
+fn selected_metadata_features(
+    value: Option<&Value>,
+    selected_id: &str,
+) -> Result<Box<[String]>, CargoMetadataFactsError> {
+    let nodes = value
+        .and_then(|resolve| resolve.get("nodes"))
+        .and_then(Value::as_array)
+        .ok_or(CargoMetadataFactsError::InvalidField {
+            field: "resolve.nodes",
+        })?;
+    if nodes.len() > MAX_PACKAGE_COUNT {
+        return Err(CargoMetadataFactsError::FieldLimitExceeded {
+            field: "resolve.nodes",
+        });
+    }
+    let mut ids = BTreeSet::new();
+    let mut selected = None;
+    for node in nodes {
+        let id = metadata_string_field(node.get("id"), "resolve.nodes[].id", MAX_PACKAGE_ID_BYTES)?;
+        if !ids.insert(id) {
+            return Err(CargoMetadataFactsError::DuplicateResolveNode);
         }
-        Some(_) => Err(CargoMetadataFactsError::InvalidField {
-            field: "packages[].source",
-        }),
+        let features =
+            normalized_metadata_features(node.get("features"), "resolve.nodes[].features")?;
+        if id == selected_id {
+            selected = Some(features);
+        }
+    }
+    selected.ok_or(CargoMetadataFactsError::MissingSelectedResolveNode)
+}
+
+fn package_source(value: Option<&Value>) -> Result<Option<&str>, CargoMetadataFactsError> {
+    match value {
+        Some(Value::Null) | None => Ok(None),
+        Some(value) => {
+            metadata_string_field(Some(value), "packages[].source", MAX_PATH_BYTES).map(Some)
+        }
+    }
+}
+
+fn package_source_kind(source: Option<&str>) -> CargoPackageSourceKind {
+    match source {
+        None => CargoPackageSourceKind::Path,
+        Some(source) if source.starts_with("registry+") => CargoPackageSourceKind::Registry,
+        Some(source) if source.starts_with("git+") => CargoPackageSourceKind::Git,
+        Some(source) if source.starts_with("path+") => CargoPackageSourceKind::Path,
+        Some(_) => CargoPackageSourceKind::Other,
     }
 }
 
@@ -429,8 +472,14 @@ fn validate_absolute_metadata_path(
     path: &Path,
     field: &'static str,
 ) -> Result<(), CargoMetadataFactsError> {
-    if path.to_string_lossy().len() > MAX_PATH_BYTES {
+    let text = path
+        .to_str()
+        .ok_or(CargoMetadataFactsError::InvalidField { field })?;
+    if text.len() > MAX_PATH_BYTES {
         return Err(CargoMetadataFactsError::FieldLimitExceeded { field });
+    }
+    if text.chars().any(char::is_control) {
+        return Err(CargoMetadataFactsError::InvalidField { field });
     }
     if !path.is_absolute() {
         return Err(CargoMetadataFactsError::NonAbsolutePath { field });
@@ -454,10 +503,8 @@ fn metadata_string_field<'a>(
 ) -> Result<&'a str, CargoMetadataFactsError> {
     let value = value
         .and_then(Value::as_str)
+        .filter(|value| !value.is_empty() && !value.chars().any(char::is_control))
         .ok_or(CargoMetadataFactsError::InvalidField { field })?;
-    if value.is_empty() {
-        return Err(CargoMetadataFactsError::InvalidField { field });
-    }
     if value.len() > max_bytes {
         return Err(CargoMetadataFactsError::FieldLimitExceeded { field });
     }
@@ -492,10 +539,4 @@ fn normalized_metadata_features(
         return Err(CargoMetadataFactsError::InvalidField { field });
     }
     Ok(features.into_boxed_slice())
-}
-
-fn u64_field(value: Option<&Value>, field: &'static str) -> Result<u64, CargoMetadataFactsError> {
-    value
-        .and_then(Value::as_u64)
-        .ok_or(CargoMetadataFactsError::InvalidField { field })
 }

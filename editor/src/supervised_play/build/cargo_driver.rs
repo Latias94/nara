@@ -5,7 +5,10 @@ use std::{
     path::{Path, PathBuf},
 };
 
-use nara::{fs::ContentDigest, project_workflow::__private::CargoDesktopBuildInvocation};
+use nara::{
+    fs::ContentDigest,
+    project_workflow::cargo::{CargoBuildInvocation, CargoBuildSelection, CargoMetadataFacts},
+};
 use thiserror::Error;
 
 use super::{
@@ -13,6 +16,12 @@ use super::{
     MAX_TOOL_IDENTITY_BYTES, MAX_TOOL_PATH_BYTES,
 };
 use crate::supervised_play::process::SupervisedProcessCommand;
+
+// The trusted starter adapter owns this preset; generic Cargo facts impose no desktop policy.
+const DESKTOP_TARGET: &str = "desktop";
+const DESKTOP_PROFILE: &str = "dev";
+const DESKTOP_FEATURES: [&str; 1] = ["desktop"];
+const DESKTOP_DEFAULT_FEATURES: bool = false;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum DesktopBuildTool {
@@ -158,20 +167,58 @@ pub(crate) fn rustc_identity_command(request: &DesktopBuildRequest) -> Supervise
     SupervisedProcessCommand::new(&request.tools.rustc, &request.project_root).argument("-vV")
 }
 
-pub(crate) fn metadata_command(request: &DesktopBuildRequest) -> SupervisedProcessCommand {
-    SupervisedProcessCommand::new(&request.tools.cargo, &request.project_root)
-        .arguments(["metadata", "--locked", "--no-deps", "--format-version", "1"])
+pub(crate) fn metadata_command(
+    request: &DesktopBuildRequest,
+    host_target: &str,
+) -> SupervisedProcessCommand {
+    let mut command = SupervisedProcessCommand::new(&request.tools.cargo, &request.project_root)
+        .arguments(["metadata", "--locked", "--format-version", "1"])
         .argument("--manifest-path")
         .argument(request.manifest_path.as_os_str())
+        .argument("--features")
+        .argument(DESKTOP_FEATURES.join(","))
+        .argument("--filter-platform")
+        .argument(host_target)
         .environment("CARGO_TERM_COLOR", "never")
-        .environment("RUSTC", request.tools.rustc.as_os_str())
+        .environment("RUSTC", request.tools.rustc.as_os_str());
+    if !DESKTOP_DEFAULT_FEATURES {
+        command = command.argument("--no-default-features");
+    }
+    command
+}
+
+pub(crate) fn desktop_build_invocation(
+    metadata: &[u8],
+    manifest_path: &Path,
+    host_target: &str,
+) -> Result<CargoBuildInvocation, DesktopBuildFailure> {
+    let package = CargoMetadataFacts::package_name_for_manifest(metadata, manifest_path)
+        .map_err(DesktopBuildFailure::Metadata)?;
+    let selection = CargoBuildSelection::new(
+        package,
+        DESKTOP_TARGET,
+        DESKTOP_PROFILE,
+        host_target,
+        DESKTOP_FEATURES,
+        DESKTOP_DEFAULT_FEATURES,
+    )
+    .map_err(DesktopBuildFailure::Selection)?;
+    let metadata = CargoMetadataFacts::parse(metadata, manifest_path, &selection)
+        .map_err(DesktopBuildFailure::Metadata)?;
+    metadata
+        .build_invocation(selection)
+        .map_err(DesktopBuildFailure::Invocation)
 }
 
 pub(crate) fn cargo_build_command(
     request: &DesktopBuildRequest,
-    invocation: &CargoDesktopBuildInvocation,
-) -> SupervisedProcessCommand {
-    SupervisedProcessCommand::new(&request.tools.cargo, &request.project_root)
+    invocation: &CargoBuildInvocation,
+    host_target: &str,
+) -> Result<SupervisedProcessCommand, DesktopBuildFailure> {
+    if invocation.target_triple() != host_target {
+        return Err(DesktopBuildFailure::NonNativeTarget);
+    }
+    let mut command = SupervisedProcessCommand::new(&request.tools.cargo, &request.project_root)
         .argument("build")
         .argument("--locked")
         .argument("--manifest-path")
@@ -182,18 +229,24 @@ pub(crate) fn cargo_build_command(
         .argument(invocation.target_name())
         .argument("--profile")
         .argument(invocation.profile())
-        .argument("--no-default-features")
-        .argument("--features")
-        .argument(invocation.features().join(","))
         .argument("--target")
-        .argument(invocation.host_target())
+        .argument(invocation.target_triple())
         .argument("--message-format=json-diagnostic-rendered-ansi")
         .environment("CARGO_TERM_COLOR", "never")
         .environment(
             "CARGO_TARGET_DIR",
             invocation.target_directory().as_os_str(),
         )
-        .environment("RUSTC", request.tools.rustc.as_os_str())
+        .environment("RUSTC", request.tools.rustc.as_os_str());
+    if !invocation.default_features() {
+        command = command.argument("--no-default-features");
+    }
+    if !invocation.features().is_empty() {
+        command = command
+            .argument("--features")
+            .argument(invocation.features().join(","));
+    }
+    Ok(command)
 }
 
 pub(crate) fn parse_tool_identity(bytes: &[u8]) -> Option<ToolIdentityFact> {
@@ -237,18 +290,29 @@ pub(crate) fn parse_rustc_identity(bytes: &[u8]) -> Option<RustcIdentityFact> {
     })
 }
 
-pub(crate) fn digest_build_invocation(invocation: &CargoDesktopBuildInvocation) -> ContentDigest {
+pub(crate) fn digest_build_invocation(invocation: &CargoBuildInvocation) -> ContentDigest {
     let mut bytes = Vec::with_capacity(256);
     bytes.extend_from_slice(b"nara.desktop-build-invocation.v1\0");
     feed_digest_field(&mut bytes, "package-name", invocation.package_name());
     feed_digest_field(&mut bytes, "package-version", invocation.package_version());
     feed_digest_field(&mut bytes, "target", invocation.target_name());
     feed_digest_field(&mut bytes, "profile", invocation.profile());
-    feed_digest_field(&mut bytes, "host-target", invocation.host_target());
+    feed_digest_field(&mut bytes, "target-triple", invocation.target_triple());
     feed_digest_field(&mut bytes, "locked", "true");
-    feed_digest_field(&mut bytes, "default-features", "false");
+    feed_digest_field(
+        &mut bytes,
+        "default-features",
+        if invocation.default_features() {
+            "true"
+        } else {
+            "false"
+        },
+    );
     for feature in invocation.features() {
-        feed_digest_field(&mut bytes, "feature", feature);
+        feed_digest_field(&mut bytes, "requested-feature", feature);
+    }
+    for feature in invocation.metadata_features() {
+        feed_digest_field(&mut bytes, "metadata-feature", feature);
     }
     ContentDigest::of_bytes(&bytes)
 }

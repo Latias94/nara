@@ -346,7 +346,9 @@ fn validate_message_text(
     field: &'static str,
     max_bytes: usize,
 ) -> Result<(), CargoJsonMessageError> {
-    if value.len() > max_bytes {
+    if value.chars().any(char::is_control) {
+        Err(CargoJsonMessageError::InvalidField { field })
+    } else if value.len() > max_bytes {
         Err(CargoJsonMessageError::FieldLimitExceeded { field })
     } else {
         Ok(())
