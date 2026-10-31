@@ -3,7 +3,7 @@ type: "Current State"
 title: "Current Engineering State"
 description: "Derived summary of immutable engineering-memory shards."
 tags: ["engineering-memory", "derived"]
-source_fingerprint: "37a26ef4fa0501cc74bcff611bd3214835a7ebde87868c851d6a3bca86711851"
+source_fingerprint: "75ec8840c54ee3b9be0115184fb782e25a53275e352218f3bf64209e44caf514"
 ---
 
 # Current State
@@ -12,8 +12,8 @@ source_fingerprint: "37a26ef4fa0501cc74bcff611bd3214835a7ebde87868c851d6a3bca867
 
 This file is derived from immutable shards. Record new facts in shards, then render during integration.
 
-- Source fingerprint: `37a26ef4fa0501cc74bcff611bd3214835a7ebde87868c851d6a3bca86711851`
-- Immutable records: 1138
+- Source fingerprint: `75ec8840c54ee3b9be0115184fb782e25a53275e352218f3bf64209e44caf514`
+- Immutable records: 1143
 - Active lane heads: 2
 
 # Active Registrations
@@ -51,7 +51,7 @@ This file is derived from immutable shards. Record new facts in shards, then ren
 - [Editor foundation U9 and U1-U8 complete with exact-source external acceptance](registry/2026-10/2026-10-17T102710Z-nara-editor-foundation-implementation-codex-root-76fa1ccb656c4ebd8c2b5f77f83287f7.md): `completed` (nara-editor-foundation-implementation-codex-root; producer `codex-root`)
 - [Editor foundation research and refactor planning complete](registry/2026-10/2026-10-16T044159Z-nara-editor-foundation-planning-codex-root-d0e8f37adfd54751b67d7ae647f06d83.md): `completed` (nara-editor-foundation-planning-codex-root; producer `codex-root`)
 - [First 2D author workflow complete with clean committed-source acceptance](registry/2026-10/2026-10-16T025148Z-nara-first-2d-author-workflow-codex-root-fe7312236c5d4906b8e950d366111171.md): `completed` (nara-first-2d-author-workflow-codex-root; producer `codex-root`)
-- [Typed policy committed and owned history candidate selected](registry/2026-10/2026-10-31T193254Z-nara-foundation-rebaseline-codex-main-5f44bbe538f14c67aaaa5b8d5d5422f2.md): `active` (nara-foundation-rebaseline-codex-main; producer `codex-foundation-main`)
+- [Captured View history qualified and complete foundation work continuing](registry/2026-10/2026-10-31T211538Z-nara-foundation-rebaseline-codex-main-cfd7154ad052484e8b7411bec7980299.md): `active` (nara-foundation-rebaseline-codex-main; producer `codex-foundation-main`)
 - [Ordinary structural authoring qualified](registry/2026-10/2026-10-20T053614Z-ordinary-authoring-codex-root-ac405c79936d43b09f6cfb4197d747ed.md): `completed` (ordinary-authoring-codex-root; producer `codex-root`)
 - [Persistent checkpoint consumer qualified on Windows](registry/2026-10/2026-10-21T032628Z-persistent-two-level-game-codex-root-1ac997abdab142e590af8a6c21f9f443.md): `complete` (persistent-two-level-game-codex-root; producer `codex-root`)
 - [N05 plugin failure facts qualified](registry/2026-10/2026-10-19T172945Z-plugin-error-facts-codex-root-c20974513f104398967edbed73efccaa.md): `completed` (plugin-error-facts-codex-root; producer `codex-root`)
@@ -70,6 +70,9 @@ This file is derived from immutable shards. Record new facts in shards, then ren
 
 # Recent Evidence
 
+- **Verification Evidence**: [Captured View histories and original submission cleanup production qualification](verification/2026-10/2026-10-31T210034Z-captured-view-histories-and-original-submission-cleanup-production-qualification-5c061376803446c0bff1a95495ca55c7.md) - Scoped production history candidates, independent numeric and Runtime consumers, and final submitted-custody cleanup evidence.
+- **Work Progress**: [History View leases independent numeric qualification and publication review corrections](progress/2026-10/2026-10-31T203210Z-history-view-leases-independent-numeric-qualification-and-publication-review-corrections-a0e84fabb63d49f6b893582e58a20926.md) - Six independent GPU history cases pass; publication cleanup, program budget and final storage corrections remain in final integration.
+- **Work Progress**: [Captured View lifetimes and production history candidates in integration](progress/2026-10/2026-10-31T200950Z-captured-view-lifetimes-and-production-history-candidates-in-integration-adb17185d2534fb5bd768a08ed6e22dc.md) - Neutral View ownership verified; original logical declarations, move-owned candidates and complete Host history publication are integrating.
 - **Verification Evidence**: [Original typed render policy capture and complete consumer qualification](verification/2026-10/2026-10-31T192756Z-original-typed-render-policy-capture-and-complete-consumer-qualification-df7f9377f51142b78060b53617c800a1.md) - Typed renderer policy custody, public UI transfer, stock consumer replacement and scoped native evidence.
 - **Work Progress**: [Typed policy integrated owners and native consumers qualified pending final checks](progress/2026-10/2026-10-31T184954Z-typed-policy-integrated-owners-and-native-consumers-qualified-pending-final-checks-b002ff50f627472a952f92373c1c6284.md) - Records final ordinary owner and Root results, native Editor and independent policy/image/program evidence, and the corrected device-loss admission classification.
 - **Work Progress**: [Typed policy review corrections and first external GPU qualification](progress/2026-10/2026-10-31T181343Z-typed-policy-review-corrections-and-first-external-gpu-qualification-c170e2fdd79a436985aa9eef136dc2f6.md) - Records actual independent-policy CPU and DX12 evidence, structural review corrections, and the still-open full integration qualification.
@@ -79,9 +82,6 @@ This file is derived from immutable shards. Record new facts in shards, then ren
 - **Verification Evidence**: [Stock image consumers and declared WorldCanvas through shared programs qualification](verification/2026-10/2026-10-31T153613Z-stock-image-consumers-and-declared-worldcanvas-through-shared-programs-qualification-f6cfe4185aad459587db367d807aeb60.md) - Verification Evidence for Stock image consumers and declared WorldCanvas through shared programs qualification.
 - **Work Progress**: [Ordinary stock image consumers through typed programs integration](progress/2026-10/2026-10-31T152937Z-ordinary-stock-image-consumers-through-typed-programs-integration-158cff8e7dbd4b6fb373f8908539f5af.md) - Work Progress for Ordinary stock image consumers through typed programs integration.
 - **Verification Evidence**: [Shared stock native preparation and whole-candidate preflight qualification](verification/2026-10/2026-10-31T144610Z-shared-stock-native-preparation-and-whole-candidate-preflight-qualification-01b79b28279b48618dd19ec377ad2cc8.md) - Verification Evidence for Shared stock native preparation and whole-candidate preflight qualification.
-- **Verification Evidence**: [Finite typed render programs through the original Host production qualification](verification/2026-10/2026-10-31T133536Z-finite-typed-render-programs-through-the-original-host-production-qualification-a32bacec9d8b4572801df1f79fc31c01.md) - Verification Evidence for Finite typed render programs through the original Host production qualification.
-- **Verification Evidence**: [Immutable render outputs owning producers and original native prefix qualification](verification/2026-10/2026-10-31T121248Z-immutable-render-outputs-owning-producers-and-original-native-prefix-qualification-1b4de7f4305740698abba87b589f9459.md) - Verification Evidence for Immutable render outputs owning producers and original native prefix qualification.
-- **Work Progress**: [Immutable render outputs and owning producer admission replacement in progress](progress/2026-10/2026-10-31T113038Z-immutable-render-outputs-and-owning-producer-admission-replacement-in-progress-7147451b93b04ec8960ebe75ab6bf147.md) - Work Progress for Immutable render outputs and owning producer admission replacement in progress.
 
 # Integration Notes
 
