@@ -3,7 +3,7 @@ type: "Current State"
 title: "Current Engineering State"
 description: "Derived summary of immutable engineering-memory shards."
 tags: ["engineering-memory", "derived"]
-source_fingerprint: "295ccc1ab8a7c793a2132c71be1aaceacef42ac2e1783d6d463ea980b2e980ec"
+source_fingerprint: "635b14fc362a8559b3a70111e8da01289927c0c33b132de44ac40a46caeb2c8d"
 ---
 
 # Current State
@@ -12,8 +12,8 @@ source_fingerprint: "295ccc1ab8a7c793a2132c71be1aaceacef42ac2e1783d6d463ea980b2e
 
 This file is derived from immutable shards. Record new facts in shards, then render during integration.
 
-- Source fingerprint: `295ccc1ab8a7c793a2132c71be1aaceacef42ac2e1783d6d463ea980b2e980ec`
-- Immutable records: 1089
+- Source fingerprint: `635b14fc362a8559b3a70111e8da01289927c0c33b132de44ac40a46caeb2c8d`
+- Immutable records: 1094
 - Active lane heads: 2
 
 # Active Registrations
@@ -51,7 +51,7 @@ This file is derived from immutable shards. Record new facts in shards, then ren
 - [Editor foundation U9 and U1-U8 complete with exact-source external acceptance](registry/2026-10/2026-10-17T102710Z-nara-editor-foundation-implementation-codex-root-76fa1ccb656c4ebd8c2b5f77f83287f7.md): `completed` (nara-editor-foundation-implementation-codex-root; producer `codex-root`)
 - [Editor foundation research and refactor planning complete](registry/2026-10/2026-10-16T044159Z-nara-editor-foundation-planning-codex-root-d0e8f37adfd54751b67d7ae647f06d83.md): `completed` (nara-editor-foundation-planning-codex-root; producer `codex-root`)
 - [First 2D author workflow complete with clean committed-source acceptance](registry/2026-10/2026-10-16T025148Z-nara-first-2d-author-workflow-codex-root-fe7312236c5d4906b8e950d366111171.md): `completed` (nara-first-2d-author-workflow-codex-root; producer `codex-root`)
-- [Foundation finite local artifact builds qualified; target delivery and remaining waves open](registry/2026-10/2026-10-30T232921Z-nara-foundation-rebaseline-codex-main-df3cc019087541f9a65ba97996e39b64.md): `active` (nara-foundation-rebaseline-codex-main; producer `codex-foundation-main`)
+- [Foundation explicit Cargo builds qualified; cooked Player and remaining waves open](registry/2026-10/2026-10-31T040323Z-nara-foundation-rebaseline-codex-main-69db5ff3542148acb103ff153ce8c096.md): `active` (nara-foundation-rebaseline-codex-main; producer `codex-foundation-main`)
 - [Ordinary structural authoring qualified](registry/2026-10/2026-10-20T053614Z-ordinary-authoring-codex-root-ac405c79936d43b09f6cfb4197d747ed.md): `completed` (ordinary-authoring-codex-root; producer `codex-root`)
 - [Persistent checkpoint consumer qualified on Windows](registry/2026-10/2026-10-21T032628Z-persistent-two-level-game-codex-root-1ac997abdab142e590af8a6c21f9f443.md): `complete` (persistent-two-level-game-codex-root; producer `codex-root`)
 - [N05 plugin failure facts qualified](registry/2026-10/2026-10-19T172945Z-plugin-error-facts-codex-root-c20974513f104398967edbed73efccaa.md): `completed` (plugin-error-facts-codex-root; producer `codex-root`)
@@ -70,6 +70,10 @@ This file is derived from immutable shards. Record new facts in shards, then ren
 
 # Recent Evidence
 
+- **Verification Evidence**: [Explicit Cargo builds captured executables and supervised protocol qualification](verification/2026-10/2026-10-31T035034Z-explicit-cargo-builds-captured-executables-and-supervised-protocol-qualification-4cfff5128fa64423b6f234ea7b312c63.md) - Cargo-authoritative target selection, captured input and executable binding, exact bounded Editor protocol and real native consumers.
+- **Work Progress**: [Native Cargo metadata exposes lossy protocol transport and requires owned queue replacement](progress/2026-10/2026-10-31T030020Z-native-cargo-metadata-exposes-lossy-protocol-transport-and-requires-owned-queue-replacement-566938962bc9455cbfb9516d2fbae4ee.md) - Work Progress for Native Cargo metadata exposes lossy protocol transport and requires owned queue replacement.
+- **Work Progress**: [Explicit Cargo contracts independently reviewed with actual native and foreign consumers](progress/2026-10/2026-10-31T020011Z-explicit-cargo-contracts-independently-reviewed-with-actual-native-and-foreign-consumers-ca2e1780a12140d6acee32ad39c35481.md) - Work Progress for Explicit Cargo contracts independently reviewed with actual native and foreign consumers.
+- **Work Progress**: [Explicit Cargo selection and captured executable ownership replacement in progress](progress/2026-10/2026-10-31T002716Z-explicit-cargo-selection-and-captured-executable-ownership-replacement-in-progress-29b2a117d6af41679ca9fef5d1250965.md) - Replaces fixed desktop selectors through native build, source Export and supervised Editor consumers; independent and foreign artifact qualification pending.
 - **Verification Evidence**: [Tracked local artifact builds and complete-group publication qualification](verification/2026-10/2026-10-30T231610Z-tracked-local-artifact-builds-and-complete-group-publication-qualification-d3fcd08e15e04d45812ae09d7c81e944.md) - Finite typed compound and Image execution, current-input reuse, whole-group publication and original Runtime custody.
 - **Work Progress**: [Tracked local artifact execution and complete-group store implementation in progress](progress/2026-10/2026-10-30T213010Z-tracked-local-artifact-execution-and-complete-group-store-implementation-in-progress-610ba9175c1b41bebdaa3f8f0c86bd79.md) - Work Progress for Tracked local artifact execution and complete-group store implementation in progress.
 - **Verification Evidence**: [Source import recipes and target-sensitive CPU Image cook prerequisite qualification](verification/2026-10/2026-10-30T201802Z-source-import-recipes-and-target-sensitive-cpu-image-cook-prerequisite-qualification-462c0179d20b44fd8545d4c135e814f9.md) - Verification Evidence for Source import recipes and target-sensitive CPU Image cook prerequisite qualification.
@@ -78,10 +82,6 @@ This file is derived from immutable shards. Record new facts in shards, then ren
 - **Work Progress**: [Retained local pack ownership replacement and public consumer qualification in progress](progress/2026-10/2026-10-30T182551Z-retained-local-pack-ownership-replacement-and-public-consumer-qualification-in-progress-5d5a3464bbcd436581a379fcee22e3e1.md) - Work Progress for Retained local pack ownership replacement and public consumer qualification in progress.
 - **Verification Evidence**: [Reference validity and current demand production replacement qualification](verification/2026-10/2026-10-30T172312Z-reference-validity-and-current-demand-production-replacement-qualification-b16511fa33a74c2b808270394b28bf62.md) - Verification Evidence for Reference validity and current demand production replacement qualification.
 - **Work Progress**: [Demand-aware public travel and editor prepared-membership correction verified](progress/2026-10/2026-10-30T163329Z-demand-aware-public-travel-and-editor-prepared-membership-correction-verified-fccc1404b4914d28b825e008efa969fd.md) - Work Progress for Demand-aware public travel and editor prepared-membership correction verified.
-- **Work Progress**: [Actual demand admission and compact deep validation integration in progress](progress/2026-10/2026-10-30T153010Z-actual-demand-admission-and-compact-deep-validation-integration-in-progress-e2a98fb4e3ef490d83d93fd3b900f655.md) - Records the unqualified demand-aware owning replacement, verified Reflect surface and selected compact cross-member deep validation.
-- **Work Progress**: [Reference validity and current load demand design selected after pinned source review](progress/2026-10/2026-10-30T145320Z-reference-validity-and-current-load-demand-design-selected-after-pinned-source-review-33a51556e0074d0180f63ff2eacb189a.md) - Records the CP3 owning design, compound/Authoring proof limits, exact-set admission and deterministic discovered-work scheduling before implementation.
-- **Verification Evidence**: [Bounded Input ownership and total UI presentation qualification](verification/2026-10/2026-10-30T140508Z-bounded-input-ownership-and-total-ui-presentation-qualification-b97643044e4a4f92b892a3539d2ad415.md) - Qualifies finite ingress/member ownership, exact endpoint claims, total UI completion, explicit candidate queries and the real Reference desktop observation path.
-- **Work Progress**: [Explicit UI candidate API and Runtime-bound Reference presentation observation](progress/2026-10/2026-10-30T133904Z-explicit-ui-candidate-api-and-runtime-bound-reference-presentation-observation-4ac94530888142ae8d956f4172287842.md) - Reference consumer failures reveal ambiguous candidate lookup and a real post-commit production observation defect; direct API replacement and exact owner/session repair are frozen for final qualification.
 
 # Integration Notes
 
