@@ -167,3 +167,11 @@ Windows headless product. Actual source/cache/toolchain-free execution, shared c
 Input and Deferred acquisition failure are covered. This implements the next complete consumer;
 it does not reset the remaining authored evolution, joint execution/motion, render/output or
 self-drawn editable Editor design gates in the research disposition above.
+
+The [render composition unit](../plans/2026-10-31-render-composition-and-host-execution-plan.md)
+now carries the next complete R8/R9a workflow. Its first
+[private CPU/DX12 comparison](../knowledge/engineering/verification/2026-10/2026-10-31T060722Z-private-render-graph-buffer-history-and-viable-controls-comparison-on-dx12-d6aca1996b2342659bd07933b33e0e64.md)
+executes texture/buffer kernels through graph and viable controls, with fixed history groups,
+exact physical versions and failure/custody oracles. Comparative costs, production Host/epochs,
+independently paced streams and UI completion remain open. This advances the imported F1/F2/F3
+research gates without treating a private experiment as the production rendering replacement.

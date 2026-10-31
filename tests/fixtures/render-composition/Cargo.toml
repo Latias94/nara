@@ -1,0 +1,15 @@
+[package]
+name = "nara-render-composition-comparison"
+version = "0.0.0"
+edition = "2024"
+rust-version = "1.95"
+license = "MIT OR Apache-2.0"
+publish = false
+
+[workspace]
+resolver = "3"
+
+[dev-dependencies]
+nara_ecs = { path = "../../../crates/nara_ecs" }
+pollster = "0.4.0"
+wgpu = "=30.0.1"

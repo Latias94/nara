@@ -2,10 +2,15 @@
 
 **Status**: Proposed
 **Date**: 2026-10-23
-**Revised**: 2026-10-30 after bounded contract review; still Proposed
+**Revised**: 2026-10-31 after private candidate counterexamples; still Proposed
 **Owner**: Render semantics, concrete domain features, WGPU execution and native target Hosts
 **Would Replace In Part**: ADR 0017, ADR 0094, ADR 0105
 **Would Refine**: ADR 0012, ADR 0032, ADR 0040, ADR 0054, ADR 0078, ADR 0096, ADR 0106
+
+The [private CPU/DX12 comparison](../../knowledge/engineering/verification/2026-10/2026-10-31T060722Z-private-render-graph-buffer-history-and-viable-controls-comparison-on-dx12-d6aca1996b2342659bd07933b33e0e64.md)
+exercises graph/ordered/slot/schedule kernels, exact physical versions and fixed history groups.
+It informs this proposal's semantic-copy and publication boundaries; production Host/epoch,
+external Runtime/Scene View consumers, costs and exact UI completion remain unqualified.
 
 ## Context
 
@@ -65,6 +70,11 @@ output; an outdated successor cannot replace a newer history chain. Initial exec
 each slot. Retry uses the pinned inputs or explicitly prepares a new candidate, never silently
 switches to latest history. Failure or supersession before output publication does not advance
 history; a later window-present failure does not roll back an already published producer output.
+An empty/reset slot retains a revision/reset incarnation; `None` alone cannot distinguish an old
+empty predecessor from a new empty slot after a camera cut. Publication compares that original
+slot basis, not merely optional texture equality. Each producer/View/Feature-instance/capture may
+advance its slot at most once, including when a caller rebuilds another candidate for the same
+capture. A reset invalidates pre-reset tickets without erasing deduplication of completed captures.
 Repeated display of one capture never advances history. The effect defines initialization and
 compatibility, including resize, policy changes and camera cuts versus compatible camera motion;
 device loss invalidates GPU history. Per-capture graphs and exact output leases preserve independent
@@ -125,15 +135,38 @@ sample and bounded full 2D subresources while rejecting other combinations. Smal
 structures and explicit wiring suffice; no global output-name resolver or RHI descriptor mirror
 is required.
 
+Semantic port compatibility and initialization-copy compatibility are different checks. A declared
+operation may initialize a new FinalComposite version by copying compatible PreUiSceneColor bytes,
+then draw UI; that does not let FinalComposite satisfy a consumer requiring PreUiSceneColor.
+Copies still require matching physical shape and color/alpha interpretation, or a separately
+admitted conversion. Buffer ports likewise distinguish raw integer counts from normalized float
+frequencies even when both use16 bytes and identical native usages. A small code-owned typed
+output/port identity supplies this distinction; no new material ABI/schema system follows.
+
+Initialization is also a postcondition: any version subsequently read, exported or retained as
+history remains stored after its operation. Initially all shared attachments use Store; Discard
+is limited to adapter-private attachments with no later consumer. Topological order and an early
+clear alone cannot prove that the final contents remain initialized.
+
 **Candidate publication.** Each candidate declares an output publication group and its complete
 required dependency closure. Initially keep producer-output groups and Editor composition in
-separate candidates. One Host drive may service several candidates; sharing resources or a
-submission does not merge independently declared publication or failure domains. Content and
+separate candidates. One Host drive may service several candidates; shared resources alone do
+not merge independently declared publication groups. Native batching must satisfy the failure
+boundary below rather than infer independence from group labels. Content and
 preparation failures reject affected candidates and their dependent work while independent
-candidates continue; device/Host failures retain their domain-wide scope. A selected fallback is
+candidates continue; device/Host failures retain their domain-wide scope. Logical grouping alone
+does not isolate a shared native encoder or failed submission batch. Initially encode each output
+group separately, inspect its validation scopes and submit it independently. A batch failure
+prevents publication of every affected group; any healthy retry re-encodes from its original pinned
+inputs. Native protocol violations may instead have explicit Host-failure scope, never silently
+produce success for another command buffer in that batch. A selected fallback is
 a separately validated candidate with pinned initialized inputs. Failed preparation cannot publish
 partial outputs or advance history. Existing presentation and interaction owners still decide
 display and input authority; this does not require arbitrary partial-graph publication.
+A ready/fully encoded candidate is distinct from a published output. Output and history pointers
+publish together only after submission admission succeeds and the device epoch remains valid.
+GPU completion is a later physical-lifetime fact; dependent work inherits original submission
+ordering and custody.
 
 ### Imported Content And UI Output Boundaries
 
