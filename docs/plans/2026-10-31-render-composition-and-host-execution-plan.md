@@ -1,7 +1,7 @@
 # Render Composition And Host Execution
 
-Date: 2026-10-31. Status: private CPU/DX12/cost comparison and internal device-owner prerequisite
-evidenced; complete production replacement remains in development.
+Date: 2026-10-31. Status: private CPU/DX12/cost comparison, internal device ownership and original
+UI result/logical-close prerequisites evidenced; complete production replacement remains in development.
 Baseline: `a0995e7b65288ae67a5786b5312e6166b679d171`.
 Parent: [foundation R8/R9a](2026-10-23-foundation-architecture-rebaseline-plan.md#r8-external-render-feature-and-host-local-execution).
 Candidate: Proposed [ADR0121](../architecture/adr/0121-composable-render-programs-and-host-execution.md).
@@ -119,8 +119,11 @@ device-owner extraction or qualify the production/public boundary below.
 The internal [coherent device-owner prerequisite](../knowledge/engineering/verification/2026-10/2026-10-31T064658Z-coherent-wgpu-device-ownership-and-render-cost-comparison-qualification-18760d4fdea7435b90fb9bd2bee64510.md)
 is implemented at `48cf9ce` through existing stock Runtime/Editor execution. Its complete Ready
 aggregate, private surface-less acquisition, loss isolation and cleanup/epoch behavior have owner
-and selected native evidence. Continue the production ownership design at the capture/result and
-runner migration; GPU ECS storage and public offscreen/Feature/output workflows are still open.
+and selected native evidence. The [original-result/logical-close successor](../knowledge/engineering/verification/2026-10/2026-10-31T082117Z-original-ui-result-custody-and-logical-close-qualification-6e1965c6428841ec9138088bef20f90c.md)
+is implemented at `8e9d840`: original nominal batch storage, retained receivers, Root UI/Input
+settlement and CPU WGPU observations have final owner/neutral and selected native evidence.
+Continue with the complete owned native session, capture/result execution and runner migration;
+GPU ECS storage and public offscreen/Feature/output workflows are still open.
 
 1. Implement the private graph/access model and hostile cases together with a real window-free
    GPU readback harness. Compare actual pinned Bevy/Godot mechanisms and challenge the proposed
