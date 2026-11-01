@@ -114,7 +114,7 @@ fn scene_cycles_self_edges_and_diamonds_retain_one_raw_and_effective_source_per_
     let project = fixture(&[1, 2, 3], &[4, 1], &[4], &[]);
     let (snapshot, source, session) = open_second_scene(&project);
     let mut capture = snapshot
-        .capture_scene_document(&source, &session, &[])
+        .capture_scene_from_bound_source(&source, &session, &[])
         .unwrap();
     assert_eq!(capture.readiness(), AuthoringProjectReadiness::Complete);
     assert_eq!(capture.scenes().len(), 4);
@@ -183,15 +183,22 @@ fn demanded_scene_working_copy_introduces_actual_transitive_demand_without_savin
         value: encode_asset_reference_value(&product(3)),
     }]);
     assert!(b.apply_authoring_patch(&patch).applied);
-    let inputs = snapshot
+    let mut inputs = snapshot
         .admit_source_capture_inputs(
             0,
             AuthoringSceneSessionSnapshot::capture_retained_bytes(&b_source, &b).unwrap(),
         )
         .unwrap();
-    let working = AuthoringSceneSessionSnapshot::capture(&b_source, &b);
+    let working = AuthoringSceneSessionSnapshot::capture(
+        &b_source,
+        bound_source_observation(&snapshot, &b_source),
+        &b,
+    );
+    inputs
+        .retain_shared_source_observations(working.observation.iter())
+        .unwrap();
     let capture = snapshot
-        .capture_scene_request(&source, &session, inputs, Box::new([]))
+        .capture_bound_scene_request(&source, &session, inputs, Box::new([]))
         .unwrap()
         .with_open_scenes(vec![working].into_boxed_slice())
         .prepare()
@@ -219,7 +226,11 @@ fn demanded_scene_unavailable_stale_ambiguous_or_equal_content_foreign_basis_ref
     let project = fixture(&[2], &[], &[], &[]);
     let (snapshot, source, session) = open_second_scene(&project);
     let (b_source, b) = open_scene(&snapshot, "scenes/b.scene.json");
-    let correct = AuthoringSceneSessionSnapshot::capture(&b_source, &b);
+    let correct = AuthoringSceneSessionSnapshot::capture(
+        &b_source,
+        bound_source_observation(&snapshot, &b_source),
+        &b,
+    );
     let (_, _, other_root) = open_second_scene(&project);
     let mut incompatible = correct.clone();
     incompatible.basis = other_root.authoring_schema_basis();
@@ -244,15 +255,22 @@ fn demanded_scene_unavailable_stale_ambiguous_or_equal_content_foreign_basis_ref
             &b,
         )],
     ] {
-        let inputs = snapshot
+        let mut inputs = snapshot
             .admit_source_capture_inputs(
                 0,
                 scenes::open_scene_inputs_retained_bytes(&snapshots).unwrap(),
             )
             .unwrap();
+        inputs
+            .retain_shared_source_observations(
+                snapshots
+                    .iter()
+                    .filter_map(|snapshot| snapshot.observation.as_ref()),
+            )
+            .unwrap();
         assert!(
             snapshot
-                .capture_scene_request(&source, &session, inputs, Box::new([]))
+                .capture_bound_scene_request(&source, &session, inputs, Box::new([]))
                 .unwrap()
                 .with_open_scenes(snapshots.into_boxed_slice())
                 .prepare()
@@ -261,19 +279,25 @@ fn demanded_scene_unavailable_stale_ambiguous_or_equal_content_foreign_basis_ref
     }
     // An unavailable unrelated open Scene is not a selected dependency.
     let (c_source, c) = open_scene(&snapshot, "scenes/c.scene.json");
-    let inputs = snapshot
+    let mut inputs = snapshot
         .admit_source_capture_inputs(
             0,
             AuthoringSceneSessionSnapshot::capture_retained_bytes(&c_source, &c).unwrap(),
         )
         .unwrap();
+    let unrelated = AuthoringSceneSessionSnapshot::capture(
+        &c_source,
+        bound_source_observation(&snapshot, &c_source),
+        &c,
+    )
+    .without_persistence();
+    inputs
+        .retain_shared_source_observations(unrelated.observation.iter())
+        .unwrap();
     let capture = snapshot
-        .capture_scene_request(&source, &session, inputs, Box::new([]))
+        .capture_bound_scene_request(&source, &session, inputs, Box::new([]))
         .unwrap()
-        .with_open_scenes(
-            vec![AuthoringSceneSessionSnapshot::capture(&c_source, &c).without_persistence()]
-                .into_boxed_slice(),
-        )
+        .with_open_scenes(vec![unrelated].into_boxed_slice())
         .prepare()
         .unwrap();
     assert_eq!(capture.scenes().len(), 2);
@@ -331,7 +355,7 @@ fn schema_default_introduces_scene_demand_and_discarded_prefab_overlay_does_not(
     .unwrap();
     let (snapshot, source, session) = open_second_scene(&project);
     let capture = snapshot
-        .capture_scene_document(&source, &session, &[])
+        .capture_scene_from_bound_source(&source, &session, &[])
         .unwrap();
     assert_eq!(capture.scenes().len(), 2);
     assert!(
@@ -381,7 +405,7 @@ fn schema_default_introduces_scene_demand_and_discarded_prefab_overlay_does_not(
     .unwrap();
     let (snapshot, source, session) = open_second_scene(&project);
     let capture = snapshot
-        .capture_scene_document(&source, &session, &[])
+        .capture_scene_from_bound_source(&source, &session, &[])
         .unwrap();
     assert_eq!(capture.scenes().len(), 1);
     assert!(!capture.requires_recapture());
@@ -395,7 +419,7 @@ fn complete_scene_closure_admits_its_exact_retained_ceiling_and_rejects_one_byte
         let (snapshot, source, session) = open_second_scene(&project);
         let inputs = snapshot.admit_source_capture_inputs(0, 0).unwrap();
         let mut request = snapshot
-            .capture_scene_request(&source, &session, inputs, Box::new([]))
+            .capture_bound_scene_request(&source, &session, inputs, Box::new([]))
             .unwrap();
         drop(snapshot);
         Arc::get_mut(&mut request.schema)
@@ -460,7 +484,7 @@ fn scene_kind_uses_its_actual_assets_or_prefabs_reader_and_canonical_identity() 
         .unwrap();
         let (snapshot, source, session) = open_second_scene(&project);
         let capture = snapshot
-            .capture_scene_document(&source, &session, &[])
+            .capture_scene_from_bound_source(&source, &session, &[])
             .unwrap();
         assert_eq!(capture.scenes().len(), 2);
         let canonical = format!("{directory}/b.scene.json");
@@ -520,7 +544,7 @@ fn malformed_scene_data_duplicate_source_ids_and_auxiliary_scene_products_are_re
         let (snapshot, source, session) = open_second_scene(&project);
         assert!(
             snapshot
-                .capture_scene_document(&source, &session, &[])
+                .capture_scene_from_bound_source(&source, &session, &[])
                 .is_err(),
             "{corruption}"
         );
@@ -587,12 +611,15 @@ fn schema_successor_capture_demands_the_corresponding_prepared_scene_snapshot() 
         .unwrap();
     let scenes = [AuthoringSceneSessionSnapshot::capture_prepared(
         &b_source,
+        observe_owner_source(&mut owner, &snapshot, &b_source),
         borrow_prepared_scene_schema_source(&b, &b_prepared).unwrap(),
     )
     .unwrap()];
+    let root_observation = observe_owner_source(&mut owner, &snapshot, &source);
     let capture = owner
         .capture_scene(
             &source,
+            root_observation,
             borrow_prepared_scene_schema_source(&session, &root_prepared).unwrap(),
             &[],
             &scenes,

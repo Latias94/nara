@@ -1,7 +1,7 @@
 # ADR 0081: Schema Source, Stable Identity, Catalog, and Runtime Binding
 
 **Status**: Accepted
-**Last Revised**: 2026-11-01 (construction and admitted-definition ownership)
+**Last Revised**: 2026-11-02 (construction ownership and canonical first-party UI baseline)
 **Date**: 2026-07-12
 **Implemented Slices**: RGF-U1 canonical catalog and native binding boundary on 2026-07-12; RGF-U2
 native Rust derive authoring and public headless consumer on 2026-07-13; RGF-U12 World-independent
@@ -45,8 +45,10 @@ Field missing-value defaults, strict native binding and owned schema lineage ret
 
 Finite scalar intervals follow ADR 0045 and participate in saved schema identity. Tightening or
 relaxing a range requires an explicit component successor; migrations decide how historical values
-are handled rather than silently clamping them. The UI owner preserves its generation-two catalog
-and advances UiText to version three with its complete native F32 `(0, 256]` size constraint.
+are handled rather than silently clamping them. The unreleased first-party UI baseline follows
+ADR 0102: its version-one UiText already includes the complete native F32 `(0, 256]` constraint,
+without prototype catalog predecessors or loading migrations. Actual project-data successors keep
+the explicit evolution and migration rules above.
 
 A component-domain failure may retain a checked static diagnostic code and summary, plus an
 optional stable root field ID. The Scene bridge publishes that field only when an explicitly

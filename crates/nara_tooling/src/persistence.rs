@@ -7,7 +7,7 @@ use crate::{
 };
 use crate::{EditorClosePromptToken, EditorDocumentDigest, EditorDocumentId, EditorFrameRevision};
 
-/// Authoring completeness of the exact project snapshot installed in an Editor session.
+/// Authoring completeness of the installed project and its actual admitted source documents.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum EditorAuthoringReadiness {
     Complete,

@@ -2,7 +2,7 @@
 
 **Status**: Accepted
 **Date**: 2026-07-09
-**Last Revised**: 2026-10-30
+**Last Revised**: 2026-11-01
 **Refines**: ADR 0020: Project Source Layout
 **Refined By**: ADR 0039: Main Loop, Time Domains, Pause, and Runtime State; ADR 0041: Input Routing,
 Actions, Text Input, UI Focus, and Accessibility; ADR 0046: Plugin Metadata and Default Plugin
@@ -21,6 +21,16 @@ consumer separately admits either a plugin-owned versioned asset or a namespaced
 extension; this ADR does not create a generic plugin-settings registry.
 
 ## Runtime Configuration Projection
+
+Project source readiness is required manifest data, owned by `nara_project`: an explicit Ready
+state or a Pending authored-upgrade recovery reference. Profiles cannot override it. Missing
+state never silently becomes Ready. The raw manifest can represent Pending for a code-free
+recovery view; effective settings preserve it and source Hosts must enforce ADR0110's readiness
+checks rather than treating successful parsing/profile resolution as execution admission.
+Readiness grants neither file authority nor permission to execute a transformation. It is excluded
+from source-free `RuntimeConfiguration`; independently admitted old products keep their own basis.
+The [authored-upgrade unit](../../plans/2026-11-01-authored-schema-upgrade-plan.md) owns its
+implementation and complete producer/consumer migration; this amendment does not qualify support.
 
 `nara_project` owns a separate `RuntimeConfiguration` value and its admitted
 `EffectiveRuntimeConfiguration`. A source project's selected profile is resolved before
@@ -174,6 +184,9 @@ schema_version = 1
 name = "Example"
 source_universe = "72011426-37e2-48ba-bc06-78841468889a"
 native_document_identity = "stable_metadata"
+
+[authoring]
+state = "ready"
 
 [runtime]
 preset = "local-headless"

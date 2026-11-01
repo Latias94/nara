@@ -469,6 +469,7 @@ prefabs = "prefabs"
 scripts = "scripts"
 
 [authoring]
+state = "ready"
 schema_bundle = "{BUNDLE_PATH}"
 "#
         );

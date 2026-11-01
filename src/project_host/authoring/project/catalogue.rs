@@ -1,4 +1,4 @@
-//! Bounded stable lookups and Deferred target bindings alongside physical source receipts.
+//! Bounded read-only metadata lookups and Deferred target bindings.
 
 use std::{
     collections::VecDeque,
@@ -23,18 +23,18 @@ pub(super) enum ReferenceObservation {
 pub(super) struct StableLookupObservation {
     stable_id: StableAssetId,
     // An unresolved result remains provisional; capture still requires recapture.
-    target: Option<AssetSourcePath>,
+    record: Option<AssetRecord>,
+    metadata_digest: Option<ContentDigest>,
     // An intrinsic source participates in the same global identity universe even without a
     // sidecar. Revalidation must still reject newly conflicting, otherwise unrelated metadata.
     intrinsic: Option<AssetRecord>,
 }
 
-/// A Deferred target keeps its actual reader binding without observing its document body.
+/// A Deferred target keeps its canonical reader binding without observing its document body.
+/// Its key and sidecar content are validated by the capture's separate metadata source facts.
 pub(super) struct ResolvedTargetObservation {
     kind: AuthoringSourceKind,
     project_path: ProjectPath,
-    identity: FileIdentity,
-    parent_identity: Option<FileIdentity>,
     dependency_depth: usize,
 }
 
@@ -54,24 +54,21 @@ impl ResolvedTargetObservation {
             self.project_path.as_str().len(),
         ])?;
         budget.charge_source_bytes(0, 0, 0, scratch)?;
-        let opened = open_source_file(
-            root,
-            self.project_path.clone(),
-            self.project_path.as_str(),
-            self.kind,
-            self.dependency_depth,
-            budget,
-        )?;
-        if opened.identity != self.identity || opened.parent_identity != self.parent_identity {
-            return Err(AuthoringProjectSourceAdmissionError::SourceChanged {
-                kind: self.kind,
-                path: opened.project_path,
-            });
-        }
-        probe_target_readability(&opened, budget, false)?;
-        drop(opened);
+        let result = (|| {
+            let opened = open_source_file(
+                root,
+                self.project_path.clone(),
+                self.project_path.as_str(),
+                self.kind,
+                self.dependency_depth,
+                budget,
+            )?;
+            // No historical leaf or parent identity is asserted for an unread body. A new
+            // readable leaf under the same admitted binding has the same Deferred meaning.
+            probe_target_readability(&opened, budget, false)
+        })();
         budget.reconcile_retained_reservation(scratch, 0)?;
-        Ok(())
+        result
     }
 }
 
@@ -114,9 +111,9 @@ impl ReferenceObservation {
             Self::StableLookup(observation) => checked_sum([
                 size_of::<Self>(),
                 observation
-                    .target
+                    .record
                     .as_ref()
-                    .map_or(0, |path| path.as_str().len()),
+                    .map_or(Ok(0), asset_record_retained_bytes)?,
                 observation
                     .intrinsic
                     .as_ref()
@@ -132,13 +129,21 @@ impl ReferenceObservation {
 /// The actual directory capability binding and expected kind of a source query.
 /// Neither field is part of canonical source identity.
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub(super) struct SourceDirectoryBinding {
+pub(in crate::project_host::authoring) struct SourceDirectoryBinding {
     pub(super) directory: Arc<ProjectPath>,
     pub(super) scope: Arc<AssetPathScope>,
     pub(super) expected_kind: Option<AssetSourceKind>,
 }
 
 impl SourceDirectoryBinding {
+    pub(in crate::project_host::authoring) fn directory(&self) -> &ProjectPath {
+        &self.directory
+    }
+
+    pub(in crate::project_host::authoring) fn scope(&self) -> &AssetPathScope {
+        &self.scope
+    }
+
     pub(super) fn new(directory: ProjectPath, expected_kind: Option<AssetSourceKind>) -> Self {
         let prefix = AssetSourcePath::new(directory.as_str())
             .expect("an admitted project directory is a canonical source prefix");
@@ -166,6 +171,8 @@ pub(super) struct ReferenceCatalogue {
     source_bindings: BTreeMap<AssetSourcePath, SourceDirectoryBinding>,
     lookups: BTreeMap<StableAssetId, StableLookupObservation>,
     resolved_targets: BTreeMap<AssetSourcePath, ResolvedTargetObservation>,
+    // Capture-local collision rejection only. These copied observations never attest that
+    // a subsequently opened leaf is the historical object, and do not escape for revalidation.
     resolved_identities: HashMap<FileIdentity, AssetSourcePath>,
 }
 
@@ -240,7 +247,7 @@ impl ReferenceCatalogue {
     pub(super) fn lookup_sources(&self) -> impl Iterator<Item = &Arc<AuthoringSourceFact>> {
         self.lookups
             .values()
-            .filter_map(|lookup| self.metadata.get(lookup.target.as_ref()?))
+            .filter_map(|lookup| self.metadata.get(lookup.record.as_ref()?.path()))
     }
 
     /// Bare paths keep their Assets-relative meaning. Stable selections retain the actual
@@ -360,20 +367,21 @@ impl ReferenceCatalogue {
         };
         self.ensure_indexed(budget)?;
         if !self.lookups.contains_key(&stable_id) {
-            let target = self.indexed_source_path(stable_id);
+            let record = self.indexed_record(stable_id);
             budget.charge_source_bytes(
                 0,
                 0,
                 0,
                 checked_sum([
                     size_of::<StableLookupObservation>(),
-                    target.map_or(0, |path| path.as_str().len()),
+                    record.map_or(Ok(0), asset_record_retained_bytes)?,
                     64,
                 ])?,
             )?;
             let observation = StableLookupObservation {
                 stable_id,
-                target: target.cloned(),
+                record: record.cloned(),
+                metadata_digest: record.map(|record| self.metadata[record.path()].digest()),
                 intrinsic: None,
             };
             self.lookups.insert(stable_id, observation);
@@ -422,7 +430,7 @@ impl ReferenceCatalogue {
             }
         }
         if let Some(indexed) = self.metadata.get(record.path())
-            && !metadata.is_some_and(|(_, source)| indexed.same_file_observation(source))
+            && !metadata.is_some_and(|(_, source)| same_metadata_content(indexed, source))
         {
             return Err(AuthoringProjectSourceAdmissionError::AssetMetadataChanged {
                 path: record.path().clone(),
@@ -437,24 +445,26 @@ impl ReferenceCatalogue {
                 observation.intrinsic = Some(record.clone());
             }
         } else {
-            let target = self.indexed_source_path(stable_id);
+            let indexed = self.indexed_record(stable_id);
             budget.charge_source_bytes(
                 0,
                 0,
                 0,
                 checked_sum([
                     size_of::<StableLookupObservation>(),
-                    target.map_or(0, |path| path.as_str().len()),
+                    indexed.map_or(Ok(0), asset_record_retained_bytes)?,
                     asset_record_retained_bytes(record)?,
                     64,
                 ])?,
             )?;
-            let target = target.cloned();
+            let metadata_digest = indexed.map(|record| self.metadata[record.path()].digest());
+            let indexed = indexed.cloned();
             self.lookups.insert(
                 stable_id,
                 StableLookupObservation {
                     stable_id,
-                    target,
+                    record: indexed,
+                    metadata_digest,
                     intrinsic: Some(record.clone()),
                 },
             );
@@ -532,10 +542,10 @@ impl ReferenceCatalogue {
 
     /// Stable identity is global to the admitted catalogue. A lookup observation must not
     /// inherit the fallback alias scope used before an unresolved source has an actual reader.
-    fn indexed_source_path(&self, stable_id: StableAssetId) -> Option<&AssetSourcePath> {
+    fn indexed_record(&self, stable_id: StableAssetId) -> Option<&AssetRecord> {
         let record = self.database.record_for_stable_id(stable_id)?;
         self.metadata.get(record.path())?;
-        Some(record.path())
+        Some(record)
     }
 
     pub(super) fn check_resolved_target_identity(
@@ -569,10 +579,7 @@ impl ReferenceCatalogue {
         }
         probe_target_readability(&opened, budget, true)?;
         if let Some(previous) = self.resolved_targets.get(record.path()) {
-            if previous.identity != opened.identity
-                || previous.parent_identity != opened.parent_identity
-                || previous.kind != opened.kind
-            {
+            if previous.kind != opened.kind {
                 return Err(AuthoringProjectSourceAdmissionError::SourceChanged {
                     kind: opened.kind,
                     path: opened.project_path,
@@ -601,8 +608,6 @@ impl ReferenceCatalogue {
             ResolvedTargetObservation {
                 kind: opened.kind,
                 project_path: opened.project_path,
-                identity: opened.identity,
-                parent_identity: opened.parent_identity,
                 dependency_depth: opened.dependency_depth,
             },
         );
@@ -686,21 +691,24 @@ impl ReferenceCatalogue {
             if let Some(record) = &observation.intrinsic {
                 current.validate_intrinsic_record(record)?;
             }
-            let target = current.indexed_source_path(observation.stable_id);
-            if target != observation.target.as_ref() {
+            let record = current.indexed_record(observation.stable_id);
+            if record != observation.record.as_ref()
+                || record.map(|record| current.metadata[record.path()].digest())
+                    != observation.metadata_digest
+            {
                 // None is an observed unresolved lookup, never a durable absence receipt.
                 let path = observation
-                    .target
+                    .record
                     .as_ref()
-                    .or(target)
+                    .or(record)
                     .expect("different optional lookup targets include at least one path");
                 return Err(AuthoringProjectSourceAdmissionError::AssetMetadataChanged {
-                    path: path.clone(),
+                    path: path.path().clone(),
                 });
             }
-        }
-        for source in current.lookup_sources() {
-            revalidate_source_fact(root, source, budget)?;
+            if let Some(record) = record {
+                revalidate_metadata_content(root, &current.metadata[record.path()], budget)?;
+            }
         }
         Ok(())
     }
@@ -878,12 +886,12 @@ impl ReferenceCatalogue {
         }
         charge_asset_metadata(&read.source, encoded_bytes, &metadata, &record, budget)?;
         // Overlapping configured directories can observe the same canonical source twice.
-        // Both the sidecar declaration and exact source observation must still agree.
+        // Both the sidecar declaration and captured content must still agree.
         if self.database.record_for_path(record.path()) == Some(&record) {
             if self
                 .metadata
                 .get(record.path())
-                .is_some_and(|indexed| indexed.same_file_observation(&read.source))
+                .is_some_and(|indexed| same_metadata_content(indexed, &read.source))
             {
                 return Ok(());
             }
@@ -918,7 +926,7 @@ impl ReferenceCatalogue {
     ) -> Result<(), AuthoringProjectSourceAdmissionError> {
         let canonical_path = binding.scope.resolve(path);
         if let Some(indexed) = self.metadata.get(&canonical_path) {
-            if !indexed.same_file_observation(source) {
+            if !same_metadata_content(indexed, source) {
                 return Err(AuthoringProjectSourceAdmissionError::AssetMetadataChanged {
                     path: canonical_path,
                 });
@@ -962,6 +970,64 @@ impl ReferenceCatalogue {
         budget.charge_source_bytes(0, 0, 0, source_fact_retained_bytes(&read.source)?)?;
         Ok(Some((record, read.source)))
     }
+}
+
+fn same_metadata_content(expected: &AuthoringSourceFact, actual: &AuthoringSourceFact) -> bool {
+    expected.kind() == actual.kind()
+        && expected.project_path() == actual.project_path()
+        && expected.digest() == actual.digest()
+        && expected.encoded_bytes() == actual.encoded_bytes()
+}
+
+fn revalidate_metadata_content(
+    root: &DirectoryCapability,
+    source: &AuthoringSourceFact,
+    budget: &mut AuthoringProjectAdmissionBudget,
+) -> Result<(), AuthoringProjectSourceAdmissionError> {
+    let retained_before = budget.retained_candidate_bytes;
+    let result = (|| {
+        budget.admit_handle_peak(SOURCE_OPEN_HANDLE_PEAK)?;
+        let work = source
+            .encoded_bytes()
+            .checked_add(1)
+            .ok_or(AuthoringProjectSourceAdmissionError::AccountingOverflow)?;
+        let scratch = checked_sum([
+            64 * 1024,
+            size_of::<OpenedAuthoringSource>(),
+            source.project_path().as_str().len(),
+        ])?;
+        budget.charge_source_bytes(0, 0, work, scratch)?;
+        let opened = open_source_file(
+            root,
+            source.project_path().clone(),
+            source.project_path().as_str(),
+            source.kind(),
+            source.dependency_depth(),
+            budget,
+        )?;
+        opened
+            .capability
+            .verify_digest(source.digest(), source.digest().length())
+            .map_err(|error| match error {
+                FsError::DigestMismatch { .. } | FsError::ByteLimitExceeded { .. } => {
+                    AuthoringProjectSourceAdmissionError::SourceChanged {
+                        kind: source.kind(),
+                        path: source.project_path().clone(),
+                    }
+                }
+                source_error => AuthoringProjectSourceAdmissionError::SourceHost {
+                    kind: source.kind(),
+                    path: source.project_path().clone(),
+                    source: source_error,
+                },
+            })
+    })();
+    let temporary = budget
+        .retained_candidate_bytes
+        .checked_sub(retained_before)
+        .ok_or(AuthoringProjectSourceAdmissionError::AccountingOverflow)?;
+    budget.reconcile_retained_reservation(temporary, 0)?;
+    result
 }
 
 fn catalogue_host_error(source: FsError) -> AuthoringProjectSourceAdmissionError {

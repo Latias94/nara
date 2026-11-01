@@ -144,7 +144,7 @@ impl Fixture {
              native_document_identity = 'project_location'\n\
              [paths]\nassets = 'assets'\nscenes = 'scenes'\nprefabs = 'prefabs'\n\
              [startup]\ndefault_scene = 'startup.scene.json'\n\
-             [authoring]\nschema_bundle = 'schema/authoring.bundle.json'\n\
+             [authoring]\nstate = \"ready\"\nschema_bundle = 'schema/authoring.bundle.json'\n\
              [runtime]\npreset = 'local-headless'\n\
              [capabilities]\nrequested = ['runtime-2d']\n",
         )
@@ -1870,6 +1870,20 @@ fn interrupted_publication_requires_actual_disk_reconciliation_without_inventing
         );
         name_edit(&mut editor, document, "dirty-after-interruption");
         let current = source_state(&editor, document);
+        let upgrade = editor.begin_authored_schema_upgrade().unwrap();
+        assert_eq!(
+            editor.reconcile_schema_owner_adoption(operation),
+            Err(EditorSchemaOwnerAdoptionError::Busy)
+        );
+        assert_eq!(
+            editor.schema_owner_adoption_view().operation,
+            Some(operation)
+        );
+        assert_eq!(
+            editor.schema_owner_adoption_view().phase,
+            EditorSchemaOwnerAdoptionPhase::RequiresReconcile
+        );
+        editor.cancel_authored_schema_upgrade(upgrade).unwrap();
         let recovery = editor.reconcile_schema_owner_adoption(operation).unwrap();
         wait(&mut editor, |editor| {
             matches!(

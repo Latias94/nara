@@ -38,7 +38,7 @@ impl Fixture {
         for directory in ["assets", "scenes", "prefabs", "schema"] {
             fs::create_dir_all(root.join(directory)).unwrap();
         }
-        fs::write(root.join("nara.toml"), "schema_version = 1\n[project]\nsource_universe = '6d57f8c5-867c-5463-b74a-057a8cabe2bc'\nnative_document_identity = 'project_location'\nname = \"Document custody\"\n[paths]\nassets = \"assets\"\nscenes = \"scenes\"\nprefabs = \"prefabs\"\n[startup]\ndefault_scene = \"startup.scene.json\"\n[authoring]\nschema_bundle = \"schema/authoring.bundle.json\"\n[runtime]\npreset = \"local-headless\"\n[capabilities]\nrequested = [\"runtime-2d\"]\n").unwrap();
+        fs::write(root.join("nara.toml"), "schema_version = 1\n[project]\nsource_universe = '6d57f8c5-867c-5463-b74a-057a8cabe2bc'\nnative_document_identity = 'project_location'\nname = \"Document custody\"\n[paths]\nassets = \"assets\"\nscenes = \"scenes\"\nprefabs = \"prefabs\"\n[startup]\ndefault_scene = \"startup.scene.json\"\n[authoring]\nstate = \"ready\"\nschema_bundle = \"schema/authoring.bundle.json\"\n[runtime]\npreset = \"local-headless\"\n[capabilities]\nrequested = [\"runtime-2d\"]\n").unwrap();
         let bundle = nara_reflect::AuthoringSchemaBundle::from_trusted_provider_definitions(
             built_in_schema_providers(),
         )
@@ -153,12 +153,38 @@ impl Fixture {
         kind: EditorDocumentKind,
         name: &str,
     ) -> EditorDocumentId {
-        let registry = editor
-            .trusted_compiled()
-            .unwrap()
-            .plan
-            .schema_validation()
-            .snapshot();
+        let basis = editor
+            .scene_lanes
+            .keys()
+            .find_map(|document| {
+                editor
+                    .workspace
+                    .scene(*document)?
+                    .session()
+                    .authoring_schema_basis()
+            })
+            .or_else(|| {
+                editor.prefab_lanes.keys().find_map(|document| {
+                    editor
+                        .workspace
+                        .prefab(*document)?
+                        .session()
+                        .authoring_schema_basis()
+                })
+            })
+            .unwrap_or_else(|| {
+                let validation = editor.trusted_compiled().unwrap().plan.schema_validation();
+                let adapters = crate::project_host::authoring::compiled_authoring_adapters(
+                    validation.authoring_schema_bundle(),
+                    validation.snapshot(),
+                )
+                .unwrap();
+                nara_scene::AuthoringSchemaBasis::admit(
+                    validation.authoring_schema_bundle(),
+                    &adapters,
+                )
+                .unwrap()
+            });
         match kind {
             EditorDocumentKind::Scene => {
                 fs::write(
@@ -170,7 +196,15 @@ impl Fixture {
                     .capability()
                     .open_directory(&RelativePath::new("scenes").unwrap())
                     .unwrap();
-                let opened = ScenePersistenceHost::open(&directory, name, registry).unwrap();
+                let opened = ScenePersistenceHost::open_authoring(
+                    &directory,
+                    name,
+                    nara_scene::AuthoringDocumentSource::new(
+                        AssetRef::path(format!("scenes/{name}")).unwrap(),
+                    ),
+                    &basis,
+                )
+                .unwrap();
                 let document = editor
                     .workspace
                     .open_scene_session(name, opened.session)
@@ -220,8 +254,15 @@ impl Fixture {
                     .open_directory(&RelativePath::new("prefabs").unwrap())
                     .unwrap();
                 let binding = EditorDocumentSourceBinding::new(name.to_owned());
-                let opened =
-                    PrefabPersistenceHost::open(&directory, binding.clone(), registry).unwrap();
+                let opened = PrefabPersistenceHost::open_authoring(
+                    &directory,
+                    binding.clone(),
+                    nara_scene::AuthoringDocumentSource::new(
+                        AssetRef::path(format!("prefabs/{name}")).unwrap(),
+                    ),
+                    &basis,
+                )
+                .unwrap();
                 let document = editor
                     .workspace
                     .open_prefab_session(name, binding, opened.session)
@@ -265,12 +306,6 @@ impl Fixture {
     }
 
     fn rebind(&self, editor: &mut EditorProjectSession, document: EditorDocumentId) {
-        let registry = editor
-            .trusted_compiled()
-            .unwrap()
-            .plan
-            .schema_validation()
-            .snapshot();
         match editor.capture_persistence_lane(document).unwrap() {
             PersistenceLane::Scene(mut lane) => {
                 let directory = self
@@ -278,7 +313,14 @@ impl Fixture {
                     .open_directory(&RelativePath::new("scenes").unwrap())
                     .unwrap();
                 let name = lane.project_path.strip_prefix("scenes/").unwrap();
-                let opened = ScenePersistenceHost::open(&directory, name, registry).unwrap();
+                let session = editor.workspace.scene(document).unwrap().session();
+                let opened = ScenePersistenceHost::open_authoring(
+                    &directory,
+                    name,
+                    session.authoring_source().unwrap().clone(),
+                    &session.authoring_schema_basis().unwrap(),
+                )
+                .unwrap();
                 lane.host = editor
                     .authoring_runtime
                     .host_custody()
@@ -292,10 +334,12 @@ impl Fixture {
                     .open_directory(&RelativePath::new("prefabs").unwrap())
                     .unwrap();
                 let name = lane.project_path.strip_prefix("prefabs/").unwrap();
-                let opened = PrefabPersistenceHost::open(
+                let session = editor.workspace.prefab(document).unwrap().session();
+                let opened = PrefabPersistenceHost::open_authoring(
                     &directory,
                     EditorDocumentSourceBinding::new(name.to_owned()),
-                    registry,
+                    session.authoring_source().unwrap().clone(),
+                    &session.authoring_schema_basis().unwrap(),
                 )
                 .unwrap();
                 lane.host = editor
@@ -1099,15 +1143,16 @@ fn queued_save_cannot_acquire_a_replacement_host_after_admission() {
 fn direct_save(
     lane: &PersistenceLane,
     checkpoint: nara_tooling::EditorPersistenceCheckpoint,
+    authoring: Option<nara_scene::AuthoringDocumentReadmission>,
 ) -> PersistenceSaveOutcome {
     match lane {
         PersistenceLane::Scene(lane) => lane
             .host
-            .try_with(|host| host.save_owned(SceneSaveCandidate { checkpoint }, None))
+            .try_with(|host| host.save_owned(SceneSaveCandidate { checkpoint }, authoring))
             .unwrap(),
         PersistenceLane::Prefab(lane) => lane
             .host
-            .try_with(|host| host.save_owned(PrefabSaveCandidate { checkpoint }, None))
+            .try_with(|host| host.save_owned(PrefabSaveCandidate { checkpoint }, authoring))
             .unwrap(),
         PersistenceLane::Extension(_) => unreachable!(),
     }
@@ -1140,17 +1185,34 @@ fn rejected_acknowledgement_marks_only_the_original_published_host_uncertain() {
             .persistence_authority
             .capture(&editor.workspace, document)
             .unwrap();
+        let readmission = || match kind {
+            EditorDocumentKind::Scene => editor
+                .workspace
+                .scene(document)
+                .unwrap()
+                .session()
+                .authoring_readmission(),
+            EditorDocumentKind::Prefab => editor
+                .workspace
+                .prefab(document)
+                .unwrap()
+                .session()
+                .authoring_readmission(),
+            EditorDocumentKind::Extension(_) => unreachable!(),
+        };
+        let original_readmission = readmission();
+        let replacement_readmission = readmission();
         assert!(editor.workspace.__discard_document(document).applied);
         gate.release();
         assert!(
             matches!(settle(&mut editor), EditorPersistenceResult::PersistenceUncertain { document: target, .. } if target == document)
         );
         assert!(matches!(
-            direct_save(&original, original_retry),
+            direct_save(&original, original_retry, original_readmission),
             PersistenceSaveOutcome::Rejected(EditorPersistenceRejection::RequiresReconcile)
         ));
         assert!(matches!(
-            direct_save(&replacement, replacement_retry),
+            direct_save(&replacement, replacement_retry, replacement_readmission),
             PersistenceSaveOutcome::Saved { .. }
         ));
         close(&mut editor);

@@ -14,6 +14,7 @@ use nara_scene::{
     ScenePlacementOwner, SchemaReclassificationWork,
 };
 
+use super::super::tests::observe_owner_source;
 use super::*;
 use crate::project_host::{
     authoring::{
@@ -141,12 +142,15 @@ fn actual_capture_uses_prepared_dirty_prefab_and_attaches_only_the_same_nominal_
         .unwrap();
     let open_prefabs = [AuthoringPrefabSessionSnapshot::capture_prepared(
         &prefab_source,
+        observe_owner_source(&mut owner, &snapshot, &prefab_source),
         borrow_prepared_prefab_schema_source(&prefab_session, &prepared_prefab).unwrap(),
     )
     .unwrap()];
+    let root_observation = observe_owner_source(&mut owner, &snapshot, &scene_source);
     let capture = owner
         .capture_scene(
             &scene_source,
+            root_observation,
             borrow_prepared_scene_schema_source(&scene, &prepared_scene).unwrap(),
             &open_prefabs,
             &[],
@@ -192,9 +196,11 @@ fn actual_capture_uses_prepared_dirty_prefab_and_attaches_only_the_same_nominal_
             &mut SchemaReclassificationWork::default(),
         )
         .unwrap();
+    let independent_observation = observe_owner_source(&mut independent, &snapshot, &scene_source);
     let independent_capture = independent
         .capture_scene(
             &scene_source,
+            independent_observation,
             borrow_prepared_scene_schema_source(&scene, &independent_scene).unwrap(),
             &[],
             &[],

@@ -1957,7 +1957,7 @@ impl Project {
                 "schema_version = 1\n[project]\nsource_universe = '2b67ec37-1dd4-550f-8956-6424db6ffd3b'\nnative_document_identity = 'project_location'\nname = \"Property authoring consumer\"\n",
                 "[paths]\nassets = \"assets\"\nscenes = \"scenes\"\nprefabs = \"prefabs\"\n",
                 "[startup]\ndefault_scene = \"startup.scene.json\"\n",
-                "[authoring]\nschema_bundle = \"schema/authoring.bundle.json\"\n",
+                "[authoring]\nstate = \"ready\"\nschema_bundle = \"schema/authoring.bundle.json\"\n",
                 "[runtime]\npreset = \"local-headless\"\n",
                 "[capabilities]\nrequested = [\"runtime-2d\"]\n",
             ),

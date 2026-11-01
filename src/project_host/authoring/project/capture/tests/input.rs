@@ -73,7 +73,7 @@ fn ordinary_scene_capture_does_not_activate_the_selected_project_input() {
     )
     .unwrap();
     let capture = snapshot
-        .capture_scene_document(&source, &session, &[])
+        .capture_scene_from_bound_source(&source, &session, &[])
         .unwrap();
     assert!(
         capture
@@ -256,6 +256,7 @@ fn temporary_input_compilation_is_reserved_before_parsing_and_not_retained_in_th
         snapshot.scene_limits,
         &basis,
         Arc::clone(&snapshot.startup_source),
+        SourceCaptureMode::Content,
         &snapshot.startup_native_source,
         &mut budget,
         &[],
@@ -293,6 +294,7 @@ fn input_read_memory_is_admitted_before_the_buffer_or_source_fact_is_allocated()
         snapshot.scene_limits,
         &basis,
         Arc::clone(&snapshot.startup_source),
+        SourceCaptureMode::Content,
         &snapshot.startup_native_source,
         &mut budget,
         &[],
@@ -339,6 +341,7 @@ fn input_and_sidecar_aggregate_short_reads_preserve_the_budget_error() {
             snapshot.scene_limits,
             &basis,
             Arc::clone(&snapshot.startup_source),
+            SourceCaptureMode::Content,
             &snapshot.startup_native_source,
             &mut budget,
             &[],

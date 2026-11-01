@@ -24,15 +24,14 @@ use crate::{
     validation::reference_traversal_limits,
 };
 
-#[cfg(feature = "serde")]
-use crate::PrefabProjectionPath;
-#[cfg(feature = "serde")]
-use crate::provenance::provenance_string_bytes;
-
 #[cfg(test)]
 use crate::SourceDocumentKind;
 mod declaration;
+#[cfg(feature = "serde")]
+mod native_preview;
 mod overlay;
+#[cfg(feature = "serde")]
+pub(crate) use overlay::validate_claim_paths;
 
 pub use declaration::{
     PrefabDeclarationSource, PrefabExpansionFailure, PrefabExpansionFailureKind,
@@ -770,22 +769,93 @@ pub struct PrefabExpansionReport {
 }
 
 /// Disposable observations from compilation against one admitted data-authoring basis.
+///
+/// The candidate, omissions and terminal observations remain paired with the compiler's original
+/// Schema evidence and working allowance until a consuming operation ends that custody.
+/// Callers cannot replace the candidate or clear omissions before native preview restriction:
+///
+/// ```compile_fail,E0616
+/// use nara_scene::__private::AuthoringPrefabExpansionReport;
+/// fn replace_candidate(report: &mut AuthoringPrefabExpansionReport) {
+///     report.candidate = None;
+/// }
+/// ```
+///
+/// ```compile_fail,E0616
+/// use nara_scene::__private::AuthoringPrefabExpansionReport;
+/// fn clear_omissions(report: &mut AuthoringPrefabExpansionReport) {
+///     report.omissions.clear();
+/// }
+/// ```
 #[cfg(feature = "serde")]
 #[derive(Debug)]
 pub struct AuthoringPrefabExpansionReport {
-    pub candidate: Option<ExpandedSceneDocument>,
-    pub diagnostics: DiagnosticReport,
-    pub failure: Option<PrefabExpansionFailure>,
-    pub omissions: Vec<AuthoringPrefabOmission>,
+    candidate: Option<ExpandedSceneDocument>,
+    diagnostics: DiagnosticReport,
+    failure: Option<PrefabExpansionFailure>,
+    omissions: Vec<AuthoringPrefabOmission>,
     asset_references: Vec<nara_reflect::DeclaredAssetReference>,
-    work_bytes: Option<usize>,
+    basis: crate::AuthoringSchemaBasis,
+    usage: PrefabExpansionUsage,
+    working_limit: ByteLimit,
     budget_failed: bool,
 }
 
 #[cfg(feature = "serde")]
 impl AuthoringPrefabExpansionReport {
-    pub const fn checked_work_bytes(&self) -> Option<usize> {
-        self.work_bytes
+    /// Borrows the exact semantic candidate before native preview filtering.
+    #[must_use]
+    pub fn candidate(&self) -> Option<&ExpandedSceneDocument> {
+        self.candidate.as_ref()
+    }
+
+    /// Borrows the original compiler diagnostics without changing its terminal outcome.
+    #[must_use]
+    pub const fn diagnostics(&self) -> &DiagnosticReport {
+        &self.diagnostics
+    }
+
+    /// Borrows the first rejected compiler step, independently of source classification.
+    #[must_use]
+    pub fn failure(&self) -> Option<&PrefabExpansionFailure> {
+        self.failure.as_ref()
+    }
+
+    /// Borrows all compiler omissions paired with this candidate and working allowance.
+    #[must_use]
+    pub fn omissions(&self) -> &[AuthoringPrefabOmission] {
+        &self.omissions
+    }
+
+    /// Transfers the semantic observations without native preview restriction authority.
+    ///
+    /// The original Schema evidence and working allowance are not exposed or reconstructible
+    /// from these parts. Choose this transfer or native preview conversion, not both:
+    ///
+    /// ```compile_fail,E0382
+    /// use nara_reflect::ComponentRegistrySnapshot;
+    /// use nara_scene::__private::AuthoringPrefabExpansionReport;
+    /// fn reuse_report(
+    ///     report: AuthoringPrefabExpansionReport,
+    ///     registry: &ComponentRegistrySnapshot,
+    /// ) {
+    ///     let _parts = report.into_parts();
+    ///     let _preview = report.into_native_preview_for(registry);
+    /// }
+    /// ```
+    #[must_use]
+    pub fn into_parts(self) -> AuthoringPrefabExpansionParts {
+        AuthoringPrefabExpansionParts {
+            candidate: self.candidate,
+            diagnostics: self.diagnostics,
+            failure: self.failure,
+            omissions: self.omissions,
+            effective_asset_references: self.asset_references,
+        }
+    }
+
+    pub fn checked_work_bytes(&self) -> Option<usize> {
+        self.usage.checked_work_bytes()
     }
 
     pub const fn budget_exceeded(&self) -> bool {
@@ -796,37 +866,34 @@ impl AuthoringPrefabExpansionReport {
     pub fn effective_asset_references(&self) -> &[nara_reflect::DeclaredAssetReference] {
         &self.asset_references
     }
+}
 
-    /// Consumes semantic compilation after asset capture, retaining the exact source provenance.
-    pub fn into_native_preview(
-        self,
-    ) -> Result<
-        (
-            ExpandedSceneDocument,
-            Vec<crate::authoring_preview::AuthoringPreviewOmission>,
-        ),
-        DiagnosticReport,
-    > {
-        let Some(candidate) = self.candidate else {
-            return Err(self.diagnostics);
-        };
-        let candidate = candidate.remove_compiler_components(
-            self.omissions
-                .iter()
-                .filter(|fact| {
-                    fact.reason == AuthoringPrefabOmissionReason::NativeBindingUnavailable
-                })
-                .map(|fact| (&fact.entity, &fact.component)),
-        );
-        let omissions = self
-            .omissions
-            .iter()
-            .map(|fact| {
-                crate::authoring_preview::AuthoringPreviewOmission::from_expansion(fact, &candidate)
-            })
-            .collect();
-        Ok((candidate, omissions))
-    }
+/// Owned semantic observations after consuming the compiler report.
+///
+/// These parts carry no Schema evidence, compiler allowance or native preview conversion API.
+/// Their candidate has not undergone presentation filtering; its source owner still owns
+/// containing-source binding and materialization admission.
+#[cfg(feature = "serde")]
+#[derive(Debug)]
+pub struct AuthoringPrefabExpansionParts {
+    pub candidate: Option<ExpandedSceneDocument>,
+    pub diagnostics: DiagnosticReport,
+    pub failure: Option<PrefabExpansionFailure>,
+    pub omissions: Vec<AuthoringPrefabOmission>,
+    pub effective_asset_references: Vec<nara_reflect::DeclaredAssetReference>,
+}
+
+/// Presentation observations after consuming the original compiler's filtering allowance.
+///
+/// Diagnostics move with the filtered candidate; retaining them does not require a second copy.
+/// This output carries no Schema basis, working allowance or further conversion authority.
+#[cfg(feature = "serde")]
+#[derive(Debug)]
+pub struct AuthoringNativePreview {
+    pub candidate: ExpandedSceneDocument,
+    pub omissions: Vec<crate::authoring_preview::AuthoringPreviewOmission>,
+    pub diagnostics: DiagnosticReport,
+    pub failure: Option<PrefabExpansionFailure>,
 }
 
 #[cfg(feature = "serde")]
@@ -865,7 +932,6 @@ where
         asset_resolution,
     );
     let report = context.expand_scene_document(document);
-    let work_bytes = PrefabExpansionContext::<F, E>::usage_work_bytes(context.usage);
     if let Some(error) = context.load_error {
         return Err(error);
     }
@@ -875,7 +941,9 @@ where
         failure: report.failure,
         omissions: context.omissions,
         asset_references: context.asset_references,
-        work_bytes,
+        basis: basis.clone(),
+        usage: context.usage,
+        working_limit: context.options.limits.working_bytes(),
         budget_failed: context.budget_failed,
     })
 }
@@ -990,7 +1058,7 @@ where
             (None, Some(failure))
         }
     };
-    let work_bytes = PrefabExpansionContext::<F, E>::usage_work_bytes(context.usage);
+    let work_bytes = context.usage.checked_work_bytes();
     if let Some(error) = context.load_error {
         return Err(error);
     }
@@ -1039,6 +1107,24 @@ struct PrefabExpansionUsage {
     generated_identifier_bytes: usize,
     provenance_bytes: usize,
     scratch_bytes: usize,
+}
+
+impl PrefabExpansionUsage {
+    fn checked_work_bytes(self) -> Option<usize> {
+        expansion_work_bytes(
+            [
+                self.materialized_entities,
+                self.materialized_components,
+                self.materialized_value_nodes,
+                self.resolved_instances,
+                self.overlay_declarations,
+            ],
+            self.materialized_value_bytes,
+            self.generated_identifier_bytes,
+            self.provenance_bytes,
+        )?
+        .checked_add(self.scratch_bytes)
+    }
 }
 
 /// Conservative modeled allocation held by a suspended expansion, excluding resolver caches.
@@ -1501,26 +1587,10 @@ where
 
     fn working_set(&self) -> PrefabExpansionWorkingSet {
         PrefabExpansionWorkingSet {
-            bytes: Self::usage_work_bytes(self.usage),
+            bytes: self.usage.checked_work_bytes(),
             working_limit: self.options.limits.working_bytes(),
             source_depth: 1,
         }
-    }
-
-    fn usage_work_bytes(usage: PrefabExpansionUsage) -> Option<usize> {
-        expansion_work_bytes(
-            [
-                usage.materialized_entities,
-                usage.materialized_components,
-                usage.materialized_value_nodes,
-                usage.resolved_instances,
-                usage.overlay_declarations,
-            ],
-            usage.materialized_value_bytes,
-            usage.generated_identifier_bytes,
-            usage.provenance_bytes,
-        )?
-        .checked_add(usage.scratch_bytes)
     }
 
     fn admit_working_usage(
@@ -1529,7 +1599,7 @@ where
         entity: Option<&SceneEntityId>,
         source: Option<&AssetRef>,
     ) -> bool {
-        let bytes = Self::usage_work_bytes(usage);
+        let bytes = usage.checked_work_bytes();
         let maximum = self.options.limits.working_bytes().get();
         if bytes.is_none_or(|bytes| bytes > maximum) {
             self.fail_budget(
@@ -1803,29 +1873,9 @@ where
             return;
         }
         self.budget_failed = true;
-        let mut diagnostic = with_public_u64(
-            with_public_u64(
-                with_public_locator(
-                    diagnostic_error(
-                        "scene.prefab-expansion-budget-exceeded",
-                        "Prefab expansion budget was exceeded",
-                    ),
-                    "budget-kind",
-                    kind.as_str(),
-                ),
-                "observed",
-                usize_to_u64(observed),
-            ),
-            "maximum",
-            usize_to_u64(maximum),
-        );
-        if let Some(entity) = entity {
-            diagnostic = with_public_locator(diagnostic, "entity-id", entity.as_str());
-        }
-        if let Some(source) = source {
-            diagnostic = with_asset_ref(diagnostic, "asset-ref", source);
-        }
-        self.diagnostics.push(diagnostic);
+        self.diagnostics.push(prefab_expansion_budget_diagnostic(
+            kind, observed, maximum, entity, source,
+        ));
     }
 
     fn validate_document(&mut self, document: &SceneDocument) -> DiagnosticReport {
@@ -1917,37 +1967,11 @@ where
                             .then_some(AuthoringPrefabOmissionReason::NativeBindingUnavailable)
                     });
                 if let Some(reason) = reason {
-                    // The retained fact and its later native-preview observation coexist.
-                    // Reserve the complete typed ancestry before either result can copy it.
-                    let bytes = provenance_string_bytes(entity.id.as_str())
-                        .and_then(|bytes| {
-                            bytes.checked_add(provenance_string_bytes(component.as_str())?)
-                        })
-                        .and_then(|bytes| bytes.checked_mul(2))
-                        .and_then(|bytes| {
-                            bytes.checked_add(
-                                std::mem::size_of::<AuthoringPrefabOmission>()
-                                    + std::mem::size_of::<
-                                        crate::authoring_preview::AuthoringPreviewOmission,
-                                    >(),
-                            )
-                        })
-                        .and_then(|bytes| {
-                            let origin = self.provenance.get(&entity.id)?;
-                            let Some(path) = origin.projection_path() else {
-                                return Some(bytes);
-                            };
-                            bytes
-                                .checked_add(std::mem::size_of::<SceneEntityProvenance>())?
-                                .checked_add(provenance_string_bytes(
-                                    origin.local_entity_id().as_str(),
-                                )?)?
-                                .checked_add(PrefabProjectionPath::extended_allocation_bytes(
-                                    Some(path),
-                                    path.root_anchor(),
-                                    0,
-                                )?)
-                        });
+                    let bytes = native_preview::omission_work_bytes(
+                        &entity.id,
+                        component,
+                        self.provenance.get(&entity.id),
+                    );
                     if !self.reserve_scratch_bytes(bytes, Some(&entity.id), None) {
                         return true;
                     }
@@ -1961,6 +1985,38 @@ where
             });
         }
     }
+}
+
+fn prefab_expansion_budget_diagnostic(
+    kind: PrefabExpansionBudgetKind,
+    observed: usize,
+    maximum: usize,
+    entity: Option<&SceneEntityId>,
+    source: Option<&AssetRef>,
+) -> nara_diagnostic::Diagnostic {
+    let mut diagnostic = with_public_u64(
+        with_public_u64(
+            with_public_locator(
+                diagnostic_error(
+                    "scene.prefab-expansion-budget-exceeded",
+                    "Prefab expansion budget was exceeded",
+                ),
+                "budget-kind",
+                kind.as_str(),
+            ),
+            "observed",
+            usize_to_u64(observed),
+        ),
+        "maximum",
+        usize_to_u64(maximum),
+    );
+    if let Some(entity) = entity {
+        diagnostic = with_public_locator(diagnostic, "entity-id", entity.as_str());
+    }
+    if let Some(source) = source {
+        diagnostic = with_asset_ref(diagnostic, "asset-ref", source);
+    }
+    diagnostic
 }
 
 fn accumulate_generated_identifier_bytes(

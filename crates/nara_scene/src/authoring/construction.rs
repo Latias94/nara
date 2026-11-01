@@ -13,7 +13,7 @@ use crate::{
     ScenePlacement, ScenePlacementOwner,
     authoring_decode::{
         AuthoringDocumentState, MAX_AUTHORING_EDIT_OPERATIONS, MAX_AUTHORING_FIELD_LOGICAL_BYTES,
-        MAX_AUTHORING_FIELD_VALUE_NODES, MAX_AUTHORING_FIELD_WRITES,
+        MAX_AUTHORING_FIELD_VALUE_NODES,
     },
 };
 
@@ -188,7 +188,9 @@ impl AuthoringConstructionDraft {
     }
 
     fn admit_declaration(&self) -> Result<(), ScenePatchReport> {
-        if self.entities.len() + self.components.len() >= MAX_AUTHORING_EDIT_OPERATIONS {
+        if self.entities.len() + self.components.len() + self.writes.len()
+            >= MAX_AUTHORING_EDIT_OPERATIONS
+        {
             return Err(rejected());
         }
         Ok(())
@@ -208,9 +210,7 @@ impl AuthoringConstructionDraft {
             return Err(rejected());
         }
         self.admit_entity(&write.entity)?;
-        if self.writes.len() >= MAX_AUTHORING_FIELD_WRITES {
-            return Err(rejected());
-        }
+        self.admit_declaration()?;
         let bytes = self
             .write_bytes
             .saturating_add(write.property.logical_bytes().map_err(|_| rejected())?);
@@ -529,8 +529,12 @@ fn lower(
     }
     let fields = if writes.is_empty() {
         Vec::new()
-    } else {
+    } else if draft.entities.is_empty() && draft.components.is_empty() {
+        // A construction-shaped request with no additive declarations is an ordinary edit.
+        // Check its original write count before coalescing repeated roots.
         property::lower(original, state, &writes, &staged)?.operations
+    } else {
+        property::lower_construction(original, state, &writes, &staged)?.operations
     };
     drop(staged);
     for (entity, component, template) in templates {
@@ -582,6 +586,9 @@ fn foreign_local() -> ScenePatchReport {
         "Construction local handles require their exact originating draft and declaration",
     )
 }
+
+#[cfg(test)]
+mod limit_tests;
 
 #[cfg(test)]
 mod tests {

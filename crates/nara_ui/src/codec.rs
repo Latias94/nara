@@ -7,7 +7,7 @@ use nara_reflect::{
     ComponentFloat, ComponentNumericBound, ComponentNumericDomain, ComponentNumericInterval,
     ComponentRegistryBuilder, ComponentRegistryError, ComponentSchema, ComponentSchemaCatalog,
     ComponentSchemaVersion, ComponentTypeId, ComponentValue, ComponentValueKind,
-    ComponentValueShape, PreparedComponentCandidate, validate_component_value,
+    PreparedComponentCandidate,
 };
 use nara_scene::PrefabDocument;
 use nara_ui_kernel::{
@@ -28,12 +28,8 @@ const UI_SEMANTICS_ID: &str = "nara.ui.UiSemantics";
 const UI_THEME_ID: &str = "nara.ui.UiTheme";
 
 const DIMENSION_FIELDS: &[&str] = &["kind", "value"];
-const LEGACY_BRUSH_FIELDS: &[&str] = &["kind", "red", "green", "blue", "alpha", "reference"];
 const BRUSH_FIELDS: &[&str] = &["kind", "red", "green", "blue", "alpha", "role", "image"];
 const COLOR_FIELDS: &[&str] = &["red", "green", "blue", "alpha"];
-
-const UI_SCHEMA_VERSION_TWO: ComponentSchemaVersion = ComponentSchemaVersion(2);
-const UI_SCHEMA_VERSION_THREE: ComponentSchemaVersion = ComponentSchemaVersion(3);
 
 pub fn register_ui_components(
     registry: &mut ComponentRegistryBuilder,
@@ -79,24 +75,6 @@ pub fn register_ui_components(
         decode_theme,
         encode_theme,
     )?;
-    registry.register_component_migration(
-        &ComponentTypeId::new(UI_VISUAL_ID),
-        ComponentSchemaVersion::ONE,
-        UI_SCHEMA_VERSION_TWO,
-        migrate_legacy_visual,
-    )?;
-    registry.register_component_migration(
-        &ComponentTypeId::new(UI_TEXT_ID),
-        ComponentSchemaVersion::ONE,
-        UI_SCHEMA_VERSION_TWO,
-        migrate_legacy_text,
-    )?;
-    registry.register_component_migration(
-        &ComponentTypeId::new(UI_TEXT_ID),
-        UI_SCHEMA_VERSION_TWO,
-        UI_SCHEMA_VERSION_THREE,
-        migrate_text_logical_size,
-    )?;
     Ok(())
 }
 
@@ -125,13 +103,13 @@ pub fn prefab_contains_ui_root(document: &PrefabDocument) -> bool {
         .any(|entity| entity.components.contains_key(&root))
 }
 
-fn legacy_ui_schema_catalog() -> ComponentSchemaCatalog {
+pub(crate) fn ui_schema_catalog() -> ComponentSchemaCatalog {
     ComponentSchemaCatalog {
         components: vec![
             ui_root_schema(),
             ui_node_schema(),
-            legacy_ui_visual_schema(),
-            legacy_ui_text_schema(),
+            ui_visual_schema(),
+            ui_text_schema(),
             ui_button_schema(),
             ui_button_visuals_schema(),
             ui_semantics_schema(),
@@ -139,40 +117,6 @@ fn legacy_ui_schema_catalog() -> ComponentSchemaCatalog {
         ],
         ..ComponentSchemaCatalog::default()
     }
-}
-
-pub(crate) fn ui_schema_predecessor_catalog() -> ComponentSchemaCatalog {
-    let predecessor = legacy_ui_schema_catalog();
-    let mut current = ComponentSchemaCatalog::successor_of(&predecessor)
-        .expect("the fixed generation-one UI catalog always has a successor");
-    current.components = vec![
-        ui_root_schema(),
-        ui_node_schema(),
-        ui_visual_schema(),
-        version_two_ui_text_schema(),
-        ui_button_schema(),
-        ui_button_visuals_schema(),
-        ui_semantics_schema(),
-        ui_theme_schema(),
-    ];
-    current
-}
-
-pub(crate) fn ui_schema_catalog() -> ComponentSchemaCatalog {
-    let predecessor = ui_schema_predecessor_catalog();
-    let mut current = ComponentSchemaCatalog::successor_of(&predecessor)
-        .expect("the fixed generation-two UI catalog always has a successor");
-    current.components = vec![
-        ui_root_schema(),
-        ui_node_schema(),
-        ui_visual_schema(),
-        ui_text_schema(),
-        ui_button_schema(),
-        ui_button_visuals_schema(),
-        ui_semantics_schema(),
-        ui_theme_schema(),
-    ];
-    current
 }
 
 pub(crate) fn validate_ui_component_value(
@@ -197,10 +141,8 @@ pub(crate) fn validate_ui_component_value(
 
 pub(crate) fn ui_component_schema_version(id: &ComponentTypeId) -> Option<ComponentSchemaVersion> {
     match id.as_str() {
-        UI_TEXT_ID => Some(UI_SCHEMA_VERSION_THREE),
-        UI_VISUAL_ID => Some(UI_SCHEMA_VERSION_TWO),
-        UI_ROOT_ID | UI_NODE_ID | UI_BUTTON_ID | UI_BUTTON_VISUALS_ID | UI_SEMANTICS_ID
-        | UI_THEME_ID => Some(ComponentSchemaVersion::ONE),
+        UI_ROOT_ID | UI_NODE_ID | UI_VISUAL_ID | UI_TEXT_ID | UI_BUTTON_ID
+        | UI_BUTTON_VISUALS_ID | UI_SEMANTICS_ID | UI_THEME_ID => Some(ComponentSchemaVersion::ONE),
         _ => None,
     }
 }
@@ -1050,102 +992,6 @@ fn read_optional_asset_ref(
     }
 }
 
-fn migrate_legacy_visual(mut value: ComponentValue) -> Result<ComponentValue, ComponentCodecError> {
-    expect_fields(
-        &value,
-        "UiVisual",
-        &["background", "border_width", "border_brush", "radii"],
-    )?;
-    migrate_legacy_brush_at(&mut value, "background")?;
-    migrate_legacy_brush_at(&mut value, "border_brush")?;
-    read_visual(&value)?;
-    Ok(value)
-}
-
-fn migrate_legacy_text(mut value: ComponentValue) -> Result<ComponentValue, ComponentCodecError> {
-    expect_fields(
-        &value,
-        "UiText",
-        &[
-            "content",
-            "logical_size",
-            "brush",
-            "alignment",
-            "overflow",
-            "has_semantic_text",
-            "semantic_text",
-        ],
-    )?;
-    migrate_legacy_brush_at(&mut value, "brush")?;
-    decode_text(&value)?;
-    Ok(value)
-}
-
-fn migrate_text_logical_size(value: ComponentValue) -> Result<ComponentValue, ComponentCodecError> {
-    // A narrower shared contract needs deliberate repair of invalid historical data. Keep valid
-    // stored numbers unchanged: F32 materialization belongs to validation and native decoding.
-    validate_component_value(&ui_text_schema(), &value)?;
-    Ok(value)
-}
-
-fn migrate_legacy_brush_at(
-    value: &mut ComponentValue,
-    field: &str,
-) -> Result<(), ComponentCodecError> {
-    let ComponentValue::Map(fields) = value else {
-        return Err(ComponentCodecError::invalid_field(
-            "component",
-            "a component map",
-        ));
-    };
-    let legacy = fields.get(field).ok_or_else(|| {
-        ComponentCodecError::invalid_field(field, "a required legacy brush field")
-    })?;
-    let migrated = migrate_legacy_brush(legacy, field)?;
-    fields.insert(field.to_owned(), migrated);
-    Ok(())
-}
-
-fn migrate_legacy_brush(
-    value: &ComponentValue,
-    field: &str,
-) -> Result<ComponentValue, ComponentCodecError> {
-    expect_fields(value, field, LEGACY_BRUSH_FIELDS)?;
-    let kind = read_string(value.field("kind")?, &format!("{field}.kind"))?;
-    let color = read_flat_color(value, field)?;
-    let reference = read_string(value.field("reference")?, &format!("{field}.reference"))?;
-    let brush = match kind.as_str() {
-        "solid" if reference.is_empty() => UiBrush::Solid(color),
-        "role" => UiBrush::Role(read_color_role_name(
-            &reference,
-            &format!("{field}.reference"),
-        )?),
-        "image" => {
-            let reference = AssetRef::path(reference.clone()).map_err(|error| {
-                ComponentCodecError::invalid_asset_ref(
-                    format!("{field}.reference"),
-                    reference.clone(),
-                    error.to_string(),
-                )
-            })?;
-            return image_brush_value(&reference, color);
-        }
-        "solid" => {
-            return Err(ComponentCodecError::invalid_field(
-                format!("{field}.reference"),
-                "an empty string for a solid brush",
-            ));
-        }
-        _ => {
-            return Err(ComponentCodecError::invalid_field(
-                format!("{field}.kind"),
-                "solid, role, or image",
-            ));
-        }
-    };
-    brush_value(&brush, None)
-}
-
 fn read_radii(value: &ComponentValue) -> Result<UiCornerRadii, ComponentCodecError> {
     expect_fields(
         value,
@@ -1521,7 +1367,10 @@ fn ui_node_schema() -> ComponentSchema {
             ComponentValueKind::F64,
         ));
     }
-    schema(UI_NODE_ID, "UI node", &fields)
+    schema(UI_NODE_ID, "UI node", &fields).with_authoring_initial_value(
+        encode_node(&UiNode::new(UiStyle::default()))
+            .expect("the fixed UI node creation template is encodable"),
+    )
 }
 
 fn ui_visual_schema() -> ComponentSchema {
@@ -1532,22 +1381,15 @@ fn ui_visual_schema() -> ComponentSchema {
     for name in ["top_left", "top_right", "bottom_right", "bottom_left"] {
         fields.push(field(&format!("radii.{name}"), ComponentValueKind::F64));
     }
-    schema_with_version(UI_VISUAL_ID, "UI visual", UI_SCHEMA_VERSION_TWO, &fields)
-        .with_field_tombstones([
-            ComponentFieldId::new("background.reference"),
-            ComponentFieldId::new("border_brush.reference"),
-        ])
+    schema(UI_VISUAL_ID, "UI visual", &fields).with_authoring_initial_value(
+        encode_visual(&UiVisual::role(UiColorRole::Panel))
+            .expect("the fixed UI visual creation template is encodable"),
+    )
 }
 
 fn ui_text_schema() -> ComponentSchema {
-    let mut schema = version_two_ui_text_schema();
-    schema.version = UI_SCHEMA_VERSION_THREE;
-    let logical_size = schema
-        .fields
-        .iter_mut()
-        .find(|field| field.id().as_str() == "logical_size")
-        .expect("the fixed UiText schema contains its logical-size field");
-    logical_size.shape = ComponentValueShape::scalar(ComponentValueKind::F64)
+    let text = UiText::new("Text", 16.0).expect("the fixed UI text creation template is valid");
+    let logical_size = field("logical_size", ComponentValueKind::F64)
         .with_numeric_domain(ComponentNumericDomain::F32)
         .with_numeric_interval(ComponentNumericInterval::F64 {
             min: Some(ComponentNumericBound::Excluded(
@@ -1557,48 +1399,27 @@ fn ui_text_schema() -> ComponentSchema {
                 ComponentFloat::new(256.0).expect("the fixed upper text-size bound is finite"),
             )),
         });
-    schema
-}
-
-fn version_two_ui_text_schema() -> ComponentSchema {
     let mut fields = vec![
         field("content", ComponentValueKind::String),
-        field("logical_size", ComponentValueKind::F64),
+        logical_size,
         field("alignment", ComponentValueKind::String),
         field("overflow", ComponentValueKind::String),
         field("has_semantic_text", ComponentValueKind::Bool),
         field("semantic_text", ComponentValueKind::String),
     ];
     add_brush_fields(&mut fields, "brush");
-    schema_with_version(UI_TEXT_ID, "UI text", UI_SCHEMA_VERSION_TWO, &fields)
-        .with_field_tombstones([ComponentFieldId::new("brush.reference")])
-}
-
-fn legacy_ui_visual_schema() -> ComponentSchema {
-    let mut fields = Vec::new();
-    add_legacy_brush_fields(&mut fields, "background");
-    fields.push(field("border_width", ComponentValueKind::F64));
-    add_legacy_brush_fields(&mut fields, "border_brush");
-    for name in ["top_left", "top_right", "bottom_right", "bottom_left"] {
-        fields.push(field(&format!("radii.{name}"), ComponentValueKind::F64));
-    }
-    schema(UI_VISUAL_ID, "UI visual", &fields)
-}
-
-fn legacy_ui_text_schema() -> ComponentSchema {
-    let mut fields = vec![
-        field("content", ComponentValueKind::String),
-        field("logical_size", ComponentValueKind::F64),
-        field("alignment", ComponentValueKind::String),
-        field("overflow", ComponentValueKind::String),
-        field("has_semantic_text", ComponentValueKind::Bool),
-        field("semantic_text", ComponentValueKind::String),
-    ];
-    add_legacy_brush_fields(&mut fields, "brush");
-    schema(UI_TEXT_ID, "UI text", &fields)
+    schema(UI_TEXT_ID, "UI text", &fields).with_authoring_initial_value(
+        encode_text(&text).expect("the fixed UI text creation template is encodable"),
+    )
 }
 
 fn ui_button_schema() -> ComponentSchema {
+    let button = UiButton::new(
+        "Button",
+        UiActionId::new("activate").expect("the fixed UI button action is valid"),
+        16.0,
+    )
+    .expect("the fixed UI button creation template is valid");
     schema(
         UI_BUTTON_ID,
         "UI button",
@@ -1608,6 +1429,9 @@ fn ui_button_schema() -> ComponentSchema {
             field("enabled", ComponentValueKind::Bool),
             field("logical_text_size", ComponentValueKind::F64),
         ],
+    )
+    .with_authoring_initial_value(
+        encode_button(&button).expect("the fixed UI button creation template is encodable"),
     )
 }
 
@@ -1627,6 +1451,10 @@ fn ui_button_visuals_schema() -> ComponentSchema {
             field("disabled_background", ComponentValueKind::String),
             field("disabled_text", ComponentValueKind::String),
         ],
+    )
+    .with_authoring_initial_value(
+        encode_button_visuals(&UiButtonVisuals::default())
+            .expect("the fixed UI button visuals creation template is encodable"),
     )
 }
 
@@ -1673,16 +1501,7 @@ fn ui_theme_schema() -> ComponentSchema {
 }
 
 fn schema(id: &str, alias: &str, fields: &[ComponentFieldSchema]) -> ComponentSchema {
-    schema_with_version(id, alias, ComponentSchemaVersion::ONE, fields)
-}
-
-fn schema_with_version(
-    id: &str,
-    alias: &str,
-    version: ComponentSchemaVersion,
-    fields: &[ComponentFieldSchema],
-) -> ComponentSchema {
-    ComponentSchema::new(ComponentTypeId::new(id), alias, version)
+    ComponentSchema::new(ComponentTypeId::new(id), alias, ComponentSchemaVersion::ONE)
         .with_capabilities(ComponentCapability::SCENE_AUTHORING)
         .with_fields(fields.iter().cloned())
 }
@@ -1720,15 +1539,4 @@ fn add_brush_fields(fields: &mut Vec<ComponentFieldSchema>, prefix: &str) {
             ComponentCapability::AssetRef,
         ]),
     );
-}
-
-fn add_legacy_brush_fields(fields: &mut Vec<ComponentFieldSchema>, prefix: &str) {
-    for name in LEGACY_BRUSH_FIELDS {
-        let kind = if matches!(*name, "red" | "green" | "blue" | "alpha") {
-            ComponentValueKind::F64
-        } else {
-            ComponentValueKind::String
-        };
-        fields.push(field(&format!("{prefix}.{name}"), kind));
-    }
 }

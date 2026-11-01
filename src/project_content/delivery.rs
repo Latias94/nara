@@ -10,8 +10,9 @@ use super::{
     ARC_CONTROL_BLOCK_BYTES, BTREE_ENTRY_OVERHEAD, ProjectContentBudgetKind,
     ProjectContentClosureReceipt, ProjectContentError, ProjectContentErrorKind,
     ProjectContentLease, ProjectContentLoader, ProjectContentMemberReceipt, ProjectContentSnapshot,
-    ProjectSettingsCandidate, ProjectSettingsLineage, RuntimePlan, StartupContentClosureReceipt,
-    allocation_failed, append_frame, checked_plan_product, checked_plan_sum, string_retained_bytes,
+    ProjectSettingsCandidate, ProjectSettingsLineage, RuntimePlan, SourceReadiness,
+    StartupContentClosureReceipt, allocation_failed, append_frame, checked_plan_product,
+    checked_plan_sum, string_retained_bytes,
 };
 
 /// Strict source delivery for the complete mandatory closure of the project's Scene roots.
@@ -110,18 +111,21 @@ impl ProjectContentLoader {
     /// ordinary Immediate preparation and is never replaced with the strict validation closure.
     /// Stable identities use one lazily captured catalogue for this operation. Referenced
     /// metadata is revalidated on use; unrelated additions are discovered by the next operation.
+    /// One actual disk readiness observation spans startup, every Scene and final union
+    /// publication, which reopens the manifest before exposing the delivery receipt.
     pub fn load_delivery(
         &self,
         candidate: &ProjectSettingsCandidate,
         plan: &RuntimePlan,
     ) -> Result<ProjectContentDeliveryReceipt, ProjectContentError> {
-        self.validate_inputs(candidate, plan)?;
+        let readiness = self.validate_inputs(candidate, plan)?;
         let agreement = crate::project_host::runtime_agreement::prepare_runtime_schema_agreement(
             &self.root, candidate, plan,
         )?;
-        let (startup, catalogue) =
-            self.load_startup_for_delivery(candidate, plan, None, agreement)?;
-        self.load_delivery_with_startup_and_catalogue(candidate, plan, startup, catalogue)
+        let (startup, catalogue) = self.load_startup_for_delivery_with_readiness(
+            candidate, plan, None, agreement, &readiness,
+        )?;
+        self.load_delivery_with_readiness(candidate, plan, startup, catalogue, &readiness)
     }
 
     pub(crate) fn load_delivery_with_startup_and_catalogue(
@@ -129,9 +133,20 @@ impl ProjectContentLoader {
         candidate: &ProjectSettingsCandidate,
         plan: &RuntimePlan,
         snapshot: ProjectContentSnapshot,
-        mut catalogue: Option<DeliveryCatalogue>,
+        catalogue: Option<DeliveryCatalogue>,
     ) -> Result<ProjectContentDeliveryReceipt, ProjectContentError> {
-        self.validate_inputs(candidate, plan)?;
+        let readiness = self.validate_inputs(candidate, plan)?;
+        self.load_delivery_with_readiness(candidate, plan, snapshot, catalogue, &readiness)
+    }
+
+    fn load_delivery_with_readiness(
+        &self,
+        candidate: &ProjectSettingsCandidate,
+        plan: &RuntimePlan,
+        snapshot: ProjectContentSnapshot,
+        mut catalogue: Option<DeliveryCatalogue>,
+        readiness: &SourceReadiness,
+    ) -> Result<ProjectContentDeliveryReceipt, ProjectContentError> {
         let startup = snapshot.startup_content_closure().ok_or_else(|| {
             delivery_error(
                 "project.delivery.startup-mismatch",
@@ -212,6 +227,7 @@ impl ProjectContentLoader {
                 root,
                 catalogue.as_ref(),
                 catalogue.is_none(),
+                readiness,
             )?;
             catalogue = next_catalogue.or(catalogue);
             merge_delivery_source_identities(&mut source_identities, &snapshot, &mut budget)?;
@@ -276,7 +292,7 @@ impl ProjectContentLoader {
             ])
             .map_err(ProjectContentError::budget)?;
         let lease = budget.into_lease().map_err(ProjectContentError::budget)?;
-        Ok(ProjectContentDeliveryReceipt {
+        let receipt = ProjectContentDeliveryReceipt {
             inner: Arc::new(DeliveryInner {
                 startup,
                 roots: roots.into_boxed_slice(),
@@ -284,7 +300,15 @@ impl ProjectContentLoader {
                 digest,
                 _lease: lease,
             }),
-        })
+        };
+        #[cfg(test)]
+        if let Some(before_revalidation) = &self.before_delivery_readiness_revalidation {
+            before_revalidation();
+        }
+        // Receipt, startup closure and catalogue leases still own their original reservations;
+        // the bounded final read must overlap them rather than hiding publication's peak.
+        readiness.revalidate(self, candidate)?;
+        Ok(receipt)
     }
 
     fn merge_delivery_members(

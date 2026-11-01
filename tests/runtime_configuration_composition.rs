@@ -84,6 +84,8 @@ schema_version = 1
 source_universe = 'ab6dcb23-33ca-59eb-85d5-31234eb0e2ea'
 native_document_identity = 'project_location'
 name = 'Configuration composition'
+[authoring]
+state = "ready"
 [profiles.delivery.runtime]
 preset = 'local-headless'
 paused = true
@@ -214,6 +216,8 @@ schema_version = 1
 source_universe = 'ab6dcb23-33ca-59eb-85d5-31234eb0e2ea'
 native_document_identity = 'project_location'
 name = 'Selected policy configuration'
+[authoring]
+state = "ready"
 [runtime]
 preset = 'minimal'
 [capabilities]
@@ -380,6 +384,8 @@ schema_version = 1
 source_universe = 'ab6dcb23-33ca-59eb-85d5-31234eb0e2ea'
 native_document_identity = 'project_location'
 name = 'Source input owner selection'
+[authoring]
+state = "ready"
 [runtime]
 preset = 'server'
 [input]

@@ -105,6 +105,16 @@ prepare its native resource closure. These facts are called resolved targets, ne
 decoded Products. A future request revalidates and decodes its actual target under the original
 admitted plan before Ready/publication.
 
+For a fresh read-only Authoring binding, identity means the admitted canonical source/key and
+metadata association, not the continued lifetime of a particular native file ID. Deferred
+revalidation checks that reader/key/kind/metadata association and actual presence/readability.
+It does not authenticate the target body, whether bytes change in place or the leaf is replaced.
+Do not add a full-body digest merely to distinguish those equivalent changes. Immediate fresh
+disk dependencies separately compare their actually consumed content. Open working copies and
+expected-object writes keep their exact file-owner custody; neither rule is inferred from a
+missing token or from a changed copied ID. The owning ADR0047 records this distinction; older
+qualification that rejected every Deferred native replacement retains its historical scope.
+
 Generic metadata cannot prove an arbitrary compound auxiliary Product exists. Strict Check/Export
 must execute its actual selected importer and membership query. Ordinary Deferred resolution
 must not claim that proof from an assignment name or Host-parsed private importer settings. A

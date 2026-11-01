@@ -12,6 +12,8 @@ use nara_fs::{CapabilityRights, HostCapabilityOptions, TrustMode};
 use super::*;
 use crate::project_host::authoring::AuthoringProjectAdmissionLimits;
 
+mod read_content;
+
 static SEQUENCE: AtomicU64 = AtomicU64::new(0);
 
 #[test]
@@ -385,7 +387,7 @@ fn exact_directory_and_file_open_costs_are_admitted_before_opening() {
 }
 
 #[test]
-fn actual_prefab_metadata_read_rejects_changed_bytes_and_replaced_identity_after_lookup() {
+fn actual_prefab_metadata_read_rejects_changed_bytes_and_accepts_equal_content_replacement() {
     let fixture = CatalogueFixture::new();
     let root = fixture.capability();
     let mut budget =
@@ -424,12 +426,14 @@ fn actual_prefab_metadata_read_rejects_changed_bytes_and_replaced_identity_after
     )
     .unwrap();
     fs::write(fixture.metadata_path(), fixture.metadata()).unwrap();
-    let replaced_identity =
-        catalogue.admit_prefab_metadata(&directory, &path, &catalogue.prefabs(), &mut budget);
-    assert!(matches!(
-        replaced_identity,
-        Err(AuthoringProjectSourceAdmissionError::AssetMetadataChanged { .. })
-    ));
+    let (_, replacement) = catalogue
+        .admit_prefab_metadata(&directory, &path, &catalogue.prefabs(), &mut budget)
+        .unwrap()
+        .unwrap();
+    assert_eq!(
+        replacement.digest(),
+        ContentDigest::of_bytes(fixture.metadata().as_bytes())
+    );
 }
 
 #[test]
@@ -490,7 +494,7 @@ fn stable_identity_observations_are_independent_of_query_scope_and_deduplicate_r
     };
     assert_eq!(prefab.stable_id, fixture.id());
     assert_eq!(
-        prefab.target,
+        prefab.record.as_ref().map(|record| record.path().clone()),
         path.as_ref()
             .map(|path| AssetSourcePath::new(format!("prefabs/{path}")).unwrap()),
     );

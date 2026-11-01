@@ -10,6 +10,7 @@ pub(crate) struct AuthoringPrefabCaptureRequest {
     schema: Arc<AuthoringSchemaReceipt>,
     scene_limits: SceneFileLimits,
     source: AuthoringDocumentSourceFact,
+    observation: FileSourceObservation,
     basis: AuthoringSchemaBasis,
     adapter_retained: usize,
     open_prefabs: Box<[AuthoringPrefabSessionSnapshot]>,
@@ -24,6 +25,7 @@ impl AuthoringProjectSessionSnapshot {
     pub(crate) fn capture_prefab_conversion_request(
         &self,
         source: &AuthoringDocumentSourceFact,
+        observation: FileSourceObservation,
         basis: &AuthoringSchemaBasis,
         kind: SourceDocumentKind,
         inputs: AuthoringSourceCaptureInputs,
@@ -37,10 +39,12 @@ impl AuthoringProjectSessionSnapshot {
                 crate::project_host::authoring::AuthoringDocumentAdmissionError::DocumentKindMismatch,
             ));
         }
+        source_observations::check_document_observation(source, &observation)?;
         Ok(AuthoringPrefabCaptureRequest {
             schema: Arc::clone(&self.schema),
             scene_limits: self.scene_limits,
             source: source.clone(),
+            observation,
             basis: basis.clone(),
             adapter_retained: adapter_receipts_retained_bytes(&self.adapters)?,
             open_prefabs,
@@ -66,6 +70,7 @@ impl AuthoringPrefabCaptureRequest {
         // Conversion keeps both input reservations conservatively charged through its result.
         self.inputs.charge_inputs(
             open_prefab_inputs_retained_bytes(&self.open_prefabs)?,
+            input_observation_count(&self.observation, &self.open_prefabs, &[]),
             &mut self.budget,
         )?;
         let (_, containing) = charge_capture_inputs(
@@ -80,6 +85,7 @@ impl AuthoringPrefabCaptureRequest {
             self.scene_limits,
             &self.basis,
             containing,
+            SourceCaptureMode::Physical(&self.observation),
             self.source.native_source(),
             &mut self.budget,
             &self.open_prefabs,
@@ -134,6 +140,7 @@ pub(crate) struct AuthoringPrefabAcquisition<'a> {
     pub(super) open_prefabs: &'a [AuthoringPrefabSessionSnapshot],
     pub(super) identities: HashMap<FileIdentity, LoadedIdentity>,
     pub(super) source_facts: BTreeMap<String, Arc<AuthoringSourceFact>>,
+    pub(super) source_observations: SourceObservations,
     pub(super) unresolved_dependencies: Vec<AuthoringUnresolvedDependency>,
     pub(super) catalogue: ReferenceCatalogue,
     pub(super) prefabs_directory: Option<(Arc<ProjectPath>, DirectoryCapability)>,
@@ -151,6 +158,7 @@ impl<'a> AuthoringPrefabAcquisition<'a> {
         scene_limits: SceneFileLimits,
         basis: &'a AuthoringSchemaBasis,
         containing_source: Arc<AuthoringSourceFact>,
+        containing_observation: SourceCaptureMode<'_>,
         containing_native_source: &'a AdmittedNativeDocumentSource,
         budget: &'a mut AuthoringProjectAdmissionBudget,
         open_prefabs: &'a [AuthoringPrefabSessionSnapshot],
@@ -191,6 +199,20 @@ impl<'a> AuthoringPrefabAcquisition<'a> {
             &mut identities,
             &mut source_facts,
         )?;
+        let mut source_observations = SourceObservations::new(budget)?;
+        match containing_observation {
+            SourceCaptureMode::Content => source_observations.insert_read_content(
+                &containing_source,
+                Some(containing_native_source),
+                budget,
+            )?,
+            SourceCaptureMode::Physical(observation) => source_observations.insert_original(
+                &containing_source,
+                containing_native_source,
+                observation,
+                budget,
+            )?,
+        }
         let catalogue = ReferenceCatalogue::new(
             schema.project_root.share(),
             ReferenceCatalogue::project_bindings(&schema.settings),
@@ -212,6 +234,7 @@ impl<'a> AuthoringPrefabAcquisition<'a> {
             open_prefabs,
             identities,
             source_facts,
+            source_observations,
             unresolved_dependencies: Vec::new(),
             catalogue,
             prefabs_directory: None,
@@ -298,6 +321,7 @@ impl<'a> AuthoringPrefabAcquisition<'a> {
         let open_prefabs = self.open_prefabs;
         let identities = &mut self.identities;
         let source_facts = &mut self.source_facts;
+        let source_observations = &mut self.source_observations;
         let catalogue = &mut self.catalogue;
         let prefabs_directory = &mut self.prefabs_directory;
         let prefabs = &mut self.prefabs;
@@ -447,6 +471,24 @@ impl<'a> AuthoringPrefabAcquisition<'a> {
             if snapshot.basis.as_ref() != Some(basis) {
                 return Err(AuthoringProjectSourceAdmissionError::SchemaBasisMismatch);
             }
+            let observation = snapshot.observation.as_ref().ok_or_else(|| {
+                AuthoringProjectSourceAdmissionError::SourceChanged {
+                    kind: AuthoringSourceKind::Prefab,
+                    path: opened.project_path.clone(),
+                }
+            })?;
+            if !observation.matches(&opened.capability).map_err(|source| {
+                AuthoringProjectSourceAdmissionError::SourceHost {
+                    kind: AuthoringSourceKind::Prefab,
+                    path: opened.project_path.clone(),
+                    source,
+                }
+            })? {
+                return Err(AuthoringProjectSourceAdmissionError::SourceChanged {
+                    kind: AuthoringSourceKind::Prefab,
+                    path: opened.project_path,
+                });
+            }
             if identities.contains_key(&opened.identity) && !is_containing_prefab {
                 return Err(
                     AuthoringProjectSourceAdmissionError::SourceIdentityKindConflict {
@@ -469,6 +511,7 @@ impl<'a> AuthoringPrefabAcquisition<'a> {
             charge_composition_source(&source, 0, &snapshot.document, budget)?;
             budget.charge_source_bytes(source.encoded_bytes(), 0, 0, 0)?;
             let source = Arc::new(source);
+            source_observations.insert_original(&source, &native_source, observation, budget)?;
             let content = AuthoringPrefabContent::Session {
                 document: Arc::clone(&snapshot.document),
                 revision: snapshot.revision,
@@ -489,6 +532,7 @@ impl<'a> AuthoringPrefabAcquisition<'a> {
             let read = read_unique_source(opened, scene_limits.encoded_bytes().get(), budget)?;
             let (document, limits) = admit_prefab_composition_source(&read, scene_limits, budget)?;
             let source = Arc::clone(&read.source);
+            source_observations.insert_read_content(&source, Some(&native_source), budget)?;
             identities.insert(source.identity(), LoadedIdentity::Prefab);
             source_facts.insert(
                 source.project_path().as_str().to_owned(),
@@ -527,10 +571,9 @@ impl<'a> AuthoringPrefabAcquisition<'a> {
         drop(self.prefabs_directory.take());
         revalidate_sources(
             self.schema,
-            self.containing_native_source,
-            &self.prefabs,
             &mut self.identities,
             &mut self.source_facts,
+            &mut self.source_observations,
             &self.catalogue,
             self.budget,
         )?;
@@ -557,6 +600,7 @@ impl<'a> AuthoringPrefabAcquisition<'a> {
             sources,
             stable_lookups,
             self.budget.usage().retained_candidate_bytes(),
+            Arc::new(self.source_observations),
         );
         Ok(AuthoringPrefabSourceCapture {
             prefabs: self
@@ -653,25 +697,15 @@ pub(in crate::project_host::authoring::project) fn open_prefab_inputs_retained_b
 
 pub(super) fn revalidate_sources(
     schema: &AuthoringSchemaReceipt,
-    containing_native_source: &AdmittedNativeDocumentSource,
-    prefabs: &BTreeMap<AssetSourcePath, AuthoringPrefabSource>,
     identities: &mut HashMap<FileIdentity, LoadedIdentity>,
     source_facts: &mut BTreeMap<String, Arc<AuthoringSourceFact>>,
+    source_observations: &mut SourceObservations,
     catalogue: &ReferenceCatalogue,
     budget: &mut AuthoringProjectAdmissionBudget,
 ) -> Result<(), AuthoringProjectSourceAdmissionError> {
-    containing_native_source
-        .revalidate(&schema.project_root)
-        .map_err(AuthoringProjectSourceAdmissionError::NativeSource)?;
-    for prefab in prefabs.values() {
-        prefab
-            .native_source
-            .revalidate(&schema.project_root)
-            .map_err(AuthoringProjectSourceAdmissionError::NativeSource)?;
-    }
     for source in source_facts.values() {
         catalogue.check_resolved_target_identity(source.identity(), source.project_path())?;
-        revalidate_source_fact(&schema.project_root, source, budget)?;
+        source_observations.validate(schema, source, None, budget)?;
     }
     for source in schema_source_facts(schema) {
         revalidate_source_fact(&schema.project_root, &source, budget)?;
@@ -686,7 +720,8 @@ pub(super) fn revalidate_sources(
                 });
             }
         } else {
-            revalidate_source_fact(&schema.project_root, source, budget)?;
+            source_observations.insert_read_content(source, None, budget)?;
+            source_observations.validate(schema, source, None, budget)?;
             if identities.contains_key(&source.identity()) {
                 return Err(
                     AuthoringProjectSourceAdmissionError::SourceIdentityKindConflict {

@@ -2,7 +2,8 @@ use super::*;
 use crate::{
     EffectivePrimaryUiSurface, EffectiveUiSafeArea, EffectiveWorldCanvas,
     MAX_PROJECT_FIXED_DEBT_STEPS, MAX_PROJECT_FIXED_STEPS_PER_FRAME, MAX_PROJECT_UI_LOGICAL_EXTENT,
-    ProductCapability, ProjectManifest, ProjectPath, ProjectTaskPoolManifest,
+    ProductCapability, ProjectAuthoringRecovery, ProjectAuthoringRecoveryDigest,
+    ProjectAuthoringState, ProjectManifest, ProjectPath, ProjectTaskPoolManifest,
 };
 use nara_app::{FixedTime, RuntimeTimeSettings};
 use nara_asset::StableAssetId;
@@ -83,6 +84,7 @@ stable_id = "source-only-coordinate"
 [paths]
 assets = "source-assets"
 [authoring]
+state = "ready"
 schema_bundle = "source/schema.bundle.json"
 [startup]
 default_scene = "source/start.scene.json"
@@ -715,6 +717,7 @@ fn source_fields_are_not_part_of_the_runtime_record() {
         "startup",
         "content",
         "authoring",
+        "authoring_state",
         "execution",
         "schema_version",
     ] {
@@ -775,6 +778,8 @@ schema_version = 1
 name = "Final preset admission"
 source_universe = "72011426-37e2-48ba-bc06-78841468889a"
 native_document_identity = "stable_metadata"
+[authoring]
+state = "ready"
 [runtime]
 preset = "server"
 [window]
@@ -814,6 +819,8 @@ schema_version = 1
 name = "Named preset invariants"
 source_universe = "72011426-37e2-48ba-bc06-78841468889a"
 native_document_identity = "stable_metadata"
+[authoring]
+state = "ready"
 [runtime]
 preset = "server"
 [window]
@@ -989,6 +996,57 @@ fn resolved_profile_exports_all_values_without_source_or_profile_dependencies() 
 }
 
 #[test]
+fn pending_refuses_source_projection_but_does_not_change_source_free_values() {
+    let mut manifest = project_manifest();
+    let ready = manifest.resolve_profile(Some("release")).unwrap();
+    assert_eq!(ready.authoring_state, ProjectAuthoringState::Ready);
+    let runtime = ready.runtime_configuration().unwrap();
+    let source_projection = ready.source_runtime_projection().unwrap();
+    let pending = ProjectAuthoringState::Pending(
+        ProjectAuthoringRecovery::new(
+            ProjectPath::new(".nara/upgrades/recovery.json").unwrap(),
+            ProjectAuthoringRecoveryDigest::from_parts(123, [0xab; 32]),
+        )
+        .unwrap(),
+    );
+    manifest.authoring.state = pending.clone();
+    let mut settings = manifest.resolve_profile(Some("release")).unwrap();
+    assert_eq!(settings.runtime_configuration().unwrap(), runtime);
+    assert_diagnostic(
+        &settings.source_runtime_projection().unwrap_err(),
+        "runtime.configuration.source-authoring-pending",
+        "authoring.state",
+    );
+    // Previously projected immutable values do not acquire current-source authority.
+    assert_eq!(source_projection.runtime(), &runtime);
+    assert_eq!(settings.authoring_state, pending);
+    assert_round_trip(&runtime);
+    let encoded = serde_json::to_value(runtime.to_configuration()).unwrap();
+    assert!(encoded.get("authoring").is_none());
+    assert!(encoded.get("authoring_state").is_none());
+
+    settings.input.action_map = Some(ProjectPath::new("source/input.actions.json").unwrap());
+    assert_diagnostic(
+        &settings.source_runtime_projection().unwrap_err(),
+        "runtime.configuration.source-authoring-pending",
+        "authoring.state",
+    );
+    assert_diagnostic(
+        &settings.runtime_configuration().unwrap_err(),
+        "runtime.configuration.source-input-required",
+        "input.action_map",
+    );
+    assert_eq!(settings.authoring_state, pending);
+    settings.authoring_state = ProjectAuthoringState::Ready;
+    let projected = settings.source_runtime_projection().unwrap();
+    assert_eq!(projected.runtime(), &runtime);
+    assert_eq!(
+        projected.input_requirement(),
+        settings.input.action_map.as_ref()
+    );
+}
+
+#[test]
 fn projection_revalidates_public_effective_primitives() {
     let mut settings = project_settings();
     settings.window.width = 0;
@@ -1120,7 +1178,7 @@ fn source_lowered_durations_export_exactly_at_the_float_precision_boundary() {
         let source = format!(
             "schema_version = 1\n[project]\nname = 'Exact source duration'\n\
              source_universe = '72011426-37e2-48ba-bc06-78841468889a'\n\
-             native_document_identity = 'stable_metadata'\n[runtime]\n\
+             native_document_identity = 'stable_metadata'\n[authoring]\nstate = 'ready'\n[runtime]\n\
              max_delta_seconds = {seconds:?}\nfixed_timestep_seconds = {seconds:?}\n"
         );
         let load = ProjectManifest::parse_toml_str(&source);

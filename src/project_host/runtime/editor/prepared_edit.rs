@@ -102,7 +102,7 @@ impl EditorProjectSession {
         if !self.accepts_new_work() || self.pending_workspace_intent.is_some() {
             return Err(EditorEditPreparationError::Closing);
         }
-        if self.schema_adoption_fenced() {
+        if self.authoring_operation_fenced() {
             return Err(EditorEditPreparationError::Busy);
         }
         self.workspace
@@ -143,7 +143,7 @@ impl EditorProjectSession {
         &mut self,
         prepared: PreparedEditorDocumentConstruction,
     ) -> Result<CommittedEditorDocumentConstruction, EditorActionOutcome> {
-        if self.schema_adoption_fenced() {
+        if self.authoring_operation_fenced() {
             return Err(EditorActionOutcome::Workspace(
                 editor_workspace_command_rejected(
                     self.workspace.active_document(),
@@ -212,7 +212,7 @@ impl EditorProjectSession {
         &mut self,
         prepared: PreparedEditorDocumentEdit,
     ) -> EditorActionOutcome {
-        if self.schema_adoption_fenced() {
+        if self.authoring_operation_fenced() {
             return EditorActionOutcome::Workspace(editor_workspace_command_rejected(
                 self.workspace.active_document(),
                 "project.editor.schema-adoption-busy",

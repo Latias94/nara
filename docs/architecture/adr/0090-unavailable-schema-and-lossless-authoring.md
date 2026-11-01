@@ -3,7 +3,7 @@
 **Status**: Accepted
 **Date**: 2026-07-13
 **Accepted**: 2026-08-18
-**Last Revised**: 2026-10-27 (explicit declaration repair and composition/source publication boundaries)
+**Last Revised**: 2026-11-01 (reviewed source/Schema upgrade and explicit history checkpoint)
 **Owner**: `nara_reflect`, `nara_scene`, `nara_tooling`, and persistent document owners
 **Admission Trigger**: Scene/prefab fixtures with a missing provider, known schema without its
 required native or Adapter-specific runtime binding, missing migration, and future component schema
@@ -264,6 +264,34 @@ flowchart TD
     Degraded -. runtime forbidden .-> Runtime
     Runtime -. unavailable record .-> Deny
 ```
+
+### Explicit Source And Schema Upgrade
+
+The reviewed upgrade operation in ADR0043 is a separate authority from additive reclassification,
+creation-only evolution and ordinary whole-record editing. It pins the original source,
+revision/content state and nominal Schema basis, one admitted successor and an explicit affected
+owner/component/property footprint. The Host derives actual differences and affected-version
+coverage from the complete authored declaration tree, rather than trusting producer-reported
+locations or a surviving effective composition. All out-of-scope unavailable records, claims,
+bindings and opaque understood values remain structurally equal; affected uninterpretable data
+refuses specifically. A Degraded successor alone does not prove a valid upgrade.
+Inventory availability also does not prove complete value validity. The upgrade owner validates
+affected complete records under their respective old/new Schemas, including defaults, and every
+claim in an affected Properties batch, including unchanged claims. Selector and selected-payload
+validation share the source operation's bounded work admission. Ordinary lossless inventory keeps
+its separate non-activating responsibility.
+Affected property batches retain the compiler's non-overlap rule. Prepared replacements also
+satisfy the original source file's publication limits; an independently decoded candidate's wider
+limits do not replace that source policy.
+
+The first operation selects a new history checkpoint instead of claiming old-history continuity.
+The exact new source and classification are prepared together. Successful commit creates new
+revision/content-state identities and rejects old query/prepared-edit bases, while preserving
+logical source/entity identity and compatible selection. Workspace and actual persistence lanes
+adopt the complete set under ADR0047; native binding/readiness remains a separate admission.
+Existing creation-only and generic authoring guards remain strict. The
+[upgrade unit](../../plans/2026-11-01-authored-schema-upgrade-plan.md) records the selected consumer
+and pending implementation; no unknown-record replacement permission follows from this amendment.
 
 ### Readiness Vocabulary
 

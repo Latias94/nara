@@ -228,7 +228,7 @@ impl EditorProjectSession {
         basis: EditorDocumentQueryBasis,
         anchor: SceneEntityId,
     ) -> Outcome {
-        if self.schema_adoption_fenced() || self.source_tools.reclamation_fenced() {
+        if self.authoring_operation_fenced() || self.source_tools.reclamation_fenced() {
             return rejected(None, Rejection::Busy);
         }
         if !self.accepts_new_work() || self.pending_workspace_intent.is_some() {
@@ -276,7 +276,7 @@ impl EditorProjectSession {
                     .expect("checked authoring mode")
                     .admit_source_capture_inputs(0, bytes)
             });
-        let inputs = match inputs {
+        let mut inputs = match inputs {
             Ok(inputs) => inputs,
             Err(error) => {
                 let failure = admission_failure(error, Rejection::PreparationFailed);
@@ -318,15 +318,25 @@ impl EditorProjectSession {
             return rejected(None, Rejection::StaleSource);
         }
         let prefabs = self.authoring_prefab_selections();
-        let snapshots = self.capture_open_prefabs(&prefabs);
         let Some(schema) = basis.schema.as_ref() else {
             return rejected(None, Rejection::SourceRejected);
         };
-        let mut context = match self
-            .authoring_project()
-            .expect("checked authoring mode")
-            .capture_prefab_conversion_request(receipt, schema, kind, inputs, snapshots)
-        {
+        let context = (|| {
+            let observation = self.capture_authoring_source_observation(&root, &mut inputs)?;
+            let snapshots =
+                self.capture_open_prefabs(&prefabs, &mut inputs, Some((&root, &observation)))?;
+            self.authoring_project()
+                .expect("checked authoring mode")
+                .capture_prefab_conversion_request(
+                    receipt,
+                    observation,
+                    schema,
+                    kind,
+                    inputs,
+                    snapshots,
+                )
+        })();
+        let mut context = match context {
             Ok(context) => context,
             Err(error) => {
                 let failure = admission_failure(error, Rejection::PreparationFailed);
@@ -436,7 +446,7 @@ impl EditorProjectSession {
     }
 
     fn validate_prefab_conversion(&mut self, operation: EditorPrefabConversionId) -> Outcome {
-        if self.schema_adoption_fenced() {
+        if self.authoring_operation_fenced() {
             return rejected(Some(operation), Rejection::Busy);
         }
         if !self.accepts_new_work() || self.pending_workspace_intent.is_some() {

@@ -27,6 +27,24 @@ pub(super) struct AdmittedAuthoringSchemaBundle {
 }
 
 impl AdmittedAuthoringSchemaBundle {
+    /// Joins already admitted immutable metadata to its exact verified source observation.
+    /// The upgrade owner checks the live leaf, parent and digest before calling this helper.
+    pub(super) fn from_upgrade_observation(
+        path: ProjectPath,
+        capability: FileCapability,
+        bytes: Arc<[u8]>,
+        digest: ContentDigest,
+        bundle: Arc<AuthoringSchemaBundle>,
+    ) -> Self {
+        Self {
+            path,
+            capability,
+            bytes,
+            digest,
+            bundle,
+        }
+    }
+
     pub(super) const fn path(&self) -> &ProjectPath {
         &self.path
     }

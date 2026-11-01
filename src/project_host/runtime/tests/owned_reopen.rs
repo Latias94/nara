@@ -274,6 +274,7 @@ fn pending_reopen_blocks_external_play_admission_before_build_receipt_preparatio
             }
         }
     };
+    let binding = editor.register_supervised_play_owner(1).unwrap();
     assert_eq!(
         editor.project_readiness().runtime(),
         nara_tooling::EditorRuntimeAvailability::ExternalSupervised
@@ -298,7 +299,7 @@ fn pending_reopen_blocks_external_play_admission_before_build_receipt_preparatio
             EditorPlayRequestResult::Rejected(EditorPlayRejection::Busy)
         );
     }
-    assert!(editor.take_external_play_request().is_none());
+    assert!(editor.take_external_play_request(&binding).is_none());
     control.release();
     assert!(matches!(
         drive_persistence_to_terminal(&mut editor)

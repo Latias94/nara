@@ -212,7 +212,7 @@ impl EditorProjectSession {
         let Some(request) = self.prefab_content_refresh.values().next().copied() else {
             return;
         };
-        let (successor, current_revision, preview_registry) = {
+        let (successor, current_revision) = {
             let Some(lane) = self.trusted_compiled() else {
                 return;
             };
@@ -251,11 +251,7 @@ impl EditorProjectSession {
                     return;
                 }
             };
-            (
-                successor,
-                lane.snapshot.revision(),
-                lane.plan.schema_validation().snapshot().clone(),
-            )
+            (successor, lane.snapshot.revision())
         };
 
         if successor.revision() == current_revision {
@@ -271,11 +267,10 @@ impl EditorProjectSession {
             return;
         }
 
-        let replacement_authoring_runtime = match self.authoring_runtime.rebuild_for_project(
-            successor.clone(),
-            &preview_registry,
-            &self.recipe,
-        ) {
+        let replacement_authoring_runtime = match self
+            .authoring_runtime
+            .rebuild_for_project(successor.clone(), &self.recipe)
+        {
             Ok(runtime) => runtime,
             Err(failure) => {
                 self.authoring_retirements.retain(failure.retirement);

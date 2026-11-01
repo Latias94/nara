@@ -417,9 +417,9 @@ fn selected_demand_does_not_read_missing_or_conflicted_siblings_or_local_child_i
             |reference, _| Ok::<_, Infallible>(fixture.load(reference, &basis)),
         )
         .unwrap();
-        assert!(full.candidate.is_none(), "{full:?}");
+        assert!(full.candidate().is_none(), "{full:?}");
         assert_eq!(
-            full.failure.unwrap().reason(),
+            full.failure().unwrap().reason(),
             if conflicted {
                 &PrefabExpansionFailureKind::SourceChanged
             } else {
@@ -444,8 +444,8 @@ fn selected_semantics_match_full_values_order_references_assets_and_typed_ancest
         |reference, _| Ok::<_, Infallible>(fixture.load(reference, &basis)),
     )
     .unwrap();
-    assert!(full.candidate.is_some(), "{full:?}");
-    let candidate = full.candidate.as_ref().unwrap();
+    assert!(full.candidate().is_some(), "{full:?}");
+    let candidate = full.candidate().unwrap();
     let document = candidate.document();
     let provenance = candidate.provenance();
     let mut remap = BTreeMap::new();
@@ -552,7 +552,7 @@ fn selected_semantics_match_full_values_order_references_assets_and_typed_ancest
     }));
     assert_eq!(selected.omissions.len(), components);
     for fact in &selected.omissions {
-        assert!(full.omissions.iter().any(|full_fact| {
+        assert!(full.omissions().iter().any(|full_fact| {
             full_fact.reason == fact.reason
                 && full_fact.component == fact.component
                 && provenance[&full_fact.entity] == fragment.provenance[&fact.entity]
@@ -569,7 +569,7 @@ fn selected_semantics_match_full_values_order_references_assets_and_typed_ancest
     }).count();
     assert_eq!(mixed, 2);
     // Native preview filtering cannot supply these complete source-conversion values.
-    let (preview, _) = full.into_native_preview().unwrap();
+    let preview = full.into_native_preview().unwrap().candidate;
     assert!(
         preview
             .document()

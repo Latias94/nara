@@ -1213,6 +1213,7 @@ prefabs = "prefabs"
 default_scene = "startup.scene.json"
 
 [authoring]
+state = "ready"
 schema_bundle = "schema/authoring.bundle.json"
 
 [runtime]

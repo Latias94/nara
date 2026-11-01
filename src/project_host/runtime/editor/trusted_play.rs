@@ -1054,6 +1054,8 @@ impl EditorProjectSession {
                     lane.plan.schema_validation().snapshot(),
                     source_revision,
                     request.clone(),
+                    nara_reflect::ComponentEncodeContext::new()
+                        .with_asset_resolution(lane.snapshot.asset_resolution()),
                 )
             })
         });

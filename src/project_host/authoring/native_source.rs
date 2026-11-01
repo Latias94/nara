@@ -3,7 +3,7 @@ use std::sync::Arc;
 use nara_asset::{
     AssetMetaFileLimits, AssetMetaIdentityCandidate, AssetSourceKind, AssetSourcePath,
 };
-use nara_fs::{ContentDigest, DirectoryCapability, FileIdentity, RelativePath};
+use nara_fs::{ContentDigest, DirectoryCapability, FileCapability, FileIdentity, RelativePath};
 use nara_project::{
     EffectiveProjectPaths, EffectiveProjectSettings, NativeDocumentIdentity, ProjectPath,
 };
@@ -16,6 +16,9 @@ use super::{
         AuthoringProjectSourceAdmissionError, AuthoringSourceFact, source_fact_retained_bytes,
     },
 };
+
+#[cfg(test)]
+mod tests;
 
 #[derive(Clone)]
 pub(crate) struct NativeDocumentSourcePolicy {
@@ -81,6 +84,80 @@ impl NativeDocumentSourcePolicy {
         retained_native_handles: usize,
         budget: &mut AuthoringProjectAdmissionBudget,
     ) -> Result<AdmittedNativeDocumentSource, AuthoringProjectSourceAdmissionError> {
+        self.admit_budgeted_source(
+            root,
+            path,
+            kind,
+            expected_identity,
+            dependency_depth,
+            retained_native_handles,
+            None,
+            budget,
+        )
+    }
+
+    /// Revalidates the logical source and sidecar content against the same live leaf the
+    /// caller reads and hashes. This grants no historical object or publication evidence.
+    pub(super) fn revalidate_read_content(
+        &self,
+        root: &DirectoryCapability,
+        path: &str,
+        current: &FileCapability,
+        expected: &AdmittedNativeDocumentSource,
+        depth: usize,
+        budget: &mut AuthoringProjectAdmissionBudget,
+    ) -> Result<(), AuthoringProjectSourceAdmissionError> {
+        let retained_before = budget.retained_candidate_bytes;
+        let result = (|| {
+            let actual = self.admit_budgeted_source(
+                root,
+                path,
+                expected.key.kind(),
+                current.identity(),
+                depth,
+                2,
+                Some(current),
+                budget,
+            )?;
+            let metadata_matches = match (&expected.metadata, &actual.metadata) {
+                (None, None) => true,
+                (Some(expected), Some(actual)) => {
+                    expected.path == actual.path
+                        && expected.source.kind() == actual.source.kind()
+                        && expected.source.project_path() == actual.source.project_path()
+                        && expected.source.digest() == actual.source.digest()
+                        && expected.source.encoded_bytes() == actual.source.encoded_bytes()
+                }
+                _ => false,
+            };
+            if actual.key != expected.key || !metadata_matches {
+                return Err(AuthoringProjectSourceAdmissionError::NativeSource(
+                    AuthoringDocumentAdmissionError::SourceIdentityChanged,
+                ));
+            }
+            Ok(())
+        })();
+        // Temporary admission drops before storage is refunded on success and refusal.
+        // Performed reads, decode work and observed handle peaks remain cumulative.
+        let temporary = budget
+            .retained_candidate_bytes
+            .checked_sub(retained_before)
+            .ok_or(AuthoringProjectSourceAdmissionError::AccountingOverflow)?;
+        budget.reconcile_retained_reservation(temporary, 0)?;
+        result
+    }
+
+    fn admit_budgeted_source(
+        &self,
+        root: &DirectoryCapability,
+        path: &str,
+        kind: SourceDocumentKind,
+        expected_identity: FileIdentity,
+        dependency_depth: usize,
+        retained_native_handles: usize,
+        current: Option<&FileCapability>,
+        budget: &mut AuthoringProjectAdmissionBudget,
+    ) -> Result<AdmittedNativeDocumentSource, AuthoringProjectSourceAdmissionError> {
         let preflight = RelativePath::preflight(path)
             .map_err(AuthoringDocumentAdmissionError::RelativePath)
             .map_err(AuthoringProjectSourceAdmissionError::NativeSource)?;
@@ -88,10 +165,14 @@ impl NativeDocumentSourcePolicy {
         // The root is already included in the caller's retained handles. Exact nested opens
         // need a parent and leaf, plus Linux's independent stored-spelling scan cursor. Metadata
         // is opened while the policy's source probe still owns its separate native handle.
-        let exact_open_handles = 2 + usize::from(cfg!(target_os = "linux"));
+        let exact_open_handles = if current.is_none() || stable {
+            2 + usize::from(cfg!(target_os = "linux"))
+        } else {
+            0
+        };
         let handle_peak = retained_native_handles
             .saturating_add(exact_open_handles)
-            .saturating_add(usize::from(stable));
+            .saturating_add(usize::from(stable && current.is_none()));
         budget.admit_handle_peak(handle_peak)?;
         let (metadata_limit, aggregate_limited) = if stable {
             budget.charge_open_file(handle_peak)?;
@@ -122,12 +203,21 @@ impl NativeDocumentSourcePolicy {
             0,
             65_536_usize
                 .saturating_mul(preflight.components())
-                .saturating_mul(if stable { 2 } else { 1 })
+                .saturating_mul(usize::from(current.is_none()) + usize::from(stable))
                 .saturating_add(metadata_limit.saturating_mul(4)),
             retained_bound,
         )?;
-        let admitted = self
-            .admit_with_metadata_limit(
+        let admitted = match current {
+            Some(current) => self.admit_opened_with_metadata_limit(
+                root,
+                path,
+                path,
+                kind,
+                current,
+                dependency_depth,
+                metadata_limit,
+            ),
+            None => self.admit_with_metadata_limit(
                 root,
                 path,
                 path,
@@ -135,25 +225,26 @@ impl NativeDocumentSourcePolicy {
                 expected_identity,
                 dependency_depth,
                 metadata_limit,
-            )
-            .map_err(|error| match error {
-                AuthoringDocumentAdmissionError::NativeSourceMetadataTooLarge { .. } => {
-                    match ProjectPath::new(format!("{path}.meta")) {
-                        Ok(path) => super::project::map_source_read_error(
-                            nara_fs::FsError::ByteLimitExceeded {
-                                limit: metadata_limit as u64,
-                            },
-                            super::project::AuthoringSourceKind::AssetMetadata,
-                            path,
-                            aggregate_limited,
-                            metadata_limit,
-                            budget.maximum(),
-                        ),
-                        Err(error) => AuthoringProjectSourceAdmissionError::JoinedSourcePath(error),
-                    }
+            ),
+        }
+        .map_err(|error| match error {
+            AuthoringDocumentAdmissionError::NativeSourceMetadataTooLarge { .. } => {
+                match ProjectPath::new(format!("{path}.meta")) {
+                    Ok(path) => super::project::map_source_read_error(
+                        nara_fs::FsError::ByteLimitExceeded {
+                            limit: metadata_limit as u64,
+                        },
+                        super::project::AuthoringSourceKind::AssetMetadata,
+                        path,
+                        aggregate_limited,
+                        metadata_limit,
+                        budget.maximum(),
+                    ),
+                    Err(error) => AuthoringProjectSourceAdmissionError::JoinedSourcePath(error),
                 }
-                error => AuthoringProjectSourceAdmissionError::NativeSource(error),
-            })?;
+            }
+            error => AuthoringProjectSourceAdmissionError::NativeSource(error),
+        })?;
         let encoded_bytes = admitted
             .metadata
             .as_ref()
@@ -184,6 +275,27 @@ impl NativeDocumentSourcePolicy {
         if file.identity() != expected_identity {
             return Err(AuthoringDocumentAdmissionError::SourceIdentityChanged);
         }
+        self.admit_opened_with_metadata_limit(
+            root,
+            open_path,
+            path,
+            kind,
+            &file,
+            dependency_depth,
+            metadata_limit,
+        )
+    }
+
+    fn admit_opened_with_metadata_limit(
+        &self,
+        root: &DirectoryCapability,
+        open_path: &str,
+        path: &str,
+        kind: SourceDocumentKind,
+        file: &FileCapability,
+        dependency_depth: usize,
+        metadata_limit: usize,
+    ) -> Result<AdmittedNativeDocumentSource, AuthoringDocumentAdmissionError> {
         let project_path = AssetSourcePath::new(path)
             .map_err(|_| AuthoringDocumentAdmissionError::NativeSourceMetadataMismatch)?;
         if self.identity == NativeDocumentIdentity::ProjectLocation {

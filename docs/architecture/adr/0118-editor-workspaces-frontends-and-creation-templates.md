@@ -2,7 +2,7 @@
 
 **Status**: Accepted
 **Date**: 2026-10-16
-**Last Revised**: 2026-10-28 (finite tool facets, complete-observation preparation, managed artifacts and explicit project-owned import)
+**Last Revised**: 2026-11-01 (CP1 persistent write fences, physical Play retirement and final installation)
 **Owner**: Private Editor product, tooling, reflection and document-domain owners
 **Refines**: [0015](0015-editor-tooling-and-dogfooding-boundary.md), [0081](0081-schema-source-stable-identity-catalog-and-runtime-binding.md), [0090](0090-unavailable-schema-and-lossless-authoring.md), [0107](0107-shared-ui-foundation-and-independent-product-layers.md), [0113](0113-editor-ui-prefab-authoring-and-canvas-authority.md), [0114](0114-standalone-generic-editor-authoring-and-execution-boundary.md)
 **Related**: [0117](0117-2d-foundation-ownership-and-authoring-contracts.md)
@@ -52,8 +52,8 @@ same source proof. Tasks remain Host-owned; Tooling creates no executor. A retur
 retains original document Arcs for capture and revalidates its complete original Workspace before
 exclusive publication, even if the live sources were edited, reopened or closed during preparation.
 
-The finite Session operation fences new conflicting source and publication admissions while
-observing the physical return of already admitted capture/index work. Rendering may continue
+For additive adoption, the finite Session operation fences new conflicting source and publication
+admissions while observing the physical return of already admitted capture/index work. Rendering may continue
 from immutable predecessor packets. Logical cancellation does not discard an actual file
 publication result or certify worker return. Metadata preparation, explicit review, disk
 publication, whole-live-set adoption and cleanup remain separate observations.
@@ -64,6 +64,34 @@ exact permitted owner extension, then prepares the complete current dirty set un
 An observed successor leaf is attached without inventing a publication receipt or writing it
 again. Changed predecessor declarations, unrelated owner additions and observation drift refuse;
 no automatic disk rollback or reuse of the stale original prepared candidate follows.
+
+The reviewed authored upgrade (CP1) under [ADR 0043](0043-scene-prefab-and-patch-document-migration-policy.md)
+has a distinct persistence boundary. Its Session fences new mutations, Save, ordinary Reopen,
+Close/Exit-triggered Save and competing source/publication admissions at operation acceptance.
+Already accepted Save drains to its actual return and its outcome is installed before baseline
+capture. Separate `work_pending`, which observes outstanding finite work, from persistent
+`writes_fenced`, which restricts write authority even after that work returns. Once Pending is
+confirmed or its publication is uncertain, Close/Exit, workspace-intent cancellation and terminal
+result acknowledgment cannot clear the fence or authorize old-lane Save. Partial or uncertain
+publication retains the fence through explicit complete reconciliation and adoption.
+
+Confirmation joins actual source-tool child/cleanup retirement and the Application-owned physical
+Play retirement acknowledgment under [ADR 0116](0116-standalone-supervised-editor-play.md) before
+Pending. The acknowledgment belongs to the exact operation and incumbent published project
+generation. Logical route withdrawal or an Idle Play view does not establish physical completion.
+
+Final installation binds the complete Workspace source/history/saved commits, each existing
+persistence Host's new leaf/digest, lane source observations and the project installation destination in
+one local owner turn. All fallible validation and storage preparation precede final Ready. Hold
+those exclusive borrows across the bound Ready publication; only its confirmed Published result
+permits consumption of the already-bound commits and movement of the prepared project. Borrowed
+guards cannot live across Tasks or calls requiring the whole mutable Session. The Application
+installs its preprepared empty Play owner in the coordinated adoption turn, and admission resumes
+only after both owners finish installation.
+
+These are selected ownership and sequencing contracts, without prescribed public API names.
+The [authored-upgrade unit](../../plans/2026-11-01-authored-schema-upgrade-plan.md) still requires
+implementation and matching public/native qualification.
 
 Future custom UI reuses these semantic boundaries and render-view handoff, but may replace all widget, layout, focus and docking code.
 Sharing rendering does not require sharing the runtime game's complete UI toolkit.

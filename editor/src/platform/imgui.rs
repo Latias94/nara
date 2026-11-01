@@ -2339,6 +2339,7 @@ fn imgui_frame_maintenance_deadline(
         || frame.document_open().has_pending_work()
         || frame.authoring_retirement_pending()
         || frame.schema_owner_adoption_work_pending()
+        || frame.authored_schema_upgrade_work_pending()
         || frame.source_tool().has_pending_work()
         || frame.prefab_conversion().phase.work_pending()
         || matches!(
@@ -2591,6 +2592,94 @@ mod opening_tests {
     }
 
     #[test]
+    fn reviewed_upgrade_does_not_poll_a_fenced_browser_refresh() {
+        use nara::project_host::EditorAuthoredSchemaUpgradePhase;
+
+        let fixture = crate::app::PersistenceFixture::authored_upgrade();
+        let mut application = EditorApplication::new(
+            EditorLaunchOptions::new(fixture.project_root()).with_profile("desktop"),
+        );
+        application.native_shell_ready();
+        let deadline = Instant::now() + Duration::from_secs(15);
+        loop {
+            application.advance_project_open();
+            if application
+                .current_frame()
+                .is_some_and(|frame| !frame.project_browser().has_pending_work())
+            {
+                break;
+            }
+            assert!(Instant::now() < deadline, "the ordinary project must open");
+            application.drive_editor_frame(Duration::ZERO, false, false);
+            std::thread::sleep(Duration::from_millis(1));
+        }
+        let original_generation = application
+            .current_frame()
+            .unwrap()
+            .project_browser()
+            .snapshot_generation();
+        let frame = application.current_frame().unwrap();
+        application.dispatch_editor_actions(EditorActionBatch::new(
+            frame.revision(),
+            [EditorAction::ProjectBrowser(
+                nara::tooling::EditorProjectBrowserAction::Refresh,
+            )],
+        ));
+        let operation = application.begin_authored_schema_upgrade().unwrap();
+        let deadline = Instant::now() + Duration::from_secs(15);
+        loop {
+            let view = application.authored_schema_upgrade_view().unwrap();
+            if view.phase == EditorAuthoredSchemaUpgradePhase::AwaitingProposal {
+                break;
+            }
+            assert!(
+                Instant::now() < deadline
+                    && view.phase != EditorAuthoredSchemaUpgradePhase::Terminal,
+                "the upgrade must capture the actual project: {view:?}"
+            );
+            application.drive_editor_frame(Duration::ZERO, false, false);
+            std::thread::sleep(Duration::from_millis(1));
+        }
+        let frame = application.current_frame().unwrap();
+        assert!(!frame.project_browser().has_pending_work());
+        assert_eq!(
+            frame.project_browser().snapshot_generation(),
+            original_generation
+        );
+        assert_eq!(
+            imgui_frame_maintenance_deadline(&frame, Instant::now()),
+            None
+        );
+        application
+            .cancel_authored_schema_upgrade(operation)
+            .unwrap();
+        let deadline = Instant::now() + Duration::from_secs(15);
+        loop {
+            application.drive_editor_frame(Duration::ZERO, false, false);
+            let frame = application.current_frame().unwrap();
+            if frame.project_browser().snapshot_generation() != original_generation
+                && !frame.project_browser().has_pending_work()
+            {
+                break;
+            }
+            assert!(Instant::now() < deadline, "the queued refresh must resume");
+            std::thread::sleep(Duration::from_millis(1));
+        }
+        let mut closed = application.request_exit().exit_ready();
+        let deadline = Instant::now() + Duration::from_secs(15);
+        while !closed {
+            closed = application
+                .drive_editor_frame(Duration::ZERO, false, true)
+                .exit_ready();
+            assert!(
+                Instant::now() < deadline,
+                "the project must physically close"
+            );
+            std::thread::sleep(Duration::from_millis(1));
+        }
+    }
+
+    #[test]
     fn ordinary_browser_pending_work_keeps_its_host_deadline_until_completion() {
         let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
             .join("../tests/fixtures/generic-editor/known-unbound");
@@ -2675,6 +2764,17 @@ mod opening_tests {
             Some(now + Duration::from_millis(16)),
         );
         assert_eq!(imgui_frame_presentation_deadline(&schema_frame, now), None);
+        let authored_frame = retired_frame
+            .clone()
+            .with_authored_schema_upgrade_work_pending(true);
+        assert_eq!(
+            imgui_frame_maintenance_deadline(&authored_frame, now),
+            Some(now + Duration::from_millis(16)),
+        );
+        assert_eq!(
+            imgui_frame_presentation_deadline(&authored_frame, now),
+            None
+        );
         let rechecking_frame = retired_frame.clone().with_scene_preview_work(
             false,
             Some(Duration::from_millis(500)),

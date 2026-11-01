@@ -1,10 +1,13 @@
 use std::{
     io::Write,
-    sync::atomic::{AtomicU64, Ordering},
+    sync::{
+        Arc,
+        atomic::{AtomicU64, Ordering},
+    },
 };
 
 #[cfg(test)]
-use std::sync::{Arc, atomic::AtomicBool};
+use std::sync::atomic::AtomicBool;
 
 use nara_fs::{
     ContentDigest, DirectoryCapability, ExpectedTarget, FileCapability, FileIdentity, FsError,
@@ -50,7 +53,36 @@ pub(in crate::project_host) enum FilePublicationBinding {
     },
 }
 
+/// Content-dependent admission for this owner's complete successful publication path. Hosts
+/// add their own path, metadata and temporary storage allowances rather than recounting hashes.
+pub(in crate::project_host) struct FilePublicationContentCost {
+    pub(in crate::project_host) encoded_read_bytes: usize,
+    pub(in crate::project_host) content_work_bytes: usize,
+}
+
 impl FilePublicationBinding {
+    pub(in crate::project_host) fn checked_content_cost(
+        self,
+        output_bytes: usize,
+    ) -> Option<FilePublicationContentCost> {
+        let old = match self {
+            Self::Missing => 0,
+            Self::Existing { digest, .. } => usize::try_from(digest.length()).ok()?,
+        };
+        // New bytes are hashed during write, as input, before replacement, by replace_temp,
+        // through the retained candidate and at its final name. Four stages read new files;
+        // input hashing and streamed-write hashing use the already retained output body.
+        let encoded_read_bytes = old.checked_add(output_bytes.checked_mul(4)?)?;
+        let growth_sentinels = if matches!(self, Self::Missing) { 4 } else { 5 };
+        let content_work_bytes = old
+            .checked_add(output_bytes.checked_mul(6)?)?
+            .checked_add(growth_sentinels)?;
+        Some(FilePublicationContentCost {
+            encoded_read_bytes,
+            content_work_bytes,
+        })
+    }
+
     const fn expected_target(self) -> ExpectedTarget {
         match self {
             Self::Missing => ExpectedTarget::Missing,
@@ -191,7 +223,144 @@ impl FilePublicationReadSource {
     }
 }
 
+/// Read-only custody transferred while the original publication owner is still alive.
+/// It grants no replacement, write or historical publication authority.
+#[derive(Clone)]
+pub(in crate::project_host) struct FileSourceObservation {
+    inner: Arc<FileSourceObservationInner>,
+}
+
+struct FileSourceObservationInner {
+    file: FileCapability,
+    parent: DirectoryCapability,
+    digest: ContentDigest,
+}
+
+impl FileSourceObservation {
+    /// The transferred scope owns a leaf and shares its parent. Accounting this complete
+    /// custody is conservative when another scope still owns the same parent; it remains
+    /// valid after that original scope drops. No new parent handle is opened by transfer.
+    pub(in crate::project_host) const fn retained_handle_capacity() -> usize {
+        2
+    }
+
+    pub(in crate::project_host) const fn retained_bytes() -> usize {
+        // DirectoryCapability keeps a shared native File and policy/identity inner. A
+        // FileCapability plus Arc counters bounds that parent storage in this local model.
+        std::mem::size_of::<FileSourceObservationInner>()
+            + 2 * std::mem::size_of::<usize>()
+            + std::mem::size_of::<FileCapability>()
+            + 2 * std::mem::size_of::<usize>()
+    }
+
+    /// Moves the actual first read and its already retained parent after caller admission.
+    /// No reopening or historical-ID comparison can substitute for that handoff.
+    pub(in crate::project_host) fn from_read(
+        file: FileCapability,
+        parent: DirectoryCapability,
+        digest: ContentDigest,
+    ) -> Result<Self, FsError> {
+        if file.parent_identity() != Some(parent.identity()) {
+            return Err(FsError::Unproven {
+                operation: nara_fs::FsOperation::InspectHandle,
+                proof: "the source read does not belong to its continuously retained parent",
+            });
+        }
+        Ok(Self {
+            inner: Arc::new(FileSourceObservationInner {
+                file,
+                parent,
+                digest,
+            }),
+        })
+    }
+
+    pub(in crate::project_host) fn observation(
+        &self,
+    ) -> (FileIdentity, Option<FileIdentity>, ContentDigest) {
+        (
+            self.inner.file.identity(),
+            Some(self.inner.parent.identity()),
+            self.inner.digest,
+        )
+    }
+
+    pub(in crate::project_host) fn matches(
+        &self,
+        current: &FileCapability,
+    ) -> Result<bool, FsError> {
+        Ok(
+            current.parent_identity() == Some(self.inner.parent.identity())
+                && current.same_object(&self.inner.file)?,
+        )
+    }
+
+    pub(in crate::project_host) fn file(&self) -> &FileCapability {
+        &self.inner.file
+    }
+}
+
+pub(in crate::project_host) struct FileSourceObservationCost {
+    pub(in crate::project_host) retained_bytes: usize,
+    pub(in crate::project_host) retained_handle_capacity: usize,
+}
+
+impl std::fmt::Debug for FileSourceObservation {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter
+            .debug_struct("FileSourceObservation")
+            .field("observation", &self.observation())
+            .finish_non_exhaustive()
+    }
+}
+
 impl FilePublicationHost {
+    /// The caller admits the complete transferred leaf/parent scope and transient open overlap
+    /// before acquisition. No source body is read or hashed on this owner-thread handoff.
+    pub(in crate::project_host) fn source_observation_cost(
+        &self,
+    ) -> Option<FileSourceObservationCost> {
+        self.accepted_source_observation()?;
+        if self.has_cleanup() {
+            return None;
+        }
+        Some(FileSourceObservationCost {
+            retained_bytes: FileSourceObservation::retained_bytes(),
+            retained_handle_capacity: FileSourceObservation::retained_handle_capacity(),
+        })
+    }
+
+    /// Called under the persistence Host's exclusive guard, before it can accept another
+    /// Save/Reopen observation. The returned capability is opened and compared while the
+    /// original leaf and parent are continuously retained; copied IDs alone cannot bind it.
+    /// Its digest remains the accepted historical observation. The finite worker verifies
+    /// current content against it before publication, under its own admitted read budget.
+    pub(in crate::project_host) fn capture_source_observation(
+        &self,
+        expected: (FileIdentity, Option<FileIdentity>, ContentDigest),
+    ) -> Result<FileSourceObservation, FilePublicationRejection> {
+        if self.uncertain() {
+            return Err(FilePublicationRejection::RequiresReconcile);
+        }
+        if self.has_cleanup() {
+            return Err(FilePublicationRejection::CleanupPending);
+        }
+        if self.accepted_source_observation() != Some(expected) {
+            return Err(FilePublicationRejection::TargetChanged);
+        }
+        let file = self
+            .parent
+            .open_child_file(&self.target)
+            .map_err(|_| FilePublicationRejection::TargetChanged)?;
+        if file.parent_identity() != Some(self.parent.identity())
+            || !self.same_source_object(&file).unwrap_or(false)
+        {
+            return Err(FilePublicationRejection::TargetChanged);
+        }
+        FileSourceObservation::from_read(file, self.parent.share(), expected.2)
+            .map_err(|_| FilePublicationRejection::TargetChanged)
+    }
+
     pub(in crate::project_host) fn from_existing(
         parent: DirectoryCapability,
         target: RelativeComponent,
@@ -231,7 +400,9 @@ impl FilePublicationHost {
         if file.identity() != observed.identity() {
             return Err(FilePublicationFailureStage::OpenTarget);
         }
-        file.verify_digest(expected_digest, byte_limit)
+        // A conflicting growth needs only the expected-length sentinel to refuse. Keep the
+        // verification work tied to this observation instead of scanning up to a write ceiling.
+        file.verify_digest(expected_digest, expected_digest.length().min(byte_limit))
             .map_err(|_| FilePublicationFailureStage::OpenTarget)?;
         Ok(Self::from_existing(
             parent,
@@ -462,12 +633,16 @@ impl FilePublicationHost {
                 .as_ref()
                 .expect("an existing publication binding opened one target before locking");
             if target.identity() != identity
-                || target.verify_digest(digest, self.byte_limit).is_err()
+                || target
+                    .verify_digest(digest, digest.length().min(self.byte_limit))
+                    .is_err()
             {
                 return FilePublicationOutcome::Rejected(FilePublicationRejection::TargetChanged);
             }
         }
 
+        // Keep success-result storage ready before the first candidate write/name switch.
+        let accepted_target = self.target.clone();
         let (temporary_name, mut temporary) = match create_temporary(&self.parent) {
             Ok(temporary) => temporary,
             Err(failure) => {
@@ -507,7 +682,9 @@ impl FilePublicationHost {
         let file = match self.parent.open_child_file(&temporary_name) {
             Ok(file)
                 if file.identity() == temporary.identity()
-                    && file.verify_digest(digest, self.byte_limit).is_ok() =>
+                    && file
+                        .verify_digest(digest, digest.length().min(self.byte_limit))
+                        .is_ok() =>
             {
                 file
             }
@@ -558,7 +735,10 @@ impl FilePublicationHost {
             || evidence.receipt.written_content_digest() != source.digest()
             || source
                 .file
-                .verify_digest(source.digest(), self.byte_limit)
+                .verify_digest(
+                    source.digest(),
+                    source.digest().length().min(self.byte_limit),
+                )
                 .is_err()
             || !self
                 .parent
@@ -566,7 +746,10 @@ impl FilePublicationHost {
                 .is_ok_and(|current| {
                     current.identity() == source.identity()
                         && current
-                            .verify_digest(source.digest(), self.byte_limit)
+                            .verify_digest(
+                                source.digest(),
+                                source.digest().length().min(self.byte_limit),
+                            )
                             .is_ok()
                 })
         {
@@ -577,7 +760,7 @@ impl FilePublicationHost {
         FilePublicationOutcome::Published(AcceptedFilePublication {
             evidence,
             source,
-            target: self.target.clone(),
+            target: accepted_target,
         })
     }
 }
@@ -650,6 +833,32 @@ mod tests {
     const TARGET: &str = "source.json";
     const MOVED: &str = "moved.json";
     const BYTE_LIMIT: u64 = 1024;
+
+    #[test]
+    fn content_admission_covers_each_real_publication_stage_and_checked_growth() {
+        let fixture = Fixture::new();
+        fs::write(fixture.directory.join(TARGET), b"old").unwrap();
+        let root = fixture.capability();
+        let file = root.open_file(&RelativePath::new(TARGET).unwrap()).unwrap();
+        let binding = FilePublicationBinding::Existing {
+            identity: file.identity(),
+            digest: ContentDigest::of_bytes(b"old"),
+        };
+        let cost = binding.checked_content_cost(10_000).unwrap();
+        assert_eq!(cost.encoded_read_bytes, 40_003);
+        assert_eq!(cost.content_work_bytes, 60_008);
+        let missing = FilePublicationBinding::Missing
+            .checked_content_cost(10_000)
+            .unwrap();
+        assert_eq!(missing.encoded_read_bytes, 40_000);
+        assert_eq!(missing.content_work_bytes, 60_004);
+        assert!(binding.checked_content_cost(usize::MAX).is_none());
+        assert!(
+            FilePublicationBinding::Missing
+                .checked_content_cost(usize::MAX)
+                .is_none()
+        );
+    }
 
     struct Fixture {
         directory: PathBuf,
@@ -806,6 +1015,120 @@ mod tests {
         let source = host.source.as_ref().unwrap();
         assert_eq!(source.identity(), identity);
         assert_eq!(source.file.read_to_end_bounded(BYTE_LIMIT).unwrap(), bytes);
+    }
+
+    #[test]
+    fn source_observation_keeps_the_actual_leaf_and_parent_after_the_host_drops() {
+        let fixture = Fixture::new();
+        let bytes = b"retained capture input";
+        fs::write(fixture.directory.join(TARGET), bytes).unwrap();
+        let root = fixture.capability();
+        let original = root
+            .open_child_file(&RelativeComponent::new(TARGET).unwrap())
+            .unwrap();
+        let digest = ContentDigest::of_bytes(bytes);
+        let host = FilePublicationHost::bind_existing(&root, TARGET, &original, digest, BYTE_LIMIT)
+            .unwrap();
+        let expected = host.accepted_source_observation().unwrap();
+        let cost = host.source_observation_cost().unwrap();
+        assert_eq!(cost.retained_bytes, FileSourceObservation::retained_bytes());
+        assert_eq!(cost.retained_handle_capacity, 2);
+        let captured = host.capture_source_observation(expected).unwrap();
+        let escaped = captured.clone();
+        assert!(Arc::ptr_eq(&captured.inner, &escaped.inner));
+        drop((host, original, root, captured));
+        fs::rename(
+            fixture.directory.join(TARGET),
+            fixture.directory.join(MOVED),
+        )
+        .unwrap();
+        fs::write(fixture.directory.join(TARGET), bytes).unwrap();
+        // Parent identity includes its capability session. The escaped owner preserves that
+        // exact authority; importing a new Host root would create a distinct session.
+        let root = escaped.inner.parent.share();
+        let current = root.open_file(&RelativePath::new(TARGET).unwrap()).unwrap();
+        let original = root.open_file(&RelativePath::new(MOVED).unwrap()).unwrap();
+        assert_eq!(escaped.observation(), expected);
+        assert_eq!(
+            escaped.file().read_to_end_bounded(BYTE_LIMIT).unwrap(),
+            bytes
+        );
+        assert!(escaped.matches(&original).unwrap());
+        assert!(!escaped.matches(&current).unwrap());
+    }
+
+    #[test]
+    fn source_observation_uses_the_accepted_new_leaf_after_reopen_and_refuses_stale_receipts() {
+        let fixture = Fixture::new();
+        fs::write(fixture.directory.join(TARGET), b"before").unwrap();
+        let root = fixture.capability();
+        let original = root.open_file(&RelativePath::new(TARGET).unwrap()).unwrap();
+        let mut host = FilePublicationHost::bind_existing(
+            &root,
+            TARGET,
+            &original,
+            ContentDigest::of_bytes(b"before"),
+            BYTE_LIMIT,
+        )
+        .unwrap();
+        let old = host.accepted_source_observation().unwrap();
+        let captured_old = host.capture_source_observation(old).unwrap();
+        let replacement = match host.publish(b"after") {
+            FilePublicationOutcome::Published(accepted) => accepted.into_parts().1,
+            _ => panic!("fixture replacement must publish"),
+        };
+        host.commit_published(replacement);
+        assert!(matches!(
+            host.capture_source_observation(old),
+            Err(FilePublicationRejection::TargetChanged)
+        ));
+        let new = host.accepted_source_observation().unwrap();
+        let captured_new = host.capture_source_observation(new).unwrap();
+        assert_ne!(new.0, old.0);
+        assert_eq!(
+            captured_new.file().read_to_end_bounded(BYTE_LIMIT).unwrap(),
+            b"after"
+        );
+        assert!(captured_old.matches(&original).unwrap());
+        assert!(!captured_new.matches(&original).unwrap());
+        host.mark_uncertain();
+        assert!(host.source_observation_cost().is_none());
+        assert!(matches!(
+            host.capture_source_observation(new),
+            Err(FilePublicationRejection::RequiresReconcile)
+        ));
+    }
+
+    #[test]
+    fn source_handoff_preserves_the_accepted_digest_for_worker_validation_and_refuses_another_parent()
+     {
+        let fixture = Fixture::new();
+        fs::write(fixture.directory.join(TARGET), b"before").unwrap();
+        let root = fixture.capability();
+        let original = root.open_file(&RelativePath::new(TARGET).unwrap()).unwrap();
+        let host = FilePublicationHost::bind_existing(
+            &root,
+            TARGET,
+            &original,
+            ContentDigest::of_bytes(b"before"),
+            BYTE_LIMIT,
+        )
+        .unwrap();
+        let expected = host.accepted_source_observation().unwrap();
+        fs::write(fixture.directory.join(TARGET), b"external").unwrap();
+        let observation = host.capture_source_observation(expected).unwrap();
+        assert_eq!(observation.observation(), expected);
+        assert!(
+            observation
+                .file()
+                .verify_digest(expected.2, expected.2.length())
+                .is_err()
+        );
+        let other = Fixture::new();
+        assert!(matches!(
+            FileSourceObservation::from_read(original, other.capability(), expected.2),
+            Err(FsError::Unproven { .. })
+        ));
     }
 
     #[test]

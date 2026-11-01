@@ -707,7 +707,7 @@ impl EditorProjectSession {
     fn ensure_source_tool_admission(&self) -> Result<(), EditorSourceToolError> {
         if !self.accepts_new_work() || self.pending_workspace_intent.is_some() {
             Err(EditorSourceToolError::Closing)
-        } else if self.schema_adoption_fenced()
+        } else if self.authoring_operation_fenced()
             || self.source_tools.selection.graph_mutation_pending()
             || self.source_tools.reclamation.fenced()
         {

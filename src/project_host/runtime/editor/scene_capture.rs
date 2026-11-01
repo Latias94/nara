@@ -436,6 +436,19 @@ impl EditorProjectSession {
         let validation = project
             .startup_source_validation()
             .with_additional_retained_bytes(cost.retained_bytes)?;
+        let validation = {
+            let mismatch = || AuthoringProjectSourceAdmissionError::DocumentSourceMismatch;
+            let source = selection.root.receipt.as_ref().ok_or_else(mismatch)?;
+            let lane = self.scene_lanes.get(&document).ok_or_else(mismatch)?;
+            let mut guard = lane.host.try_bind().ok_or_else(mismatch)?;
+            let host = guard.host_mut();
+            let cost = host.source_observation_cost().ok_or_else(mismatch)?;
+            let expected = (source.identity(), source.parent_identity(), source.digest());
+            validation.bind_opened_source(source, cost, || {
+                host.capture_source_observation(expected)
+                    .map_err(|_| mismatch())
+            })?
+        };
         let mut sources = Vec::with_capacity(cost.source_count);
         for (key, path, _) in observed() {
             sources.push(CapturedSource {
@@ -476,7 +489,7 @@ impl EditorProjectSession {
     fn start_scene_capture(
         &mut self,
         selection: CaptureSelection,
-        inputs: AuthoringSourceCaptureInputs,
+        mut inputs: AuthoringSourceCaptureInputs,
     ) {
         if self.scene_capture.pending.is_some() {
             return;
@@ -497,21 +510,25 @@ impl EditorProjectSession {
             ));
             return;
         };
-        let open_prefabs = self.capture_open_prefabs(&selection.prefabs);
-        let open_scenes = self.capture_open_scenes(&selection.scenes);
-        let request = self
-            .authoring_project()
-            .expect("authoring capture has a project")
-            .capture_scene_request(
-                root_source,
-                self.workspace
-                    .scene(selection.root.document)
-                    .expect("captured Scene is open")
-                    .session(),
-                inputs,
-                open_prefabs,
-            )
-            .map(|request| request.with_open_scenes(open_scenes));
+        let request = (|| {
+            let observation =
+                self.capture_authoring_source_observation(&selection.root, &mut inputs)?;
+            let open_prefabs = self.capture_open_prefabs(&selection.prefabs, &mut inputs, None)?;
+            let open_scenes = self.capture_open_scenes(&selection.scenes, &mut inputs)?;
+            self.authoring_project()
+                .expect("authoring capture has a project")
+                .capture_scene_request(
+                    root_source,
+                    observation,
+                    self.workspace
+                        .scene(selection.root.document)
+                        .expect("captured Scene is open")
+                        .session(),
+                    inputs,
+                    open_prefabs,
+                )
+                .map(|request| request.with_open_scenes(open_scenes))
+        })();
         let request = match request {
             Ok(request) => request,
             Err(error) => {

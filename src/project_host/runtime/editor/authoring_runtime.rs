@@ -272,18 +272,14 @@ impl std::fmt::Debug for EditorAuthoringRuntime {
 impl EditorAuthoringRuntime {
     pub(super) fn new(
         project: ProjectContentSnapshot,
-        registry: &ComponentRegistrySnapshot,
         recipe: &crate::ProductRecipe,
     ) -> Result<Self, EditorAuthoringConstructionFailure> {
         let _ = recipe;
-        #[cfg(not(feature = "presentation-2d"))]
-        let _ = registry;
         let mut app = App::new();
         let preparation = (|| {
             configure_authoring_app(&mut app)?;
             #[cfg(feature = "presentation-2d")]
-            let preview =
-                EditorPreviewSession::install_trusted(&mut app, project.clone(), registry, recipe)?;
+            let preview = EditorPreviewSession::install_trusted(&mut app, project.clone(), recipe)?;
             publish_snapshot_assets(
                 app.world_mut()
                     .map_err(|_| runtime_error("project.editor.preview-world-unavailable"))?,
@@ -396,10 +392,9 @@ impl EditorAuthoringRuntime {
     pub(super) fn rebuild_for_project(
         &self,
         project: ProjectContentSnapshot,
-        registry: &ComponentRegistrySnapshot,
         recipe: &crate::ProductRecipe,
     ) -> Result<Self, EditorAuthoringConstructionFailure> {
-        let replacement = Self::new(project, registry, recipe)?;
+        let replacement = Self::new(project, recipe)?;
         #[cfg(feature = "presentation-2d")]
         let replacement = {
             let mut replacement = replacement;
@@ -407,6 +402,11 @@ impl EditorAuthoringRuntime {
             replacement
         };
         Ok(replacement)
+    }
+
+    #[cfg(feature = "presentation-2d")]
+    pub(super) fn installed_preview_registry(&self) -> Option<&ComponentRegistrySnapshot> {
+        nara_reflect::component_registry(self.runtime.world())
     }
 
     #[cfg(feature = "presentation-2d")]
@@ -896,6 +896,8 @@ fn configure_authoring_app(app: &mut App) -> Result<(), DiagnosticReport> {
         .map_err(|_| runtime_error("project.editor.preview-state-install-failed"))?;
     #[cfg(feature = "presentation-2d")]
     app.add_plugins((
+        nara_sprite::SpritePlugin,
+        nara_tilemap::TilemapPlugin,
         nara_render::RenderPlugin::default(),
         nara_image::ImagePreparePlugin,
         nara_sprite_render::SpriteRenderPlugin,

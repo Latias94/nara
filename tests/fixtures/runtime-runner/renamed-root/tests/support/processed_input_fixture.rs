@@ -136,7 +136,7 @@ fn cook(
             "[startup]\ndefault_scene = '1.scene.json'\n",
             "[content]\nscenes = ['2.scene.json', '3.scene.json']\n",
             "[input]\naction_map = 'player.actions.json'\n",
-            "[authoring]\nschema_bundle = 'schema/authoring.bundle.json'\n",
+            "[authoring]\nstate = \"ready\"\nschema_bundle = 'schema/authoring.bundle.json'\n",
             "[runtime]\npreset = 'local-headless'\n",
             "[capabilities]\nrequested = ['runtime-2d']\n",
         ),

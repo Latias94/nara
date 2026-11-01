@@ -552,8 +552,12 @@ fn data_only_prefab_compilation_preserves_pins_and_typed_omissions_without_nativ
     .unwrap();
     assert_eq!(observed, [(request, 1)]);
     assert!(!report.budget_exceeded());
-    assert!(!report.diagnostics.has_errors(), "{:?}", report.diagnostics);
-    let candidate = report.candidate.as_ref().unwrap();
+    assert!(
+        !report.diagnostics().has_errors(),
+        "{:?}",
+        report.diagnostics()
+    );
+    let candidate = report.candidate().unwrap();
     let (projected, provenance) = candidate
         .provenance()
         .iter()
@@ -574,7 +578,11 @@ fn data_only_prefab_compilation_preserves_pins_and_typed_omissions_without_nativ
         7
     );
     let expected = candidate.provenance().clone();
-    let (native_preview, omissions) = report.into_native_preview().unwrap();
+    let nara_scene::__private::AuthoringNativePreview {
+        candidate: native_preview,
+        omissions,
+        ..
+    } = report.into_native_preview().unwrap();
     assert_eq!(native_preview.provenance(), &expected);
     assert!(
         native_preview
@@ -630,8 +638,8 @@ fn prefab_compilation_rejects_an_independently_admitted_identical_basis() {
         },
     )
     .unwrap();
-    assert!(report.candidate.is_none());
-    assert!(report.diagnostics.has_errors());
+    assert!(report.candidate().is_none());
+    assert!(report.diagnostics().has_errors());
     assert!(!report.budget_exceeded());
     assert_eq!(published.document(), &prefab);
 }

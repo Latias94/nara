@@ -61,14 +61,20 @@ impl PublishedEditorProject {
     pub(super) fn new(
         generation: u64,
         request: EditorProjectRequest,
-        session: EditorProjectSession,
+        mut session: EditorProjectSession,
         supervised_play_wake: SupervisedPlayWake,
     ) -> Self {
+        let supervised_play_binding = session
+            .register_supervised_play_owner(generation)
+            .expect("publishing a fresh Session attaches its supervised Play custodian once");
         Self {
             generation,
             request,
             session: Box::new(session),
-            supervised_play: Box::new(SupervisedDesktopPlayOwner::with_wake(supervised_play_wake)),
+            supervised_play: Box::new(SupervisedDesktopPlayOwner::with_binding(
+                supervised_play_binding,
+                supervised_play_wake,
+            )),
         }
     }
 }

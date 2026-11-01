@@ -1,34 +1,34 @@
 //! Installed metadata recovery remains one finite Project Session operation.
 
 use std::sync::{
-    Arc, Mutex, TryLockError,
+    Arc,
     atomic::{AtomicU64, Ordering},
 };
 
 use nara_fs::{ContentDigest, FileIdentity, RelativePath, ReplaceReceipt};
 use nara_reflect::ComponentSchemaOwnerChange;
 use nara_scene::SchemaReclassificationKind;
-use nara_tasks::{
-    TaskDomainKey, TaskHandle, TaskPoolKind, TaskPools, TaskReturnState, TaskSpawnRequest,
-};
+use nara_tasks::{TaskDomainKey, TaskSpawnRequest};
 use nara_tooling::{
     EditorDocumentId, EditorWorkspaceSchemaReclassificationRequest,
     PreparedEditorWorkspaceSchemaReclassification,
 };
 
 use super::authoring_sources::AuthoringSourceSelection;
+use super::authoring_work::{Pending, WorkError};
 use super::persistence::{HostCustody, RetainedHost};
 use super::{EditorExecutionLane, EditorProjectSession, EditorSourceToolInstallationInspection};
 use crate::project_host::{
     authoring::{
         AdmittedAuthoringSchemaOwner, AuthoringDocumentCapture, AuthoringPrefabSessionSnapshot,
-        AuthoringProjectSessionSnapshot, AuthoringSchemaOwnerAttachmentFailure,
-        AuthoringSchemaOwnerPreparation, AuthoringSchemaOwnerProjectInput,
-        AuthoringSchemaOwnerReconciliation, PreparedAuthoringSchemaOwner,
-        PreparedSchemaOwnerProject, PreparedSchemaOwnerSceneCapture,
+        AuthoringProjectSessionSnapshot, AuthoringProjectSourceAdmissionError,
+        AuthoringSchemaOwnerAttachmentFailure, AuthoringSchemaOwnerPreparation,
+        AuthoringSchemaOwnerProjectInput, AuthoringSchemaOwnerReconciliation,
+        PreparedAuthoringSchemaOwner, PreparedSchemaOwnerProject, PreparedSchemaOwnerSceneCapture,
         SchemaOwnerObservedProjectAttachmentFailure, SchemaOwnerProjectAttachmentFailure,
     },
     file_publication::{FilePublicationEvidence, FilePublicationHost, FilePublicationOutcome},
+    persistence::FileSourceObservation,
 };
 
 const DOMAIN: TaskDomainKey = TaskDomainKey::new(0x7363_6865_6d61_6f77);
@@ -153,7 +153,7 @@ struct Candidate {
     workspace: PreparedEditorWorkspaceSchemaReclassification,
     project: PreparedSchemaOwnerProject,
     current: Vec<(EditorDocumentId, PreparedSchemaOwnerSceneCapture)>,
-    sources: Vec<AuthoringSourceSelection>,
+    sources: Vec<(AuthoringSourceSelection, FileSourceObservation)>,
 }
 enum Publication {
     Written(FilePublicationOutcome),
@@ -245,90 +245,6 @@ pub(super) struct EditorSchemaOwnerAdoptionHost {
     cancelled: bool,
     #[cfg(test)]
     next_publication_gate: Option<Box<dyn FnOnce() + Send>>,
-}
-
-struct Job<T> {
-    run: Option<Box<dyn FnOnce() -> T + Send>>,
-    started: bool,
-    result: Option<T>,
-}
-struct Pending<T> {
-    job: Arc<Mutex<Job<T>>>,
-    task: Option<TaskHandle<()>>,
-    rejection: Option<nara_tasks::TaskRejection>,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum WorkError {
-    CancelledBeforeStart,
-    Unavailable,
-    Unobserved,
-}
-
-impl<T: Send + 'static> Pending<T> {
-    fn start(pools: &TaskPools, run: impl FnOnce() -> T + Send + 'static) -> Self {
-        let job = Arc::new(Mutex::new(Job {
-            run: Some(Box::new(run) as Box<dyn FnOnce() -> T + Send>),
-            started: false,
-            result: None,
-        }));
-        let worker = Arc::clone(&job);
-        let admitted = pools
-            .spawn(
-                TaskPoolKind::Io,
-                TaskSpawnRequest::new(0, DOMAIN),
-                move |context| {
-                    let mut job = worker.lock().unwrap_or_else(|error| error.into_inner());
-                    if context.is_cancelled() {
-                        return;
-                    }
-                    job.started = true;
-                    let run = job.run.take().expect("finite operation executes once");
-                    job.result = Some(run());
-                },
-            )
-            .into_handle();
-        let (task, rejection) = match admitted {
-            Ok(task) => (Some(task), None),
-            Err(rejection) => (None, Some(rejection)),
-        };
-        Self {
-            job,
-            task,
-            rejection,
-        }
-    }
-    fn poll(&mut self) -> Option<Result<T, WorkError>> {
-        if self
-            .task
-            .as_ref()
-            .is_some_and(|task| task.return_observer().state() == TaskReturnState::Pending)
-        {
-            return None;
-        }
-        let mut job = match self.job.try_lock() {
-            Ok(job) => job,
-            Err(TryLockError::WouldBlock) => return None,
-            Err(TryLockError::Poisoned(error)) => error.into_inner(),
-        };
-        Some(match job.result.take() {
-            Some(result) => Ok(result),
-            None if job.started => Err(WorkError::Unobserved),
-            None if self
-                .task
-                .as_ref()
-                .is_some_and(|task| task.cancellation_token().is_cancelled()) =>
-            {
-                Err(WorkError::CancelledBeforeStart)
-            }
-            None => Err(WorkError::Unavailable),
-        })
-    }
-    fn cancel(&self) {
-        if let Some(task) = &self.task {
-            task.cancel();
-        }
-    }
 }
 
 impl EditorSchemaOwnerAdoptionHost {
@@ -439,7 +355,7 @@ impl EditorProjectSession {
         {
             return Err(EditorSchemaOwnerAdoptionError::RequiresReconcile);
         }
-        if self.schema_owner_adoption.fenced()
+        if self.authoring_operation_fenced()
             || self.schema_owner_adoption.pending()
             || self.schema_adoption_conflicting_work()
         {
@@ -503,7 +419,10 @@ impl EditorProjectSession {
         {
             return Err(EditorSchemaOwnerAdoptionError::Operation);
         }
-        if self.schema_owner_adoption.pending() || self.schema_adoption_conflicting_work() {
+        if self.authoring_operation_fenced()
+            || self.schema_owner_adoption.pending()
+            || self.schema_adoption_conflicting_work()
+        {
             return Err(EditorSchemaOwnerAdoptionError::Busy);
         }
         let (directory, receipt) = self
@@ -637,13 +556,17 @@ impl EditorProjectSession {
             .expect("review owns its candidate");
         #[cfg(test)]
         let gate = self.schema_owner_adoption.next_publication_gate.take();
-        let task = Pending::start(self.authoring_runtime.persistence_tasks(), move || {
-            publish(
-                candidate,
-                #[cfg(test)]
-                gate,
-            )
-        });
+        let task = Pending::start(
+            self.authoring_runtime.persistence_tasks(),
+            TaskSpawnRequest::new(0, DOMAIN),
+            move || {
+                publish(
+                    candidate,
+                    #[cfg(test)]
+                    gate,
+                )
+            },
+        );
         self.schema_owner_adoption.work = Some(Work::Publish(task));
         self.schema_owner_adoption.view.phase = EditorSchemaOwnerAdoptionPhase::Publishing;
         Ok(())
@@ -660,8 +583,8 @@ impl EditorProjectSession {
         }
     }
 
-    pub(super) fn schema_adoption_fenced(&self) -> bool {
-        self.schema_owner_adoption.fenced()
+    pub(super) fn authoring_operation_fenced(&self) -> bool {
+        self.schema_owner_adoption.fenced() || self.authored_schema_upgrade.writes_fenced()
     }
 
     fn schema_adoption_conflicting_work(&self) -> bool {
@@ -679,7 +602,7 @@ impl EditorProjectSession {
         self.authoring_project()
             .is_some_and(|project| candidate.metadata.input.matches(project))
             && candidate.workspace.validate(&self.workspace).is_ok()
-            && candidate.sources.iter().all(|source| {
+            && candidate.sources.iter().all(|(source, _)| {
                 self.authoring_source_selection(source.document).as_ref() == Some(source)
             })
             && self
@@ -730,6 +653,7 @@ impl EditorProjectSession {
             let custody = self.authoring_runtime.host_custody().clone();
             self.schema_owner_adoption.work = Some(Work::Inspect(Pending::start(
                 self.authoring_runtime.persistence_tasks(),
+                TaskSpawnRequest::new(0, DOMAIN),
                 move || inspect(start, custody),
             )));
             self.schema_owner_adoption.view.phase = Phase::Inspecting;
@@ -852,6 +776,7 @@ impl EditorProjectSession {
             let buffers = count
                 .checked_mul(
                     std::mem::size_of::<EditorDocumentId>()
+                        + std::mem::size_of::<FileSourceObservation>()
                         + std::mem::size_of::<AuthoringPrefabSessionSnapshot>()
                         + std::mem::size_of::<
                             crate::project_host::authoring::AuthoringSceneSessionSnapshot,
@@ -899,16 +824,34 @@ impl EditorProjectSession {
             let sources = documents
                 .into_iter()
                 .map(|id| {
-                    self.authoring_source_selection(id)
+                    let source = self
+                        .authoring_source_selection(id)
                         .filter(|source| source.receipt.is_some())
                         .ok_or_else(|| {
                             Failure::new(
                                 EditorSchemaOwnerAdoptionError::Stale,
                                 EditorSchemaOwnerAdoptionPhase::Preparing,
                             )
-                        })
+                        })?;
+                    let observation = self
+                        .capture_authoring_schema_source_observation(&source, &mut metadata.owner)
+                        .map_err(|error| {
+                            let reason = match error {
+                                AuthoringProjectSourceAdmissionError::DocumentSourceMismatch => {
+                                    EditorSchemaOwnerAdoptionError::Stale
+                                }
+                                _ => EditorSchemaOwnerAdoptionError::Preparation,
+                            };
+                            Failure::source(
+                                error,
+                                reason,
+                                EditorSchemaOwnerAdoptionPhase::Preparing,
+                                Some(id),
+                            )
+                        })?;
+                    Ok((source, observation))
                 })
-                .collect::<Result<Vec<_>, _>>()?;
+                .collect::<Result<Vec<_>, Failure>>()?;
             let workspace = self
                 .workspace
                 .capture_schema_reclassification(
@@ -926,6 +869,7 @@ impl EditorProjectSession {
             Ok((sources, workspace)) => {
                 self.schema_owner_adoption.work = Some(Work::Prepare(Pending::start(
                     self.authoring_runtime.persistence_tasks(),
+                    TaskSpawnRequest::new(0, DOMAIN),
                     move || prepare(metadata, sources, workspace),
                 )));
                 self.schema_owner_adoption.view.phase = EditorSchemaOwnerAdoptionPhase::Preparing;
@@ -1224,7 +1168,7 @@ fn inspect(start: Start, custody: HostCustody) -> Result<Inspected, Failure> {
 
 fn prepare(
     mut metadata: Metadata,
-    sources: Vec<AuthoringSourceSelection>,
+    sources: Vec<(AuthoringSourceSelection, FileSourceObservation)>,
     request: EditorWorkspaceSchemaReclassificationRequest,
 ) -> Result<Candidate, Failure> {
     let phase = EditorSchemaOwnerAdoptionPhase::Preparing;
@@ -1232,7 +1176,7 @@ fn prepare(
         .prepare()
         .map_err(|report| Failure::workspace(report, phase))?;
     let mut snapshot_bytes = 0_usize;
-    for source in &sources {
+    for (source, _) in &sources {
         let receipt = source
             .receipt
             .as_ref()
@@ -1277,13 +1221,14 @@ fn prepare(
         })?;
     let mut prefabs = Vec::with_capacity(sources.len());
     let mut scenes = Vec::with_capacity(sources.len());
-    for source in &sources {
+    for (source, observation) in &sources {
         if let Some(view) = workspace.scene_snapshot(source.document) {
             scenes.push(
                 crate::project_host::authoring::AuthoringSceneSessionSnapshot::capture_prepared(
                     source.receipt.as_ref().ok_or_else(|| {
                         Failure::new(EditorSchemaOwnerAdoptionError::Stale, phase)
                     })?,
+                    observation.clone(),
                     view,
                 )
                 .map_err(|error| {
@@ -1302,6 +1247,7 @@ fn prepare(
                     source.receipt.as_ref().ok_or_else(|| {
                         Failure::new(EditorSchemaOwnerAdoptionError::Stale, phase)
                     })?,
+                    observation.clone(),
                     view,
                 )
                 .map_err(|error| {
@@ -1327,7 +1273,7 @@ fn prepare(
             )
         })?;
     let mut current = Vec::with_capacity(sources.len());
-    for source in &sources {
+    for (source, observation) in &sources {
         if let Some(view) = workspace.scene_snapshot(source.document) {
             let capture = metadata
                 .owner
@@ -1335,6 +1281,7 @@ fn prepare(
                     source.receipt.as_ref().ok_or_else(|| {
                         Failure::new(EditorSchemaOwnerAdoptionError::Stale, phase)
                     })?,
+                    observation.clone(),
                     view,
                     &prefabs,
                     &scenes,

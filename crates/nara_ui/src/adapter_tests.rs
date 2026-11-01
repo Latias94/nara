@@ -472,19 +472,11 @@ fn schema_catalog_is_canonical_closed_and_requires_every_field() {
         ]
     );
     assert!(catalog.type_tombstones.is_empty());
-    assert_eq!(catalog.generation(), 3);
-    assert!(catalog.predecessor().is_some());
+    assert_eq!(catalog.generation(), 1);
+    assert!(catalog.predecessor().is_none());
     for schema in &catalog.components {
-        let brush_bearing = matches!(schema.id().as_str(), "nara.ui.UiVisual" | "nara.ui.UiText");
-        assert_eq!(
-            schema.version(),
-            match schema.id().as_str() {
-                "nara.ui.UiText" => ComponentSchemaVersion(3),
-                "nara.ui.UiVisual" => ComponentSchemaVersion(2),
-                _ => ComponentSchemaVersion::ONE,
-            }
-        );
-        assert_eq!(schema.field_tombstones().is_empty(), !brush_bearing);
+        assert_eq!(schema.version(), ComponentSchemaVersion::ONE);
+        assert!(schema.field_tombstones().is_empty());
         assert!(!schema.fields().is_empty());
         assert!(schema.fields().iter().all(|field| {
             field.required == !field.id().as_str().ends_with(".image")
@@ -506,83 +498,31 @@ fn schema_catalog_is_canonical_closed_and_requires_every_field() {
 }
 
 #[test]
-fn legacy_brush_migrations_preserve_roles_and_expose_image_asset_references() {
-    fn legacy_brush(kind: &str, reference: &str) -> ComponentValue {
-        ComponentValue::map([
-            ("kind", ComponentValue::String(kind.to_owned())),
-            ("red", ComponentValue::f64(1.0).unwrap()),
-            ("green", ComponentValue::f64(1.0).unwrap()),
-            ("blue", ComponentValue::f64(1.0).unwrap()),
-            ("alpha", ComponentValue::f64(1.0).unwrap()),
-            ("reference", ComponentValue::String(reference.to_owned())),
-        ])
-    }
-
+fn brush_records_require_canonical_fields_and_reject_untyped_references() {
     let registry = frozen_ui_registry();
-    let visual_id = ComponentTypeId::new("nara.ui.UiVisual");
-    let legacy_visual = ComponentValue::map([
-        ("background", legacy_brush("image", "assets/ui/panel.png")),
-        ("border_width", ComponentValue::f64(0.0).unwrap()),
-        ("border_brush", legacy_brush("solid", "")),
-        (
-            "radii",
-            ComponentValue::map([
-                ("top_left", ComponentValue::f64(0.0).unwrap()),
-                ("top_right", ComponentValue::f64(0.0).unwrap()),
-                ("bottom_right", ComponentValue::f64(0.0).unwrap()),
-                ("bottom_left", ComponentValue::f64(0.0).unwrap()),
-            ]),
-        ),
-    ]);
-    let migrated_visual = registry
-        .migrate_component_value(&visual_id, ComponentSchemaVersion::ONE, &legacy_visual)
-        .expect("legacy visual must migrate");
-    assert_eq!(migrated_visual.version, ComponentSchemaVersion(2));
-    let references = nara_reflect::collect_declared_asset_references(
-        &registry,
-        &visual_id,
-        migrated_visual.version,
-        &migrated_visual.value,
-    )
-    .expect("migrated image brush must expose its semantic asset reference");
-    assert_eq!(references.len(), 1);
-    assert_eq!(
-        references[0].asset_ref(),
-        &AssetRef::path("assets/ui/panel.png").unwrap()
-    );
-
-    let text_id = ComponentTypeId::new("nara.ui.UiText");
-    let legacy_text = ComponentValue::map([
-        ("content", ComponentValue::String("Text".to_owned())),
-        ("logical_size", ComponentValue::f64(16.0).unwrap()),
-        ("brush", legacy_brush("role", "primary_text")),
-        ("alignment", ComponentValue::String("start".to_owned())),
-        ("overflow", ComponentValue::String("clip".to_owned())),
-        ("has_semantic_text", ComponentValue::Bool(false)),
-        ("semantic_text", ComponentValue::String(String::new())),
-    ]);
-    let migrated_text = registry
-        .migrate_component_value(&text_id, ComponentSchemaVersion::ONE, &legacy_text)
-        .expect("legacy text must migrate");
-    assert_eq!(migrated_text.version, ComponentSchemaVersion(3));
-    assert_eq!(
-        migrated_text
-            .value
-            .field("brush")
-            .unwrap()
-            .field_str("role")
-            .unwrap(),
-        "primary_text"
-    );
-    assert_eq!(
-        migrated_text
-            .value
-            .field("brush")
-            .unwrap()
-            .field("image")
-            .unwrap(),
-        &ComponentValue::Null
-    );
+    let visual = crate::codec::encode_visual(&UiVisual::role(UiColorRole::Panel)).unwrap();
+    let text = crate::codec::encode_text(&UiText::new("Text", 16.0).unwrap()).unwrap();
+    for (component, mut value, field) in [
+        ("nara.ui.UiVisual", visual.clone(), "background"),
+        ("nara.ui.UiVisual", visual, "border_brush"),
+        ("nara.ui.UiText", text, "brush"),
+    ] {
+        let component = ComponentTypeId::new(component);
+        registry.preflight_component(&component, &value).unwrap();
+        let ComponentValue::Map(mut brush) = value.field(field).unwrap().clone() else {
+            panic!("the canonical brush must be a map");
+        };
+        let reference = brush.remove("role").unwrap();
+        brush.remove("image");
+        brush.insert("reference".to_owned(), reference);
+        value
+            .set_path(
+                &ComponentFieldPath::from_fields([field]),
+                ComponentValue::Map(brush),
+            )
+            .unwrap();
+        assert!(registry.preflight_component(&component, &value).is_err());
+    }
 }
 
 #[test]
@@ -609,7 +549,7 @@ fn image_brush_preserves_complete_products_without_source_database() {
     let document = SceneDocument::from_ordered_roots([SceneEntityRecord::new(scene_id("image"))
         .with_component(
             component_id.clone(),
-            nara_scene::SceneComponentRecord::new(ComponentSchemaVersion(2), encoded),
+            nara_scene::SceneComponentRecord::new(ComponentSchemaVersion::ONE, encoded),
         )]);
     let expanded = nara_scene::ExpandedSceneDocument::plain(Arc::new(document))
         .bind_source(scene_source_key("processed-ui-image"));
@@ -644,7 +584,7 @@ fn image_brush_preserves_complete_products_without_source_database() {
         let references = nara_reflect::collect_declared_asset_references(
             &snapshot,
             &component_id,
-            ComponentSchemaVersion(2),
+            ComponentSchemaVersion::ONE,
             &value,
         )
         .unwrap();

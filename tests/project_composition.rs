@@ -110,6 +110,9 @@ source_universe = 'fdb0ca56-759d-5f78-8b7b-83d3228d7cf5'
 native_document_identity = 'project_location'
 name = "Server Conflict"
 
+[authoring]
+state = "ready"
+
 [runtime]
 preset = "server"
 
@@ -134,6 +137,9 @@ schema_version = 1
 source_universe = 'fdb0ca56-759d-5f78-8b7b-83d3228d7cf5'
 native_document_identity = 'project_location'
 name = "Incomplete Presentation Closure"
+
+[authoring]
+state = "ready"
 
 [capabilities]
 requested = ["presentation-2d"]
@@ -170,6 +176,9 @@ source_universe = 'fdb0ca56-759d-5f78-8b7b-83d3228d7cf5'
 native_document_identity = 'project_location'
 name = "Complete Presentation Closure"
 
+[authoring]
+state = "ready"
+
 [capabilities]
 requested = ["runtime-2d", "presentation-2d"]
 "#,
@@ -199,6 +208,9 @@ schema_version = 1
 source_universe = 'fdb0ca56-759d-5f78-8b7b-83d3228d7cf5'
 native_document_identity = 'project_location'
 name = "Unavailable Tooling"
+
+[authoring]
+state = "ready"
 
 [capabilities]
 requested = ["tooling"]
@@ -233,6 +245,9 @@ schema_version = 1
 source_universe = 'fdb0ca56-759d-5f78-8b7b-83d3228d7cf5'
 native_document_identity = 'project_location'
 name = ["not", "a", "string"]
+
+[authoring]
+state = "ready"
 "#,
     );
 
@@ -466,5 +481,8 @@ schema_version = 1
 source_universe = 'fdb0ca56-759d-5f78-8b7b-83d3228d7cf5'
 native_document_identity = 'project_location'
 name = "Capability Test"
+
+[authoring]
+state = "ready"
 "#
 }

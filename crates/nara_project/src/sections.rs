@@ -14,6 +14,7 @@ use nara_window::{PresentMode, WindowMode};
 use serde::{Deserialize, Serialize};
 
 use crate::MAX_PROJECT_UI_LOGICAL_EXTENT;
+use crate::authoring::ProjectAuthoringState;
 use crate::capability::{ProductCapability, ProductCapabilitySet, RuntimePreset};
 use crate::defaults::*;
 use crate::effective::{
@@ -83,11 +84,23 @@ impl Default for ProjectPathsManifest {
 }
 
 /// Project-wide source declaration for non-executable authoring data.
-#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize, Default)]
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct ProjectAuthoringManifest {
+    /// Required source policy. Parsing or resolving this value is not execution admission.
+    pub state: ProjectAuthoringState,
     #[serde(default)]
     pub schema_bundle: Option<String>,
+}
+
+impl Default for ProjectAuthoringManifest {
+    /// Selects Ready for trusted programmatic producers; deserialization requires explicit state.
+    fn default() -> Self {
+        Self {
+            state: ProjectAuthoringState::Ready,
+            schema_bundle: None,
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize, Default)]

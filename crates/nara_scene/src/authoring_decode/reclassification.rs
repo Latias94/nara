@@ -103,7 +103,7 @@ impl AuthoringSchemaBasis {
                 if !next
                     .schema
                     .same_definition_except_initial_value(&previous.schema)
-                    || !data_adapter_creation_successor(
+                    || !data_adapter_owner_successor(
                         next.adapter.as_ref(),
                         previous.adapter.as_ref(),
                     )
@@ -118,7 +118,7 @@ impl AuthoringSchemaBasis {
     }
 }
 
-fn data_adapter_creation_successor(
+pub(super) fn data_adapter_owner_successor(
     next: Option<&AuthoringAdapterEvidence>,
     previous: Option<&AuthoringAdapterEvidence>,
 ) -> bool {

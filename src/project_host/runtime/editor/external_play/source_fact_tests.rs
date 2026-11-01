@@ -202,7 +202,7 @@ fn assert_receipt_matches_strict_startup(
     receipt
 }
 
-struct SourceReceiptProject {
+pub(super) struct SourceReceiptProject {
     root: PathBuf,
 }
 
@@ -227,7 +227,7 @@ impl SourceReceiptProject {
         }
     }
 
-    fn new(prefab_references: &[AssetRef]) -> Self {
+    pub(super) fn new(prefab_references: &[AssetRef]) -> Self {
         let project = Self {
             root: std::env::temp_dir().join(format!(
                 "nara_supervised_source_facts_{}_{}",
@@ -253,6 +253,7 @@ prefabs = "prefabs"
 [startup]
 default_scene = "startup.scene.json"
 [authoring]
+state = "ready"
 schema_bundle = "schema/authoring.bundle.json"
 [runtime]
 preset = "local-headless"
@@ -340,7 +341,7 @@ contract = "desktop-supervised-play/v1"
         .unwrap();
     }
 
-    fn capability(&self) -> DirectoryCapability {
+    pub(super) fn capability(&self) -> DirectoryCapability {
         #[cfg(windows)]
         let file = {
             use std::os::windows::fs::OpenOptionsExt;

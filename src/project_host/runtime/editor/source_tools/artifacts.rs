@@ -606,7 +606,7 @@ impl EditorProjectSession {
         if self.source_tools.reclamation.pending() {
             return Err(Error::Busy);
         }
-        if !self.accepts_new_work() || self.schema_adoption_fenced() {
+        if !self.accepts_new_work() || self.authoring_operation_fenced() {
             return Err(Error::Closing);
         }
         let state = &self.source_tools.artifacts;
@@ -623,7 +623,7 @@ impl EditorProjectSession {
         &self,
         basis: &EditorSourceToolArtifactBasis,
     ) -> Result<(), Error> {
-        if !self.accepts_new_work() || self.schema_adoption_fenced() {
+        if !self.accepts_new_work() || self.authoring_operation_fenced() {
             return Err(Error::Closing);
         }
         if self.source_tools.reclamation.fenced() {
@@ -706,7 +706,7 @@ impl EditorProjectSession {
         // Already owned removal must settle its result before Close shuts its publisher down.
         // This private drain permission cannot admit a new intent during Close.
         if !self.authoring_runtime.host_custody().is_accepting()
-            || self.schema_adoption_fenced()
+            || self.authoring_operation_fenced()
             || (self.closing
                 && record.phase != nara_tooling::EditorSourceToolReclamationRecordPhase::Results)
         {

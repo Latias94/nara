@@ -142,7 +142,7 @@ impl EditorProjectSession {
     }
 
     pub(crate) fn request_play(&mut self, command: EditorPlayCommand) -> EditorPlayRequestResult {
-        if self.source_tools.reclamation_fenced()
+        if (self.source_tools.reclamation_fenced() || self.authored_schema_upgrade.writes_fenced())
             && matches!(
                 command,
                 EditorPlayCommand::Play
@@ -282,7 +282,10 @@ impl EditorProjectSession {
         document: EditorDocumentId,
         revision: nara_scene::SceneAuthoringRevision,
     ) -> EditorPlayRequestResult {
-        if !self.accepts_new_work() || self.reopen_pending() {
+        if !self.accepts_new_work()
+            || self.authored_schema_upgrade.writes_fenced()
+            || self.reopen_pending()
+        {
             return EditorPlayRequestResult::Rejected(EditorPlayRejection::Busy);
         }
         if self.external_play_view().is_some() && self.trusted_compiled().is_none() {

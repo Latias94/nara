@@ -44,6 +44,31 @@ pub(crate) struct AuthoringDocumentSourceFact {
 }
 
 impl AuthoringDocumentSourceFact {
+    /// Binds an actual file observation to an already admitted native document identity.
+    /// The enclosing source operation admits storage before copying these locators.
+    pub(super) fn from_native_observation(
+        relative_path: &str,
+        identity: FileIdentity,
+        parent_identity: Option<FileIdentity>,
+        digest: ContentDigest,
+        native: &AdmittedNativeDocumentSource,
+    ) -> Result<Self, AuthoringDocumentAdmissionError> {
+        validate_native_source_receipt(relative_path, native.key().kind(), identity, native)?;
+        let encoded_bytes = usize::try_from(digest.length()).map_err(|_| {
+            AuthoringDocumentAdmissionError::SourceTooLarge {
+                maximum: usize::MAX as u64,
+            }
+        })?;
+        Ok(Self {
+            relative_path: Arc::from(relative_path),
+            identity,
+            parent_identity,
+            digest,
+            encoded_bytes,
+            native: native.clone(),
+        })
+    }
+
     pub(crate) fn checked_retained_bytes(&self) -> Option<usize> {
         std::mem::size_of::<Self>()
             .checked_add(2 * std::mem::size_of::<usize>())?
@@ -527,7 +552,7 @@ pub(super) fn admit_prefab_bytes_with_basis(
         .publish())
 }
 
-fn document_source(
+pub(super) fn document_source(
     path: &ProjectPath,
 ) -> Result<AuthoringDocumentSource, AuthoringDocumentDataError> {
     let path =

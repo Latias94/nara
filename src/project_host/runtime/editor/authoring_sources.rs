@@ -7,8 +7,10 @@ use nara_tooling::EditorDocumentId;
 
 use crate::project_host::authoring::{
     AuthoringPrefabSessionSnapshot, AuthoringProjectSourceAdmissionError,
-    AuthoringSceneSessionSnapshot, document::AuthoringDocumentSourceFact,
+    AuthoringSceneSessionSnapshot, AuthoringSourceCaptureInputs, PreparedAuthoringSchemaOwner,
+    document::AuthoringDocumentSourceFact,
 };
+use crate::project_host::persistence::FileSourceObservation;
 
 use super::EditorProjectSession;
 
@@ -265,29 +267,150 @@ impl EditorProjectSession {
         Ok(bytes)
     }
 
+    /// Acquires source custody only after its complete cost fits the capture allowance.
+    pub(super) fn capture_authoring_source_observation(
+        &self,
+        selected: &AuthoringSourceSelection,
+        inputs: &mut AuthoringSourceCaptureInputs,
+    ) -> Result<FileSourceObservation, AuthoringProjectSourceAdmissionError> {
+        let mismatch = || AuthoringProjectSourceAdmissionError::DocumentSourceMismatch;
+        let source = selected.receipt.as_ref().ok_or_else(mismatch)?;
+        if source.relative_path() != selected.project_path.as_ref()
+            || source.source_key() != &selected.source_key
+        {
+            return Err(mismatch());
+        }
+        let expected = (source.identity(), source.parent_identity(), source.digest());
+        match selected.source_key.kind() {
+            nara_scene::SourceDocumentKind::Scene => {
+                let lane = self
+                    .scene_lanes
+                    .get(&selected.document)
+                    .ok_or_else(mismatch)?;
+                if selected.project_path != lane.project_path
+                    || selected.source_key != lane.source_key
+                {
+                    return Err(mismatch());
+                }
+                let mut guard = lane.host.try_bind().ok_or_else(mismatch)?;
+                let host = guard.host_mut();
+                let cost = host.source_observation_cost().ok_or_else(mismatch)?;
+                inputs.capture_source_observation(cost, || {
+                    host.capture_source_observation(expected)
+                        .map_err(|_| mismatch())
+                })
+            }
+            nara_scene::SourceDocumentKind::Prefab => {
+                let lane = self
+                    .prefab_lanes
+                    .get(&selected.document)
+                    .ok_or_else(mismatch)?;
+                if selected.project_path != lane.project_path
+                    || selected.source_key != lane.source_key
+                {
+                    return Err(mismatch());
+                }
+                let mut guard = lane.host.try_bind().ok_or_else(mismatch)?;
+                let host = guard.host_mut();
+                let cost = host.source_observation_cost().ok_or_else(mismatch)?;
+                inputs.capture_source_observation(cost, || {
+                    host.capture_source_observation(expected)
+                        .map_err(|_| mismatch())
+                })
+            }
+        }
+    }
+
+    /// Freezes each open source under the schema operation's existing cumulative allowance.
+    pub(super) fn capture_authoring_schema_source_observation(
+        &self,
+        selected: &AuthoringSourceSelection,
+        owner: &mut PreparedAuthoringSchemaOwner,
+    ) -> Result<FileSourceObservation, AuthoringProjectSourceAdmissionError> {
+        let mismatch = || AuthoringProjectSourceAdmissionError::DocumentSourceMismatch;
+        let source = selected.receipt.as_ref().ok_or_else(mismatch)?;
+        if source.relative_path() != selected.project_path.as_ref()
+            || source.source_key() != &selected.source_key
+        {
+            return Err(mismatch());
+        }
+        let expected = (source.identity(), source.parent_identity(), source.digest());
+        match selected.source_key.kind() {
+            nara_scene::SourceDocumentKind::Scene => {
+                let lane = self
+                    .scene_lanes
+                    .get(&selected.document)
+                    .ok_or_else(mismatch)?;
+                if selected.project_path != lane.project_path
+                    || selected.source_key != lane.source_key
+                {
+                    return Err(mismatch());
+                }
+                let mut guard = lane.host.try_bind().ok_or_else(mismatch)?;
+                let host = guard.host_mut();
+                let cost = host.source_observation_cost().ok_or_else(mismatch)?;
+                owner.capture_source_observation(cost, || {
+                    host.capture_source_observation(expected)
+                        .map_err(|_| mismatch())
+                })
+            }
+            nara_scene::SourceDocumentKind::Prefab => {
+                let lane = self
+                    .prefab_lanes
+                    .get(&selected.document)
+                    .ok_or_else(mismatch)?;
+                if selected.project_path != lane.project_path
+                    || selected.source_key != lane.source_key
+                {
+                    return Err(mismatch());
+                }
+                let mut guard = lane.host.try_bind().ok_or_else(mismatch)?;
+                let host = guard.host_mut();
+                let cost = host.source_observation_cost().ok_or_else(mismatch)?;
+                owner.capture_source_observation(cost, || {
+                    host.capture_source_observation(expected)
+                        .map_err(|_| mismatch())
+                })
+            }
+        }
+    }
+
     pub(super) fn capture_open_scenes(
         &self,
         selections: &[AuthoringSourceSelection],
-    ) -> Box<[AuthoringSceneSessionSnapshot]> {
+        inputs: &mut AuthoringSourceCaptureInputs,
+    ) -> Result<Box<[AuthoringSceneSessionSnapshot]>, AuthoringProjectSourceAdmissionError> {
         selections
             .iter()
-            .filter_map(|selected| {
-                let lane = self.scene_lanes.get(&selected.document)?;
-                let session = self.workspace.scene(selected.document)?.session();
-                let Some(source) = selected.receipt.as_ref().or(lane.authoring_source.as_ref())
-                else {
-                    return Some(AuthoringSceneSessionSnapshot::unavailable(
+            .map(|selected| {
+                let session = self
+                    .workspace
+                    .scene(selected.document)
+                    .ok_or(AuthoringProjectSourceAdmissionError::DocumentSourceMismatch)?
+                    .session();
+                let unavailable = || {
+                    AuthoringSceneSessionSnapshot::unavailable(
                         selected.source_key.clone(),
                         Arc::clone(&selected.project_path),
                         session,
-                    ));
+                    )
                 };
-                let snapshot = AuthoringSceneSessionSnapshot::capture(source, session);
-                Some(if selected.receipt.is_some() {
-                    snapshot
-                } else {
-                    snapshot.without_persistence()
-                })
+                let Some(source) = selected.receipt.as_ref() else {
+                    return Ok(unavailable());
+                };
+                let observation = match self.capture_authoring_source_observation(selected, inputs)
+                {
+                    Ok(observation) => observation,
+                    Err(AuthoringProjectSourceAdmissionError::DocumentSourceMismatch) => {
+                        return Ok(unavailable());
+                    }
+                    Err(error) => return Err(error),
+                };
+                Ok(AuthoringSceneSessionSnapshot::capture(
+                    source,
+                    observation,
+                    session,
+                ))
             })
             .collect()
     }
@@ -295,26 +418,45 @@ impl EditorProjectSession {
     pub(super) fn capture_open_prefabs(
         &self,
         selections: &[AuthoringSourceSelection],
-    ) -> Box<[AuthoringPrefabSessionSnapshot]> {
+        inputs: &mut AuthoringSourceCaptureInputs,
+        root: Option<(&AuthoringSourceSelection, &FileSourceObservation)>,
+    ) -> Result<Box<[AuthoringPrefabSessionSnapshot]>, AuthoringProjectSourceAdmissionError> {
         selections
             .iter()
-            .filter_map(|selected| {
-                let lane = self.prefab_lanes.get(&selected.document)?;
-                let session = self.workspace.prefab(selected.document)?.session();
-                let Some(source) = selected.receipt.as_ref().or(lane.authoring_source.as_ref())
-                else {
-                    return Some(AuthoringPrefabSessionSnapshot::unavailable(
+            .map(|selected| {
+                let session = self
+                    .workspace
+                    .prefab(selected.document)
+                    .ok_or(AuthoringProjectSourceAdmissionError::DocumentSourceMismatch)?
+                    .session();
+                let unavailable = || {
+                    AuthoringPrefabSessionSnapshot::unavailable(
                         selected.source_key.clone(),
                         Arc::clone(&selected.project_path),
                         session,
-                    ));
+                    )
                 };
-                let snapshot = AuthoringPrefabSessionSnapshot::capture(source, session);
-                Some(if selected.receipt.is_some() {
-                    snapshot
-                } else {
-                    snapshot.without_persistence()
-                })
+                let Some(source) = selected.receipt.as_ref() else {
+                    return Ok(unavailable());
+                };
+                let observation =
+                    if let Some((_, observation)) = root.filter(|(root, _)| *root == selected) {
+                        // The root factory already admitted this custody; sharing opens no leaf.
+                        observation.clone()
+                    } else {
+                        match self.capture_authoring_source_observation(selected, inputs) {
+                            Ok(observation) => observation,
+                            Err(AuthoringProjectSourceAdmissionError::DocumentSourceMismatch) => {
+                                return Ok(unavailable());
+                            }
+                            Err(error) => return Err(error),
+                        }
+                    };
+                Ok(AuthoringPrefabSessionSnapshot::capture(
+                    source,
+                    observation,
+                    session,
+                ))
             })
             .collect()
     }

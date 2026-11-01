@@ -111,6 +111,7 @@ scenes = "scenes"
 prefabs = "prefabs"
 
 [authoring]
+state = "ready"
 schema_bundle = "schema/authoring.bundle.json"
 
 [startup]

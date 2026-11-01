@@ -10,8 +10,88 @@ use nara_scene::{
 
 use super::*;
 use crate::project_host::authoring::tests::independent_capture::{
-    independent_project, open_second_scene,
+    bound_source_host, independent_project, open_second_scene,
 };
+
+trait BoundCaptureRequests {
+    fn capture_bound_scene_request(
+        &self,
+        source: &super::super::super::document::AuthoringDocumentSourceFact,
+        session: &nara_scene::SceneAuthoringSession,
+        inputs: AuthoringSourceCaptureInputs,
+        prefabs: Box<[AuthoringPrefabSessionSnapshot]>,
+    ) -> Result<OwnedAuthoringSceneCapture, AuthoringProjectSourceAdmissionError>;
+
+    fn capture_bound_prefab_request(
+        &self,
+        source: &super::super::super::document::AuthoringDocumentSourceFact,
+        basis: &AuthoringSchemaBasis,
+        kind: nara_scene::SourceDocumentKind,
+        inputs: AuthoringSourceCaptureInputs,
+        prefabs: Box<[AuthoringPrefabSessionSnapshot]>,
+    ) -> Result<prefabs::AuthoringPrefabCaptureRequest, AuthoringProjectSourceAdmissionError>;
+}
+
+fn observe_request_root(
+    snapshot: &AuthoringProjectSessionSnapshot,
+    source: &super::super::super::document::AuthoringDocumentSourceFact,
+    inputs: &mut AuthoringSourceCaptureInputs,
+) -> Result<FileSourceObservation, AuthoringProjectSourceAdmissionError> {
+    let host = bound_source_host(snapshot, source)?;
+    inputs.capture_source_observation(host.source_observation_cost().unwrap(), || {
+        host.capture_source_observation(host.accepted_source_observation().unwrap())
+            .map_err(|_| AuthoringProjectSourceAdmissionError::DocumentSourceMismatch)
+    })
+}
+
+pub(super) fn observe_owner_source(
+    owner: &mut crate::project_host::authoring::PreparedAuthoringSchemaOwner,
+    snapshot: &AuthoringProjectSessionSnapshot,
+    source: &super::super::super::document::AuthoringDocumentSourceFact,
+) -> FileSourceObservation {
+    let host = bound_source_host(snapshot, source).unwrap();
+    owner
+        .capture_source_observation(host.source_observation_cost().unwrap(), || {
+            host.capture_source_observation(host.accepted_source_observation().unwrap())
+                .map_err(|_| AuthoringProjectSourceAdmissionError::DocumentSourceMismatch)
+        })
+        .unwrap()
+}
+
+impl BoundCaptureRequests for AuthoringProjectSessionSnapshot {
+    fn capture_bound_scene_request(
+        &self,
+        source: &super::super::super::document::AuthoringDocumentSourceFact,
+        session: &nara_scene::SceneAuthoringSession,
+        mut inputs: AuthoringSourceCaptureInputs,
+        prefabs: Box<[AuthoringPrefabSessionSnapshot]>,
+    ) -> Result<OwnedAuthoringSceneCapture, AuthoringProjectSourceAdmissionError> {
+        inputs.retain_shared_source_observations(
+            prefabs
+                .iter()
+                .filter_map(|snapshot| snapshot.observation.as_ref()),
+        )?;
+        let observation = observe_request_root(self, source, &mut inputs)?;
+        self.capture_scene_request(source, observation, session, inputs, prefabs)
+    }
+
+    fn capture_bound_prefab_request(
+        &self,
+        source: &super::super::super::document::AuthoringDocumentSourceFact,
+        basis: &AuthoringSchemaBasis,
+        kind: nara_scene::SourceDocumentKind,
+        mut inputs: AuthoringSourceCaptureInputs,
+        prefabs: Box<[AuthoringPrefabSessionSnapshot]>,
+    ) -> Result<prefabs::AuthoringPrefabCaptureRequest, AuthoringProjectSourceAdmissionError> {
+        inputs.retain_shared_source_observations(
+            prefabs
+                .iter()
+                .filter_map(|snapshot| snapshot.observation.as_ref()),
+        )?;
+        let observation = observe_request_root(self, source, &mut inputs)?;
+        self.capture_prefab_conversion_request(source, observation, basis, kind, inputs, prefabs)
+    }
+}
 
 mod composition_failure;
 mod host_retention;
@@ -46,7 +126,7 @@ fn shared_root_input_must_fit_the_retained_budget_even_when_its_preview_is_small
     let held_document = session.shared_document();
 
     let mut unrestricted = snapshot
-        .capture_scene_document(&source, &session, &[])
+        .capture_scene_from_bound_source(&source, &session, &[])
         .unwrap();
     assert_eq!(
         unrestricted.readiness(),
@@ -63,7 +143,7 @@ fn shared_root_input_must_fit_the_retained_budget_even_when_its_preview_is_small
     );
 
     let mut request = snapshot
-        .capture_scene_request(
+        .capture_bound_scene_request(
             &source,
             &session,
             snapshot.admit_source_capture_inputs(0, 0).unwrap(),
@@ -159,20 +239,22 @@ fn stable_root_metadata_counts_toward_encoded_bytes_and_unique_file_limits() {
             .unwrap()
             .len();
         let captured = snapshot
-            .capture_scene_document(&source, &session, &[])
+            .capture_scene_from_bound_source(&source, &session, &[])
             .unwrap();
         assert_eq!(captured.readiness(), AuthoringProjectReadiness::Complete);
         assert!(captured.prefabs().is_empty());
         assert!(captured.assets().is_empty());
         assert_eq!(captured.source_facts().len(), 2);
-        assert_eq!(captured.usage().unique_files(), baseline.unique_files() + 2);
+        // Root and stored metadata enter the capture; native content readmission reads the
+        // sidecar once more against the same current document handle before publication.
+        assert_eq!(captured.usage().unique_files(), baseline.unique_files() + 3);
         assert_eq!(
             captured.usage().aggregate_encoded_bytes(),
-            baseline.aggregate_encoded_bytes() + source.encoded_bytes() + metadata_bytes,
+            baseline.aggregate_encoded_bytes() + source.encoded_bytes() + 2 * metadata_bytes,
         );
 
         let mut request = snapshot
-            .capture_scene_request(
+            .capture_bound_scene_request(
                 &source,
                 &session,
                 snapshot.admit_source_capture_inputs(0, 0).unwrap(),
@@ -235,7 +317,7 @@ fn preview_omissions_retain_vector_capacity_and_both_owned_strings_per_record() 
     .unwrap();
     let (snapshot, source, session) = open_second_scene(&project);
     let mut capture = snapshot
-        .capture_scene_document(&source, &session, &[])
+        .capture_scene_from_bound_source(&source, &session, &[])
         .unwrap();
     let preview = capture.take_preview().unwrap();
     let mut omissions = preview.omissions;

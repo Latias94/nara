@@ -37,6 +37,22 @@ pub(crate) mod schema;
     reason = "the root-private schema receipt is consumed by the generic authoring decoder"
 )]
 mod authoring;
+#[cfg(all(
+    feature = "serde",
+    any(feature = "tooling", feature = "project-tooling")
+))]
+pub use authoring::{AuthoredSchemaUpgradeHistoryPolicy, AuthoredSchemaUpgradeHostLimits};
+#[cfg(all(
+    feature = "serde",
+    any(feature = "tooling", feature = "project-tooling")
+))]
+pub use authoring::{
+    AuthoredSchemaUpgradeRecovery, AuthoredSchemaUpgradeRecoveryError,
+    AuthoredSchemaUpgradeRecoveryErrorKind, AuthoredSchemaUpgradeRecoveryMember,
+    AuthoredSchemaUpgradeRecoveryMemberState, AuthoredSchemaUpgradeRecoveryPhase,
+    AuthoredSchemaUpgradeRecoveryReceipt, AuthoredSchemaUpgradeRecoveryReview,
+    AuthoredSchemaUpgradeRecoveryUsage, AuthoredSchemaUpgradeRecoveryView,
+};
 
 #[cfg(all(feature = "runtime-2d", feature = "serde"))]
 pub(crate) mod check;
@@ -137,19 +153,15 @@ pub use runtime::DesktopRunIntent;
 ))]
 #[doc(hidden)]
 pub use runtime::EditorUiPreviewCandidate;
-#[cfg(all(
-    feature = "runtime-2d",
-    feature = "serde",
-    feature = "tooling",
-    feature = "presentation-2d"
-))]
-pub use runtime::{
-    EditorAcceptedPreview, EditorPresentationError, EditorPresentationImage, EditorPresentedToken,
-    EditorPreviewPresentation,
-};
 #[cfg(all(feature = "runtime-2d", feature = "serde", feature = "tooling"))]
 #[doc(hidden)]
 pub use runtime::{
+    AuthoredSchemaUpgradeProposal, AuthoredSchemaUpgradeReview,
+    AuthoredSchemaUpgradeReviewedSource, AuthoredSchemaUpgradeSourceProposal,
+    EditorAuthoredSchemaUpgradeError, EditorAuthoredSchemaUpgradeId,
+    EditorAuthoredSchemaUpgradeInputs, EditorAuthoredSchemaUpgradeOutcome,
+    EditorAuthoredSchemaUpgradePhase, EditorAuthoredSchemaUpgradeSource,
+    EditorAuthoredSchemaUpgradeView, EditorAuthoredUpgradeWorkingSource,
     EditorEditPreparationError, EditorProjectCloseProgress, EditorProjectCloseReceipt,
     EditorProjectOpenAttempt, EditorProjectOpenError, EditorProjectOpenFailure,
     EditorProjectOpenFailureImpact, EditorProjectOpenFailureSource, EditorProjectOpenHost,
@@ -167,13 +179,25 @@ pub use runtime::{
     EditorSourceToolPrefabTemplateFile, EditorSourceToolPrefabTemplateImportRequest,
     EditorSourceToolPrefabTemplatePublication, EditorSourceToolReleaseError,
     EditorSourceToolReleaseMember, EditorSourceToolReleaseMemberKind,
-    EditorSourceToolReleaseRequirement, PreparedEditorSourceToolArtifacts,
+    EditorSourceToolReleaseRequirement, EditorSupervisedPlayBinding,
+    EditorSupervisedPlayOwnerError, EditorSupervisedPlayRetirementAck,
+    EditorSupervisedPlayRetirementRequest, PreparedEditorSourceToolArtifacts,
     PreparedEditorSourceToolInstallations, PreparedEditorSourceToolPrefabTemplateImport,
     PreparedEditorSourceToolReclamation, PreparedEditorSourceToolRelease,
     PreparedEditorSourceToolSelection, PreparedEditorSourceToolTemplateImport,
     PreparedEditorSourceToolWithdrawal, SupervisedDesktopSourceAdmissionError,
     SupervisedDesktopSourceAuthority, TrustedCompiledEditorProjectIntent,
     admit_supervised_desktop_source_receipt,
+};
+#[cfg(all(
+    feature = "runtime-2d",
+    feature = "serde",
+    feature = "tooling",
+    feature = "presentation-2d"
+))]
+pub use runtime::{
+    EditorAcceptedPreview, EditorPresentationError, EditorPresentationImage, EditorPresentedToken,
+    EditorPreviewPresentation,
 };
 #[cfg(all(
     feature = "runtime-2d",

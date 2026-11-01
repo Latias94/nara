@@ -16,6 +16,7 @@ pub(super) use reopen::ReopenTestGate;
 #[cfg(test)]
 pub(crate) use reopen::ReopenTestPhase;
 pub(super) use reopen::{BackgroundReopen, PendingReopen};
+pub(super) use retirement::RetainedHostGuard;
 pub(super) use retirement::{HostCustody, HostCustodyPlugin, RetainedHost};
 
 use nara_asset::{AssetPath, AssetRef};
@@ -140,13 +141,8 @@ impl EditorProjectSession {
                     };
                     return;
                 };
-                let refresh = match &lane {
-                    PersistenceLane::Prefab(lane) => lane
-                        .host
-                        .try_with(|host| host.publishes_runtime_content())
-                        .unwrap_or(false),
-                    PersistenceLane::Scene(_) | PersistenceLane::Extension(_) => false,
-                };
+                let refresh =
+                    matches!(lane, PersistenceLane::Prefab(_)) && self.trusted_compiled().is_some();
                 self.acknowledge_save(lane, refresh, outcome)
             }
             PendingPersistence::Reopen(pending) => {
@@ -221,7 +217,7 @@ impl EditorProjectSession {
         entity: &SceneEntityId,
     ) -> EditorWorkspaceCommandReport {
         if !self.accepts_new_work()
-            || self.schema_adoption_fenced()
+            || self.authoring_operation_fenced()
             || self.persistence.has_pending_work()
             || self.pending_workspace_intent.is_some()
             || self.pending_document_open.is_some()
@@ -304,10 +300,46 @@ impl EditorProjectSession {
         if let Err(code) = self.exclude_native_source_key(&project_path, &expected_source_key) {
             return editor_workspace_command_rejected(self.workspace.active_document(), code);
         }
-        let opened = PrefabPersistenceHost::open(
+        let Some(expected_digest) = lane
+            .snapshot
+            .content_closure()
+            .members()
+            .iter()
+            .find(|member| {
+                member.kind() == crate::project_content::ProjectContentMemberKind::Prefab
+                    && member.path().as_str() == project_path.as_ref()
+            })
+            .map(|member| member.digest())
+        else {
+            return editor_workspace_command_rejected(
+                self.workspace.active_document(),
+                "project.editor.prefab-source-outside-content-closure",
+            );
+        };
+        let Some(basis) = self
+            .workspace
+            .scene(document)
+            .and_then(|slot| slot.session().authoring_schema_basis())
+        else {
+            return editor_workspace_command_rejected(
+                self.workspace.active_document(),
+                "project.editor.prefab-source-basis-unavailable",
+            );
+        };
+        let source = match AssetRef::path(project_path.as_ref()) {
+            Ok(source) => nara_scene::AuthoringDocumentSource::new(source),
+            Err(_) => {
+                return editor_workspace_command_rejected(
+                    self.workspace.active_document(),
+                    "project.editor.prefab-source-path-invalid",
+                );
+            }
+        };
+        let opened = PrefabPersistenceHost::open_authoring(
             &lane.prefab_root,
             source_binding.clone(),
-            lane.plan.schema_validation().snapshot(),
+            source,
+            &basis,
         );
         let OpenedPrefabPersistence {
             host,
@@ -322,6 +354,12 @@ impl EditorProjectSession {
                 );
             }
         };
+        if digest != crate::project_host::persistence::editor_digest(expected_digest) {
+            return editor_workspace_command_rejected(
+                self.workspace.active_document(),
+                "project.editor.prefab-source-changed",
+            );
+        }
         let source_key = match host
             .read_source()
             .open()
@@ -551,7 +589,7 @@ impl EditorProjectSession {
                 );
             }
         };
-        let reopened = match prepared.admit(None) {
+        let reopened = match prepared.admit() {
             PrefabReopenOutcome::Opened(opened) => opened,
             PrefabReopenOutcome::Rejected(_) => {
                 return editor_workspace_command_rejected(
@@ -857,13 +895,16 @@ impl EditorProjectSession {
         command: EditorPersistenceCommand,
     ) -> EditorPersistenceRequestResult {
         if let EditorPersistenceCommand::AcknowledgeResult { attempt } = command {
+            if self.authored_schema_upgrade.waits_for_save(attempt) {
+                return EditorPersistenceRequestResult::Refused(EditorPersistenceRejection::Busy);
+            }
             return self.acknowledge_persistence_attempt(attempt);
         }
         if !self.source_tools.reclamation_settled() {
             return EditorPersistenceRequestResult::Refused(EditorPersistenceRejection::Busy);
         }
         if !self.accepts_new_work()
-            || self.schema_adoption_fenced()
+            || self.authoring_operation_fenced()
             || self.persistence.has_pending_work()
         {
             return EditorPersistenceRequestResult::Refused(EditorPersistenceRejection::Busy);

@@ -234,12 +234,18 @@ pub(crate) fn scene_entity_components(
     registry: &ComponentRegistrySnapshot,
     kind: SceneCompositionEntityKind,
 ) -> Result<BTreeMap<ComponentTypeId, SceneComponentRecord>, Diagnostic> {
+    scene_entity_component_ids(kind)
+        .iter()
+        .map(|component| component_draft(registry, ComponentTypeId::new(*component)))
+        .collect()
+}
+
+pub(crate) fn scene_entity_component_ids(
+    kind: SceneCompositionEntityKind,
+) -> &'static [&'static str] {
     match kind {
-        SceneCompositionEntityKind::Empty => Ok(BTreeMap::new()),
-        SceneCompositionEntityKind::ColoredSprite => Ok(BTreeMap::from([
-            component_draft(registry, ComponentTypeId::new(TRANSFORM_COMPONENT))?,
-            component_draft(registry, ComponentTypeId::new(SPRITE_COMPONENT))?,
-        ])),
+        SceneCompositionEntityKind::Empty => &[],
+        SceneCompositionEntityKind::ColoredSprite => &[TRANSFORM_COMPONENT, SPRITE_COMPONENT],
     }
 }
 

@@ -2231,8 +2231,7 @@
       {
         "owner": "nara.ui.components",
         "current": {
-          "generation": 3,
-          "predecessor": "7352339b91eb1089fa51776e5c63922b66a2319d06819df14b97fdba5691dbe6",
+          "generation": 1,
           "components": [
             {
               "id": "nara.ui.UiButton",
@@ -2335,7 +2334,28 @@
                   ]
                 }
               ],
-              "field_tombstones": []
+              "field_tombstones": [],
+              "authoring_initial_value": {
+                "type": "map",
+                "value": {
+                  "action": {
+                    "type": "string",
+                    "value": "activate"
+                  },
+                  "enabled": {
+                    "type": "bool",
+                    "value": true
+                  },
+                  "label": {
+                    "type": "string",
+                    "value": "Button"
+                  },
+                  "logical_text_size": {
+                    "type": "f64",
+                    "value": 16.0
+                  }
+                }
+              }
             },
             {
               "id": "nara.ui.UiButtonVisuals",
@@ -2570,7 +2590,52 @@
                   ]
                 }
               ],
-              "field_tombstones": []
+              "field_tombstones": [],
+              "authoring_initial_value": {
+                "type": "map",
+                "value": {
+                  "disabled_background": {
+                    "type": "string",
+                    "value": "disabled"
+                  },
+                  "disabled_text": {
+                    "type": "string",
+                    "value": "secondary_text"
+                  },
+                  "focus_border_width": {
+                    "type": "f64",
+                    "value": 2.0
+                  },
+                  "focused_border": {
+                    "type": "string",
+                    "value": "focus"
+                  },
+                  "focused_text": {
+                    "type": "string",
+                    "value": "focus"
+                  },
+                  "hovered_background": {
+                    "type": "string",
+                    "value": "accent"
+                  },
+                  "hovered_text": {
+                    "type": "string",
+                    "value": "surface"
+                  },
+                  "normal_text": {
+                    "type": "string",
+                    "value": "primary_text"
+                  },
+                  "pressed_background": {
+                    "type": "string",
+                    "value": "positive"
+                  },
+                  "pressed_text": {
+                    "type": "string",
+                    "value": "surface"
+                  }
+                }
+              }
             },
             {
               "id": "nara.ui.UiNode",
@@ -3231,7 +3296,134 @@
                   ]
                 }
               ],
-              "field_tombstones": []
+              "field_tombstones": [],
+              "authoring_initial_value": {
+                "type": "map",
+                "value": {
+                  "style": {
+                    "type": "map",
+                    "value": {
+                      "align_items": {
+                        "type": "string",
+                        "value": "stretch"
+                      },
+                      "flex_direction": {
+                        "type": "string",
+                        "value": "column"
+                      },
+                      "flex_grow": {
+                        "type": "f64",
+                        "value": 0.0
+                      },
+                      "flex_shrink": {
+                        "type": "f64",
+                        "value": 1.0
+                      },
+                      "gap": {
+                        "type": "f64",
+                        "value": 0.0
+                      },
+                      "height": {
+                        "type": "map",
+                        "value": {
+                          "kind": {
+                            "type": "string",
+                            "value": "auto"
+                          },
+                          "value": {
+                            "type": "f64",
+                            "value": 0.0
+                          }
+                        }
+                      },
+                      "justify_content": {
+                        "type": "string",
+                        "value": "start"
+                      },
+                      "left": {
+                        "type": "map",
+                        "value": {
+                          "kind": {
+                            "type": "string",
+                            "value": "auto"
+                          },
+                          "value": {
+                            "type": "f64",
+                            "value": 0.0
+                          }
+                        }
+                      },
+                      "overflow": {
+                        "type": "string",
+                        "value": "visible"
+                      },
+                      "padding": {
+                        "type": "map",
+                        "value": {
+                          "bottom": {
+                            "type": "f64",
+                            "value": 0.0
+                          },
+                          "left": {
+                            "type": "f64",
+                            "value": 0.0
+                          },
+                          "right": {
+                            "type": "f64",
+                            "value": 0.0
+                          },
+                          "top": {
+                            "type": "f64",
+                            "value": 0.0
+                          }
+                        }
+                      },
+                      "position_mode": {
+                        "type": "string",
+                        "value": "flow"
+                      },
+                      "stacking_context": {
+                        "type": "bool",
+                        "value": false
+                      },
+                      "top": {
+                        "type": "map",
+                        "value": {
+                          "kind": {
+                            "type": "string",
+                            "value": "auto"
+                          },
+                          "value": {
+                            "type": "f64",
+                            "value": 0.0
+                          }
+                        }
+                      },
+                      "visible": {
+                        "type": "bool",
+                        "value": true
+                      },
+                      "width": {
+                        "type": "map",
+                        "value": {
+                          "kind": {
+                            "type": "string",
+                            "value": "auto"
+                          },
+                          "value": {
+                            "type": "f64",
+                            "value": 0.0
+                          }
+                        }
+                      },
+                      "z_index": {
+                        "type": "i64",
+                        "value": 0
+                      }
+                    }
+                  }
+                }
+              }
             },
             {
               "id": "nara.ui.UiRoot",
@@ -3488,7 +3680,7 @@
               "aliases": [
                 "UI text"
               ],
-              "version": 3,
+              "version": 1,
               "capabilities": [
                 "scene",
                 "inspect",
@@ -3826,9 +4018,68 @@
                   ]
                 }
               ],
-              "field_tombstones": [
-                "brush.reference"
-              ]
+              "field_tombstones": [],
+              "authoring_initial_value": {
+                "type": "map",
+                "value": {
+                  "alignment": {
+                    "type": "string",
+                    "value": "start"
+                  },
+                  "brush": {
+                    "type": "map",
+                    "value": {
+                      "alpha": {
+                        "type": "f64",
+                        "value": 0.0
+                      },
+                      "blue": {
+                        "type": "f64",
+                        "value": 0.0
+                      },
+                      "green": {
+                        "type": "f64",
+                        "value": 0.0
+                      },
+                      "image": {
+                        "type": "null"
+                      },
+                      "kind": {
+                        "type": "string",
+                        "value": "role"
+                      },
+                      "red": {
+                        "type": "f64",
+                        "value": 0.0
+                      },
+                      "role": {
+                        "type": "string",
+                        "value": "primary_text"
+                      }
+                    }
+                  },
+                  "content": {
+                    "type": "string",
+                    "value": "Text"
+                  },
+                  "has_semantic_text": {
+                    "type": "bool",
+                    "value": false
+                  },
+                  "logical_size": {
+                    "type": "f64",
+                    "value": 16.0
+                  },
+                  "overflow": {
+                    "type": "string",
+                    "value": "wrap"
+                  },
+                  "semantic_text": {
+                    "type": "string",
+                    "value": ""
+                  }
+                }
+              }
             },
             {
               "id": "nara.ui.UiTheme",
@@ -5072,7 +5323,7 @@
               "aliases": [
                 "UI visual"
               ],
-              "version": 2,
+              "version": 1,
               "capabilities": [
                 "scene",
                 "inspect",
@@ -5578,3354 +5829,101 @@
                   ]
                 }
               ],
-              "field_tombstones": [
-                "background.reference",
-                "border_brush.reference"
-              ]
-            }
-          ],
-          "type_tombstones": []
-        },
-        "predecessor": {
-          "generation": 2,
-          "predecessor": "730565ab7c85d57b5977b744496fb85a7ef6cbea2311adf5b62bb5265c3cc21f",
-          "components": [
-            {
-              "id": "nara.ui.UiButton",
-              "aliases": [
-                "UI button"
-              ],
-              "version": 1,
-              "capabilities": [
-                "scene",
-                "inspect",
-                "edit"
-              ],
-              "fields": [
-                {
-                  "id": "action",
-                  "aliases": [
-                    "action"
-                  ],
-                  "path": [
-                    {
-                      "kind": "field",
-                      "value": "action"
-                    }
-                  ],
-                  "shape": {
-                    "shape": "scalar",
-                    "kind": "string"
-                  },
-                  "required": true,
-                  "capabilities": [
-                    "scene",
-                    "inspect",
-                    "edit"
-                  ]
-                },
-                {
-                  "id": "enabled",
-                  "aliases": [
-                    "enabled"
-                  ],
-                  "path": [
-                    {
-                      "kind": "field",
-                      "value": "enabled"
-                    }
-                  ],
-                  "shape": {
-                    "shape": "scalar",
-                    "kind": "bool"
-                  },
-                  "required": true,
-                  "capabilities": [
-                    "scene",
-                    "inspect",
-                    "edit"
-                  ]
-                },
-                {
-                  "id": "label",
-                  "aliases": [
-                    "label"
-                  ],
-                  "path": [
-                    {
-                      "kind": "field",
-                      "value": "label"
-                    }
-                  ],
-                  "shape": {
-                    "shape": "scalar",
-                    "kind": "string"
-                  },
-                  "required": true,
-                  "capabilities": [
-                    "scene",
-                    "inspect",
-                    "edit"
-                  ]
-                },
-                {
-                  "id": "logical_text_size",
-                  "aliases": [
-                    "logical_text_size"
-                  ],
-                  "path": [
-                    {
-                      "kind": "field",
-                      "value": "logical_text_size"
-                    }
-                  ],
-                  "shape": {
-                    "shape": "scalar",
-                    "kind": "f64"
-                  },
-                  "required": true,
-                  "capabilities": [
-                    "scene",
-                    "inspect",
-                    "edit"
-                  ]
-                }
-              ],
-              "field_tombstones": []
-            },
-            {
-              "id": "nara.ui.UiButtonVisuals",
-              "aliases": [
-                "UI button interaction visuals"
-              ],
-              "version": 1,
-              "capabilities": [
-                "scene",
-                "inspect",
-                "edit"
-              ],
-              "fields": [
-                {
-                  "id": "disabled_background",
-                  "aliases": [
-                    "disabled_background"
-                  ],
-                  "path": [
-                    {
-                      "kind": "field",
-                      "value": "disabled_background"
-                    }
-                  ],
-                  "shape": {
-                    "shape": "scalar",
-                    "kind": "string"
-                  },
-                  "required": true,
-                  "capabilities": [
-                    "scene",
-                    "inspect",
-                    "edit"
-                  ]
-                },
-                {
-                  "id": "disabled_text",
-                  "aliases": [
-                    "disabled_text"
-                  ],
-                  "path": [
-                    {
-                      "kind": "field",
-                      "value": "disabled_text"
-                    }
-                  ],
-                  "shape": {
-                    "shape": "scalar",
-                    "kind": "string"
-                  },
-                  "required": true,
-                  "capabilities": [
-                    "scene",
-                    "inspect",
-                    "edit"
-                  ]
-                },
-                {
-                  "id": "focus_border_width",
-                  "aliases": [
-                    "focus_border_width"
-                  ],
-                  "path": [
-                    {
-                      "kind": "field",
-                      "value": "focus_border_width"
-                    }
-                  ],
-                  "shape": {
-                    "shape": "scalar",
-                    "kind": "f64"
-                  },
-                  "required": true,
-                  "capabilities": [
-                    "scene",
-                    "inspect",
-                    "edit"
-                  ]
-                },
-                {
-                  "id": "focused_border",
-                  "aliases": [
-                    "focused_border"
-                  ],
-                  "path": [
-                    {
-                      "kind": "field",
-                      "value": "focused_border"
-                    }
-                  ],
-                  "shape": {
-                    "shape": "scalar",
-                    "kind": "string"
-                  },
-                  "required": true,
-                  "capabilities": [
-                    "scene",
-                    "inspect",
-                    "edit"
-                  ]
-                },
-                {
-                  "id": "focused_text",
-                  "aliases": [
-                    "focused_text"
-                  ],
-                  "path": [
-                    {
-                      "kind": "field",
-                      "value": "focused_text"
-                    }
-                  ],
-                  "shape": {
-                    "shape": "scalar",
-                    "kind": "string"
-                  },
-                  "required": true,
-                  "capabilities": [
-                    "scene",
-                    "inspect",
-                    "edit"
-                  ]
-                },
-                {
-                  "id": "hovered_background",
-                  "aliases": [
-                    "hovered_background"
-                  ],
-                  "path": [
-                    {
-                      "kind": "field",
-                      "value": "hovered_background"
-                    }
-                  ],
-                  "shape": {
-                    "shape": "scalar",
-                    "kind": "string"
-                  },
-                  "required": true,
-                  "capabilities": [
-                    "scene",
-                    "inspect",
-                    "edit"
-                  ]
-                },
-                {
-                  "id": "hovered_text",
-                  "aliases": [
-                    "hovered_text"
-                  ],
-                  "path": [
-                    {
-                      "kind": "field",
-                      "value": "hovered_text"
-                    }
-                  ],
-                  "shape": {
-                    "shape": "scalar",
-                    "kind": "string"
-                  },
-                  "required": true,
-                  "capabilities": [
-                    "scene",
-                    "inspect",
-                    "edit"
-                  ]
-                },
-                {
-                  "id": "normal_text",
-                  "aliases": [
-                    "normal_text"
-                  ],
-                  "path": [
-                    {
-                      "kind": "field",
-                      "value": "normal_text"
-                    }
-                  ],
-                  "shape": {
-                    "shape": "scalar",
-                    "kind": "string"
-                  },
-                  "required": true,
-                  "capabilities": [
-                    "scene",
-                    "inspect",
-                    "edit"
-                  ]
-                },
-                {
-                  "id": "pressed_background",
-                  "aliases": [
-                    "pressed_background"
-                  ],
-                  "path": [
-                    {
-                      "kind": "field",
-                      "value": "pressed_background"
-                    }
-                  ],
-                  "shape": {
-                    "shape": "scalar",
-                    "kind": "string"
-                  },
-                  "required": true,
-                  "capabilities": [
-                    "scene",
-                    "inspect",
-                    "edit"
-                  ]
-                },
-                {
-                  "id": "pressed_text",
-                  "aliases": [
-                    "pressed_text"
-                  ],
-                  "path": [
-                    {
-                      "kind": "field",
-                      "value": "pressed_text"
-                    }
-                  ],
-                  "shape": {
-                    "shape": "scalar",
-                    "kind": "string"
-                  },
-                  "required": true,
-                  "capabilities": [
-                    "scene",
-                    "inspect",
-                    "edit"
-                  ]
-                }
-              ],
-              "field_tombstones": []
-            },
-            {
-              "id": "nara.ui.UiNode",
-              "aliases": [
-                "UI node"
-              ],
-              "version": 1,
-              "capabilities": [
-                "scene",
-                "inspect",
-                "edit"
-              ],
-              "fields": [
-                {
-                  "id": "style.align_items",
-                  "aliases": [
-                    "style.align_items"
-                  ],
-                  "path": [
-                    {
-                      "kind": "field",
-                      "value": "style"
-                    },
-                    {
-                      "kind": "field",
-                      "value": "align_items"
-                    }
-                  ],
-                  "shape": {
-                    "shape": "scalar",
-                    "kind": "string"
-                  },
-                  "required": true,
-                  "capabilities": [
-                    "scene",
-                    "inspect",
-                    "edit"
-                  ]
-                },
-                {
-                  "id": "style.flex_direction",
-                  "aliases": [
-                    "style.flex_direction"
-                  ],
-                  "path": [
-                    {
-                      "kind": "field",
-                      "value": "style"
-                    },
-                    {
-                      "kind": "field",
-                      "value": "flex_direction"
-                    }
-                  ],
-                  "shape": {
-                    "shape": "scalar",
-                    "kind": "string"
-                  },
-                  "required": true,
-                  "capabilities": [
-                    "scene",
-                    "inspect",
-                    "edit"
-                  ]
-                },
-                {
-                  "id": "style.flex_grow",
-                  "aliases": [
-                    "style.flex_grow"
-                  ],
-                  "path": [
-                    {
-                      "kind": "field",
-                      "value": "style"
-                    },
-                    {
-                      "kind": "field",
-                      "value": "flex_grow"
-                    }
-                  ],
-                  "shape": {
-                    "shape": "scalar",
-                    "kind": "f64"
-                  },
-                  "required": true,
-                  "capabilities": [
-                    "scene",
-                    "inspect",
-                    "edit"
-                  ]
-                },
-                {
-                  "id": "style.flex_shrink",
-                  "aliases": [
-                    "style.flex_shrink"
-                  ],
-                  "path": [
-                    {
-                      "kind": "field",
-                      "value": "style"
-                    },
-                    {
-                      "kind": "field",
-                      "value": "flex_shrink"
-                    }
-                  ],
-                  "shape": {
-                    "shape": "scalar",
-                    "kind": "f64"
-                  },
-                  "required": true,
-                  "capabilities": [
-                    "scene",
-                    "inspect",
-                    "edit"
-                  ]
-                },
-                {
-                  "id": "style.gap",
-                  "aliases": [
-                    "style.gap"
-                  ],
-                  "path": [
-                    {
-                      "kind": "field",
-                      "value": "style"
-                    },
-                    {
-                      "kind": "field",
-                      "value": "gap"
-                    }
-                  ],
-                  "shape": {
-                    "shape": "scalar",
-                    "kind": "f64"
-                  },
-                  "required": true,
-                  "capabilities": [
-                    "scene",
-                    "inspect",
-                    "edit"
-                  ]
-                },
-                {
-                  "id": "style.height.kind",
-                  "aliases": [
-                    "style.height.kind"
-                  ],
-                  "path": [
-                    {
-                      "kind": "field",
-                      "value": "style"
-                    },
-                    {
-                      "kind": "field",
-                      "value": "height"
-                    },
-                    {
-                      "kind": "field",
-                      "value": "kind"
-                    }
-                  ],
-                  "shape": {
-                    "shape": "scalar",
-                    "kind": "string"
-                  },
-                  "required": true,
-                  "capabilities": [
-                    "scene",
-                    "inspect",
-                    "edit"
-                  ]
-                },
-                {
-                  "id": "style.height.value",
-                  "aliases": [
-                    "style.height.value"
-                  ],
-                  "path": [
-                    {
-                      "kind": "field",
-                      "value": "style"
-                    },
-                    {
-                      "kind": "field",
-                      "value": "height"
-                    },
-                    {
-                      "kind": "field",
-                      "value": "value"
-                    }
-                  ],
-                  "shape": {
-                    "shape": "scalar",
-                    "kind": "f64"
-                  },
-                  "required": true,
-                  "capabilities": [
-                    "scene",
-                    "inspect",
-                    "edit"
-                  ]
-                },
-                {
-                  "id": "style.justify_content",
-                  "aliases": [
-                    "style.justify_content"
-                  ],
-                  "path": [
-                    {
-                      "kind": "field",
-                      "value": "style"
-                    },
-                    {
-                      "kind": "field",
-                      "value": "justify_content"
-                    }
-                  ],
-                  "shape": {
-                    "shape": "scalar",
-                    "kind": "string"
-                  },
-                  "required": true,
-                  "capabilities": [
-                    "scene",
-                    "inspect",
-                    "edit"
-                  ]
-                },
-                {
-                  "id": "style.left.kind",
-                  "aliases": [
-                    "style.left.kind"
-                  ],
-                  "path": [
-                    {
-                      "kind": "field",
-                      "value": "style"
-                    },
-                    {
-                      "kind": "field",
-                      "value": "left"
-                    },
-                    {
-                      "kind": "field",
-                      "value": "kind"
-                    }
-                  ],
-                  "shape": {
-                    "shape": "scalar",
-                    "kind": "string"
-                  },
-                  "required": true,
-                  "capabilities": [
-                    "scene",
-                    "inspect",
-                    "edit"
-                  ]
-                },
-                {
-                  "id": "style.left.value",
-                  "aliases": [
-                    "style.left.value"
-                  ],
-                  "path": [
-                    {
-                      "kind": "field",
-                      "value": "style"
-                    },
-                    {
-                      "kind": "field",
-                      "value": "left"
-                    },
-                    {
-                      "kind": "field",
-                      "value": "value"
-                    }
-                  ],
-                  "shape": {
-                    "shape": "scalar",
-                    "kind": "f64"
-                  },
-                  "required": true,
-                  "capabilities": [
-                    "scene",
-                    "inspect",
-                    "edit"
-                  ]
-                },
-                {
-                  "id": "style.overflow",
-                  "aliases": [
-                    "style.overflow"
-                  ],
-                  "path": [
-                    {
-                      "kind": "field",
-                      "value": "style"
-                    },
-                    {
-                      "kind": "field",
-                      "value": "overflow"
-                    }
-                  ],
-                  "shape": {
-                    "shape": "scalar",
-                    "kind": "string"
-                  },
-                  "required": true,
-                  "capabilities": [
-                    "scene",
-                    "inspect",
-                    "edit"
-                  ]
-                },
-                {
-                  "id": "style.padding.bottom",
-                  "aliases": [
-                    "style.padding.bottom"
-                  ],
-                  "path": [
-                    {
-                      "kind": "field",
-                      "value": "style"
-                    },
-                    {
-                      "kind": "field",
-                      "value": "padding"
-                    },
-                    {
-                      "kind": "field",
-                      "value": "bottom"
-                    }
-                  ],
-                  "shape": {
-                    "shape": "scalar",
-                    "kind": "f64"
-                  },
-                  "required": true,
-                  "capabilities": [
-                    "scene",
-                    "inspect",
-                    "edit"
-                  ]
-                },
-                {
-                  "id": "style.padding.left",
-                  "aliases": [
-                    "style.padding.left"
-                  ],
-                  "path": [
-                    {
-                      "kind": "field",
-                      "value": "style"
-                    },
-                    {
-                      "kind": "field",
-                      "value": "padding"
-                    },
-                    {
-                      "kind": "field",
-                      "value": "left"
-                    }
-                  ],
-                  "shape": {
-                    "shape": "scalar",
-                    "kind": "f64"
-                  },
-                  "required": true,
-                  "capabilities": [
-                    "scene",
-                    "inspect",
-                    "edit"
-                  ]
-                },
-                {
-                  "id": "style.padding.right",
-                  "aliases": [
-                    "style.padding.right"
-                  ],
-                  "path": [
-                    {
-                      "kind": "field",
-                      "value": "style"
-                    },
-                    {
-                      "kind": "field",
-                      "value": "padding"
-                    },
-                    {
-                      "kind": "field",
-                      "value": "right"
-                    }
-                  ],
-                  "shape": {
-                    "shape": "scalar",
-                    "kind": "f64"
-                  },
-                  "required": true,
-                  "capabilities": [
-                    "scene",
-                    "inspect",
-                    "edit"
-                  ]
-                },
-                {
-                  "id": "style.padding.top",
-                  "aliases": [
-                    "style.padding.top"
-                  ],
-                  "path": [
-                    {
-                      "kind": "field",
-                      "value": "style"
-                    },
-                    {
-                      "kind": "field",
-                      "value": "padding"
-                    },
-                    {
-                      "kind": "field",
-                      "value": "top"
-                    }
-                  ],
-                  "shape": {
-                    "shape": "scalar",
-                    "kind": "f64"
-                  },
-                  "required": true,
-                  "capabilities": [
-                    "scene",
-                    "inspect",
-                    "edit"
-                  ]
-                },
-                {
-                  "id": "style.position_mode",
-                  "aliases": [
-                    "style.position_mode"
-                  ],
-                  "path": [
-                    {
-                      "kind": "field",
-                      "value": "style"
-                    },
-                    {
-                      "kind": "field",
-                      "value": "position_mode"
-                    }
-                  ],
-                  "shape": {
-                    "shape": "scalar",
-                    "kind": "string"
-                  },
-                  "required": true,
-                  "capabilities": [
-                    "scene",
-                    "inspect",
-                    "edit"
-                  ]
-                },
-                {
-                  "id": "style.stacking_context",
-                  "aliases": [
-                    "style.stacking_context"
-                  ],
-                  "path": [
-                    {
-                      "kind": "field",
-                      "value": "style"
-                    },
-                    {
-                      "kind": "field",
-                      "value": "stacking_context"
-                    }
-                  ],
-                  "shape": {
-                    "shape": "scalar",
-                    "kind": "bool"
-                  },
-                  "required": true,
-                  "capabilities": [
-                    "scene",
-                    "inspect",
-                    "edit"
-                  ]
-                },
-                {
-                  "id": "style.top.kind",
-                  "aliases": [
-                    "style.top.kind"
-                  ],
-                  "path": [
-                    {
-                      "kind": "field",
-                      "value": "style"
-                    },
-                    {
-                      "kind": "field",
-                      "value": "top"
-                    },
-                    {
-                      "kind": "field",
-                      "value": "kind"
-                    }
-                  ],
-                  "shape": {
-                    "shape": "scalar",
-                    "kind": "string"
-                  },
-                  "required": true,
-                  "capabilities": [
-                    "scene",
-                    "inspect",
-                    "edit"
-                  ]
-                },
-                {
-                  "id": "style.top.value",
-                  "aliases": [
-                    "style.top.value"
-                  ],
-                  "path": [
-                    {
-                      "kind": "field",
-                      "value": "style"
-                    },
-                    {
-                      "kind": "field",
-                      "value": "top"
-                    },
-                    {
-                      "kind": "field",
-                      "value": "value"
-                    }
-                  ],
-                  "shape": {
-                    "shape": "scalar",
-                    "kind": "f64"
-                  },
-                  "required": true,
-                  "capabilities": [
-                    "scene",
-                    "inspect",
-                    "edit"
-                  ]
-                },
-                {
-                  "id": "style.visible",
-                  "aliases": [
-                    "style.visible"
-                  ],
-                  "path": [
-                    {
-                      "kind": "field",
-                      "value": "style"
-                    },
-                    {
-                      "kind": "field",
-                      "value": "visible"
-                    }
-                  ],
-                  "shape": {
-                    "shape": "scalar",
-                    "kind": "bool"
-                  },
-                  "required": true,
-                  "capabilities": [
-                    "scene",
-                    "inspect",
-                    "edit"
-                  ]
-                },
-                {
-                  "id": "style.width.kind",
-                  "aliases": [
-                    "style.width.kind"
-                  ],
-                  "path": [
-                    {
-                      "kind": "field",
-                      "value": "style"
-                    },
-                    {
-                      "kind": "field",
-                      "value": "width"
-                    },
-                    {
-                      "kind": "field",
-                      "value": "kind"
-                    }
-                  ],
-                  "shape": {
-                    "shape": "scalar",
-                    "kind": "string"
-                  },
-                  "required": true,
-                  "capabilities": [
-                    "scene",
-                    "inspect",
-                    "edit"
-                  ]
-                },
-                {
-                  "id": "style.width.value",
-                  "aliases": [
-                    "style.width.value"
-                  ],
-                  "path": [
-                    {
-                      "kind": "field",
-                      "value": "style"
-                    },
-                    {
-                      "kind": "field",
-                      "value": "width"
-                    },
-                    {
-                      "kind": "field",
-                      "value": "value"
-                    }
-                  ],
-                  "shape": {
-                    "shape": "scalar",
-                    "kind": "f64"
-                  },
-                  "required": true,
-                  "capabilities": [
-                    "scene",
-                    "inspect",
-                    "edit"
-                  ]
-                },
-                {
-                  "id": "style.z_index",
-                  "aliases": [
-                    "style.z_index"
-                  ],
-                  "path": [
-                    {
-                      "kind": "field",
-                      "value": "style"
-                    },
-                    {
-                      "kind": "field",
-                      "value": "z_index"
-                    }
-                  ],
-                  "shape": {
-                    "shape": "scalar",
-                    "kind": "i64"
-                  },
-                  "required": true,
-                  "capabilities": [
-                    "scene",
-                    "inspect",
-                    "edit"
-                  ]
-                }
-              ],
-              "field_tombstones": []
-            },
-            {
-              "id": "nara.ui.UiRoot",
-              "aliases": [
-                "UI root"
-              ],
-              "version": 1,
-              "capabilities": [
-                "scene",
-                "inspect",
-                "edit"
-              ],
-              "fields": [
-                {
-                  "id": "layer",
-                  "aliases": [
-                    "layer"
-                  ],
-                  "path": [
-                    {
-                      "kind": "field",
-                      "value": "layer"
-                    }
-                  ],
-                  "shape": {
-                    "shape": "scalar",
-                    "kind": "string"
-                  },
-                  "required": true,
-                  "capabilities": [
-                    "scene",
-                    "inspect",
-                    "edit"
-                  ]
-                }
-              ],
-              "field_tombstones": []
-            },
-            {
-              "id": "nara.ui.UiSemantics",
-              "aliases": [
-                "UI semantics"
-              ],
-              "version": 1,
-              "capabilities": [
-                "scene",
-                "inspect",
-                "edit"
-              ],
-              "fields": [
-                {
-                  "id": "actions",
-                  "aliases": [
-                    "actions"
-                  ],
-                  "path": [
-                    {
-                      "kind": "field",
-                      "value": "actions"
-                    }
-                  ],
-                  "shape": {
-                    "shape": "opaque",
-                    "kind": "list"
-                  },
-                  "required": true,
-                  "capabilities": [
-                    "scene",
-                    "inspect",
-                    "edit"
-                  ]
-                },
-                {
-                  "id": "expanded",
-                  "aliases": [
-                    "expanded"
-                  ],
-                  "path": [
-                    {
-                      "kind": "field",
-                      "value": "expanded"
-                    }
-                  ],
-                  "shape": {
-                    "shape": "scalar",
-                    "kind": "bool"
-                  },
-                  "required": true,
-                  "capabilities": [
-                    "scene",
-                    "inspect",
-                    "edit"
-                  ]
-                },
-                {
-                  "id": "has_expanded",
-                  "aliases": [
-                    "has_expanded"
-                  ],
-                  "path": [
-                    {
-                      "kind": "field",
-                      "value": "has_expanded"
-                    }
-                  ],
-                  "shape": {
-                    "shape": "scalar",
-                    "kind": "bool"
-                  },
-                  "required": true,
-                  "capabilities": [
-                    "scene",
-                    "inspect",
-                    "edit"
-                  ]
-                },
-                {
-                  "id": "has_selected",
-                  "aliases": [
-                    "has_selected"
-                  ],
-                  "path": [
-                    {
-                      "kind": "field",
-                      "value": "has_selected"
-                    }
-                  ],
-                  "shape": {
-                    "shape": "scalar",
-                    "kind": "bool"
-                  },
-                  "required": true,
-                  "capabilities": [
-                    "scene",
-                    "inspect",
-                    "edit"
-                  ]
-                },
-                {
-                  "id": "has_value",
-                  "aliases": [
-                    "has_value"
-                  ],
-                  "path": [
-                    {
-                      "kind": "field",
-                      "value": "has_value"
-                    }
-                  ],
-                  "shape": {
-                    "shape": "scalar",
-                    "kind": "bool"
-                  },
-                  "required": true,
-                  "capabilities": [
-                    "scene",
-                    "inspect",
-                    "edit"
-                  ]
-                },
-                {
-                  "id": "name",
-                  "aliases": [
-                    "name"
-                  ],
-                  "path": [
-                    {
-                      "kind": "field",
-                      "value": "name"
-                    }
-                  ],
-                  "shape": {
-                    "shape": "scalar",
-                    "kind": "string"
-                  },
-                  "required": true,
-                  "capabilities": [
-                    "scene",
-                    "inspect",
-                    "edit"
-                  ]
-                },
-                {
-                  "id": "role",
-                  "aliases": [
-                    "role"
-                  ],
-                  "path": [
-                    {
-                      "kind": "field",
-                      "value": "role"
-                    }
-                  ],
-                  "shape": {
-                    "shape": "scalar",
-                    "kind": "string"
-                  },
-                  "required": true,
-                  "capabilities": [
-                    "scene",
-                    "inspect",
-                    "edit"
-                  ]
-                },
-                {
-                  "id": "selected",
-                  "aliases": [
-                    "selected"
-                  ],
-                  "path": [
-                    {
-                      "kind": "field",
-                      "value": "selected"
-                    }
-                  ],
-                  "shape": {
-                    "shape": "scalar",
-                    "kind": "bool"
-                  },
-                  "required": true,
-                  "capabilities": [
-                    "scene",
-                    "inspect",
-                    "edit"
-                  ]
-                },
-                {
-                  "id": "value",
-                  "aliases": [
-                    "value"
-                  ],
-                  "path": [
-                    {
-                      "kind": "field",
-                      "value": "value"
-                    }
-                  ],
-                  "shape": {
-                    "shape": "scalar",
-                    "kind": "string"
-                  },
-                  "required": true,
-                  "capabilities": [
-                    "scene",
-                    "inspect",
-                    "edit"
-                  ]
-                }
-              ],
-              "field_tombstones": []
-            },
-            {
-              "id": "nara.ui.UiText",
-              "aliases": [
-                "UI text"
-              ],
-              "version": 2,
-              "capabilities": [
-                "scene",
-                "inspect",
-                "edit"
-              ],
-              "fields": [
-                {
-                  "id": "alignment",
-                  "aliases": [
-                    "alignment"
-                  ],
-                  "path": [
-                    {
-                      "kind": "field",
-                      "value": "alignment"
-                    }
-                  ],
-                  "shape": {
-                    "shape": "scalar",
-                    "kind": "string"
-                  },
-                  "required": true,
-                  "capabilities": [
-                    "scene",
-                    "inspect",
-                    "edit"
-                  ]
-                },
-                {
-                  "id": "brush.alpha",
-                  "aliases": [
-                    "brush.alpha"
-                  ],
-                  "path": [
-                    {
-                      "kind": "field",
-                      "value": "brush"
-                    },
-                    {
-                      "kind": "field",
-                      "value": "alpha"
-                    }
-                  ],
-                  "shape": {
-                    "shape": "scalar",
-                    "kind": "f64"
-                  },
-                  "required": true,
-                  "capabilities": [
-                    "scene",
-                    "inspect",
-                    "edit"
-                  ]
-                },
-                {
-                  "id": "brush.blue",
-                  "aliases": [
-                    "brush.blue"
-                  ],
-                  "path": [
-                    {
-                      "kind": "field",
-                      "value": "brush"
-                    },
-                    {
-                      "kind": "field",
-                      "value": "blue"
-                    }
-                  ],
-                  "shape": {
-                    "shape": "scalar",
-                    "kind": "f64"
-                  },
-                  "required": true,
-                  "capabilities": [
-                    "scene",
-                    "inspect",
-                    "edit"
-                  ]
-                },
-                {
-                  "id": "brush.green",
-                  "aliases": [
-                    "brush.green"
-                  ],
-                  "path": [
-                    {
-                      "kind": "field",
-                      "value": "brush"
-                    },
-                    {
-                      "kind": "field",
-                      "value": "green"
-                    }
-                  ],
-                  "shape": {
-                    "shape": "scalar",
-                    "kind": "f64"
-                  },
-                  "required": true,
-                  "capabilities": [
-                    "scene",
-                    "inspect",
-                    "edit"
-                  ]
-                },
-                {
-                  "id": "brush.image",
-                  "aliases": [
-                    "brush.image"
-                  ],
-                  "path": [
-                    {
-                      "kind": "field",
-                      "value": "brush"
-                    },
-                    {
-                      "kind": "field",
-                      "value": "image"
-                    }
-                  ],
-                  "shape": {
-                    "shape": "optional",
+              "field_tombstones": [],
+              "authoring_initial_value": {
+                "type": "map",
+                "value": {
+                  "background": {
+                    "type": "map",
                     "value": {
-                      "shape": "asset_ref",
-                      "demand": "immediate"
+                      "alpha": {
+                        "type": "f64",
+                        "value": 0.0
+                      },
+                      "blue": {
+                        "type": "f64",
+                        "value": 0.0
+                      },
+                      "green": {
+                        "type": "f64",
+                        "value": 0.0
+                      },
+                      "image": {
+                        "type": "null"
+                      },
+                      "kind": {
+                        "type": "string",
+                        "value": "role"
+                      },
+                      "red": {
+                        "type": "f64",
+                        "value": 0.0
+                      },
+                      "role": {
+                        "type": "string",
+                        "value": "panel"
+                      }
                     }
                   },
-                  "required": false,
-                  "capabilities": [
-                    "scene",
-                    "inspect",
-                    "edit",
-                    "asset_ref"
-                  ]
-                },
-                {
-                  "id": "brush.kind",
-                  "aliases": [
-                    "brush.kind"
-                  ],
-                  "path": [
-                    {
-                      "kind": "field",
-                      "value": "brush"
-                    },
-                    {
-                      "kind": "field",
-                      "value": "kind"
-                    }
-                  ],
-                  "shape": {
-                    "shape": "scalar",
-                    "kind": "string"
-                  },
-                  "required": true,
-                  "capabilities": [
-                    "scene",
-                    "inspect",
-                    "edit"
-                  ]
-                },
-                {
-                  "id": "brush.red",
-                  "aliases": [
-                    "brush.red"
-                  ],
-                  "path": [
-                    {
-                      "kind": "field",
-                      "value": "brush"
-                    },
-                    {
-                      "kind": "field",
-                      "value": "red"
-                    }
-                  ],
-                  "shape": {
-                    "shape": "scalar",
-                    "kind": "f64"
-                  },
-                  "required": true,
-                  "capabilities": [
-                    "scene",
-                    "inspect",
-                    "edit"
-                  ]
-                },
-                {
-                  "id": "brush.role",
-                  "aliases": [
-                    "brush.role"
-                  ],
-                  "path": [
-                    {
-                      "kind": "field",
-                      "value": "brush"
-                    },
-                    {
-                      "kind": "field",
-                      "value": "role"
-                    }
-                  ],
-                  "shape": {
-                    "shape": "scalar",
-                    "kind": "string"
-                  },
-                  "required": true,
-                  "capabilities": [
-                    "scene",
-                    "inspect",
-                    "edit"
-                  ]
-                },
-                {
-                  "id": "content",
-                  "aliases": [
-                    "content"
-                  ],
-                  "path": [
-                    {
-                      "kind": "field",
-                      "value": "content"
-                    }
-                  ],
-                  "shape": {
-                    "shape": "scalar",
-                    "kind": "string"
-                  },
-                  "required": true,
-                  "capabilities": [
-                    "scene",
-                    "inspect",
-                    "edit"
-                  ]
-                },
-                {
-                  "id": "has_semantic_text",
-                  "aliases": [
-                    "has_semantic_text"
-                  ],
-                  "path": [
-                    {
-                      "kind": "field",
-                      "value": "has_semantic_text"
-                    }
-                  ],
-                  "shape": {
-                    "shape": "scalar",
-                    "kind": "bool"
-                  },
-                  "required": true,
-                  "capabilities": [
-                    "scene",
-                    "inspect",
-                    "edit"
-                  ]
-                },
-                {
-                  "id": "logical_size",
-                  "aliases": [
-                    "logical_size"
-                  ],
-                  "path": [
-                    {
-                      "kind": "field",
-                      "value": "logical_size"
-                    }
-                  ],
-                  "shape": {
-                    "shape": "scalar",
-                    "kind": "f64"
-                  },
-                  "required": true,
-                  "capabilities": [
-                    "scene",
-                    "inspect",
-                    "edit"
-                  ]
-                },
-                {
-                  "id": "overflow",
-                  "aliases": [
-                    "overflow"
-                  ],
-                  "path": [
-                    {
-                      "kind": "field",
-                      "value": "overflow"
-                    }
-                  ],
-                  "shape": {
-                    "shape": "scalar",
-                    "kind": "string"
-                  },
-                  "required": true,
-                  "capabilities": [
-                    "scene",
-                    "inspect",
-                    "edit"
-                  ]
-                },
-                {
-                  "id": "semantic_text",
-                  "aliases": [
-                    "semantic_text"
-                  ],
-                  "path": [
-                    {
-                      "kind": "field",
-                      "value": "semantic_text"
-                    }
-                  ],
-                  "shape": {
-                    "shape": "scalar",
-                    "kind": "string"
-                  },
-                  "required": true,
-                  "capabilities": [
-                    "scene",
-                    "inspect",
-                    "edit"
-                  ]
-                }
-              ],
-              "field_tombstones": [
-                "brush.reference"
-              ]
-            },
-            {
-              "id": "nara.ui.UiTheme",
-              "aliases": [
-                "UI theme"
-              ],
-              "version": 1,
-              "capabilities": [
-                "scene",
-                "inspect",
-                "edit"
-              ],
-              "fields": [
-                {
-                  "id": "palette.accent.alpha",
-                  "aliases": [
-                    "palette.accent.alpha"
-                  ],
-                  "path": [
-                    {
-                      "kind": "field",
-                      "value": "palette"
-                    },
-                    {
-                      "kind": "field",
-                      "value": "accent"
-                    },
-                    {
-                      "kind": "field",
-                      "value": "alpha"
-                    }
-                  ],
-                  "shape": {
-                    "shape": "scalar",
-                    "kind": "f64"
-                  },
-                  "required": true,
-                  "capabilities": [
-                    "scene",
-                    "inspect",
-                    "edit"
-                  ]
-                },
-                {
-                  "id": "palette.accent.blue",
-                  "aliases": [
-                    "palette.accent.blue"
-                  ],
-                  "path": [
-                    {
-                      "kind": "field",
-                      "value": "palette"
-                    },
-                    {
-                      "kind": "field",
-                      "value": "accent"
-                    },
-                    {
-                      "kind": "field",
-                      "value": "blue"
-                    }
-                  ],
-                  "shape": {
-                    "shape": "scalar",
-                    "kind": "f64"
-                  },
-                  "required": true,
-                  "capabilities": [
-                    "scene",
-                    "inspect",
-                    "edit"
-                  ]
-                },
-                {
-                  "id": "palette.accent.green",
-                  "aliases": [
-                    "palette.accent.green"
-                  ],
-                  "path": [
-                    {
-                      "kind": "field",
-                      "value": "palette"
-                    },
-                    {
-                      "kind": "field",
-                      "value": "accent"
-                    },
-                    {
-                      "kind": "field",
-                      "value": "green"
-                    }
-                  ],
-                  "shape": {
-                    "shape": "scalar",
-                    "kind": "f64"
-                  },
-                  "required": true,
-                  "capabilities": [
-                    "scene",
-                    "inspect",
-                    "edit"
-                  ]
-                },
-                {
-                  "id": "palette.accent.red",
-                  "aliases": [
-                    "palette.accent.red"
-                  ],
-                  "path": [
-                    {
-                      "kind": "field",
-                      "value": "palette"
-                    },
-                    {
-                      "kind": "field",
-                      "value": "accent"
-                    },
-                    {
-                      "kind": "field",
-                      "value": "red"
-                    }
-                  ],
-                  "shape": {
-                    "shape": "scalar",
-                    "kind": "f64"
-                  },
-                  "required": true,
-                  "capabilities": [
-                    "scene",
-                    "inspect",
-                    "edit"
-                  ]
-                },
-                {
-                  "id": "palette.danger.alpha",
-                  "aliases": [
-                    "palette.danger.alpha"
-                  ],
-                  "path": [
-                    {
-                      "kind": "field",
-                      "value": "palette"
-                    },
-                    {
-                      "kind": "field",
-                      "value": "danger"
-                    },
-                    {
-                      "kind": "field",
-                      "value": "alpha"
-                    }
-                  ],
-                  "shape": {
-                    "shape": "scalar",
-                    "kind": "f64"
-                  },
-                  "required": true,
-                  "capabilities": [
-                    "scene",
-                    "inspect",
-                    "edit"
-                  ]
-                },
-                {
-                  "id": "palette.danger.blue",
-                  "aliases": [
-                    "palette.danger.blue"
-                  ],
-                  "path": [
-                    {
-                      "kind": "field",
-                      "value": "palette"
-                    },
-                    {
-                      "kind": "field",
-                      "value": "danger"
-                    },
-                    {
-                      "kind": "field",
-                      "value": "blue"
-                    }
-                  ],
-                  "shape": {
-                    "shape": "scalar",
-                    "kind": "f64"
-                  },
-                  "required": true,
-                  "capabilities": [
-                    "scene",
-                    "inspect",
-                    "edit"
-                  ]
-                },
-                {
-                  "id": "palette.danger.green",
-                  "aliases": [
-                    "palette.danger.green"
-                  ],
-                  "path": [
-                    {
-                      "kind": "field",
-                      "value": "palette"
-                    },
-                    {
-                      "kind": "field",
-                      "value": "danger"
-                    },
-                    {
-                      "kind": "field",
-                      "value": "green"
-                    }
-                  ],
-                  "shape": {
-                    "shape": "scalar",
-                    "kind": "f64"
-                  },
-                  "required": true,
-                  "capabilities": [
-                    "scene",
-                    "inspect",
-                    "edit"
-                  ]
-                },
-                {
-                  "id": "palette.danger.red",
-                  "aliases": [
-                    "palette.danger.red"
-                  ],
-                  "path": [
-                    {
-                      "kind": "field",
-                      "value": "palette"
-                    },
-                    {
-                      "kind": "field",
-                      "value": "danger"
-                    },
-                    {
-                      "kind": "field",
-                      "value": "red"
-                    }
-                  ],
-                  "shape": {
-                    "shape": "scalar",
-                    "kind": "f64"
-                  },
-                  "required": true,
-                  "capabilities": [
-                    "scene",
-                    "inspect",
-                    "edit"
-                  ]
-                },
-                {
-                  "id": "palette.disabled.alpha",
-                  "aliases": [
-                    "palette.disabled.alpha"
-                  ],
-                  "path": [
-                    {
-                      "kind": "field",
-                      "value": "palette"
-                    },
-                    {
-                      "kind": "field",
-                      "value": "disabled"
-                    },
-                    {
-                      "kind": "field",
-                      "value": "alpha"
-                    }
-                  ],
-                  "shape": {
-                    "shape": "scalar",
-                    "kind": "f64"
-                  },
-                  "required": true,
-                  "capabilities": [
-                    "scene",
-                    "inspect",
-                    "edit"
-                  ]
-                },
-                {
-                  "id": "palette.disabled.blue",
-                  "aliases": [
-                    "palette.disabled.blue"
-                  ],
-                  "path": [
-                    {
-                      "kind": "field",
-                      "value": "palette"
-                    },
-                    {
-                      "kind": "field",
-                      "value": "disabled"
-                    },
-                    {
-                      "kind": "field",
-                      "value": "blue"
-                    }
-                  ],
-                  "shape": {
-                    "shape": "scalar",
-                    "kind": "f64"
-                  },
-                  "required": true,
-                  "capabilities": [
-                    "scene",
-                    "inspect",
-                    "edit"
-                  ]
-                },
-                {
-                  "id": "palette.disabled.green",
-                  "aliases": [
-                    "palette.disabled.green"
-                  ],
-                  "path": [
-                    {
-                      "kind": "field",
-                      "value": "palette"
-                    },
-                    {
-                      "kind": "field",
-                      "value": "disabled"
-                    },
-                    {
-                      "kind": "field",
-                      "value": "green"
-                    }
-                  ],
-                  "shape": {
-                    "shape": "scalar",
-                    "kind": "f64"
-                  },
-                  "required": true,
-                  "capabilities": [
-                    "scene",
-                    "inspect",
-                    "edit"
-                  ]
-                },
-                {
-                  "id": "palette.disabled.red",
-                  "aliases": [
-                    "palette.disabled.red"
-                  ],
-                  "path": [
-                    {
-                      "kind": "field",
-                      "value": "palette"
-                    },
-                    {
-                      "kind": "field",
-                      "value": "disabled"
-                    },
-                    {
-                      "kind": "field",
-                      "value": "red"
-                    }
-                  ],
-                  "shape": {
-                    "shape": "scalar",
-                    "kind": "f64"
-                  },
-                  "required": true,
-                  "capabilities": [
-                    "scene",
-                    "inspect",
-                    "edit"
-                  ]
-                },
-                {
-                  "id": "palette.focus.alpha",
-                  "aliases": [
-                    "palette.focus.alpha"
-                  ],
-                  "path": [
-                    {
-                      "kind": "field",
-                      "value": "palette"
-                    },
-                    {
-                      "kind": "field",
-                      "value": "focus"
-                    },
-                    {
-                      "kind": "field",
-                      "value": "alpha"
-                    }
-                  ],
-                  "shape": {
-                    "shape": "scalar",
-                    "kind": "f64"
-                  },
-                  "required": true,
-                  "capabilities": [
-                    "scene",
-                    "inspect",
-                    "edit"
-                  ]
-                },
-                {
-                  "id": "palette.focus.blue",
-                  "aliases": [
-                    "palette.focus.blue"
-                  ],
-                  "path": [
-                    {
-                      "kind": "field",
-                      "value": "palette"
-                    },
-                    {
-                      "kind": "field",
-                      "value": "focus"
-                    },
-                    {
-                      "kind": "field",
-                      "value": "blue"
-                    }
-                  ],
-                  "shape": {
-                    "shape": "scalar",
-                    "kind": "f64"
-                  },
-                  "required": true,
-                  "capabilities": [
-                    "scene",
-                    "inspect",
-                    "edit"
-                  ]
-                },
-                {
-                  "id": "palette.focus.green",
-                  "aliases": [
-                    "palette.focus.green"
-                  ],
-                  "path": [
-                    {
-                      "kind": "field",
-                      "value": "palette"
-                    },
-                    {
-                      "kind": "field",
-                      "value": "focus"
-                    },
-                    {
-                      "kind": "field",
-                      "value": "green"
-                    }
-                  ],
-                  "shape": {
-                    "shape": "scalar",
-                    "kind": "f64"
-                  },
-                  "required": true,
-                  "capabilities": [
-                    "scene",
-                    "inspect",
-                    "edit"
-                  ]
-                },
-                {
-                  "id": "palette.focus.red",
-                  "aliases": [
-                    "palette.focus.red"
-                  ],
-                  "path": [
-                    {
-                      "kind": "field",
-                      "value": "palette"
-                    },
-                    {
-                      "kind": "field",
-                      "value": "focus"
-                    },
-                    {
-                      "kind": "field",
-                      "value": "red"
-                    }
-                  ],
-                  "shape": {
-                    "shape": "scalar",
-                    "kind": "f64"
-                  },
-                  "required": true,
-                  "capabilities": [
-                    "scene",
-                    "inspect",
-                    "edit"
-                  ]
-                },
-                {
-                  "id": "palette.panel.alpha",
-                  "aliases": [
-                    "palette.panel.alpha"
-                  ],
-                  "path": [
-                    {
-                      "kind": "field",
-                      "value": "palette"
-                    },
-                    {
-                      "kind": "field",
-                      "value": "panel"
-                    },
-                    {
-                      "kind": "field",
-                      "value": "alpha"
-                    }
-                  ],
-                  "shape": {
-                    "shape": "scalar",
-                    "kind": "f64"
-                  },
-                  "required": true,
-                  "capabilities": [
-                    "scene",
-                    "inspect",
-                    "edit"
-                  ]
-                },
-                {
-                  "id": "palette.panel.blue",
-                  "aliases": [
-                    "palette.panel.blue"
-                  ],
-                  "path": [
-                    {
-                      "kind": "field",
-                      "value": "palette"
-                    },
-                    {
-                      "kind": "field",
-                      "value": "panel"
-                    },
-                    {
-                      "kind": "field",
-                      "value": "blue"
-                    }
-                  ],
-                  "shape": {
-                    "shape": "scalar",
-                    "kind": "f64"
-                  },
-                  "required": true,
-                  "capabilities": [
-                    "scene",
-                    "inspect",
-                    "edit"
-                  ]
-                },
-                {
-                  "id": "palette.panel.green",
-                  "aliases": [
-                    "palette.panel.green"
-                  ],
-                  "path": [
-                    {
-                      "kind": "field",
-                      "value": "palette"
-                    },
-                    {
-                      "kind": "field",
-                      "value": "panel"
-                    },
-                    {
-                      "kind": "field",
-                      "value": "green"
-                    }
-                  ],
-                  "shape": {
-                    "shape": "scalar",
-                    "kind": "f64"
-                  },
-                  "required": true,
-                  "capabilities": [
-                    "scene",
-                    "inspect",
-                    "edit"
-                  ]
-                },
-                {
-                  "id": "palette.panel.red",
-                  "aliases": [
-                    "palette.panel.red"
-                  ],
-                  "path": [
-                    {
-                      "kind": "field",
-                      "value": "palette"
-                    },
-                    {
-                      "kind": "field",
-                      "value": "panel"
-                    },
-                    {
-                      "kind": "field",
-                      "value": "red"
-                    }
-                  ],
-                  "shape": {
-                    "shape": "scalar",
-                    "kind": "f64"
-                  },
-                  "required": true,
-                  "capabilities": [
-                    "scene",
-                    "inspect",
-                    "edit"
-                  ]
-                },
-                {
-                  "id": "palette.positive.alpha",
-                  "aliases": [
-                    "palette.positive.alpha"
-                  ],
-                  "path": [
-                    {
-                      "kind": "field",
-                      "value": "palette"
-                    },
-                    {
-                      "kind": "field",
-                      "value": "positive"
-                    },
-                    {
-                      "kind": "field",
-                      "value": "alpha"
-                    }
-                  ],
-                  "shape": {
-                    "shape": "scalar",
-                    "kind": "f64"
-                  },
-                  "required": true,
-                  "capabilities": [
-                    "scene",
-                    "inspect",
-                    "edit"
-                  ]
-                },
-                {
-                  "id": "palette.positive.blue",
-                  "aliases": [
-                    "palette.positive.blue"
-                  ],
-                  "path": [
-                    {
-                      "kind": "field",
-                      "value": "palette"
-                    },
-                    {
-                      "kind": "field",
-                      "value": "positive"
-                    },
-                    {
-                      "kind": "field",
-                      "value": "blue"
-                    }
-                  ],
-                  "shape": {
-                    "shape": "scalar",
-                    "kind": "f64"
-                  },
-                  "required": true,
-                  "capabilities": [
-                    "scene",
-                    "inspect",
-                    "edit"
-                  ]
-                },
-                {
-                  "id": "palette.positive.green",
-                  "aliases": [
-                    "palette.positive.green"
-                  ],
-                  "path": [
-                    {
-                      "kind": "field",
-                      "value": "palette"
-                    },
-                    {
-                      "kind": "field",
-                      "value": "positive"
-                    },
-                    {
-                      "kind": "field",
-                      "value": "green"
-                    }
-                  ],
-                  "shape": {
-                    "shape": "scalar",
-                    "kind": "f64"
-                  },
-                  "required": true,
-                  "capabilities": [
-                    "scene",
-                    "inspect",
-                    "edit"
-                  ]
-                },
-                {
-                  "id": "palette.positive.red",
-                  "aliases": [
-                    "palette.positive.red"
-                  ],
-                  "path": [
-                    {
-                      "kind": "field",
-                      "value": "palette"
-                    },
-                    {
-                      "kind": "field",
-                      "value": "positive"
-                    },
-                    {
-                      "kind": "field",
-                      "value": "red"
-                    }
-                  ],
-                  "shape": {
-                    "shape": "scalar",
-                    "kind": "f64"
-                  },
-                  "required": true,
-                  "capabilities": [
-                    "scene",
-                    "inspect",
-                    "edit"
-                  ]
-                },
-                {
-                  "id": "palette.primary_text.alpha",
-                  "aliases": [
-                    "palette.primary_text.alpha"
-                  ],
-                  "path": [
-                    {
-                      "kind": "field",
-                      "value": "palette"
-                    },
-                    {
-                      "kind": "field",
-                      "value": "primary_text"
-                    },
-                    {
-                      "kind": "field",
-                      "value": "alpha"
-                    }
-                  ],
-                  "shape": {
-                    "shape": "scalar",
-                    "kind": "f64"
-                  },
-                  "required": true,
-                  "capabilities": [
-                    "scene",
-                    "inspect",
-                    "edit"
-                  ]
-                },
-                {
-                  "id": "palette.primary_text.blue",
-                  "aliases": [
-                    "palette.primary_text.blue"
-                  ],
-                  "path": [
-                    {
-                      "kind": "field",
-                      "value": "palette"
-                    },
-                    {
-                      "kind": "field",
-                      "value": "primary_text"
-                    },
-                    {
-                      "kind": "field",
-                      "value": "blue"
-                    }
-                  ],
-                  "shape": {
-                    "shape": "scalar",
-                    "kind": "f64"
-                  },
-                  "required": true,
-                  "capabilities": [
-                    "scene",
-                    "inspect",
-                    "edit"
-                  ]
-                },
-                {
-                  "id": "palette.primary_text.green",
-                  "aliases": [
-                    "palette.primary_text.green"
-                  ],
-                  "path": [
-                    {
-                      "kind": "field",
-                      "value": "palette"
-                    },
-                    {
-                      "kind": "field",
-                      "value": "primary_text"
-                    },
-                    {
-                      "kind": "field",
-                      "value": "green"
-                    }
-                  ],
-                  "shape": {
-                    "shape": "scalar",
-                    "kind": "f64"
-                  },
-                  "required": true,
-                  "capabilities": [
-                    "scene",
-                    "inspect",
-                    "edit"
-                  ]
-                },
-                {
-                  "id": "palette.primary_text.red",
-                  "aliases": [
-                    "palette.primary_text.red"
-                  ],
-                  "path": [
-                    {
-                      "kind": "field",
-                      "value": "palette"
-                    },
-                    {
-                      "kind": "field",
-                      "value": "primary_text"
-                    },
-                    {
-                      "kind": "field",
-                      "value": "red"
-                    }
-                  ],
-                  "shape": {
-                    "shape": "scalar",
-                    "kind": "f64"
-                  },
-                  "required": true,
-                  "capabilities": [
-                    "scene",
-                    "inspect",
-                    "edit"
-                  ]
-                },
-                {
-                  "id": "palette.secondary_text.alpha",
-                  "aliases": [
-                    "palette.secondary_text.alpha"
-                  ],
-                  "path": [
-                    {
-                      "kind": "field",
-                      "value": "palette"
-                    },
-                    {
-                      "kind": "field",
-                      "value": "secondary_text"
-                    },
-                    {
-                      "kind": "field",
-                      "value": "alpha"
-                    }
-                  ],
-                  "shape": {
-                    "shape": "scalar",
-                    "kind": "f64"
-                  },
-                  "required": true,
-                  "capabilities": [
-                    "scene",
-                    "inspect",
-                    "edit"
-                  ]
-                },
-                {
-                  "id": "palette.secondary_text.blue",
-                  "aliases": [
-                    "palette.secondary_text.blue"
-                  ],
-                  "path": [
-                    {
-                      "kind": "field",
-                      "value": "palette"
-                    },
-                    {
-                      "kind": "field",
-                      "value": "secondary_text"
-                    },
-                    {
-                      "kind": "field",
-                      "value": "blue"
-                    }
-                  ],
-                  "shape": {
-                    "shape": "scalar",
-                    "kind": "f64"
-                  },
-                  "required": true,
-                  "capabilities": [
-                    "scene",
-                    "inspect",
-                    "edit"
-                  ]
-                },
-                {
-                  "id": "palette.secondary_text.green",
-                  "aliases": [
-                    "palette.secondary_text.green"
-                  ],
-                  "path": [
-                    {
-                      "kind": "field",
-                      "value": "palette"
-                    },
-                    {
-                      "kind": "field",
-                      "value": "secondary_text"
-                    },
-                    {
-                      "kind": "field",
-                      "value": "green"
-                    }
-                  ],
-                  "shape": {
-                    "shape": "scalar",
-                    "kind": "f64"
-                  },
-                  "required": true,
-                  "capabilities": [
-                    "scene",
-                    "inspect",
-                    "edit"
-                  ]
-                },
-                {
-                  "id": "palette.secondary_text.red",
-                  "aliases": [
-                    "palette.secondary_text.red"
-                  ],
-                  "path": [
-                    {
-                      "kind": "field",
-                      "value": "palette"
-                    },
-                    {
-                      "kind": "field",
-                      "value": "secondary_text"
-                    },
-                    {
-                      "kind": "field",
-                      "value": "red"
-                    }
-                  ],
-                  "shape": {
-                    "shape": "scalar",
-                    "kind": "f64"
-                  },
-                  "required": true,
-                  "capabilities": [
-                    "scene",
-                    "inspect",
-                    "edit"
-                  ]
-                },
-                {
-                  "id": "palette.surface.alpha",
-                  "aliases": [
-                    "palette.surface.alpha"
-                  ],
-                  "path": [
-                    {
-                      "kind": "field",
-                      "value": "palette"
-                    },
-                    {
-                      "kind": "field",
-                      "value": "surface"
-                    },
-                    {
-                      "kind": "field",
-                      "value": "alpha"
-                    }
-                  ],
-                  "shape": {
-                    "shape": "scalar",
-                    "kind": "f64"
-                  },
-                  "required": true,
-                  "capabilities": [
-                    "scene",
-                    "inspect",
-                    "edit"
-                  ]
-                },
-                {
-                  "id": "palette.surface.blue",
-                  "aliases": [
-                    "palette.surface.blue"
-                  ],
-                  "path": [
-                    {
-                      "kind": "field",
-                      "value": "palette"
-                    },
-                    {
-                      "kind": "field",
-                      "value": "surface"
-                    },
-                    {
-                      "kind": "field",
-                      "value": "blue"
-                    }
-                  ],
-                  "shape": {
-                    "shape": "scalar",
-                    "kind": "f64"
-                  },
-                  "required": true,
-                  "capabilities": [
-                    "scene",
-                    "inspect",
-                    "edit"
-                  ]
-                },
-                {
-                  "id": "palette.surface.green",
-                  "aliases": [
-                    "palette.surface.green"
-                  ],
-                  "path": [
-                    {
-                      "kind": "field",
-                      "value": "palette"
-                    },
-                    {
-                      "kind": "field",
-                      "value": "surface"
-                    },
-                    {
-                      "kind": "field",
-                      "value": "green"
-                    }
-                  ],
-                  "shape": {
-                    "shape": "scalar",
-                    "kind": "f64"
-                  },
-                  "required": true,
-                  "capabilities": [
-                    "scene",
-                    "inspect",
-                    "edit"
-                  ]
-                },
-                {
-                  "id": "palette.surface.red",
-                  "aliases": [
-                    "palette.surface.red"
-                  ],
-                  "path": [
-                    {
-                      "kind": "field",
-                      "value": "palette"
-                    },
-                    {
-                      "kind": "field",
-                      "value": "surface"
-                    },
-                    {
-                      "kind": "field",
-                      "value": "red"
-                    }
-                  ],
-                  "shape": {
-                    "shape": "scalar",
-                    "kind": "f64"
-                  },
-                  "required": true,
-                  "capabilities": [
-                    "scene",
-                    "inspect",
-                    "edit"
-                  ]
-                },
-                {
-                  "id": "palette.warning.alpha",
-                  "aliases": [
-                    "palette.warning.alpha"
-                  ],
-                  "path": [
-                    {
-                      "kind": "field",
-                      "value": "palette"
-                    },
-                    {
-                      "kind": "field",
-                      "value": "warning"
-                    },
-                    {
-                      "kind": "field",
-                      "value": "alpha"
-                    }
-                  ],
-                  "shape": {
-                    "shape": "scalar",
-                    "kind": "f64"
-                  },
-                  "required": true,
-                  "capabilities": [
-                    "scene",
-                    "inspect",
-                    "edit"
-                  ]
-                },
-                {
-                  "id": "palette.warning.blue",
-                  "aliases": [
-                    "palette.warning.blue"
-                  ],
-                  "path": [
-                    {
-                      "kind": "field",
-                      "value": "palette"
-                    },
-                    {
-                      "kind": "field",
-                      "value": "warning"
-                    },
-                    {
-                      "kind": "field",
-                      "value": "blue"
-                    }
-                  ],
-                  "shape": {
-                    "shape": "scalar",
-                    "kind": "f64"
-                  },
-                  "required": true,
-                  "capabilities": [
-                    "scene",
-                    "inspect",
-                    "edit"
-                  ]
-                },
-                {
-                  "id": "palette.warning.green",
-                  "aliases": [
-                    "palette.warning.green"
-                  ],
-                  "path": [
-                    {
-                      "kind": "field",
-                      "value": "palette"
-                    },
-                    {
-                      "kind": "field",
-                      "value": "warning"
-                    },
-                    {
-                      "kind": "field",
-                      "value": "green"
-                    }
-                  ],
-                  "shape": {
-                    "shape": "scalar",
-                    "kind": "f64"
-                  },
-                  "required": true,
-                  "capabilities": [
-                    "scene",
-                    "inspect",
-                    "edit"
-                  ]
-                },
-                {
-                  "id": "palette.warning.red",
-                  "aliases": [
-                    "palette.warning.red"
-                  ],
-                  "path": [
-                    {
-                      "kind": "field",
-                      "value": "palette"
-                    },
-                    {
-                      "kind": "field",
-                      "value": "warning"
-                    },
-                    {
-                      "kind": "field",
-                      "value": "red"
-                    }
-                  ],
-                  "shape": {
-                    "shape": "scalar",
-                    "kind": "f64"
-                  },
-                  "required": true,
-                  "capabilities": [
-                    "scene",
-                    "inspect",
-                    "edit"
-                  ]
-                },
-                {
-                  "id": "revision",
-                  "aliases": [
-                    "revision"
-                  ],
-                  "path": [
-                    {
-                      "kind": "field",
-                      "value": "revision"
-                    }
-                  ],
-                  "shape": {
-                    "shape": "scalar",
-                    "kind": "u64"
-                  },
-                  "required": true,
-                  "capabilities": [
-                    "scene",
-                    "inspect",
-                    "edit"
-                  ]
-                }
-              ],
-              "field_tombstones": []
-            },
-            {
-              "id": "nara.ui.UiVisual",
-              "aliases": [
-                "UI visual"
-              ],
-              "version": 2,
-              "capabilities": [
-                "scene",
-                "inspect",
-                "edit"
-              ],
-              "fields": [
-                {
-                  "id": "background.alpha",
-                  "aliases": [
-                    "background.alpha"
-                  ],
-                  "path": [
-                    {
-                      "kind": "field",
-                      "value": "background"
-                    },
-                    {
-                      "kind": "field",
-                      "value": "alpha"
-                    }
-                  ],
-                  "shape": {
-                    "shape": "scalar",
-                    "kind": "f64"
-                  },
-                  "required": true,
-                  "capabilities": [
-                    "scene",
-                    "inspect",
-                    "edit"
-                  ]
-                },
-                {
-                  "id": "background.blue",
-                  "aliases": [
-                    "background.blue"
-                  ],
-                  "path": [
-                    {
-                      "kind": "field",
-                      "value": "background"
-                    },
-                    {
-                      "kind": "field",
-                      "value": "blue"
-                    }
-                  ],
-                  "shape": {
-                    "shape": "scalar",
-                    "kind": "f64"
-                  },
-                  "required": true,
-                  "capabilities": [
-                    "scene",
-                    "inspect",
-                    "edit"
-                  ]
-                },
-                {
-                  "id": "background.green",
-                  "aliases": [
-                    "background.green"
-                  ],
-                  "path": [
-                    {
-                      "kind": "field",
-                      "value": "background"
-                    },
-                    {
-                      "kind": "field",
-                      "value": "green"
-                    }
-                  ],
-                  "shape": {
-                    "shape": "scalar",
-                    "kind": "f64"
-                  },
-                  "required": true,
-                  "capabilities": [
-                    "scene",
-                    "inspect",
-                    "edit"
-                  ]
-                },
-                {
-                  "id": "background.image",
-                  "aliases": [
-                    "background.image"
-                  ],
-                  "path": [
-                    {
-                      "kind": "field",
-                      "value": "background"
-                    },
-                    {
-                      "kind": "field",
-                      "value": "image"
-                    }
-                  ],
-                  "shape": {
-                    "shape": "optional",
+                  "border_brush": {
+                    "type": "map",
                     "value": {
-                      "shape": "asset_ref",
-                      "demand": "immediate"
+                      "alpha": {
+                        "type": "f64",
+                        "value": 0.0
+                      },
+                      "blue": {
+                        "type": "f64",
+                        "value": 0.0
+                      },
+                      "green": {
+                        "type": "f64",
+                        "value": 0.0
+                      },
+                      "image": {
+                        "type": "null"
+                      },
+                      "kind": {
+                        "type": "string",
+                        "value": "solid"
+                      },
+                      "red": {
+                        "type": "f64",
+                        "value": 0.0
+                      },
+                      "role": {
+                        "type": "string",
+                        "value": ""
+                      }
                     }
                   },
-                  "required": false,
-                  "capabilities": [
-                    "scene",
-                    "inspect",
-                    "edit",
-                    "asset_ref"
-                  ]
-                },
-                {
-                  "id": "background.kind",
-                  "aliases": [
-                    "background.kind"
-                  ],
-                  "path": [
-                    {
-                      "kind": "field",
-                      "value": "background"
-                    },
-                    {
-                      "kind": "field",
-                      "value": "kind"
-                    }
-                  ],
-                  "shape": {
-                    "shape": "scalar",
-                    "kind": "string"
+                  "border_width": {
+                    "type": "f64",
+                    "value": 0.0
                   },
-                  "required": true,
-                  "capabilities": [
-                    "scene",
-                    "inspect",
-                    "edit"
-                  ]
-                },
-                {
-                  "id": "background.red",
-                  "aliases": [
-                    "background.red"
-                  ],
-                  "path": [
-                    {
-                      "kind": "field",
-                      "value": "background"
-                    },
-                    {
-                      "kind": "field",
-                      "value": "red"
-                    }
-                  ],
-                  "shape": {
-                    "shape": "scalar",
-                    "kind": "f64"
-                  },
-                  "required": true,
-                  "capabilities": [
-                    "scene",
-                    "inspect",
-                    "edit"
-                  ]
-                },
-                {
-                  "id": "background.role",
-                  "aliases": [
-                    "background.role"
-                  ],
-                  "path": [
-                    {
-                      "kind": "field",
-                      "value": "background"
-                    },
-                    {
-                      "kind": "field",
-                      "value": "role"
-                    }
-                  ],
-                  "shape": {
-                    "shape": "scalar",
-                    "kind": "string"
-                  },
-                  "required": true,
-                  "capabilities": [
-                    "scene",
-                    "inspect",
-                    "edit"
-                  ]
-                },
-                {
-                  "id": "border_brush.alpha",
-                  "aliases": [
-                    "border_brush.alpha"
-                  ],
-                  "path": [
-                    {
-                      "kind": "field",
-                      "value": "border_brush"
-                    },
-                    {
-                      "kind": "field",
-                      "value": "alpha"
-                    }
-                  ],
-                  "shape": {
-                    "shape": "scalar",
-                    "kind": "f64"
-                  },
-                  "required": true,
-                  "capabilities": [
-                    "scene",
-                    "inspect",
-                    "edit"
-                  ]
-                },
-                {
-                  "id": "border_brush.blue",
-                  "aliases": [
-                    "border_brush.blue"
-                  ],
-                  "path": [
-                    {
-                      "kind": "field",
-                      "value": "border_brush"
-                    },
-                    {
-                      "kind": "field",
-                      "value": "blue"
-                    }
-                  ],
-                  "shape": {
-                    "shape": "scalar",
-                    "kind": "f64"
-                  },
-                  "required": true,
-                  "capabilities": [
-                    "scene",
-                    "inspect",
-                    "edit"
-                  ]
-                },
-                {
-                  "id": "border_brush.green",
-                  "aliases": [
-                    "border_brush.green"
-                  ],
-                  "path": [
-                    {
-                      "kind": "field",
-                      "value": "border_brush"
-                    },
-                    {
-                      "kind": "field",
-                      "value": "green"
-                    }
-                  ],
-                  "shape": {
-                    "shape": "scalar",
-                    "kind": "f64"
-                  },
-                  "required": true,
-                  "capabilities": [
-                    "scene",
-                    "inspect",
-                    "edit"
-                  ]
-                },
-                {
-                  "id": "border_brush.image",
-                  "aliases": [
-                    "border_brush.image"
-                  ],
-                  "path": [
-                    {
-                      "kind": "field",
-                      "value": "border_brush"
-                    },
-                    {
-                      "kind": "field",
-                      "value": "image"
-                    }
-                  ],
-                  "shape": {
-                    "shape": "optional",
+                  "radii": {
+                    "type": "map",
                     "value": {
-                      "shape": "asset_ref",
-                      "demand": "immediate"
+                      "bottom_left": {
+                        "type": "f64",
+                        "value": 0.0
+                      },
+                      "bottom_right": {
+                        "type": "f64",
+                        "value": 0.0
+                      },
+                      "top_left": {
+                        "type": "f64",
+                        "value": 0.0
+                      },
+                      "top_right": {
+                        "type": "f64",
+                        "value": 0.0
+                      }
                     }
-                  },
-                  "required": false,
-                  "capabilities": [
-                    "scene",
-                    "inspect",
-                    "edit",
-                    "asset_ref"
-                  ]
-                },
-                {
-                  "id": "border_brush.kind",
-                  "aliases": [
-                    "border_brush.kind"
-                  ],
-                  "path": [
-                    {
-                      "kind": "field",
-                      "value": "border_brush"
-                    },
-                    {
-                      "kind": "field",
-                      "value": "kind"
-                    }
-                  ],
-                  "shape": {
-                    "shape": "scalar",
-                    "kind": "string"
-                  },
-                  "required": true,
-                  "capabilities": [
-                    "scene",
-                    "inspect",
-                    "edit"
-                  ]
-                },
-                {
-                  "id": "border_brush.red",
-                  "aliases": [
-                    "border_brush.red"
-                  ],
-                  "path": [
-                    {
-                      "kind": "field",
-                      "value": "border_brush"
-                    },
-                    {
-                      "kind": "field",
-                      "value": "red"
-                    }
-                  ],
-                  "shape": {
-                    "shape": "scalar",
-                    "kind": "f64"
-                  },
-                  "required": true,
-                  "capabilities": [
-                    "scene",
-                    "inspect",
-                    "edit"
-                  ]
-                },
-                {
-                  "id": "border_brush.role",
-                  "aliases": [
-                    "border_brush.role"
-                  ],
-                  "path": [
-                    {
-                      "kind": "field",
-                      "value": "border_brush"
-                    },
-                    {
-                      "kind": "field",
-                      "value": "role"
-                    }
-                  ],
-                  "shape": {
-                    "shape": "scalar",
-                    "kind": "string"
-                  },
-                  "required": true,
-                  "capabilities": [
-                    "scene",
-                    "inspect",
-                    "edit"
-                  ]
-                },
-                {
-                  "id": "border_width",
-                  "aliases": [
-                    "border_width"
-                  ],
-                  "path": [
-                    {
-                      "kind": "field",
-                      "value": "border_width"
-                    }
-                  ],
-                  "shape": {
-                    "shape": "scalar",
-                    "kind": "f64"
-                  },
-                  "required": true,
-                  "capabilities": [
-                    "scene",
-                    "inspect",
-                    "edit"
-                  ]
-                },
-                {
-                  "id": "radii.bottom_left",
-                  "aliases": [
-                    "radii.bottom_left"
-                  ],
-                  "path": [
-                    {
-                      "kind": "field",
-                      "value": "radii"
-                    },
-                    {
-                      "kind": "field",
-                      "value": "bottom_left"
-                    }
-                  ],
-                  "shape": {
-                    "shape": "scalar",
-                    "kind": "f64"
-                  },
-                  "required": true,
-                  "capabilities": [
-                    "scene",
-                    "inspect",
-                    "edit"
-                  ]
-                },
-                {
-                  "id": "radii.bottom_right",
-                  "aliases": [
-                    "radii.bottom_right"
-                  ],
-                  "path": [
-                    {
-                      "kind": "field",
-                      "value": "radii"
-                    },
-                    {
-                      "kind": "field",
-                      "value": "bottom_right"
-                    }
-                  ],
-                  "shape": {
-                    "shape": "scalar",
-                    "kind": "f64"
-                  },
-                  "required": true,
-                  "capabilities": [
-                    "scene",
-                    "inspect",
-                    "edit"
-                  ]
-                },
-                {
-                  "id": "radii.top_left",
-                  "aliases": [
-                    "radii.top_left"
-                  ],
-                  "path": [
-                    {
-                      "kind": "field",
-                      "value": "radii"
-                    },
-                    {
-                      "kind": "field",
-                      "value": "top_left"
-                    }
-                  ],
-                  "shape": {
-                    "shape": "scalar",
-                    "kind": "f64"
-                  },
-                  "required": true,
-                  "capabilities": [
-                    "scene",
-                    "inspect",
-                    "edit"
-                  ]
-                },
-                {
-                  "id": "radii.top_right",
-                  "aliases": [
-                    "radii.top_right"
-                  ],
-                  "path": [
-                    {
-                      "kind": "field",
-                      "value": "radii"
-                    },
-                    {
-                      "kind": "field",
-                      "value": "top_right"
-                    }
-                  ],
-                  "shape": {
-                    "shape": "scalar",
-                    "kind": "f64"
-                  },
-                  "required": true,
-                  "capabilities": [
-                    "scene",
-                    "inspect",
-                    "edit"
-                  ]
+                  }
                 }
-              ],
-              "field_tombstones": [
-                "background.reference",
-                "border_brush.reference"
-              ]
+              }
             }
           ],
           "type_tombstones": []

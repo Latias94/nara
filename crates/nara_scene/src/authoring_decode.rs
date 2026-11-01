@@ -11,6 +11,7 @@ mod product_reference_tests;
 mod read;
 mod reclassification;
 mod retention;
+pub(crate) mod schema_upgrade;
 #[cfg(test)]
 mod shared_publication_tests;
 mod structure;
@@ -140,6 +141,32 @@ impl AuthoringSchemaBasis {
             .get(component)
             .and_then(|entry| entry.adapter.as_ref())
             .is_some_and(AuthoringAdapterEvidence::supports_native_preview)
+    }
+
+    /// Observes only already available Native evidence; other source omissions cannot be promoted.
+    pub(crate) fn native_preview_matches_registry(
+        &self,
+        component: &ComponentTypeId,
+        record: &SceneComponentRecord,
+        registry: &nara_reflect::ComponentRegistrySnapshot,
+    ) -> Option<bool> {
+        let entry = self.0.schemas.get(component)?;
+        let contribution = entry.adapter.as_ref()?.contribution()?;
+        if record.version != entry.schema.version()
+            || record.owner().is_some_and(|owner| owner != &entry.owner)
+        {
+            return None;
+        }
+        let owner = contribution.owner().owner();
+        Some(
+            entry.owner.matches_executable(owner).unwrap_or(false)
+                && registry.component_schema_owner(component) == Some(owner)
+                && registry.schema(component) == Some(&entry.schema)
+                && registry.native_rust_type_path(component).is_some()
+                && registry.owner_receipt(owner) == Some(contribution.owner())
+                && registry.provider_receipt(contribution.provider().provider())
+                    == Some(contribution.provider()),
+        )
     }
 }
 
@@ -468,11 +495,12 @@ pub struct AuthoringRecordFact {
 }
 
 /// Maximum ordered operations in one mixed source-authoring transaction.
-/// Field edits retain their separate, smaller write/value budgets.
+/// A complete construction shares this count across entities, components and property writes.
+/// Standalone field batches retain the smaller write count; all paths retain value budgets.
 pub const MAX_AUTHORING_EDIT_OPERATIONS: usize = 256;
 pub const MAX_AUTHORING_FIELD_WRITES: usize = 8;
-pub(crate) const MAX_AUTHORING_FIELD_VALUE_NODES: usize = 256;
-pub(crate) const MAX_AUTHORING_FIELD_LOGICAL_BYTES: usize = 64 * 1024;
+pub const MAX_AUTHORING_FIELD_VALUE_NODES: usize = 256;
+pub const MAX_AUTHORING_FIELD_LOGICAL_BYTES: usize = 64 * 1024;
 
 /// One exact field write within a preservation-safe authoring edit.
 #[derive(Debug, Clone, PartialEq)]
@@ -1057,6 +1085,29 @@ impl AuthoringAdapterReceipt {
     pub fn components(&self) -> impl ExactSizeIterator<Item = &ComponentTypeId> {
         self.components.iter()
     }
+
+    /// Logical storage of this receipt and its independently owned catalog/coverage locators.
+    /// Static native Adapter identity text and externally retained provider code are excluded.
+    #[doc(hidden)]
+    pub fn checked_retained_bytes(&self) -> Option<usize> {
+        let owner = match &self.catalog {
+            AuthoringAdapterCatalog::Native(_) => 0,
+            AuthoringAdapterCatalog::Data { owner, .. } => {
+                crate::provenance::provenance_string_bytes(owner.as_str())?
+            }
+        };
+        self.components.iter().try_fold(
+            std::mem::size_of::<Self>().checked_add(owner)?,
+            |bytes, component| {
+                bytes
+                    .checked_add(std::mem::size_of::<ComponentTypeId>())?
+                    .checked_add(6 * std::mem::size_of::<usize>())?
+                    .checked_add(crate::provenance::provenance_string_bytes(
+                        component.as_str(),
+                    )?)
+            },
+        )
+    }
 }
 
 fn supports_data_authoring(schema: &ComponentSchema) -> bool {
@@ -1389,6 +1440,10 @@ impl AuthoringDocumentState {
 
     pub(crate) fn source(&self) -> &AuthoringDocumentSource {
         &self.source
+    }
+
+    pub(crate) const fn document_kind(&self) -> AuthoringDocumentKind {
+        self.kind
     }
 
     pub(crate) fn schema_declared_asset_references(
@@ -2787,31 +2842,42 @@ fn field_edits_from_patch(
     if patch.format_version != ScenePatchDocument::CURRENT_FORMAT_VERSION {
         return Err(authoring_field_patch_rejection());
     }
-    field_edits_from_operations(patch.operations.iter())
+    field_edits_from_operations(patch.operations.iter(), MAX_AUTHORING_FIELD_WRITES)
 }
 
 fn field_edits_from_operations<'a>(
     operations: impl Iterator<Item = &'a ScenePatchOperation> + Clone,
+    maximum_writes: usize,
 ) -> Result<Vec<AuthoringFieldChange>, ScenePatchReport> {
-    parse_authoring_field_operations(operations, |entity, component, version, field, value| {
-        AuthoringFieldChange {
+    parse_authoring_field_operations(
+        operations,
+        maximum_writes,
+        |entity, component, version, field, value| AuthoringFieldChange {
             entity: entity.clone(),
             component: component.clone(),
             component_version: version,
             field: field.clone(),
             value: value.cloned(),
-        }
-    })
+        },
+    )
 }
 
 fn validate_authoring_field_operations<'a>(
     operations: impl Iterator<Item = &'a ScenePatchOperation> + Clone,
 ) -> Result<(), ScenePatchReport> {
-    parse_authoring_field_operations(operations, |_, _, _, _, _| ()).map(|_| ())
+    validate_authoring_field_operations_with_limit(operations, MAX_AUTHORING_FIELD_WRITES)
+}
+
+fn validate_authoring_field_operations_with_limit<'a>(
+    operations: impl Iterator<Item = &'a ScenePatchOperation> + Clone,
+    maximum_writes: usize,
+) -> Result<(), ScenePatchReport> {
+    parse_authoring_field_operations(operations, maximum_writes, |_, _, _, _, _| ()).map(|_| ())
 }
 
 fn parse_authoring_field_operations<'a, T>(
     operations: impl Iterator<Item = &'a ScenePatchOperation> + Clone,
+    maximum_writes: usize,
     mut field_change: impl FnMut(
         &SceneEntityId,
         &ComponentTypeId,
@@ -2821,7 +2887,7 @@ fn parse_authoring_field_operations<'a, T>(
     ) -> T,
 ) -> Result<Vec<T>, ScenePatchReport> {
     let count = operations.clone().count();
-    if count == 0 || count > MAX_AUTHORING_FIELD_WRITES {
+    if count == 0 || count > maximum_writes {
         return Err(authoring_field_patch_rejection());
     }
     let mut fields = BTreeSet::new();

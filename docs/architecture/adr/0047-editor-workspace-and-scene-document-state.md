@@ -2,7 +2,7 @@
 
 **Status**: Accepted
 **Date**: 2026-07-09
-**Last Revised**: 2026-10-30
+**Last Revised**: 2026-11-02
 **Amended**: 2026-08-15 to make selection single-owner and separate monotonic revision from
 receipt-backed content state
 **Amended**: 2026-10-27 to capture actual open Prefab working copies for authoring Scene preview
@@ -12,6 +12,8 @@ with independent file evidence and complete content authorization
 **Amended**: 2026-10-28 to share complete tool observations and activation-bound actions across frontends
 **Amended**: 2026-10-28 to separate code-free local release capture from installation and activation
 **Amended**: 2026-10-28 to prepare additive Schema classification for the complete open set
+**Amended**: 2026-11-01 for complete source/Schema/history/persistence upgrade installation
+**Amended**: 2026-11-02 for compiled Native/Data source authoring under the selected Schema
 **Refines**: ADR 0015, ADR 0026, ADR 0034, ADR 0038, ADR 0043
 **Amended**: 2026-10-28 to retain installed-content protection independently of graph withdrawal;
 management facts do not recover creation or deletion authority on Open
@@ -64,6 +66,19 @@ Rules:
 - Open documents are explicit slots with document kind, stable document ID, optional source path or
   asset reference, loaded document value, source revision, saved revision, dirty state, diagnostics,
   and external reload status.
+- The explicitly trusted compiled Editor also admits its source through the selected complete
+  Native/Data Schema and actual compatible Adapter receipts. A native-only codec registry is not
+  its source model. Native Adapter evidence comes from the real compiled contributions; data
+  declarations grant no native codec or execution authority. Its persistence lane retains the
+  resulting authoring readmission and source observation. The initial source bytes must match the
+  admitted content snapshot. Strict effective Runtime admission remains separate from lossless
+  source classification, including dormant unavailable declarations.
+- Workspace commands follow each document's retained source authority, independently of the
+  Host's execution placement. Native export does not authorize whole-record replacement in a
+  metadata-admitted source. Apply Changes lowers supported exported values through the same
+  bounded declared-field and structure policy, preserving unknown data and source-owned history.
+  Compiled Editor authoring readiness aggregates all actual open source classifications; trusted
+  Runtime availability is a separate fact.
 - `SceneAuthoringSession` remains the per-document scene authoring/live projection boundary. The
   workspace coordinates many sessions; it does not replace patch validation or direct document
   ownership rules.
@@ -72,6 +87,12 @@ Rules:
   epoch replacement under ADR 0058; preview changes do not restart the shared authoring Runtime or
   transfer its pending Save/import, task, image or filesystem responsibility. A refused candidate
   preserves last-good and does not mark the requested source revision accepted.
+- Compiled Editor preview uses the source's actual Schema basis for semantic Prefab expansion,
+  then narrows Native coverage against the preview Runtime's installed registry. The exact
+  declaration, owner and Native contribution must agree. Data and uninstalled game Native
+  components retain typed omission facts; the preview never executes game code merely because
+  its Runtime plan selected that contribution. Filtering changes neither the source nor its
+  history, and its complete omission/provenance storage obeys the compiler's existing allowance.
 - Selection is workspace state: a selection set, top-selected item, selection history, and optional
   viewport/tool context. Selection targets use authoring identities and provenance, not runtime
   `Entity` values. Inspector state consumes that selection and does not retain a second durable
@@ -256,6 +277,46 @@ Rules:
   bundle that cannot be adopted remains an explicit published-without-adoption outcome.
   Later source Undo/Redo may expose a composition conflict; ordinary revision-bound capture reports
   it and source repair can recover. History continuity does not promise all-history preview validity.
+- A reviewed authored-data upgrade under ADR0043 is a distinct complete-set commit, not a
+  classification-only reclassification. It binds every participating open Scene/Prefab, including
+  inactive dirty documents, before installing transformed source, successor Schema classification,
+  a new history checkpoint and new source revision/content-state identities together. Its explicit
+  review authorizes saving those working copies and ending both prior history branches only upon
+  successful adoption. Out-of-scope unavailable data and logical identities remain preserved.
+  Preparation, cancellation and pre-write refusal do not alter source or history.
+  The commit also owns each actual persistence Host's new leaf, digest/saved token and lane source
+  observation. Old saved tokens cannot mark transformed bytes saved. All fallible preparation,
+  complete-set binding and publication checks precede the final Ready manifest publication and
+  infallible installation; a partial or uncertain publication fences old Session writes until
+  reconciliation. A fresh process establishes new nominal bases and current saved observations
+  without manufacturing the predecessor's filesystem receipts or arbitrary lost history.
+  Its owner admits proposal storage before queueing background preparation and returns the same
+  captured inputs on pre-write refusal. Work pending, an accepted suspended request and a persistent
+  write fence are distinct observations. A suspended Browser refresh does not require maintenance
+  polling and resumes when admission reopens. Before destructive publication, Application Close/Exit
+  consults the operation owner's cancellation authority and waits for actual worker return before
+  ordinary dirty-document arbitration. Project replacement and additive Schema reconciliation obey
+  the incumbent's common write fence; a frontend cannot bypass it by replacing its own state.
+  The complete upgrade selects one finite work allowance before capture and keeps it cumulative
+  through refused proposals and publication. Completed work evidence does not become the next
+  ordinary Schema capture policy. New invocations admit continuing storage and native custody
+  under their own scope; a new operation does not replay prior performed work, while a retry
+  cannot renew its existing allowance.
+  Select the complete operation's finite native-handle ceiling at acceptance as well. A complete
+  corpus can exceed ordinary one-source capture's ceiling because original, successor, confirming
+  and final persistence scopes coexist. Such refusal precedes Pending and remains cancellable;
+  an explicit larger finite selection for a new operation does not widen ordinary Schema policy
+  or permit a retry to reset admission.
+  Final exclusive binding is reversible until Ready is confirmed: a refused bind returns the
+  same move-only preparation and saved inputs, and an uninstalled guard releases its borrows
+  back into those owners. It does not clone or reconstruct document/history candidates. A Task
+  rejected before execution also returns its retained input owner. A known refusal before the
+  Pending file publisher runs preserves cancellation; missing execution results and uncertain
+  replacement evidence do not. Before Ready, prepare the successor generation's continuing
+  storage/native scope separately from operation evidence. Later validation and reclamation
+  cannot charge discarded original inventories, recovery buffers or binding scratch as live
+  successor storage. Final leaf verification consumes the same operation allowance before its
+  reads, hashing, transient handles and scratch allocation.
 - Authoring revision remains monotonic for conflict detection. Dirty state compares the current
   opaque content-state identity with the receipt-backed saved content-state identity, with
   source-upgrade-required as an additional dirty condition.
@@ -341,11 +402,32 @@ Rules:
   observation, independently of its unsaved document bytes. It must share the root's exact nominal
   `AuthoringSchemaBasis`; equal Schema content alone is insufficient. Ambiguous, unavailable,
   stale or Schema-incompatible selected working-copy ownership rejects the capture without disk
-  fallback. Disk-backed dependencies retain their own immutable source/metadata evidence. A Scene
+  fallback. A finite request obtains its file observation while the actual persistence Host still
+  holds its original leaf and parent. The transferred read-only custody survives the request,
+  capture and escaped validation; a copied native ID cannot prove that original lifetime. A later
+  genuine Save/Reopen supplies a new observation through the updated Host, rather than a path-only
+  exception to the old proof. Transferred capacity covers both leaf and parent custody even when
+  the parent is physically shared with the original Host. Owner-thread transfer compares the live
+  objects and accepted observation without hashing every offered document body. Its digest remains
+  historical; the finite worker verifies actual content against it before publishing a capture.
+  Disk-backed dependencies retain their own immutable source/metadata evidence. A Scene
   self-reference reuses the captured root. Dependency Scenes remain data; only the selected root
   is materialized. The accepted capture retains the actual raw and effective dependency data
   through preview publication, replacement and retirement; an accounting allowance alone cannot
   substitute for custody of those documents.
+- The acquisition owner explicitly distinguishes original-object observations from fresh read-only
+  content observations. The latter retain the actual consumed data, canonical location, kind,
+  native document key and identity metadata. Revalidation strictly opens the current canonical
+  reader, re-admits its logical identity through the same source policy and checks its observed
+  content. Equal-content leaf replacement with the same logical binding is allowed; it is not a
+  claim of native-object continuity. The number of read-only dependencies does not require one
+  permanently open file per member. A missing proof is not an implicit content-observation mode.
+  Manifest/bundle nominal authority, open working-copy observations and all expected-object writes
+  keep their own strict custody. Historical-object reclamation requires its own live-object proof;
+  successful current-content validation grants neither deletion nor a reconstructed old receipt.
+  A disposal check may retain a freshly validated current capability solely to exclude that object
+  from its separately authorized candidates. Original observations continue to exclude their
+  retained historical objects independently; current exclusions do not reconstruct that history.
 - The [selected demand successor](../reference-validity-and-load-demand-design.md) refines
   "demands" to Immediate value/structural use. A Deferred target's binding observation does not
   make its dirty document or native resources a current preview participant. If a separate deep

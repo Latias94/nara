@@ -64,6 +64,7 @@ prefabs = "prefabs"
 [startup]
 default_scene = "startup.scene.json"
 [authoring]
+state = "ready"
 schema_bundle = "schema/authoring.bundle.json"
 [runtime]
 preset = "local-headless"
@@ -779,7 +780,32 @@ fn newly_selected_image_capture(
     let prepared = session.prepare_authoring_construction(&draft).unwrap();
     session.commit_authoring_construction(prepared).unwrap();
     project
-        .capture_scene_document(&source, &session, &[])
+        .capture_scene_document(
+            &source,
+            {
+                let root = project.project_root();
+                let file = root
+                    .open_file_exact(&nara_fs::RelativePath::new(source.relative_path()).unwrap())
+                    .unwrap();
+                let host =
+                    crate::project_host::file_publication::FilePublicationHost::bind_existing(
+                        &root,
+                        source.relative_path(),
+                        &file,
+                        source.digest(),
+                        nara_scene::SceneFileLimits::default().encoded_bytes().get() as u64,
+                    )
+                    .unwrap();
+                host.capture_source_observation((
+                    source.identity(),
+                    source.parent_identity(),
+                    source.digest(),
+                ))
+                .unwrap()
+            },
+            &session,
+            &[],
+        )
         .unwrap()
 }
 

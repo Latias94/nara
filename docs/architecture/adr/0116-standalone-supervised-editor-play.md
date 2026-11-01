@@ -3,6 +3,7 @@
 **Status**: Accepted
 **Date**: 2026-08-21
 **Amended**: 2026-10-31 by separate bounded build-protocol capture and diagnostic-tail retention
+**Amended**: 2026-11-01 by CP1 operation-bound physical retirement and Play owner replacement
 **Owner**: private `nara-editor`, the project Host, executable product Hosts, UI-neutral tooling,
 and platform process adapters
 **Refines**: [ADR 0082](0082-process-host-authority-and-runtime-construction-topology.md),
@@ -155,20 +156,43 @@ held by `PublishedEditorProject` performs Cargo and OS effects and returns only 
 generation-stamped observations. The Host applies observations before publishing the next Editor
 frame.
 
+The source Session hands external requests to one attached nominal Play-owner binding for its
+published project generation. The binding cannot be reconstructed from IDs or silently replaced;
+an unattached Session cannot export a launch request. CP1 retirement requests and acknowledgments
+use that same authority with the exact incumbent Schema/basis, operation and recovery digest.
+The concrete Application owner attests its actual physical completion. Root verifies the attached
+authority and retained request, rather than independently claiming to inspect another crate's child.
+
 `EditorProjectSession`, `TrustedCompiledEditorLane`, and `nara_tooling` do not own `Child`, Job,
 process-group, pipe, Winit, capability, or raw-path state. The external placement reuses the
 existing Play lifecycle and distinguishes preparation, startup, running, normal exit, fault,
 stopping, retirement-incomplete, and close-incomplete outcomes. Pause, Resume, Step, and embedded
 Game View are unavailable with typed external-placement reasons.
 
-Authoring remains available while the external child runs. Saved-source divergence marks the
-running generation out of date but does not mutate it. Restart is unavailable after observed
+Ordinary authoring remains available while the external child runs. Saved-source divergence marks
+the running generation out of date but does not mutate it. Restart is unavailable after observed
 divergence and rechecks actual saved files when requested, even if the published availability is
 stale. Unsaved edits do not redefine saved-source identity. Stop followed by Play targets current
 saved source; this decision adds no old-source snapshot mechanism. The child's strict receipt and
 READY checks still reject a source race after Host admission. A failed current Play may expose
 `Run Last Good` only when the current source receipt exactly equals the generation's accepted
 source receipt. That choice is explicit and never restores old project data.
+
+For the reviewed authored upgrade (CP1), the Application physically retires the affected supervised
+Play owner before Pending publication. Its acknowledgment binds the exact upgrade operation and
+incumbent published project generation, and is issued only after build, generation preparation,
+child/pipe and generation-store cleanup have completed through their actual owners. The Session
+accepts that bounded observation only for its retained operation and project generation. An Idle
+Play view or an accepted Stop/Close request is insufficient. Incomplete or failed cleanup remains
+a distinct outcome and cannot authorize Pending; affected execution stays fenced through
+publication and reconciliation under [ADR 0118](0118-editor-workspaces-frontends-and-creation-templates.md).
+
+Before final Ready, the Application prepares an empty replacement for the permanently closed Play
+owner. It moves that replacement into the coordinated adoption turn before execution admission
+resumes. Cancellation after physical Close also requires replacement before resumption; it does
+not reopen the closed owner. Process custody remains Application-owned across this value-only seam.
+The [authored-upgrade unit](../../plans/2026-11-01-authored-schema-upgrade-plan.md) owns implementation
+and qualification of these selected contracts.
 
 ### Private process and diagnostic authority
 

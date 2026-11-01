@@ -2,12 +2,14 @@ use std::{collections::BTreeMap, fmt, sync::Arc, time::Duration};
 
 mod actions;
 mod asset_metadata;
+mod authored_upgrade;
 #[cfg(feature = "runtime-ui")]
 mod authoring_images;
 #[cfg(any(feature = "presentation-2d", feature = "runtime-ui"))]
 mod authoring_preview;
 mod authoring_runtime;
 mod authoring_sources;
+mod authoring_work;
 mod content_refresh;
 mod document_open;
 mod extension_documents;
@@ -40,6 +42,14 @@ mod ui_authoring;
 #[cfg(feature = "presentation-ui")]
 mod ui_preview;
 
+pub use authored_upgrade::{
+    AuthoredSchemaUpgradeProposal, AuthoredSchemaUpgradeReview,
+    AuthoredSchemaUpgradeReviewedSource, AuthoredSchemaUpgradeSourceProposal,
+    EditorAuthoredSchemaUpgradeError, EditorAuthoredSchemaUpgradeId,
+    EditorAuthoredSchemaUpgradeInputs, EditorAuthoredSchemaUpgradeOutcome,
+    EditorAuthoredSchemaUpgradePhase, EditorAuthoredSchemaUpgradeSource,
+    EditorAuthoredSchemaUpgradeView, EditorAuthoredUpgradeWorkingSource,
+};
 #[cfg(test)]
 pub(crate) use authoring_runtime::EditorImageRuntimeFailure;
 pub(crate) use document_open::EditorDocumentOpenRequestResult;
@@ -48,8 +58,10 @@ pub(crate) use document_open::preparation::OpenTestPhase;
 pub use extension_documents::EditorExtensionDocumentHostError;
 #[doc(hidden)]
 pub use external_play::{
-    EditorExternalPlayReceiptError, SupervisedDesktopSourceAdmissionError,
-    SupervisedDesktopSourceAuthority, admit_supervised_desktop_source_receipt,
+    EditorExternalPlayReceiptError, EditorSupervisedPlayBinding, EditorSupervisedPlayOwnerError,
+    EditorSupervisedPlayRetirementAck, EditorSupervisedPlayRetirementRequest,
+    SupervisedDesktopSourceAdmissionError, SupervisedDesktopSourceAuthority,
+    admit_supervised_desktop_source_receipt,
 };
 #[cfg(any(feature = "presentation-2d", feature = "presentation-ui"))]
 pub use game_view::{
@@ -817,6 +829,7 @@ struct EditorScenePersistenceLane {
     source_key: nara_scene::SourceDocumentKey,
     document: EditorDocumentId,
     host: persistence::RetainedHost<ScenePersistenceHost>,
+    // Historical admission origin. Current selections project the Host's accepted observation.
     authoring_source: Option<crate::project_host::authoring::document::AuthoringDocumentSourceFact>,
 }
 
@@ -826,6 +839,7 @@ struct EditorPrefabPersistenceLane {
     source_key: nara_scene::SourceDocumentKey,
     document: EditorDocumentId,
     host: persistence::RetainedHost<PrefabPersistenceHost>,
+    // Historical admission origin. Current selections project the Host's accepted observation.
     authoring_source: Option<crate::project_host::authoring::document::AuthoringDocumentSourceFact>,
 }
 
@@ -882,6 +896,7 @@ pub struct EditorProjectSession {
     prefab_conversion: prefab_conversion::EditorPrefabConversionHost,
     source_tools: source_tools::EditorSourceTools,
     schema_owner_adoption: schema_owner::EditorSchemaOwnerAdoptionHost,
+    authored_schema_upgrade: authored_upgrade::EditorAuthoredSchemaUpgradeHost,
     #[cfg(test)]
     next_close_poll_gate: Option<Box<dyn FnOnce(&mut Self) + Send>>,
     authoring_prefab_source_observations:
@@ -897,6 +912,7 @@ pub struct EditorProjectSession {
     diagnostics: DiagnosticReport,
     field_feedback: Option<EditorFieldFeedback>,
     play_result: Option<EditorPlayOperationResult>,
+    supervised_play_owner: Option<external_play::SupervisedPlayOwnerRegistration>,
     external_play_request: Option<EditorExternalPlayRequest>,
     external_play_attempt: Option<u64>,
     external_play_view: Option<EditorExternalPlayView>,
@@ -1037,6 +1053,7 @@ impl fmt::Debug for EditorProjectSession {
 
 impl Drop for EditorProjectSession {
     fn drop(&mut self) {
+        self.authored_schema_upgrade.cancel();
         self.schema_owner_adoption.cancel();
         if let Some(project) = self.authoring_project_mut() {
             project.cancel_source_index();
@@ -1076,6 +1093,17 @@ impl EditorProjectSession {
         }
         self.schema_owner_adoption.cancel();
         self.advance_schema_owner_adoption();
+        self.authored_schema_upgrade.cancel();
+        self.advance_authored_schema_upgrade();
+        if self.authored_schema_upgrade.writes_fenced() {
+            // Publication still owns its Task inputs and recovery fence. Do not shut down
+            // the pools that must return those actual results or complete reconciliation.
+            return EditorProjectCloseProgress::Incomplete {
+                task_shutdown: self.session_task_shutdown(&TaskShutdownReport::default()),
+                file_cleanup_pending: true,
+                play_cleanup_pending: self.supervised_play_retirement_pending(),
+            };
+        }
         self.source_tools.cancel();
         self.advance_source_tools();
         self.prefab_conversion.cancel();
@@ -1116,10 +1144,13 @@ impl EditorProjectSession {
             }
             authoring_runtime::EditorAuthoringRuntimeCloseProgress::Complete(task_shutdown) => {
                 self.advance_schema_owner_adoption();
+                self.advance_authored_schema_upgrade();
                 self.drain_schema_adoption_source_asset_import();
                 self.advance_prefab_conversion();
                 self.advance_source_tools();
                 files_closed &= !self.schema_owner_adoption.pending();
+                files_closed &= !self.authored_schema_upgrade.work_pending();
+                files_closed &= !self.authored_schema_upgrade.writes_fenced();
                 files_closed &= !self.source_asset_import.schema_adoption_pending();
                 files_closed &= self.authoring_runtime.host_custody().retry_cleanup();
                 let task_shutdown = self.session_task_shutdown(&task_shutdown);
@@ -1177,7 +1208,14 @@ impl EditorProjectSession {
                 external_play::authoring_runtime_availability(snapshot),
             ),
             EditorExecutionLane::TrustedCompiled(_) => EditorProjectReadinessView::new(
-                EditorAuthoringReadiness::Complete,
+                match self.workspace.authoring_readiness() {
+                    Some(nara_scene::AuthoringDocumentReadiness::Degraded) => {
+                        EditorAuthoringReadiness::Degraded
+                    }
+                    Some(nara_scene::AuthoringDocumentReadiness::Complete) | None => {
+                        EditorAuthoringReadiness::Complete
+                    }
+                },
                 EditorRuntimeAvailability::TrustedInProcess,
             ),
         }
@@ -1229,8 +1267,15 @@ impl EditorProjectSession {
 
     #[must_use]
     pub(crate) fn project_source_index_work_pending(&self) -> bool {
-        self.authoring_project()
-            .is_some_and(AuthoringProjectSessionSnapshot::source_index_has_pending_work)
+        self.authoring_project().is_some_and(|project| {
+            if self.authoring_operation_fenced() || self.source_tools.reclamation_fenced() {
+                // Queued refreshes remain owned by the index but cannot advance through this
+                // fence. Only an actual worker needs maintenance wakeups until admission resumes.
+                project.source_index_scan_pending()
+            } else {
+                project.source_index_has_pending_work()
+            }
+        })
     }
 
     pub(crate) fn project_source_index_progress(
@@ -1241,7 +1286,10 @@ impl EditorProjectSession {
     }
 
     pub(crate) fn request_project_source_index_refresh(&mut self) -> bool {
-        if !self.accepts_new_work() || self.source_tools.reclamation_fenced() {
+        if !self.accepts_new_work()
+            || self.authoring_operation_fenced()
+            || self.source_tools.reclamation_fenced()
+        {
             return false;
         }
         self.authoring_project_mut()
@@ -1343,7 +1391,10 @@ impl EditorProjectSession {
         expected_detail_revision: u64,
         settings: ImageImportSettings,
     ) -> image_import::EditorImageImportRequestResult {
-        if !self.accepts_new_work() || self.source_tools.reclamation_fenced() {
+        if !self.accepts_new_work()
+            || self.authoring_operation_fenced()
+            || self.source_tools.reclamation_fenced()
+        {
             return image_import::EditorImageImportRequestResult::Rejected(
                 image_import::EditorImageImportFailure::Busy,
             );
@@ -1694,6 +1745,7 @@ impl EditorProjectSession {
                 prefab_conversion: Default::default(),
                 source_tools: Default::default(),
                 schema_owner_adoption: Default::default(),
+                authored_schema_upgrade: Default::default(),
                 #[cfg(test)]
                 next_close_poll_gate: None,
                 authoring_prefab_source_observations: BTreeMap::new(),
@@ -1708,6 +1760,7 @@ impl EditorProjectSession {
                 diagnostics,
                 field_feedback: None,
                 play_result: None,
+                supervised_play_owner: None,
                 external_play_request: None,
                 external_play_attempt: None,
                 external_play_view: None,
@@ -1824,12 +1877,9 @@ impl EditorProjectSession {
         let snapshot = loader
             .load_with_runtime_agreement(&candidate, &plan, runtime_agreement)
             .map_err(|error| EditorProjectOpenError::new(error.diagnostics().clone()))?;
-        let authoring_runtime = authoring_runtime::EditorAuthoringRuntime::new(
-            snapshot.clone(),
-            plan.schema_validation().snapshot(),
-            &recipe,
-        )
-        .map_err(EditorProjectOpenError::from)?;
+        let authoring_runtime =
+            authoring_runtime::EditorAuthoringRuntime::new(snapshot.clone(), &recipe)
+                .map_err(EditorProjectOpenError::from)?;
         let mut unpublished = Some(authoring_runtime);
         let publication: Result<Self, EditorProjectOpenError> = (|| {
             let authoring_runtime = unpublished
@@ -1881,12 +1931,40 @@ impl EditorProjectSession {
                         .map_err(|_| editor_open_error("project.editor.startup-scene-missing"))?,
                 )
                 .map_err(|_| editor_open_error("project.editor.startup-source-spelling"))?;
-            let opened = ScenePersistenceHost::open(
-                &scenes,
-                startup.as_str(),
-                plan.schema_validation().snapshot(),
+            let validation = plan.schema_validation();
+            let adapters = crate::project_host::authoring::compiled_authoring_adapters(
+                validation.authoring_schema_bundle(),
+                validation.snapshot(),
             )
-            .map_err(editor_persistence_open_error)?;
+            .map_err(|_| editor_open_error("project.editor.compiled-authoring-adapters-invalid"))?;
+            let basis = nara_scene::AuthoringSchemaBasis::admit(
+                validation.authoring_schema_bundle(),
+                &adapters,
+            )
+            .map_err(|_| editor_open_error("project.editor.compiled-authoring-basis-invalid"))?;
+            let source = nara_scene::AuthoringDocumentSource::new(
+                nara_asset::AssetRef::path(startup_project_path.as_ref())
+                    .map_err(|_| editor_open_error("project.editor.startup-source-policy"))?,
+            );
+            let opened =
+                ScenePersistenceHost::open_authoring(&scenes, startup.as_str(), source, &basis)
+                    .map_err(editor_persistence_open_error)?;
+            let closure = snapshot.content_closure();
+            let expected = closure
+                .members()
+                .iter()
+                .find(|member| {
+                    member.kind() == crate::project_content::ProjectContentMemberKind::Scene
+                        && member.path().as_str() == startup_project_path.as_ref()
+                })
+                .ok_or_else(|| editor_open_error("project.editor.startup-source-changed"))?;
+            if opened
+                .host
+                .accepted_source_observation()
+                .is_none_or(|(_, _, digest)| digest != expected.digest())
+            {
+                return Err(editor_open_error("project.editor.startup-source-changed"));
+            }
 
             let (mut workspace, mut persistence_authority) = EditorWorkspace::new_hosted();
             let report = workspace
@@ -1971,6 +2049,7 @@ impl EditorProjectSession {
                 prefab_conversion: Default::default(),
                 source_tools: Default::default(),
                 schema_owner_adoption: Default::default(),
+                authored_schema_upgrade: Default::default(),
                 #[cfg(test)]
                 next_close_poll_gate: None,
                 authoring_prefab_source_observations: BTreeMap::new(),
@@ -1985,6 +2064,7 @@ impl EditorProjectSession {
                 diagnostics,
                 field_feedback: None,
                 play_result: None,
+                supervised_play_owner: None,
                 external_play_request: None,
                 external_play_attempt: None,
                 external_play_view: None,
@@ -2584,7 +2664,7 @@ impl EditorProjectSession {
 
     #[cfg(feature = "presentation-2d")]
     fn drive_editor_preview(&mut self) {
-        if self.closing || self.schema_adoption_fenced() {
+        if self.closing || self.authoring_operation_fenced() {
             return;
         }
         if self.authoring_runtime.preview_extent().is_none() {
@@ -2603,18 +2683,48 @@ impl EditorProjectSession {
                     .authoring_runtime
                     .preview_requires_source_projection(document, slot.revision(), &dependencies)
                     .then(|| {
-                        preview::EditorPreviewProjection::trusted_compiled(
-                            self.scene_lanes
-                                .get(&document)
-                                .expect("an open Scene retains its admitted source")
-                                .source_key
-                                .clone(),
-                            slot.session().document().clone(),
-                            authoring_preview::EditorAuthoringPreviewOmissions::empty(
-                                document,
-                                slot.revision(),
-                            ),
-                        )
+                        let Some(registry) = self.authoring_runtime.installed_preview_registry()
+                        else {
+                            return preview::EditorPreviewProjection::rejected(single_error(
+                                "project.editor.preview-registry-unavailable",
+                                "the preview Runtime has no installed native component registry",
+                            ));
+                        };
+                        let Some(basis) = slot.session().authoring_schema_basis() else {
+                            return preview::EditorPreviewProjection::rejected(single_error(
+                                "project.editor.preview-source-basis-unavailable",
+                                "the preview source has no retained authoring Schema basis",
+                            ));
+                        };
+                        let source_key = &self
+                            .scene_lanes
+                            .get(&document)
+                            .expect("an open Scene retains its admitted source")
+                            .source_key;
+                        match self
+                            .trusted_compiled()
+                            .expect("the compiled preview retains its content owner")
+                            .snapshot
+                            .compile_editor_preview_scene(
+                                source_key,
+                                slot.session().document(),
+                                &basis,
+                                registry,
+                            ) {
+                            Ok((candidate, omissions)) => {
+                                preview::EditorPreviewProjection::trusted_compiled(
+                                    candidate,
+                                    authoring_preview::EditorAuthoringPreviewOmissions::new(
+                                        document,
+                                        slot.revision(),
+                                        omissions,
+                                    ),
+                                )
+                            }
+                            Err(diagnostics) => {
+                                preview::EditorPreviewProjection::rejected(diagnostics)
+                            }
+                        }
                     });
                 Some(preview::EditorPreviewSource {
                     document,
@@ -2810,7 +2920,7 @@ impl EditorProjectSession {
         &mut self,
         command: EditorWorkspaceCommand,
     ) -> EditorWorkspaceCommandReport {
-        if self.schema_adoption_fenced()
+        if self.authoring_operation_fenced()
             && !matches!(
                 command,
                 EditorWorkspaceCommand::SetActiveDocument { .. }
@@ -2859,7 +2969,12 @@ impl EditorProjectSession {
         &mut self,
         intent: EditorWorkspaceIntent,
     ) -> EditorWorkspaceIntentRequestResult {
-        if self.schema_adoption_fenced() {
+        if self.authored_schema_upgrade.writes_fenced() {
+            return EditorWorkspaceIntentRequestResult::Rejected(
+                EditorWorkspaceIntentRejection::Busy,
+            );
+        }
+        if self.schema_owner_adoption.fenced() {
             self.schema_owner_adoption.cancel();
             if self.schema_owner_adoption.pending() {
                 return EditorWorkspaceIntentRequestResult::Rejected(
@@ -3522,7 +3637,7 @@ mod tests {
         for directory in ["assets", "scenes", "prefabs", "schema"] {
             fs::create_dir_all(root.join(directory)).unwrap();
         }
-        fs::write(root.join("nara.toml"), "schema_version = 1\n[project]\nsource_universe = '75a0a1c0-daf6-5671-b219-c2e2137d5517'\nnative_document_identity = 'project_location'\nname = \"UI transition\"\n[paths]\nassets = \"assets\"\nscenes = \"scenes\"\nprefabs = \"prefabs\"\n[startup]\ndefault_scene = \"startup.scene.json\"\n[authoring]\nschema_bundle = \"schema/authoring.bundle.json\"\n[runtime]\npreset = \"local-headless\"\n[capabilities]\nrequested = [\"runtime-2d\", \"runtime-ui\"]\n").unwrap();
+        fs::write(root.join("nara.toml"), "schema_version = 1\n[project]\nsource_universe = '75a0a1c0-daf6-5671-b219-c2e2137d5517'\nnative_document_identity = 'project_location'\nname = \"UI transition\"\n[paths]\nassets = \"assets\"\nscenes = \"scenes\"\nprefabs = \"prefabs\"\n[startup]\ndefault_scene = \"startup.scene.json\"\n[authoring]\nstate = \"ready\"\nschema_bundle = \"schema/authoring.bundle.json\"\n[runtime]\npreset = \"local-headless\"\n[capabilities]\nrequested = [\"runtime-2d\", \"runtime-ui\"]\n").unwrap();
         fs::write(
             root.join("scenes/startup.scene.json"),
             SceneDocument::default().to_json_string().unwrap(),

@@ -41,7 +41,7 @@ impl EditorProjectSession {
             };
             return self.publish_editor_frame(scan_work_observed);
         }
-        let schema_fenced = self.schema_adoption_fenced();
+        let schema_fenced = self.authoring_operation_fenced();
         let source_work_fenced = schema_fenced || self.source_tools.reclamation_fenced();
         let open_before = self.document_open_view();
         let mut scan_work_observed = match &mut self.execution {
@@ -73,13 +73,14 @@ impl EditorProjectSession {
         self.advance_prefab_conversion();
         self.advance_source_tools();
         self.advance_schema_owner_adoption();
+        self.advance_authored_schema_upgrade();
         if drive_runtime && self.trusted_compiled().is_some() {
             self.drive_play_owner(real_delta);
         }
         self.advance_workspace_retirement();
         scan_work_observed |= open_before != self.document_open_view();
         #[cfg(feature = "presentation-2d")]
-        if !self.schema_adoption_fenced() && !self.source_tools.reclamation_fenced() {
+        if !self.authoring_operation_fenced() && !self.source_tools.reclamation_fenced() {
             self.drive_editor_preview();
         }
         self.publish_editor_frame(scan_work_observed)
@@ -149,7 +150,7 @@ impl EditorProjectSession {
         let preview_work = if self.authoring_runtime.preview_extent().is_some() {
             (
                 self.scene_capture.has_pending_work(),
-                if self.schema_adoption_fenced() {
+                if self.authoring_operation_fenced() {
                     None
                 } else {
                     self.scene_capture.recheck_after()
@@ -180,6 +181,9 @@ impl EditorProjectSession {
                 .with_document_open(self.document_open_view())
                 .with_authoring_retirement_pending(self.authoring_retirements.is_pending())
                 .with_schema_owner_adoption_work_pending(self.schema_owner_adoption.work_pending())
+                .with_authored_schema_upgrade_work_pending(
+                    self.authored_schema_upgrade.work_pending(),
+                )
                 .with_scene_preview_work(preview_work.0, preview_work.1, preview_work.2)
                 .with_scene_preview_document(self.scene_preview_document)
                 .with_prefab_conversion(self.prefab_conversion_view()),

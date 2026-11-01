@@ -78,14 +78,11 @@ pub const UI_SCHEMA_PROVIDER: nara_reflect::ComponentSchemaProviderDefinition =
     nara_reflect::ComponentSchemaProviderDefinition::with_validation(
         UI_SCHEMA_OWNER_ID,
         UI_SCHEMA_PROVIDER_ID,
-        nara_reflect::ComponentSchemaProviderBindingId::new("nara.ui.components.native", 3)
-            .with_codec_version(3)
-            .with_migration_version(3),
+        nara_reflect::ComponentSchemaProviderBindingId::new("nara.ui.components.native", 1),
         ui_schema_catalog,
         crate::codec::validate_ui_components,
         register_ui_components,
-    )
-    .with_predecessor(ui_schema_predecessor_catalog);
+    );
 const UI_PLUGIN_REQUIREMENTS: &[nara_app::PluginId] = &[
     nara_reflect::COMPONENT_REGISTRY_PLUGIN_ID,
     nara_input::INPUT_PLUGIN_ID,
@@ -102,11 +99,6 @@ pub const UI_PLUGIN_DECLARATION: nara_app::PluginDeclaration =
 fn ui_schema_catalog()
 -> Result<nara_reflect::ComponentSchemaCatalog, nara_reflect::ComponentSchemaProviderSourceError> {
     Ok(crate::codec::ui_schema_catalog())
-}
-
-fn ui_schema_predecessor_catalog()
--> Result<nara_reflect::ComponentSchemaCatalog, nara_reflect::ComponentSchemaProviderSourceError> {
-    Ok(crate::codec::ui_schema_predecessor_catalog())
 }
 
 impl Plugin for UiPlugin {
@@ -226,4 +218,4 @@ pub mod advanced {
 mod adapter_tests;
 
 #[cfg(test)]
-mod component_evolution_tests;
+mod component_schema_tests;

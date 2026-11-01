@@ -5,8 +5,12 @@ use std::{
 };
 
 use nara_fs::{CapabilityRights, DirectoryCapability, HostCapabilityOptions, TrustMode};
-use nara_reflect::ComponentRegistryBuilder;
-use nara_scene::{SceneAuthoringSession, SceneDocument, SceneEntityId, SceneEntityRecord};
+use nara_reflect::AuthoringSchemaBundle;
+use nara_scene::{
+    AuthoringDocumentSource, AuthoringSchemaBasis, SceneAuthoringSession, SceneDocument,
+    SceneDocumentCandidate, SceneEntityId, SceneEntityRecord, ScenePatchDocument,
+    ScenePatchOperation, ScenePlacement, ScenePlacementOwner,
+};
 use nara_tasks::{TaskPoolConfig, TaskTerminal};
 use nara_tooling::{EditorPersistenceAuthority, EditorWorkspace};
 
@@ -36,15 +40,50 @@ impl SaveFixture {
             .unwrap()
             .into_bytes();
         fs::write(directory.join("current.scene.json"), &original).unwrap();
-        let scene = SceneDocument::from_ordered_roots([SceneEntityRecord::new(
-            SceneEntityId::new("captured-entity").unwrap(),
-        )]);
-        let (mut workspace, authority) = EditorWorkspace::new_hosted();
+        let basis =
+            AuthoringSchemaBasis::admit(&AuthoringSchemaBundle::new([]).unwrap(), &[]).unwrap();
+        let published = SceneDocumentCandidate::decode_json_bytes(&original)
+            .unwrap()
+            .admit_authoring_with_basis(
+                AuthoringDocumentSource::new(AssetRef::path("scenes/current.scene.json").unwrap()),
+                &basis,
+            )
+            .unwrap()
+            .publish();
+        let (mut workspace, mut authority) = EditorWorkspace::new_hosted();
         let document = workspace
-            .open_scene_session("current.scene.json", SceneAuthoringSession::new(scene))
+            .open_scene_session(
+                "current.scene.json",
+                SceneAuthoringSession::from_published_authoring_document(published),
+            )
             .unwrap()
             .opened_document
             .unwrap();
+        assert!(
+            authority
+                .bind_opened_source_digest(
+                    &mut workspace,
+                    document,
+                    crate::project_host::persistence::editor_digest(
+                        nara_fs::ContentDigest::of_bytes(&original),
+                    ),
+                )
+                .applied
+        );
+        assert!(
+            workspace
+                .apply_authoring_command(EditorWorkspaceCommand::ApplyScenePatch {
+                    document,
+                    base_revision: workspace.scene(document).unwrap().revision(),
+                    patch: ScenePatchDocument::new([ScenePatchOperation::AddEntity {
+                        entity: SceneEntityRecord::new(
+                            SceneEntityId::new("captured-entity").unwrap(),
+                        ),
+                        placement: ScenePlacement::last(ScenePlacementOwner::Root),
+                    }]),
+                })
+                .applied
+        );
         Self {
             directory,
             original,
@@ -78,10 +117,15 @@ impl SaveFixture {
             HostCapabilityOptions::new(CapabilityRights::ReadWrite, TrustMode::TrustedLocal),
         )
         .unwrap();
-        let registry = ComponentRegistryBuilder::new();
-        let registry = registry.freeze().unwrap();
-        let opened =
-            ScenePersistenceHost::open(&directory, "current.scene.json", &registry).unwrap();
+        let session = self.workspace.scene(self.document).unwrap().session();
+        let opened = ScenePersistenceHost::open_authoring(
+            &directory,
+            "current.scene.json",
+            session.authoring_source().unwrap().clone(),
+            &session.authoring_schema_basis().unwrap(),
+        )
+        .unwrap();
+        let authoring = session.authoring_readmission();
         let lane = PersistenceLane::Scene(EditorScenePersistenceLane {
             project_path: Arc::from("scenes/current.scene.json"),
             source_key: nara_scene::SourceDocumentKey::named(
@@ -97,7 +141,7 @@ impl SaveFixture {
         BackgroundSave::start(
             lane,
             PendingSave::Scene(self.candidate()),
-            None,
+            authoring,
             pools,
             gate,
         )
@@ -107,9 +151,15 @@ impl SaveFixture {
         let PersistenceLane::Scene(lane) = lane else {
             panic!("the fixture owns a Scene Host")
         };
+        let authoring = self
+            .workspace
+            .scene(self.document)
+            .unwrap()
+            .session()
+            .authoring_readmission();
         assert!(matches!(
             lane.host
-                .try_with(|host| host.save_owned(self.candidate(), None))
+                .try_with(|host| host.save_owned(self.candidate(), authoring))
                 .unwrap(),
             PersistenceSaveOutcome::Saved { .. }
         ));
@@ -283,9 +333,15 @@ fn worker_panic_recovers_the_poisoned_host_and_blocks_blind_retry() {
     let PersistenceLane::Scene(lane) = lane else {
         panic!("the fixture owns a Scene Host")
     };
+    let authoring = fixture
+        .workspace
+        .scene(fixture.document)
+        .unwrap()
+        .session()
+        .authoring_readmission();
     assert!(matches!(
         lane.host
-            .try_with(|host| host.save_owned(fixture.candidate(), None))
+            .try_with(|host| host.save_owned(fixture.candidate(), authoring))
             .unwrap(),
         PersistenceSaveOutcome::Rejected(EditorPersistenceRejection::RequiresReconcile)
     ));

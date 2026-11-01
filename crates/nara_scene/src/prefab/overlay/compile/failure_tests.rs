@@ -271,12 +271,12 @@ fn a_different_authoring_admission_is_not_a_repairable_base_change() {
         |_, _| Ok::<_, Infallible>(Some(loaded.clone())),
     )
     .unwrap();
-    let failure = report.failure.as_ref().expect("typed admission refusal");
+    let failure = report.failure().expect("typed admission refusal");
     assert_eq!(
         failure.reason(),
         &PrefabExpansionFailureKind::OwnerAdmission
     );
     assert!(failure.location().is_none());
     assert!(failure.slot().is_none());
-    assert!(report.candidate.is_none());
+    assert!(report.candidate().is_none());
 }

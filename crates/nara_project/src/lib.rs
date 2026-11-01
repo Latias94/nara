@@ -17,6 +17,7 @@ pub const MAX_PROJECT_EXECUTION_CONTRACT_BYTES: usize = 128;
 /// a manifest admission bound, not a promise about supported scene size or runtime performance.
 pub const MAX_PROJECT_CONTENT_SCENES: usize = 64;
 
+mod authoring;
 mod capability;
 mod content;
 mod defaults;
@@ -29,6 +30,11 @@ mod runtime_configuration;
 mod sections;
 mod validation;
 
+pub use authoring::{
+    MAX_PROJECT_AUTHORING_RECOVERY_PATH_BYTES, ProjectAuthoringRecovery,
+    ProjectAuthoringRecoveryDigest, ProjectAuthoringRecoveryDigestError,
+    ProjectAuthoringRecoveryPathError, ProjectAuthoringState,
+};
 pub use capability::{ProductCapability, ProductCapabilitySet, RuntimePreset};
 pub use content::{EffectiveProjectContentSettings, ProjectContentManifest};
 pub use effective::{
@@ -75,13 +81,16 @@ pub mod prelude {
         EffectiveProjectSettings, EffectiveRenderSettings, EffectiveRuntimeConfiguration,
         EffectiveRuntimeSettings, EffectiveStartupSettings, EffectiveTaskSettings,
         EffectiveUiSafeArea, EffectiveUiSettings, EffectiveWindowSettings, EffectiveWorldCanvas,
-        MAX_PROJECT_CONTENT_SCENES, MAX_PROJECT_EXECUTION_CONTRACT_BYTES,
-        MAX_PROJECT_FIXED_DEBT_STEPS, MAX_PROJECT_FIXED_STEPS_PER_FRAME,
-        MAX_PROJECT_UI_LOGICAL_EXTENT, NativeDocumentIdentity, ProductCapability,
-        ProductCapabilitySet, ProjectAuthoringManifest, ProjectCapabilitiesManifest,
-        ProjectCapabilitiesPatch, ProjectContentManifest, ProjectDiagnosticsManifest,
-        ProjectExecutionContract, ProjectExecutionPatch, ProjectFixedCatchUpPolicy, ProjectInfo,
-        ProjectInputManifest, ProjectManifest, ProjectManifestLoad, ProjectManifestMutationError,
+        MAX_PROJECT_AUTHORING_RECOVERY_PATH_BYTES, MAX_PROJECT_CONTENT_SCENES,
+        MAX_PROJECT_EXECUTION_CONTRACT_BYTES, MAX_PROJECT_FIXED_DEBT_STEPS,
+        MAX_PROJECT_FIXED_STEPS_PER_FRAME, MAX_PROJECT_UI_LOGICAL_EXTENT, NativeDocumentIdentity,
+        ProductCapability, ProductCapabilitySet, ProjectAuthoringManifest,
+        ProjectAuthoringRecovery, ProjectAuthoringRecoveryDigest,
+        ProjectAuthoringRecoveryDigestError, ProjectAuthoringRecoveryPathError,
+        ProjectAuthoringState, ProjectCapabilitiesManifest, ProjectCapabilitiesPatch,
+        ProjectContentManifest, ProjectDiagnosticsManifest, ProjectExecutionContract,
+        ProjectExecutionPatch, ProjectFixedCatchUpPolicy, ProjectInfo, ProjectInputManifest,
+        ProjectManifest, ProjectManifestLoad, ProjectManifestMutationError,
         ProjectManifestWriteError, ProjectPath, ProjectPathError, ProjectPathsManifest,
         ProjectPresentMode, ProjectProfileError, ProjectProfileKind, ProjectProfileOverlay,
         ProjectRenderManifest, ProjectRenderPatch, ProjectRuntimeManifest, ProjectStartupManifest,

@@ -1,17 +1,56 @@
 //! Root-private admission for non-executable project authoring schema data.
 
 mod adapter;
+#[cfg(feature = "tooling")]
+pub(crate) use adapter::compiled_authoring_adapters;
 mod bundle;
 pub(crate) mod document;
 pub(crate) mod native_source;
 mod project;
 mod source_index;
+mod source_upgrade_inventory;
+#[cfg(any(feature = "tooling", feature = "project-tooling"))]
+mod source_upgrade_policy;
+#[cfg(any(feature = "tooling", feature = "project-tooling"))]
+pub use project::{
+    AuthoredSchemaUpgradeRecovery, AuthoredSchemaUpgradeRecoveryError,
+    AuthoredSchemaUpgradeRecoveryErrorKind, AuthoredSchemaUpgradeRecoveryMember,
+    AuthoredSchemaUpgradeRecoveryMemberState, AuthoredSchemaUpgradeRecoveryPhase,
+    AuthoredSchemaUpgradeRecoveryReceipt, AuthoredSchemaUpgradeRecoveryReview,
+    AuthoredSchemaUpgradeRecoveryUsage, AuthoredSchemaUpgradeRecoveryView,
+};
+#[cfg(any(feature = "tooling", feature = "project-tooling"))]
+pub use source_upgrade_policy::{
+    AuthoredSchemaUpgradeHistoryPolicy, AuthoredSchemaUpgradeHostLimits,
+};
+#[cfg(any(feature = "tooling", feature = "project-tooling"))]
+mod source_upgrade_publication;
+#[cfg(any(feature = "tooling", feature = "project-tooling", test))]
+mod source_upgrade_ready;
+mod source_upgrade_recovery;
+#[cfg(any(feature = "tooling", feature = "project-tooling", test))]
+mod source_upgrade_storage;
 
 #[cfg(any(feature = "tooling", test))]
 pub(crate) use adapter::{first_party_authoring_preview_registry, project_authoring_adapters};
 pub(crate) use document::{
     AdmittedAuthoringDocument, AuthoringDocumentAdmissionError, AuthoringDocumentKind,
     OwnedAuthoringDocumentRequest,
+};
+#[cfg(feature = "tooling")]
+pub(crate) use project::SourceUpgradeProjectOutcome;
+#[cfg(feature = "tooling")]
+pub use project::{
+    AuthoredSchemaUpgradeProposal, AuthoredSchemaUpgradeReview,
+    AuthoredSchemaUpgradeReviewedSource, AuthoredSchemaUpgradeSourceProposal,
+};
+#[cfg(feature = "tooling")]
+pub(crate) use project::{
+    AuthoredSourceUpgradeObservedFile, AuthoredSourceUpgradePublication,
+    AuthoredSourceUpgradePublicationFailure, AuthoredSourceUpgradePublicationPhase,
+    PreparedAuthoredSchemaUpgradeReview, SourceUpgradeBaseline, SourceUpgradeCaptureRequest,
+    SourceUpgradeOpenInput, SourceUpgradePreparationError, SourceUpgradeProposalError,
+    SourceUpgradeProposalFailure,
 };
 #[cfg(any(feature = "tooling", test))]
 pub(crate) use project::{
@@ -41,7 +80,7 @@ use std::{
     error::Error,
     fmt::{self, Display, Formatter},
     num::NonZeroU64,
-    sync::Arc,
+    sync::{Arc, OnceLock},
 };
 
 use nara_core::{ByteLimit, DepthLimit, ItemLimit};
@@ -51,8 +90,8 @@ use nara_fs::{
     RelativePath,
 };
 use nara_project::{
-    DEFAULT_MANIFEST_BYTE_LIMIT, EffectiveProjectSettings, ProjectManifest, ProjectPath,
-    ProjectProfileError,
+    DEFAULT_MANIFEST_BYTE_LIMIT, EffectiveProjectSettings, ProjectAuthoringState, ProjectManifest,
+    ProjectPath, ProjectProfileError,
 };
 use nara_reflect::{
     AuthoringSchemaBundle, AuthoringSchemaBundleError, SchemaCompositionFingerprint,
@@ -206,6 +245,7 @@ pub(crate) struct AuthoringProjectAdmissionUsage {
     max_traversal_depth: usize,
     path_bytes: usize,
     peak_open_handles: usize,
+    retained_open_handles: usize,
     diagnostic_items: usize,
     diagnostic_bytes: usize,
     retained_candidate_bytes: usize,
@@ -250,6 +290,11 @@ impl AuthoringProjectAdmissionUsage {
     #[must_use]
     pub(crate) const fn peak_open_handles(self) -> usize {
         self.peak_open_handles
+    }
+
+    #[must_use]
+    pub(crate) const fn retained_open_handles(self) -> usize {
+        self.retained_open_handles
     }
 
     #[must_use]
@@ -309,6 +354,7 @@ struct AuthoringProjectAdmissionBudget {
     max_traversal_depth: usize,
     path_bytes: usize,
     peak_open_handles: usize,
+    retained_open_handles: usize,
     diagnostic_items: usize,
     diagnostic_bytes: usize,
     retained_candidate_bytes: usize,
@@ -328,10 +374,20 @@ impl AuthoringProjectAdmissionBudget {
             max_traversal_depth: 0,
             path_bytes: 0,
             peak_open_handles: 0,
+            retained_open_handles: 0,
             diagnostic_items: 0,
             diagnostic_bytes: 0,
             retained_candidate_bytes: 0,
         }
+    }
+
+    /// Starts a new authored operation's work meter once. Existing admitted content, storage
+    /// and native custody remain charged; a proposal retry continues the returned budget.
+    fn for_authored_upgrade(mut self, work_limit: ItemLimit, open_handles: ItemLimit) -> Self {
+        self.limits.decode_work = work_limit;
+        self.limits.peak_open_handles = open_handles;
+        self.decode_work = 0;
+        self
     }
 
     fn read_limit(
@@ -388,8 +444,61 @@ impl AuthoringProjectAdmissionBudget {
         &mut self,
         live_handles: usize,
     ) -> Result<(), AuthoringProjectAdmissionError> {
-        self.peak_open_handles = self.peak_open_handles.max(live_handles);
-        self.ensure_within_limits()
+        self.ensure_within_limits()?;
+        let peak = self
+            .retained_open_handles
+            .checked_add(live_handles)
+            .filter(|peak| *peak <= self.limits.peak_open_handles().get())
+            .ok_or(AuthoringProjectAdmissionError::PeakOpenHandlesExceeded {
+                maximum: self.limits.peak_open_handles().get(),
+            })?;
+        self.peak_open_handles = self.peak_open_handles.max(peak);
+        Ok(())
+    }
+
+    /// Checks a known later stage without reserving handles or recording it as observed usage.
+    fn check_handle_capacity(
+        &self,
+        additional: usize,
+    ) -> Result<(), AuthoringProjectAdmissionError> {
+        self.ensure_within_limits()?;
+        self.retained_open_handles
+            .checked_add(additional)
+            .filter(|peak| *peak <= self.limits.peak_open_handles().get())
+            .ok_or(AuthoringProjectAdmissionError::PeakOpenHandlesExceeded {
+                maximum: self.limits.peak_open_handles().get(),
+            })?;
+        Ok(())
+    }
+
+    /// Admits continuously retained native objects before opening them. Existing transient
+    /// peak callers add their own overlap to this retained base, rather than hiding N sources
+    /// behind one fixed per-call estimate. Rejected opens create no retained ownership.
+    fn retain_open_handles(
+        &mut self,
+        additional: usize,
+    ) -> Result<(), AuthoringProjectAdmissionError> {
+        self.ensure_within_limits()?;
+        let retained = self.retained_open_handles.checked_add(additional).ok_or(
+            AuthoringProjectAdmissionError::PeakOpenHandlesExceeded {
+                maximum: self.limits.peak_open_handles().get(),
+            },
+        )?;
+        if retained > self.limits.peak_open_handles().get() {
+            return Err(AuthoringProjectAdmissionError::PeakOpenHandlesExceeded {
+                maximum: self.limits.peak_open_handles().get(),
+            });
+        }
+        self.retained_open_handles = retained;
+        self.peak_open_handles = self.peak_open_handles.max(retained);
+        Ok(())
+    }
+
+    fn release_open_handles(&mut self, released: usize) {
+        self.retained_open_handles = self
+            .retained_open_handles
+            .checked_sub(released)
+            .expect("retained handle custody ends before its reservation is released");
     }
 
     fn charge_manifest_bytes(
@@ -527,6 +636,7 @@ impl AuthoringProjectAdmissionBudget {
             max_traversal_depth: self.max_traversal_depth,
             path_bytes: self.path_bytes,
             peak_open_handles: self.peak_open_handles,
+            retained_open_handles: self.retained_open_handles,
             diagnostic_items: self.diagnostic_items,
             diagnostic_bytes: self.diagnostic_bytes,
             retained_candidate_bytes: self.retained_candidate_bytes,
@@ -607,6 +717,9 @@ impl AuthoringProjectAdmissionHost {
         let settings = manifest
             .resolve_profile(profile)
             .map_err(AuthoringProjectAdmissionError::Profile)?;
+        if matches!(settings.authoring_state, ProjectAuthoringState::Pending(_)) {
+            return Err(AuthoringProjectAdmissionError::SourceAuthoringPending);
+        }
         let bundle_path = settings
             .authoring_schema_bundle
             .clone()
@@ -616,7 +729,7 @@ impl AuthoringProjectAdmissionHost {
             attempt,
             project_root,
             manifest: AdmittedAuthoringManifest {
-                capability: manifest_capability,
+                capability: OnceLock::from(manifest_capability),
                 bytes: Arc::from(manifest_bytes),
                 digest: manifest_digest,
             }
@@ -639,9 +752,19 @@ impl AuthoringProjectAdmissionHost {
 }
 
 struct AdmittedAuthoringManifest {
-    capability: FileCapability,
+    // Only the private authored-upgrade publisher prepares an empty slot. It never exposes
+    // its ordinary receipt until its own confirmed publication fills this slot.
+    capability: OnceLock<FileCapability>,
     bytes: Arc<[u8]>,
     digest: ContentDigest,
+}
+
+impl AdmittedAuthoringManifest {
+    fn capability(&self) -> &FileCapability {
+        self.capability
+            .get()
+            .expect("ordinary Schema receipts retain their admitted manifest capability")
+    }
 }
 
 pub(crate) struct PreparedAuthoringSchemaBasis {
@@ -703,22 +826,32 @@ pub(crate) struct AuthoringSchemaReceipt {
     manifest: Arc<AdmittedAuthoringManifest>,
     settings: EffectiveProjectSettings,
     bundle: AdmittedAuthoringSchemaBundle,
+    // Ordinary capture policy and admitted live Schema inputs. Completed upgrade work belongs
+    // to its operation outcome/Session usage and must never be installed as this baseline.
     budget: AuthoringProjectAdmissionBudget,
 }
 
 impl AuthoringSchemaReceipt {
     /// Compares retained schema files without reopening names or reading their contents.
     pub(crate) fn source_object_in_use(&self, candidate: &FileCapability) -> Result<bool, FsError> {
-        Ok(self.manifest.capability.same_object(candidate)?
+        Ok(self.manifest.capability().same_object(candidate)?
             || self.bundle.capability().same_object(candidate)?)
     }
 
     /// Validates current schema names against the retained objects before retaining those opens.
-    fn collect_reclamation_sources(&self, output: &mut Vec<FileCapability>) -> Result<(), FsError> {
+    fn collect_reclamation_sources(
+        &self,
+        output: &mut Vec<FileCapability>,
+        budget: &mut AuthoringProjectAdmissionBudget,
+    ) -> Result<(), FsError> {
+        let unproven = || FsError::Unproven {
+            operation: nara_fs::FsOperation::InspectHandle,
+            proof: "the retained Schema exclusion exceeds reclamation capacity",
+        };
         for (path, retained, digest) in [
             (
                 PROJECT_MANIFEST_PATH,
-                &self.manifest.capability,
+                self.manifest.capability(),
                 self.manifest.digest,
             ),
             (
@@ -727,6 +860,30 @@ impl AuthoringSchemaReceipt {
                 self.bundle.digest(),
             ),
         ] {
+            // Current exclusions and native scratch overlap the retained capture. Exact-name
+            // verification and the 64 KiB streaming hash run sequentially, sharing this ceiling.
+            let temporary = path
+                .len()
+                .checked_mul(2)
+                .and_then(|bytes| bytes.checked_add(65_536))
+                .ok_or_else(unproven)?;
+            let work = usize::try_from(digest.length())
+                .ok()
+                .and_then(|bytes| bytes.checked_add(1))
+                .and_then(|bytes| bytes.checked_add(temporary))
+                .ok_or_else(unproven)?;
+            budget
+                .charge_source_bytes(
+                    0,
+                    0,
+                    work,
+                    temporary
+                        .checked_add(std::mem::size_of::<FileCapability>())
+                        .ok_or_else(unproven)?,
+                )
+                .map_err(|_| unproven())?;
+            budget.retain_open_handles(1).map_err(|_| unproven())?;
+            budget.admit_handle_peak(7).map_err(|_| unproven())?;
             let file = self
                 .project_root
                 .open_file_exact(&RelativePath::new(path)?)?;
@@ -739,6 +896,9 @@ impl AuthoringSchemaReceipt {
             }
             file.verify_digest(digest, digest.length())?;
             output.push(file);
+            budget
+                .reconcile_retained_reservation(temporary, 0)
+                .map_err(|_| unproven())?;
         }
         Ok(())
     }
@@ -760,12 +920,12 @@ impl AuthoringSchemaReceipt {
 
     #[must_use]
     pub(crate) fn manifest_identity(&self) -> FileIdentity {
-        self.manifest.capability.identity()
+        self.manifest.capability().identity()
     }
 
     #[must_use]
     pub(crate) fn manifest_parent_identity(&self) -> Option<FileIdentity> {
-        self.manifest.capability.parent_identity()
+        self.manifest.capability().parent_identity()
     }
 
     #[must_use]
@@ -838,6 +998,7 @@ pub(crate) enum AuthoringProjectAdmissionError {
     ManifestTooLarge { maximum: usize },
     ManifestInvalid { diagnostics: DiagnosticReport },
     Profile(ProjectProfileError),
+    SourceAuthoringPending,
     MissingSchemaBundle,
     BundlePath(PathValidationError),
     BundleHost(FsError),
@@ -875,6 +1036,9 @@ impl Display for AuthoringProjectAdmissionError {
             ),
             Self::ManifestInvalid { .. } => formatter.write_str("project manifest is invalid"),
             Self::Profile(_) => formatter.write_str("project profile could not be resolved"),
+            Self::SourceAuthoringPending => {
+                formatter.write_str("project sources have an unfinished authored upgrade")
+            }
             Self::MissingSchemaBundle => {
                 formatter.write_str("project manifest does not declare an authoring schema bundle")
             }
@@ -948,6 +1112,7 @@ impl Error for AuthoringProjectAdmissionError {
             | Self::ManifestRootMismatch
             | Self::ManifestTooLarge { .. }
             | Self::ManifestInvalid { .. }
+            | Self::SourceAuthoringPending
             | Self::MissingSchemaBundle
             | Self::BundleTooLarge { .. }
             | Self::AggregateEncodedBytesExceeded { .. }
@@ -1021,6 +1186,38 @@ mod tests {
 
     use super::*;
 
+    #[test]
+    fn retained_handle_custody_adds_to_transient_peaks_and_refuses_before_retention() {
+        let mut limits = AuthoringProjectAdmissionLimits::default();
+        limits.peak_open_handles = ItemLimit::new(5).unwrap();
+        let mut budget = AuthoringProjectAdmissionBudget::new(limits);
+        budget.retain_open_handles(3).unwrap();
+        let before_check = budget.usage();
+        budget.check_handle_capacity(2).unwrap();
+        assert!(matches!(
+            budget.check_handle_capacity(3),
+            Err(AuthoringProjectAdmissionError::PeakOpenHandlesExceeded { maximum: 5 })
+        ));
+        assert_eq!(budget.usage(), before_check);
+        budget.admit_handle_peak(2).unwrap();
+        assert_eq!(budget.usage().retained_open_handles(), 3);
+        assert_eq!(budget.usage().peak_open_handles(), 5);
+        assert!(matches!(
+            budget.retain_open_handles(3),
+            Err(AuthoringProjectAdmissionError::PeakOpenHandlesExceeded { maximum: 5 })
+        ));
+        assert_eq!(budget.usage().retained_open_handles(), 3);
+        budget.release_open_handles(2);
+        budget.admit_handle_peak(4).unwrap();
+        assert_eq!(budget.usage().retained_open_handles(), 1);
+        assert_eq!(budget.usage().peak_open_handles(), 5);
+        assert!(matches!(
+            budget.admit_handle_peak(5),
+            Err(AuthoringProjectAdmissionError::PeakOpenHandlesExceeded { maximum: 5 })
+        ));
+        assert_eq!(budget.usage().retained_open_handles(), 1);
+    }
+
     static TEMP_SEQUENCE: AtomicU64 = AtomicU64::new(0);
     const BUNDLE_PATH: &str = "schemas/authoring.bundle.json";
     const BUILTIN_OWNER: ComponentSchemaOwnerId =
@@ -1065,7 +1262,12 @@ mod tests {
             .unwrap();
         assert!(schema.source_object_in_use(&moved).unwrap());
         assert!(!schema.source_object_in_use(&replacement).unwrap());
-        assert!(schema.collect_reclamation_sources(&mut Vec::new()).is_err());
+        let mut budget = schema.budget;
+        assert!(
+            schema
+                .collect_reclamation_sources(&mut Vec::new(), &mut budget)
+                .is_err()
+        );
     }
 
     #[test]
@@ -1135,15 +1337,31 @@ mod tests {
         );
 
         fs::write(project.root.join(path), &bytes).unwrap();
+        let mut current_exclusions = Vec::new();
+        snapshot
+            .collect_reclamation_sources(&mut current_exclusions)
+            .unwrap();
+        validation
+            .collect_reclamation_sources(&mut Vec::new())
+            .unwrap();
+        let current = project
+            .capability()
+            .open_file_exact(&RelativePath::new(path).unwrap())
+            .unwrap();
         assert!(
-            snapshot
-                .collect_reclamation_sources(&mut Vec::new())
-                .is_err()
+            current_exclusions
+                .iter()
+                .any(|source| source.same_object(&current).unwrap())
         );
         assert!(
-            validation
-                .collect_reclamation_sources(&mut Vec::new())
-                .is_err()
+            sources
+                .iter()
+                .any(|source| source.same_object(&moved).unwrap())
+        );
+        assert!(
+            !current_exclusions
+                .iter()
+                .any(|source| source.same_object(&moved).unwrap())
         );
     }
 
@@ -1218,6 +1436,30 @@ mod tests {
             .unwrap()
             .publish();
         assert_eq!(second.attempt_generation().get(), 2);
+    }
+
+    #[test]
+    fn pending_authored_upgrade_refuses_authoring_before_loading_the_bundle() {
+        let project = TestAuthoringProject::new(
+            "pending-upgrade",
+            schema_bundle("nara.test.authoring", "nara.test.Transform"),
+        );
+        let manifest_path = project.root.join(PROJECT_MANIFEST_PATH);
+        let bytes = fs::read(&manifest_path).unwrap();
+        let mut manifest = ProjectManifest::parse_toml_bytes(&bytes).manifest.unwrap();
+        manifest.authoring.state = ProjectAuthoringState::Pending(
+            nara_project::ProjectAuthoringRecovery::new(
+                ProjectPath::new(".nara/upgrades/recovery.json").unwrap(),
+                nara_project::ProjectAuthoringRecoveryDigest::from_parts(123, [1; 32]),
+            )
+            .unwrap(),
+        );
+        fs::write(&manifest_path, manifest.to_canonical_toml_bytes().unwrap()).unwrap();
+        fs::remove_file(project.root.join(BUNDLE_PATH)).unwrap();
+        assert!(matches!(
+            AuthoringProjectAdmissionHost::default().prepare(project.capability(), None),
+            Err(AuthoringProjectAdmissionError::SourceAuthoringPending),
+        ));
     }
 
     #[test]
@@ -1685,6 +1927,11 @@ mod tests {
                         }
                     );
                     let usage = snapshot.usage();
+                    let readmission_metadata_bytes = snapshot
+                        .source_facts()
+                        .filter(|fact| fact.kind() == AuthoringSourceKind::AssetMetadata)
+                        .map(|fact| fact.encoded_bytes())
+                        .sum::<usize>();
                     assert_eq!(
                         usage.aggregate_encoded_bytes(),
                         usage.manifest_encoded_bytes()
@@ -1693,6 +1940,7 @@ mod tests {
                                 .source_facts()
                                 .map(|fact| fact.encoded_bytes())
                                 .sum::<usize>()
+                            + readmission_metadata_bytes
                     );
                 }
             }
@@ -2582,6 +2830,7 @@ native_document_identity = 'project_location'
 name = "{name}"
 
 [authoring]
+state = "ready"
 schema_bundle = "{BUNDLE_PATH}"
 "#
                 ),
@@ -2619,6 +2868,7 @@ prefabs = "prefabs"
 default_scene = "startup.scene.json"
 
 [authoring]
+state = "ready"
 schema_bundle = "{BUNDLE_PATH}"
 "#
                 ),

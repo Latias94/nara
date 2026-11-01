@@ -20,7 +20,7 @@ use nara_render::{
 use nara_render_wgpu::{WgpuRenderInput, WgpuStockCapture, WgpuStockCaptureAdapter};
 use nara_scene::{
     __private::AuthoringPreviewOmission, ExpandedSceneCandidate, SceneAuthoringRevision,
-    SceneDocument, SceneEntityId, SceneEntitySource, SceneProjection, SourceDocumentKey,
+    SceneEntityId, SceneEntitySource, SceneProjection, SourceDocumentKey,
 };
 use nara_sprite_render::__private::{QueuedSpriteItems, SpriteBatches, SpriteInstance};
 use nara_tooling::{EditorDocumentId, WorldIdentitySnapshot};
@@ -239,8 +239,7 @@ pub(super) enum EditorPreviewProjection {
         asset_scope: Arc<AssetPathScope>,
     },
     TrustedCompiled {
-        source_key: SourceDocumentKey,
-        scene: SceneDocument,
+        candidate: ExpandedSceneCandidate,
         omissions: EditorAuthoringPreviewOmissions,
     },
     Rejected(DiagnosticReport),
@@ -262,13 +261,11 @@ impl EditorPreviewProjection {
     }
 
     pub(super) fn trusted_compiled(
-        source_key: SourceDocumentKey,
-        scene: SceneDocument,
+        candidate: ExpandedSceneCandidate,
         omissions: EditorAuthoringPreviewOmissions,
     ) -> Self {
         Self::TrustedCompiled {
-            source_key,
-            scene,
+            candidate,
             omissions,
         }
     }
@@ -292,7 +289,19 @@ impl EditorPreviewProjection {
 struct EditorPreviewInput(Arc<Mutex<Option<EditorPreviewRequest>>>);
 
 #[derive(Resource)]
-struct EditorPreviewRegistry(ComponentRegistrySnapshot);
+enum EditorPreviewRegistry {
+    Authoring(ComponentRegistrySnapshot),
+    Installed,
+}
+
+impl EditorPreviewRegistry {
+    fn snapshot(&self, world: &World) -> Option<ComponentRegistrySnapshot> {
+        match self {
+            Self::Authoring(registry) => Some(registry.clone()),
+            Self::Installed => nara_reflect::component_registry(world).cloned(),
+        }
+    }
+}
 
 #[derive(Resource)]
 enum EditorPreviewProject {
@@ -471,13 +480,12 @@ impl EditorPreviewSession {
     pub(super) fn install_trusted(
         app: &mut App,
         project: ProjectContentSnapshot,
-        registry: &ComponentRegistrySnapshot,
         recipe: &crate::ProductRecipe,
     ) -> Result<Self, DiagnosticReport> {
         Self::install(
             app,
             EditorPreviewProject::TrustedCompiled(project),
-            registry,
+            EditorPreviewRegistry::Installed,
             recipe,
         )
     }
@@ -505,7 +513,7 @@ impl EditorPreviewSession {
                 admitted_count,
                 additional_path_bytes: 0,
             }),
-            registry,
+            EditorPreviewRegistry::Authoring(registry.clone()),
             recipe,
         )
     }
@@ -513,7 +521,7 @@ impl EditorPreviewSession {
     fn install(
         app: &mut App,
         project: EditorPreviewProject,
-        registry: &ComponentRegistrySnapshot,
+        registry: EditorPreviewRegistry,
         recipe: &crate::ProductRecipe,
     ) -> Result<Self, DiagnosticReport> {
         let _ = recipe;
@@ -525,7 +533,7 @@ impl EditorPreviewSession {
             .map_err(|_| preview_error("project.editor.preview-policy-install-failed"))?;
         let input = Arc::new(Mutex::new(None));
         app.insert_resource(EditorPreviewInput(Arc::clone(&input)))
-            .and_then(|app| app.insert_resource(EditorPreviewRegistry(registry.clone())))
+            .and_then(|app| app.insert_resource(registry))
             .and_then(|app| app.insert_resource(project))
             .and_then(|app| app.insert_resource(EditorPreviewRuntimeState::new()))
             .and_then(|app| app.add_systems(CoreStage::First, apply_editor_preview_request))
@@ -837,8 +845,9 @@ fn apply_editor_preview_request(world: &mut World) {
             .requested_projection
             .as_ref()
             .expect("a requested preview retains its exact projection");
-        let report = match (&project, projection) {
-            (_, EditorPreviewProjection::Rejected(diagnostics)) => {
+        let native_registry = registry.snapshot(world);
+        let report = match (&project, projection, native_registry.as_ref()) {
+            (_, EditorPreviewProjection::Rejected(diagnostics), _) => {
                 let mut report = nara_scene::SceneSpawnReport::default();
                 report.diagnostics = diagnostics.clone();
                 report
@@ -851,24 +860,19 @@ fn apply_editor_preview_request(world: &mut World) {
                     asset_scope,
                     ..
                 },
-            ) => state.materializer.publish(
-                world,
-                &registry.0,
-                candidate,
-                database.resolver(asset_scope),
-            ),
+                Some(native),
+            ) => {
+                state
+                    .materializer
+                    .publish(world, native, candidate, database.resolver(asset_scope))
+            }
             (
                 EditorPreviewProject::TrustedCompiled(project),
-                EditorPreviewProjection::TrustedCompiled {
-                    source_key, scene, ..
-                },
-            ) => project.sync_editor_preview_scene(
-                &mut state.materializer,
-                source_key,
-                scene,
-                world,
-                &registry.0,
-            ),
+                EditorPreviewProjection::TrustedCompiled { candidate, .. },
+                Some(native),
+            ) => state
+                .materializer
+                .publish(world, native, candidate, project.asset_resolution()),
             _ => {
                 let mut report = nara_scene::SceneSpawnReport::default();
                 report.diagnostics =

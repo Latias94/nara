@@ -8,6 +8,8 @@ use nara_fs::{ContentDigest, DirectoryCapability, FileIdentity};
 use nara_tasks::TaskPools;
 
 use super::AuthoringSchemaReceipt;
+#[cfg(any(feature = "tooling", feature = "project-tooling"))]
+use super::project::AuthoringProjectSourceAdmissionError;
 
 mod attempt;
 mod budget;
@@ -627,6 +629,47 @@ pub(crate) struct ProjectSourceIndexState {
 }
 
 impl ProjectSourceIndexState {
+    /// Storage copied by `new` for the exact original configuration, before allocating the
+    /// bundle locator, four root locators and their boxed index. Sharing root capabilities
+    /// does not clone the logical path contents or require another native open.
+    #[cfg(any(feature = "tooling", feature = "project-tooling"))]
+    pub(super) fn checked_retained_bytes_for_schema(
+        schema: &AuthoringSchemaReceipt,
+    ) -> Result<usize, AuthoringProjectSourceAdmissionError> {
+        let settings = schema.settings();
+        let locators = [
+            schema.bundle_path().as_str(),
+            settings.paths.assets.as_str(),
+            settings.paths.scenes.as_str(),
+            settings.paths.prefabs.as_str(),
+            settings.paths.scripts.as_str(),
+        ];
+        let fixed = std::mem::size_of::<Self>()
+            .checked_add(4 * std::mem::size_of::<(Arc<str>, ProjectSourceRootRole)>())
+            .ok_or(AuthoringProjectSourceAdmissionError::AccountingOverflow)?;
+        locators.into_iter().try_fold(fixed, |bytes, path| {
+            bytes
+                .checked_add(path.len())
+                .and_then(|bytes| bytes.checked_add(4 * std::mem::size_of::<usize>()))
+                .ok_or(AuthoringProjectSourceAdmissionError::AccountingOverflow)
+        })
+    }
+
+    /// Rebinds a private, not-yet-driven upgrade index after its own final Ready publication.
+    /// Configuration and bundle were prepared under the same Pending capture. Only the new
+    /// manifest leaf and digest become known at the final name switch; no allocation or scan
+    /// starts during this installation.
+    #[cfg(any(feature = "tooling", feature = "project-tooling"))]
+    pub(super) fn commit_authored_upgrade_manifest(
+        &mut self,
+        identity: FileIdentity,
+        digest: ContentDigest,
+    ) {
+        assert!(self.attempt.is_none() && self.snapshot.is_none());
+        self.basis.manifest_identity = identity;
+        self.basis.manifest_digest = digest;
+    }
+
     pub(crate) fn new(schema: &AuthoringSchemaReceipt) -> Self {
         Self::with_limits(schema, ProjectSourceIndexLimits::default())
     }

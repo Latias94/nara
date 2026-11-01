@@ -21,6 +21,9 @@ source_universe = '35a5507d-e2d5-536d-b901-d8f19efe32ee'
 native_document_identity = 'project_location'
 name = "Fixed world canvas"
 
+[authoring]
+state = "ready"
+
 [window]
 width = 1280
 height = 720
@@ -86,7 +89,7 @@ fn world_canvas_profiles_replace_or_clear_without_changing_window_or_ui() {
 #[test]
 fn omitted_world_canvas_preserves_native_resolution_defaults() {
     let manifest =
-        ProjectManifest::parse_toml_str("schema_version = 1\n[project]\nsource_universe = '35a5507d-e2d5-536d-b901-d8f19efe32ee'\nnative_document_identity = 'project_location'\nname = 'Native world'\n")
+        ProjectManifest::parse_toml_str("schema_version = 1\n[project]\nsource_universe = '35a5507d-e2d5-536d-b901-d8f19efe32ee'\nnative_document_identity = 'project_location'\nname = 'Native world'\n[authoring]\nstate = 'ready'\n")
             .manifest
             .unwrap();
     assert!(
@@ -109,7 +112,7 @@ fn invalid_base_and_profile_extents_are_rejected_with_exact_field_paths() {
         ),
     ] {
         let source = format!(
-            "schema_version = 1\n[project]\nsource_universe = '35a5507d-e2d5-536d-b901-d8f19efe32ee'\nnative_document_identity = 'project_location'\nname = 'Invalid canvas'\n[{section}]\nwidth = 0\nheight = 180\n"
+            "schema_version = 1\n[project]\nsource_universe = '35a5507d-e2d5-536d-b901-d8f19efe32ee'\nnative_document_identity = 'project_location'\nname = 'Invalid canvas'\n[authoring]\nstate = 'ready'\n[{section}]\nwidth = 0\nheight = 180\n"
         );
         let load = ProjectManifest::parse_toml_str(&source);
         assert!(load.has_errors());

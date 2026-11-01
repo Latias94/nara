@@ -145,6 +145,15 @@ impl AssetMetaIdentityCandidate {
     pub fn into_identity(self) -> AssetMetaIdentity {
         self.identity
     }
+
+    /// Consumes the candidate and returns its admitted identity and original bounded bytes.
+    ///
+    /// The encoded allocation is moved without copying, rereading or re-encoding settings.
+    /// Keeping these bytes does not grant domain-specific settings admission.
+    #[must_use]
+    pub fn into_parts(self) -> (AssetMetaIdentity, Box<[u8]>) {
+        (self.identity, self.encoded)
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

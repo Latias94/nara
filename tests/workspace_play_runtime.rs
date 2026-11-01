@@ -1034,6 +1034,7 @@ prefabs = "prefabs"
 default_scene = "startup.scene.json"
 
 [authoring]
+state = "ready"
 schema_bundle = "schema/authoring.bundle.json"
 
 [runtime]
@@ -1819,13 +1820,14 @@ fn apply_changes_exports_selected_runtime_value_and_marks_runtime_out_of_date() 
         .as_ref()
         .and_then(|patch| patch.operations.first())
         .and_then(|operation| match operation {
-            ScenePatchOperation::ReplaceComponent { value, .. } => value
-                .value
-                .get("translation")
-                .and_then(|translation| translation.get("x")),
+            ScenePatchOperation::SetField { field, value, .. }
+                if field.as_str() == "translation.x" =>
+            {
+                Some(value)
+            }
             _ => None,
         })
-        .expect("Apply Changes should export the edited component value");
+        .expect("Apply Changes should export the edited source field value");
     assert_eq!(exported_value, &ComponentValue::f64(42.0).unwrap());
     let frame = editor.current_frame();
     let document = frame.workspace().active_document.unwrap();

@@ -47,7 +47,7 @@ impl Project {
 
     fn config(&self, universe: &str, policy: &str) {
         fs::write(self.root.join("nara.toml"), format!(
-            "[project]\nsource_universe = \"{universe}\"\n[content]\nnative_document_identity = \"{policy}\"\n"
+            "[project]\nsource_universe = \"{universe}\"\n[authoring]\nstate = \"ready\"\n[content]\nnative_document_identity = \"{policy}\"\n"
         )).unwrap();
     }
 

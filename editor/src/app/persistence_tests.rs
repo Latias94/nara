@@ -31,6 +31,9 @@ use super::{
     EditorSessionRetirement, OpeningReplacementState,
 };
 
+#[path = "persistence_tests/authored_upgrade.rs"]
+mod authored_upgrade;
+
 fn advance_to_session_publication(application: &mut EditorApplication) {
     let deadline = Instant::now() + Duration::from_secs(10);
     loop {
@@ -84,6 +87,7 @@ fn settle_background_imports(application: &mut EditorApplication) {
             && !frame.source_tool().has_pending_work()
             && !frame.scene_preview_work_pending()
             && !frame.schema_owner_adoption_work_pending()
+            && !frame.authored_schema_upgrade_work_pending()
         {
             return;
         }
@@ -1480,11 +1484,39 @@ pub(in crate::app) fn close(application: &mut EditorApplication) {
     assert!(exited, "the persistence fixture retained its session");
 }
 
-pub(in crate::app) struct PersistenceFixture {
+pub(crate) struct PersistenceFixture {
     pub(in crate::app) root: PathBuf,
 }
 
 impl PersistenceFixture {
+    pub(crate) fn authored_upgrade() -> Self {
+        use nara::asset::{
+            AssetMeta, AssetMetaIdentity, AssetPath, AssetSourceKind, StableAssetId,
+        };
+
+        let fixture = Self::trusted();
+        // The ordinary Browser fixture deliberately keeps this metadata uninterpreted. A
+        // complete upgrade inventory must admit it, even when the Image is not active.
+        let metadata = AssetMeta::new(
+            AssetMetaIdentity::new(
+                StableAssetId::parse_str("0b035fcc-a832-4287-90a0-02d978b97303").unwrap(),
+                AssetPath::new("icon.png").unwrap(),
+                AssetSourceKind::Image,
+            ),
+            nara::image::ImageImportSettings::default(),
+        );
+        fs::write(
+            fixture.root.join("media/icon.png.meta"),
+            metadata.to_json_string().unwrap(),
+        )
+        .unwrap();
+        fixture
+    }
+
+    pub(crate) fn project_root(&self) -> &std::path::Path {
+        &self.root
+    }
+
     fn trusted() -> Self {
         let fixture = Self::new();
         let bundle = nara::reflect::AuthoringSchemaBundle::from_trusted_provider_definitions(

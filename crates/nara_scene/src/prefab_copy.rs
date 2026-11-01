@@ -556,18 +556,19 @@ fn validate_closure(
         },
     )?;
     budget.allocate(report.checked_work_bytes())?;
-    if report.candidate.is_none()
-        || report.diagnostics.has_errors()
-        || report.omissions.iter().any(|omission| {
+    if report.candidate().is_none()
+        || report.diagnostics().has_errors()
+        || report.omissions().iter().any(|omission| {
             matches!(
                 omission.reason,
                 crate::prefab::AuthoringPrefabOmissionReason::RecordUnavailable(_)
             )
         })
     {
+        let parts = report.into_parts();
         return Err(PrefabCopyError::Compiler {
-            failure: report.failure,
-            diagnostics: report.diagnostics,
+            failure: parts.failure,
+            diagnostics: parts.diagnostics,
         });
     }
     Ok(())

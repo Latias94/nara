@@ -189,6 +189,7 @@ source_universe = 'e6896809-3ac2-5a42-bfb7-cddc44b3f2ee'
 native_document_identity = 'project_location'
 name = "schema-test"
 [authoring]
+state = "ready"
 schema_bundle = "schema/authoring.bundle.json"
 [runtime]
 preset = "local-headless"
@@ -631,10 +632,7 @@ requested = ["runtime-2d"]
         let manifest = fs::read_to_string(project.0.join("nara.toml")).unwrap();
         fs::write(
             project.0.join("nara.toml"),
-            manifest.replace(
-                "[authoring]\nschema_bundle = \"schema/authoring.bundle.json\"\n",
-                "",
-            ),
+            manifest.replace("schema_bundle = \"schema/authoring.bundle.json\"\n", ""),
         )
         .unwrap();
         assert_eq!(

@@ -9,6 +9,44 @@ const FIRST_PARTY_SCHEMA_ADAPTER_ID: &str = "nara.first-party-authoring";
 const FIRST_PARTY_SCHEMA_ADAPTER_VERSION: u32 = 1;
 const FIRST_PARTY_SCHEMA_ADAPTER_GENERATION: u64 = 1;
 
+/// Uses the actual compiled registry's native receipts and the selected complete metadata.
+/// A data declaration never manufactures a native codec or native Adapter contribution.
+#[cfg(feature = "tooling")]
+pub(crate) fn compiled_authoring_adapters(
+    bundle: &AuthoringSchemaBundle,
+    native: &ComponentRegistrySnapshot,
+) -> Result<Box<[AuthoringAdapterReceipt]>, AuthoringAdapterReceiptError> {
+    let mut adapters = Vec::new();
+    for contribution in native.contribution_receipts() {
+        let owner = contribution.owner().owner();
+        let coverage: Vec<_> = native
+            .schemas()
+            .filter(|schema| {
+                native.component_schema_owner(schema.id()) == Some(owner)
+                    && schema.has_capability(ComponentCapability::Scene)
+                    && schema.has_capability(ComponentCapability::Inspect)
+            })
+            .map(|schema| schema.id().clone())
+            .collect();
+        if !coverage.is_empty() {
+            adapters.push(AuthoringAdapterReceipt::from_trusted_provider(
+                contribution,
+                "nara.compiled-authoring",
+                1,
+                1,
+                coverage,
+            )?);
+        }
+    }
+    let native_coverage = native.schemas().map(|schema| schema.id().clone()).collect();
+    adapters.extend(
+        bundle.owners().iter().filter_map(|owner| {
+            AuthoringAdapterReceipt::from_schema_owner(owner, &native_coverage)
+        }),
+    );
+    Ok(adapters.into_boxed_slice())
+}
+
 pub(crate) fn project_authoring_adapters(
     bundle: &AuthoringSchemaBundle,
 ) -> Result<Box<[AuthoringAdapterReceipt]>, FirstPartyAuthoringAdapterError> {

@@ -1,6 +1,91 @@
-use nara_reflect::ComponentRegistryBuilder;
-
 use super::*;
+
+#[test]
+fn authoring_hosts_transfer_their_current_observation_and_keep_old_captures_independent() {
+    let root = TestRoot::new();
+    let directory = root.capability();
+    let scene_path = "startup.scene.json";
+    let prefab_path = "reference-ui.prefab.json";
+    let scene_file = directory
+        .open_file(&RelativePath::new(scene_path).unwrap())
+        .unwrap();
+    let prefab_file = directory
+        .open_file(&RelativePath::new(prefab_path).unwrap())
+        .unwrap();
+    let scene_digest = scene_file.digest(65_536).unwrap();
+    let prefab_digest = prefab_file.digest(65_536).unwrap();
+    let (mut scene, _) = ScenePersistenceHost::bind_authoring_source(
+        &directory,
+        scene_path,
+        scene_file,
+        scene_digest,
+    )
+    .unwrap();
+    let (mut prefab, _) = PrefabPersistenceHost::bind_authoring_source(
+        &directory,
+        EditorDocumentSourceBinding::new(prefab_path),
+        prefab_file,
+        prefab_digest,
+    )
+    .unwrap();
+    let old_scene = scene.accepted_source_observation().unwrap();
+    let old_prefab = prefab.accepted_source_observation().unwrap();
+    assert!(scene.source_observation_cost().is_some());
+    assert!(prefab.source_observation_cost().is_some());
+    let scene_input = scene.capture_source_observation(old_scene).unwrap();
+    let prefab_input = prefab.capture_source_observation(old_prefab).unwrap();
+    // Reopen supplies actual newly read leaves to the updated owner; new captures must use
+    // that owner, while escaped old captures continue to own the original observations.
+    for (path, moved) in [
+        (scene_path, "old-scene.json"),
+        (prefab_path, "old-prefab.json"),
+    ] {
+        fs::rename(root.path.join(path), root.path.join(moved)).unwrap();
+        fs::write(root.path.join(path), b"new read observation").unwrap();
+    }
+    let new_scene = directory
+        .open_file(&RelativePath::new(scene_path).unwrap())
+        .unwrap();
+    let new_prefab = directory
+        .open_file(&RelativePath::new(prefab_path).unwrap())
+        .unwrap();
+    let digest = ContentDigest::of_bytes(b"new read observation");
+    scene.commit_reopen(new_scene, digest);
+    prefab.commit_reopen(new_prefab, digest);
+    assert!(matches!(
+        scene.capture_source_observation(old_scene),
+        Err(EditorPersistenceRejection::TargetChanged)
+    ));
+    assert!(matches!(
+        prefab.capture_source_observation(old_prefab),
+        Err(EditorPersistenceRejection::TargetChanged)
+    ));
+    let next_scene = scene
+        .capture_source_observation(scene.accepted_source_observation().unwrap())
+        .unwrap();
+    let next_prefab = prefab
+        .capture_source_observation(prefab.accepted_source_observation().unwrap())
+        .unwrap();
+    drop((scene, prefab));
+    let old_scene_leaf = directory
+        .open_file(&RelativePath::new("old-scene.json").unwrap())
+        .unwrap();
+    let old_prefab_leaf = directory
+        .open_file(&RelativePath::new("old-prefab.json").unwrap())
+        .unwrap();
+    assert!(scene_input.matches(&old_scene_leaf).unwrap());
+    assert!(prefab_input.matches(&old_prefab_leaf).unwrap());
+    assert!(!next_scene.matches(&old_scene_leaf).unwrap());
+    assert!(!next_prefab.matches(&old_prefab_leaf).unwrap());
+    assert_eq!(
+        next_scene.file().read_to_end_bounded(65_536).unwrap(),
+        b"new read observation"
+    );
+    assert_eq!(
+        next_prefab.file().read_to_end_bounded(65_536).unwrap(),
+        b"new read observation"
+    );
+}
 
 #[test]
 fn missing_and_uncommitted_publications_have_no_accepted_observation() {
@@ -58,15 +143,24 @@ fn accepted_observation_uses_the_retained_parent_and_does_not_reopen_the_target(
 fn scene_and_prefab_hosts_expose_only_their_accepted_persistence_observation() {
     let root = TestRoot::new();
     let directory = root.capability();
-    let registry = ComponentRegistryBuilder::new();
-    let registry = registry.freeze().unwrap();
-    let mut scene = ScenePersistenceHost::open(&directory, "startup.scene.json", &registry)
-        .unwrap()
-        .host;
-    let mut prefab = PrefabPersistenceHost::open(
+    let basis = AuthoringSchemaBasis::admit(&AuthoringSchemaBundle::new([]).unwrap(), &[]).unwrap();
+    let mut scene = ScenePersistenceHost::open_authoring(
+        &directory,
+        "startup.scene.json",
+        AuthoringDocumentSource::new(
+            nara_asset::AssetRef::path("scenes/startup.scene.json").unwrap(),
+        ),
+        &basis,
+    )
+    .unwrap()
+    .host;
+    let mut prefab = PrefabPersistenceHost::open_authoring(
         &directory,
         EditorDocumentSourceBinding::new("reference-ui.prefab.json"),
-        &registry,
+        AuthoringDocumentSource::new(
+            nara_asset::AssetRef::path("prefabs/reference-ui.prefab.json").unwrap(),
+        ),
+        &basis,
     )
     .unwrap()
     .host;

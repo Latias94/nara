@@ -58,18 +58,18 @@ static UI_REFRESH_EXPECTED_SOURCE: Mutex<Option<SceneEntityId>> = Mutex::new(Non
 #[test]
 fn saved_ui_prefab_refreshes_project_content_and_explicit_restart() {
     let project = ReferenceProjectCopy::new("editor-ui-refresh");
-    seed_legacy_modal_image(&project);
-    let migrated_content = try_load_project_content_from_path(project.path())
-        .expect("the legacy image brush must migrate through the ordinary loader");
+    seed_modal_image(&project);
+    let loaded_content = try_load_project_content_from_path(project.path())
+        .expect("the canonical image brush must load through the ordinary loader");
     assert!(
-        migrated_content
+        loaded_content
             .snapshot
             .images()
             .iter()
             .any(|image| image.path().as_str() == "assets/textures/player.png")
     );
-    assert!(migrated_content.snapshot.source_upgrade_required());
-    let source_prefab = migrated_content
+    assert!(!loaded_content.snapshot.source_upgrade_required());
+    let source_prefab = loaded_content
         .snapshot
         .prefabs()
         .iter()
@@ -88,15 +88,19 @@ fn saved_ui_prefab_refreshes_project_content_and_explicit_restart() {
         .expect("the authored modal visual must remain present");
     assert_eq!(source_visual.version, ComponentSchemaVersion::ONE);
     assert_eq!(
-        source_visual
-            .value
-            .get("background")
-            .unwrap()
-            .get("reference"),
-        Some(&ComponentValue::String("textures/player.png".to_owned())),
+        nara::reflect::decode_asset_reference_value(
+            source_visual
+                .value
+                .get("background")
+                .unwrap()
+                .get("image")
+                .unwrap()
+        )
+        .unwrap(),
+        nara::asset::AssetRef::path("textures/player.png").unwrap(),
         "source capture must preserve the original authored declaration"
     );
-    let projected_id = migrated_content
+    let projected_id = loaded_content
         .snapshot
         .expanded_scene_provenance()
         .iter()
@@ -111,7 +115,7 @@ fn saved_ui_prefab_refreshes_project_content_and_explicit_restart() {
             .then_some(id)
         })
         .expect("the modal must retain its exact source in effective compilation");
-    let migrated_visual = migrated_content
+    let projected_visual = loaded_content
         .snapshot
         .expanded_scene()
         .entities
@@ -122,18 +126,17 @@ fn saved_ui_prefab_refreshes_project_content_and_explicit_restart() {
                 .components
                 .get(&ComponentTypeId::new("nara.ui.UiVisual"))
         })
-        .expect("effective compilation must include the migrated modal visual");
-    assert_eq!(
-        migrated_visual.version,
-        ComponentSchemaVersion::new(2).unwrap()
-    );
-    let background = migrated_visual.value.get("background").unwrap();
+        .expect("effective compilation must include the canonical modal visual");
+    assert_eq!(projected_visual.version, ComponentSchemaVersion::ONE);
+    let background = projected_visual.value.get("background").unwrap();
     assert!(background.get("reference").is_none());
     assert_eq!(
         nara::reflect::decode_asset_reference_value(background.get("image").unwrap()).unwrap(),
         nara::asset::AssetRef::path("textures/player.png").unwrap()
     );
-    drop(migrated_content);
+    drop(loaded_content);
+    let original_prefab_bytes = fs::read(project.file("prefabs/reference-ui.prefab.json"))
+        .expect("the seeded source must remain readable before Open");
     let stale_expected = UI_REFRESH_EXPECTED_SOURCE
         .lock()
         .unwrap_or_else(std::sync::PoisonError::into_inner)
@@ -233,7 +236,15 @@ fn saved_ui_prefab_refreshes_project_content_and_explicit_restart() {
         .expect("the opened UI Prefab must become active");
     let prefab_tab = prefab_frame.workspace().document(prefab_document).unwrap();
     assert_eq!(prefab_tab.kind, EditorDocumentKind::Prefab);
-    assert!(prefab_tab.dirty);
+    assert!(
+        !prefab_tab.dirty,
+        "source Open must preserve its saved checkpoint"
+    );
+    assert_eq!(
+        fs::read(project.file("prefabs/reference-ui.prefab.json")).unwrap(),
+        original_prefab_bytes,
+        "source Open must preserve the original bytes"
+    );
     let retry = SceneEntityId::new("retry-button").unwrap();
     let ui_frame = editor
         .current_ui_authoring_frame()
@@ -245,16 +256,16 @@ fn saved_ui_prefab_refreshes_project_content_and_explicit_restart() {
     assert_eq!(canvas.logical_size().width(), 960.0);
     assert_eq!(canvas.logical_size().height(), 540.0);
     assert!(canvas.facts().iter().any(|fact| fact.entity() == &retry));
-    let migrated_brush = projection
+    let authored_brush = projection
         .fields()
         .iter()
         .find(|field| {
             field.key().entity().as_str() == "modal-dim"
                 && field.key().primary_field().as_str() == "background.kind"
         })
-        .expect("the migrated modal must expose one semantic brush descriptor");
+        .expect("the canonical modal must expose one semantic brush descriptor");
     assert!(matches!(
-        migrated_brush.value(),
+        authored_brush.value(),
         UiAuthoringFieldValue::Brush {
             kind: UiBrushAuthoringKind::Image,
             reference,
@@ -296,7 +307,7 @@ fn saved_ui_prefab_refreshes_project_content_and_explicit_restart() {
     ) {
         EditorActionOutcome::Workspace(report) => match report.prefab_composition_outcome {
             Some(PrefabCompositionOutcome::Created { entity }) => entity,
-            other => panic!("expected one created UI image, got {other:?}"),
+            ref other => panic!("expected one created UI image, got {other:?}; {report:?}"),
         },
         other => panic!("expected one workspace create outcome, got {other:?}"),
     };
@@ -371,7 +382,7 @@ fn saved_ui_prefab_refreshes_project_content_and_explicit_restart() {
         .lower_structure_intent(&UiStructureIntent::Delete {
             target: SceneEntityId::new("modal-dim").unwrap(),
         })
-        .expect("the migrated modal must be deletable as a source-local subtree");
+        .expect("the canonical modal must be deletable as a source-local subtree");
     assert!(matches!(
         dispatch(
             &mut editor,
@@ -920,7 +931,7 @@ fn retry_authored_width(editor: &EditorProjectSession, retry: &SceneEntityId) ->
     }
 }
 
-fn seed_legacy_modal_image(project: &ReferenceProjectCopy) {
+fn seed_modal_image(project: &ReferenceProjectCopy) {
     let loaded = try_load_project_content_from_path(project.path())
         .expect("the temporary reference project must load before the source edit");
     assert!(
@@ -961,18 +972,18 @@ fn seed_legacy_modal_image(project: &ReferenceProjectCopy) {
     visual.value = ComponentValue::map([
         (
             "background",
-            legacy_brush("image", [0.0, 0.0, 0.0, 0.65], "textures/player.png"),
+            source_brush("image", [0.0, 0.0, 0.0, 0.65], Some("textures/player.png")),
         ),
         ("border_width", border_width),
         (
             "border_brush",
-            legacy_brush("solid", [0.0, 0.0, 0.0, 0.0], ""),
+            source_brush("solid", [0.0, 0.0, 0.0, 0.0], None),
         ),
         ("radii", radii),
     ]);
     let encoded = PrefabDocument::new(prefab.roots, prefab.entities)
         .to_json_string()
-        .expect("the legacy source edit must use the canonical Prefab writer");
+        .expect("the source edit must use the canonical Prefab writer");
     fs::write(
         project.file("prefabs/reference-ui.prefab.json"),
         format!("{encoded}\n"),
@@ -980,26 +991,34 @@ fn seed_legacy_modal_image(project: &ReferenceProjectCopy) {
     .expect("the guarded source copy must accept the canonical Prefab edit");
 }
 
-fn legacy_brush(kind: &str, color: [f64; 4], reference: &str) -> ComponentValue {
+fn source_brush(kind: &str, color: [f64; 4], image: Option<&str>) -> ComponentValue {
     ComponentValue::map([
         ("kind", ComponentValue::String(kind.to_owned())),
         (
             "red",
-            ComponentValue::f64(color[0]).expect("legacy red channel must be finite"),
+            ComponentValue::f64(color[0]).expect("source red channel must be finite"),
         ),
         (
             "green",
-            ComponentValue::f64(color[1]).expect("legacy green channel must be finite"),
+            ComponentValue::f64(color[1]).expect("source green channel must be finite"),
         ),
         (
             "blue",
-            ComponentValue::f64(color[2]).expect("legacy blue channel must be finite"),
+            ComponentValue::f64(color[2]).expect("source blue channel must be finite"),
         ),
         (
             "alpha",
-            ComponentValue::f64(color[3]).expect("legacy alpha channel must be finite"),
+            ComponentValue::f64(color[3]).expect("source alpha channel must be finite"),
         ),
-        ("reference", ComponentValue::String(reference.to_owned())),
+        ("role", ComponentValue::String(String::new())),
+        (
+            "image",
+            image.map_or(ComponentValue::Null, |path| {
+                nara::reflect::encode_asset_reference_value(
+                    &nara::asset::AssetRef::path(path).unwrap(),
+                )
+            }),
+        ),
     ])
 }
 

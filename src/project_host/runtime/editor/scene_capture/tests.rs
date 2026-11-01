@@ -2,6 +2,7 @@
 
 mod composition_failure;
 mod scene_dependencies;
+mod source_observation;
 
 use std::{
     fs,
@@ -70,6 +71,7 @@ prefabs = "prefabs"
 [startup]
 default_scene = "startup.scene.json"
 [authoring]
+state = "ready"
 schema_bundle = "schema/authoring.bundle.json"
 [runtime]
 preset = "local-headless"

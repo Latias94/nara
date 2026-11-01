@@ -489,10 +489,10 @@ The shared interval contract is:
   A tiny positive F64 which rounds to F32 zero must fail a positive F32 rule, matching native decode.
   Defaults, templates and generic/native validation share this rule without rewriting stored bytes.
   `UiText.logical_size` now has an F32 numeric domain and the complete native interval `(0, 256]`.
-  UiText advances from component v2 to v3 and the UI catalog from generation 2 to generation 3,
-  retaining the exact generation-2 predecessor. Other UI components retain their versions.
-  Its explicit migration preserves valid stored values and rejects invalid history for deliberate
-  repair; it does not clamp or rewrite the floating payload.
+  ADR 0102 consolidates the unreleased first-party UI catalog and component schemas at version 1,
+  including this complete constraint. Prototype UI predecessors and loading migrations are removed.
+  Actual custom-owner evolution retains explicit predecessor and migration policy; neither source
+  admission nor native validation clamps or rewrites the floating payload.
 - Nonfinite bounds reject, canonical signed zero is deterministic, and inclusive/exclusive endpoints
   have explicit tags. Constraint traversal consumes existing caller value-work budgets.
 - Absent metadata preserves the old fingerprint encoding. New metadata participates in catalog
@@ -662,7 +662,7 @@ closed; its G1-G9 entry conditions remain separate from the work below.
 | --- | --- | --- |
 | Field identity and mutation authority | Stable UI/draft binding is independent of document revision; exact revision/catalog/source basis still governs commit. Retained controller state remains private to its frontend instance. | Adopted in ADRs 0047/0118 for S2. |
 | Intent and acknowledgement | Keep existing semantic actions and owner reports. Carry their exact origin through dispatch/filtering, then settle one original live recipient after application drive. | Adopted in ADR 0118 for S2. |
-| Data rules and error facts | One schema-driven validator owns supported numeric rules; native preflight and Editor feedback consume it. Presentation hints and arbitrary native invariants remain distinct. Safe error facts cross adapters without parsing strings. | Adopted in ADRs 0045/0081 for S3, with explicit UiText/catalog succession. |
+| Data rules and error facts | One schema-driven validator owns supported numeric rules; native preflight and Editor feedback consume it. Presentation hints and arbitrary native invariants remain distinct. Safe error facts cross adapters without parsing strings. | Adopted in ADRs 0045/0081 for S3; ADR 0102 consolidates first-party UI at canonical version 1 while actual project successors retain explicit evolution. |
 | Component installation | Keep explicit package/recipe and atomic provider admission. One inventory generates mechanical callbacks and current schemas, while history stays explicit. | Implemented as an ergonomic helper over existing ProductRecipe/SchemaContribution authority; no additional registration owner. |
 | Waiting and retirement | Preserve a seam for owned preparation, attempt/result identity and owner-thread publication; decide cancel and physical-retirement behavior for the actual operation. | D6 and G1/G9 remain triggered work, not blanket async trait changes or prerequisites for current repairs. |
 

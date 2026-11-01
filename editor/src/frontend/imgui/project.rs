@@ -1272,6 +1272,7 @@ mod tests {
                 }
             }
         };
+        let binding = editor.register_supervised_play_owner(1).unwrap();
         let frame = editor.current_frame();
         let scene = frame.workspace().active_scene.as_ref().unwrap();
         assert_eq!(
@@ -1284,10 +1285,11 @@ mod tests {
             ),
             EditorPlayRequestResult::Accepted
         );
-        let play = editor.take_external_play_request().unwrap();
+        let play = editor.take_external_play_request(&binding).unwrap();
         let digest = ContentDigest::of_bytes(play.source_receipt().unwrap());
         assert!(
             editor.apply_external_play_observation(
+                &binding,
                 EditorExternalPlayObservation::new(
                     play.attempt(),
                     EditorExternalPlayState::Running,
@@ -1308,7 +1310,7 @@ mod tests {
             request(&mut editor, EditorPlayAction::Restart),
             EditorPlayRequestResult::Rejected(EditorPlayRejection::RuntimeOutOfDate),
         );
-        assert!(editor.take_external_play_request().is_none());
+        assert!(editor.take_external_play_request(&binding).is_none());
         let frame = editor.drive_editor_frame(Duration::ZERO);
         assert!(frame.play().is_out_of_date());
         assert!(matches!(

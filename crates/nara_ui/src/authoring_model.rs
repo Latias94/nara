@@ -2365,7 +2365,7 @@ mod tests {
             .insert(
                 UiAuthoringComponentKind::Visual.component_type(),
                 SceneComponentRecord::new(
-                    ComponentSchemaVersion::new(2).unwrap(),
+                    ComponentSchemaVersion::ONE,
                     ComponentValue::map([
                         ("background", solid_brush_value(0.2, 0.4, 0.8, 1.0)),
                         ("border_width", ComponentValue::f64(0.0).unwrap()),

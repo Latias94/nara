@@ -159,9 +159,11 @@ fn current_capture_validation_keeps_saved_project_budget_and_original_source_obs
             &mut work,
         )
         .unwrap();
+    let observation = super::tests::observe_source(&mut owner, &source);
     let capture = owner
         .capture_scene(
             &source,
+            observation,
             borrow_prepared_scene_schema_source(&scene, &prepared_scene).unwrap(),
             &[],
             &[],

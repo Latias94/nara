@@ -65,11 +65,12 @@ pub use authoring_decode::{
     AuthoringOverlayPathSegment, AuthoringOverlayRecordSlot, AuthoringOverlayTargetKind,
     AuthoringPropertyValue, AuthoringReadError, AuthoringRecordFact, AuthoringRecordLocation,
     AuthoringRecordOwnerClaim, AuthoringRecordReadiness, AuthoringSchemaBasis,
-    AuthoringSessionReopenError, MAX_AUTHORING_EDIT_OPERATIONS, MAX_AUTHORING_FIELD_WRITES,
-    PrefabAuthoringDocumentCandidate, PublishedAuthoringPrefabDocument,
-    PublishedAuthoringSceneDocument, SceneAuthoringDocumentCandidate, UnavailableEntityReference,
-    UnavailableOverlayTarget, UnavailableRecord, UnavailableRecordManifest,
-    UnavailableRecordManifestEntry, UnavailableValuePathSegment,
+    AuthoringSessionReopenError, MAX_AUTHORING_EDIT_OPERATIONS, MAX_AUTHORING_FIELD_LOGICAL_BYTES,
+    MAX_AUTHORING_FIELD_VALUE_NODES, MAX_AUTHORING_FIELD_WRITES, PrefabAuthoringDocumentCandidate,
+    PublishedAuthoringPrefabDocument, PublishedAuthoringSceneDocument,
+    SceneAuthoringDocumentCandidate, UnavailableEntityReference, UnavailableOverlayTarget,
+    UnavailableRecord, UnavailableRecordManifest, UnavailableRecordManifestEntry,
+    UnavailableValuePathSegment,
 };
 pub use candidate::{ExpandedSceneCandidate, ExpandedSceneDocument};
 pub use component_binding_plugin::{
@@ -158,6 +159,15 @@ pub use spawn::{
 #[doc(hidden)]
 #[cfg(feature = "serde")]
 pub mod __private {
+    pub use crate::authoring::schema_upgrade::{
+        AuthoredSchemaUpgradeBindFailure, AuthoredSchemaUpgradeLimits, AuthoredSchemaUpgradeUsage,
+        AuthoredSchemaUpgradeWork, PrefabAuthoredSchemaUpgradeCommit,
+        PrefabAuthoredSchemaUpgradeInput, PreparedPrefabAuthoredSchemaUpgrade,
+        PreparedSceneAuthoredSchemaUpgrade, RetainedAuthoredSchemaUpgradeSource,
+        SceneAuthoredSchemaUpgradeCommit, SceneAuthoredSchemaUpgradeInput,
+        admit_authored_upgrade_prefab_source, admit_authored_upgrade_scene_source,
+        validate_authored_upgrade_prefab_transition, validate_authored_upgrade_scene_transition,
+    };
     pub use crate::authoring::{
         PrefabSchemaReclassificationCommit, PrefabSchemaReclassificationRequest,
         PreparedPrefabSchemaSource, PreparedSceneSchemaSource,
@@ -165,6 +175,7 @@ pub mod __private {
         SceneSchemaReclassificationRequest, borrow_prepared_prefab_schema_source,
         borrow_prepared_scene_schema_source, require_schema_reclassification_successor,
     };
+    pub use crate::authoring_decode::schema_upgrade::AuthoredFieldUpgrade;
     pub use crate::authoring_decode::{
         AuthoringAdapterReceipt, AuthoringAdapterReceiptError,
         fork_published_authoring_prefab_document, fork_published_authoring_scene_document,
@@ -176,8 +187,10 @@ pub mod __private {
         project_authoring_scene_session_preview, project_published_authoring_prefab_preview,
         project_published_authoring_scene_preview,
     };
+    pub use crate::format::{canonical_prefab_source_matches, canonical_scene_source_matches};
     pub use crate::prefab::{
-        AuthoringPrefabExpansionReport, AuthoringPrefabOmission, AuthoringPrefabOmissionReason,
+        AuthoringNativePreview, AuthoringPrefabExpansionParts, AuthoringPrefabExpansionReport,
+        AuthoringPrefabOmission, AuthoringPrefabOmissionReason,
         try_expand_authoring_prefabs_with_loader,
     };
 }

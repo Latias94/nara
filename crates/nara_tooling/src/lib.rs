@@ -150,7 +150,10 @@ pub use workspace::{
 };
 #[doc(hidden)]
 pub use workspace::{
+    EditorAuthoredSchemaUpgradeProposal, EditorAuthoredUpgradeSavedSource,
     EditorExtensionDocumentCandidate, EditorPersistenceAuthority, EditorPersistenceCheckpoint,
-    EditorPersistenceCommit, EditorWorkspaceSchemaReclassificationCommit,
-    EditorWorkspaceSchemaReclassificationRequest,
+    EditorPersistenceCommit, EditorWorkspaceAuthoredSchemaUpgradeBindFailure,
+    EditorWorkspaceAuthoredSchemaUpgradeCommit, EditorWorkspaceAuthoredSchemaUpgradeInput,
+    EditorWorkspaceSchemaReclassificationCommit, EditorWorkspaceSchemaReclassificationRequest,
+    PreparedEditorWorkspaceAuthoredSchemaUpgrade,
 };

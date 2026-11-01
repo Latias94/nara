@@ -1163,6 +1163,9 @@ source_universe = 'c3422bfd-4907-5b31-9ce9-cdd97a77d607'
 native_document_identity = 'project_location'
 name = "UI Content Test"
 
+[authoring]
+state = "ready"
+
 [paths]
 assets = "assets"
 scenes = "scenes"

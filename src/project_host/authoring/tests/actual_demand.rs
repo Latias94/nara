@@ -281,11 +281,15 @@ fn selected_repair_captures_p_and_r_once_without_reading_q_or_suppressed_asset_i
         }
         previous_manifest = Some(manifest.clone());
         let compiled = compile_snapshot(&snapshot);
-        assert!(compiled.candidate.is_some(), "{:?}", compiled.diagnostics);
-        assert!(!compiled.diagnostics.has_errors());
-        assert!(compiled.omissions.is_empty());
+        assert!(
+            compiled.candidate().is_some(),
+            "{:?}",
+            compiled.diagnostics()
+        );
+        assert!(!compiled.diagnostics().has_errors());
+        assert!(compiled.omissions().is_empty());
         assert!(compiled.effective_asset_references().is_empty());
-        let expanded = compiled.candidate.unwrap();
+        let expanded = compiled.into_parts().candidate.unwrap();
         assert_eq!(expanded.document().entities.len(), 8);
         assert!(
             expanded
@@ -428,8 +432,12 @@ fn effective_and_default_assets_are_captured_with_data_adapters_without_native_a
             value
         );
         let compiled = compile_snapshot(&snapshot);
-        assert!(compiled.candidate.is_some(), "{:?}", compiled.diagnostics);
-        assert!(!compiled.diagnostics.has_errors());
+        assert!(
+            compiled.candidate().is_some(),
+            "{:?}",
+            compiled.diagnostics()
+        );
+        assert!(!compiled.diagnostics().has_errors());
         assert_eq!(compiled.effective_asset_references().len(), 2);
         assert!(
             compiled
@@ -439,12 +447,16 @@ fn effective_and_default_assets_are_captured_with_data_adapters_without_native_a
                     reference.asset_ref() == &AssetRef::path(format!("{name}.png")).unwrap()
                 })
         );
-        assert_eq!(compiled.omissions.len(), 2);
-        assert!(compiled.omissions.iter().all(|omission| {
+        assert_eq!(compiled.omissions().len(), 2);
+        assert!(compiled.omissions().iter().all(|omission| {
             omission.component == component()
                 && omission.reason == AuthoringPrefabOmissionReason::NativeBindingUnavailable
         }));
-        let (native_preview, omissions) = compiled.into_native_preview().unwrap();
+        let nara_scene::__private::AuthoringNativePreview {
+            candidate: native_preview,
+            omissions,
+            ..
+        } = compiled.into_native_preview().unwrap();
         assert_eq!(omissions.len(), 2);
         assert!(
             native_preview
@@ -588,9 +600,13 @@ fn complete_outer_repair_skips_bad_available_source_values_but_standalone_open_s
             Err(AuthoringDocumentDataError::Publication(_))
         ));
         let compiled = compile_snapshot(&snapshot);
-        assert!(compiled.candidate.is_some(), "{:?}", compiled.diagnostics);
-        assert!(!compiled.diagnostics.has_errors());
-        let expanded = compiled.candidate.unwrap();
+        assert!(
+            compiled.candidate().is_some(),
+            "{:?}",
+            compiled.diagnostics()
+        );
+        assert!(!compiled.diagnostics().has_errors());
+        let expanded = compiled.into_parts().candidate.unwrap();
         let values = expanded
             .document()
             .entities
@@ -651,7 +667,7 @@ fn complete_outer_repair_skips_bad_available_source_values_but_standalone_open_s
         assert_eq!(snapshot.readiness(), AuthoringProjectReadiness::Degraded);
         assert!(snapshot.startup_compilation_diagnostics().has_errors());
         assert_eq!(snapshot.prefabs()[0].document(), &fixture.p);
-        assert!(compile_snapshot(&snapshot).candidate.is_none());
+        assert!(compile_snapshot(&snapshot).candidate().is_none());
     }
 }
 
@@ -717,10 +733,10 @@ fn removing_replacements_requests_q_and_preserves_raw_sources_on_compile_failure
             && dependency.dependency_depth() == 2
     }));
     let compiled = compile_snapshot(&snapshot);
-    assert!(compiled.candidate.is_none());
+    assert!(compiled.candidate().is_none());
     assert!(
         compiled
-            .diagnostics
+            .diagnostics()
             .iter()
             .any(|diagnostic| { diagnostic.code().as_str() == "scene.prefab-source-missing" })
     );

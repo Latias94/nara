@@ -604,10 +604,10 @@ tombstones on every successor.
 `HashMap`, non-string map keys, enums, tuple structs, and arbitrary nested Rust structs remain
 unsupported. Manual schemas can declare closed records with `ComponentValueShape::record`:
 every declared member must be present, optional members encode `Null`, and extra members reject.
-The catalog and authoring-bundle envelopes use version 3; versions 1/2 are rejected. Scene, Prefab,
-and Patch formats retain their own versions. The unreleased R5a metadata reset preserves historical
-component definitions/versions and migration chains, while re-encoding catalogs and recomputing
-their predecessor fingerprints. It is not permission to rewrite historical component semantics.
+The canonical catalog, authoring-bundle, Scene, Prefab and Patch envelopes use format version 1.
+Component versions and catalog generations describe authored semantic evolution independently of
+that envelope. Retain genuine predecessor declarations and conversion rules when a project
+component evolves; an unreleased engine-format rewrite does not authorize changing those meanings.
 
 Schema-description limits bound metadata; Scene, Prefab, Patch, and reference traversal own the
 runtime value work budgets. Direct in-memory validation does not grant file-ingest or allocation
@@ -817,6 +817,41 @@ The derive emits one native provider. It does not publish catalogs, mutate a fro
 select a predecessor, synthesize migrations, allocate tombstones, or implement dynamic non-Rust
 storage. Construction remains explicit in `ComponentRegistryBuilder` and its owning project or
 plugin workflow; admitted queries and execution use `ComponentRegistrySnapshot`.
+
+A complete authored Schema upgrade is separate from ordinary value decoding and additive owner
+adoption. A project-owned command proposes the successor bundle and deterministic old/new source
+pairs for every participant: dirty open Scenes/Prefabs, unopened sources, other configured profiles
+and dormant overlay declarations. Explicitly transform versioned selectors and claims as well as
+direct values. Unknown semantics outside that command's authority remain preserved or cause a
+specific refusal; the engine does not guess a converter from field names.
+
+The Editor Session and Application expose `begin_authored_schema_upgrade_with_limits`, borrowed
+`authored_schema_upgrade_inputs`, `prepare_authored_schema_upgrade`, borrowed
+`authored_schema_upgrade_review` and `confirm_authored_schema_upgrade`. Select finite complete-
+operation work and handle limits at acceptance. The operation captures its actual complete input
+once, fences competing writes, prepares on existing finite Tasks and returns that same input on
+repairable proposal refusal. Review precedes publication. A successful upgrade adopts new saved
+checkpoints and intentionally starts a new document history; it is not one cross-file Undo entry.
+
+Use the operation view's `can_cancel` and `can_retry` facts. Once Pending publication can have
+occurred, ordinary cancellation, Close or Exit cannot restore old-lane writes. Safe retry continues
+the same retained publisher, reviewed candidate, custody and cumulative allowance. Unknown or
+uncertain publication requires explicit reconciliation rather than another blind write.
+
+`AuthoredSchemaUpgradeRecovery` is the public headless recovery owner for a fresh process.
+`inspect` verifies the stored bounded package and complete mixed old/new source set. Borrow
+`review`, explicitly `confirm`, then `advance` finite steps. It publishes stored deterministic
+outputs only for freshly verified old members; already-new members keep their current leaves.
+It neither executes the project converter again nor reconstructs old Session tokens or history.
+Ready is the last disk replacement. Ordinary Open then admits its own fresh generation. The
+filesystem receipt states the actual guarantee tier; process-interruption recovery does not
+establish cross-file atomic replacement or power-loss durability.
+
+The independent project command and live/fresh-process consumers are in
+[`tests/fixtures/behavior-languages/tests/authored_upgrade_command.rs`](../../tests/fixtures/behavior-languages/tests/authored_upgrade_command.rs).
+The separate [headless recovery executable](../../tests/fixtures/authored-upgrade-recovery/README.md)
+uses no Tooling dependency. The [complete unit plan](../plans/2026-11-01-authored-schema-upgrade-plan.md)
+owns current qualification and the distinct nested-source topology successor.
 
 See [`reference-game/src/components.rs`](../../reference-game/src/components.rs) for
 production-shaped declarations and [`reference-game/tests/authoring.rs`](../../reference-game/tests/authoring.rs)

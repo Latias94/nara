@@ -5,6 +5,7 @@ use nara_ecs::Resource;
 use nara_tasks::TaskPoolConfig;
 use nara_window::{PresentMode, Window, WindowMode, WindowResolution};
 
+use crate::authoring::ProjectAuthoringState;
 use crate::capability::{ProductCapabilitySet, RuntimePreset};
 use crate::content::EffectiveProjectContentSettings;
 use crate::manifest::ProjectManifest;
@@ -24,6 +25,8 @@ pub struct EffectiveProjectSettings {
     pub runtime_preset: RuntimePreset,
     pub requested_capabilities: ProductCapabilitySet,
     pub paths: EffectiveProjectPaths,
+    /// Project-wide source state. Profiles preserve it; source Hosts enforce readiness separately.
+    pub authoring_state: ProjectAuthoringState,
     /// Project-wide authoring schema bundle source. Profiles cannot replace this path.
     pub authoring_schema_bundle: Option<ProjectPath>,
     pub content: EffectiveProjectContentSettings,
@@ -54,6 +57,7 @@ impl EffectiveProjectSettings {
             runtime_preset: manifest.runtime.preset,
             requested_capabilities: manifest.capabilities.lower(),
             paths: EffectiveProjectPaths::from_manifest(manifest.paths.clone())?,
+            authoring_state: manifest.authoring.state.clone(),
             authoring_schema_bundle: manifest
                 .authoring
                 .schema_bundle

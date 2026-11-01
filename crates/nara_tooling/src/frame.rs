@@ -124,6 +124,7 @@ impl EditorFrameClock {
             scene_preview_document: None,
             authoring_retirement_pending: false,
             schema_owner_adoption_work_pending: false,
+            authored_schema_upgrade_work_pending: false,
             scene_preview_work_pending: false,
             scene_preview_recheck_after: None,
             scene_preview_unsaved_dependencies: 0,
@@ -297,6 +298,7 @@ pub struct EditorFrameModel {
     scene_preview_document: Option<EditorDocumentId>,
     authoring_retirement_pending: bool,
     schema_owner_adoption_work_pending: bool,
+    authored_schema_upgrade_work_pending: bool,
     scene_preview_work_pending: bool,
     scene_preview_recheck_after: Option<Duration>,
     scene_preview_unsaved_dependencies: usize,
@@ -381,6 +383,18 @@ impl EditorFrameModel {
     #[must_use]
     pub fn with_schema_owner_adoption_work_pending(mut self, pending: bool) -> Self {
         self.schema_owner_adoption_work_pending = pending;
+        self
+    }
+
+    /// Finite authored-upgrade work needs maintenance independently of its persistent write fence.
+    #[must_use]
+    pub const fn authored_schema_upgrade_work_pending(&self) -> bool {
+        self.authored_schema_upgrade_work_pending
+    }
+
+    #[must_use]
+    pub fn with_authored_schema_upgrade_work_pending(mut self, pending: bool) -> Self {
+        self.authored_schema_upgrade_work_pending = pending;
         self
     }
 

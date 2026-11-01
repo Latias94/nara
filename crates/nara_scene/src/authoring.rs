@@ -49,7 +49,11 @@ mod prepared;
 #[cfg(feature = "serde")]
 pub use prepared::{PreparedPrefabAuthoringEdit, PreparedSceneAuthoringEdit};
 #[cfg(feature = "serde")]
+mod schema_preparation;
+#[cfg(feature = "serde")]
 mod schema_reclassification;
+#[cfg(feature = "serde")]
+pub(crate) mod schema_upgrade;
 #[cfg(feature = "serde")]
 pub use schema_reclassification::{
     PrefabSchemaReclassificationCommit, PrefabSchemaReclassificationRequest,
@@ -456,15 +460,19 @@ impl AuthoringHistory {
         if patch.format_version != ScenePatchDocument::CURRENT_FORMAT_VERSION
             || patch.is_empty()
             || patch.operations.len() > crate::authoring_decode::MAX_AUTHORING_EDIT_OPERATIONS
-            || patch
+            || (patch
                 .operations
                 .iter()
-                .filter(|operation| {
-                    crate::authoring_decode::is_authoring_field_operation(operation)
-                })
-                .take(crate::authoring_decode::MAX_AUTHORING_FIELD_WRITES + 1)
-                .count()
-                > crate::authoring_decode::MAX_AUTHORING_FIELD_WRITES
+                .all(crate::authoring_decode::is_authoring_field_operation)
+                && patch
+                    .operations
+                    .iter()
+                    .filter(|operation| {
+                        crate::authoring_decode::is_authoring_field_operation(operation)
+                    })
+                    .take(crate::authoring_decode::MAX_AUTHORING_FIELD_WRITES + 1)
+                    .count()
+                    > crate::authoring_decode::MAX_AUTHORING_FIELD_WRITES)
         {
             return Ok(());
         }

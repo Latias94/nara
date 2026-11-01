@@ -11,7 +11,7 @@ fn actual_source_capture_retains_typed_failure_and_fences_its_schema_and_prefab_
     let disk_scene = fs::read(project.root.join(SECOND_SCENE)).unwrap();
     let (snapshot, source, mut session) = open_second_scene(&project);
     let baseline = snapshot
-        .capture_scene_document(&source, &session, &[])
+        .capture_scene_from_bound_source(&source, &session, &[])
         .unwrap();
     let key = baseline
         .prefabs()
@@ -39,7 +39,7 @@ fn actual_source_capture_retains_typed_failure_and_fences_its_schema_and_prefab_
     drop(baseline);
     let revision = session.revision();
     let mut capture = snapshot
-        .capture_scene_document(&source, &session, &[])
+        .capture_scene_from_bound_source(&source, &session, &[])
         .unwrap();
     assert_eq!(capture.readiness(), AuthoringProjectReadiness::Degraded);
     assert_eq!(capture.root_revision(), Some(revision));
@@ -96,7 +96,7 @@ fn missing_source_capture_keeps_analysis_and_recovers_only_after_demand_runs_aga
     let (snapshot, source, session) = open_second_scene(&project);
     let revision = session.revision();
     let mut missing = snapshot
-        .capture_scene_document(&source, &session, &[])
+        .capture_scene_from_bound_source(&source, &session, &[])
         .unwrap();
     assert_eq!(missing.readiness(), AuthoringProjectReadiness::Degraded);
     assert!(missing.take_preview().is_none());
@@ -109,7 +109,7 @@ fn missing_source_capture_keeps_analysis_and_recovers_only_after_demand_runs_aga
     // Existing receipts remain valid both before and after creating the missing file.
     missing.source_validation().validate().unwrap();
     let mut recovered = snapshot
-        .capture_scene_document(&source, &session, &[])
+        .capture_scene_from_bound_source(&source, &session, &[])
         .unwrap();
     assert!(recovered.composition_failure().is_none());
     assert!(!recovered.requires_recapture());

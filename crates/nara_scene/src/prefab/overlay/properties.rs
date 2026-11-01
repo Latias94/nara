@@ -220,7 +220,7 @@ fn property_failure(error: ComponentPropertyError) -> PrefabExpansionFailureKind
 
 /// Declaration conflicts survive even when a later complete component discards the values.
 /// The caller admits this pointer index before allocation.
-pub(super) fn validate_claim_paths(
+pub(crate) fn validate_claim_paths(
     claims: &[PrefabPropertyClaim],
 ) -> Result<(), PrefabExpansionFailureKind> {
     let mut paths = claims.iter().map(|claim| &claim.path).collect::<Vec<_>>();

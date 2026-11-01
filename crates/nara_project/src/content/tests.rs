@@ -2,13 +2,15 @@ use nara_diagnostic::{DiagnosticFieldClass, DiagnosticValueRef};
 
 use crate::{MAX_PROJECT_CONTENT_SCENES, ProjectManifest, ProjectProfileError};
 
-const MINIMAL: &str = "schema_version = 1\n[project]\nsource_universe = '2649c813-2b09-54bb-98b6-35e506c33d16'\nnative_document_identity = 'project_location'\nname = 'Content roots'\n";
+const MINIMAL: &str = "schema_version = 1\n[project]\nsource_universe = '2649c813-2b09-54bb-98b6-35e506c33d16'\nnative_document_identity = 'project_location'\nname = 'Content roots'\n[authoring]\nstate = 'ready'\n";
 const DECLARED: &str = r#"
 schema_version = 1
 [project]
 source_universe = '2649c813-2b09-54bb-98b6-35e506c33d16'
 native_document_identity = 'project_location'
 name = "Content roots"
+[authoring]
+state = "ready"
 [paths]
 scenes = "levels"
 [startup]

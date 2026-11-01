@@ -578,6 +578,7 @@ default_scene = "scene-000.scene.json"
 [content]
 scenes = [{declared}]
 [authoring]
+state = "ready"
 schema_bundle = "schema/authoring.bundle.json"
 [capabilities]
 requested = ["runtime-2d"]

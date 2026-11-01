@@ -145,6 +145,66 @@ fn malformed_unknown_record_retains_the_complete_workspace_preparation_failure_w
 }
 
 #[test]
+fn open_source_replacement_refuses_before_the_source_preparation_worker_is_dispatched() {
+    let fixture = Fixture::new();
+    fixture.run(|editor| {
+        let document = startup(editor);
+        name_edit(
+            editor,
+            document,
+            "retain-dirty-source-before-custody-handoff",
+        );
+        let before = source_state(editor, document);
+        let basis = editor.document_query_basis(document).unwrap();
+        let bundle = fixture.bytes(BUNDLE);
+        let source = fixture.bytes(STARTUP);
+        fs::rename(
+            fixture.root.join(STARTUP),
+            fixture.root.join("scenes/previous-startup.scene.json"),
+        )
+        .unwrap();
+        fs::write(fixture.root.join(STARTUP), &source).unwrap();
+        let operation = editor
+            .prepare_installed_schema_owner(
+                INSTALLED,
+                fixture.receipt,
+                nara_reflect::ComponentSchemaOwnerChange::Add,
+            )
+            .unwrap();
+        wait(editor, |editor| {
+            matches!(
+                editor.schema_owner_adoption_view().phase,
+                EditorSchemaOwnerAdoptionPhase::Preparing
+                    | EditorSchemaOwnerAdoptionPhase::Terminal
+                    | EditorSchemaOwnerAdoptionPhase::RequiresReconcile
+            )
+        });
+        assert_eq!(
+            editor.schema_owner_adoption_view().phase,
+            EditorSchemaOwnerAdoptionPhase::Terminal
+        );
+        assert_eq!(
+            editor.schema_owner_adoption_view().outcome,
+            Some(EditorSchemaOwnerAdoptionOutcome::Failed(
+                EditorSchemaOwnerAdoptionError::Stale
+            ))
+        );
+        assert!(editor.schema_owner_adoption.work.is_none());
+        let failure = editor.schema_owner_adoption_failure().unwrap();
+        assert_eq!(failure.operation(), Some(operation));
+        assert_eq!(failure.phase(), EditorSchemaOwnerAdoptionPhase::Preparing);
+        assert_eq!(failure.document(), Some(document));
+        assert!(failure.task_rejection().is_none());
+        assert!(editor.schema_owner_adoption_publication().is_none());
+        assert_eq!(source_state(editor, document), before);
+        assert_eq!(editor.document_query_basis(document).unwrap(), basis);
+        assert_eq!(fixture.bytes(BUNDLE), bundle);
+        assert_eq!(fixture.bytes(STARTUP), source);
+        editor.acknowledge_schema_owner_adoption(operation).unwrap();
+    });
+}
+
+#[test]
 fn saved_startup_drift_after_review_retains_the_original_operation_source_and_publishing_phase() {
     let fixture = Fixture::new();
     fixture.run(|editor| {
@@ -438,9 +498,9 @@ fn cancelling_successfully_returned_preparation_does_not_invent_a_stale_failure(
 
 #[test]
 fn cancelling_inspection_queued_before_start_does_not_invent_a_task_failure() {
-    use nara_tasks::{TaskPoolConfig, TaskPools};
+    use nara_tasks::{TaskPoolConfig, TaskPools, TaskSpawnRequest};
 
-    use super::super::{Pending, Work, inspect};
+    use super::super::{DOMAIN, Pending, Work, inspect};
 
     let fixture = Fixture::new();
     fixture.run(|editor| {
@@ -462,7 +522,9 @@ fn cancelling_inspection_queued_before_start_does_not_invent_a_task_failure() {
         // inspection queued until cancellation has reached the admitted task.
         let start = editor.schema_owner_adoption.start.take().unwrap();
         let custody = editor.authoring_runtime.host_custody().clone();
-        let pending = Pending::start(&pools, move || inspect(start, custody));
+        let pending = Pending::start(&pools, TaskSpawnRequest::new(0, DOMAIN), move || {
+            inspect(start, custody)
+        });
         assert!(pending.rejection.is_none());
         let returned = pending.task.as_ref().unwrap().return_observer();
         assert_eq!(returned.state(), TaskReturnState::Pending);

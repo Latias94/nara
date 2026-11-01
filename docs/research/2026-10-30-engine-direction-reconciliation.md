@@ -85,15 +85,18 @@ plan; it does not mark the replacement implemented or silently amend an Accepted
 
 ## Development Order
 
-Finish the in-progress bounded Input endpoint/terminal owner before widening its consumers. Actual
-regressions already demonstrate growth and stuck physical/semantic holds; that correction has a
-stronger immediate failure signal than an unexecuted future capability. The research does not
-justify abandoning it or repeating the completed processed Input unit.
+The receiving-baseline findings above remain historical. Their qualified Input, reference/demand,
+retained-pack, local-build and cooked-Player successors are linked below; do not restart them when
+the same archive is supplied again. CP1/S2 now has a qualified
+[authored-upgrade successor](../plans/2026-11-01-authored-schema-upgrade-plan.md) covering the live
+Session/Application operation, actual fresh-process interruption recovery and fixed-v2 Check/Play.
+Its final evidence is linked under Implemented Successors. CP2 remains a separate occurrence-topology
+and reference-remap workflow.
 
-Next settle valid-reference/demand semantics before target/package delivery freezes the newly
-introduced Scene reference model. The eager-backing comparison is separate and can remain private
-until its representative content consumer is ready. Carry Schema/claim evolution and cross-source
-extraction as explicit R5 workflows before promising durable upgrade/source-refactor support.
+Keep CP2 nested-source extraction separate: it reuses the reviewed complete-set and recovery owners
+but additionally changes occurrence topology and every affected claim/reference address. CP1's
+value and selector conversion cannot prove that remap. Neither an unchanged terminal entity ID nor
+successful effective expansion substitutes for complete authored declaration coverage.
 
 Bring the joint motion oracle into phase-plan selection, and bring editable text plus output/UI
 completion into the first render/custom-Editor design. These are design dependencies, not a reason
@@ -282,3 +285,11 @@ evolution, interrupted recovery, derived-output provenance, phase/executor selec
 generations, numeric color/mapping and editable-text/platform gates. The archive's 91 manifest
 entries and ten imported studies still match; its historical research and current owner
 qualification retain their separate evidence scopes.
+
+The [authored-upgrade successor](../knowledge/engineering/verification/2026-11/2026-11-01T203621Z-reviewed-authored-schema-upgrades-and-fresh-process-recovery-qualification-cf7c8ecab10c4e21b4cfcff4906805de.md)
+qualifies CP1/S2, including complete retained inputs, guarded Ready adoption, actual fresh-process
+recovery and source-authority separation. Its current canonical UI baseline and template-owned
+creation retire unpublished migration history. CP2 root/reference representation, complete
+finite-graph production rendering, joint motion/executor selection, material generations and the
+editable Nara-drawn Inspector remain separate uncompleted units. This bounded result does not
+promote Proposed ADRs or qualify power-loss durability and untested native platforms.

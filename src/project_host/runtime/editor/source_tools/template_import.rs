@@ -385,7 +385,7 @@ impl EditorProjectSession {
     fn require_template_import(&self, basis: &EditorSourceToolSelectionBasis) -> Result<(), Error> {
         if !self.accepts_new_work()
             || self.pending_workspace_intent.is_some()
-            || self.schema_adoption_fenced()
+            || self.authoring_operation_fenced()
         {
             return Err(Error::Closing);
         }

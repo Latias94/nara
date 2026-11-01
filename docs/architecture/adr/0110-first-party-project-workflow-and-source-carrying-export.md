@@ -12,6 +12,7 @@ creation terminality, build-input freshness and startup-closure ownership
 **Amended**: 2026-10-31 by explicit Cargo selection and captured executable ownership
 **Amended**: 2026-10-31 by finite cooked-content assembly and captured Player package binding
 **Amended**: 2026-11-01 by explicit physical event-loop custody across sequential desktop actions
+**Amended**: 2026-11-01 by project-wide source readiness and bounded authored-upgrade recovery
 **Owner**: root product workflow, `nara_project`, `nara_fs`, project content and Runtime Hosts
 **Refines**: [ADR 0020](0020-project-layout-and-package-format.md),
 [ADR 0035](0035-project-manifest-and-runtime-settings-authority.md),
@@ -297,6 +298,57 @@ actual consumer qualification; selecting this contract alone does not mark it co
   afterward. A published candidate that fails acceptance remains present and is reported as
   published-but-unaccepted; no rollback or in-place acceptance retry is claimed.
 
+### Project Source Readiness During Authored Upgrades
+
+The project manifest carries a required project-wide authoring `Ready` or `Pending` state.
+Profiles cannot replace it. Pending binds a bounded operation recovery package by project-relative
+location and content digest. Missing/invalid state never defaults to Ready; missing/corrupt package
+data refuses specifically. Unreleased manifest producers/fixtures are updated directly, retaining
+one canonical reader. Parsing data is separate from admitting ready source execution.
+
+All actual source entry paths capture and finally revalidate this state: Authoring admission,
+source Check including pre-read manifest bytes, content `load`/`load_scene`/`load_delivery`, external
+Play readmission, source Cook and Export publication. A retained source candidate cannot bypass
+later Pending authority. Immutable independently captured source-free products retain their
+original generation; their execution does not acquire current-source authority.
+
+The upgrade verifies bounded recovery inputs/outputs first, then confirms Pending before replacing
+any source. It publishes reviewed source outputs and the successor bundle, verifies the complete
+new participating set and binds all Workspace/project/persistence commit objects. Ready is the last
+disk replacement; only infallible in-memory installation and acknowledgment follow. Partial,
+published-without-adoption and uncertain facts remain distinct, and old Session writes/new affected
+execution stay fenced while reconciliation is required. Uncertain Ready evidence requires actual
+reconciliation rather than assuming success or restoring old files.
+
+Within a live review, expected native identities are backed by continuously retained original
+leaves and every compared parent/ancestor object, including the existing ancestor of a Missing
+location. Copying a native file ID does not preserve an object's incarnation after its handle
+closes. Shared custody keeps the original handles alive without reopening them. Admission covers
+the retained set plus transient scan/publication overlap before opening; a project that cannot fit
+the configured allowance refuses before Pending. Candidate refusal releases storage and handles
+only after their last owning scope ends, while performed read/parse/compare work remains spent.
+An operation that consumes an already admitted candidate must return its custody on refusal or
+explicitly settle its disposal; an error code alone cannot silently discard that ownership.
+
+The upgrade owner prepares successor project/Schema receipt facts while the actual manifest is
+Pending; ordinary Open keeps its refusal. Preparation is bound to the verified operation, exact
+Pending source and deterministic Ready bytes, then to the exclusive Ready publisher. All fallible
+semantic attachment and receipt-storage preparation precede that publication. Only this bound
+publisher's confirmed Published result transfers the real manifest capability into the completed
+receipt. Private unshared preparation storage is never exposed as a phase-dependent ordinary
+receipt, and an arbitrary later publication cannot satisfy the binding.
+
+A new process reopens project capabilities, verifies logical identities/locations, old/new catalog
+data and actual complete-set content, and establishes fresh nominal admissions. New-byte members
+need no rewrite; only freshly verified old-byte members may resume publication. Equal old/new
+digests prove no historical rename. Current observed new bytes can establish current saved state
+without recreating lost publication receipts; retries use deterministic outputs rather than
+re-executing conversion. A crash after confirmed Ready opens the complete new disk generation.
+Competing external edits remain conflicts. No cross-file atomicity, arbitrary rollback, universal
+journal or stronger durability tier is implied. The
+[authored-upgrade unit](../../plans/2026-11-01-authored-schema-upgrade-plan.md) owns implementation
+and scoped recovery evidence; the contract amendment alone is not product qualification.
+
 ### Compiled source-domain members
 
 ADR 0103's source-domain refinement lets the same compiled recipe prepare typed CPU content for
@@ -325,6 +377,10 @@ See the [public guide](../../guides/project-asset-domains.md) and
   the expected manifest identity/digest, replacement Scene digest and complete startup closure,
   then publishes through `nara_fs`. The receipt reports the actual replacement proof tier and does
   not claim strong compare-and-swap against non-cooperating writers.
+  Replacement content preparation performs ordinary current-readiness reads before acquiring the
+  manifest's exclusive write lock. After preparation, acquire that lock on the retained manifest
+  and revalidate its original identity/digest before publication. Do not bypass source-readiness
+  admission because Windows denies another reader while an exclusive lock is held.
 - A fresh authoritative check follows manifest publication. If the project no longer matches the
   prepared Scene/closure facts, the result is published-but-not-repaired, not a success receipt.
 

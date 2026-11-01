@@ -6,6 +6,7 @@ use std::{
     sync::Arc,
 };
 
+use crate::project_host::file_publication::{FileSourceObservation, FileSourceObservationCost};
 use nara_asset::{
     AssetDatabaseError, AssetMetaFileLimits, AssetMetaFormatError, AssetMetaIdentityCandidate,
     AssetPath, AssetPathError, AssetPathScope, AssetRecord, AssetRef, AssetReferenceResolver,
@@ -35,12 +36,24 @@ use super::{
     AuthoringProjectAttemptGeneration, AuthoringSchemaReceipt, checked_retained_replacement,
     document::{AuthoringDocumentDataError, admit_scene_bytes_with_basis},
     source_index::ProjectSourceIndexState,
+    source_upgrade_inventory::SharedSourceUpgradeInventoryCustody,
 };
 
 mod capture;
+use capture::source_observations::SourceObservations;
 mod catalogue;
+#[cfg(any(feature = "tooling", feature = "project-tooling"))]
+mod source_upgrade_decode;
+#[cfg(any(feature = "tooling", feature = "project-tooling"))]
+use source_upgrade_decode::{SourceTree, SourceUpgradeDecodeError, decode_source, release_tree};
 #[cfg(any(feature = "tooling", test))]
 mod schema_owner;
+#[cfg(feature = "tooling")]
+pub(super) mod source_upgrade;
+#[cfg(any(feature = "tooling", feature = "project-tooling"))]
+mod source_upgrade_adoption;
+#[cfg(any(feature = "tooling", feature = "project-tooling"))]
+mod source_upgrade_resume;
 pub(crate) use capture::{
     AuthoringDocumentCapture, AuthoringPrefabSessionSnapshot, AuthoringPrefabSourceCapture,
     AuthoringSceneSessionSnapshot, AuthoringSceneSource, AuthoringSourceCaptureInputs,
@@ -51,12 +64,47 @@ pub(crate) use schema_owner::{
     AuthoringSchemaOwnerProjectInput, PreparedSchemaOwnerProject, PreparedSchemaOwnerSceneCapture,
     SchemaOwnerObservedProjectAttachmentFailure, SchemaOwnerProjectAttachmentFailure,
 };
+#[cfg(feature = "tooling")]
+pub use source_upgrade::{
+    AuthoredSchemaUpgradeProposal, AuthoredSchemaUpgradeReview,
+    AuthoredSchemaUpgradeReviewedSource, AuthoredSchemaUpgradeSourceProposal,
+};
+#[cfg(feature = "tooling")]
+pub(crate) use source_upgrade::{
+    AuthoredSourceUpgradeObservedFile, AuthoredSourceUpgradePublication,
+    AuthoredSourceUpgradePublicationFailure, AuthoredSourceUpgradePublicationPhase,
+    PreparedAuthoredSchemaUpgradeReview, SourceUpgradeBaseline, SourceUpgradeCaptureRequest,
+    SourceUpgradeOpenInput, SourceUpgradePreparationError, SourceUpgradeProposalError,
+    SourceUpgradeProposalFailure,
+};
+#[cfg(feature = "tooling")]
+pub(crate) use source_upgrade_adoption::SourceUpgradeProjectOutcome;
+#[cfg(any(feature = "tooling", feature = "project-tooling"))]
+pub use source_upgrade_resume::{
+    AuthoredSchemaUpgradeRecovery, AuthoredSchemaUpgradeRecoveryError,
+    AuthoredSchemaUpgradeRecoveryErrorKind, AuthoredSchemaUpgradeRecoveryMember,
+    AuthoredSchemaUpgradeRecoveryMemberState, AuthoredSchemaUpgradeRecoveryPhase,
+    AuthoredSchemaUpgradeRecoveryReceipt, AuthoredSchemaUpgradeRecoveryReview,
+    AuthoredSchemaUpgradeRecoveryUsage, AuthoredSchemaUpgradeRecoveryView,
+};
+#[cfg(all(test, any(windows, target_os = "linux")))]
+mod content_observation_finish_tests;
+#[cfg(all(test, any(windows, target_os = "linux")))]
+mod read_content_lifetime_tests;
 #[cfg(test)]
 mod tests;
 use super::native_source::{AdmittedNativeDocumentSource, NativeDocumentSourcePolicy};
+pub(super) use catalogue::SourceDirectoryBinding;
 #[cfg(feature = "presentation-2d")]
 use catalogue::charge_database_record;
 use catalogue::{ReferenceCatalogue, admit_asset_record};
+
+/// Exposes the catalogue owner's actual configuration-to-scope selection for finite inventories.
+pub(super) fn project_reference_bindings(
+    settings: &EffectiveProjectSettings,
+) -> Vec<SourceDirectoryBinding> {
+    ReferenceCatalogue::project_bindings(settings)
+}
 
 const SOURCE_OPEN_HANDLE_PEAK: usize = 7;
 const VALUE_NODE_RETAINED_BYTES: usize = 32;
@@ -104,6 +152,7 @@ impl AuthoringSourceFact {
     fn collect_reclamation_source(
         &self,
         root: &DirectoryCapability,
+        custody: Option<&SharedSourceUpgradeInventoryCustody>,
         output: &mut Vec<FileCapability>,
     ) -> Result<(), FsError> {
         let path = RelativePath::new(self.project_path.as_str())?;
@@ -118,6 +167,12 @@ impl AuthoringSourceFact {
             return Err(FsError::Unproven {
                 operation: nara_fs::FsOperation::InspectHandle,
                 proof: "the historical source parent no longer matches",
+            });
+        }
+        if !source_observation_matches_custody(self, &file, custody)? {
+            return Err(FsError::Unproven {
+                operation: nara_fs::FsOperation::InspectHandle,
+                proof: "the current source differs from its retained object or parent",
             });
         }
         file.verify_digest(self.digest, self.digest.length())?;
@@ -408,6 +463,7 @@ struct AuthoringProjectSnapshotInner {
     unresolved_dependencies: Box<[AuthoringUnresolvedDependency]>,
     source_facts: Arc<[Arc<AuthoringSourceFact>]>,
     stable_lookups: Arc<[catalogue::ReferenceObservation]>,
+    source_observations: Arc<SourceObservations>,
     usage: AuthoringProjectAdmissionUsage,
 }
 
@@ -606,8 +662,10 @@ impl AuthoringProjectReceipt {
             unresolved_dependencies: inner.unresolved_dependencies,
             source_facts: inner.source_facts,
             stable_lookups: inner.stable_lookups,
+            source_observations: inner.source_observations,
             usage: inner.usage,
             source_index,
+            source_observation_custody: None,
         })
     }
 }
@@ -658,14 +716,25 @@ pub(crate) struct AuthoringProjectSessionSnapshot {
     unresolved_dependencies: Box<[AuthoringUnresolvedDependency]>,
     source_facts: Arc<[Arc<AuthoringSourceFact>]>,
     stable_lookups: Arc<[catalogue::ReferenceObservation]>,
+    source_observations: Arc<SourceObservations>,
     usage: AuthoringProjectAdmissionUsage,
     source_index: ProjectSourceIndexState,
+    source_observation_custody: Option<SharedSourceUpgradeInventoryCustody>,
 }
 
 impl AuthoringProjectSessionSnapshot {
+    /// Keeps admitted native observations alive without extending the captured dependency set.
+    pub(super) fn install_source_observation_custody(
+        &mut self,
+        custody: SharedSourceUpgradeInventoryCustody,
+    ) {
+        self.source_observation_custody = Some(custody);
+    }
+
     /// Checks retained schema handles; historical sources are collected separately.
     pub(crate) fn source_object_in_use(&self, candidate: &FileCapability) -> Result<bool, FsError> {
-        self.schema.source_object_in_use(candidate)
+        Ok(self.schema.source_object_in_use(candidate)?
+            || self.source_observations.source_object_in_use(candidate)?)
     }
 
     /// Collects the bounded historical source set once for all reclamation candidates.
@@ -674,9 +743,31 @@ impl AuthoringProjectSessionSnapshot {
         &self,
         output: &mut Vec<FileCapability>,
     ) -> Result<(), FsError> {
-        self.schema.collect_reclamation_sources(output)?;
+        let mut budget = self.schema.budget;
+        if let Some(custody) = &self.source_observation_custody {
+            custody
+                .admit_shared(&mut budget)
+                .map_err(|_| FsError::Unproven {
+                    operation: nara_fs::FsOperation::InspectHandle,
+                    proof: "the retained upgrade custody exceeds reclamation capacity",
+                })?;
+        }
+        capture::admit_reclamation_scope(
+            self.source_observations.physical_count(),
+            self.usage.retained_candidate_bytes(),
+            &mut budget,
+        )?;
+        self.schema
+            .collect_reclamation_sources(output, &mut budget)?;
         for source in self.source_facts.iter() {
-            source.collect_reclamation_source(&self.schema.project_root, output)?;
+            self.source_observations.collect_reclamation_source(
+                &self.schema,
+                source,
+                None,
+                self.source_observation_custody.as_ref(),
+                &mut budget,
+                output,
+            )?;
         }
         Ok(())
     }
@@ -710,16 +801,19 @@ impl AuthoringProjectSessionSnapshot {
             Arc::clone(&self.source_facts),
             Arc::clone(&self.stable_lookups),
             self.usage.retained_candidate_bytes(),
+            Arc::clone(&self.source_observations),
         )
+        .with_source_observation_custody(self.source_observation_custody.clone())
     }
 
     pub(crate) fn capture_scene_document(
         &self,
         source: &super::document::AuthoringDocumentSourceFact,
+        observation: FileSourceObservation,
         session: &nara_scene::SceneAuthoringSession,
         open_prefabs: &[AuthoringPrefabSessionSnapshot],
     ) -> Result<AuthoringDocumentCapture, AuthoringProjectSourceAdmissionError> {
-        let inputs = self.admit_source_capture_inputs(
+        let mut inputs = self.admit_source_capture_inputs(
             0,
             checked_sum([
                 capture::prefabs::open_prefab_inputs_retained_bytes(open_prefabs)?,
@@ -728,8 +822,16 @@ impl AuthoringProjectSessionSnapshot {
                     .ok_or(AuthoringProjectSourceAdmissionError::AccountingOverflow)?,
             ])?,
         )?;
+        inputs.retain_shared_source_observations(
+            std::iter::once(&observation).chain(
+                open_prefabs
+                    .iter()
+                    .filter_map(|snapshot| snapshot.observation.as_ref()),
+            ),
+        )?;
         self.capture_scene_request(
             source,
+            observation,
             session,
             inputs,
             open_prefabs.iter().cloned().collect(),
@@ -744,8 +846,23 @@ impl AuthoringProjectSessionSnapshot {
         host_retained_bytes: usize,
         worker_retained_bytes: usize,
     ) -> Result<AuthoringSourceCaptureInputs, AuthoringProjectSourceAdmissionError> {
+        self.admit_source_capture_inputs_with_budget(
+            host_retained_bytes,
+            worker_retained_bytes,
+            self.schema.budget,
+        )
+    }
+
+    fn admit_source_capture_inputs_with_budget(
+        &self,
+        host_retained_bytes: usize,
+        worker_retained_bytes: usize,
+        mut budget: AuthoringProjectAdmissionBudget,
+    ) -> Result<AuthoringSourceCaptureInputs, AuthoringProjectSourceAdmissionError> {
+        if let Some(custody) = &self.source_observation_custody {
+            custody.admit_shared(&mut budget)?;
+        }
         let retained_bytes = checked_sum([host_retained_bytes, worker_retained_bytes])?;
-        let mut budget = self.schema.budget;
         checked_retained_replacement(
             budget.retained_candidate_bytes,
             0,
@@ -757,12 +874,15 @@ impl AuthoringProjectSessionSnapshot {
             basis: self.startup_scene.schema_basis(),
             host_retained_bytes,
             worker_retained_bytes,
+            budget,
+            observation_count: 0,
         })
     }
 
     pub(crate) fn capture_scene_request(
         &self,
         source: &super::document::AuthoringDocumentSourceFact,
+        observation: FileSourceObservation,
         session: &nara_scene::SceneAuthoringSession,
         inputs: AuthoringSourceCaptureInputs,
         open_prefabs: Box<[AuthoringPrefabSessionSnapshot]>,
@@ -782,10 +902,12 @@ impl AuthoringProjectSessionSnapshot {
         if !capture::source_locator_matches(session.authoring_source(), source.relative_path()) {
             return Err(AuthoringProjectSourceAdmissionError::DocumentSourceMismatch);
         }
+        capture::source_observations::check_document_observation(source, &observation)?;
         Ok(capture::OwnedAuthoringSceneCapture {
             schema: Arc::clone(&self.schema),
             scene_limits: self.scene_limits,
             source: source.clone(),
+            observation,
             document: session.shared_document(),
             revision: session.revision(),
             basis,
@@ -1119,6 +1241,7 @@ impl CapturedSavedStartup {
             unresolved_dependencies,
             source_facts,
             stable_lookups,
+            source_observations,
             usage: _,
             host_retained_bytes: _,
             preview: startup_preview,
@@ -1148,6 +1271,7 @@ impl CapturedSavedStartup {
                 unresolved_dependencies,
                 source_facts,
                 stable_lookups,
+                source_observations,
                 usage,
             },
         }
@@ -1228,6 +1352,7 @@ fn capture_saved_startup(
         document.document(),
         basis,
         &source,
+        capture::source_observations::SourceCaptureMode::Content,
         &native_source,
         AuthoringProjectReadiness::from_document(document.readiness()),
         budget,
@@ -1599,9 +1724,9 @@ fn admit_prefab_composition_source(
 
 /// The production decoder enforces this shape ceiling before allocating domain data.
 /// Parser/domain memory is reserved separately from the finite wire scan work.
-struct CompositionDecodeReservation {
-    bytes: usize,
-    limits: SceneFileLimits,
+pub(super) struct CompositionDecodeReservation {
+    pub(super) bytes: usize,
+    pub(super) limits: SceneFileLimits,
     constrained_nodes: bool,
     maximum_retained: usize,
 }
@@ -1639,7 +1764,25 @@ fn reserve_composition_decode(
     limits: SceneFileLimits,
     budget: &mut AuthoringProjectAdmissionBudget,
 ) -> Result<CompositionDecodeReservation, AuthoringProjectSourceAdmissionError> {
-    let encoded = source.bytes.len().max(1);
+    reserve_source_decode(
+        source.bytes.len(),
+        source.read_limit,
+        source_fact_retained_bytes(&source.source)?,
+        limits,
+        budget,
+    )
+}
+
+/// Reserves the existing decoder's actual shape ceiling before it constructs owned source data.
+/// Borrowed reviewed inputs use the same model as file-backed composition sources.
+pub(super) fn reserve_source_decode(
+    encoded_len: usize,
+    read_limit: usize,
+    source_metadata_bytes: usize,
+    limits: SceneFileLimits,
+    budget: &mut AuthoringProjectAdmissionBudget,
+) -> Result<CompositionDecodeReservation, AuthoringProjectSourceAdmissionError> {
+    let encoded = encoded_len.max(1);
     let maximum_retained = budget.limits.retained_candidate_bytes().get();
     let available = maximum_retained.saturating_sub(budget.retained_candidate_bytes);
     let bound = |nodes| {
@@ -1670,7 +1813,7 @@ fn reserve_composition_decode(
             checked_product(limits.overlay_declarations().get().min(nodes), 512)?,
             checked_product(limits.component_value_nodes().get().min(nodes), 96)?,
             checked_product(limits.diagnostic_sources().get().min(nodes), 128)?,
-            source_fact_retained_bytes(&source.source)?,
+            source_metadata_bytes,
             4 * size_of::<usize>(),
         ])
     };
@@ -1692,7 +1835,7 @@ fn reserve_composition_decode(
     let shape = limits.shape();
     let limits = limits
         .with_encoded_bytes(
-            ByteLimit::new(source.read_limit)
+            ByteLimit::new(read_limit)
                 .ok_or(AuthoringProjectSourceAdmissionError::AccountingOverflow)?,
         )
         .with_shape(nara_core::SerdeShapeLimits::new(
@@ -1706,7 +1849,7 @@ fn reserve_composition_decode(
     let bytes = bound(nodes.get())?;
     // Shape, header and payload parsing each scan the actual encoded input. Memory capacity
     // is not work performed; whitespace must not masquerade as millions of domain records.
-    budget.charge_source_bytes(0, 0, checked_product(source.bytes.len(), 3)?, bytes)?;
+    budget.charge_source_bytes(0, 0, checked_product(encoded_len, 3)?, bytes)?;
     Ok(CompositionDecodeReservation {
         bytes,
         limits,
@@ -2048,6 +2191,32 @@ pub(super) fn revalidate_source_fact(
     source: &AuthoringSourceFact,
     budget: &mut AuthoringProjectAdmissionBudget,
 ) -> Result<(), AuthoringProjectSourceAdmissionError> {
+    revalidate_source_fact_with_custody(root, source, None, budget)
+}
+
+fn source_observation_matches_custody(
+    source: &AuthoringSourceFact,
+    actual: &FileCapability,
+    custody: Option<&SharedSourceUpgradeInventoryCustody>,
+) -> Result<bool, FsError> {
+    let Some(custody) = custody else {
+        return Ok(true);
+    };
+    let Some(original) = custody.file(source.project_path().as_str()) else {
+        return Ok(true);
+    };
+    let Some(parent) = custody.parent(source.project_path().as_str()) else {
+        return Ok(false);
+    };
+    Ok(actual.parent_identity() == Some(parent.identity()) && actual.same_object(original)?)
+}
+
+fn revalidate_source_fact_with_custody(
+    root: &DirectoryCapability,
+    source: &AuthoringSourceFact,
+    custody: Option<&SharedSourceUpgradeInventoryCustody>,
+    budget: &mut AuthoringProjectAdmissionBudget,
+) -> Result<(), AuthoringProjectSourceAdmissionError> {
     let changed = || AuthoringProjectSourceAdmissionError::SourceChanged {
         kind: source.kind(),
         path: source.project_path().clone(),
@@ -2070,6 +2239,17 @@ pub(super) fn revalidate_source_fact(
         }
     })?;
     if file.identity() != source.identity() || file.parent_identity() != source.parent_identity() {
+        return Err(changed());
+    }
+    let matches_custody =
+        source_observation_matches_custody(source, &file, custody).map_err(|error| {
+            AuthoringProjectSourceAdmissionError::SourceHost {
+                kind: source.kind(),
+                path: source.project_path().clone(),
+                source: error,
+            }
+        })?;
+    if !matches_custody {
         return Err(changed());
     }
     let read_limit = source
@@ -2137,14 +2317,12 @@ fn adapter_receipts_retained_bytes(
     adapters: &[AuthoringAdapterReceipt],
 ) -> Result<usize, AuthoringProjectSourceAdmissionError> {
     adapters.iter().try_fold(0_usize, |total, adapter| {
-        let component_bytes = adapter.components().try_fold(0_usize, |total, component| {
-            total
-                .checked_add(component.as_str().len() + size_of::<nara_reflect::ComponentTypeId>())
-                .ok_or(AuthoringProjectSourceAdmissionError::AccountingOverflow)
-        })?;
         total
-            .checked_add(size_of::<AuthoringAdapterReceipt>())
-            .and_then(|total| total.checked_add(component_bytes))
+            .checked_add(
+                adapter
+                    .checked_retained_bytes()
+                    .ok_or(AuthoringProjectSourceAdmissionError::AccountingOverflow)?,
+            )
             .ok_or(AuthoringProjectSourceAdmissionError::AccountingOverflow)
     })
 }

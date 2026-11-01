@@ -1174,6 +1174,12 @@ mod tests {
             let recipe = build_recipe(&parameters, Some(&choices)).unwrap();
             assert_eq!(recipe.kind(), kind);
             assert_eq!(recipe.components().len(), component_count);
+            assert!(
+                recipe
+                    .components()
+                    .values()
+                    .all(|record| record.version == ComponentSchemaVersion::ONE)
+            );
             let node = recipe
                 .components()
                 .get(&UiAuthoringComponentKind::Node.component_type())
@@ -1258,7 +1264,7 @@ mod tests {
             .components()
             .get(&UiAuthoringComponentKind::Visual.component_type())
             .unwrap();
-        assert_eq!(visual.version, ComponentSchemaVersion(2));
+        assert_eq!(visual.version, ComponentSchemaVersion::ONE);
         assert_eq!(
             visual
                 .value

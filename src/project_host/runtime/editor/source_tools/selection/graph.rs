@@ -386,7 +386,7 @@ impl EditorProjectSession {
         if !self.accepts_new_work() {
             return Err(Error::Closing);
         }
-        if self.schema_adoption_fenced()
+        if self.authoring_operation_fenced()
             || self.source_tools.probe.is_some()
             || self.source_tools.reclamation_fenced()
         {

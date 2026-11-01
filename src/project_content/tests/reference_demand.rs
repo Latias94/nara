@@ -21,7 +21,10 @@ fn demand_project() -> LazyContentProject {
     let source = fs::read_to_string(&manifest).unwrap();
     fs::write(
         manifest,
-        format!("{source}\n[authoring]\nschema_bundle = \"schema.bundle.json\"\n"),
+        source.replace(
+            "[authoring]\nstate = \"ready\"\n",
+            "[authoring]\nstate = \"ready\"\nschema_bundle = \"schema.bundle.json\"\n",
+        ),
     )
     .unwrap();
     project

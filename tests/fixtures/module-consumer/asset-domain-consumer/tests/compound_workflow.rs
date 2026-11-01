@@ -857,7 +857,7 @@ impl Fixture {
         for directory in ["assets", "prefabs", "scenes", "schema"] {
             fs::create_dir(root.join(directory)).unwrap();
         }
-        fs::write(root.join("nara.toml"), "schema_version = 1\n[project]\nsource_universe = 'af3176df-4556-45a5-9b2f-334ce47a5fbf'\nnative_document_identity = 'project_location'\nname = 'Compound'\n[startup]\ndefault_scene = 'startup.scene.json'\n[content]\nscenes = ['other.scene.json']\n[authoring]\nschema_bundle = 'schema/bundle.json'\n[runtime]\npreset = 'local-headless'\n[capabilities]\nrequested = ['runtime-2d']\n").unwrap();
+        fs::write(root.join("nara.toml"), "schema_version = 1\n[project]\nsource_universe = 'af3176df-4556-45a5-9b2f-334ce47a5fbf'\nnative_document_identity = 'project_location'\nname = 'Compound'\n[startup]\ndefault_scene = 'startup.scene.json'\n[content]\nscenes = ['other.scene.json']\n[authoring]\nstate = \"ready\"\nschema_bundle = 'schema/bundle.json'\n[runtime]\npreset = 'local-headless'\n[capabilities]\nrequested = ['runtime-2d']\n").unwrap();
         for (path, product) in [("startup.scene.json", FIRST), ("other.scene.json", SECOND)] {
             fs::write(
                 root.join("scenes").join(path),

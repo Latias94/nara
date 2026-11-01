@@ -15,7 +15,7 @@ use super::*;
 const DEPENDENT: &str = "scenes/dependent.scene.json";
 const UNRELATED: &str = "scenes/unrelated.scene.json";
 
-fn scene_fixture() -> Fixture {
+pub(super) fn scene_fixture() -> Fixture {
     let fixture = Fixture::new();
     let owner = PersistentComponentSchemaOwnerId::try_new("nara.test.scene-links").unwrap();
     let component = ComponentTypeId::new("nara.test.SceneLink");
@@ -374,12 +374,14 @@ fn startup_observations_use_complete_project_retention_at_exact_and_one_short_li
     let output_bytes = observation_cost(&selection, std::iter::empty(), 0)
         .unwrap()
         .retained_bytes;
+    let source_custody = crate::project_host::persistence::FileSourceObservation::retained_bytes();
     drop(selection);
     assert!(editor.scene_capture.captured.is_some());
     fixture.run_editor(editor, |_| {});
     for (maximum, accepted) in [
         (project_retained + root_bytes - 1, false),
-        (project_retained + output_bytes, true),
+        (project_retained + output_bytes + source_custody - 1, false),
+        (project_retained + output_bytes + source_custody, true),
     ] {
         let editor = fixture.open_editor_with_limits(
             AuthoringProjectAdmissionLimits::default()
@@ -527,7 +529,15 @@ fn input_admission_failure_after_an_accepted_root_waits_for_retry_or_a_new_root_
         }
         open_document(editor, SECOND, AuthoringDocumentKind::Scene);
         edit_rotation(editor, root, 0.75);
-        editor.drive_authoring_scene_capture();
+        let deadline = Instant::now() + WAIT;
+        while editor.scene_capture.failure.is_none() {
+            editor.drive_authoring_scene_capture();
+            assert!(
+                Instant::now() < deadline,
+                "the rejected input did not settle"
+            );
+            thread::yield_now();
+        }
         assert!(
             editor
                 .scene_capture

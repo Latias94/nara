@@ -523,16 +523,16 @@ fn assert_omitted_default_node_budget(
             },
         )
         .unwrap();
-        assert!(report.candidate.is_none());
+        assert!(report.candidate().is_none());
         assert!(report.budget_exceeded());
-        let failure = report.failure.as_ref().unwrap();
+        let failure = report.failure().unwrap();
         assert_eq!(
             failure.reason(),
             &crate::PrefabExpansionFailureKind::WorkLimit
         );
         assert!(failure.location().is_none());
         assert!(failure.slot().is_none());
-        let diagnostic = report.diagnostics.iter().next().unwrap();
+        let diagnostic = report.diagnostics().iter().next().unwrap();
         assert_eq!(
             diagnostic.code().as_str(),
             "scene.prefab-expansion-budget-exceeded"

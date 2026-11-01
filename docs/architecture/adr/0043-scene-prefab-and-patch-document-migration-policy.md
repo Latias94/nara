@@ -6,6 +6,8 @@
 **Amended**: 2026-10-26 for exact instance-declaration snapshot semantics
 and source-owned canonical identity encoding
 **Amended**: 2026-10-27 for composition selection before component interpretation
+**Amended**: 2026-11-01 for explicit reviewed authored-data upgrades and history checkpoints
+**Amended**: 2026-11-02 for headless recovery ownership and fresh model/native provenance
 **Implemented Slice**: RGF-U1 on 2026-07-12
 **Refines**: ADR 0006, ADR 0011, ADR 0026, ADR 0038
 **Refined By**: ADR 0047: Editor Workspace and Scene Document State; ADR 0049: Untrusted Project
@@ -113,6 +115,44 @@ Rules:
 - In-repository prototype source files are updated in the breaking implementation unit. External
   experimental files require the documented manual/offline source action; runtime does not carry a
   hidden prototype reader.
+
+### Reviewed Authored-Data Upgrades
+
+An explicit project operation may upgrade component semantics and their authored claims together.
+This is distinct from generic Open, component-value loading migration and document-format
+compatibility. A trusted project command computes a bounded data proposal under the captured old
+Schema; the source owner validates it under one explicitly admitted successor. Catalogs, Adapter
+receipts and recovery data carry no executable transformation authority.
+
+The operation covers complete stored declarations, including direct records, nested/dormant
+Prefab additions, component Set records and versioned Properties batches. Stable field identity
+does not prove conversion semantics. Explicit selector/binding correspondence, checked value
+conversion and full affected-version coverage are required; empty batches cannot hide old versions.
+The Host independently constrains the actual change footprint, preserving out-of-scope records,
+claims, bindings and topology by structural equality under the understood wire grammar. Affected
+unknown semantics refuse; unavailable unrelated data remains preserved.
+
+The selected first workflow saves reviewed participating working copies and establishes a new
+per-document history checkpoint after complete adoption. It does not reinterpret old Undo/Redo
+or `SetPrefabInstance` snapshots under the new Schema. Preparation/cancellation and pre-write
+refusal preserve old histories. Successful adoption replaces source/classification/history and
+their persistence bindings together under ADR0047. Retained-history migration would need its
+own original-basis edge/inverse proof and is not implied by value conversion.
+
+Before destructive publication, the operation retains bounded reviewed inputs and deterministic
+outputs and publishes project Pending authority under ADR0110. Partial replacement and uncertain
+publication are observed explicitly; fresh-process recovery reads and admits actual old/new facts,
+never inventing lost receipts or rerunning conversion on already-upgraded bytes. Its finite owner
+is independent of Editor/Workspace and retains one reviewed inventory, cumulative allowance and
+actual file outcomes through confirmation and safe cleanup retry. New model admission and current
+native observations have separate provenance; neither reconstructs an old nominal basis or history.
+Already-new members require no replacement, and only the exclusive final Ready publisher supplies
+that recovery's confirmed publication evidence. Ordinary fresh Open admits a new generation.
+This selects
+process-interruption recovery at the actual filesystem guarantee tier, not cross-file atomicity
+or power-loss durability. The
+[authored-upgrade unit](../../plans/2026-11-01-authored-schema-upgrade-plan.md) owns implementation
+and qualification; this amendment alone establishes neither.
 
 ### Current Compatibility Matrix
 

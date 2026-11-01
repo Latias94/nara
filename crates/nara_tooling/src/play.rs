@@ -22,6 +22,10 @@ use crate::inspector::{
 use crate::snapshot::WorldIdentitySnapshot;
 
 mod external;
+mod source;
+
+#[cfg(test)]
+mod apply_changes_tests;
 
 pub use external::{
     EditorExternalPlayCompilerLevel, EditorExternalPlayDiagnostics, EditorExternalPlayMessage,
@@ -429,6 +433,11 @@ impl SceneEditorState {
 /// Exports one bounded Apply Changes request from a Host-owned runtime safe point.
 ///
 /// The runtime `World` is borrowed only for this call and is never retained by tooling state.
+/// The Host supplies the source's actual asset resolver or path scope through `context`.
+/// The request selects the export policy; no implicit root scope is chosen by this operation.
+/// Published authoring sessions export only source-admitted field and template operations,
+/// after exact source/Native Schema and owner agreement. Independent native sessions retain
+/// their native patch contract.
 #[doc(hidden)]
 pub fn __export_apply_changes_from_world(
     world: &World,
@@ -436,6 +445,7 @@ pub fn __export_apply_changes_from_world(
     registry: &ComponentRegistrySnapshot,
     source_revision: SceneAuthoringRevision,
     request: SceneApplyChangesRequest,
+    context: ComponentEncodeContext<'_>,
 ) -> SceneApplyChangesReport {
     let current_revision = session.revision();
     if source_revision != current_revision {
@@ -522,8 +532,17 @@ pub fn __export_apply_changes_from_world(
         };
     }
 
-    let context =
-        ComponentEncodeContext::new().with_asset_ref_export_policy(request.asset_ref_export_policy);
+    let mut source = source::SourceApplyChanges::new(session);
+    if source.is_some() && request.components.len() > nara_scene::MAX_AUTHORING_EDIT_OPERATIONS {
+        return apply_changes_error_report(
+            Some(source_revision),
+            current_revision,
+            "tooling.apply-changes-operation-limit",
+            "Apply Changes exceeds the source authoring transaction limit",
+        );
+    }
+
+    let context = context.with_asset_ref_export_policy(request.asset_ref_export_policy);
     let mut seen_components = BTreeSet::new();
     let mut operations = Vec::new();
     let mut component_reports = Vec::new();
@@ -544,24 +563,54 @@ pub fn __export_apply_changes_from_world(
             component_reports.push(component_report);
             continue;
         }
-        let component_change = export_component_change(
-            world,
-            runtime_entity,
-            document_entity,
-            registry,
-            component,
-            &context,
-        );
+        let component_change = match &mut source {
+            Some(source) => source.export_component_change(
+                world,
+                runtime_entity,
+                document_entity,
+                registry,
+                component,
+                &context,
+            ),
+            None => export_component_change(
+                world,
+                runtime_entity,
+                document_entity,
+                registry,
+                component,
+                &context,
+            ),
+        };
         let _ = diagnostics.extend(component_change.report.diagnostics.clone());
-        if let Some(operation) = component_change.operation {
-            operations.push(operation);
-        }
+        operations.extend(component_change.operations);
         component_reports.push(component_change.report);
+    }
+    let patch = (!operations.is_empty()).then(|| ScenePatchDocument::new(operations));
+    if let Some(source) = &source
+        && let Some(patch) = &patch
+        && !component_reports
+            .iter()
+            .any(|report| report.status == SceneApplyChangesComponentStatus::Rejected)
+        && let Err(report) = source.prepare(patch)
+    {
+        let _ = diagnostics.extend(report.diagnostics);
+        reject_pending_component_reports(&mut component_reports);
+        return SceneApplyChangesReport {
+            applied: false,
+            supported: false,
+            source_revision: Some(source_revision),
+            current_revision,
+            patch: None,
+            patch_report: None,
+            components: component_reports,
+            diagnostics,
+        };
     }
     if component_reports
         .iter()
         .any(|report| report.status == SceneApplyChangesComponentStatus::Rejected)
     {
+        reject_pending_component_reports(&mut component_reports);
         return SceneApplyChangesReport {
             applied: false,
             supported: false,
@@ -578,7 +627,7 @@ pub fn __export_apply_changes_from_world(
         supported: true,
         source_revision: Some(source_revision),
         current_revision,
-        patch: (!operations.is_empty()).then(|| ScenePatchDocument::new(operations)),
+        patch,
         patch_report: None,
         components: component_reports,
         diagnostics,
@@ -636,7 +685,16 @@ fn apply_changes_entity_error_report(
 
 struct ExportedComponentChange {
     report: SceneApplyChangesComponentReport,
-    operation: Option<ScenePatchOperation>,
+    operations: Vec<ScenePatchOperation>,
+}
+
+fn reject_pending_component_reports(reports: &mut [SceneApplyChangesComponentReport]) {
+    for report in reports {
+        if report.status == SceneApplyChangesComponentStatus::Pending {
+            report.status = SceneApplyChangesComponentStatus::Rejected;
+            report.operation_count = 0;
+        }
+    }
 }
 
 fn export_component_change(
@@ -659,7 +717,7 @@ fn export_component_change(
                     component,
                 ),
             ),
-            operation: None,
+            operations: Vec::new(),
         };
     };
 
@@ -677,7 +735,7 @@ fn export_component_change(
                     component,
                 ),
             ),
-            operation: None,
+            operations: Vec::new(),
         };
     }
 
@@ -700,7 +758,7 @@ fn export_component_change(
                             Some(schema),
                         ),
                     ),
-                    operation: None,
+                    operations: Vec::new(),
                 };
             }
         };
@@ -727,7 +785,7 @@ fn export_component_change(
                             &error,
                         ),
                     ),
-                    operation: None,
+                    operations: Vec::new(),
                 };
             }
         },
@@ -771,7 +829,7 @@ fn export_component_change(
             operation_count,
             diagnostics: DiagnosticReport::default(),
         },
-        operation,
+        operations: operation.into_iter().collect(),
     }
 }
 

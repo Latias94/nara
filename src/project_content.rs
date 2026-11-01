@@ -7,6 +7,7 @@ mod delivery;
 mod domains;
 mod input;
 mod scenes;
+mod source_readiness;
 
 use std::{
     collections::{BTreeMap, BTreeSet, VecDeque},
@@ -84,6 +85,7 @@ pub(crate) use domains::{ErasedCollection, runtime_collection};
 pub use domains::{ProjectAssetCollection, ProjectDomainAssets};
 pub use input::ProjectInputContent;
 use scenes::pending_scene_source_work_bytes;
+use source_readiness::SourceReadiness;
 
 /// Computes the canonical Runtime startup-content digest from already admitted logical members.
 ///
@@ -522,6 +524,7 @@ impl ProjectContentSnapshot {
             prefabs: self.prefabs(),
             database: self.inner.sources.database(),
             scope: &self.inner.sources.prefab_scope,
+            authoring_basis: None,
         };
         let expansion = match bindings.try_expand_prefabs_with_loader(
             document,
@@ -666,36 +669,40 @@ impl ProjectContentSnapshot {
     }
 
     #[cfg(feature = "presentation-2d")]
-    pub(crate) fn sync_editor_preview_scene(
+    pub(crate) fn compile_editor_preview_scene(
         &self,
-        projection: &mut nara_scene::SceneProjection,
         source_key: &SourceDocumentKey,
         document: &SceneDocument,
-        world: &mut nara_ecs::World,
+        basis: &nara_scene::AuthoringSchemaBasis,
         registry: &nara_reflect::ComponentRegistrySnapshot,
-    ) -> nara_scene::SceneSpawnReport {
+    ) -> Result<
+        (
+            nara_scene::ExpandedSceneCandidate,
+            Vec<nara_scene::__private::AuthoringPreviewOmission>,
+        ),
+        DiagnosticReport,
+    > {
         let resolver = SnapshotPrefabResolver {
             prefabs: self.prefabs(),
             database: self.inner.sources.database(),
             scope: &self.inner.sources.prefab_scope,
+            authoring_basis: Some(basis),
         };
-        let expansion = document.expand_prefabs_with_options_and_asset_resolution(
-            registry,
-            &resolver,
+        let expansion = match nara_scene::__private::try_expand_authoring_prefabs_with_loader(
+            document,
+            basis,
             nara_scene::PrefabExpansionOptions::default(),
-            self.asset_resolution(),
-        );
-        let Some(candidate) = expansion.candidate else {
-            let mut report = nara_scene::SceneSpawnReport::default();
-            report.diagnostics = expansion.diagnostics;
-            return report;
+            Some(self.asset_resolution()),
+            |source, _| Ok::<_, std::convert::Infallible>(resolver.resolve_prefab(source)),
+        ) {
+            Ok(report) => report,
+            Err(error) => match error {},
         };
-        projection.publish(
-            world,
-            registry,
-            &candidate.bind_source(source_key.clone()),
-            self.asset_resolution(),
-        )
+        let preview = expansion.into_native_preview_for(registry)?;
+        Ok((
+            preview.candidate.bind_source(source_key.clone()),
+            preview.omissions,
+        ))
     }
 }
 
@@ -703,6 +710,7 @@ struct SnapshotPrefabResolver<'a> {
     prefabs: &'a [ProjectPrefabContent],
     database: &'a ProjectAssetDatabase,
     scope: &'a AssetPathScope,
+    authoring_basis: Option<&'a nara_scene::AuthoringSchemaBasis>,
 }
 
 impl PrefabSourceResolver for SnapshotPrefabResolver<'_> {
@@ -733,10 +741,17 @@ impl PrefabSourceResolver for SnapshotPrefabResolver<'_> {
                     }),
             })
             .and_then(|prefab| {
-                let source = ResolvedPrefabSource::bound(
-                    Arc::clone(&prefab.document),
-                    prefab.source.clone(),
-                );
+                let source = match self.authoring_basis {
+                    Some(basis) => ResolvedPrefabSource::bound_authoring_source(
+                        Arc::clone(&prefab.document),
+                        basis.clone(),
+                        prefab.source.clone(),
+                    ),
+                    None => ResolvedPrefabSource::bound(
+                        Arc::clone(&prefab.document),
+                        prefab.source.clone(),
+                    ),
+                };
                 match self.database.record_for_path(prefab.path()) {
                     Some(record) => source.with_source_asset(record).ok(),
                     None => Some(source),
@@ -993,6 +1008,10 @@ pub struct ProjectContentLoader {
     limits: ProjectContentLimits,
     budget_host: ProjectContentBudgetHost,
     image_importer: ImageImporter,
+    #[cfg(test)]
+    before_source_readiness_revalidation: Option<Box<dyn Fn() + Send + Sync>>,
+    #[cfg(test)]
+    before_delivery_readiness_revalidation: Option<Box<dyn Fn() + Send + Sync>>,
 }
 
 impl ProjectContentLoader {
@@ -1027,6 +1046,10 @@ impl ProjectContentLoader {
             limits,
             budget_host,
             image_importer,
+            #[cfg(test)]
+            before_source_readiness_revalidation: None,
+            #[cfg(test)]
+            before_delivery_readiness_revalidation: None,
         })
     }
 
@@ -1049,6 +1072,8 @@ impl ProjectContentLoader {
     /// Present Deferred targets are resolved and checked for source readability, without
     /// decoding their payloads or preparing their resource dependencies. Use [`Self::load_delivery`]
     /// for strict validation of the complete saved-source delivery closure.
+    /// The actual disk manifest is checked for Ready at entry and before snapshot publication,
+    /// including when the supplied settings candidate was admitted earlier.
     pub fn load(
         &self,
         candidate: &ProjectSettingsCandidate,
@@ -1181,7 +1206,25 @@ impl ProjectContentLoader {
         expected_startup_scene_digest: Option<ContentDigest>,
         agreement: PreparedRuntimeSchemaAgreement,
     ) -> Result<(ProjectContentSnapshot, Option<DeliveryCatalogue>), ProjectContentError> {
-        self.load_inner_with_delivery_catalogue(
+        let readiness = self.validate_inputs(candidate, plan)?;
+        self.load_startup_for_delivery_with_readiness(
+            candidate,
+            plan,
+            expected_startup_scene_digest,
+            agreement,
+            &readiness,
+        )
+    }
+
+    fn load_startup_for_delivery_with_readiness(
+        &self,
+        candidate: &ProjectSettingsCandidate,
+        plan: &RuntimePlan,
+        expected_startup_scene_digest: Option<ContentDigest>,
+        agreement: PreparedRuntimeSchemaAgreement,
+        readiness: &SourceReadiness,
+    ) -> Result<(ProjectContentSnapshot, Option<DeliveryCatalogue>), ProjectContentError> {
+        self.load_inner_with_source_mode(
             candidate,
             plan,
             None,
@@ -1191,6 +1234,8 @@ impl ProjectContentLoader {
             None,
             true,
             None,
+            SourceLoadMode::Current,
+            Some(readiness),
         )
     }
 
@@ -1201,6 +1246,7 @@ impl ProjectContentLoader {
         scene: &nara_project::ProjectPath,
         catalogue: Option<&DeliveryCatalogue>,
         capture_catalogue: bool,
+        readiness: &SourceReadiness,
     ) -> Result<(ProjectContentSnapshot, Option<DeliveryCatalogue>), ProjectContentError> {
         self.load_inner_with_source_mode(
             candidate,
@@ -1213,6 +1259,7 @@ impl ProjectContentLoader {
             capture_catalogue,
             None,
             SourceLoadMode::Strict,
+            Some(readiness),
         )
     }
 
@@ -1239,6 +1286,7 @@ impl ProjectContentLoader {
             capture_delivery_catalogue,
             input_reuse,
             SourceLoadMode::Current,
+            None,
         )
     }
 
@@ -1254,8 +1302,18 @@ impl ProjectContentLoader {
         capture_delivery_catalogue: bool,
         input_reuse: Option<&ProjectInputContent>,
         source_mode: SourceLoadMode,
+        readiness: Option<&SourceReadiness>,
     ) -> Result<(ProjectContentSnapshot, Option<DeliveryCatalogue>), ProjectContentError> {
-        self.validate_inputs(candidate, plan)?;
+        // A delivery operation shares one entry observation across its immutable inputs and
+        // all Scene roots. Standalone loads capture their own actual disk observation.
+        let captured_readiness;
+        let readiness = match readiness {
+            Some(readiness) => readiness,
+            None => {
+                captured_readiness = self.validate_inputs(candidate, plan)?;
+                &captured_readiness
+            }
+        };
         let settings = candidate.settings();
         if delivery_catalogue.is_some_and(|catalogue| {
             catalogue.roots
@@ -1293,6 +1351,13 @@ impl ProjectContentLoader {
         )?;
         context.source_mode = source_mode;
         let snapshot = context.load(candidate, selected_scene, input_reuse)?;
+        #[cfg(test)]
+        if let Some(before_revalidation) = &self.before_source_readiness_revalidation {
+            before_revalidation();
+        }
+        // Keep the completed snapshot and its leases alive during this separately budgeted
+        // read. Only the final gate can authorize exposing the newly captured source content.
+        readiness.revalidate(self, candidate)?;
         Ok((snapshot, context.take_delivery_catalogue()))
     }
 
@@ -1300,7 +1365,7 @@ impl ProjectContentLoader {
         &self,
         candidate: &ProjectSettingsCandidate,
         plan: &RuntimePlan,
-    ) -> Result<(), ProjectContentError> {
+    ) -> Result<SourceReadiness, ProjectContentError> {
         if candidate.lineage() != plan.lineage() {
             return Err(ProjectContentError::single(
                 ProjectContentErrorKind::ProjectLineageMismatch,
@@ -1331,7 +1396,7 @@ impl ProjectContentLoader {
                 "Project schema validation fingerprint changed",
             ));
         }
-        Ok(())
+        SourceReadiness::capture(self, candidate)
     }
 }
 
@@ -3987,6 +4052,7 @@ fn single_report(diagnostic: Diagnostic) -> DiagnosticReport {
 #[cfg(test)]
 mod tests {
     mod reference_demand;
+    mod source_readiness;
 
     use std::{
         collections::BTreeMap,
@@ -4211,7 +4277,8 @@ mod tests {
             short
                 .budget_snapshot()
                 .high_water(ProjectContentBudgetKind::Files),
-            0,
+            1,
+            "readiness retains the manifest before the catalogue allocation is refused",
         );
         assert_eq!(short.budget_snapshot().active_reservations(), 0);
     }
@@ -4268,7 +4335,10 @@ mod tests {
         let source = fs::read_to_string(&manifest).unwrap();
         fs::write(
             manifest,
-            format!("{source}\n[authoring]\nschema_bundle = \"schema.bundle.json\"\n"),
+            source.replace(
+                "[authoring]\nstate = \"ready\"\n",
+                "[authoring]\nstate = \"ready\"\nschema_bundle = \"schema.bundle.json\"\n",
+            ),
         )
         .unwrap();
         let owner = data_owner();
@@ -4874,8 +4944,8 @@ mod tests {
             loader
                 .budget_snapshot()
                 .high_water(ProjectContentBudgetKind::Files),
-            3,
-            "two occurrences share the actual P and R source reads"
+            4,
+            "the readiness manifest and Scene coexist with the shared P and R source reads"
         );
         let closure = snapshot.content_closure();
         let prefabs = closure
@@ -5024,8 +5094,8 @@ mod tests {
             short
                 .budget_snapshot()
                 .high_water(ProjectContentBudgetKind::Files),
-            3,
-            "the complete partial expansion must remain charged while decoding R"
+            4,
+            "the readiness manifest and complete partial expansion remain charged while decoding R"
         );
         assert_eq!(short.budget_snapshot().active_reservations(), 0);
     }
@@ -5283,6 +5353,8 @@ mod tests {
 source_universe = '39f9d09d-63e3-5fc4-8e3f-71e84893cb8d'
 native_document_identity = 'project_location'
 name = "Lazy content regression"
+[authoring]
+state = "ready"
 [paths]
 assets = "assets"
 scenes = "scenes"

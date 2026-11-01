@@ -485,13 +485,48 @@ pub(crate) fn validate_value_materialization_budget(
     value: &ComponentValue,
     limits: ComponentValueMaterializationLimits,
 ) -> Result<(), ComponentCodecError> {
+    validate_value_materialization_budget_impl(value, limits, None)
+}
+
+/// Runs the ordinary finite raw-value check, admitting each observation and stack growth first.
+/// No default plan or value copy is constructed. Caller refusals retain their exact identity.
+pub(crate) fn validate_value_materialization_budget_with_admission<E>(
+    value: &ComponentValue,
+    limits: ComponentValueMaterializationLimits,
+    mut admit: impl FnMut(usize, usize, usize) -> Result<(), E>,
+) -> Result<(), EffectiveValueAdmissionError<E>> {
+    let mut refusal = None;
+    let result = {
+        let mut callback = |nodes, bytes, allocated| {
+            admit(nodes, bytes, allocated).map_err(|error| {
+                refusal = Some(error);
+                // Allocation-free carrier; the caller's exact error is returned below.
+                ComponentCodecError::MaterializationNodeLimit {
+                    observed: 0,
+                    maximum: 0,
+                }
+            })
+        };
+        validate_value_materialization_budget_impl(value, limits, Some(&mut callback))
+    };
+    match refusal {
+        Some(error) => Err(EffectiveValueAdmissionError::Admission(error)),
+        None => result.map_err(EffectiveValueAdmissionError::Value),
+    }
+}
+
+fn validate_value_materialization_budget_impl<'admit>(
+    value: &ComponentValue,
+    limits: ComponentValueMaterializationLimits,
+    admission: Option<&'admit mut MaterializationAdmission<'admit>>,
+) -> Result<(), ComponentCodecError> {
     MaterializationBudget {
         maximum_nodes: limits.nodes().get(),
         maximum_bytes: limits.bytes().get(),
         maximum_depth: limits.depth(),
         nodes: 0,
         bytes: 0,
-        admission: None,
+        admission,
     }
     .observe_tree(value, 1)
 }

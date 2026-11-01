@@ -7,6 +7,10 @@
 #[path = "support/project_content_fixture.rs"]
 mod project_content_fixture;
 
+#[cfg(all(feature = "tooling", feature = "presentation-2d"))]
+#[path = "product_data_components/compiled_editor.rs"]
+mod compiled_editor;
+
 use std::{
     fs,
     num::NonZeroU32,
@@ -1192,11 +1196,15 @@ fn generated_scene_plan_identity_includes_the_predecessors_own_lineage_link() {
 }
 
 const NATIVE_VALUE: &str = "test.product-data.NativeValue";
+const SCENE_ONLY_VALUE: &str = "test.product-data.SceneOnlyValue";
 const NATIVE_PROVIDER_ID: nara::app::PluginSchemaProviderId =
     nara::app::PluginSchemaProviderId::new("test.product-data.native-value-schema");
 
 #[derive(Component)]
 struct NativeValue(ComponentValue);
+
+#[derive(Component)]
+struct SceneOnlyValue(ComponentValue);
 
 #[derive(Default)]
 struct NativeAndDataPlugin;
@@ -1233,37 +1241,62 @@ fn native_schema() -> ComponentSchema {
     .with_capabilities(ComponentCapability::SCENE_AUTHORING)])
 }
 
-#[test]
-fn one_native_contribution_can_own_data_admissions_without_data_codecs() {
-    let owners = data_owners(3);
+fn scene_only_schema() -> ComponentSchema {
+    ComponentSchema::new(
+        component(SCENE_ONLY_VALUE),
+        "Scene Only Value",
+        ComponentSchemaVersion::ONE,
+    )
+    .with_capabilities([ComponentCapability::Scene])
+    .with_fields([ComponentFieldSchema::required(
+        ComponentFieldId::new("enabled"),
+        "Enabled",
+        ComponentFieldPath::from_fields(["enabled"]),
+        ComponentValueKind::Bool,
+    )
+    .with_capabilities([ComponentCapability::Scene])])
+}
+
+fn native_and_data_recipe(owners: &[ComponentSchemaOwnerSnapshot]) -> ProductRecipe {
     let provider = ComponentSchemaProviderDefinition::new(
         ComponentSchemaOwnerId::new("test.product-data.native-value"),
         NATIVE_PROVIDER_ID,
         ComponentSchemaProviderBindingId::new("test.product-data.native-value-bindings", 1),
         || {
             Ok(ComponentSchemaCatalog {
-                components: vec![native_schema()],
+                components: vec![native_schema(), scene_only_schema()],
                 ..Default::default()
             })
         },
         |registry| {
+            let _ = registry.register_persistent_component_with_codec::<NativeValue, _, _>(
+                native_schema(),
+                |value| Ok(NativeValue(value.clone())),
+                |value| Ok(value.0.clone()),
+            )?;
             registry
-                .register_persistent_component_with_codec::<NativeValue, _, _>(
-                    native_schema(),
-                    |value| Ok(NativeValue(value.clone())),
+                .register_persistent_component_with_codec::<SceneOnlyValue, _, _>(
+                    scene_only_schema(),
+                    |value| Ok(SceneOnlyValue(value.clone())),
                     |value| Ok(value.0.clone()),
                 )
                 .map(|_| ())
         },
     );
-    let recipe = ProductRecipe::new()
+    ProductRecipe::new()
         .add_contribution(
             SchemaContribution::<NativeAndDataPlugin>::for_default([provider])
                 .unwrap()
                 .with_data_owners(owners.iter().cloned())
                 .unwrap(),
         )
-        .unwrap();
+        .unwrap()
+}
+
+#[test]
+fn one_native_contribution_can_own_data_admissions_without_data_codecs() {
+    let owners = data_owners(3);
+    let recipe = native_and_data_recipe(&owners);
     let project = project_with_data();
     let mut document = prefab(17);
     document.entities[0].components.insert(

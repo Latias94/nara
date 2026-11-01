@@ -21,6 +21,13 @@ use nara_tooling::{
     EditorPlayRejection, EditorPlayRequestResult,
 };
 
+mod owner_binding;
+pub(super) use owner_binding::SupervisedPlayOwnerRegistration;
+pub use owner_binding::{
+    EditorSupervisedPlayBinding, EditorSupervisedPlayOwnerError, EditorSupervisedPlayRetirementAck,
+    EditorSupervisedPlayRetirementRequest,
+};
+
 /// Capability-free source authority admitted for one supervised desktop launch.
 ///
 /// The decoded receipt remains the single semantic source of project/profile and strict Runtime
@@ -466,16 +473,31 @@ impl EditorProjectSession {
     }
 
     #[doc(hidden)]
-    pub fn take_external_play_request(&mut self) -> Option<EditorExternalPlayRequest> {
+    pub fn take_external_play_request(
+        &mut self,
+        binding: &EditorSupervisedPlayBinding,
+    ) -> Option<EditorExternalPlayRequest> {
+        if !self.matches_supervised_play_binding(binding)
+            || (self.supervised_play_retirement_held()
+                && (!self.supervised_play_retirement_pending()
+                    || self.external_play_request.as_ref().is_none_or(|request| {
+                        request.operation() != nara_tooling::EditorPlayOperation::RetryClose
+                    })))
+        {
+            return None;
+        }
         self.external_play_request.take()
     }
 
     #[doc(hidden)]
     pub fn apply_external_play_observation(
         &mut self,
+        binding: &EditorSupervisedPlayBinding,
         observation: EditorExternalPlayObservation,
     ) -> bool {
-        if self.external_play_attempt != Some(observation.attempt()) {
+        if !self.matches_supervised_play_binding(binding)
+            || self.external_play_attempt != Some(observation.attempt())
+        {
             return false;
         }
         if let Some(source_digest) = observation.source_receipt_digest() {
@@ -502,6 +524,12 @@ impl EditorProjectSession {
         &mut self,
         command: EditorPlayCommand,
     ) -> EditorPlayRequestResult {
+        if self.supervised_play_retirement_held()
+            && !(self.supervised_play_retirement_pending()
+                && command == EditorPlayCommand::RetryClose)
+        {
+            return EditorPlayRequestResult::Rejected(EditorPlayRejection::Busy);
+        }
         if (!self.accepts_new_work() || self.reopen_pending())
             && matches!(
                 command,

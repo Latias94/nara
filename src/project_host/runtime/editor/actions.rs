@@ -112,7 +112,7 @@ impl EditorProjectSession {
             EditorAction::SourceTool(action) => self.dispatch_source_tool_action(action),
             EditorAction::Mutate(action) => self.dispatch_document_mutation(action),
             EditorAction::Extension(action) => {
-                if self.schema_adoption_fenced() {
+                if self.authoring_operation_fenced() {
                     return EditorActionOutcome::Workspace(
                         super::editor_workspace_command_rejected(
                             self.workspace.active_document(),
@@ -196,7 +196,7 @@ impl EditorProjectSession {
         image_frame: Option<&super::image_import::EditorImageImportFrame>,
         action: EditorImageImportAction,
     ) -> EditorActionOutcome {
-        if self.schema_adoption_fenced() || self.source_asset_import.has_pending_work() {
+        if self.authoring_operation_fenced() || self.source_asset_import.has_pending_work() {
             return EditorActionOutcome::ImageImport(EditorImageImportActionOutcome::Rejected(
                 EditorImageImportActionRejection::Busy,
             ));
@@ -439,7 +439,7 @@ impl EditorProjectSession {
         &mut self,
         action: EditorDocumentMutation,
     ) -> EditorActionOutcome {
-        if self.schema_adoption_fenced() {
+        if self.authoring_operation_fenced() {
             return EditorActionOutcome::Workspace(super::editor_workspace_command_rejected(
                 self.workspace.active_document(),
                 "project.editor.schema-adoption-busy",
@@ -587,7 +587,9 @@ impl EditorProjectSession {
         frame: &EditorFrameModel,
         action: EditorGestureAction,
     ) -> EditorActionOutcome {
-        if self.schema_adoption_fenced() && !matches!(&action, EditorGestureAction::Cancel { .. }) {
+        if self.authoring_operation_fenced()
+            && !matches!(&action, EditorGestureAction::Cancel { .. })
+        {
             return EditorActionOutcome::Workspace(super::editor_workspace_command_rejected(
                 self.workspace.active_document(),
                 "project.editor.schema-adoption-busy",

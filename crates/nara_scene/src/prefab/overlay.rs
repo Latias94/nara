@@ -18,6 +18,8 @@ pub(crate) mod cost;
 mod layout;
 mod properties;
 mod references;
+#[cfg(feature = "serde")]
+pub(crate) use properties::validate_claim_paths;
 
 #[cfg(all(test, feature = "serde"))]
 mod regression_tests;

@@ -38,6 +38,7 @@ use crate::{
     document_query::EditorDocumentQueryOwner,
 };
 
+mod authored_schema_upgrade;
 mod authoring_query;
 mod construction;
 mod extension;
@@ -45,6 +46,12 @@ mod prefab_conversion;
 mod prefab_declarations;
 mod prepared_edit;
 mod schema_reclassification;
+#[doc(hidden)]
+pub use authored_schema_upgrade::{
+    EditorAuthoredSchemaUpgradeProposal, EditorAuthoredUpgradeSavedSource,
+    EditorWorkspaceAuthoredSchemaUpgradeBindFailure, EditorWorkspaceAuthoredSchemaUpgradeCommit,
+    EditorWorkspaceAuthoredSchemaUpgradeInput, PreparedEditorWorkspaceAuthoredSchemaUpgrade,
+};
 pub use construction::{CommittedEditorDocumentConstruction, PreparedEditorDocumentConstruction};
 pub use extension::{
     EditorExtensionCommand, EditorExtensionDocument, EditorExtensionDocumentCandidate,
@@ -537,6 +544,28 @@ impl EditorWorkspace {
         self.documents.len()
     }
 
+    /// Aggregates the actual source classification of every open Scene and Prefab.
+    ///
+    /// Native-only and extension documents do not claim an authoring Schema admission. Returns
+    /// `None` when no source has one; any degraded admitted source makes the aggregate degraded,
+    /// independently of active navigation or the Host's execution capabilities.
+    #[must_use]
+    pub fn authoring_readiness(&self) -> Option<AuthoringDocumentReadiness> {
+        let mut readiness = None;
+        for slot in self.documents.values() {
+            match slot.authoring_readiness() {
+                Some(AuthoringDocumentReadiness::Degraded) => {
+                    return Some(AuthoringDocumentReadiness::Degraded);
+                }
+                Some(AuthoringDocumentReadiness::Complete) => {
+                    readiness = Some(AuthoringDocumentReadiness::Complete);
+                }
+                None => {}
+            }
+        }
+        readiness
+    }
+
     /// Returns the stable document identities currently owned by this workspace.
     ///
     /// This Host-only snapshot supports non-destructive whole-workspace close preparation. UI
@@ -1010,6 +1039,15 @@ impl EditorWorkspace {
         registry: &ComponentRegistrySnapshot,
         command: EditorWorkspaceCommand,
     ) -> EditorWorkspaceCommandReport {
+        if self
+            .documents
+            .get(&command.document())
+            .is_some_and(|slot| slot.authoring_readiness().is_some())
+        {
+            // The source's retained admission owns publication, independently of execution
+            // placement. A caller-supplied native registry cannot replace that authority.
+            return self.apply_authoring_command(command);
+        }
         match command {
             EditorWorkspaceCommand::CloseDocument { document } => self.close_document(document),
             EditorWorkspaceCommand::SetActiveDocument { document } => {
@@ -1149,13 +1187,15 @@ impl EditorWorkspace {
                 command,
             } => {
                 let command = match command {
-                    PrefabCompositionCommand::CreateEntity { draft, placement }
-                        if draft.components().is_empty() =>
-                    {
-                        SceneCompositionCommand::CreateEntity {
-                            kind: crate::SceneCompositionEntityKind::Empty,
-                            placement,
-                        }
+                    PrefabCompositionCommand::CreateEntity { draft, placement } => {
+                        return self
+                            .apply_authoring_prefab_creation(
+                                document,
+                                base_revision,
+                                &draft,
+                                placement,
+                            )
+                            .unwrap_or_else(|report| report);
                     }
                     PrefabCompositionCommand::AddComponent { entity, component } => {
                         SceneCompositionCommand::AddComponent { entity, component }
@@ -1169,7 +1209,6 @@ impl EditorWorkspace {
                     PrefabCompositionCommand::RemoveEntity { entity } => {
                         SceneCompositionCommand::RemoveEntity { entity }
                     }
-                    _ => return authoring_command_error_report(self.active_document, document),
                 };
                 self.apply_generic_composition(
                     document,
@@ -1358,13 +1397,6 @@ impl EditorWorkspace {
         base_revision: SceneAuthoringRevision,
         command: SceneInspectorCommand,
     ) -> EditorWorkspaceCommandReport {
-        if self
-            .documents
-            .get(&document)
-            .is_some_and(|slot| slot.authoring_readiness().is_some())
-        {
-            return self.apply_authoring_inspector_command(document, base_revision, command);
-        }
         let (active_document, slot) =
             match self.resolve_exact_document_mutation_slot(document, base_revision) {
                 Ok(exact) => exact,
@@ -1616,38 +1648,13 @@ impl EditorWorkspace {
             return authoring_command_error_report(active_document, document);
         }
         if let SceneCompositionCommand::CreateEntity {
-            kind: crate::SceneCompositionEntityKind::Empty,
+            kind: entity_kind,
             placement,
         } = command
         {
-            let created = match slot {
-                EditorDocumentSlot::Scene(slot) => slot
-                    .session
-                    .create_authoring_entity(base_revision, placement),
-                EditorDocumentSlot::Prefab(slot) => slot
-                    .session
-                    .create_authoring_entity(base_revision, placement),
-                EditorDocumentSlot::Extension(_) => {
-                    return authoring_command_error_report(active_document, document);
-                }
-            };
-            return match created {
-                Ok(created) => {
-                    let (entity, patch_report) = created.into_parts();
-                    slot.selection_mut().clear();
-                    let mut report =
-                        report_for_document_patch(document, active_document, slot, patch_report);
-                    slot.selection_mut().select_entity(Some(entity.clone()));
-                    if kind == EditorDocumentKind::Prefab {
-                        report.prefab_composition_outcome =
-                            Some(PrefabCompositionOutcome::Created { entity });
-                    }
-                    report
-                }
-                Err(patch_report) => {
-                    report_for_document_patch(document, active_document, slot, patch_report)
-                }
-            };
+            return self
+                .apply_authoring_entity_creation(document, base_revision, entity_kind, placement)
+                .unwrap_or_else(|report| report);
         }
         if let (
             EditorDocumentSlot::Prefab(prefab),
@@ -2954,6 +2961,26 @@ pub enum EditorWorkspaceCommand {
     MarkExternalChanged {
         document: EditorDocumentId,
     },
+}
+
+impl EditorWorkspaceCommand {
+    #[must_use]
+    const fn document(&self) -> EditorDocumentId {
+        match self {
+            Self::CloseDocument { document }
+            | Self::SetActiveDocument { document }
+            | Self::SelectEntity { document, .. }
+            | Self::ApplyInspectorCommand { document, .. }
+            | Self::ApplyScenePatch { document, .. }
+            | Self::ApplyPrefabPatch { document, .. }
+            | Self::ApplyAuthoringFieldEdit { document, .. }
+            | Self::ComposeScene { document, .. }
+            | Self::ComposePrefab { document, .. }
+            | Self::Undo { document, .. }
+            | Self::Redo { document, .. }
+            | Self::MarkExternalChanged { document } => *document,
+        }
+    }
 }
 
 #[derive(Debug, Default, Clone, PartialEq)]
@@ -5546,6 +5573,7 @@ mod tests {
         .unwrap()
         .publish();
         let expected_manifest = published.unavailable_manifest().clone();
+        let native = frozen_empty_registry();
 
         let mut workspace = EditorWorkspace::new();
         let document = workspace
@@ -5567,10 +5595,13 @@ mod tests {
         );
         assert!(
             workspace
-                .apply_authoring_command(EditorWorkspaceCommand::SelectEntity {
-                    document,
-                    entity: Some(entity.clone()),
-                })
+                .apply_command(
+                    &native,
+                    EditorWorkspaceCommand::SelectEntity {
+                        document,
+                        entity: Some(entity.clone()),
+                    }
+                )
                 .applied
         );
         let inspector = &workspace
@@ -5613,8 +5644,9 @@ mod tests {
         assert!(visibility_view.fields.is_empty());
 
         let edit_base_revision = workspace.document_revision(document).unwrap();
-        let edit =
-            workspace.apply_authoring_command(EditorWorkspaceCommand::ApplyInspectorCommand {
+        let edit = workspace.apply_command(
+            &native,
+            EditorWorkspaceCommand::ApplyInspectorCommand {
                 document,
                 base_revision: edit_base_revision,
                 command: SceneInspectorCommand::SetField {
@@ -5624,14 +5656,18 @@ mod tests {
                     field: ComponentFieldId::new("value"),
                     value: ComponentValue::String("Renamed".to_owned()),
                 },
-            });
+            },
+        );
         assert!(edit.applied, "{:#?}", edit.diagnostics);
         assert_ne!(edit.revision, Some(edit_base_revision));
 
-        let undo = workspace.apply_authoring_command(EditorWorkspaceCommand::Undo {
-            document,
-            base_revision: edit.revision.unwrap(),
-        });
+        let undo = workspace.apply_command(
+            &native,
+            EditorWorkspaceCommand::Undo {
+                document,
+                base_revision: edit.revision.unwrap(),
+            },
+        );
         assert!(undo.applied, "{:#?}", undo.diagnostics);
         assert_eq!(
             workspace
@@ -5640,10 +5676,13 @@ mod tests {
                 .unavailable_record_manifest(),
             Some(&expected_manifest)
         );
-        let redo = workspace.apply_authoring_command(EditorWorkspaceCommand::Redo {
-            document,
-            base_revision: undo.revision.unwrap(),
-        });
+        let redo = workspace.apply_command(
+            &native,
+            EditorWorkspaceCommand::Redo {
+                document,
+                base_revision: undo.revision.unwrap(),
+            },
+        );
         assert!(redo.applied, "{:#?}", redo.diagnostics);
         assert_eq!(
             workspace

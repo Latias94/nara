@@ -17,8 +17,8 @@ use nara_reflect::{
 };
 use nara_scene::{
     __private::{
-        AuthoringAdapterReceipt, AuthoringPrefabExpansionReport, AuthoringPrefabOmission,
-        AuthoringPrefabOmissionReason, AuthoringPreviewOmissionLocation,
+        AuthoringAdapterReceipt, AuthoringPrefabExpansionParts, AuthoringPrefabExpansionReport,
+        AuthoringPrefabOmission, AuthoringPrefabOmissionReason, AuthoringPreviewOmissionLocation,
         AuthoringPreviewOmissionReason, try_expand_authoring_prefabs_with_loader,
     },
     AuthoringDocumentSource, AuthoringRecordReadiness, AuthoringSchemaBasis, ExpandedSceneDocument,
@@ -230,10 +230,13 @@ fn native_preview_loses_available_component_data_and_declared_references() {
 
     assert_eq!(requested, [source("base")]);
     assert!(!report.budget_exceeded());
-    assert!(!report.diagnostics.has_errors(), "{:?}", report.diagnostics);
+    assert!(
+        !report.diagnostics().has_errors(),
+        "{:?}",
+        report.diagnostics()
+    );
     let candidate = report
-        .candidate
-        .as_ref()
+        .candidate()
         .expect("semantic compilation must succeed");
     let root = projected(candidate, "root");
     let target = projected(candidate, "target");
@@ -254,8 +257,8 @@ fn native_preview_loses_available_component_data_and_declared_references() {
         &AssetRef::path("textures/icon.png").unwrap()
     );
     assert_eq!(
-        report.omissions,
-        [AuthoringPrefabOmission {
+        report.omissions(),
+        &[AuthoringPrefabOmission {
             entity: root.clone(),
             component: component(),
             reason: AuthoringPrefabOmissionReason::NativeBindingUnavailable,
@@ -263,7 +266,11 @@ fn native_preview_loses_available_component_data_and_declared_references() {
     );
     let provenance = candidate.provenance().clone();
 
-    let (preview, omissions) = report.into_native_preview().unwrap();
+    let nara_scene::__private::AuthoringNativePreview {
+        candidate: preview,
+        omissions,
+        ..
+    } = report.into_native_preview().unwrap();
 
     assert_eq!(preview.provenance(), &provenance);
     assert!(entity(preview.document(), &root).components.is_empty());
@@ -285,6 +292,49 @@ fn native_preview_loses_available_component_data_and_declared_references() {
     assert_eq!(session.content_state(), content);
     assert_eq!(session.history_status(), history);
     assert_eq!(session.authoring_schema_basis(), Some(basis));
+    assert_eq!(published.document(), &prefab);
+}
+
+#[test]
+fn consuming_semantic_parts_preserves_data_omissions_and_effective_asset_references() {
+    let basis = basis();
+    let prefab = prefab(record(id("target")));
+    let published = publish_prefab(&prefab, &basis);
+    let document = SceneDocument::from_ordered_roots([anchor("selected", "base")]);
+    let mut requested = Vec::new();
+    let report = compile(&document, &basis, &published, &mut requested);
+    let candidate = report
+        .candidate()
+        .expect("semantic compilation must succeed");
+    let root = projected(candidate, "root");
+    let target = projected(candidate, "target");
+    let document_allocation = std::ptr::from_ref(candidate.document());
+    let omissions = report.omissions().to_vec();
+    let diagnostics = report.diagnostics().clone();
+    let failure = report.failure().cloned();
+    assert_eq!(report.effective_asset_references().len(), 1);
+
+    let parts: AuthoringPrefabExpansionParts = report.into_parts();
+
+    let candidate = parts
+        .candidate
+        .expect("the semantic candidate moves into its parts");
+    assert_eq!(
+        std::ptr::from_ref(candidate.document()),
+        document_allocation
+    );
+    assert_eq!(
+        entity(candidate.document(), &root).components[&component()],
+        record(target),
+    );
+    assert_eq!(parts.omissions, omissions);
+    assert_eq!(parts.diagnostics, diagnostics);
+    assert_eq!(parts.failure, failure);
+    assert_eq!(parts.effective_asset_references.len(), 1);
+    assert_eq!(
+        parts.effective_asset_references[0].asset_ref(),
+        &AssetRef::path("textures/icon.png").unwrap(),
+    );
     assert_eq!(published.document(), &prefab);
 }
 
@@ -311,17 +361,20 @@ fn unavailable_selected_record_is_an_omission_even_before_native_preview_filteri
 
     assert_eq!(requested, [source("base")]);
     assert!(!report.budget_exceeded());
-    assert!(!report.diagnostics.has_errors(), "{:?}", report.diagnostics);
+    assert!(
+        !report.diagnostics().has_errors(),
+        "{:?}",
+        report.diagnostics()
+    );
     let candidate = report
-        .candidate
-        .as_ref()
+        .candidate()
         .expect("unavailable data is reported separately");
     let root = projected(candidate, "root");
     assert!(entity(candidate.document(), &root).components.is_empty());
     assert!(report.effective_asset_references().is_empty());
     assert_eq!(
-        report.omissions,
-        [AuthoringPrefabOmission {
+        report.omissions(),
+        &[AuthoringPrefabOmission {
             entity: root.clone(),
             component: component(),
             reason: AuthoringPrefabOmissionReason::RecordUnavailable(
@@ -331,7 +384,11 @@ fn unavailable_selected_record_is_an_omission_even_before_native_preview_filteri
     );
     let provenance = candidate.provenance().clone();
 
-    let (preview, omissions) = report.into_native_preview().unwrap();
+    let nara_scene::__private::AuthoringNativePreview {
+        candidate: preview,
+        omissions,
+        ..
+    } = report.into_native_preview().unwrap();
 
     assert_eq!(preview.provenance(), &provenance);
     assert!(entity(preview.document(), &root).components.is_empty());
@@ -366,13 +423,12 @@ fn unrelated_missing_dependency_blocks_whole_document_compilation_with_a_healthy
     let healthy = compile(selected.document(), &basis, &published, &mut requested);
     assert_eq!(requested, [source("base")]);
     assert!(
-        !healthy.diagnostics.has_errors(),
+        !healthy.diagnostics().has_errors(),
         "{:?}",
-        healthy.diagnostics
+        healthy.diagnostics()
     );
     let candidate = healthy
-        .candidate
-        .as_ref()
+        .candidate()
         .expect("selected anchor must be healthy");
     let root = projected(candidate, "root");
     let target = projected(candidate, "target");
@@ -395,15 +451,15 @@ fn unrelated_missing_dependency_blocks_whole_document_compilation_with_a_healthy
 
     assert_eq!(requested, [source("base"), source("missing")]);
     assert!(!report.budget_exceeded());
-    assert!(report.candidate.is_none());
-    assert!(report.diagnostics.has_errors());
+    assert!(report.candidate().is_none());
+    assert!(report.diagnostics().has_errors());
     assert!(
         report
-            .diagnostics
+            .diagnostics()
             .iter()
             .any(|diagnostic| { diagnostic.code().as_str() == "scene.prefab-source-missing" }),
         "{:?}",
-        report.diagnostics
+        report.diagnostics()
     );
     assert!(report.into_native_preview().is_err());
     assert_eq!(session.document(), &document);

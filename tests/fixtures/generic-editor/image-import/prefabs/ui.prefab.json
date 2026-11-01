@@ -296,7 +296,7 @@
             }
           },
           "nara.ui.UiVisual": {
-            "version": 2,
+            "version": 1,
             "value": {
               "type": "map",
               "value": {

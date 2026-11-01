@@ -7,6 +7,7 @@ use nara_window::{PresentMode, WindowMode};
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
+use crate::authoring::ProjectAuthoringState;
 use crate::capability::{ProductCapabilitySet, RuntimePreset};
 use crate::effective::{
     EffectiveDiagnosticsSettings, EffectiveProjectSettings, EffectiveRuntimeSettings,
@@ -189,7 +190,8 @@ impl RuntimeInputConfiguration {
 ///
 /// Deserialization produces an untrusted record. Call [`Self::resolve`] to validate and admit
 /// these values before runtime composition. This record neither selects executable code nor
-/// carries project paths, source authority, Scene selection, or an external Play execution contract.
+/// carries project paths, authoring state, source authority, Scene selection, or an external Play
+/// execution contract.
 #[derive(Debug, Clone, Default, PartialEq, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct RuntimeConfiguration {
@@ -360,6 +362,9 @@ impl EffectiveRuntimeConfiguration {
 ///
 /// The input requirement is relative to the project root. Retaining it does not read or admit
 /// the selected file, grant source authority, or establish that an Input owner is installed.
+/// Projection requires Ready at that point, but stores no source-readiness authority. The source
+/// Host must capture and finally revalidate the manifest; a retained projection cannot certify
+/// that the current project is still Ready.
 #[derive(Debug, Clone, PartialEq)]
 #[must_use = "source input requirements must be fulfilled before runtime startup"]
 pub struct SourceRuntimeProjection {
@@ -388,6 +393,8 @@ impl EffectiveProjectSettings {
     /// can explicitly clear that path before projection. Public effective fields are validated
     /// again, and values the runtime record cannot represent exactly are rejected. Source Hosts
     /// can retain the selection as an obligation through [`Self::source_runtime_projection`].
+    /// Project authoring state is source-only policy and is excluded, including Pending. A
+    /// successful projection does not admit source execution or establish source readiness.
     pub fn runtime_configuration(
         &self,
     ) -> Result<EffectiveRuntimeConfiguration, RuntimeConfigurationError> {
@@ -407,10 +414,19 @@ impl EffectiveProjectSettings {
     /// Uses the same runtime validation and exact representation checks as
     /// [`Self::runtime_configuration`]. The source Host must separately admit any selected input
     /// file and its receiving owner before runtime startup. Profile clearing is applied before
-    /// projection and leaves no input requirement.
+    /// projection and leaves no input requirement. Pending authoring state rejects source
+    /// composition. The source Host must still capture and finally revalidate the manifest;
+    /// this check cannot certify that a retained projection's source is still Ready.
     pub fn source_runtime_projection(
         &self,
     ) -> Result<SourceRuntimeProjection, RuntimeConfigurationError> {
+        if matches!(&self.authoring_state, ProjectAuthoringState::Pending(_)) {
+            return Err(RuntimeConfigurationError::field(
+                "runtime.configuration.source-authoring-pending",
+                "Pending project authoring state cannot enter source runtime composition",
+                "authoring.state",
+            ));
+        }
         Ok(SourceRuntimeProjection {
             runtime: self.project_runtime_configuration()?,
             input_requirement: self.input.action_map.clone(),

@@ -18,6 +18,82 @@ use crate::project_host::authoring::{
     document::{AuthoringDocumentDataError, AuthoringDocumentSourceFact},
     project::{AuthoringDocumentCapture, AuthoringPrefabSessionSnapshot},
 };
+use crate::project_host::file_publication::{FilePublicationHost, FileSourceObservation};
+
+pub(in crate::project_host::authoring) fn bound_source_host(
+    snapshot: &AuthoringProjectSessionSnapshot,
+    source: &AuthoringDocumentSourceFact,
+) -> Result<FilePublicationHost, AuthoringProjectSourceAdmissionError> {
+    let kind = match source.source_key().kind() {
+        nara_scene::SourceDocumentKind::Scene => AuthoringSourceKind::Scene,
+        nara_scene::SourceDocumentKind::Prefab => AuthoringSourceKind::Prefab,
+    };
+    let changed = || AuthoringProjectSourceAdmissionError::SourceChanged {
+        kind,
+        path: nara_project::ProjectPath::new(source.relative_path()).unwrap(),
+    };
+    let root = snapshot.project_root();
+    let file = root
+        .open_file_exact(&nara_fs::RelativePath::new(source.relative_path()).unwrap())
+        .map_err(|_| changed())?;
+    if file.identity() != source.identity() || file.parent_identity() != source.parent_identity() {
+        return Err(changed());
+    }
+    FilePublicationHost::bind_existing(
+        &root,
+        source.relative_path(),
+        &file,
+        source.digest(),
+        source.digest().length(),
+    )
+    .map_err(|_| changed())
+}
+
+pub(in crate::project_host::authoring) fn bound_source_observation(
+    snapshot: &AuthoringProjectSessionSnapshot,
+    source: &AuthoringDocumentSourceFact,
+) -> FileSourceObservation {
+    let host = bound_source_host(snapshot, source).unwrap();
+    let mut inputs = snapshot.admit_source_capture_inputs(0, 0).unwrap();
+    inputs
+        .capture_source_observation(host.source_observation_cost().unwrap(), || {
+            host.capture_source_observation(host.accepted_source_observation().unwrap())
+                .map_err(|_| AuthoringProjectSourceAdmissionError::DocumentSourceMismatch)
+        })
+        .unwrap()
+}
+
+pub(in crate::project_host::authoring) trait CaptureBoundScene {
+    fn capture_scene_from_bound_source(
+        &self,
+        source: &AuthoringDocumentSourceFact,
+        session: &SceneAuthoringSession,
+        open_prefabs: &[AuthoringPrefabSessionSnapshot],
+    ) -> Result<AuthoringDocumentCapture, AuthoringProjectSourceAdmissionError>;
+}
+
+impl CaptureBoundScene for AuthoringProjectSessionSnapshot {
+    fn capture_scene_from_bound_source(
+        &self,
+        source: &AuthoringDocumentSourceFact,
+        session: &SceneAuthoringSession,
+        open_prefabs: &[AuthoringPrefabSessionSnapshot],
+    ) -> Result<AuthoringDocumentCapture, AuthoringProjectSourceAdmissionError> {
+        let host = bound_source_host(self, source)?;
+        let mut observation_inputs = self.admit_source_capture_inputs(0, 0)?;
+        let observation = observation_inputs.capture_source_observation(
+            host.source_observation_cost().unwrap(),
+            || {
+                host.capture_source_observation(host.accepted_source_observation().unwrap())
+                    .map_err(|_| AuthoringProjectSourceAdmissionError::SourceChanged {
+                        kind: AuthoringSourceKind::Scene,
+                        path: nara_project::ProjectPath::new(source.relative_path()).unwrap(),
+                    })
+            },
+        )?;
+        self.capture_scene_document(source, observation, session, open_prefabs)
+    }
+}
 
 const SECOND_SCENE: &str = "scenes/second.scene.json";
 const OUTER_PREFAB: &str = "prefabs/outer.prefab.json";
@@ -307,7 +383,7 @@ fn indexed_scene_captures_its_nested_files_without_widening_startup_or_accumulat
     );
 
     let mut first = snapshot
-        .capture_scene_document(&source, &session, &[])
+        .capture_scene_from_bound_source(&source, &session, &[])
         .unwrap();
     assert_closure(
         &first,
@@ -438,7 +514,7 @@ fn indexed_scene_captures_its_nested_files_without_widening_startup_or_accumulat
     assert!(omitted_entities.contains(leaf_id));
 
     let second = snapshot
-        .capture_scene_document(&source, &session, &[])
+        .capture_scene_from_bound_source(&source, &session, &[])
         .unwrap();
     assert_closure(
         &second,
@@ -474,7 +550,7 @@ fn unsaved_exact_instance_replacement_changes_the_capture_and_undo_restores_it()
     let content = session.content_state();
     let basis = session.authoring_schema_basis();
     let before = snapshot
-        .capture_scene_document(&source, &session, &[])
+        .capture_scene_from_bound_source(&source, &session, &[])
         .unwrap();
     assert_closure(
         &before,
@@ -493,7 +569,7 @@ fn unsaved_exact_instance_replacement_changes_the_capture_and_undo_restores_it()
     assert_eq!(session.authoring_schema_basis(), basis);
 
     let edited = snapshot
-        .capture_scene_document(&source, &session, &[])
+        .capture_scene_from_bound_source(&source, &session, &[])
         .unwrap();
     assert_closure(&edited, &["alternate.prefab.json"], &["alternate.png"]);
     assert_eq!(
@@ -522,7 +598,7 @@ fn unsaved_exact_instance_replacement_changes_the_capture_and_undo_restores_it()
     assert_eq!(session.document(), original.as_ref());
     assert_eq!(session.content_state(), content);
     let restored = snapshot
-        .capture_scene_document(&source, &session, &[])
+        .capture_scene_from_bound_source(&source, &session, &[])
         .unwrap();
     assert_closure(
         &restored,
@@ -561,20 +637,20 @@ fn independent_capture_rejects_a_fresh_schema_basis_even_when_files_and_shape_ma
     );
     assert_closure(
         &snapshot
-            .capture_scene_document(&source, &session, &[])
+            .capture_scene_from_bound_source(&source, &session, &[])
             .unwrap(),
         &["leaf.prefab.json", "outer.prefab.json"],
         &["leaf.png", "outer.png"],
     );
     assert_closure(
         &fresh_snapshot
-            .capture_scene_document(&fresh_source, &fresh_session, &[])
+            .capture_scene_from_bound_source(&fresh_source, &fresh_session, &[])
             .unwrap(),
         &["leaf.prefab.json", "outer.prefab.json"],
         &["leaf.png", "outer.png"],
     );
     let error = snapshot
-        .capture_scene_document(&source, &fresh_session, &[])
+        .capture_scene_from_bound_source(&source, &fresh_session, &[])
         .err()
         .expect("an equivalent fresh Schema basis must not replace the original authority");
     assert!(matches!(
@@ -598,7 +674,7 @@ fn demanded_malformed_files_and_changed_root_or_schema_receipts_are_typed_refusa
         let document = session.shared_document();
         assert_closure(
             &snapshot
-                .capture_scene_document(&source, &session, &[])
+                .capture_scene_from_bound_source(&source, &session, &[])
                 .unwrap(),
             &["leaf.prefab.json", "outer.prefab.json"],
             &["leaf.png", "outer.png"],
@@ -617,7 +693,7 @@ fn demanded_malformed_files_and_changed_root_or_schema_receipts_are_typed_refusa
         };
         fs::write(path, bytes).unwrap();
         let error = snapshot
-            .capture_scene_document(&source, &session, &[])
+            .capture_scene_from_bound_source(&source, &session, &[])
             .err()
             .expect("a demanded malformed file or changed receipt must refuse capture");
         let expected_refusal = match (expected_kind, &error) {
@@ -664,11 +740,15 @@ fn open_prefab_edits_change_nested_demand_while_held_snapshots_and_disk_stay_unc
     let prefab_disk = fs::read(project.root.join(OUTER_PREFAB)).unwrap();
     let original_document = prefab_session.shared_document();
     let original_content = prefab_session.content_state();
-    let held = AuthoringPrefabSessionSnapshot::capture(&prefab_source, &prefab_session);
+    let held = AuthoringPrefabSessionSnapshot::capture(
+        &prefab_source,
+        bound_source_observation(&snapshot, &prefab_source),
+        &prefab_session,
+    );
     assert_eq!(held.source_key(), prefab_source.source_key());
     assert_eq!(held.revision(), prefab_session.revision());
     let before = snapshot
-        .capture_scene_document(&source, &session, std::slice::from_ref(&held))
+        .capture_scene_from_bound_source(&source, &session, std::slice::from_ref(&held))
         .unwrap();
     assert_closure(
         &before,
@@ -696,12 +776,16 @@ fn open_prefab_edits_change_nested_demand_while_held_snapshots_and_disk_stay_unc
     let report = prefab_session.apply_authoring_patch(&patch);
     assert!(report.applied, "{:?}", report.diagnostics);
     let edited_document = prefab_session.shared_document();
-    let edited = AuthoringPrefabSessionSnapshot::capture(&prefab_source, &prefab_session);
+    let edited = AuthoringPrefabSessionSnapshot::capture(
+        &prefab_source,
+        bound_source_observation(&snapshot, &prefab_source),
+        &prefab_session,
+    );
     assert_ne!(edited.revision(), held.revision());
     assert_eq!(edited.revision().source_id(), held.revision().source_id());
     assert!(edited.revision().generation() > held.revision().generation());
     let selected = snapshot
-        .capture_scene_document(&source, &session, std::slice::from_ref(&edited))
+        .capture_scene_from_bound_source(&source, &session, std::slice::from_ref(&edited))
         .unwrap();
     assert_closure(
         &selected,
@@ -729,7 +813,7 @@ fn open_prefab_edits_change_nested_demand_while_held_snapshots_and_disk_stay_unc
     );
 
     let still_held = snapshot
-        .capture_scene_document(&source, &session, std::slice::from_ref(&held))
+        .capture_scene_from_bound_source(&source, &session, std::slice::from_ref(&held))
         .unwrap();
     assert_closure(
         &still_held,
@@ -746,7 +830,7 @@ fn open_prefab_edits_change_nested_demand_while_held_snapshots_and_disk_stay_unc
     ));
     assert_eq!(still_held.usage(), before.usage());
     let from_disk = snapshot
-        .capture_scene_document(&source, &session, &[])
+        .capture_scene_from_bound_source(&source, &session, &[])
         .unwrap();
     assert_closure(
         &from_disk,
@@ -775,9 +859,13 @@ fn open_prefab_edits_change_nested_demand_while_held_snapshots_and_disk_stay_unc
     assert!(undone.applied, "{:?}", undone.diagnostics);
     assert_eq!(prefab_session.document(), original_document.as_ref());
     assert_eq!(prefab_session.content_state(), original_content);
-    let restored_input = AuthoringPrefabSessionSnapshot::capture(&prefab_source, &prefab_session);
+    let restored_input = AuthoringPrefabSessionSnapshot::capture(
+        &prefab_source,
+        bound_source_observation(&snapshot, &prefab_source),
+        &prefab_session,
+    );
     let restored = snapshot
-        .capture_scene_document(&source, &session, std::slice::from_ref(&restored_input))
+        .capture_scene_from_bound_source(&source, &session, std::slice::from_ref(&restored_input))
         .unwrap();
     assert_closure(
         &restored,
@@ -791,7 +879,7 @@ fn open_prefab_edits_change_nested_demand_while_held_snapshots_and_disk_stay_unc
     assert_ne!(restored_input.revision(), held.revision());
     assert!(restored_input.revision().generation() > edited.revision().generation());
     let still_edited = snapshot
-        .capture_scene_document(&source, &session, std::slice::from_ref(&edited))
+        .capture_scene_from_bound_source(&source, &session, std::slice::from_ref(&edited))
         .unwrap();
     assert_closure(
         &still_edited,
@@ -829,19 +917,27 @@ fn only_demanded_open_prefabs_activate_schema_basis_validation() {
         unused_session.authoring_schema_basis(),
         session.authoring_schema_basis()
     );
-    let unused = AuthoringPrefabSessionSnapshot::capture(&unused_source, &unused_session);
+    let unused = AuthoringPrefabSessionSnapshot::capture(
+        &unused_source,
+        bound_source_observation(&fresh_snapshot, &unused_source),
+        &unused_session,
+    );
     let baseline = snapshot
-        .capture_scene_document(&source, &session, &[])
+        .capture_scene_from_bound_source(&source, &session, &[])
         .unwrap();
     let with_unused = snapshot
-        .capture_scene_document(&source, &session, std::slice::from_ref(&unused))
+        .capture_scene_from_bound_source(&source, &session, std::slice::from_ref(&unused))
         .unwrap();
     assert_closure(
         &with_unused,
         &["leaf.prefab.json", "outer.prefab.json"],
         &["leaf.png", "outer.png"],
     );
-    assert_eq!(with_unused.usage(), baseline.usage());
+    let mut expected = baseline.usage();
+    // Unrelated proof custody is offered during preparation, then released with its input.
+    // Successful output keeps only the demanded set; cumulative work and peak stay distinct.
+    expected.peak_open_handles += FileSourceObservation::retained_handle_capacity();
+    assert_eq!(with_unused.usage(), expected);
     assert_eq!(
         with_unused.source_facts().collect::<Vec<_>>(),
         baseline.source_facts().collect::<Vec<_>>(),
@@ -863,9 +959,13 @@ fn only_demanded_open_prefabs_activate_schema_basis_validation() {
         demanded_session.document(),
         baseline.prefabs()[1].document()
     );
-    let demanded = AuthoringPrefabSessionSnapshot::capture(&demanded_source, &demanded_session);
+    let demanded = AuthoringPrefabSessionSnapshot::capture(
+        &demanded_source,
+        bound_source_observation(&snapshot, &demanded_source),
+        &demanded_session,
+    );
     let error = snapshot
-        .capture_scene_document(&source, &session, &[unused, demanded])
+        .capture_scene_from_bound_source(&source, &session, &[unused, demanded])
         .err()
         .expect("an actually demanded Prefab must use the original shared Schema basis");
     assert!(matches!(
@@ -880,8 +980,16 @@ fn duplicate_canonical_prefab_sessions_are_ambiguous_even_at_the_same_generation
     let (snapshot, source, session) = open_second_scene(&project);
     let (first_source, first_session) = open_prefab(&snapshot, OUTER_PREFAB);
     let (second_source, second_session) = open_prefab(&snapshot, OUTER_PREFAB);
-    let first = AuthoringPrefabSessionSnapshot::capture(&first_source, &first_session);
-    let second = AuthoringPrefabSessionSnapshot::capture(&second_source, &second_session);
+    let first = AuthoringPrefabSessionSnapshot::capture(
+        &first_source,
+        bound_source_observation(&snapshot, &first_source),
+        &first_session,
+    );
+    let second = AuthoringPrefabSessionSnapshot::capture(
+        &second_source,
+        bound_source_observation(&snapshot, &second_source),
+        &second_session,
+    );
     assert_eq!(first.source_key(), second.source_key());
     assert_eq!(
         first.revision().generation(),
@@ -890,7 +998,7 @@ fn duplicate_canonical_prefab_sessions_are_ambiguous_even_at_the_same_generation
     assert_ne!(first.revision().source_id(), second.revision().source_id());
     for input in [&first, &second] {
         let selected = snapshot
-            .capture_scene_document(&source, &session, std::slice::from_ref(input))
+            .capture_scene_from_bound_source(&source, &session, std::slice::from_ref(input))
             .unwrap();
         assert_closure(
             &selected,
@@ -903,7 +1011,7 @@ fn duplicate_canonical_prefab_sessions_are_ambiguous_even_at_the_same_generation
         );
     }
     let error = snapshot
-        .capture_scene_document(&source, &session, &[first, second])
+        .capture_scene_from_bound_source(&source, &session, &[first, second])
         .err()
         .expect("two selected sessions with the same canonical source must be ambiguous");
     assert!(
@@ -923,10 +1031,14 @@ fn selected_prefab_session_rejects_a_stale_file_receipt_while_disk_capture_reads
     let (prefab_source, prefab_session) = open_prefab(&snapshot, OUTER_PREFAB);
     let scene_revision = session.revision();
     let startup_usage = snapshot.usage();
-    let held = AuthoringPrefabSessionSnapshot::capture(&prefab_source, &prefab_session);
+    let held = AuthoringPrefabSessionSnapshot::capture(
+        &prefab_source,
+        bound_source_observation(&snapshot, &prefab_source),
+        &prefab_session,
+    );
     assert_closure(
         &snapshot
-            .capture_scene_document(&source, &session, std::slice::from_ref(&held))
+            .capture_scene_from_bound_source(&source, &session, std::slice::from_ref(&held))
             .unwrap(),
         &["leaf.prefab.json", "outer.prefab.json"],
         &["leaf.png", "outer.png"],
@@ -936,7 +1048,7 @@ fn selected_prefab_session_rejects_a_stale_file_receipt_while_disk_capture_reads
     fs::write(project.root.join(OUTER_PREFAB), &bytes).unwrap();
     assert_ne!(ContentDigest::of_bytes(&bytes), prefab_source.digest());
     let error = snapshot
-        .capture_scene_document(&source, &session, std::slice::from_ref(&held))
+        .capture_scene_from_bound_source(&source, &session, std::slice::from_ref(&held))
         .err()
         .expect("a selected working copy must retain an exact current file receipt");
     assert!(
@@ -950,7 +1062,7 @@ fn selected_prefab_session_rejects_a_stale_file_receipt_while_disk_capture_reads
         "{error:?}"
     );
     let from_disk = snapshot
-        .capture_scene_document(&source, &session, &[])
+        .capture_scene_from_bound_source(&source, &session, &[])
         .unwrap();
     assert_closure(
         &from_disk,
@@ -976,20 +1088,35 @@ fn owned_request_keeps_root_and_prefab_snapshots_after_both_sessions_change_and_
     let scene_disk = fs::read(project.root.join(SECOND_SCENE)).unwrap();
     let prefab_disk = fs::read(project.root.join(OUTER_PREFAB)).unwrap();
     let original_prefab = prefab_session.shared_document();
-    let input = AuthoringPrefabSessionSnapshot::capture(&prefab_source, &prefab_session);
+    let prefab_observation = bound_source_observation(&snapshot, &prefab_source);
+    let input = AuthoringPrefabSessionSnapshot::capture(
+        &prefab_source,
+        prefab_observation.clone(),
+        &prefab_session,
+    );
     let mut expected = snapshot
-        .capture_scene_document(&source, &session, std::slice::from_ref(&input))
+        .capture_scene_from_bound_source(&source, &session, std::slice::from_ref(&input))
         .unwrap();
     let expected_preview = expected.take_preview().unwrap();
-    let inputs = snapshot
+    let mut inputs = snapshot
         .admit_source_capture_inputs(
             0,
             AuthoringPrefabSessionSnapshot::capture_retained_bytes(&prefab_source, &prefab_session)
                 .unwrap(),
         )
         .unwrap();
+    let observation = bound_source_observation(&snapshot, &source);
+    inputs
+        .retain_shared_source_observations([&observation, &prefab_observation])
+        .unwrap();
     let request = snapshot
-        .capture_scene_request(&source, &session, inputs, vec![input].into_boxed_slice())
+        .capture_scene_request(
+            &source,
+            observation,
+            &session,
+            inputs,
+            vec![input].into_boxed_slice(),
+        )
         .unwrap();
     let prefab_edit = prefab_session.apply_authoring_patch(&ScenePatchDocument::new([
         ScenePatchOperation::SetPrefabInstance {
@@ -1007,10 +1134,14 @@ fn owned_request_keeps_root_and_prefab_snapshots_after_both_sessions_change_and_
         },
     ]));
     assert!(root_edit.applied, "{:?}", root_edit.diagnostics);
-    let edited_input = AuthoringPrefabSessionSnapshot::capture(&prefab_source, &prefab_session);
+    let edited_input = AuthoringPrefabSessionSnapshot::capture(
+        &prefab_source,
+        bound_source_observation(&snapshot, &prefab_source),
+        &prefab_session,
+    );
     assert_closure(
         &snapshot
-            .capture_scene_document(&source, &session, &[edited_input])
+            .capture_scene_from_bound_source(&source, &session, &[edited_input])
             .unwrap(),
         &["leaf.prefab.json"],
         &["leaf.png"],
@@ -1100,13 +1231,13 @@ fn scene_request_rejects_same_basis_wrong_source_even_when_documents_are_identic
     assert_eq!(source.digest(), other_source.digest());
     assert_ne!(source.source_key(), other_source.source_key());
     for (receipt, working) in [(&source, &other_session), (&other_source, &session)] {
+        let observation = bound_source_observation(&snapshot, receipt);
+        let mut inputs = snapshot.admit_source_capture_inputs(0, 0).unwrap();
+        inputs
+            .retain_shared_source_observations([&observation])
+            .unwrap();
         let error = snapshot
-            .capture_scene_request(
-                receipt,
-                working,
-                snapshot.admit_source_capture_inputs(0, 0).unwrap(),
-                Box::new([]),
-            )
+            .capture_scene_request(receipt, observation, working, inputs, Box::new([]))
             .err()
             .expect("equal document content cannot authorize a different containing source");
         assert!(matches!(
@@ -1114,11 +1245,17 @@ fn scene_request_rejects_same_basis_wrong_source_even_when_documents_are_identic
             AuthoringProjectSourceAdmissionError::DocumentSourceMismatch
         ));
     }
+    let observation = bound_source_observation(&snapshot, &other_source);
+    let mut inputs = snapshot.admit_source_capture_inputs(0, 0).unwrap();
+    inputs
+        .retain_shared_source_observations([&observation])
+        .unwrap();
     let admitted = snapshot
         .capture_scene_request(
             &other_source,
+            observation,
             &other_session,
-            snapshot.admit_source_capture_inputs(0, 0).unwrap(),
+            inputs,
             Box::new([]),
         )
         .unwrap()
@@ -1150,10 +1287,14 @@ fn selected_prefab_rejects_same_basis_wrong_source_even_when_documents_are_ident
     );
     assert_eq!(prefab_source.digest(), other_source.digest());
     assert_ne!(prefab_source.source_key(), other_source.source_key());
-    let mismatched = AuthoringPrefabSessionSnapshot::capture(&prefab_source, &other_session);
+    let mismatched = AuthoringPrefabSessionSnapshot::capture(
+        &prefab_source,
+        bound_source_observation(&snapshot, &prefab_source),
+        &other_session,
+    );
     assert_eq!(mismatched.source_key(), prefab_source.source_key());
     let error = snapshot
-        .capture_scene_document(&source, &session, &[mismatched])
+        .capture_scene_from_bound_source(&source, &session, &[mismatched])
         .err()
         .expect("the selected Prefab session locator must match its actual source receipt");
     assert!(
@@ -1166,9 +1307,13 @@ fn selected_prefab_rejects_same_basis_wrong_source_even_when_documents_are_ident
         ),
         "{error:?}"
     );
-    let correct = AuthoringPrefabSessionSnapshot::capture(&prefab_source, &prefab_session);
+    let correct = AuthoringPrefabSessionSnapshot::capture(
+        &prefab_source,
+        bound_source_observation(&snapshot, &prefab_source),
+        &prefab_session,
+    );
     let admitted = snapshot
-        .capture_scene_document(&source, &session, &[correct])
+        .capture_scene_from_bound_source(&source, &session, &[correct])
         .unwrap();
     assert_closure(
         &admitted,

@@ -174,6 +174,8 @@ pub enum NativePolicy {
 #[serde(deny_unknown_fields)]
 struct TrialManifest {
     project: TrialProject,
+    #[serde(rename = "authoring")]
+    _authoring: nara_engine::project::ProjectAuthoringManifest,
     content: TrialContent,
 }
 

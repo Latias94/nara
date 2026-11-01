@@ -407,6 +407,14 @@ fn manifest_failure(error: AuthoringProjectAdmissionError) -> EditorProjectOpenF
             ),
             "Select a profile declared by nara.toml or clear the profile field.",
         ),
+        AuthoringProjectAdmissionError::SourceAuthoringPending => (
+            EditorProjectOpenFailureSource::ProjectManifest,
+            single_error(
+                "project.editor.authored-upgrade-pending",
+                "The project has an unfinished authored upgrade",
+            ),
+            "Inspect and reconcile the project's authored-upgrade recovery information before retrying.",
+        ),
         _ => (
             EditorProjectOpenFailureSource::ProjectManifest,
             single_error(

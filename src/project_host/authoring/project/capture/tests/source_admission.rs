@@ -56,7 +56,7 @@ fn whitespace_padded_scene_and_prefab_dependencies_fit_default_admission_in_both
         }
         let (snapshot, source, session) = open_second_scene(&project);
         let capture = snapshot
-            .capture_scene_document(&source, &session, &[])
+            .capture_scene_from_bound_source(&source, &session, &[])
             .unwrap();
         assert_eq!(capture.readiness(), AuthoringProjectReadiness::Complete);
         assert_eq!(capture.scenes().len(), 2);
@@ -144,7 +144,7 @@ fn nested_stable_native_sources_use_the_actual_sidecar_reader_for_scene_and_pref
     .unwrap();
     let (snapshot, source, session) = open_second_scene(&project);
     let capture = snapshot
-        .capture_scene_document(&source, &session, &[])
+        .capture_scene_from_bound_source(&source, &session, &[])
         .unwrap();
     assert_eq!(capture.readiness(), AuthoringProjectReadiness::Complete);
     let scene = capture
@@ -248,7 +248,7 @@ fn nested_stable_native_sources_use_the_actual_sidecar_reader_for_scene_and_pref
         )
         .unwrap();
         let capture = snapshot
-            .capture_scene_document(&source, &session, &[])
+            .capture_scene_from_bound_source(&source, &session, &[])
             .unwrap();
         assert_eq!(capture.readiness(), AuthoringProjectReadiness::Complete);
         assert_eq!(capture.scenes().len(), 2);
@@ -303,7 +303,7 @@ fn path_self_edge_reads_its_metadata_without_indexing_unrelated_sources_or_redec
     )
     .unwrap();
     let capture = snapshot
-        .capture_scene_document(&source, &session, &[])
+        .capture_scene_from_bound_source(&source, &session, &[])
         .unwrap();
     assert_eq!(capture.readiness(), AuthoringProjectReadiness::Complete);
     assert_eq!(capture.scenes().len(), 1);
@@ -336,7 +336,7 @@ fn path_self_edge_reads_its_metadata_without_indexing_unrelated_sources_or_redec
 fn real_compiler_output_transfers_its_exact_reservation_without_a_second_candidate_allowance() {
     let project = fixture(&[], &[], &[], &[]);
     let (snapshot, source, session) = open_second_scene(&project);
-    let mut report = nara_scene::__private::try_expand_authoring_prefabs_with_loader(
+    let report = nara_scene::__private::try_expand_authoring_prefabs_with_loader(
         session.document(),
         &session.authoring_schema_basis().unwrap(),
         Default::default(),
@@ -346,11 +346,10 @@ fn real_compiler_output_transfers_its_exact_reservation_without_a_second_candida
     .unwrap();
     let working = report.checked_work_bytes().unwrap();
     let candidate = report
+        .into_parts()
         .candidate
-        .take()
         .unwrap()
         .bind_source(source.source_key().clone());
-    drop(report);
     let retained = crate::scene_retention::direct_startup_scene_retained_bytes(&candidate).unwrap();
     let mut reservation = working.max(retained);
     let baseline = snapshot.schema.budget.retained_candidate_bytes;
@@ -372,7 +371,11 @@ fn borrowed_input_costs_match_captured_owners_and_unavailable_prefab_never_falls
     let (snapshot, source, session) = open_second_scene(&project);
     let (prefab_source, prefab) =
         super::prefab_acquisition::open_prefab(&snapshot, "prefabs/outer.prefab.json");
-    let scene_input = AuthoringSceneSessionSnapshot::capture(&source, &session);
+    let scene_input = AuthoringSceneSessionSnapshot::capture(
+        &source,
+        bound_source_observation(&snapshot, &source),
+        &session,
+    );
     assert_eq!(
         AuthoringSceneSessionSnapshot::capture_retained_bytes(&source, &session).unwrap(),
         scenes::open_scene_inputs_retained_bytes(&[scene_input]).unwrap()
@@ -405,7 +408,7 @@ fn borrowed_input_costs_match_captured_owners_and_unavailable_prefab_never_falls
     .unwrap();
     let (snapshot, source, session) = open_second_scene(&project);
     assert!(
-        matches!(snapshot.capture_scene_document(&source, &session, &[unavailable]),
+        matches!(snapshot.capture_scene_from_bound_source(&source, &session, &[unavailable]),
         Err(AuthoringProjectSourceAdmissionError::SourceChanged { kind: AuthoringSourceKind::Prefab, path })
             if path.as_str() == "prefabs/outer.prefab.json")
     );

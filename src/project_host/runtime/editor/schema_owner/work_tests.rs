@@ -3,7 +3,7 @@ use std::{
     time::{Duration, Instant},
 };
 
-use nara_tasks::TaskPoolConfig;
+use nara_tasks::{TaskPoolConfig, TaskPools, TaskReturnState};
 
 fn pools() -> TaskPools {
     let worker = nara_core::ItemLimit::new(1).unwrap();
@@ -17,7 +17,7 @@ fn cancelled_finite_work_retains_its_actual_result_until_physical_return() {
     let pools = pools();
     let (entered_tx, entered_rx) = mpsc::channel();
     let (release_tx, release_rx) = mpsc::channel();
-    let mut pending = Pending::start(&pools, move || {
+    let mut pending = Pending::start(&pools, TaskSpawnRequest::new(0, DOMAIN), move || {
         entered_tx.send(()).unwrap();
         release_rx.recv_timeout(Duration::from_secs(15)).unwrap();
         73_u64
@@ -51,7 +51,9 @@ fn cancelled_finite_work_retains_its_actual_result_until_physical_return() {
 #[test]
 fn panicked_started_work_requires_reconciliation_instead_of_inventing_an_unpublished_result() {
     let pools = pools();
-    let mut pending = Pending::<()>::start(&pools, || panic!("injected finite publication unwind"));
+    let mut pending = Pending::<()>::start(&pools, TaskSpawnRequest::new(0, DOMAIN), || {
+        panic!("injected finite publication unwind")
+    });
     let deadline = Instant::now() + Duration::from_secs(5);
     let result = loop {
         if let Some(result) = pending.poll() {
@@ -70,7 +72,9 @@ fn panicked_started_work_requires_reconciliation_instead_of_inventing_an_unpubli
 fn rejected_finite_work_exposes_its_original_task_admission_reason() {
     let pools = pools();
     assert!(pools.shutdown_blocking().unwrap().is_complete());
-    let mut pending = Pending::start(&pools, || Ok::<(), Failure>(()));
+    let mut pending = Pending::start(&pools, TaskSpawnRequest::new(0, DOMAIN), || {
+        Ok::<(), Failure>(())
+    });
     assert!(pending.task.is_none());
     let result = pending.poll().unwrap();
     let failure = work_error(

@@ -69,6 +69,7 @@ fn prefab_conversion_charges_preadmitted_open_inputs_once_during_real_acquisitio
         let open = if with_open {
             vec![AuthoringPrefabSessionSnapshot::capture(
                 &prefab_source,
+                bound_source_observation(&snapshot, &prefab_source),
                 &prefab,
             )]
             .into_boxed_slice()
@@ -76,13 +77,7 @@ fn prefab_conversion_charges_preadmitted_open_inputs_once_during_real_acquisitio
             Box::new([])
         };
         let mut context = snapshot
-            .capture_prefab_conversion_request(
-                &source,
-                &basis,
-                SourceDocumentKind::Scene,
-                inputs,
-                open,
-            )
+            .capture_bound_prefab_request(&source, &basis, SourceDocumentKind::Scene, inputs, open)
             .unwrap();
         context.retain_root_input(root_bytes);
         let acquisition = context.acquire().unwrap();
@@ -93,8 +88,9 @@ fn prefab_conversion_charges_preadmitted_open_inputs_once_during_real_acquisitio
     };
     let without_open = measure(false);
     let with_open = measure(true);
-    assert_eq!(with_open.0 - without_open.0, snapshot_bytes);
-    assert_eq!(with_open.1 - without_open.1, snapshot_bytes);
+    let held_input = snapshot_bytes + FileSourceObservation::retained_bytes();
+    assert_eq!(with_open.0 - without_open.0, held_input);
+    assert_eq!(with_open.1 - without_open.1, held_input);
 }
 
 #[test]
@@ -108,13 +104,14 @@ fn prefab_conversion_rejects_unadmitted_snapshots_and_foreign_nominal_input_toke
         Err(AuthoringProjectSourceAdmissionError::AccountingOverflow)
     ));
     let mut context = snapshot
-        .capture_prefab_conversion_request(
+        .capture_bound_prefab_request(
             &source,
             &basis,
             SourceDocumentKind::Scene,
             snapshot.admit_source_capture_inputs(0, 0).unwrap(),
             vec![AuthoringPrefabSessionSnapshot::capture(
                 &prefab_source,
+                bound_source_observation(&snapshot, &prefab_source),
                 &prefab,
             )]
             .into_boxed_slice(),
@@ -127,7 +124,7 @@ fn prefab_conversion_rejects_unadmitted_snapshots_and_foreign_nominal_input_toke
 
     let (other, _, _) = open_second_scene(&project);
     assert!(matches!(
-        snapshot.capture_prefab_conversion_request(
+        snapshot.capture_bound_prefab_request(
             &source,
             &basis,
             SourceDocumentKind::Scene,
@@ -146,7 +143,7 @@ fn prefab_conversion_acquires_real_prefab_root_and_never_hydrates_effective_imag
     let revision = session.revision();
     let basis = session.authoring_schema_basis().unwrap();
     assert!(matches!(
-        snapshot.capture_prefab_conversion_request(
+        snapshot.capture_bound_prefab_request(
             &source,
             &basis,
             SourceDocumentKind::Scene,
@@ -172,7 +169,7 @@ fn prefab_conversion_acquires_real_prefab_root_and_never_hydrates_effective_imag
         )
         .unwrap();
     let mut context = snapshot
-        .capture_prefab_conversion_request(
+        .capture_bound_prefab_request(
             &source,
             &basis,
             SourceDocumentKind::Prefab,
@@ -240,7 +237,7 @@ fn selected_scene_conversion_does_not_activate_independent_missing_sources_or_as
         )
         .unwrap();
     let mut context = snapshot
-        .capture_prefab_conversion_request(
+        .capture_bound_prefab_request(
             &source,
             &session.authoring_schema_basis().unwrap(),
             SourceDocumentKind::Scene,
@@ -323,7 +320,7 @@ fn finite_containing_prefab_demand_uses_the_actual_unsaved_root_working_copy() {
         )
         .unwrap();
     let mut context = snapshot
-        .capture_prefab_conversion_request(
+        .capture_bound_prefab_request(
             &source,
             &session.authoring_schema_basis().unwrap(),
             SourceDocumentKind::Prefab,
@@ -334,7 +331,12 @@ fn finite_containing_prefab_demand_uses_the_actual_unsaved_root_working_copy() {
                         .unwrap(),
                 )
                 .unwrap(),
-            vec![AuthoringPrefabSessionSnapshot::capture(&source, &session)].into_boxed_slice(),
+            vec![AuthoringPrefabSessionSnapshot::capture(
+                &source,
+                bound_source_observation(&snapshot, &source),
+                &session,
+            )]
+            .into_boxed_slice(),
         )
         .unwrap();
     context.retain_root_input(session.document().retained_bytes().unwrap());
@@ -387,7 +389,7 @@ fn selected_conversion_retains_unsaved_working_copy_and_file_participants_separa
         )
         .unwrap();
     let mut context = snapshot
-        .capture_prefab_conversion_request(
+        .capture_bound_prefab_request(
             &source,
             &session.authoring_schema_basis().unwrap(),
             SourceDocumentKind::Scene,
@@ -410,9 +412,17 @@ fn selected_conversion_retains_unsaved_working_copy_and_file_participants_separa
                 )
                 .unwrap(),
             vec![
-                AuthoringPrefabSessionSnapshot::capture(&prefab_source, &prefab_session),
-                AuthoringPrefabSessionSnapshot::capture(&unused_source, &unused_session)
-                    .without_persistence(),
+                AuthoringPrefabSessionSnapshot::capture(
+                    &prefab_source,
+                    bound_source_observation(&snapshot, &prefab_source),
+                    &prefab_session,
+                ),
+                AuthoringPrefabSessionSnapshot::capture(
+                    &unused_source,
+                    bound_source_observation(&snapshot, &unused_source),
+                    &unused_session,
+                )
+                .without_persistence(),
             ]
             .into_boxed_slice(),
         )
@@ -506,7 +516,7 @@ fn selected_conversion_retains_path_and_stable_aliases_and_rejects_new_lookup_am
         )
         .unwrap();
     let mut context = snapshot
-        .capture_prefab_conversion_request(
+        .capture_bound_prefab_request(
             &source,
             &session.authoring_schema_basis().unwrap(),
             SourceDocumentKind::Scene,

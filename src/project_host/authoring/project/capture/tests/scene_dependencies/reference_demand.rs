@@ -82,12 +82,17 @@ fn capture_with_scenes(
     root: &SceneAuthoringSession,
     sessions: Vec<AuthoringSceneSessionSnapshot>,
 ) -> Result<AuthoringDocumentCapture, AuthoringProjectSourceAdmissionError> {
-    let inputs = snapshot.admit_source_capture_inputs(
+    let mut inputs = snapshot.admit_source_capture_inputs(
         0,
         scenes::open_scene_inputs_retained_bytes(&sessions).unwrap(),
     )?;
+    inputs.retain_shared_source_observations(
+        sessions
+            .iter()
+            .filter_map(|snapshot| snapshot.observation.as_ref()),
+    )?;
     snapshot
-        .capture_scene_request(source, root, inputs, Box::new([]))?
+        .capture_bound_scene_request(source, root, inputs, Box::new([]))?
         .with_open_scenes(sessions.into_boxed_slice())
         .prepare()
 }
@@ -109,6 +114,7 @@ fn dirty_deferred_scene_is_not_a_participant_while_dirty_immediate_scene_owns_it
     let (snapshot, source, root) = open_second_scene(&project);
     let (b_source, mut b) = open_scene(&snapshot, "scenes/b.scene.json");
     let (d_source, mut d) = open_scene(&snapshot, "scenes/d.scene.json");
+    let b_observation = bound_source_observation(&snapshot, &b_source);
     let b_disk = fs::read(project.root.join("scenes/b.scene.json")).unwrap();
     let d_disk = fs::read(project.root.join("scenes/d.scene.json")).unwrap();
     edit_link(&mut b, "image", 99);
@@ -118,8 +124,12 @@ fn dirty_deferred_scene_is_not_a_participant_while_dirty_immediate_scene_owns_it
         &source,
         &root,
         vec![
-            AuthoringSceneSessionSnapshot::capture(&b_source, &b),
-            AuthoringSceneSessionSnapshot::capture(&d_source, &d),
+            AuthoringSceneSessionSnapshot::capture(&b_source, b_observation.clone(), &b),
+            AuthoringSceneSessionSnapshot::capture(
+                &d_source,
+                bound_source_observation(&snapshot, &d_source),
+                &d,
+            ),
         ],
     )
     .unwrap();
@@ -178,8 +188,13 @@ fn dirty_deferred_scene_is_not_a_participant_while_dirty_immediate_scene_owns_it
         &source,
         &root,
         vec![
-            AuthoringSceneSessionSnapshot::capture(&b_source, &b).without_persistence(),
-            AuthoringSceneSessionSnapshot::capture(&d_source, &d),
+            AuthoringSceneSessionSnapshot::capture(&b_source, b_observation, &b)
+                .without_persistence(),
+            AuthoringSceneSessionSnapshot::capture(
+                &d_source,
+                bound_source_observation(&snapshot, &d_source),
+                &d,
+            ),
         ],
     )
     .unwrap();
@@ -188,7 +203,7 @@ fn dirty_deferred_scene_is_not_a_participant_while_dirty_immediate_scene_owns_it
 }
 
 #[test]
-fn deferred_source_body_is_not_decoded_but_metadata_and_actual_file_rebinding_revoke() {
+fn deferred_source_body_is_not_decoded_and_replacement_preserves_only_its_logical_binding() {
     for change in ["metadata", "replacement", "missing"] {
         let project = fixture(&[2], &[], &[], &[]);
         write_demand_schema(&project);
@@ -201,7 +216,7 @@ fn deferred_source_body_is_not_decoded_but_metadata_and_actual_file_rebinding_re
         .unwrap();
         let (snapshot, source, root) = open_second_scene(&project);
         let capture = snapshot
-            .capture_scene_document(&source, &root, &[])
+            .capture_scene_from_bound_source(&source, &root, &[])
             .unwrap();
         assert_eq!(capture.scenes().len(), 1);
         assert!(capture.assets().is_empty());
@@ -217,7 +232,14 @@ fn deferred_source_body_is_not_decoded_but_metadata_and_actual_file_rebinding_re
             "missing" => fs::remove_file(&path).unwrap(),
             _ => unreachable!(),
         }
-        assert!(capture.source_validation().validate().is_err(), "{change}");
+        let validation = capture.source_validation().validate();
+        if change == "replacement" {
+            validation
+                .expect("Deferred binding authenticates no target body or native incarnation");
+            assert!(capture.usage().aggregate_encoded_bytes() < 1024 * 1024);
+        } else {
+            assert!(validation.is_err(), "{change}");
+        }
     }
 }
 
@@ -244,7 +266,7 @@ fn deferred_path_observation_uses_its_actual_reader_without_scanning_unrelated_m
     // independent_project retains malformed unused metadata as an explicit catalogue canary.
     let (snapshot, source, root) = open_second_scene(&project);
     let capture = snapshot
-        .capture_scene_document(&source, &root, &[])
+        .capture_scene_from_bound_source(&source, &root, &[])
         .unwrap();
     assert_eq!(capture.readiness(), AuthoringProjectReadiness::Complete);
     assert_eq!(capture.scenes().len(), 1);
@@ -294,7 +316,11 @@ fn a_later_immediate_use_upgrades_an_already_observed_deferred_scene() {
         &snapshot,
         &source,
         &root,
-        vec![AuthoringSceneSessionSnapshot::capture(&b_source, &b)],
+        vec![AuthoringSceneSessionSnapshot::capture(
+            &b_source,
+            bound_source_observation(&snapshot, &b_source),
+            &b,
+        )],
     )
     .unwrap();
     assert_eq!(capture.scenes().len(), 4);
@@ -351,7 +377,11 @@ fn duplicate_deferred_and_immediate_leaves_prepare_the_same_scene_once() {
             &snapshot,
             &source,
             &root,
-            vec![AuthoringSceneSessionSnapshot::capture(&b_source, &b)],
+            vec![AuthoringSceneSessionSnapshot::capture(
+                &b_source,
+                bound_source_observation(&snapshot, &b_source),
+                &b,
+            )],
         )
         .unwrap();
         assert_eq!(capture.scenes().len(), 2);
@@ -403,7 +433,7 @@ fn deferred_auxiliary_resolution_retains_source_binding_without_inventing_produc
     );
     let (snapshot, source, root) = open_second_scene(&project);
     let capture = snapshot
-        .capture_scene_document(&source, &root, &[])
+        .capture_scene_from_bound_source(&source, &root, &[])
         .unwrap();
     assert_eq!(capture.scenes().len(), 1);
     assert!(capture.assets().is_empty());

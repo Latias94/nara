@@ -97,7 +97,7 @@ impl Project {
                  source_universe = '{UNIVERSE}'\nnative_document_identity = 'project_location'\n\
                  [paths]\nassets = 'assets'\nscenes = 'scenes'\nprefabs = 'prefabs'\n\
                  [startup]\ndefault_scene = 'startup.scene.json'\n\
-                 [authoring]\nschema_bundle = 'schema/authoring.bundle.json'\n\
+                 [authoring]\nstate = \"ready\"\nschema_bundle = 'schema/authoring.bundle.json'\n\
                  [runtime]\npreset = 'local-headless'\n\
                  [capabilities]\nrequested = ['runtime-2d']\n"
             ),

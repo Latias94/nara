@@ -111,7 +111,7 @@ impl EditorProjectSession {
     pub fn register_extension_document<D: EditorExtensionDocument>(
         &mut self,
     ) -> Result<(), EditorExtensionDocumentHostError> {
-        if !self.accepts_new_work() || self.schema_adoption_fenced() {
+        if !self.accepts_new_work() || self.authoring_operation_fenced() {
             return Err(EditorExtensionDocumentHostError::Busy);
         }
         self.extension_documents.register::<D>()
@@ -126,7 +126,7 @@ impl EditorProjectSession {
         source: &str,
     ) -> Result<EditorDocumentId, EditorExtensionDocumentHostError> {
         if !self.accepts_new_work()
-            || self.schema_adoption_fenced()
+            || self.authoring_operation_fenced()
             || self.pending_workspace_intent.is_some()
             || self.persistence.has_pending_work()
             || self.pending_document_open.is_some()

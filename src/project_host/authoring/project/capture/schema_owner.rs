@@ -6,9 +6,22 @@ use crate::project_host::authoring::{
 };
 
 impl PreparedAuthoringSchemaOwner {
+    /// Transfers an actual persistence observation under this owner's cumulative allowance.
+    pub(crate) fn capture_source_observation(
+        &mut self,
+        cost: FileSourceObservationCost,
+        factory: impl FnOnce() -> Result<FileSourceObservation, AuthoringProjectSourceAdmissionError>,
+    ) -> Result<FileSourceObservation, AuthoringProjectSourceAdmissionError> {
+        let mut budget = self.budget();
+        let result = source_observations::capture_source_observation(&mut budget, cost, factory);
+        self.retain_capture_budget(budget);
+        result
+    }
+
     pub(crate) fn capture_scene(
         &mut self,
         source: &super::super::super::document::AuthoringDocumentSourceFact,
+        observation: FileSourceObservation,
         view: nara_scene::__private::PreparedSceneSchemaSource<'_>,
         open_prefabs: &[AuthoringPrefabSessionSnapshot],
         open_scenes: &[AuthoringSceneSessionSnapshot],
@@ -22,6 +35,7 @@ impl PreparedAuthoringSchemaOwner {
         {
             return Err(AuthoringProjectSourceAdmissionError::DocumentSourceMismatch);
         }
+        source_observations::check_document_observation(source, &observation)?;
         let mut budget = self.budget();
         let result = (|| {
             budget.charge_source_bytes(
@@ -45,6 +59,7 @@ impl PreparedAuthoringSchemaOwner {
                     view.document(),
                     &basis,
                     &containing,
+                    SourceCaptureMode::Physical(&observation),
                     source.native_source(),
                     AuthoringProjectReadiness::from_document(view.readiness()),
                     &mut budget,

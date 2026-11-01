@@ -73,9 +73,11 @@ fn observed_successor_reprepares_dirty_source_and_attaches_without_another_write
     let prepared_scene = scene
         .prepare_schema_reclassification(&basis, owner.reclassification_kind(), &mut work)
         .unwrap();
+    let observation = super::tests::observe_source(&mut owner, &source);
     let capture = owner
         .capture_scene(
             &source,
+            observation,
             borrow_prepared_scene_schema_source(&scene, &prepared_scene).unwrap(),
             &[],
             &[],

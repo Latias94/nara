@@ -42,21 +42,38 @@ fn scene_capture_transfers_host_retention_and_releases_only_finished_worker_inpu
             ])
             .unwrap();
         }
-        let inputs = snapshot.admit_source_capture_inputs(host, worker).unwrap();
-        let mut scenes = vec![AuthoringSceneSessionSnapshot::capture(&b_source, &b)];
+        let mut inputs = snapshot.admit_source_capture_inputs(host, worker).unwrap();
+        let mut scenes = vec![AuthoringSceneSessionSnapshot::capture(
+            &b_source,
+            bound_source_observation(&snapshot, &b_source),
+            &b,
+        )];
         let mut prefabs = vec![AuthoringPrefabSessionSnapshot::capture(
             &prefab_source,
+            bound_source_observation(&snapshot, &prefab_source),
             &prefab,
         )];
         if with_unused {
-            scenes.push(AuthoringSceneSessionSnapshot::capture(&c_source, &c));
+            scenes.push(AuthoringSceneSessionSnapshot::capture(
+                &c_source,
+                bound_source_observation(&snapshot, &c_source),
+                &c,
+            ));
             prefabs.push(AuthoringPrefabSessionSnapshot::capture(
                 &unused_source,
+                bound_source_observation(&snapshot, &unused_source),
                 &unused,
             ));
         }
+        inputs
+            .retain_shared_source_observations(
+                scenes
+                    .iter()
+                    .filter_map(|snapshot| snapshot.observation.as_ref()),
+            )
+            .unwrap();
         snapshot
-            .capture_scene_request(&source, &session, inputs, prefabs.into_boxed_slice())
+            .capture_bound_scene_request(&source, &session, inputs, prefabs.into_boxed_slice())
             .unwrap()
             .with_open_scenes(scenes.into_boxed_slice())
             .prepare()
@@ -67,6 +84,9 @@ fn scene_capture_transfers_host_retention_and_releases_only_finished_worker_inpu
     let captured = capture(host, true);
     let mut expected = baseline.usage();
     expected.retained_candidate_bytes += host;
+    // Two offered but undemanded observations coexist with the selected set during
+    // preparation, then release four leaf/parent capacity slots on worker return.
+    expected.peak_open_handles += 2 * FileSourceObservation::retained_handle_capacity();
     assert_eq!(baseline.host_retained_bytes, 0);
     assert_eq!(captured.host_retained_bytes, host);
     assert_eq!(captured.usage(), expected);
@@ -127,12 +147,13 @@ fn input_admission_checks_the_combined_limit_without_lending_host_bytes_to_the_w
         .admit_source_capture_inputs(snapshot_bytes, 0)
         .unwrap();
     let request = snapshot
-        .capture_scene_request(
+        .capture_bound_scene_request(
             &source,
             &session,
             inputs,
             vec![AuthoringPrefabSessionSnapshot::capture(
                 &prefab_source,
+                bound_source_observation(&snapshot, &prefab_source),
                 &prefab,
             )]
             .into_boxed_slice(),
@@ -154,7 +175,7 @@ fn host_replacement_admits_exact_overlap_and_rejects_one_short_or_overflow_atomi
         .admit_source_capture_inputs(host, source.checked_retained_bytes().unwrap())
         .unwrap();
     let mut capture = snapshot
-        .capture_scene_request(&source, &session, inputs, Box::new([]))
+        .capture_bound_scene_request(&source, &session, inputs, Box::new([]))
         .unwrap()
         .prepare()
         .unwrap();

@@ -11,7 +11,7 @@ use nara_reflect::PersistentComponentSchemaOwnerId;
 use super::{
     AuthoringHistory, AuthoringHistoryScope, AuthoringSessionAuthority, PrefabAuthoringSession,
     SceneAuthoringRevision, SceneAuthoringSession, admit_history_replay_report,
-    history_error_report,
+    history_error_report, schema_preparation::SchemaPreparationBudget,
 };
 use crate::{
     AuthoringSchemaBasis, PrefabDocument, SceneDocument, ScenePatchDocument, ScenePatchReport,
@@ -89,13 +89,10 @@ pub struct SchemaReclassificationUsage {
 /// Uncharged open-source incumbents are outside the reported peak. Whole-open-set admission
 /// must charge every incumbent before preparing its first successor; this source helper alone
 /// does not establish that Workspace-wide bound.
-#[derive(Debug, Default)]
+#[derive(Debug)]
 pub struct SchemaReclassificationWork {
     identity: Arc<ReclassificationWorkIdentity>,
-    limits: SchemaReclassificationLimits,
-    usage: SchemaReclassificationUsage,
-    retained: usize,
-    scratch: usize,
+    budget: SchemaPreparationBudget,
 }
 
 #[derive(Debug, Default)]
@@ -114,24 +111,28 @@ pub struct RetainedSchemaReclassificationSource {
     kind: crate::SourceDocumentKind,
 }
 
+impl Default for SchemaReclassificationWork {
+    fn default() -> Self {
+        Self::new(SchemaReclassificationLimits::default())
+    }
+}
+
 impl SchemaReclassificationWork {
     #[must_use]
     pub fn new(limits: SchemaReclassificationLimits) -> Self {
         Self {
             identity: Arc::new(ReclassificationWorkIdentity),
-            limits,
-            usage: SchemaReclassificationUsage {
-                work_bytes: 0,
-                peak_retained_bytes: 0,
-            },
-            retained: 0,
-            scratch: 0,
+            budget: SchemaPreparationBudget::new(limits.work_bytes(), limits.retained_bytes()),
         }
     }
 
     #[must_use]
     pub const fn usage(&self) -> SchemaReclassificationUsage {
-        self.usage
+        let (work_bytes, peak_retained_bytes) = self.budget.usage();
+        SchemaReclassificationUsage {
+            work_bytes,
+            peak_retained_bytes,
+        }
     }
 
     /// Charges the finite owner's candidate and binding storage before allocation.
@@ -143,17 +144,15 @@ impl SchemaReclassificationWork {
     }
 
     fn retain(&mut self, bytes: Option<usize>) -> Result<(), ScenePatchReport> {
-        let next = bytes.and_then(|bytes| self.retained.checked_add(bytes));
-        let Some(next) = next.filter(|next| *next <= self.limits.retained_bytes.get()) else {
-            return Err(limit_error("retained", "incumbent-or-candidate"));
-        };
-        self.retained = next;
-        self.observe_peak()
+        self.budget
+            .retain(bytes)
+            .map_err(|error| limit_error(error.kind, error.stage))
     }
 
     fn begin_step(&mut self, held: Option<usize>) -> Result<(), ScenePatchReport> {
-        self.scratch = held.ok_or_else(|| limit_error("retained", "history-branch"))?;
-        self.observe_peak()
+        self.budget
+            .begin_step(held)
+            .map_err(|error| limit_error(error.kind, error.stage))
     }
 
     fn reserve(
@@ -161,44 +160,19 @@ impl SchemaReclassificationWork {
         stage: &'static str,
         bytes: Option<usize>,
     ) -> Result<(), ScenePatchReport> {
-        let work = bytes.and_then(|bytes| self.usage.work_bytes.checked_add(bytes));
-        let Some(work) = work.filter(|work| *work <= self.limits.work_bytes.get()) else {
-            return Err(limit_error("work", stage));
-        };
-        let scratch = bytes.and_then(|bytes| self.scratch.checked_add(bytes));
-        let Some(scratch) = scratch else {
-            return Err(limit_error("retained", stage));
-        };
-        let total = self.retained.checked_add(scratch);
-        if total.is_none_or(|total| total > self.limits.retained_bytes.get()) {
-            return Err(limit_error("retained", stage));
-        }
-        self.usage.work_bytes = work;
-        self.scratch = scratch;
-        self.observe_peak()
-    }
-
-    fn observe_peak(&mut self) -> Result<(), ScenePatchReport> {
-        let total = self
-            .retained
-            .checked_add(self.scratch)
-            .filter(|total| *total <= self.limits.retained_bytes.get())
-            .ok_or_else(|| limit_error("retained", "retained-and-scratch"))?;
-        self.usage.peak_retained_bytes = self.usage.peak_retained_bytes.max(total);
-        Ok(())
+        self.budget
+            .reserve(stage, bytes)
+            .map_err(|error| limit_error(error.kind, error.stage))
     }
 
     fn retain_classification(&mut self, bytes: Option<usize>) -> Result<(), ScenePatchReport> {
-        let bytes = bytes.ok_or_else(|| limit_error("retained", "classification-output"))?;
-        if bytes > self.scratch {
-            return Err(limit_error("retained", "classification-admission-model"));
-        }
-        self.scratch = 0;
-        self.retain(Some(bytes))
+        self.budget
+            .retain_output(bytes)
+            .map_err(|error| limit_error(error.kind, error.stage))
     }
 
     fn end_step(&mut self) {
-        self.scratch = 0;
+        self.budget.end_step();
     }
 }
 

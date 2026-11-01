@@ -205,6 +205,30 @@ adoption operation separately accumulates source/history proof and current captu
 attempts; exhaustion forbids validation and attachment. A completed capture's observed usage is
 a cumulative snapshot at that point, not its independent delta or the operation's final total.
 
+### Reviewed Structural And Value Successors
+
+ADR0043's explicit authored upgrade may change an existing owner's value shape/semantics and
+versioned Prefab claims under its exact predecessor. It is a new preparation intent: additive and
+creation-only comparisons remain unchanged. The source owner validates the actual allowed
+differences, every affected stored declaration and preservation of unrelated unavailable data;
+one fresh nominal basis and actual Adapter evidence cover the complete prepared set. Adapter
+admission grants no Runtime agreement. The successful consumer selects matching successor Runtime
+recipe/bindings, with the old definition retained as an explicit refusal control.
+
+The bounded participating inventory covers the manifest's default configuration and every declared
+profile, their source roots and explicit Scene selections, the complete open set, actual catalogue
+Scene/Prefab targets and identity sidecars. A current Browser page or effective startup closure
+does not prove that membership. Re-enumeration at confirmation and final publication compares
+members and observed missing roots; truncated, unavailable or ambiguous sets refuse.
+
+Before destructive publication, affected tool/child/Play/Runtime work must physically return;
+logical disable and cleanup failure are separate observations. Affected execution cannot restart
+while publication/reconciliation is pending. Manifest readiness and complete-set disk recovery
+follow ADR0110; Workspace/history/persistence installation follows ADR0047. Generic Open may
+expose a code-free recovery state but never runs project upgrade code or installs a mixed ready
+project. The [selected unit](../../plans/2026-11-01-authored-schema-upgrade-plan.md) still requires
+implementation and matching independent/public qualification.
+
 ### Non-executable authoring schema bundle
 
 Each project may publish a versioned, bounded Authoring Schema Bundle composed only of data:

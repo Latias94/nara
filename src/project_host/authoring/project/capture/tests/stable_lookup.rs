@@ -136,7 +136,7 @@ fn primary_product_prefab_preserves_location_identity_on_fresh_and_cached_loads(
         .unwrap();
         let (snapshot, source, session) = open_second_scene(&project);
         let mut capture = snapshot
-            .capture_scene_document(&source, &session, &[])
+            .capture_scene_from_bound_source(&source, &session, &[])
             .unwrap();
         assert_eq!(capture.readiness(), AuthoringProjectReadiness::Complete);
         assert_eq!(capture.prefabs().len(), 1);
@@ -191,7 +191,7 @@ fn admitted_prefab_association_conflicts_report_the_actual_catalogue_path() {
     let project = stable_project(true);
     let (snapshot, source, session) = open_second_scene(&project);
     let capture = snapshot
-        .capture_scene_document(&source, &session, &[])
+        .capture_scene_from_bound_source(&source, &session, &[])
         .unwrap();
     let prefab = &capture.prefabs()[0];
     let SourceDocumentOrigin::ProjectLocation { universe, .. } =
@@ -280,7 +280,7 @@ fn unreferenced_metadata_kinds_do_not_block_open_or_activate_their_sources() {
         snapshot.admit_startup_document().unwrap();
         snapshot.startup_source_validation().validate().unwrap();
         let capture = snapshot
-            .capture_scene_document(&source, &session, &[])
+            .capture_scene_from_bound_source(&source, &session, &[])
             .unwrap();
         assert_eq!(capture.readiness(), AuthoringProjectReadiness::Complete);
         assert_eq!(capture.prefabs().len(), usize::from(prefab));
@@ -350,7 +350,7 @@ fn overlapping_configured_roots_keep_exact_prefab_and_asset_locations_and_source
 
         let (snapshot, source, session) = open_second_scene(&project);
         let capture = snapshot
-            .capture_scene_document(&source, &session, &[])
+            .capture_scene_from_bound_source(&source, &session, &[])
             .unwrap();
         assert_eq!(capture.readiness(), AuthoringProjectReadiness::Complete);
         assert_eq!(capture.prefabs().len(), 1);
@@ -418,7 +418,7 @@ fn reviewed_prefab_lookup_rejects_new_conflicting_metadata_in_either_source_dire
         let (snapshot, source, session) = open_second_scene(&project);
         let revision = session.revision();
         let capture = snapshot
-            .capture_scene_document(&source, &session, &[])
+            .capture_scene_from_bound_source(&source, &session, &[])
             .unwrap();
         assert_eq!(capture.readiness(), AuthoringProjectReadiness::Complete);
         assert_eq!(capture.stable_lookups.len(), 1);
@@ -453,7 +453,7 @@ fn reviewed_asset_lookup_rejects_new_conflicting_prefab_metadata() {
     let project = stable_project(false);
     let (snapshot, source, session) = open_second_scene(&project);
     let capture = snapshot
-        .capture_scene_document(&source, &session, &[])
+        .capture_scene_from_bound_source(&source, &session, &[])
         .unwrap();
     assert_eq!(capture.readiness(), AuthoringProjectReadiness::Complete);
     assert_eq!(capture.assets().len(), 1);
@@ -482,7 +482,7 @@ fn reviewed_successful_lookups_accept_unrelated_new_unique_metadata() {
         let project = stable_project(prefab);
         let (snapshot, source, session) = open_second_scene(&project);
         let capture = snapshot
-            .capture_scene_document(&source, &session, &[])
+            .capture_scene_from_bound_source(&source, &session, &[])
             .unwrap();
         capture.source_validation().validate().unwrap();
         write_metadata(
@@ -503,7 +503,7 @@ fn reviewed_successful_lookup_preserves_existing_file_receipts_on_removal_or_reb
         let project = stable_project(true);
         let (snapshot, source, session) = open_second_scene(&project);
         let capture = snapshot
-            .capture_scene_document(&source, &session, &[])
+            .capture_scene_from_bound_source(&source, &session, &[])
             .unwrap();
         capture.source_validation().validate().unwrap();
         fs::remove_file(project.root.join("prefabs/outer.prefab.json.meta")).unwrap();
@@ -563,7 +563,7 @@ fn unresolved_stable_lookup_is_reobserved_and_still_requires_explicit_recapture(
     .unwrap();
     let (snapshot, source, session) = open_second_scene(&project);
     let capture = snapshot
-        .capture_scene_document(&source, &session, &[])
+        .capture_scene_from_bound_source(&source, &session, &[])
         .unwrap();
     assert_eq!(capture.readiness(), AuthoringProjectReadiness::Degraded);
     assert!(capture.requires_recapture());
@@ -602,7 +602,7 @@ fn unresolved_stable_lookup_is_reobserved_and_still_requires_explicit_recapture(
     );
     assert!(capture.requires_recapture());
     let recovered = snapshot
-        .capture_scene_document(&source, &session, &[])
+        .capture_scene_from_bound_source(&source, &session, &[])
         .unwrap();
     assert_eq!(recovered.readiness(), AuthoringProjectReadiness::Complete);
     assert!(!recovered.requires_recapture());
@@ -614,7 +614,7 @@ fn path_only_capture_revalidation_does_not_activate_unused_metadata() {
     let project = independent_project();
     let (snapshot, source, session) = open_second_scene(&project);
     let capture = snapshot
-        .capture_scene_document(&source, &session, &[])
+        .capture_scene_from_bound_source(&source, &session, &[])
         .unwrap();
     assert_eq!(capture.readiness(), AuthoringProjectReadiness::Complete);
     assert!(capture.stable_lookups.is_empty());
@@ -631,7 +631,7 @@ fn source_revalidation_uses_the_same_bounded_budget_for_a_fresh_catalogue() {
     let project = stable_project(true);
     let (snapshot, source, session) = open_second_scene(&project);
     let capture = snapshot
-        .capture_scene_document(&source, &session, &[])
+        .capture_scene_from_bound_source(&source, &session, &[])
         .unwrap();
     let mut validation = capture.source_validation();
     drop(capture);

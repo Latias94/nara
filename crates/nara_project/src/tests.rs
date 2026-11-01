@@ -16,6 +16,9 @@ schema_version = 1
 source_universe = 'c945c1a2-4484-5a1e-b4fe-1ed73294d35a'
 native_document_identity = 'project_location'
 name = "Test Game"
+
+[authoring]
+state = "ready"
 "#;
 const COMPLETE_MANIFEST: &str = include_str!("../tests/fixtures/complete_v1.toml");
 
@@ -53,6 +56,8 @@ schema_version = 1
 name = "Source identity"
 source_universe = "72011426-37e2-48ba-bc06-78841468889a"
 native_document_identity = "stable_metadata"
+[authoring]
+state = "ready"
 [profiles.dev.window]
 enabled = false
 "#;
@@ -99,7 +104,7 @@ enabled = false
 
 #[test]
 fn source_identity_cannot_be_missing_nil_or_inferred_from_an_old_manifest() {
-    let valid = "schema_version = 1\n[project]\nname = 'Required source'\nsource_universe = '72011426-37e2-48ba-bc06-78841468889a'\nnative_document_identity = 'project_location'\n";
+    let valid = "schema_version = 1\n[project]\nname = 'Required source'\nsource_universe = '72011426-37e2-48ba-bc06-78841468889a'\nnative_document_identity = 'project_location'\n[authoring]\nstate = 'ready'\n";
     for source in [
         valid.replace(
             "source_universe = '72011426-37e2-48ba-bc06-78841468889a'\n",
@@ -168,6 +173,7 @@ native_document_identity = 'project_location'
 name = "Authoring Bundle"
 
 [authoring]
+state = "ready"
 schema_bundle = "schema/authoring.bundle.json"
 
 [profiles.dev.startup]
@@ -201,6 +207,7 @@ native_document_identity = 'project_location'
 name = "Invalid Authoring Bundle"
 
 [authoring]
+state = "ready"
 schema_bundle = "../outside.bundle.json"
 "#,
     );
@@ -219,6 +226,9 @@ schema_version = 1
 source_universe = 'c945c1a2-4484-5a1e-b4fe-1ed73294d35a'
 native_document_identity = 'project_location'
 name = "Execution Contract"
+
+[authoring]
+state = "ready"
 
 [profiles.desktop.execution]
 contract = "desktop-supervised-play/v1"
@@ -280,6 +290,9 @@ source_universe = 'c945c1a2-4484-5a1e-b4fe-1ed73294d35a'
 native_document_identity = 'project_location'
 name = "Invalid Execution Contract"
 
+[authoring]
+state = "ready"
+
 [profiles.desktop.execution]
 contract = "{contract}"
 "#
@@ -303,6 +316,9 @@ source_universe = 'c945c1a2-4484-5a1e-b4fe-1ed73294d35a'
 native_document_identity = 'project_location'
 name = "Profile Authoring Override"
 
+[authoring]
+state = "ready"
+
 [profiles.dev.authoring]
 schema_bundle = "schema/dev.bundle.json"
 "#,
@@ -322,6 +338,9 @@ schema_version = 1
 source_universe = 'c945c1a2-4484-5a1e-b4fe-1ed73294d35a'
 native_document_identity = 'project_location'
 name = "UI Surface"
+
+[authoring]
+state = "ready"
 
 [ui.primary_surface]
 logical_width = 960
@@ -373,6 +392,9 @@ schema_version = 1
 source_universe = 'c945c1a2-4484-5a1e-b4fe-1ed73294d35a'
 native_document_identity = 'project_location'
 name = "Invalid UI Surface"
+
+[authoring]
+state = "ready"
 
 [ui.primary_surface]
 logical_width = 0
@@ -440,6 +462,9 @@ unexpected = true
 source_universe = 'c945c1a2-4484-5a1e-b4fe-1ed73294d35a'
 native_document_identity = 'project_location'
 name = "Bad"
+
+[authoring]
+state = "ready"
 "#,
     );
 
@@ -463,6 +488,9 @@ unexpected = "{canary}"
 source_universe = 'c945c1a2-4484-5a1e-b4fe-1ed73294d35a'
 native_document_identity = 'project_location'
 name = "Private Project"
+
+[authoring]
+state = "ready"
 "#
     );
 
@@ -495,6 +523,9 @@ source_universe = 'c945c1a2-4484-5a1e-b4fe-1ed73294d35a'
 native_document_identity = 'project_location'
 name = "Bad Paths"
 
+[authoring]
+state = "ready"
+
 [paths]
 assets = "../assets"
 "#,
@@ -519,6 +550,9 @@ schema_version = 1
 source_universe = 'c945c1a2-4484-5a1e-b4fe-1ed73294d35a'
 native_document_identity = 'project_location'
 name = "Private Paths"
+
+[authoring]
+state = "ready"
 
 [paths]
 assets = "{raw_path}"
@@ -550,6 +584,9 @@ schema_version = 1
 source_universe = 'c945c1a2-4484-5a1e-b4fe-1ed73294d35a'
 native_document_identity = 'project_location'
 name = "Private Profile"
+
+[authoring]
+state = "ready"
 
 [profiles."{profile_canary}".window]
 width = 0
@@ -589,6 +626,9 @@ source_universe = 'c945c1a2-4484-5a1e-b4fe-1ed73294d35a'
 native_document_identity = 'project_location'
 name = "Long Profile"
 
+[authoring]
+state = "ready"
+
 [profiles."{profile_name}".window]
 width = 0
 "#
@@ -627,6 +667,9 @@ source_universe = 'c945c1a2-4484-5a1e-b4fe-1ed73294d35a'
 native_document_identity = 'project_location'
 name = "Invalid Runtime"
 
+[authoring]
+state = "ready"
+
 [runtime]
 {field} = {value}
 "#
@@ -646,6 +689,9 @@ schema_version = 1
 source_universe = 'c945c1a2-4484-5a1e-b4fe-1ed73294d35a'
 native_document_identity = 'project_location'
 name = "Zero Runtime Limits"
+
+[authoring]
+state = "ready"
 
 [runtime]
 max_delta_seconds = 0.0
@@ -674,6 +720,9 @@ source_universe = 'c945c1a2-4484-5a1e-b4fe-1ed73294d35a'
 native_document_identity = 'project_location'
 name = "Oversized Fixed Runtime"
 
+[authoring]
+state = "ready"
+
 [runtime]
 max_fixed_steps_per_frame = {too_many_steps}
 max_fixed_debt_steps = {too_much_debt}
@@ -697,6 +746,9 @@ schema_version = 1
 source_universe = 'c945c1a2-4484-5a1e-b4fe-1ed73294d35a'
 native_document_identity = 'project_location'
 name = "Oversized Fixed Profile"
+
+[authoring]
+state = "ready"
 
 [profiles.dev.runtime]
 max_fixed_steps_per_frame = {too_many_steps}
@@ -722,6 +774,9 @@ schema_version = 1
 source_universe = 'c945c1a2-4484-5a1e-b4fe-1ed73294d35a'
 native_document_identity = 'project_location'
 name = "Fixed Runtime Boundary"
+
+[authoring]
+state = "ready"
 
 [runtime]
 max_fixed_steps_per_frame = {MAX_PROJECT_FIXED_STEPS_PER_FRAME}
@@ -751,6 +806,9 @@ source_universe = 'c945c1a2-4484-5a1e-b4fe-1ed73294d35a'
 native_document_identity = 'project_location'
 name = "Obsolete Plugin Plan"
 
+[authoring]
+state = "ready"
+
 [runtime]
 plugin_plan = "runtime-2d"
 "#,
@@ -771,6 +829,9 @@ schema_version = 1
 source_universe = 'c945c1a2-4484-5a1e-b4fe-1ed73294d35a'
 native_document_identity = 'project_location'
 name = "Runtime Tooling Capability"
+
+[authoring]
+state = "ready"
 
 [capabilities]
 requested = ["{capability}"]
@@ -795,6 +856,9 @@ schema_version = 1
 source_universe = 'c945c1a2-4484-5a1e-b4fe-1ed73294d35a'
 native_document_identity = 'project_location'
 name = "Server Game"
+
+[authoring]
+state = "ready"
 
 [profiles.server]
 "#,
@@ -833,6 +897,9 @@ source_universe = 'c945c1a2-4484-5a1e-b4fe-1ed73294d35a'
 native_document_identity = 'project_location'
 name = "Host-Owned Editor"
 
+[authoring]
+state = "ready"
+
 [profiles.editor]
 "#,
     );
@@ -860,6 +927,9 @@ schema_version = 1
 source_universe = 'c945c1a2-4484-5a1e-b4fe-1ed73294d35a'
 native_document_identity = 'project_location'
 name = "Direct Server Plan"
+
+[authoring]
+state = "ready"
 
 [runtime]
 preset = "server"
@@ -891,6 +961,9 @@ schema_version = 1
 source_universe = 'c945c1a2-4484-5a1e-b4fe-1ed73294d35a'
 native_document_identity = 'project_location'
 name = "Overlay Game"
+
+[authoring]
+state = "ready"
 
 [runtime]
 time_scale = 1.0
@@ -1014,6 +1087,9 @@ source_universe = 'c945c1a2-4484-5a1e-b4fe-1ed73294d35a'
 native_document_identity = 'project_location'
 name = "Clear Overlay Game"
 
+[authoring]
+state = "ready"
+
 [startup]
 default_scene = "scenes/main.scene.ron"
 
@@ -1043,6 +1119,9 @@ schema_version = 1
 source_universe = 'c945c1a2-4484-5a1e-b4fe-1ed73294d35a'
 native_document_identity = 'project_location'
 name = "Hostile Server Game"
+
+[authoring]
+state = "ready"
 
 [profiles.server.runtime]
 preset = "minimal"
@@ -1111,6 +1190,9 @@ source_universe = 'c945c1a2-4484-5a1e-b4fe-1ed73294d35a'
 native_document_identity = 'project_location'
 name = "Obsolete Tasks"
 
+[authoring]
+state = "ready"
+
 [tasks]
 {obsolete}
 "#
@@ -1129,6 +1211,9 @@ schema_version = 1
 source_universe = 'c945c1a2-4484-5a1e-b4fe-1ed73294d35a'
 native_document_identity = 'project_location'
 name = "Zero Tasks"
+
+[authoring]
+state = "ready"
 
 [tasks.io]
 workers = 0
@@ -1158,6 +1243,9 @@ source_universe = 'c945c1a2-4484-5a1e-b4fe-1ed73294d35a'
 native_document_identity = 'project_location'
 name = "Per Pool Limits"
 
+[authoring]
+state = "ready"
+
 [tasks.io]
 workers = {}
 pending_capacity = {}
@@ -1181,6 +1269,9 @@ schema_version = 1
 source_universe = 'c945c1a2-4484-5a1e-b4fe-1ed73294d35a'
 native_document_identity = 'project_location'
 name = "Aggregate Limits"
+
+[authoring]
+state = "ready"
 
 [tasks.io]
 workers = {workers_each}
@@ -1211,6 +1302,9 @@ schema_version = 1
 source_universe = 'c945c1a2-4484-5a1e-b4fe-1ed73294d35a'
 native_document_identity = 'project_location'
 name = "Patched Aggregate Limits"
+
+[authoring]
+state = "ready"
 
 [tasks.io]
 workers = {workers_each}
@@ -1248,6 +1342,9 @@ source_universe = 'c945c1a2-4484-5a1e-b4fe-1ed73294d35a'
 native_document_identity = 'project_location'
 name = "Shutdown Limits"
 
+[authoring]
+state = "ready"
+
 [tasks.shutdown]
 drain_timeout_ms = {too_long_ms}
 cancel_timeout_ms = 30000
@@ -1271,6 +1368,9 @@ source_universe = 'c945c1a2-4484-5a1e-b4fe-1ed73294d35a'
 native_document_identity = 'project_location'
 name = "Oversized Diagnostics"
 
+[authoring]
+state = "ready"
+
 [diagnostics]
 runtime_capacity = {}
 "#,
@@ -1290,6 +1390,9 @@ schema_version = 1
 source_universe = 'c945c1a2-4484-5a1e-b4fe-1ed73294d35a'
 native_document_identity = 'project_location'
 name = "Window Reenable Game"
+
+[authoring]
+state = "ready"
 
 [window]
 enabled = false
@@ -1395,6 +1498,9 @@ source_universe = 'c945c1a2-4484-5a1e-b4fe-1ed73294d35a'
 native_document_identity = 'project_location'
 name = "Duplicate Capabilities"
 
+[authoring]
+state = "ready"
+
 [capabilities]
 requested = ["runtime-2d", "runtime-2d"]
 "#,
@@ -1409,6 +1515,9 @@ schema_version = 1
 source_universe = 'c945c1a2-4484-5a1e-b4fe-1ed73294d35a'
 native_document_identity = 'project_location'
 name = "Unknown Capability"
+
+[authoring]
+state = "ready"
 
 [capabilities]
 requested = ["future-renderer"]

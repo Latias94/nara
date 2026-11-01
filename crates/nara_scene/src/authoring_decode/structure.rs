@@ -189,7 +189,7 @@ fn prepare_structure_from_parts(
         .iter()
         .filter(|operation| is_authoring_field_operation(operation));
     let fields = if field_operations.clone().next().is_some() {
-        super::field_edits_from_operations(field_operations)?
+        super::field_edits_from_operations(field_operations, super::MAX_AUTHORING_EDIT_OPERATIONS)?
     } else {
         Vec::new()
     };
@@ -429,11 +429,12 @@ fn prepare_structure_from_parts(
     let inverse = ScenePatchDocument::new(inverses.into_iter().rev().flatten());
     admit_replay_cost(&inverse, admit.as_deref_mut())?;
     if inverse.operations.iter().any(is_authoring_field_operation) {
-        super::validate_authoring_field_operations(
+        super::validate_authoring_field_operations_with_limit(
             inverse
                 .operations
                 .iter()
                 .filter(|operation| is_authoring_field_operation(operation)),
+            super::MAX_AUTHORING_EDIT_OPERATIONS,
         )?;
     }
     Ok(PreparedSceneAuthoringPatch {

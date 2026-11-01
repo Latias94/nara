@@ -529,12 +529,17 @@ unresolved members, fence external edits and make retries idempotent. Per-file r
 project-wide atomicity. Recovered Check/Play consumes a coherent admitted generation or refuses.
 This is meaningful authored evolution, not a requirement to retain abandoned pre-release readers.
 
-The [reviewed authored-upgrade unit](2026-11-01-authored-schema-upgrade-plan.md) concretizes CP1
-and process-interruption recovery with the existing independent EnemyStats consumer. It proposes
-an explicit new history checkpoint, all-profile source inventory, project-owned Pending/Ready
-admission and complete Workspace/persistence-lane installation. Its six adversarial review
-corrections are recorded in the proposal; Accepted contract reconciliation and implementation
-remain separate work. CP2 nested-source extraction retains its own occurrence-remap consumer.
+The [reviewed authored-upgrade unit](2026-11-01-authored-schema-upgrade-plan.md) now has
+[qualified CP1/S2 implementation](../knowledge/engineering/verification/2026-11/2026-11-01T203621Z-reviewed-authored-schema-upgrades-and-fresh-process-recovery-qualification-cf7c8ecab10c4e21b4cfcff4906805de.md):
+complete value/claim/selector transformation, retained all-profile inventory, explicit dirty-source
+history checkpoints, guarded Ready adoption and actual fresh-process interruption recovery.
+The fixed-v2 consumer covers ordinary follow-up editing/persistence and Check/Play. CP2
+nested-source extraction remains open, including instance-root identity and cross-boundary
+reference representation. This bounded qualification does not complete R5 or the foundation Goal.
+The [pinned extraction study](../research/2026-11-02-prefab-extraction-and-occurrence-continuity.md)
+identifies instance-root identity and cross-boundary source references as representation gates.
+Settle the expected branch-to-Prefab workflow before freezing a child-only extraction subset;
+reuse neutral publication mechanisms without fabricating a Schema successor for topology changes.
 
 Acceptance: nested and repeated instances, base rename/reorder/delete, same-name members,
 Behavior migration, convert-to-local and explicit remap. Long edit churn preserves stale-alias

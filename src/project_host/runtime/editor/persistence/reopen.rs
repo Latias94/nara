@@ -354,10 +354,6 @@ impl EditorProjectSession {
         if let Err(reason) = self.validate_reopen_admission(admission) {
             return rejected(reason);
         }
-        // Recheck before invoking native code. The registry never crosses into the worker.
-        let registry = self
-            .trusted_compiled()
-            .map(|lane| lane.plan.schema_validation().snapshot());
         match (prepared, &admission.lane) {
             (ReopenCompletion::Scene(prepared, source), PersistenceLane::Scene(lane)) => {
                 let identity = match prepared.preparation_identity() {
@@ -376,7 +372,7 @@ impl EditorProjectSession {
                 ) {
                     return rejected(reason);
                 }
-                let outcome = prepared.admit(registry);
+                let outcome = prepared.admit();
                 self.publish_scene_reopen(lane, admission.revision, &source, outcome)
             }
             (ReopenCompletion::Prefab(prepared, source), PersistenceLane::Prefab(lane)) => {
@@ -396,11 +392,8 @@ impl EditorProjectSession {
                 ) {
                     return rejected(reason);
                 }
-                let outcome = prepared.admit(registry);
-                let refresh = lane
-                    .host
-                    .try_with(|host| host.publishes_runtime_content())
-                    .unwrap_or(false);
+                let outcome = prepared.admit();
+                let refresh = self.trusted_compiled().is_some();
                 self.publish_prefab_reopen(
                     lane,
                     admission.revision,

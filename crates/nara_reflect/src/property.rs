@@ -13,7 +13,10 @@ use crate::{
     ComponentFieldPathSegment, ComponentFieldSchema, ComponentMemberPath,
     ComponentMemberPathSegment, ComponentSchema, ComponentSchemaVersion, ComponentShapeError,
     ComponentValue, ComponentValueKind, ComponentValueMaterializationLimits, ComponentValueShape,
-    effective::validate_value_materialization_budget,
+    effective::{
+        EffectiveValueAdmissionError, validate_value_materialization_budget,
+        validate_value_materialization_budget_with_admission,
+    },
     schema::{
         MAX_SHAPE_BYTES, MAX_SHAPE_DEPTH, keyed_list_member, validate_component_shape_budget,
         validate_component_value_budget,
@@ -355,7 +358,7 @@ impl Error for ComponentPropertyError {
     }
 }
 
-/// Separates selector interpretation failure from the owning caller's work allowance.
+/// Separates property interpretation failure from the owning caller's work allowance.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ComponentPropertyAdmissionError<E> {
     Property(ComponentPropertyError),
@@ -454,6 +457,42 @@ pub fn resolve_component_property_schema_claim_with_admission<'schema, E>(
     }
 }
 
+/// Validates a selected replacement under its owner's finite work and value allowances.
+///
+/// The caller supplies an admitted schema and its already resolved property claim. Only the
+/// supplied replacement is validated; selector/target resolution, defaults and the shared
+/// selector read budget remain with the caller. The path supplies the root identity for
+/// numeric-range diagnostics.
+///
+/// The existing materialization walker checks raw limits, including opaque contents, in one
+/// admitted pass. Declaration/value scratch and potential errors use the registry's shared
+/// preflight before the shared replacement shape validator runs. Callback deltas count visited
+/// work, logical bytes and modeled scratch allocation, not allocator/RSS bounds.
+pub fn validate_component_property_value_with_admission<E>(
+    shape: &ComponentValueShape,
+    path: &ComponentPropertyPath,
+    value: &ComponentValue,
+    limits: ComponentValueMaterializationLimits,
+    mut admit: impl FnMut(usize, usize, usize) -> Result<(), E>,
+) -> Result<(), ComponentPropertyAdmissionError<E>> {
+    validate_value_materialization_budget_with_admission(value, limits, &mut admit).map_err(
+        |error| match error {
+            EffectiveValueAdmissionError::Value(error) => {
+                ComponentPropertyAdmissionError::Property(ComponentPropertyError::InvalidValue(
+                    error,
+                ))
+            }
+            EffectiveValueAdmissionError::Admission(error) => {
+                ComponentPropertyAdmissionError::Admission(error)
+            }
+        },
+    )?;
+    crate::registry::preflight_property_validation(shape, &path.root, value, &mut admit)
+        .map_err(ComponentPropertyAdmissionError::Admission)?;
+    validate_property_replacement_shape(shape, path, value)
+        .map_err(ComponentPropertyAdmissionError::Property)
+}
+
 fn resolve_component_property_schema_claim_impl<'schema>(
     schema: &'schema ComponentSchema,
     version: ComponentSchemaVersion,
@@ -533,6 +572,14 @@ fn validate_property_replacement(
     limits: Option<ComponentValueMaterializationLimits>,
 ) -> Result<(), ComponentPropertyError> {
     admit_property_value(replacement, limits)?;
+    validate_property_replacement_shape(shape, path, replacement)
+}
+
+fn validate_property_replacement_shape(
+    shape: &ComponentValueShape,
+    path: &ComponentPropertyPath,
+    replacement: &ComponentValue,
+) -> Result<(), ComponentPropertyError> {
     shape.validate_value(replacement).map_err(|error| {
         if error.kind == crate::ComponentShapeErrorKind::NumericInterval {
             ComponentPropertyError::InvalidReplacement(crate::registry::numeric_range_error(
@@ -916,3 +963,5 @@ fn resolve_root_field<'schema>(
 
 #[cfg(test)]
 mod admission_tests;
+#[cfg(test)]
+mod value_admission_tests;

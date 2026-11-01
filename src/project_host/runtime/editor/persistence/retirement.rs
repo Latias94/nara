@@ -1,6 +1,6 @@
 //! Runtime-owned file Hosts retain cleanup authority until explicit retirement.
 
-use std::sync::{Arc, Mutex, TryLockError};
+use std::sync::{Arc, Mutex, MutexGuard, TryLockError};
 
 use nara_app::{
     App, Plugin, PluginCategory, PluginDeclaration, PluginError, PluginId,
@@ -53,6 +53,20 @@ pub(in crate::project_host::runtime::editor) struct RetainedHost<H> {
     host: Arc<Mutex<Option<H>>>,
 }
 
+/// Holds the existing Host exclusively through a finite final publication and installation.
+/// Retiring the shared owner cannot take the Host while this local guard is alive.
+pub(in crate::project_host::runtime::editor) struct RetainedHostGuard<'a, H> {
+    host: MutexGuard<'a, Option<H>>,
+}
+
+impl<H> RetainedHostGuard<'_, H> {
+    pub(in crate::project_host::runtime::editor) fn host_mut(&mut self) -> &mut H {
+        self.host
+            .as_mut()
+            .expect("a bound Host guard retains its live Host")
+    }
+}
+
 impl<H> Clone for RetainedHost<H> {
     fn clone(&self) -> Self {
         Self {
@@ -70,6 +84,20 @@ impl<H> RetainedHost<H> {
 
     pub(in crate::project_host::runtime::editor) fn same_owner(&self, other: &Self) -> bool {
         Arc::ptr_eq(&self.host, &other.host)
+    }
+
+    pub(in crate::project_host::runtime::editor) fn try_bind(
+        &self,
+    ) -> Option<RetainedHostGuard<'_, H>> {
+        let host = match self.host.try_lock() {
+            Ok(host) => host,
+            Err(TryLockError::WouldBlock) => return None,
+            Err(TryLockError::Poisoned(error)) => error.into_inner(),
+        };
+        if host.is_none() {
+            return None;
+        }
+        Some(RetainedHostGuard { host })
     }
 
     pub(in crate::project_host::runtime::editor) fn try_with<R>(
@@ -382,5 +410,36 @@ impl RuntimeCloseParticipant for HostCustodyCloseParticipant {
         _context: &mut RuntimeCloseContext<'_>,
     ) -> Result<RuntimeCloseProgress, RuntimeCloseParticipantError> {
         Ok(self.0.poll_retirement())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    struct TestHost(u64);
+
+    impl RetirableHost for TestHost {
+        fn has_cleanup(&self) -> bool {
+            false
+        }
+        fn retry_cleanup(&mut self) -> bool {
+            true
+        }
+    }
+
+    #[test]
+    fn a_bound_host_remains_exclusive_until_the_local_commit_scope_ends() {
+        let owner = RetainedHost::new(TestHost(7));
+        let shared = owner.clone();
+        let mut guard = owner.try_bind().unwrap();
+        assert!(shared.try_bind().is_none());
+        assert!(shared.try_with(|_| ()).is_none());
+        assert!(!shared.retire());
+        guard.host_mut().0 = 9;
+        drop(guard);
+        assert_eq!(shared.try_with(|host| host.0), Some(9));
+        assert!(shared.retire());
+        assert!(owner.try_bind().is_none());
     }
 }

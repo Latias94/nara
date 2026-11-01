@@ -38,6 +38,7 @@ const EDITOR_SESSION_CLOSE_RETRY_DELAY: Duration = Duration::from_millis(16);
 #[path = "shell.rs"]
 mod shell;
 
+mod authored_upgrade;
 mod extension_documents;
 mod schema_owner;
 mod source_tools;
@@ -898,6 +899,10 @@ impl EditorApplication {
         if self.session_retirement.is_some()
             || self.project_open_retirement_pending()
             || self.final_exit_committed
+            || self
+                .state
+                .workspace()
+                .is_some_and(|project| project.session.authored_schema_upgrade_view().writes_fenced)
         {
             return false;
         }
@@ -1644,6 +1649,24 @@ impl EditorApplication {
                 exit_ready: false,
             };
         };
+        // A Pending Task may reopen cancellation only after its actual pre-publisher refusal.
+        // Keep consulting the operation owner while Close/Exit waits; post-Pending stays fenced.
+        let upgrade_cancelled = self.state.workspace_mut().is_some_and(|project| {
+            authored_upgrade::cancel_pre_pending_for_close(&mut project.session)
+        });
+        let actions_observed = actions_observed || upgrade_cancelled;
+        if self
+            .state
+            .workspace()
+            .is_some_and(|project| project.session.authored_schema_upgrade_view().writes_fenced)
+        {
+            // Pre-Pending cancellation retains its inputs until physical return. Dirty-document
+            // arbitration starts only after that operation releases its write fence.
+            return EditorApplicationUpdate {
+                actions_observed,
+                exit_ready: false,
+            };
+        }
         match frame.workspace_intent().result() {
             Some(EditorWorkspaceIntentResult::Applied {
                 intent: EditorWorkspaceIntent::Exit,
@@ -2622,10 +2645,11 @@ fn request_exit_on_project(
     real_delta: Duration,
     drive_runtime: bool,
 ) -> EditorApplicationUpdate {
+    let upgrade_cancelled = authored_upgrade::cancel_pre_pending_for_close(&mut project.session);
     let dispatch = dispatch_exit_on_project(project);
     let frame_observed = drive_project_frame(project, real_delta, drive_runtime);
     EditorApplicationUpdate {
-        actions_observed: dispatch.actions_observed() || frame_observed,
+        actions_observed: upgrade_cancelled || dispatch.actions_observed() || frame_observed,
         exit_ready: false,
     }
 }
@@ -2639,9 +2663,13 @@ fn dispatch_exit_on_project(project: &mut PublishedEditorProject) -> EditorAppli
                 EditorWorkspaceIntentAction::AcknowledgeResult,
             ));
         }
-        actions.push(EditorAction::WorkspaceIntent(
-            EditorWorkspaceIntentAction::Request(EditorWorkspaceIntent::Exit),
-        ));
+        // A prior Close result must not settle this new request while the upgrade retires.
+        // Its acknowledgement is independent of admission of the new Exit arbitration.
+        if !project.session.authored_schema_upgrade_view().writes_fenced {
+            actions.push(EditorAction::WorkspaceIntent(
+                EditorWorkspaceIntentAction::Request(EditorWorkspaceIntent::Exit),
+            ));
+        }
     }
     if actions.is_empty() {
         EditorApplicationDispatch::default()
@@ -2651,7 +2679,10 @@ fn dispatch_exit_on_project(project: &mut PublishedEditorProject) -> EditorAppli
 }
 
 fn submit_supervised_play_request(project: &mut PublishedEditorProject) {
-    let Some(request) = project.session.take_external_play_request() else {
+    let Some(binding) = project.supervised_play.binding() else {
+        return;
+    };
+    let Some(request) = project.session.take_external_play_request(binding) else {
         return;
     };
     project.supervised_play.submit(
@@ -2662,10 +2693,39 @@ fn submit_supervised_play_request(project: &mut PublishedEditorProject) {
 }
 
 fn drive_supervised_play_owner(project: &mut PublishedEditorProject, now: Instant) -> bool {
-    let Some(observation) = project.supervised_play.advance(now) else {
-        return false;
-    };
-    project.session.apply_external_play_observation(observation)
+    let mut changed = false;
+    let retirement = project.supervised_play.binding().and_then(|binding| {
+        project
+            .session
+            .supervised_play_retirement_request(binding)
+            .ok()
+            .flatten()
+    });
+    if let Some(request) = retirement {
+        changed |= project
+            .supervised_play
+            .begin_authored_upgrade_retirement(request, now)
+            .unwrap_or(false);
+    }
+    if let Some(observation) = project.supervised_play.advance(now)
+        && let Some(binding) = project.supervised_play.binding()
+    {
+        changed |= project
+            .session
+            .apply_external_play_observation(binding, observation);
+    }
+    if let Ok(Some(acknowledgment)) =
+        crate::supervised_play::SupervisedDesktopPlayOwner::complete_authored_upgrade_retirement(
+            &mut project.supervised_play,
+        )
+        && let Some(binding) = project.supervised_play.binding()
+    {
+        changed |= project
+            .session
+            .apply_supervised_play_retirement_ack(binding, acknowledgment)
+            .is_ok();
+    }
+    changed
 }
 
 fn earliest_instant(left: Option<Instant>, right: Option<Instant>) -> Option<Instant> {
@@ -2748,6 +2808,8 @@ fn open_directory(path: &Path) -> io::Result<File> {
 #[cfg(all(test, any(windows, all(target_os = "linux", target_arch = "x86_64"))))]
 #[path = "app/persistence_tests.rs"]
 mod persistence_tests;
+#[cfg(test)]
+pub(crate) use persistence_tests::PersistenceFixture;
 
 #[cfg(all(test, any(windows, all(target_os = "linux", target_arch = "x86_64"))))]
 pub(crate) mod startup_retirement_tests;

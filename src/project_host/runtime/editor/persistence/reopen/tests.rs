@@ -5,8 +5,11 @@ use std::{
 };
 
 use nara_fs::{CapabilityRights, DirectoryCapability, HostCapabilityOptions, TrustMode};
-use nara_reflect::{ComponentRegistryBuilder, ComponentRegistrySnapshot};
-use nara_scene::{SceneAuthoringSession, SceneDocument, SceneEntityId, SceneEntityRecord};
+use nara_reflect::AuthoringSchemaBundle;
+use nara_scene::{
+    AuthoringDocumentSource, AuthoringSchemaBasis, SceneDocument, SceneEntityId, SceneEntityRecord,
+    ScenePatchDocument, ScenePatchOperation, ScenePlacement, ScenePlacementOwner,
+};
 use nara_tasks::TaskPoolConfig;
 use nara_tooling::EditorWorkspace;
 
@@ -18,7 +21,6 @@ struct ReopenFixture {
     directory: PathBuf,
     original: Vec<u8>,
     host: RetainedHost<ScenePersistenceHost>,
-    registry: ComponentRegistrySnapshot,
     workspace: EditorWorkspace,
     document: EditorDocumentId,
 }
@@ -41,26 +43,52 @@ impl ReopenFixture {
             HostCapabilityOptions::new(CapabilityRights::ReadWrite, TrustMode::TrustedLocal),
         )
         .unwrap();
-        let registry = ComponentRegistryBuilder::new();
-        let registry = registry.freeze().unwrap();
-        let host =
-            ScenePersistenceHost::open(&directory_capability, "current.scene.json", &registry)
-                .unwrap()
-                .host;
-        let mut workspace = EditorWorkspace::new();
+        let basis =
+            AuthoringSchemaBasis::admit(&AuthoringSchemaBundle::new([]).unwrap(), &[]).unwrap();
+        let opened = ScenePersistenceHost::open_authoring(
+            &directory_capability,
+            "current.scene.json",
+            AuthoringDocumentSource::new(AssetRef::path("scenes/current.scene.json").unwrap()),
+            &basis,
+        )
+        .unwrap();
+        let persisted = SceneEntityId::new("persisted-entity").unwrap();
+        let from = ScenePlacement::current(opened.session.document(), &persisted).unwrap();
+        let (mut workspace, mut authority) = EditorWorkspace::new_hosted();
         let document = workspace
-            .open_scene_session(
-                "current.scene.json",
-                SceneAuthoringSession::new(scene("working-entity")),
-            )
+            .open_scene_session("current.scene.json", opened.session)
             .unwrap()
             .opened_document
             .unwrap();
+        assert!(
+            authority
+                .bind_opened_source_digest(&mut workspace, document, opened.digest)
+                .applied
+        );
+        assert!(
+            workspace
+                .apply_authoring_command(EditorWorkspaceCommand::ApplyScenePatch {
+                    document,
+                    base_revision: workspace.scene(document).unwrap().revision(),
+                    patch: ScenePatchDocument::new([
+                        ScenePatchOperation::RemoveEntity {
+                            entity: persisted,
+                            from,
+                        },
+                        ScenePatchOperation::AddEntity {
+                            entity: SceneEntityRecord::new(
+                                SceneEntityId::new("working-entity").unwrap(),
+                            ),
+                            placement: ScenePlacement::last(ScenePlacementOwner::Root),
+                        },
+                    ]),
+                })
+                .applied
+        );
         Self {
             directory,
             original,
-            host: HostCustody::default().retain_scene(host).unwrap(),
-            registry,
+            host: HostCustody::default().retain_scene(opened.host).unwrap(),
             workspace,
             document,
         }
@@ -88,11 +116,13 @@ impl ReopenFixture {
                     revision: slot.revision(),
                     binding: None,
                     project_path: Arc::from("scenes/current.scene.json"),
-                    schema: None,
+                    schema: slot.session().authoring_schema_basis(),
                 },
                 request: ReopenRequest::Scene(
                     self.host
-                        .try_with(|host| host.prepare_reopen(None))
+                        .try_with(|host| {
+                            host.prepare_reopen(slot.session().authoring_readmission())
+                        })
                         .unwrap()
                         .unwrap(),
                     NativeReopenSource {
@@ -102,7 +132,7 @@ impl ReopenFixture {
                         ).unwrap(),
                         policy: NativeDocumentSourcePolicy::new(
                             &nara_project::ProjectManifest::parse_toml_str(
-                                "schema_version = 1\n[project]\nname = 'Reopen fixture'\nsource_universe = '840ad54a-4b14-4f32-954a-e873ff0d6e41'\nnative_document_identity = 'project_location'\n",
+                                "schema_version = 1\n[project]\nname = 'Reopen fixture'\nsource_universe = '840ad54a-4b14-4f32-954a-e873ff0d6e41'\nnative_document_identity = 'project_location'\n[authoring]\nstate = \"ready\"\n",
                             ).manifest.unwrap().resolve_profile(None).unwrap(),
                         ),
                         project_path: Arc::from("current.scene.json"),
@@ -268,7 +298,7 @@ fn completed_preparation_can_be_admitted_only_by_the_owner() {
         panic!("a completed read must return its candidate")
     };
     assert!(source.is_ok());
-    let SceneReopenOutcome::Opened(opened) = prepared.admit(Some(&fixture.registry)) else {
+    let SceneReopenOutcome::Opened(opened) = prepared.admit() else {
         panic!("the candidate must admit on the owner")
     };
     assert_eq!(opened.session.document(), &scene("persisted-entity"));

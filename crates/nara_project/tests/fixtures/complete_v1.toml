@@ -7,6 +7,9 @@ name = "Complete Fixture"
 stable_id = "complete-fixture"
 version = "0.1.0"
 
+[authoring]
+state = "ready"
+
 [runtime]
 paused = false
 time_scale = 0.75

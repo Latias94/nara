@@ -233,10 +233,14 @@ fn authoring_property_expansion_accepts_large_admitted_values_and_reports_real_b
     let sources = large_sources();
     let document = large_scene("x", ComponentValue::U64(7));
     let report = authoring_expand(&document, &sources, generous_limits());
-    assert!(!report.diagnostics.has_errors(), "{:?}", report.diagnostics);
+    assert!(
+        !report.diagnostics().has_errors(),
+        "{:?}",
+        report.diagnostics()
+    );
     assert!(!report.budget_exceeded());
-    assert!(report.failure.is_none());
-    assert_large_result(report.candidate.as_ref().unwrap().document());
+    assert!(report.failure().is_none());
+    assert_large_result(report.candidate().unwrap().document());
 
     let cost = large_value().cost();
     for limits in [
@@ -245,10 +249,10 @@ fn authoring_property_expansion_accepts_large_admitted_values_and_reports_real_b
             .with_materialized_value_bytes(ByteLimit::new(cost.logical_bytes() - 1).unwrap()),
     ] {
         let report = authoring_expand(&document, &sources, limits);
-        assert!(report.candidate.is_none());
-        assert!(report.diagnostics.has_errors());
+        assert!(report.candidate().is_none());
+        assert!(report.diagnostics().has_errors());
         assert!(report.budget_exceeded());
-        assert_budget_failure(report.failure.as_ref().unwrap());
+        assert_budget_failure(report.failure().unwrap());
     }
 
     for document in [
@@ -256,8 +260,8 @@ fn authoring_property_expansion_accepts_large_admitted_values_and_reports_real_b
         large_scene("x", ComponentValue::Bool(false)),
     ] {
         let report = authoring_expand(&document, &sources, generous_limits());
-        assert!(report.candidate.is_none());
+        assert!(report.candidate().is_none());
         assert!(!report.budget_exceeded());
-        assert_semantic_failure(report.failure.as_ref().unwrap());
+        assert_semantic_failure(report.failure().unwrap());
     }
 }

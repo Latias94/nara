@@ -221,7 +221,7 @@ impl Fixture {
                 "[paths]\nassets = '{assets}'\nscenes = '{scenes}'\nprefabs = '{prefabs}'\n",
                 "[startup]\ndefault_scene = '{startup}'\n",
                 "[content]\nscenes = {declared}\n",
-                "[authoring]\nschema_bundle = 'schema/authoring.bundle.json'\n",
+                "[authoring]\nstate = \"ready\"\nschema_bundle = 'schema/authoring.bundle.json'\n",
                 "[runtime]\npreset = 'local-headless'\n",
                 "[capabilities]\nrequested = ['runtime-2d']\n",
                 "[tasks.io]\nworkers = 1\npending_capacity = 16\n",

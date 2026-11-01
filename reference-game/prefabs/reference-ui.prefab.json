@@ -147,7 +147,7 @@
             }
           },
           "nara.ui.UiText": {
-            "version": 3,
+            "version": 1,
             "value": {
               "type": "map",
               "value": {
@@ -347,7 +347,7 @@
             }
           },
           "nara.ui.UiVisual": {
-            "version": 2,
+            "version": 1,
             "value": {
               "type": "map",
               "value": {
@@ -580,7 +580,7 @@
             }
           },
           "nara.ui.UiText": {
-            "version": 3,
+            "version": 1,
             "value": {
               "type": "map",
               "value": {
@@ -783,7 +783,7 @@
             }
           },
           "nara.ui.UiVisual": {
-            "version": 2,
+            "version": 1,
             "value": {
               "type": "map",
               "value": {
@@ -1016,7 +1016,7 @@
             }
           },
           "nara.ui.UiText": {
-            "version": 3,
+            "version": 1,
             "value": {
               "type": "map",
               "value": {
@@ -1216,7 +1216,7 @@
             }
           },
           "nara.ui.UiVisual": {
-            "version": 2,
+            "version": 1,
             "value": {
               "type": "map",
               "value": {
@@ -1449,7 +1449,7 @@
             }
           },
           "nara.ui.UiText": {
-            "version": 3,
+            "version": 1,
             "value": {
               "type": "map",
               "value": {
@@ -1649,7 +1649,7 @@
             }
           },
           "nara.ui.UiText": {
-            "version": 3,
+            "version": 1,
             "value": {
               "type": "map",
               "value": {
@@ -2302,7 +2302,7 @@
             }
           },
           "nara.ui.UiVisual": {
-            "version": 2,
+            "version": 1,
             "value": {
               "type": "map",
               "value": {
@@ -2535,7 +2535,7 @@
             }
           },
           "nara.ui.UiText": {
-            "version": 3,
+            "version": 1,
             "value": {
               "type": "map",
               "value": {
@@ -2735,7 +2735,7 @@
             }
           },
           "nara.ui.UiText": {
-            "version": 3,
+            "version": 1,
             "value": {
               "type": "map",
               "value": {
@@ -3091,7 +3091,7 @@
             }
           },
           "nara.ui.UiVisual": {
-            "version": 2,
+            "version": 1,
             "value": {
               "type": "map",
               "value": {
@@ -3324,7 +3324,7 @@
             }
           },
           "nara.ui.UiText": {
-            "version": 3,
+            "version": 1,
             "value": {
               "type": "map",
               "value": {

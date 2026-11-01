@@ -68,6 +68,12 @@ pub use scene_requests::{
 mod editor;
 #[cfg(feature = "tooling")]
 pub use editor::{
+    AuthoredSchemaUpgradeProposal, AuthoredSchemaUpgradeReview,
+    AuthoredSchemaUpgradeReviewedSource, AuthoredSchemaUpgradeSourceProposal,
+    EditorAuthoredSchemaUpgradeError, EditorAuthoredSchemaUpgradeId,
+    EditorAuthoredSchemaUpgradeInputs, EditorAuthoredSchemaUpgradeOutcome,
+    EditorAuthoredSchemaUpgradePhase, EditorAuthoredSchemaUpgradeSource,
+    EditorAuthoredSchemaUpgradeView, EditorAuthoredUpgradeWorkingSource,
     EditorExtensionDocumentHostError, EditorSchemaOwnerAdoptionError,
     EditorSchemaOwnerAdoptionFailure, EditorSchemaOwnerAdoptionId,
     EditorSchemaOwnerAdoptionOutcome, EditorSchemaOwnerAdoptionPhase,
@@ -110,7 +116,9 @@ pub use editor::{
     EditorProjectOpenAttempt, EditorProjectOpenError, EditorProjectOpenFailure,
     EditorProjectOpenFailureImpact, EditorProjectOpenFailureSource, EditorProjectOpenHost,
     EditorProjectOpenPhase, EditorProjectOpenProgress, EditorProjectOpenTasksCloseReport,
-    EditorProjectSession, SupervisedDesktopSourceAdmissionError, SupervisedDesktopSourceAuthority,
+    EditorProjectSession, EditorSupervisedPlayBinding, EditorSupervisedPlayOwnerError,
+    EditorSupervisedPlayRetirementAck, EditorSupervisedPlayRetirementRequest,
+    SupervisedDesktopSourceAdmissionError, SupervisedDesktopSourceAuthority,
     TrustedCompiledEditorProjectIntent, admit_supervised_desktop_source_receipt,
 };
 #[cfg(all(

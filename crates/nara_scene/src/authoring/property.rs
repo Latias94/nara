@@ -13,8 +13,8 @@ use super::{
 use crate::{
     SceneEntityId, SceneEntityRecord, ScenePatchDocument, ScenePatchOperation, ScenePatchReport,
     authoring_decode::{
-        AuthoringDocumentState, MAX_AUTHORING_FIELD_LOGICAL_BYTES, MAX_AUTHORING_FIELD_VALUE_NODES,
-        MAX_AUTHORING_FIELD_WRITES,
+        AuthoringDocumentState, MAX_AUTHORING_EDIT_OPERATIONS, MAX_AUTHORING_FIELD_LOGICAL_BYTES,
+        MAX_AUTHORING_FIELD_VALUE_NODES, MAX_AUTHORING_FIELD_WRITES,
     },
 };
 
@@ -76,8 +76,33 @@ pub(super) fn lower<'a>(
     edits: &[AuthoringPropertyEdit],
     staged: &BTreeMap<(SceneEntityId, ComponentTypeId), StagedPropertyRecord<'a>>,
 ) -> Result<ScenePatchDocument, ScenePatchReport> {
+    lower_with_write_limit(entities, state, edits, staged, MAX_AUTHORING_FIELD_WRITES)
+}
+
+pub(super) fn lower_construction<'a>(
+    entities: &'a [SceneEntityRecord],
+    state: &'a AuthoringDocumentState,
+    edits: &[AuthoringPropertyEdit],
+    staged: &BTreeMap<(SceneEntityId, ComponentTypeId), StagedPropertyRecord<'a>>,
+) -> Result<ScenePatchDocument, ScenePatchReport> {
+    lower_with_write_limit(
+        entities,
+        state,
+        edits,
+        staged,
+        MAX_AUTHORING_EDIT_OPERATIONS,
+    )
+}
+
+fn lower_with_write_limit<'a>(
+    entities: &'a [SceneEntityRecord],
+    state: &'a AuthoringDocumentState,
+    edits: &[AuthoringPropertyEdit],
+    staged: &BTreeMap<(SceneEntityId, ComponentTypeId), StagedPropertyRecord<'a>>,
+    maximum_writes: usize,
+) -> Result<ScenePatchDocument, ScenePatchReport> {
     // Bound original work, not just the coalesced patch: many writes to one root still cost work.
-    if edits.is_empty() || edits.len() > MAX_AUTHORING_FIELD_WRITES {
+    if edits.is_empty() || edits.len() > maximum_writes {
         return Err(rejected());
     }
     let mut nodes = 0usize;

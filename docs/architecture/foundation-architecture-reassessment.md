@@ -50,6 +50,20 @@ Retain proven ownership invariants; replace constraints that encode accidental p
 Nara is unreleased, so affected callers and formats can change together. No new migration guide
 is required for this work.
 
+The [authored-upgrade consumer](../plans/2026-11-01-authored-schema-upgrade-plan.md) exposes another
+instance of this distinction: execution placement cannot select a document's source authority,
+and a game Runtime's Native definitions cannot stand in for the Editor preview App's installed
+capabilities. Source commands, history and persistence follow the retained authoring basis;
+presentation narrows that interpretation through its actual installed contributions. Runtime
+writeback also carries the source's real asset scope and admits cumulative replacement costs
+before copying. A compiler result that retains semantic evidence must keep its candidate and
+omissions inseparable until consumption; mutable observation parts must not retain conversion
+authority. These corrections preserve the selected ECS and domain separation while removing
+displaced prototype paths. Their
+[CP1/S2 qualification](../knowledge/engineering/verification/2026-11/2026-11-01T203621Z-reviewed-authored-schema-upgrades-and-fresh-process-recovery-qualification-cf7c8ecab10c4e21b4cfcff4906805de.md)
+records the complete live and fresh-process consumers with exact evidence limits. CP2 occurrence
+extraction and the remaining foundation work retain their separate design and implementation gates.
+
 ## Target Architecture And Refactor Decision Rule
 
 The integrated recommendation is one architecture with five cooperating responsibility groups.

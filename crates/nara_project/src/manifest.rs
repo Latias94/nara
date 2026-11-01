@@ -70,7 +70,6 @@ pub struct ProjectManifest {
     pub project: ProjectInfo,
     #[serde(default)]
     pub paths: ProjectPathsManifest,
-    #[serde(default)]
     pub authoring: ProjectAuthoringManifest,
     #[serde(default, skip_serializing_if = "ProjectContentManifest::is_empty")]
     pub content: ProjectContentManifest,

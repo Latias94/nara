@@ -854,6 +854,7 @@ prefabs = "prefabs"
 default_scene = "startup.scene.json"
 
 [authoring]
+state = "ready"
 schema_bundle = "schema/authoring.bundle.json"
 
 [runtime]
@@ -3086,14 +3087,16 @@ fn external_play_restart_rechecks_saved_files_before_requesting_child_retirement
                 }
             }
         };
+        let binding = editor.register_supervised_play_owner(1).unwrap();
         assert_eq!(
             editor.request_play(nara_tooling::EditorPlayCommand::Play),
             nara_tooling::EditorPlayRequestResult::Accepted,
         );
-        let play = editor.take_external_play_request().unwrap();
+        let play = editor.take_external_play_request(&binding).unwrap();
         let source_digest = nara_fs::ContentDigest::of_bytes(play.source_receipt().unwrap());
         assert!(
             editor.apply_external_play_observation(
+                &binding,
                 nara_tooling::EditorExternalPlayObservation::new(
                     play.attempt(),
                     nara_tooling::EditorExternalPlayState::Running,
@@ -3135,7 +3138,10 @@ fn external_play_restart_rechecks_saved_files_before_requesting_child_retirement
             ),
             "{name}: admission must inspect saved files before issuing retirement"
         );
-        assert!(editor.take_external_play_request().is_none(), "{name}");
+        assert!(
+            editor.take_external_play_request(&binding).is_none(),
+            "{name}"
+        );
         let frame = editor.drive_editor_frame(Duration::ZERO);
         assert!(frame.play().is_out_of_date(), "{name}");
         assert_eq!(frame.play().state(), nara_tooling::EditorPlayState::Running);
@@ -3146,7 +3152,10 @@ fn external_play_restart_rechecks_saved_files_before_requesting_child_retirement
             "{name}: source admission failure must not block Stop"
         );
         assert_eq!(
-            editor.take_external_play_request().unwrap().operation(),
+            editor
+                .take_external_play_request(&binding)
+                .unwrap()
+                .operation(),
             nara_tooling::EditorPlayOperation::Stop,
         );
     }
@@ -3183,12 +3192,13 @@ fn external_play_tracks_exact_saved_source_across_edit_save_restart_and_successo
         nara_tooling::EditorRuntimeAvailability::ExternalSupervised
     );
 
+    let binding = editor.register_supervised_play_owner(1).unwrap();
     let document = editor.workspace().active_document().unwrap();
     assert_eq!(
         editor.request_play(nara_tooling::EditorPlayCommand::Play),
         nara_tooling::EditorPlayRequestResult::Accepted
     );
-    let play = editor.take_external_play_request().unwrap();
+    let play = editor.take_external_play_request(&binding).unwrap();
     let first_source = play.source_receipt().unwrap().to_vec();
     let first_digest = nara_fs::ContentDigest::of_bytes(&first_source);
     let output = |sequence: u64, text: &str| {
@@ -3214,6 +3224,7 @@ fn external_play_tracks_exact_saved_source_across_edit_save_restart_and_successo
     let stale_output = output(1, "stale output");
     assert!(
         !editor.apply_external_play_observation(
+            &binding,
             nara_tooling::EditorExternalPlayObservation::new(
                 play.attempt() + 1,
                 nara_tooling::EditorExternalPlayState::Faulted,
@@ -3229,6 +3240,7 @@ fn external_play_tracks_exact_saved_source_across_edit_save_restart_and_successo
     let first_output = output(2, "first product output");
     assert!(
         editor.apply_external_play_observation(
+            &binding,
             nara_tooling::EditorExternalPlayObservation::new(
                 play.attempt(),
                 nara_tooling::EditorExternalPlayState::Running,
@@ -3262,7 +3274,7 @@ fn external_play_tracks_exact_saved_source_across_edit_save_restart_and_successo
     )
     .unwrap();
     assert!(
-        !editor.apply_external_play_observation(unchanged),
+        !editor.apply_external_play_observation(&binding, unchanged),
         "a quiet child must not report a frame-changing observation"
     );
     assert_eq!(
@@ -3287,7 +3299,7 @@ fn external_play_tracks_exact_saved_source_across_edit_save_restart_and_successo
         editor.request_play(nara_tooling::EditorPlayCommand::Restart),
         nara_tooling::EditorPlayRequestResult::Accepted
     );
-    let restart = editor.take_external_play_request().unwrap();
+    let restart = editor.take_external_play_request(&binding).unwrap();
     assert!(restart.source_receipt().is_none());
     assert!(
         editor
@@ -3300,6 +3312,7 @@ fn external_play_tracks_exact_saved_source_across_edit_save_restart_and_successo
     let restart_output = output(1, "restarted product output");
     assert!(
         editor.apply_external_play_observation(
+            &binding,
             nara_tooling::EditorExternalPlayObservation::new(
                 restart.attempt(),
                 nara_tooling::EditorExternalPlayState::Running,
@@ -3338,7 +3351,7 @@ fn external_play_tracks_exact_saved_source_across_edit_save_restart_and_successo
         ),
         "changed saved source must reject Restart before retiring the running child"
     );
-    assert!(editor.take_external_play_request().is_none());
+    assert!(editor.take_external_play_request(&binding).is_none());
     let rejected = editor.drive_editor_frame(Duration::ZERO);
     let external = rejected.play().external().unwrap();
     assert_eq!(
@@ -3357,6 +3370,7 @@ fn external_play_tracks_exact_saved_source_across_edit_save_restart_and_successo
 
     assert!(
         editor.apply_external_play_observation(
+            &binding,
             nara_tooling::EditorExternalPlayObservation::new(
                 restart.attempt(),
                 nara_tooling::EditorExternalPlayState::Faulted,
@@ -3384,9 +3398,10 @@ fn external_play_tracks_exact_saved_source_across_edit_save_restart_and_successo
         editor.request_play(nara_tooling::EditorPlayCommand::Stop),
         nara_tooling::EditorPlayRequestResult::Accepted
     );
-    let stop = editor.take_external_play_request().unwrap();
+    let stop = editor.take_external_play_request(&binding).unwrap();
     assert!(
         editor.apply_external_play_observation(
+            &binding,
             nara_tooling::EditorExternalPlayObservation::new(
                 stop.attempt(),
                 nara_tooling::EditorExternalPlayState::Idle,
@@ -3411,7 +3426,7 @@ fn external_play_tracks_exact_saved_source_across_edit_save_restart_and_successo
         editor.request_play(nara_tooling::EditorPlayCommand::Play),
         nara_tooling::EditorPlayRequestResult::Accepted
     );
-    let successor = editor.take_external_play_request().unwrap();
+    let successor = editor.take_external_play_request(&binding).unwrap();
     assert!(
         editor
             .external_play_view()
@@ -3428,6 +3443,7 @@ fn external_play_tracks_exact_saved_source_across_edit_save_restart_and_successo
     let successor_digest = nara_fs::ContentDigest::of_bytes(successor_source);
     assert!(
         editor.apply_external_play_observation(
+            &binding,
             nara_tooling::EditorExternalPlayObservation::new(
                 successor.attempt(),
                 nara_tooling::EditorExternalPlayState::CleanupIncomplete,
@@ -3452,7 +3468,10 @@ fn external_play_tracks_exact_saved_source_across_edit_save_restart_and_successo
         nara_tooling::EditorPlayRequestResult::Accepted,
     );
     assert_eq!(
-        editor.take_external_play_request().unwrap().operation(),
+        editor
+            .take_external_play_request(&binding)
+            .unwrap()
+            .operation(),
         nara_tooling::EditorPlayOperation::RetryClose,
     );
 }
@@ -4677,6 +4696,7 @@ prefabs = "prefabs"
 default_scene = "startup.scene.json"
 
 [authoring]
+state = "ready"
 schema_bundle = "schema/authoring.bundle.json"
 
 [runtime]
@@ -5591,6 +5611,9 @@ fn editor_play_profile_captures_the_selected_policy_without_native_window_presen
 source_universe = 'c60a6da4-b6a7-5028-bc53-39111af1a2ba'
 native_document_identity = 'project_location'
 name = "Editor Play Placement"
+
+[authoring]
+state = "ready"
 
 [paths]
 assets = "assets"
@@ -7382,6 +7405,7 @@ prefabs = "prefabs"
 default_scene = "startup.scene.json"
 
 [authoring]
+state = "ready"
 schema_bundle = "schema/authoring.bundle.json"
 
 [runtime]
@@ -7466,6 +7490,7 @@ prefabs = "prefabs"
 default_scene = "startup.scene.json"
 
 [authoring]
+state = "ready"
 schema_bundle = "schema/authoring.bundle.json"
 
 [runtime]
@@ -7536,6 +7561,7 @@ prefabs = "prefabs"
 default_scene = "startup.scene.json"
 
 [authoring]
+state = "ready"
 schema_bundle = "schema/authoring.bundle.json"
 
 [runtime]
@@ -7949,7 +7975,7 @@ fn ui_visual_record(image: Option<&str>) -> SceneComponentRecord {
         ])
     };
     SceneComponentRecord::new(
-        ComponentSchemaVersion::new(2).unwrap(),
+        ComponentSchemaVersion::ONE,
         ComponentValue::map([
             ("background", brush(0.2, 0.4, 0.8, 1.0, image)),
             ("border_width", ComponentValue::f64(0.0).unwrap()),

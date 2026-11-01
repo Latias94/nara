@@ -262,21 +262,12 @@ pub fn repair_startup_scene(
     if manifest.identity() != issue.manifest_identity {
         return Err(ProjectStartupSceneRepairError::StaleIssue);
     }
-    let manifest = match manifest.try_lock(LockMode::Exclusive) {
-        Ok(manifest) => manifest,
-        Err(failure) => {
-            let (error, _file) = failure.into_parts();
-            return Err(match error {
-                FsError::LockContended => ProjectStartupSceneRepairError::LockUnavailable,
-                error => ProjectStartupSceneRepairError::Filesystem(error),
-            });
-        }
-    };
-    verify_manifest_digest(&manifest, issue.manifest_digest)?;
-
     let manifest_bytes = manifest
         .read_to_end_bounded(DEFAULT_MANIFEST_BYTE_LIMIT)
         .map_err(ProjectStartupSceneRepairError::Filesystem)?;
+    if ContentDigest::of_bytes(&manifest_bytes) != issue.manifest_digest {
+        return Err(ProjectStartupSceneRepairError::StaleIssue);
+    }
     let load = ProjectManifest::parse_toml_bytes(&manifest_bytes);
     if load.has_errors() || load.manifest.is_none() {
         return Err(ProjectStartupSceneRepairError::ManifestInvalid {
@@ -312,6 +303,19 @@ pub fn repair_startup_scene(
         startup_scene_digest(&prepared, &issue.scenes_path, &replacement)
             .ok_or(ProjectStartupSceneRepairError::PreparedFactsUnavailable)?;
 
+    // Ordinary source preparation must observe current readiness through the manifest name.
+    // Windows excludes those reads while the cooperative write lock is held. Take that lock
+    // only after preparation, then prove the exact original input again before replacement.
+    let manifest = match manifest.try_lock(LockMode::Exclusive) {
+        Ok(manifest) => manifest,
+        Err(failure) => {
+            let (error, _file) = failure.into_parts();
+            return Err(match error {
+                FsError::LockContended => ProjectStartupSceneRepairError::LockUnavailable,
+                error => ProjectStartupSceneRepairError::Filesystem(error),
+            });
+        }
+    };
     if manifest.identity() != issue.manifest_identity {
         return Err(ProjectStartupSceneRepairError::StaleIssue);
     }

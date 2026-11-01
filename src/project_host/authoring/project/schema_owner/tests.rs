@@ -35,6 +35,34 @@ use crate::project_host::{
 const STARTUP: &str = "scenes/startup.scene.json";
 const BUNDLE: &str = "schemas/authoring.bundle.json";
 
+pub(super) fn observe_source(
+    owner: &mut PreparedAuthoringSchemaOwner,
+    source: &AuthoringDocumentSourceFact,
+) -> crate::project_host::file_publication::FileSourceObservation {
+    let root = owner.incumbent().project_root();
+    let file = root
+        .open_file_exact(&RelativePath::new(source.relative_path()).unwrap())
+        .unwrap();
+    let host = FilePublicationHost::bind_existing(
+        &root,
+        source.relative_path(),
+        &file,
+        source.digest(),
+        SceneFileLimits::default().encoded_bytes().get() as u64,
+    )
+    .unwrap();
+    owner
+        .capture_source_observation(host.source_observation_cost().unwrap(), || {
+            host.capture_source_observation((
+                source.identity(),
+                source.parent_identity(),
+                source.digest(),
+            ))
+            .map_err(|_| AuthoringProjectSourceAdmissionError::DocumentSourceMismatch)
+        })
+        .unwrap()
+}
+
 fn installed_owner() -> ComponentSchemaOwnerSnapshot {
     AuthoringSchemaBundle::new([AuthoringSchemaBundleOwner::new(
         PersistentComponentSchemaOwnerId::try_new("test.prepared-project.owner").unwrap(),
@@ -178,9 +206,11 @@ fn saved_project_and_dirty_scene_keep_distinct_roots_and_rebuild_the_actual_sour
     assert_eq!(prepared.startup.document.schema_basis(), basis);
     assert_eq!(prepared.startup.capture.root_revision(), None);
     let project_usage = owner.budget().usage();
+    let observation = observe_source(&mut owner, &source);
     let current = owner
         .capture_scene(
             &source,
+            observation,
             borrow_prepared_scene_schema_source(&scene, &prepared_scene).unwrap(),
             &[],
             &[],
@@ -301,9 +331,11 @@ fn saved_startup_is_reread_as_b_while_the_incumbent_retains_a_and_the_scene_is_d
     assert_eq!(prepared.startup.source.digest(), digest);
     assert_eq!(prepared.startup.source.encoded_bytes(), bytes_b.len());
     assert_eq!(prepared.startup.capture.root_revision(), None);
+    let observation = observe_source(&mut owner, &current_source);
     let current = owner
         .capture_scene(
             &current_source,
+            observation,
             borrow_prepared_scene_schema_source(&scene, &reclassified).unwrap(),
             &[],
             &[],
@@ -380,6 +412,7 @@ fn prepared_project_selects_the_dirty_prefab_arc_and_revision_without_disk_previ
         .unwrap();
     let open = [AuthoringPrefabSessionSnapshot::capture_prepared(
         &source,
+        observe_source(&mut owner, &source),
         borrow_prepared_prefab_schema_source(&session, &reclassified).unwrap(),
     )
     .unwrap()];
@@ -613,7 +646,7 @@ fn failed_saved_source_captures_and_validation_attempts_share_the_owner_budget()
 }
 
 #[test]
-fn prepared_validation_refuses_source_bundle_manifest_and_parent_observation_drift() {
+fn prepared_validation_refuses_content_and_nominal_drift_but_readmits_equal_saved_content() {
     for change in ["source", "bundle", "manifest", "parent"] {
         let project = independent_project();
         let incumbent = open_project(&project);
@@ -669,6 +702,10 @@ fn prepared_validation_refuses_source_bundle_manifest_and_parent_observation_dri
             assert_eq!(file.identity(), before.identity());
             assert_ne!(file.parent_identity(), before.parent_identity());
             file.verify_digest(before.digest(), 65_536).unwrap();
+            // This is a saved read-only project capture, not an expected-object write.
+            // Its canonical location/key and actual content still match after readmission.
+            prepared.validate(&mut owner).unwrap();
+            continue;
         } else {
             let path = match change {
                 "source" => STARTUP,
@@ -772,9 +809,11 @@ fn preserved_history_can_expose_a_composition_conflict_and_redo_its_exact_source
             )
             .unwrap();
         let prepared = owner.prepare_project(&incumbent, &[], &[]).unwrap();
+        let observation = observe_source(&mut owner, &source);
         let current = owner
             .capture_scene(
                 &source,
+                observation,
                 borrow_prepared_scene_schema_source(&scene, &reclassified).unwrap(),
                 &[],
                 &[],
@@ -812,7 +851,31 @@ fn preserved_history_can_expose_a_composition_conflict_and_redo_its_exact_source
             Some(bad)
         );
         let conflict = successor
-            .capture_scene_document(&source, &scene, &[])
+            .capture_scene_document(
+                &source,
+                {
+                    let root = successor.project_root();
+                    let file = root
+                        .open_file_exact(&RelativePath::new(source.relative_path()).unwrap())
+                        .unwrap();
+                    let host = FilePublicationHost::bind_existing(
+                        &root,
+                        source.relative_path(),
+                        &file,
+                        source.digest(),
+                        65_536,
+                    )
+                    .unwrap();
+                    host.capture_source_observation((
+                        source.identity(),
+                        source.parent_identity(),
+                        source.digest(),
+                    ))
+                    .unwrap()
+                },
+                &scene,
+                &[],
+            )
             .unwrap();
         assert_eq!(conflict.readiness(), AuthoringProjectReadiness::Degraded);
         assert_eq!(
@@ -836,7 +899,31 @@ fn preserved_history_can_expose_a_composition_conflict_and_redo_its_exact_source
             Some(repaired)
         );
         let restored = successor
-            .capture_scene_document(&source, &scene, &[])
+            .capture_scene_document(
+                &source,
+                {
+                    let root = successor.project_root();
+                    let file = root
+                        .open_file_exact(&RelativePath::new(source.relative_path()).unwrap())
+                        .unwrap();
+                    let host = FilePublicationHost::bind_existing(
+                        &root,
+                        source.relative_path(),
+                        &file,
+                        source.digest(),
+                        65_536,
+                    )
+                    .unwrap();
+                    host.capture_source_observation((
+                        source.identity(),
+                        source.parent_identity(),
+                        source.digest(),
+                    ))
+                    .unwrap()
+                },
+                &scene,
+                &[],
+            )
             .unwrap();
         assert!(restored.composition_failure().is_none());
         assert!(!restored.diagnostics().has_errors());

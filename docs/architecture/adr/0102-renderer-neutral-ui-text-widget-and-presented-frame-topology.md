@@ -2,7 +2,7 @@
 
 **Status**: Accepted
 **Date**: 2026-08-04
-**Last Revised**: 2026-10-31
+**Last Revised**: 2026-11-02
 **Amended**: 2026-08-05 by the NUI-U8 post-decision checkpoint; 2026-08-06 by the NUI-U17 pre-implementation ownership checkpoint; 2026-08-07 by the NUI-U15A example-first interface-proof checkpoint; 2026-08-08 by the focused U15A focus-identity refreeze and UI Foundation rebaseline; 2026-08-10 by the UIF-U5 public-inventory and Host-authority audit; 2026-08-12 by the UIFD immutable dynamic-text projection correction; 2026-10-25 by the complete source/occurrence/placement key adoption
 **Owner**: UI authoring, text, widget behavior, input routing, presentation packets, and platform adapters
 **Refines**: [ADR 0012](0012-render-crate-boundaries.md),
@@ -297,6 +297,20 @@ flowchart LR
   enter the kernel, widget, packet, or headless contracts.
 - Open-GPUI and other engines are behavioral evidence only. Nara does not adopt their App/Window/
   Entity/Element lifecycle or copy source without explicit provenance and license review.
+
+### Unreleased Persistence Baseline
+
+The first-party UI component catalog, component schemas and native binding/codec identity use
+the current canonical version 1 baseline. Current typed brush references and bounded logical
+text-size semantics belong to that baseline. Retire the prototype brush/text readers, synthetic
+catalog predecessors and their historical tombstones; checked-in resources and ordinary consumers
+are updated directly. Opening a source document preserves its original declarations and saved
+checkpoint rather than invoking those native migrations or making it dirty.
+
+This consolidation does not remove generic component/catalog evolution or the reviewed authored
+upgrade contract. Actual project-data evolution, such as EnemyStats v1 to v2, retains its explicit
+old/new semantics, history policy and recovery evidence. Do not retain unreleased first-party
+prototype formats merely to serve as that mechanism's fixture.
 
 ### Image Identity And Typed Asset Binding
 

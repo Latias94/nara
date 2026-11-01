@@ -638,7 +638,7 @@ impl EditorProjectSession {
         if !self.accepts_new_work() {
             return Err(Error::Closing);
         }
-        if self.schema_adoption_fenced() {
+        if self.authoring_operation_fenced() {
             return Err(Error::Busy);
         }
         if !project
@@ -696,7 +696,7 @@ impl EditorProjectSession {
         if !self.accepts_new_work() {
             return Err(Error::Closing);
         }
-        if self.schema_adoption_fenced() {
+        if self.authoring_operation_fenced() {
             return Err(Error::Busy);
         }
         self.advance_source_tools();
@@ -772,7 +772,7 @@ impl EditorProjectSession {
         if !self.accepts_new_work() {
             return Err(Error::Closing);
         }
-        if self.schema_adoption_fenced() {
+        if self.authoring_operation_fenced() {
             return Err(Error::Busy);
         }
         self.source_tools.selection.check_basis(basis)?;
@@ -813,7 +813,7 @@ impl EditorProjectSession {
         if !self.accepts_new_work() {
             return Err(Error::Closing);
         }
-        if self.schema_adoption_fenced() {
+        if self.authoring_operation_fenced() {
             return Err(Error::Busy);
         }
         self.source_tools.selection.check_basis(basis)?;

@@ -149,10 +149,12 @@ fn assert_committed_content() {
             ),
         ],
     );
-    // The content loader charges six reads: Scene + two Prefabs + image source + image
-    // metadata discovery + image metadata admission/digest revalidation. Manifest ingestion
-    // predates this loader; schema catalogs and unrelated images are outside this closure.
-    assert_eq!(before_clone.high_water(ProjectContentBudgetKind::Files), 6);
+    // The retained readiness observation overlaps six content-file charges: Scene + two
+    // Prefabs + image source + metadata discovery + metadata admission/digest revalidation.
+    // Content Files end at lease transfer, so final readiness reread overlaps only the first
+    // manifest observation. Peak Files is max(1 + 6, 1 + 1), rather than total read count.
+    // Schema catalogs and unrelated images remain outside this loader's closure.
+    assert_eq!(before_clone.high_water(ProjectContentBudgetKind::Files), 7);
     assert_eq!(
         before_clone.high_water(ProjectContentBudgetKind::DependencyEdges),
         8,

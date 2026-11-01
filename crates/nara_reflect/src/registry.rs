@@ -3014,6 +3014,23 @@ fn preflight_field_validation<E>(
     admit(0, 0, scratch.allocation_bytes())
 }
 
+/// Admits the same declaration, payload and potential-error scratch for one selected shape.
+/// There is no field storage lookup, default insertion or synthetic component schema here.
+pub(crate) fn preflight_property_validation<E>(
+    shape: &crate::ComponentValueShape,
+    root: &ComponentFieldId,
+    value: &ComponentValue,
+    admit: &mut ValueValidationAdmission<'_, E>,
+) -> Result<(), E> {
+    let mut scratch = FieldValidationErrorScratch {
+        payload_bytes: root.as_str().len(),
+        ..FieldValidationErrorScratch::default()
+    };
+    preflight_validation_shape(shape, 0, 0, &mut scratch, admit)?;
+    preflight_validation_value(shape, value, 0, 0, &mut scratch, admit)?;
+    admit(0, 0, scratch.allocation_bytes())
+}
+
 fn preflight_validation_shape<E>(
     shape: &crate::ComponentValueShape,
     segments: usize,

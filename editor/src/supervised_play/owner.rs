@@ -7,6 +7,8 @@ use nara::{
     fs::ContentDigest,
     project::DESKTOP_SUPERVISED_PLAY_V1_CONTRACT,
     project_host::{
+        EditorSupervisedPlayBinding, EditorSupervisedPlayOwnerError,
+        EditorSupervisedPlayRetirementAck, EditorSupervisedPlayRetirementRequest,
         SUPERVISED_DESKTOP_LAUNCH_CONTEXT_VERSION, SupervisedDesktopSourceAuthority,
         admit_supervised_desktop_source_receipt,
     },
@@ -86,6 +88,11 @@ enum SupervisorTerminalKind {
     Failed { failure: EditorPlayFailure },
 }
 
+struct PreparedSupervisedPlayRetirement {
+    request: EditorSupervisedPlayRetirementRequest,
+    replacement: Box<SupervisedDesktopPlayOwner>,
+}
+
 /// Owns all process, build, generation, and cleanup capabilities for one published Editor.
 ///
 /// The Host never receives this value. It exchanges only `EditorExternalPlayRequest` and
@@ -108,6 +115,8 @@ pub(crate) struct SupervisedDesktopPlayOwner {
     close_requested: bool,
     close_cleanup_incomplete: bool,
     close_complete: bool,
+    binding: Option<EditorSupervisedPlayBinding>,
+    authored_upgrade_retirement: Option<PreparedSupervisedPlayRetirement>,
 }
 
 impl SupervisedDesktopPlayOwner {
@@ -135,11 +144,91 @@ impl SupervisedDesktopPlayOwner {
             close_requested: false,
             close_cleanup_incomplete: false,
             close_complete: false,
+            binding: None,
+            authored_upgrade_retirement: None,
         }
     }
 
+    pub(crate) fn with_binding(
+        binding: EditorSupervisedPlayBinding,
+        wake: SupervisedPlayWake,
+    ) -> Self {
+        let mut owner = Self::with_wake(wake);
+        owner.binding = Some(binding);
+        owner
+    }
+
+    pub(crate) fn binding(&self) -> Option<&EditorSupervisedPlayBinding> {
+        self.binding.as_ref()
+    }
+
     pub(crate) fn set_wake(&mut self, wake: SupervisedPlayWake) {
+        if let Some(retirement) = self.authored_upgrade_retirement.as_mut() {
+            retirement.replacement.set_wake(wake.clone());
+        }
         self.wake = wake;
+    }
+
+    /// Prepares the empty successor before asking the actual owner to close permanently.
+    /// Even an Idle registered owner participates; display state never proves retirement.
+    pub(crate) fn begin_authored_upgrade_retirement(
+        &mut self,
+        request: EditorSupervisedPlayRetirementRequest,
+        now: Instant,
+    ) -> Result<bool, EditorSupervisedPlayOwnerError> {
+        let binding = self
+            .binding
+            .as_ref()
+            .ok_or(EditorSupervisedPlayOwnerError::ForeignOwner)?;
+        binding.validate_retirement_request(&request)?;
+        if let Some(retirement) = self.authored_upgrade_retirement.as_ref() {
+            return if retirement.request.is_same_request(&request) {
+                Ok(false)
+            } else {
+                Err(EditorSupervisedPlayOwnerError::Request)
+            };
+        }
+        let replacement = Box::new(Self::with_wake(self.wake.clone()));
+        self.authored_upgrade_retirement = Some(PreparedSupervisedPlayRetirement {
+            request,
+            replacement,
+        });
+        self.request_close(now);
+        Ok(true)
+    }
+
+    /// Trusted child-custodian boundary: emit proof only after actual Close and replacement.
+    ///
+    /// `close_complete` includes joined build/preparation/child work and generation-store cleanup.
+    /// A cleanup failure retains both the request and replacement and cannot produce an ack.
+    /// Swapping the caller's actual owner slot precedes attestation, including on cancellation.
+    pub(crate) fn complete_authored_upgrade_retirement(
+        owner: &mut Box<Self>,
+    ) -> Result<Option<EditorSupervisedPlayRetirementAck>, EditorSupervisedPlayOwnerError> {
+        let Some(retirement) = owner.authored_upgrade_retirement.as_ref() else {
+            return Ok(None);
+        };
+        owner
+            .binding
+            .as_ref()
+            .ok_or(EditorSupervisedPlayOwnerError::ForeignOwner)?
+            .validate_retirement_request(&retirement.request)?;
+        if !owner.close_complete() {
+            return Ok(None);
+        }
+        let mut retirement = owner
+            .authored_upgrade_retirement
+            .take()
+            .expect("the completed owner retains its exact retirement request");
+        retirement.replacement.binding = owner.binding.take();
+        let retired = std::mem::replace(owner, retirement.replacement);
+        drop(retired);
+        owner
+            .binding
+            .as_ref()
+            .expect("the installed replacement owns the original registration binding")
+            .attest_retirement(retirement.request)
+            .map(Some)
     }
 
     pub(crate) fn next_deadline(&self) -> Option<Instant> {
@@ -1714,12 +1803,15 @@ impl DesktopBuildInputRevision {
 }
 
 #[cfg(test)]
+mod retirement_tests;
+
+#[cfg(test)]
 mod tests {
     use std::{fs, thread};
 
     use super::*;
 
-    fn request(
+    pub(super) fn request(
         attempt: u64,
         operation: EditorPlayOperation,
         source_receipt: Option<Vec<u8>>,
@@ -2181,7 +2273,7 @@ mod tests {
         fs::remove_dir_all(base).unwrap();
     }
 
-    fn generation_manifest(source_receipt: &[u8]) -> GenerationManifestInput {
+    pub(super) fn generation_manifest(source_receipt: &[u8]) -> GenerationManifestInput {
         let digest = |value: &[u8]| ContentDigest::of_bytes(value);
         GenerationManifestInput::new(
             GenerationSourceFacts::new(
@@ -2214,7 +2306,7 @@ mod tests {
         )
     }
 
-    fn unique_test_root(name: &str) -> PathBuf {
+    pub(super) fn unique_test_root(name: &str) -> PathBuf {
         use std::sync::atomic::{AtomicU64, Ordering};
 
         static NEXT: AtomicU64 = AtomicU64::new(1);

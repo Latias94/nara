@@ -143,6 +143,7 @@ pub mod __private {
     };
     pub use crate::property::{
         ComponentPropertyAdmissionError, resolve_component_property_schema_claim_with_admission,
+        validate_component_property_value_with_admission,
     };
     pub use crate::provider::{
         ComponentSchemaOwnerRecord, ResolvedComponentSchemaProvider,

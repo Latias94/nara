@@ -181,6 +181,9 @@ fn include_fact(
     source: Arc<AuthoringSourceFact>,
     identity_kind: LoadedIdentity,
 ) -> Result<(), AuthoringProjectSourceAdmissionError> {
+    acquisition
+        .source_observations
+        .insert_read_content(&source, None, acquisition.budget)?;
     let path = source.project_path();
     if let Some(existing) = acquisition.source_facts.get(path.as_str()) {
         return if existing.same_file_observation(&source) {

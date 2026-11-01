@@ -2,7 +2,7 @@
 
 **Status**: Accepted
 **Date**: 2026-08-17
-**Last Revised**: 2026-10-24
+**Last Revised**: 2026-11-02
 **Amended**: 2026-08-18 to make the exact U2 authoring projection the single Canvas source
 authority, separate receipt-backed Prefab persistence from immutable project-content generation
 publication, admit source-local ordered entity structure through ordinary Prefab history, and close
@@ -167,11 +167,24 @@ record, revision, selection and content state. The selected frontend submits the
 document- and revision-bound mutation unchanged; it does not build raw structure patches or
 repair stale placements.
 
-Persistent UI brushes distinguish semantic role and image forms. Image brushes store a canonical
-asset reference, and the accepted predecessor migration rewrites legacy brush data before normal
-authoring. The ordinary project-content loader discovers that reference even when the new UI node
-is the image's only startup-closure dependency. Save, content refresh, Reopen, and explicit Runtime
-Restart therefore consume the same canonical source instead of an Editor-only cache.
+Source-admitted Prefabs consume these finite recipes through the document owner's existing
+construction templates and declared editable properties. The UI component catalog supplies actual
+complete creation templates for its Node, Visual, Text, Button and ButtonVisuals recipes. Tooling
+checks the complete prepared result against the requested recipe before publishing; missing
+templates, wrong owner/version, undeclared data and read-only differences refuse. It does not
+restore native whole-record authority merely because the specialized UI validated a recipe.
+Selection, identity and one history transaction remain owned by the source construction commit.
+Complete construction counts entity declarations, component additions and property writes against
+one existing bounded structural transaction allowance. A standalone small field-edit batch keeps
+its separate write count. Both paths retain the cumulative value/node/byte, inverse, replay and
+history limits; a full UI recipe must not depend on tuning a default to fit the field-editor count.
+
+Persistent UI brushes distinguish semantic role and image forms. Canonical version-one image
+brushes store a typed asset reference under ADR 0102; source Open preserves that declaration and
+its saved checkpoint. The ordinary project-content loader discovers that reference even when the
+new UI node is the image's only startup-closure dependency. Save, content refresh, Reopen, and
+explicit Runtime Restart therefore consume the same canonical source instead of an Editor-only
+cache. Unreleased prototype brush readers and catalog predecessors are removed.
 
 Every accepted structural publication retires the predecessor authoring frame and Canvas geometric
 input authority. Preview resumes from the successor source revision; Canvas picking/manipulation
@@ -229,7 +242,7 @@ it does not introduce a universal document transaction, Automation service or Wi
 | Trusted runtime freshness | In-process source refresh never mutates a running Runtime; explicit Restart consumes the successor snapshot | Reference Game Editor trajectory |
 | Structural composition | Create, move, and subtree delete publish one exact Prefab transaction and one history record | Scene, tooling, Adapter, and Reference Game trajectory tests |
 | Structural Canvas safety | A predecessor receipt cannot pick after structure publication; the exact successor can | Native Editor UI Canvas canary |
-| Image dependency retention | A migrated image brush remains in the startup closure when the created UI node is its sole reference | Reference Game Save/Reopen/Restart trajectory |
+| Image dependency retention | A canonical image brush remains in the startup closure when the created UI node is its sole reference | Reference Game Save/Reopen/Restart trajectory |
 
 ## Risks and Mitigations
 

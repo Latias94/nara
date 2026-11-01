@@ -1051,6 +1051,88 @@ pub(crate) fn validate_prefab_publication_shape_with_admission<E>(
     validate_publication_shape_with_admission(document, limits, admission)
 }
 
+/// Compares a bounded owned source with its owner's canonical wire spelling, without copying
+/// its tree or allocating an encoded output. The caller admits document/ordering/serializer work.
+#[doc(hidden)]
+pub fn canonical_scene_source_matches(
+    document: SceneDocument,
+    encoding: SceneFileEncoding,
+    expected: &[u8],
+    limits: SceneFileLimits,
+) -> Result<bool, SceneFormatError> {
+    canonical_source_matches(document, encoding, expected, limits)
+}
+
+#[doc(hidden)]
+pub fn canonical_prefab_source_matches(
+    document: PrefabDocument,
+    encoding: SceneFileEncoding,
+    expected: &[u8],
+    limits: SceneFileLimits,
+) -> Result<bool, SceneFormatError> {
+    canonical_source_matches(document, encoding, expected, limits)
+}
+
+fn canonical_source_matches<T: SceneFilePayload>(
+    mut document: T,
+    encoding: SceneFileEncoding,
+    expected: &[u8],
+    limits: SceneFileLimits,
+) -> Result<bool, SceneFormatError> {
+    document.validate_contract()?;
+    document.validate_budget(limits)?;
+    validate_encoded_bytes(expected, limits)?;
+    document.canonicalize_payload();
+    let envelope = publication_envelope(&document, T::KIND)?;
+    let mut writer = SourceComparisonWriter {
+        expected,
+        written: 0,
+        differs: false,
+    };
+    let result =
+        match encoding {
+            SceneFileEncoding::Json => serde_json::to_writer_pretty(&mut writer, &envelope)
+                .map_err(|source| SceneFormatError::Encode {
+                    encoding,
+                    source: Box::new(source),
+                }),
+            SceneFileEncoding::Ron => {
+                ron::ser::to_writer_pretty(&mut writer, &envelope, canonical_ron_pretty_config())
+                    .map_err(|source| SceneFormatError::Encode {
+                        encoding,
+                        source: Box::new(source),
+                    })
+            }
+        };
+    if writer.differs {
+        return Ok(false);
+    }
+    result?;
+    Ok(writer.written == expected.len())
+}
+
+struct SourceComparisonWriter<'a> {
+    expected: &'a [u8],
+    written: usize,
+    differs: bool,
+}
+
+impl Write for SourceComparisonWriter<'_> {
+    fn write(&mut self, bytes: &[u8]) -> io::Result<usize> {
+        let end = self.written.checked_add(bytes.len());
+        if end.is_none_or(|end| self.expected.get(self.written..end) != Some(bytes)) {
+            self.differs = true;
+            return Err(io::ErrorKind::InvalidData.into());
+        }
+        self.written = end.expect("the matching slice has a bounded end");
+        Ok(bytes.len())
+    }
+
+    fn flush(&mut self) -> io::Result<()> {
+        Ok(())
+    }
+}
+
 pub(crate) fn validate_patch_publication_shape(
     document: &ScenePatchDocument,
     limits: SceneFileLimits,
@@ -1059,6 +1141,21 @@ pub(crate) fn validate_patch_publication_shape(
 }
 
 impl SceneDocumentCandidate {
+    /// Reuses an owned source through the same domain admission as file decoding.
+    ///
+    /// The caller retains its original wire/shape evidence and publication limits. This does
+    /// not establish Schema, source identity or standalone publication readiness.
+    #[doc(hidden)]
+    pub fn from_source_document(
+        document: SceneDocument,
+        limits: SceneFileLimits,
+    ) -> Result<Self, SceneFormatError> {
+        Ok(Self {
+            document: finish_decode(document, limits)?,
+            limits,
+        })
+    }
+
     /// Consumes bounded decoded declarations for deferred mixed Scene/Prefab composition.
     ///
     /// Decoding already enforced the selected file and decoded-value limits. This step checks
@@ -2074,6 +2171,85 @@ mod overlay_storage_tests {
         PrefabInstance {
             source: AssetRef::Path(AssetPath::new("missing.prefab.json").unwrap()),
             overrides: Some(overlay),
+        }
+    }
+
+    #[test]
+    fn canonical_source_comparison_uses_the_owning_json_and_ron_encoders() {
+        let source = SceneDocument::from_ordered_roots([
+            SceneEntityRecord::new(SceneEntityId::new("z").unwrap()),
+            SceneEntityRecord::new(SceneEntityId::new("a").unwrap()),
+        ]);
+        let prefab = PrefabDocument::new(source.roots.clone(), source.entities.clone());
+        for encoding in [SceneFileEncoding::Json, SceneFileEncoding::Ron] {
+            let scene_bytes = match encoding {
+                SceneFileEncoding::Json => source.to_json_string().unwrap(),
+                SceneFileEncoding::Ron => source.to_ron_string().unwrap(),
+            };
+            let prefab_bytes = match encoding {
+                SceneFileEncoding::Json => prefab.to_json_string().unwrap(),
+                SceneFileEncoding::Ron => prefab.to_ron_string().unwrap(),
+            };
+            let mut unordered = source.clone();
+            unordered.entities.reverse();
+            assert!(
+                canonical_scene_source_matches(
+                    unordered,
+                    encoding,
+                    scene_bytes.as_bytes(),
+                    SceneFileLimits::default()
+                )
+                .unwrap()
+            );
+            assert!(
+                canonical_prefab_source_matches(
+                    prefab.clone(),
+                    encoding,
+                    prefab_bytes.as_bytes(),
+                    SceneFileLimits::default()
+                )
+                .unwrap()
+            );
+            assert!(
+                !canonical_scene_source_matches(
+                    source.clone(),
+                    encoding,
+                    prefab_bytes.as_bytes(),
+                    SceneFileLimits::default()
+                )
+                .unwrap()
+            );
+            let mut changed = scene_bytes.as_bytes().to_vec();
+            changed.push(b' ');
+            assert!(
+                !canonical_scene_source_matches(
+                    source.clone(),
+                    encoding,
+                    &changed,
+                    SceneFileLimits::default()
+                )
+                .unwrap()
+            );
+            assert!(
+                !canonical_scene_source_matches(
+                    source.clone(),
+                    encoding,
+                    &scene_bytes.as_bytes()[..scene_bytes.len() - 1],
+                    SceneFileLimits::default()
+                )
+                .unwrap()
+            );
+            let limits = SceneFileLimits::default()
+                .with_encoded_bytes(ByteLimit::new(scene_bytes.len() - 1).unwrap());
+            assert!(
+                canonical_scene_source_matches(
+                    source.clone(),
+                    encoding,
+                    scene_bytes.as_bytes(),
+                    limits
+                )
+                .is_err()
+            );
         }
     }
 

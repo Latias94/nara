@@ -350,7 +350,7 @@ impl EditorProjectSession {
         action: EditorSourceAssetImportAction,
     ) -> Result<(), Rejection> {
         if self.closing
-            || self.schema_adoption_fenced()
+            || self.authoring_operation_fenced()
             || self.source_tools.reclamation_fenced()
             || self.source_asset_import.has_pending_work()
             || matches!(

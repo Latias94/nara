@@ -107,7 +107,7 @@ fn runtime_definition_retained_bytes(
 }
 
 #[cfg(feature = "serde")]
-fn schema_catalog_retained_bytes(
+pub(crate) fn schema_catalog_retained_bytes(
     catalog: &nara_reflect::ComponentSchemaCatalog,
 ) -> Result<usize, SceneRetentionOverflow> {
     let nara_reflect::ComponentSchemaCatalog {
@@ -594,7 +594,7 @@ fn bindings_retained_bytes(
     Ok(total)
 }
 
-fn property_path_retained_bytes(
+pub(crate) fn property_path_retained_bytes(
     path: &nara_reflect::ComponentPropertyPath,
 ) -> Result<usize, SceneRetentionOverflow> {
     use nara_reflect::{ComponentPropertyKey, ComponentPropertyStep};

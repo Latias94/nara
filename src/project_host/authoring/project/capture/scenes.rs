@@ -103,7 +103,7 @@ fn compile(
             nara_scene::PrefabExpansionLimits::default()
                 .with_working_bytes(acquisition.compiler_limit),
         );
-    let mut compiled = nara_scene::__private::try_expand_authoring_prefabs_with_loader(
+    let compiled = nara_scene::__private::try_expand_authoring_prefabs_with_loader(
         &source.document,
         acquisition.basis,
         options,
@@ -112,7 +112,7 @@ fn compile(
     )?;
     if compiled.budget_exceeded() {
         return Err(AuthoringProjectSourceAdmissionError::CompilationBudget(
-            compiled.diagnostics,
+            compiled.into_parts().diagnostics,
         ));
     }
     resize_compiler_work(
@@ -186,69 +186,49 @@ fn compile(
         }
     }
     acquisition.budget.charge_diagnostics(
-        compiled.diagnostics.len(),
-        compiled.diagnostics.retained_bytes(),
+        compiled.diagnostics().len(),
+        compiled.diagnostics().retained_bytes(),
     )?;
-    let mut result_retained = compiled.diagnostics.retained_bytes();
-    let mut diagnostics = std::mem::take(&mut compiled.diagnostics);
-    if let Some(failure) = &compiled.failure {
+    let mut result_retained = compiled.diagnostics().retained_bytes();
+    if let Some(failure) = compiled.failure() {
         result_retained = checked_sum([
             result_retained,
             composition_failure_retained_bytes(failure)?,
         ])?;
     }
-    let mut failure = compiled.failure.take();
-    let native_preview = if matches!(preview, Some(AuthoringCapturePreview::Prepare))
-        && compiled.candidate.is_some()
-    {
-        let effective = compiled
-            .candidate
-            .as_ref()
-            .expect("checked candidate")
-            .document();
-        acquisition
-            .budget
-            .charge_source_bytes(0, 0, 0, effective.retained_bytes()?)?;
-        source.root_effective = Some(Arc::new(effective.clone()));
-        acquisition.budget.charge_source_bytes(
-            0,
-            0,
-            0,
-            source.native_source.key().retained_bytes(),
-        )?;
-        let omission_reservation = preview_omission_copy_retained_bytes(&compiled)?;
-        acquisition
-            .budget
-            .charge_source_bytes(0, 0, 0, omission_reservation)?;
-        let (candidate, omissions) = compiled
-            .into_native_preview()
-            .map_err(AuthoringProjectSourceAdmissionError::CompilationBudget)?;
-        let candidate = candidate.bind_source(source.native_source.key().clone());
-        let omission_retained = preview_omissions_retained_bytes(&omissions)
-            .ok_or(AuthoringProjectSourceAdmissionError::AccountingOverflow)?;
-        acquisition
-            .budget
-            .reconcile_retained_reservation(omission_reservation, omission_retained)?;
-        result_retained = checked_sum([
-            result_retained,
-            crate::scene_retention::direct_startup_scene_retained_bytes(&candidate)
-                .map_err(|_| AuthoringProjectSourceAdmissionError::AccountingOverflow)?
-                .checked_sub(source.native_source.key().retained_bytes())
-                .ok_or(AuthoringProjectSourceAdmissionError::AccountingOverflow)?,
-        ])?;
-        Some(CapturedAuthoringPreview {
-            candidate,
-            omissions,
-        })
-    } else {
-        if let Some(candidate) = compiled.candidate.take() {
+    let (native_preview, mut diagnostics, mut failure) =
+        if matches!(preview, Some(AuthoringCapturePreview::Prepare))
+            && compiled.candidate().is_some()
+        {
+            let effective = compiled.candidate().expect("checked candidate").document();
+            acquisition
+                .budget
+                .charge_source_bytes(0, 0, 0, effective.retained_bytes()?)?;
+            source.root_effective = Some(Arc::new(effective.clone()));
             acquisition.budget.charge_source_bytes(
                 0,
                 0,
                 0,
                 source.native_source.key().retained_bytes(),
             )?;
+            let omission_reservation = preview_omission_copy_retained_bytes(&compiled)?;
+            acquisition
+                .budget
+                .charge_source_bytes(0, 0, 0, omission_reservation)?;
+            let nara_scene::__private::AuthoringNativePreview {
+                candidate,
+                omissions,
+                diagnostics,
+                failure,
+            } = compiled
+                .into_native_preview()
+                .map_err(AuthoringProjectSourceAdmissionError::CompilationBudget)?;
             let candidate = candidate.bind_source(source.native_source.key().clone());
+            let omission_retained = preview_omissions_retained_bytes(&omissions)
+                .ok_or(AuthoringProjectSourceAdmissionError::AccountingOverflow)?;
+            acquisition
+                .budget
+                .reconcile_retained_reservation(omission_reservation, omission_retained)?;
             result_retained = checked_sum([
                 result_retained,
                 crate::scene_retention::direct_startup_scene_retained_bytes(&candidate)
@@ -256,11 +236,35 @@ fn compile(
                     .checked_sub(source.native_source.key().retained_bytes())
                     .ok_or(AuthoringProjectSourceAdmissionError::AccountingOverflow)?,
             ])?;
-            source.compiled = Some(candidate);
-        }
-        drop(compiled);
-        None
-    };
+            (
+                Some(CapturedAuthoringPreview {
+                    candidate,
+                    omissions,
+                }),
+                diagnostics,
+                failure,
+            )
+        } else {
+            let parts = compiled.into_parts();
+            if let Some(candidate) = parts.candidate {
+                acquisition.budget.charge_source_bytes(
+                    0,
+                    0,
+                    0,
+                    source.native_source.key().retained_bytes(),
+                )?;
+                let candidate = candidate.bind_source(source.native_source.key().clone());
+                result_retained = checked_sum([
+                    result_retained,
+                    crate::scene_retention::direct_startup_scene_retained_bytes(&candidate)
+                        .map_err(|_| AuthoringProjectSourceAdmissionError::AccountingOverflow)?
+                        .checked_sub(source.native_source.key().retained_bytes())
+                        .ok_or(AuthoringProjectSourceAdmissionError::AccountingOverflow)?,
+                ])?;
+                source.compiled = Some(candidate);
+            }
+            (None, parts.diagnostics, parts.failure)
+        };
     retain_compiler_result(
         acquisition.budget,
         &mut acquisition.compiler_reservation,
@@ -294,12 +298,11 @@ fn preview_omission_copy_retained_bytes(
     compiled: &nara_scene::__private::AuthoringPrefabExpansionReport,
 ) -> Result<usize, AuthoringProjectSourceAdmissionError> {
     let candidate = compiled
-        .candidate
-        .as_ref()
+        .candidate()
         .ok_or(AuthoringProjectSourceAdmissionError::AccountingOverflow)?;
-    compiled.omissions.iter().try_fold(
+    compiled.omissions().iter().try_fold(
         checked_product(
-            compiled.omissions.len(),
+            compiled.omissions().len(),
             size_of::<nara_scene::__private::AuthoringPreviewOmission>(),
         )?,
         |bytes, fact| {
@@ -376,6 +379,9 @@ pub(super) fn load_resource(
             return Ok(None);
         }
         let read = read_unique_source(opened, budget.maximum(), budget)?;
+        acquisition
+            .source_observations
+            .insert_read_content(&read.source, None, budget)?;
         charge_asset_source(&read, budget)?;
         acquisition
             .identities
@@ -466,6 +472,24 @@ pub(super) fn load_resource(
         if snapshot.basis.as_ref() != Some(acquisition.basis) {
             return Err(AuthoringProjectSourceAdmissionError::SchemaBasisMismatch);
         }
+        let observation = snapshot.observation.as_ref().ok_or_else(|| {
+            AuthoringProjectSourceAdmissionError::SourceChanged {
+                kind,
+                path: opened.project_path.clone(),
+            }
+        })?;
+        if !observation.matches(&opened.capability).map_err(|source| {
+            AuthoringProjectSourceAdmissionError::SourceHost {
+                kind,
+                path: opened.project_path.clone(),
+                source,
+            }
+        })? {
+            return Err(AuthoringProjectSourceAdmissionError::SourceChanged {
+                kind,
+                path: opened.project_path,
+            });
+        }
         let fact_bytes = checked_sum([
             size_of::<AuthoringSourceFact>(),
             size_of::<Arc<AuthoringSourceFact>>(),
@@ -481,6 +505,9 @@ pub(super) fn load_resource(
             encoded_bytes: snapshot_source.encoded_bytes(),
             dependency_depth: depth,
         });
+        acquisition
+            .source_observations
+            .insert_original(&source, &native, observation, budget)?;
         // Move the input's modeled document custody into the captured closure.
         budget.reconcile_retained_reservation(snapshot.document.retained_bytes()?, 0)?;
         budget.charge_source_bytes(0, 0, 0, snapshot.document.retained_bytes()?)?;
@@ -495,6 +522,9 @@ pub(super) fn load_resource(
             acquisition.scene_limits.encoded_bytes().get(),
             budget,
         )?;
+        acquisition
+            .source_observations
+            .insert_read_content(&read.source, Some(&native), budget)?;
         let reservation = reserve_composition_decode(&read, acquisition.scene_limits, budget)?;
         let limits = reservation.limits;
         let path = read.source.project_path().as_str();
@@ -600,6 +630,9 @@ pub(super) fn load_resource_metadata(
         AssetMetaFileLimits::default().encoded_bytes().get(),
         budget,
     )?;
+    acquisition
+        .source_observations
+        .insert_read_content(&read.source, None, budget)?;
     acquisition
         .catalogue
         .verify_metadata(path, binding, &read.source)?;
