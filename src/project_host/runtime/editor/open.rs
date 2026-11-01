@@ -171,6 +171,7 @@ pub struct EditorProjectOpenHost {
     admission: AuthoringProjectAdmissionHost,
     preparation: StartupPreparationHost,
     source_asset_importers: super::EditorSourceAssetImporters,
+    recipe: crate::ProductRecipe,
     #[cfg(test)]
     pub(in crate::project_host::runtime::editor) next_authoring_publication_hook:
         Option<Box<dyn FnOnce(&super::authoring_runtime::EditorAuthoringRuntime)>>,
@@ -212,6 +213,16 @@ impl EditorProjectOpenHost {
         importers: super::EditorSourceAssetImporters,
     ) -> Self {
         self.source_asset_importers = importers;
+        self
+    }
+
+    /// Selects compiled product configuration for authoring Scene and UI Canvas rendering.
+    ///
+    /// Authoring admission still uses its admitted Schema bundle and native preview allowlist;
+    /// selecting a render policy does not install the recipe's Runtime or Schema plugins.
+    #[must_use]
+    pub fn with_recipe(mut self, recipe: crate::ProductRecipe) -> Self {
+        self.recipe = recipe;
         self
     }
 
@@ -315,8 +326,9 @@ impl EditorProjectOpenHost {
                 }
             }
             EditorProjectOpenAttemptState::SessionPublication(receipt) => {
-                match EditorProjectSession::open(
+                match EditorProjectSession::open_with_recipe(
                     receipt,
+                    self.recipe.clone(),
                     #[cfg(test)]
                     self.next_authoring_publication_hook.take(),
                 ) {

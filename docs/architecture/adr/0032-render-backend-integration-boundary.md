@@ -55,7 +55,20 @@ independent rendering. It never drains the managed transport, takes a UI sidecar
 connection barrier or grants presentation authority. The original connection owner alone takes
 the sealed batch with its one-shot completion responsibilities.
 
+`RenderFramePacket` contains only bounded immutable CPU facts. Cloning it preserves source,
+frame, View lifetimes, target descriptor and Canvas mapping; it duplicates no capture admission,
+surface acquisition, UI permit, producer execution or presentation authority. One packet names one
+destination, while exclusivity is enforced by the actual target/producer owners. A composing
+image consumer can reuse this exact neutral cut when constructing its own newly admitted policy
+input without changing target merely to obtain an owned copy.
+
 ## Context
+
+The [shared stock-construction refinement](0094-minimal-render-execution-boundary-and-evidence-gated-extensions.md#shared-stock-program-construction)
+selects reusable world/Canvas/UI program construction and original stock-capture handoff for
+external Scene effects. These CPU helpers use the existing typed policy, capture and Host; they
+introduce neither another extraction authority nor a second native submitter. Default and custom
+policies retain the same complete Image preflight and exact final-UI-binding checks.
 
 nara now has a Bevy ECS substrate, nara-owned app lifecycle, and render-facing authoring data.
 The next foundation slice introduces real desktop window and wgpu surface lifetimes, so the engine must decide where window handles, extracted render data, backend initialization, and facade feature gates live before code hardens the wrong boundary.

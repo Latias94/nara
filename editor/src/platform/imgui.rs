@@ -74,6 +74,8 @@ mod scene;
 #[cfg(all(test, target_os = "windows"))]
 mod scene_image_tests;
 #[cfg(all(test, target_os = "windows"))]
+mod stock_composition_tests;
+#[cfg(all(test, target_os = "windows"))]
 mod supervised_play_support;
 #[cfg(all(test, target_os = "windows"))]
 mod supervised_play_tests;

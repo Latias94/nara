@@ -63,11 +63,24 @@ impl Drop for OutputReservation {
 
 #[derive(Debug)]
 pub(crate) struct WgpuImageStorage {
-    pub(crate) epoch_lost: Arc<std::sync::atomic::AtomicBool>,
     pub(crate) receipt: WgpuSubmittedImageReceipt,
-    pub(crate) texture: wgpu::Texture,
-    pub(crate) view: wgpu::TextureView,
-    pub(crate) _reservation: Arc<OutputReservation>,
+    pub(crate) resource: Arc<crate::program::ProgramResourceStorage>,
+}
+
+impl WgpuImageStorage {
+    pub(crate) fn texture(&self) -> &wgpu::Texture {
+        let crate::program::NativeResource::Texture { texture, .. } = &self.resource.native else {
+            unreachable!("published image storage is selected only from a texture output")
+        };
+        texture
+    }
+
+    pub(crate) fn view(&self) -> &wgpu::TextureView {
+        let crate::program::NativeResource::Texture { view, .. } = &self.resource.native else {
+            unreachable!("published image storage is selected only from a texture output")
+        };
+        view
+    }
 }
 
 /// One exact, immutable physical image version published by a WGPU Host.
@@ -82,7 +95,7 @@ impl WgpuImageOutput {
     /// Reports whether this retained allocation still belongs to its original live device epoch.
     #[must_use]
     pub fn is_current(&self) -> bool {
-        !self.0.epoch_lost.load(Ordering::Acquire)
+        self.0.resource.is_current()
     }
 
     #[must_use]
@@ -92,12 +105,26 @@ impl WgpuImageOutput {
 
     #[must_use]
     pub fn format(&self) -> wgpu::TextureFormat {
-        self.0.texture.format()
+        self.0.texture().format()
     }
 
     #[must_use]
     pub fn extent(&self) -> nara_render::Extent2d {
         self.receipt().target().extent()
+    }
+
+    /// Retains this exact published texture with its original semantic interpretation.
+    ///
+    /// The marker must match the selected program output; equal pixels or a same-shaped image
+    /// cannot substitute another port meaning. This lease imports through the ordinary program
+    /// builder, retaining only this resource rather than the original program or CPU capture.
+    pub fn texture<S: 'static>(
+        &self,
+    ) -> Result<crate::WgpuProgramTextureOutput<S>, crate::WgpuRenderProgramError> {
+        crate::program::require_descriptor::<S>(&self.0.resource.descriptor, true)?;
+        Ok(crate::WgpuProgramTextureOutput::new(Arc::clone(
+            &self.0.resource,
+        )))
     }
 }
 

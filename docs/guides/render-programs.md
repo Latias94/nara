@@ -57,7 +57,7 @@ the already accepted input intact. A second installation cannot silently replace
 route. `WgpuWindowPresentationPlugin` selects the ordinary native-window consumer; capture alone
 does not require a window or create a second native execution owner.
 
-The default product explicitly composes `WgpuStockPolicyPlugin` and its selected
+The default product explicitly composes `WgpuStockCapturePlugin`, `WgpuStockPolicyPlugin` and its selected
 `WgpuStockSpritePlugin`/`WgpuStockUiPlugin` contributors. Compiling a domain does not install it.
 Independent image owners may retain their installation and call `installation.capture` directly.
 Call `host.prepare_policy` before device acquisition to admit nondefault requirements. The same
@@ -96,6 +96,50 @@ settles another occurrence's permission.
 
 These APIs do not establish a persistent renderer recipe, runtime route replacement or native
 code unloading. Complete current qualification belongs to the render unit and its evidence.
+
+## Composing With Stock Drawing
+
+The shared stock-construction replacement is under qualification in the
+[current unit](../architecture/render-program-production-design.md#next-production-unit-public-stock-composition).
+Use `WgpuStockStages` inside an ordinary `WgpuRenderPolicy` to reuse default Sprite, Canvas and UI
+lowering. Include its `device_requirements`, resolve its original `bind` result through the policy
+context, and call `begin` with that binding, the immutable `WgpuStockCapture`, the current build
+context and finite `GraphLimits`.
+
+The returned `WgpuStockProgramBuilder` owns one ordinary graph. `world(operation_key)` draws
+ordered Views into `WgpuWorldColor`; caller Features use `graph()` to create and process distinct
+versions. If the packet has a WorldCanvas, `resolve_canvas(operation_key, &world_version)` applies
+its exact nearest mapping and returns `WgpuSceneColor` at target extent. Otherwise world color
+already has target extent. A generic effect can accept either marker; wiring chooses the actual
+pixel space and radius units. No identity copy is required solely to relabel the no-Canvas path.
+
+Call `finish(ui_operation_key, &selected_scene, additional_outputs)` after the desired Scene
+effects. It validates the actual target shape/color interpretation and draws captured UI at full
+target resolution into a separate final version, with its exact original UI binding. Additional
+outputs can retain untouched Scene versions for before/after composition. The final version joins
+the output group once even when already listed; repeated caller entries still reject. Operation
+keys, producer access and all normal graph and Host budgets remain enforced.
+
+Actual stock UI drawing produces `WgpuCompositeColor`. Without UI, the final texture retains the
+selected Scene marker. `WgpuPublishedFrame::final_texture<S>()` and
+`WgpuImageOutput::texture<S>()` both require that original semantic type; neither relabels an
+equal-shaped texture. Reducing a publication to its image retains the selected resource owner,
+interpretation, epoch and shared allocation guard, without retaining the complete program,
+reports, scratch or CPU capture. Import that exact lease with the normal `import_texture` path
+for further composition or declared readback.
+
+For normal stock collection with a custom policy, explicitly install `WgpuStockCapturePlugin`
+and the selected domain contributors. Compose in `WgpuStockCaptureSet::Compose` using
+`WgpuStockFrameReader::take(&installation, &writer)`. A foreign/closed route, busy connection or
+unavailable slot leaves the original draft untouched. `into_parts` returns the immutable snapshot
+and optional original UI sidecar when UI is compiled. Submit with `capture` or `capture_with_ui`,
+retaining any returned sidecar for retry or settlement. Do not drain the UI backend a second time.
+
+A `WgpuStockCaptureAdapter` owns one exact installation plus a conversion from complete stock
+inputs to its typed capture. It lets Scene/Canvas construction select the same renderer without
+downcasting its captures for picking, taking UI responsibility or querying a World at native
+execution. Product selection uses an explicit compiled recipe; it is not a durable pipeline
+asset, a hot route replacement or permission to load project Rust into a data-only Editor.
 
 ## Typed Versions And Dependencies
 

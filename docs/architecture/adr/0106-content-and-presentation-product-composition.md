@@ -59,8 +59,9 @@ flowchart LR
   resolution reject before candidate App creation. Plugin build and Host bridge capture remain
   fallible candidate work: failure poisons and retires the unpublished candidate rather than
   claiming arbitrary Rust side effects were rolled back.
-- These concrete contribution plugins are first-party closed topology. They do not make backend
-  replacement, dynamic plugin discovery or a general contribution registry supported contracts.
+- These product intersections select concrete first-party defaults. A replayable policy can
+  replace the stock composer through the shared-stock refinement below. The defaults do not
+  establish dynamic discovery, a general renderer registry or replacement native ownership.
 
 ## Context
 
@@ -76,6 +77,23 @@ separate Host-owned product under ADR 0104 and must not enter either content or 
 implication.
 
 ## Decision
+
+The shared stock-program refinement in
+[ADR0094](0094-minimal-render-execution-boundary-and-evidence-gated-extensions.md#shared-stock-program-construction)
+separates stock packet collection from concrete renderer selection. A product recipe can select an
+exact replayable policy/capture plugin through existing plugin definitions; stock Sprite/UI
+contributors do not require the default policy type. Editor Scene and Canvas construction select
+their original capture adapters explicitly. The recipe retains existing capability, definition
+fingerprint, placement and single-route admission; this is not a renderer registry or a persistent
+pipeline recipe. Merely compiling these implementations installs none of them.
+
+The same compiled recipe remains usable for content-only Headless and strict Check profiles.
+Activate its selected renderer/composer and stock-policy slot edit only when the resolved product
+requests RenderWgpu. Omitting that presentation contribution does not omit gameplay or Schema
+contributions. A custom renderer cannot make source admission or source-free content validation
+require a native device. The exact selected plugin definition and its paired Scene/Canvas factory
+configuration are checked after outer group edits and before Startup; replacing only the Runtime
+materializer through an edited group cannot split their meaning.
 
 Nara separates product composition into content/simulation, renderer-neutral presentation, and
 platform/backend adapter closures. Hosts select and validate those closures explicitly before

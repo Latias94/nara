@@ -72,6 +72,22 @@ retired by their existing owners. Allow up to ten minutes for build/READY on a c
 ## Broader Qualification
 
 When the change affects image/Canvas workflows, project opening, docking/layout, or supervised builds, also execute the corresponding ignored native tests.
+For selected stock-stage policies, Scene rendering adapters or picking independent of the concrete
+policy, execute the independent effects through the actual native Scene View:
+
+```powershell
+$env:NARA_WGPU_FORCE_FALLBACK='0'
+$env:DEAR_IMGUI_REQUIRE_WGPU_ADAPTER='1'
+cargo +1.95.0 nextest run -p nara-editor --all-features --lib --locked --run-ignored only -E 'test(native_scene_stock_composition_presents_external_effects_picks_edits_undoes_and_retires)' --test-threads=1
+```
+
+This hidden-window trajectory selects the external blur/grade packages through a product recipe,
+joins the displayed Scene's exact image/composite receipt, and reads its actual final pixels.
+It also checks original before-effects branches, ordinary picking, source editing, Undo, retained
+old images and physical retirement. A separate same-source replay supplies branch observations;
+it does not substitute for the actual displayed output. This is qualification of the working
+Dear frontend and the shared render seam, not the future editable Nara-drawn Inspector.
+
 For retained Scene source selection and ordinary Prefab/Canvas navigation, execute:
 
 ```powershell

@@ -50,6 +50,14 @@ separate lifetimes. `EditorProjectSession` remains renderer-neutral and owns no 
 surface, GPU object or toolkit texture registration. It may retain backend-neutral content and
 geometry presentation facts without acquiring native submission or display authority.
 
+A published image retains the exact selected program-resource owner, including its original
+semantic/color interpretation, allocation guard and epoch facts. Reducing a complete publication
+to its image does not discard that meaning or retain the whole program, scratch, reports or CPU
+capture. A typed read-only lease from the image must match that original semantic marker; it cannot
+relabel final composite as Scene color. The ordinary program import then applies the same original
+Host/epoch, descriptor, budget and submission rules. This enables retained Scene-image composition
+and numeric observation through declared Features without another readback or native submitter API.
+
 ```mermaid
 flowchart LR
     Snapshot[Accepted edit-world snapshot]
@@ -66,6 +74,14 @@ flowchart LR
 ```
 
 ### One execution authority
+
+Scene and authoring Canvas capture construction may select a typed renderer through the shared
+stock boundary in [ADR0094](0094-minimal-render-execution-boundary-and-evidence-gated-extensions.md#shared-stock-program-construction).
+Each accepted input retains its original definition and captured parameters. The Scene candidate
+retains exact geometry/provenance for picking independently of the renderer's capture type; a
+default-policy downcast is not picking authority. Effects preserve the selected mapping contract,
+and a materially different geometric mapping needs its own explicit tooling support. This does not
+grant a generic data-only Editor permission to execute arbitrary project Rust.
 
 - One concrete render Host owns the instance, adapter, device, queue, epochs, admitted targets,
   serialized native submissions and actual completion custody. Runtime, Editor and offscreen

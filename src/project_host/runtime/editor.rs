@@ -913,6 +913,7 @@ pub struct EditorProjectSession {
     published_frame: Option<PublishedEditorFrame>,
     gestures: EditorGestureController,
     last_gesture_cancellation: Option<EditorGestureCancelReason>,
+    recipe: ProductRecipe,
     authoring_runtime: authoring_runtime::EditorAuthoringRuntime,
     authoring_retirements: authoring_runtime::EditorAuthoringRetirements,
     #[cfg(test)]
@@ -1533,8 +1534,17 @@ impl EditorProjectSession {
         true
     }
 
+    #[cfg(test)]
     fn open(
         receipt: AuthoringProjectReceipt,
+        publication_hook: Option<Box<dyn FnOnce(&authoring_runtime::EditorAuthoringRuntime)>>,
+    ) -> Result<Self, EditorProjectOpenError> {
+        Self::open_with_recipe(receipt, ProductRecipe::new(), publication_hook)
+    }
+
+    fn open_with_recipe(
+        receipt: AuthoringProjectReceipt,
+        recipe: ProductRecipe,
         #[cfg(test)] publication_hook: Option<
             Box<dyn FnOnce(&authoring_runtime::EditorAuthoringRuntime)>,
         >,
@@ -1545,8 +1555,12 @@ impl EditorProjectSession {
         let preview_registry = first_party_authoring_preview_registry(built_in_schema_providers())
             .map_err(|_| editor_open_error("project.editor.authoring-preview-registry-invalid"))?;
         let authoring_runtime =
-            authoring_runtime::EditorAuthoringRuntime::new_authoring(&snapshot, &preview_registry)
-                .map_err(EditorProjectOpenError::from)?;
+            authoring_runtime::EditorAuthoringRuntime::new_authoring_with_recipe(
+                &snapshot,
+                &preview_registry,
+                &recipe,
+            )
+            .map_err(EditorProjectOpenError::from)?;
         #[cfg(test)]
         if let Some(hook) = publication_hook {
             hook(&authoring_runtime);
@@ -1565,9 +1579,10 @@ impl EditorProjectSession {
             )
             .map_err(|_| editor_open_error("project.editor.authoring-image-init-failed"))?;
             #[cfg(feature = "presentation-ui")]
-            let ui_preview = ui_preview::EditorUiPreviewSession::new().map_err(|_error| {
-                editor_open_error("project.editor.authoring-ui-preview-init-failed")
-            })?;
+            let ui_preview =
+                ui_preview::EditorUiPreviewSession::with_recipe(&recipe).map_err(|_error| {
+                    editor_open_error("project.editor.authoring-ui-preview-init-failed")
+                })?;
             let project_root = snapshot.project_root();
             let settings = snapshot.settings();
             let scenes_path = RelativePath::new(settings.paths.scenes.as_str())
@@ -1709,6 +1724,7 @@ impl EditorProjectSession {
                 published_frame: None,
                 gestures: EditorGestureController::default(),
                 last_gesture_cancellation: None,
+                recipe,
                 authoring_runtime: unpublished
                     .take()
                     .expect("publication transfers the authoring owner once"),
@@ -1786,8 +1802,12 @@ impl EditorProjectSession {
         };
         #[cfg(not(any(feature = "presentation-2d", feature = "presentation-ui")))]
         let host_policy = host_policy;
-        let request =
-            editor_play_runtime_plugins_with_recipe(&candidate, recipe, overlay, Some(host_policy));
+        let request = editor_play_runtime_plugins_with_recipe(
+            &candidate,
+            recipe.clone(),
+            overlay,
+            Some(host_policy),
+        );
         let plan = resolve_project_runtime_request(&candidate, request)
             .map_err(|error| EditorProjectOpenError::new(runtime_plan_failure_report(&error)))?;
         let runtime_agreement = prepare_runtime_schema_agreement(&project_root, &candidate, &plan)
@@ -1811,6 +1831,7 @@ impl EditorProjectSession {
         let authoring_runtime = authoring_runtime::EditorAuthoringRuntime::new(
             snapshot.clone(),
             plan.schema_validation().snapshot(),
+            &recipe,
         )
         .map_err(EditorProjectOpenError::from)?;
         let mut unpublished = Some(authoring_runtime);
@@ -1830,12 +1851,13 @@ impl EditorProjectSession {
                 ))
             })?;
             #[cfg(feature = "presentation-ui")]
-            let ui_preview = ui_preview::EditorUiPreviewSession::new().map_err(|_error| {
-                EditorProjectOpenError::new(single_error(
-                    "project.editor.ui-preview-init-failed",
-                    "the Editor UI preview owner could not be initialized",
-                ))
-            })?;
+            let ui_preview =
+                ui_preview::EditorUiPreviewSession::with_recipe(&recipe).map_err(|_error| {
+                    EditorProjectOpenError::new(single_error(
+                        "project.editor.ui-preview-init-failed",
+                        "the Editor UI preview owner could not be initialized",
+                    ))
+                })?;
             let scenes_path = RelativePath::new(candidate.settings().paths.scenes.as_str())
                 .map_err(|_| editor_open_error("project.editor.scenes-path-invalid"))?;
             let scenes = project_root
@@ -1979,6 +2001,7 @@ impl EditorProjectSession {
                 published_frame: None,
                 gestures: EditorGestureController::default(),
                 last_gesture_cancellation: None,
+                recipe,
                 authoring_runtime: unpublished
                     .take()
                     .expect("publication transfers the authoring owner once"),

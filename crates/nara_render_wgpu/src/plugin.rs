@@ -3,8 +3,9 @@ use std::sync::{Arc, Weak};
 #[cfg(feature = "stock-ui")]
 use crate::host::WgpuUiSubmission;
 use nara_app::{
-    App, CoreStage, FrameExecutionStart, Plugin, PluginError, RuntimeFault, RuntimeFaultKind,
-    RuntimeFaultReporter, RuntimeGeneration,
+    App, CoreStage, FrameExecutionStart, Plugin, PluginError, RuntimeCloseContext,
+    RuntimeCloseParticipant, RuntimeCloseParticipantError, RuntimeCloseParticipantId,
+    RuntimeCloseProgress, RuntimeFault, RuntimeFaultKind, RuntimeFaultReporter, RuntimeGeneration,
 };
 use nara_ecs::{
     Query, Res, ResMut, Resource, SystemParam, SystemSet, schedule::IntoScheduleConfigs,
@@ -14,9 +15,7 @@ use nara_render::{
     build_render_frame_packet_with_world_canvas,
 };
 #[cfg(feature = "stock-ui")]
-use nara_ui_render::UiPresentationIntegrationError;
-#[cfg(feature = "stock-ui")]
-use nara_ui_render::advanced::{UiBackendSubmission, UiBackendSubmissionReader};
+use nara_ui_render::advanced::UiBackendSubmissionReader;
 use nara_window::{PrimaryWindowId, Window, backend::WindowPresentationRequirement};
 
 use crate::{
@@ -31,17 +30,23 @@ pub const WGPU_CAPTURE_PLUGIN_ID: nara_app::PluginId =
     nara_app::PluginId::new("nara.render-wgpu.capture");
 pub const WGPU_WINDOW_PRESENTATION_PLUGIN_ID: nara_app::PluginId =
     nara_app::PluginId::new("nara.render-wgpu.window-presentation");
+pub const WGPU_STOCK_CAPTURE_PLUGIN_ID: nara_app::PluginId =
+    nara_app::PluginId::new("nara.render-wgpu.stock-capture");
 pub const WGPU_STOCK_POLICY_PLUGIN_ID: nara_app::PluginId =
     nara_app::PluginId::new("nara.render-wgpu.stock-policy");
 pub const WGPU_BACKEND_SHUTDOWN_OBLIGATION: nara_app::PluginShutdownObligationId =
     nara_app::PluginShutdownObligationId::new("nara.render-wgpu.backend");
+const WGPU_STOCK_CAPTURE_SHUTDOWN_OBLIGATION: nara_app::PluginShutdownObligationId =
+    nara_app::PluginShutdownObligationId::new("nara.render-wgpu.stock-capture");
 
 const WGPU_RENDER_PRODUCT_REQUIREMENTS: &[nara_app::PluginProductCapability] =
     &[nara_app::PluginProductCapability::new("render-wgpu")];
 const WGPU_CAPTURE_PLUGIN_REQUIREMENTS: &[nara_app::PluginId] = &[nara_render::RENDER_PLUGIN_ID];
 const WGPU_WINDOW_PRESENTATION_PLUGIN_REQUIREMENTS: &[nara_app::PluginId] =
     &[WGPU_CAPTURE_PLUGIN_ID];
-const WGPU_STOCK_POLICY_PLUGIN_REQUIREMENTS: &[nara_app::PluginId] = &[WGPU_CAPTURE_PLUGIN_ID];
+const WGPU_STOCK_CAPTURE_PLUGIN_REQUIREMENTS: &[nara_app::PluginId] = &[WGPU_CAPTURE_PLUGIN_ID];
+const WGPU_STOCK_POLICY_PLUGIN_REQUIREMENTS: &[nara_app::PluginId] =
+    &[WGPU_STOCK_CAPTURE_PLUGIN_ID];
 
 pub const WGPU_CAPTURE_PLUGIN_DECLARATION: nara_app::PluginDeclaration =
     nara_app::PluginDeclaration::new(WGPU_CAPTURE_PLUGIN_ID, nara_app::PluginCategory::Backend)
@@ -55,6 +60,14 @@ pub const WGPU_WINDOW_PRESENTATION_PLUGIN_DECLARATION: nara_app::PluginDeclarati
     )
     .requires_plugins(WGPU_WINDOW_PRESENTATION_PLUGIN_REQUIREMENTS)
     .requires_product_capabilities(WGPU_RENDER_PRODUCT_REQUIREMENTS);
+pub const WGPU_STOCK_CAPTURE_PLUGIN_DECLARATION: nara_app::PluginDeclaration =
+    nara_app::PluginDeclaration::new(
+        WGPU_STOCK_CAPTURE_PLUGIN_ID,
+        nara_app::PluginCategory::Backend,
+    )
+    .requires_plugins(WGPU_STOCK_CAPTURE_PLUGIN_REQUIREMENTS)
+    .requires_product_capabilities(WGPU_RENDER_PRODUCT_REQUIREMENTS)
+    .shutdown_obligations(&[WGPU_STOCK_CAPTURE_SHUTDOWN_OBLIGATION]);
 pub const WGPU_STOCK_POLICY_PLUGIN_DECLARATION: nara_app::PluginDeclaration =
     nara_app::PluginDeclaration::new(
         WGPU_STOCK_POLICY_PLUGIN_ID,
@@ -143,6 +156,12 @@ struct SelectedPolicy {
 }
 
 impl SelectedPolicy {
+    fn is_open(&self) -> bool {
+        self.admission
+            .upgrade()
+            .is_some_and(|admission| admission.is_open())
+    }
+
     fn accepts<P: WgpuRenderPolicy>(&self, installation: &WgpuPolicyInstallation<P>) -> bool {
         self.admission.upgrade().is_some_and(|admission| {
             admission.id == installation.id()
@@ -216,6 +235,15 @@ impl WgpuPolicyUiCaptureFailure {
 }
 
 impl WgpuPolicyFrameWriter<'_> {
+    fn can_collect_stock(&self) -> bool {
+        self.connection.can_capture_from(&self.authority)
+            && self.slot.accepts_capture()
+            && self
+                .selected
+                .as_ref()
+                .is_some_and(|selected| selected.is_open())
+    }
+
     #[must_use]
     pub fn can_capture<P: WgpuRenderPolicy>(
         &self,
@@ -302,24 +330,6 @@ impl WgpuPolicyFrameWriter<'_> {
                 ),
                 ui: WgpuUiSubmission::from_state(ui),
             })
-    }
-
-    #[cfg(feature = "stock-ui")]
-    pub(crate) fn can_collect_ui<P: WgpuRenderPolicy>(
-        &self,
-        installation: &WgpuPolicyInstallation<P>,
-    ) -> bool {
-        self.can_capture_with_ui(installation)
-    }
-
-    #[cfg(feature = "stock-ui")]
-    pub(crate) fn collect_ui(&mut self, submissions: Vec<UiBackendSubmission>) -> bool {
-        self.slot.collect_ui(submissions)
-    }
-
-    #[cfg(feature = "stock-ui")]
-    pub(crate) fn reject_ui_collection(&mut self, error: UiPresentationIntegrationError) {
-        self.slot.reject_ui_collection(error);
     }
 }
 
@@ -409,19 +419,209 @@ fn publish_wgpu_capture(
     });
 }
 
-/// Installs the explicit stock renderer policy without enabling any domain contributor.
+/// Installs policy-independent stock collection and its ordered contribution phase.
+///
+/// Select this plugin explicitly alongside [`WgpuCapturePlugin`]. It installs neither a policy
+/// nor a domain contributor. Custom policies take the collected frame in
+/// [`WgpuStockCaptureSet::Compose`] and submit it through [`WgpuPolicyFrameWriter`].
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
-pub struct WgpuStockPolicyPlugin;
+pub struct WgpuStockCapturePlugin;
 
 #[derive(Default, Resource)]
-struct StockCaptureBuilder(WgpuStockCapture);
+struct StockCaptureBuilder {
+    draft: Option<WgpuStockFrame>,
+    closed: bool,
+}
 
+impl StockCaptureBuilder {
+    fn close(&mut self) {
+        self.closed = true;
+        // Dropping an original unsubmitted permission returns its pre-admitted Aborted outcome
+        // to its original owner, even if that owner's World resource has been replaced.
+        self.draft = None;
+    }
+}
+
+/// Ordered stock collection phases within [`crate::WgpuPolicyCaptureSet::Capture`].
+///
+/// Domain collectors run in `Contribute`; external composition runs in `Compose`. The frame
+/// remains pending until a composer takes it or logical Runtime close returns its permissions.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, SystemSet)]
-enum StockCaptureSet {
+pub enum WgpuStockCaptureSet {
     Reset,
     Contribute,
-    Emit,
+    Compose,
 }
+
+/// One stock snapshot and its optional original move-only UI completion responsibility.
+///
+/// The snapshot may be retained for replay. The sidecar must be submitted, retained for retry,
+/// or settled exactly once by the caller after handoff; it cannot be reconstructed from packets.
+#[derive(Debug)]
+#[must_use]
+pub struct WgpuStockFrame {
+    capture: Arc<WgpuStockCapture>,
+    #[cfg(feature = "stock-ui")]
+    ui: Option<WgpuUiSubmission>,
+}
+
+impl WgpuStockFrame {
+    /// Borrows replayable drawing inputs without transferring UI responsibility.
+    #[must_use]
+    pub fn capture(&self) -> &WgpuStockCapture {
+        &self.capture
+    }
+
+    /// Moves the immutable snapshot and the unchanged original UI sidecar to the composer.
+    #[cfg(feature = "stock-ui")]
+    #[must_use]
+    pub fn into_parts(self) -> (Arc<WgpuStockCapture>, Option<WgpuUiSubmission>) {
+        (self.capture, self.ui)
+    }
+
+    /// Moves the immutable snapshot to the composer when UI support is disabled.
+    #[cfg(not(feature = "stock-ui"))]
+    #[must_use]
+    pub fn into_parts(self) -> Arc<WgpuStockCapture> {
+        self.capture
+    }
+}
+
+/// Moves the current stock frame to the exact selected policy during capture.
+#[derive(SystemParam)]
+pub struct WgpuStockFrameReader<'w> {
+    builder: ResMut<'w, StockCaptureBuilder>,
+}
+
+impl WgpuStockFrameReader<'_> {
+    /// Takes at most once in [`WgpuStockCaptureSet::Compose`].
+    ///
+    /// A different or closed installation, an unavailable original Runtime connection, or a
+    /// busy/out-of-phase slot leaves both the snapshot and original UI sidecar untouched.
+    #[must_use]
+    pub fn take<P: WgpuRenderPolicy>(
+        &mut self,
+        installation: &WgpuPolicyInstallation<P>,
+        writer: &WgpuPolicyFrameWriter<'_>,
+    ) -> Option<WgpuStockFrame> {
+        if self.builder.closed || !writer.can_capture(installation) {
+            return None;
+        }
+        #[cfg(feature = "stock-ui")]
+        if self.builder.draft.as_ref()?.ui.is_some() && !writer.can_capture_with_ui(installation) {
+            return None;
+        }
+        self.builder.draft.take()
+    }
+}
+
+struct StockCaptureClose;
+
+impl StockCaptureClose {
+    fn drive(
+        &mut self,
+        context: &mut RuntimeCloseContext<'_>,
+    ) -> Result<RuntimeCloseProgress, RuntimeCloseParticipantError> {
+        if let Some(mut builder) =
+            context
+                .get_resource_mut::<StockCaptureBuilder>()
+                .map_err(|_| {
+                    RuntimeCloseParticipantError::retryable("stock-capture-builder-unavailable")
+                })?
+        {
+            builder.close();
+        }
+        Ok(RuntimeCloseProgress::Complete)
+    }
+}
+
+impl RuntimeCloseParticipant for StockCaptureClose {
+    fn begin_close(
+        &mut self,
+        context: &mut RuntimeCloseContext<'_>,
+    ) -> Result<RuntimeCloseProgress, RuntimeCloseParticipantError> {
+        self.drive(context)
+    }
+
+    fn poll_close(
+        &mut self,
+        context: &mut RuntimeCloseContext<'_>,
+    ) -> Result<RuntimeCloseProgress, RuntimeCloseParticipantError> {
+        self.drive(context)
+    }
+}
+
+impl Plugin for WgpuStockCapturePlugin {
+    fn declaration() -> &'static nara_app::PluginDeclaration {
+        &WGPU_STOCK_CAPTURE_PLUGIN_DECLARATION
+    }
+
+    fn build(&self, app: &mut App) -> Result<(), PluginError> {
+        app.init_resource::<StockCaptureBuilder>()?;
+        app.register_plugin_runtime_close_participant(
+            WGPU_STOCK_CAPTURE_SHUTDOWN_OBLIGATION,
+            RuntimeCloseParticipantId::new("nara.render-wgpu.stock-capture"),
+            StockCaptureClose,
+        )?;
+        app.configure_sets(
+            CoreStage::Render,
+            (
+                WgpuStockCaptureSet::Reset,
+                WgpuStockCaptureSet::Contribute,
+                WgpuStockCaptureSet::Compose,
+            )
+                .chain()
+                .in_set(WgpuFrameSet::Capture),
+        )?;
+        app.add_systems(
+            CoreStage::Render,
+            reset_stock_capture.in_set(WgpuStockCaptureSet::Reset),
+        )?;
+        Ok(())
+    }
+}
+
+#[cfg_attr(not(feature = "stock-ui"), allow(unused_mut))]
+fn reset_stock_capture(
+    mut writer: WgpuPolicyFrameWriter,
+    mut builder: ResMut<StockCaptureBuilder>,
+    #[cfg(feature = "stock-ui")] primary_window_id: Option<Res<PrimaryWindowId>>,
+) {
+    if builder.closed || !writer.can_collect_stock() {
+        return;
+    }
+    #[cfg(feature = "stock-ui")]
+    if builder
+        .draft
+        .as_ref()
+        .is_some_and(|draft| draft.ui.is_some())
+    {
+        // A missing custom composer must not silently replace original UI permissions on the
+        // next frame. Keep the draft for logical close and expose the incomplete composition.
+        writer.slot.reject_capture(WgpuFrameCaptureError::Policy(
+            WgpuRenderProgramError::feature(
+                "the previous stock frame was not handed off during its capture phase",
+            ),
+        ));
+        return;
+    }
+    let capture = WgpuStockCapture::default();
+    #[cfg(feature = "stock-ui")]
+    let capture = WgpuStockCapture {
+        primary_window_id: primary_window_id.map(|primary| primary.0),
+        ..capture
+    };
+    builder.draft = Some(WgpuStockFrame {
+        capture: Arc::new(capture),
+        #[cfg(feature = "stock-ui")]
+        ui: None,
+    });
+}
+
+/// Installs the default stock policy and composer without enabling any domain contributor.
+/// Requires an explicitly selected [`WgpuStockCapturePlugin`].
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
+pub struct WgpuStockPolicyPlugin;
 
 impl Plugin for WgpuStockPolicyPlugin {
     fn declaration() -> &'static nara_app::PluginDeclaration {
@@ -436,54 +636,45 @@ impl Plugin for WgpuStockPolicyPlugin {
                 message: error.to_string(),
             })?;
         install_wgpu_policy(app, installation)?;
-        app.init_resource::<StockCaptureBuilder>()?;
-        app.configure_sets(
-            CoreStage::Render,
-            (
-                StockCaptureSet::Reset,
-                StockCaptureSet::Contribute,
-                StockCaptureSet::Emit,
-            )
-                .chain()
-                .in_set(WgpuFrameSet::Capture),
-        )?;
         app.add_systems(
             CoreStage::Render,
-            (
-                reset_stock_capture.in_set(StockCaptureSet::Reset),
-                emit_stock_capture.in_set(StockCaptureSet::Emit),
-            ),
+            emit_stock_capture.in_set(WgpuStockCaptureSet::Compose),
         )?;
         Ok(())
-    }
-}
-
-fn reset_stock_capture(
-    installation: Res<WgpuPolicyInstallation<WgpuStockPolicy>>,
-    writer: WgpuPolicyFrameWriter,
-    mut builder: ResMut<StockCaptureBuilder>,
-) {
-    if writer.can_capture(&installation) {
-        builder.0 = WgpuStockCapture::default();
     }
 }
 
 fn emit_stock_capture(
     installation: Res<WgpuPolicyInstallation<WgpuStockPolicy>>,
     mut writer: WgpuPolicyFrameWriter,
-    mut builder: ResMut<StockCaptureBuilder>,
-    #[cfg(feature = "stock-ui")] primary_window_id: Option<Res<PrimaryWindowId>>,
+    mut reader: WgpuStockFrameReader,
 ) {
-    if !writer.can_capture(&installation) {
+    let Some(frame) = reader.take(&installation, &writer) else {
+        return;
+    };
+    let capture = Arc::clone(&frame.capture);
+    #[cfg(feature = "stock-ui")]
+    let mut frame = frame;
+    #[cfg(feature = "stock-ui")]
+    let captured = if let Some(ui) = frame.ui.take() {
+        writer
+            .capture_with_ui(&installation, capture, ui)
+            .map(|()| true)
+            .map_err(|failure| {
+                let (error, ui) = failure.into_parts();
+                frame.ui = Some(ui);
+                error
+            })
+    } else {
+        writer.capture(&installation, capture)
+    };
+    #[cfg(not(feature = "stock-ui"))]
+    let captured = writer.capture(&installation, capture);
+    if matches!(captured, Ok(true)) {
         return;
     }
-    let capture = std::mem::take(&mut builder.0);
-    #[cfg(feature = "stock-ui")]
-    let capture = WgpuStockCapture {
-        primary_window_id: primary_window_id.map(|primary| primary.0),
-        ..capture
-    };
-    if let Err(error) = writer.capture(&installation, Arc::new(capture)) {
+    reader.builder.draft = Some(frame);
+    if let Err(error) = captured {
         writer
             .slot
             .reject_capture(WgpuFrameCaptureError::Policy(error));
@@ -499,7 +690,7 @@ pub const WGPU_STOCK_SPRITE_PLUGIN_ID: nara_app::PluginId =
     nara_app::PluginId::new("nara.render-wgpu.stock-sprite");
 #[cfg(feature = "stock-sprite")]
 const WGPU_STOCK_SPRITE_PLUGIN_REQUIREMENTS: &[nara_app::PluginId] = &[
-    WGPU_STOCK_POLICY_PLUGIN_ID,
+    WGPU_STOCK_CAPTURE_PLUGIN_ID,
     nara_sprite_render::SPRITE_RENDER_PLUGIN_ID,
 ];
 #[cfg(feature = "stock-sprite")]
@@ -525,7 +716,7 @@ impl Plugin for WgpuStockSpritePlugin {
     fn build(&self, app: &mut App) -> Result<(), PluginError> {
         app.add_systems(
             CoreStage::Render,
-            collect_stock_sprites.in_set(StockCaptureSet::Contribute),
+            collect_stock_sprites.in_set(WgpuStockCaptureSet::Contribute),
         )?;
         Ok(())
     }
@@ -534,13 +725,18 @@ impl Plugin for WgpuStockSpritePlugin {
 #[cfg(feature = "stock-sprite")]
 fn collect_stock_sprites(
     sprite_batches: Res<nara_sprite_render::__private::SpriteBatches>,
-    installation: Res<WgpuPolicyInstallation<WgpuStockPolicy>>,
     writer: WgpuPolicyFrameWriter,
     mut builder: ResMut<StockCaptureBuilder>,
 ) {
-    if writer.can_capture(&installation) {
-        builder.0.sprite_batches = Some(sprite_batches.clone());
+    if builder.closed || !writer.can_collect_stock() {
+        return;
     }
+    let Some(draft) = builder.draft.as_mut() else {
+        return;
+    };
+    Arc::get_mut(&mut draft.capture)
+        .expect("an unhanded stock capture has one snapshot owner")
+        .sprite_batches = Some(sprite_batches.clone());
 }
 
 #[cfg(feature = "stock-ui")]
@@ -552,7 +748,7 @@ pub const WGPU_STOCK_UI_PLUGIN_ID: nara_app::PluginId =
     nara_app::PluginId::new("nara.render-wgpu.stock-ui");
 #[cfg(feature = "stock-ui")]
 const WGPU_STOCK_UI_PLUGIN_REQUIREMENTS: &[nara_app::PluginId] = &[
-    WGPU_STOCK_POLICY_PLUGIN_ID,
+    WGPU_STOCK_CAPTURE_PLUGIN_ID,
     nara_ui_render::UI_RENDER_PLUGIN_ID,
 ];
 #[cfg(feature = "stock-ui")]
@@ -575,7 +771,7 @@ impl Plugin for WgpuStockUiPlugin {
     fn build(&self, app: &mut App) -> Result<(), PluginError> {
         app.add_systems(
             CoreStage::Render,
-            collect_stock_ui.in_set(StockCaptureSet::Contribute),
+            collect_stock_ui.in_set(WgpuStockCaptureSet::Contribute),
         )?;
         Ok(())
     }
@@ -584,29 +780,44 @@ impl Plugin for WgpuStockUiPlugin {
 #[cfg(feature = "stock-ui")]
 fn collect_stock_ui(
     mut submissions: UiBackendSubmissionReader,
-    installation: Res<WgpuPolicyInstallation<WgpuStockPolicy>>,
     mut writer: WgpuPolicyFrameWriter,
     mut builder: ResMut<StockCaptureBuilder>,
 ) {
-    if !writer.can_collect_ui(&installation) {
+    if builder.closed || !writer.can_collect_stock() || !writer.slot.accepts_ui_collection() {
+        return;
+    }
+    let Some(draft) = builder.draft.as_mut() else {
+        return;
+    };
+    if draft.ui.is_some() {
         return;
     }
     match submissions.take() {
         Ok(frame) => {
-            let (packets, submissions) = frame.into_parts();
-            if writer.collect_ui(submissions) {
-                builder.0.ui_packets = packets;
-            }
+            let (packets, ui) = WgpuUiSubmission::capture(frame);
+            Arc::get_mut(&mut draft.capture)
+                .expect("an unhanded stock capture has one snapshot owner")
+                .ui_packets = packets;
+            draft.ui = Some(ui);
         }
-        Err(error) => writer.reject_ui_collection(error),
+        Err(error) => {
+            writer.slot.reject_ui_collection(error);
+            // No original sidecar was acquired. Keep the refusal in the frame slot and let the
+            // next capture retry once the UI owner's admission condition has recovered.
+            builder.draft = None;
+        }
     }
 }
+
+#[cfg(test)]
+#[path = "plugin/stock_capture_tests.rs"]
+mod stock_capture_tests;
 
 #[cfg(test)]
 mod tests {
     use super::*;
 
-    fn capture_app() -> App {
+    pub(super) fn capture_app() -> App {
         let mut app = App::new();
         app.add_plugins((
             nara_reflect::ComponentRegistryPlugin,
@@ -617,6 +828,13 @@ mod tests {
             WgpuCapturePlugin,
         ))
         .unwrap();
+        app
+    }
+
+    fn stock_policy_app() -> App {
+        let mut app = capture_app();
+        app.add_plugins((WgpuStockCapturePlugin, WgpuStockPolicyPlugin))
+            .unwrap();
         app
     }
 
@@ -670,9 +888,9 @@ mod tests {
 
     #[test]
     fn stock_policy_installs_only_its_explicit_route() {
-        let mut app = capture_app();
-        app.add_plugins(WgpuStockPolicyPlugin).unwrap();
+        let app = stock_policy_app();
 
+        assert!(app.has_plugin(WGPU_STOCK_CAPTURE_PLUGIN_ID));
         assert!(
             app.world()
                 .contains_resource::<WgpuPolicyInstallation<WgpuStockPolicy>>()
@@ -689,8 +907,7 @@ mod tests {
 
     #[test]
     fn a_second_installation_never_replaces_the_selected_route() {
-        let mut app = capture_app();
-        app.add_plugins(WgpuStockPolicyPlugin).unwrap();
+        let mut app = stock_policy_app();
         let original = app
             .world()
             .resource::<WgpuPolicyInstallation<WgpuStockPolicy>>()
@@ -712,8 +929,7 @@ mod tests {
     fn writer_accepts_only_the_exact_selected_installation_once() {
         use nara_ecs::bevy_ecs::system::SystemState;
 
-        let mut app = capture_app();
-        app.add_plugins(WgpuStockPolicyPlugin).unwrap();
+        let mut app = stock_policy_app();
         let other = WgpuPolicyDefinition::new(WgpuStockPolicy::default())
             .install()
             .unwrap();
@@ -749,8 +965,7 @@ mod tests {
     fn replacing_the_typed_resource_cannot_retarget_capture_admission() {
         use nara_ecs::bevy_ecs::system::SystemState;
 
-        let mut app = capture_app();
-        app.add_plugins(WgpuStockPolicyPlugin).unwrap();
+        let mut app = stock_policy_app();
         let replacement = WgpuPolicyDefinition::new(WgpuStockPolicy::default())
             .install()
             .unwrap();
@@ -775,8 +990,7 @@ mod tests {
     fn a_busy_connection_does_not_accept_another_policy_draft() {
         use nara_ecs::bevy_ecs::system::SystemState;
 
-        let mut app = capture_app();
-        app.add_plugins(WgpuStockPolicyPlugin).unwrap();
+        let mut app = stock_policy_app();
         let world = app.world_mut().unwrap();
         world.resource_mut::<WgpuFramePacketSlot>().reset();
         world
@@ -811,8 +1025,7 @@ mod tests {
         use nara_ui_render::__private::UiPresentationOutcomes;
 
         for replace_connection in [false, true] {
-            let mut app = capture_app();
-            app.add_plugins(WgpuStockPolicyPlugin).unwrap();
+            let mut app = stock_policy_app();
             let mut outcomes = UiPresentationOutcomes::default();
             let packet = crate::tests::ui_outcome_packet();
             let submissions = vec![crate::tests::admit_ui_attempt(
@@ -879,12 +1092,12 @@ mod tests {
 
     #[cfg(feature = "stock-sprite")]
     #[test]
-    fn sprite_contribution_requires_stock_and_the_sprite_owner() {
+    fn sprite_contribution_requires_capture_and_the_sprite_owner() {
         let declaration = WgpuStockSpritePlugin::declaration();
         assert_eq!(
             declaration.requires_plugins,
             &[
-                WGPU_STOCK_POLICY_PLUGIN_ID,
+                WGPU_STOCK_CAPTURE_PLUGIN_ID,
                 nara_sprite_render::SPRITE_RENDER_PLUGIN_ID
             ]
         );
@@ -896,12 +1109,12 @@ mod tests {
 
     #[cfg(feature = "stock-ui")]
     #[test]
-    fn ui_contribution_requires_stock_and_the_ui_owner() {
+    fn ui_contribution_requires_capture_and_the_ui_owner() {
         let declaration = WgpuStockUiPlugin::declaration();
         assert_eq!(
             declaration.requires_plugins,
             &[
-                WGPU_STOCK_POLICY_PLUGIN_ID,
+                WGPU_STOCK_CAPTURE_PLUGIN_ID,
                 nara_ui_render::UI_RENDER_PLUGIN_ID
             ]
         );

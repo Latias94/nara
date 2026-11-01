@@ -90,9 +90,6 @@ pub(crate) struct LegacyWgpuCapturedFrame {
 pub enum WgpuFrameCaptureError {
     #[error("managed runtime generation is unavailable")]
     MissingRuntimeGeneration,
-    #[cfg(feature = "stock-ui")]
-    #[error("the previous UI frame transaction did not reach terminal completion")]
-    IncompleteUiTransaction,
     #[error(transparent)]
     Topology(#[from] RenderFramePacketError),
     #[error("a render batch does not belong to the admitted view and target")]
@@ -428,10 +425,6 @@ impl WgpuFramePacketSlot {
             return;
         }
         if self.phase == CapturePhase::Collecting {
-            #[cfg(feature = "stock-ui")]
-            if self.ui_submissions.is_some() && self.collection_error.is_none() {
-                self.collection_error = Some(WgpuFrameCaptureError::IncompleteUiTransaction);
-            }
             return;
         }
         self.phase = CapturePhase::Collecting;
@@ -456,15 +449,6 @@ impl WgpuFramePacketSlot {
     #[cfg(feature = "stock-ui")]
     pub(crate) fn accepts_ui_collection(&self) -> bool {
         self.accepts_capture() && self.ui_submissions.is_none()
-    }
-
-    #[cfg(feature = "stock-ui")]
-    pub(crate) fn collect_ui(&mut self, submissions: Vec<UiBackendSubmission>) -> bool {
-        if !self.accepts_ui_collection() {
-            return false;
-        }
-        self.ui_submissions = Some(WgpuUiSubmissionState::Prepared(submissions));
-        true
     }
 
     #[cfg(feature = "stock-ui")]
@@ -809,6 +793,15 @@ pub(crate) const fn classify_ui_backend_fault(
 mod tests {
     use super::*;
 
+    #[cfg(feature = "stock-ui")]
+    fn empty_policy_capture() -> Arc<dyn CapturedPolicy> {
+        crate::WgpuPolicyDefinition::new(crate::WgpuStockPolicy::new())
+            .install()
+            .unwrap()
+            .accept(Arc::new(crate::WgpuStockCapture::new()))
+            .unwrap()
+    }
+
     #[test]
     fn sealed_reader_preserves_capture_errors_without_taking_transport() {
         let mut world = World::new();
@@ -1063,7 +1056,13 @@ mod tests {
                 }
                 2 => {
                     slot.reset();
-                    assert!(slot.collect_ui(Vec::new()));
+                    assert!(
+                        slot.collect_policy_with_ui(
+                            empty_policy_capture(),
+                            WgpuUiSubmissionState::Prepared(Vec::new())
+                        )
+                        .is_ok()
+                    );
                 }
                 3 => {
                     slot.reset();
@@ -1240,8 +1239,20 @@ mod tests {
         let submissions = prepare_ui_submissions(&mut outcomes, &packet, 1);
         let mut slot = WgpuFramePacketSlot::default();
         slot.reset();
-        assert!(slot.collect_ui(submissions));
-        assert!(!slot.collect_ui(Vec::new()));
+        assert!(
+            slot.collect_policy_with_ui(
+                empty_policy_capture(),
+                WgpuUiSubmissionState::Prepared(submissions)
+            )
+            .is_ok()
+        );
+        assert!(
+            slot.collect_policy_with_ui(
+                empty_policy_capture(),
+                WgpuUiSubmissionState::Prepared(Vec::new())
+            )
+            .is_err()
+        );
         slot.seal(Ok(None), 7, Instant::now());
         slot.reset();
         assert!(!slot.accepts_ui_collection());
@@ -1270,28 +1281,29 @@ mod tests {
 
     #[cfg(feature = "stock-ui")]
     #[test]
-    fn reset_rejects_without_overwriting_an_incomplete_ui_transaction() {
+    fn reset_preserves_an_unsealed_atomic_policy_and_original_ui_pair() {
         let packet = ui_packet();
         let mut outcomes = UiPresentationOutcomes::default();
         let submissions = prepare_ui_submissions(&mut outcomes, &packet, 1);
         let mut slot = WgpuFramePacketSlot::default();
         slot.reset();
-        assert!(slot.collect_ui(submissions));
+        assert!(
+            slot.collect_policy_with_ui(
+                empty_policy_capture(),
+                WgpuUiSubmissionState::Prepared(submissions)
+            )
+            .is_ok()
+        );
 
         slot.reset();
 
         assert!(!slot.accepts_ui_collection());
         assert!(slot.ui_submissions.is_some());
-        assert!(matches!(
-            slot.collection_error,
-            Some(WgpuFrameCaptureError::IncompleteUiTransaction)
-        ));
+        assert!(slot.capture.is_some());
+        assert!(slot.collection_error.is_none());
         slot.seal(Ok(None), 7, Instant::now());
         let batch = slot.take_batch().unwrap();
-        assert!(matches!(
-            batch.captured,
-            Err(WgpuFrameCaptureError::IncompleteUiTransaction)
-        ));
+        assert!(matches!(batch.captured, Ok(None)));
         let submissions = batch.ui.unwrap();
         assert_eq!(submissions.submission_count(), 1);
         slot.close();
@@ -1321,7 +1333,13 @@ mod tests {
         let submissions = prepare_ui_submissions(&mut outcomes, &packet, 2);
         let mut slot = WgpuFramePacketSlot::default();
         slot.reset();
-        assert!(slot.collect_ui(submissions));
+        assert!(
+            slot.collect_policy_with_ui(
+                empty_policy_capture(),
+                WgpuUiSubmissionState::Prepared(submissions)
+            )
+            .is_ok()
+        );
 
         slot.close();
         slot.close();

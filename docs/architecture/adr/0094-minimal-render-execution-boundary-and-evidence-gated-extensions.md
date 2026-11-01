@@ -285,6 +285,31 @@ pixels; exact temporal replay/checkpoints remain separate unimplemented capabili
 These responsibilities are selected for the next bounded production unit. Current implementation
 and actual evidence remain in the ledger; this does not qualify the complete Proposed0121 workload.
 
+### Shared Stock Program Construction
+
+The ordinary external Scene-effect workflow selects shared typed stock construction through the
+existing `WgpuRenderPolicy`, rather than requiring each policy to reproduce Sprite, Canvas and UI
+lowering. The default policy uses these same helpers. They retain original Feature declarations,
+bind through the existing candidate context and build one finite program; they confer no native
+execution authority or live World access. The full Proposed0121 remains unqualified.
+
+World-raster color, Canvas-resolved Scene color and the final UI composite have distinct semantic
+ports and actual extent/format/transfer/alpha facts. A composing policy explicitly wires an effect
+before or after optional Canvas resolution. It may export the untouched original Scene as another
+exact version. No implicit latest slot or universal pre-UI pixel space is introduced. Final UI
+lowering selects the exact chosen Scene version, preserves full-resolution HUD drawing and supplies
+the original UI binding validated by the existing Host.
+
+Stock capture collection is independent of the selected policy type. An admitted handoff transfers
+the immutable stock drawing and original optional move-only UI sidecar to its composing collector.
+Unavailable or foreign routes cannot drain it. The collector uses the existing capture writer;
+refusal retains the same sidecar, and logical Close terminalizes any unsubmitted responsibility.
+Runtime product construction and Editor Scene/Canvas construction explicitly select their original
+policy/capture adapter. Picking retains its own exact source geometry rather than requiring a
+downcast to the default renderer. The [production unit](../render-program-production-design.md#next-production-unit-public-stock-composition)
+owns implementation, independent blur/second-effect consumers and affected native qualification.
+This accepted selection is not evidence that those consumers already pass.
+
 ## Candidate Extensions, Not Accepted Decisions
 
 The following remain non-normative hypotheses in the render pressure matrix, render Interface

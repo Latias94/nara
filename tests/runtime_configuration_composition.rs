@@ -169,6 +169,110 @@ pending_capacity = 8
     );
 }
 
+#[cfg(feature = "render-wgpu")]
+#[test]
+fn source_and_runtime_configuration_keep_the_exact_selected_policy_and_fingerprint() {
+    use nara::ProductConfiguration;
+    use nara::render_wgpu::{WGPU_STOCK_CAPTURE_PLUGIN_ID, WGPU_STOCK_POLICY_PLUGIN_ID};
+
+    struct PolicyPlugin;
+    impl Plugin for PolicyPlugin {
+        fn declaration() -> &'static PluginDeclaration {
+            static DECLARATION: PluginDeclaration = PluginDeclaration::new(
+                PluginId::new("test.runtime-configuration.policy"),
+                PluginCategory::Runtime,
+            )
+            .requires_plugins(&[WGPU_STOCK_CAPTURE_PLUGIN_ID]);
+            &DECLARATION
+        }
+
+        fn build(&self, _app: &mut App) -> Result<(), PluginError> {
+            panic!("configuration resolution cannot build a policy plugin")
+        }
+    }
+
+    struct PolicyConfiguration(u32);
+    impl ProductConfiguration for PolicyConfiguration {
+        fn write_canonical(&self, output: &mut Vec<u8>) {
+            output.extend_from_slice(&self.0.to_le_bytes());
+        }
+    }
+
+    let recipe = |value| {
+        ProductRecipe::new()
+            .select_wgpu_policy::<PolicyPlugin, _, _, _>(
+                PolicyConfiguration(value),
+                |_| panic!("configuration resolution cannot invoke the plugin factory"),
+                |_| panic!("configuration resolution cannot invoke the adapter factory"),
+            )
+            .unwrap()
+    };
+    let manifest = TestManifest::new(
+        r#"
+schema_version = 1
+[project]
+source_universe = 'ab6dcb23-33ca-59eb-85d5-31234eb0e2ea'
+native_document_identity = 'project_location'
+name = 'Selected policy configuration'
+[runtime]
+preset = 'minimal'
+[capabilities]
+requested = ['render-wgpu']
+"#,
+    );
+    let candidate = ingest_project_manifest(&manifest.capability(), None).unwrap();
+    let selected = recipe(19);
+    let configuration_fingerprint = selected
+        .selected_wgpu_policy()
+        .unwrap()
+        .configuration_fingerprint();
+    let source = resolve_product_recipe(&candidate, selected.clone()).unwrap();
+    let runtime =
+        resolve_runtime_configuration(candidate.runtime_configuration(), selected).unwrap();
+    assert_eq!(
+        source.plugin_plan().fingerprint(),
+        runtime.plugin_plan().fingerprint(),
+    );
+    for plan in [source.plugin_plan(), runtime.plugin_plan()] {
+        let policy = plan
+            .entries()
+            .iter()
+            .find(|entry| entry.plugin_id() == PolicyPlugin::declaration().id)
+            .unwrap();
+        assert_eq!(
+            policy.definition_key().unwrap().configuration().as_bytes(),
+            configuration_fingerprint,
+        );
+        assert_eq!(
+            plan.entries()
+                .iter()
+                .filter(|entry| entry.plugin_id() == WGPU_STOCK_CAPTURE_PLUGIN_ID)
+                .count(),
+            1,
+        );
+        assert!(
+            !plan
+                .entries()
+                .iter()
+                .any(|entry| entry.plugin_id() == WGPU_STOCK_POLICY_PLUGIN_ID)
+        );
+    }
+    let changed =
+        resolve_runtime_configuration(candidate.runtime_configuration(), recipe(23)).unwrap();
+    assert_ne!(
+        runtime.plugin_plan().fingerprint(),
+        changed.plugin_plan().fingerprint(),
+    );
+    assert_eq!(
+        runtime.schema_validation().composition_fingerprint(),
+        changed.schema_validation().composition_fingerprint(),
+    );
+    assert_eq!(
+        source.schema_validation().composition_fingerprint(),
+        runtime.schema_validation().composition_fingerprint(),
+    );
+}
+
 #[test]
 fn standalone_runtime_composition_needs_only_admitted_configuration_and_recipe() {
     let configuration = RuntimeConfiguration::default().resolve().unwrap();

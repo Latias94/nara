@@ -157,6 +157,14 @@ impl WgpuRenderHost {
                         // as rejection by the same policy during program construction is.
                         Err(error.into())
                     }
+                    #[cfg(feature = "stock-ui")]
+                    crate::WgpuFrameCaptureError::UiPresentation(
+                        error @ (nara_ui_render::UiPresentationIntegrationError::OutcomeCapacityUnavailable { .. }
+                            | nara_ui_render::UiPresentationIntegrationError::PendingPresentationOutcomes { .. }
+                            | nara_ui_render::UiPresentationIntegrationError::OutstandingBackendOutcomeReservations { .. }),
+                    ) => Err(WgpuRenderHostError::Backend(WgpuRenderError::UploadDeferred {
+                        message: error.to_string(),
+                    })),
                     error => {
                         status.mark_skipped_with_message(
                             frame.index,

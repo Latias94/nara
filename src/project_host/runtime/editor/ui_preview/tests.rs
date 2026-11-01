@@ -3,7 +3,9 @@ use nara_ecs::World;
 use nara_image::ImageAsset;
 use nara_project::{EffectivePrimaryUiSurface, EffectiveUiSafeArea};
 use nara_reflect::ComponentTypeId;
-use nara_render_wgpu::{WgpuRenderPolicy, WgpuRenderProgramError};
+use nara_render_wgpu::{
+    WgpuPolicyDefinition, WgpuRenderPolicy, WgpuRenderProgramError, WgpuStockPolicy,
+};
 use nara_scene::{PrefabDocument, SceneComponentRecord, SceneEntityId, SceneEntityRecord};
 use nara_ui::{__private::project_prefab_authoring, UiNode, UiRoot};
 
@@ -100,7 +102,7 @@ fn canvas_moves_original_input_and_rebuilds_under_its_retained_installation() {
     let original_input = candidate.render_input.clone();
     let original_paint = Arc::clone(&candidate.paint_packet);
     let original_canvas = candidate.canvas.clone();
-    let installation = session.policy.id();
+    let installation = original_input.installation();
 
     let (document, revision, gesture, generation, input, paint, canvas) = candidate.into_parts();
     assert_eq!(document, EditorDocumentId::from_raw(1));
@@ -138,7 +140,6 @@ fn canvas_moves_original_input_and_rebuilds_under_its_retained_installation() {
     session.retire();
     drop(session);
     let mut replacement = EditorUiPreviewSession::new().unwrap();
-    assert_ne!(replacement.policy.id(), installation);
     assert_eq!(input.installation(), installation);
     assert_eq!(rebuilt_input.installation(), installation);
     assert!(std::ptr::eq(
@@ -150,15 +151,13 @@ fn canvas_moves_original_input_and_rebuilds_under_its_retained_installation() {
         UiAuthoringCanvasProjection::Ready(_)
     ));
     let foreign = replacement.take_candidate().unwrap();
+    assert_ne!(foreign.render_input.installation(), installation);
     assert_ne!(
         foreign.render_input.packet().target(),
         input.packet().target()
     );
     assert!(
-        replacement
-            .policy
-            .definition()
-            .policy()
+        WgpuStockPolicy::new()
             .validate_capture(
                 foreign.render_input.packet(),
                 input.captured::<WgpuStockPolicy>().unwrap(),
@@ -169,16 +168,32 @@ fn canvas_moves_original_input_and_rebuilds_under_its_retained_installation() {
 }
 
 #[test]
-fn closed_canvas_policy_rejects_capture_and_clears_the_previous_candidate() {
+fn rejected_canvas_policy_capture_clears_the_previous_candidate() {
+    use std::sync::atomic::{AtomicBool, Ordering};
+
     let mut source = CanvasSource::new();
     let mut session = EditorUiPreviewSession::new().unwrap();
+    let rejected = Arc::new(AtomicBool::new(false));
+    let reject_capture = Arc::clone(&rejected);
+    session.policy = WgpuStockCaptureAdapter::new(
+        WgpuPolicyDefinition::new(WgpuStockPolicy::new())
+            .install()
+            .unwrap(),
+        move |stock| {
+            if reject_capture.load(Ordering::SeqCst) {
+                Err(WgpuRenderProgramError::PolicyClosed)
+            } else {
+                Ok(Arc::new(stock))
+            }
+        },
+    );
     assert!(matches!(
         source.prepare(&mut session),
         UiAuthoringCanvasProjection::Ready(_)
     ));
     assert!(session.candidate.is_some());
     let frame_index = session.next_frame_index;
-    session.policy.close();
+    rejected.store(true, Ordering::SeqCst);
     assert!(matches!(
         session.try_rebuild(session.key.clone().unwrap(), source.profile),
         Err(UiPreviewError::Policy(WgpuRenderProgramError::PolicyClosed))
@@ -198,4 +213,67 @@ fn closed_canvas_policy_rejects_capture_and_clears_the_previous_candidate() {
     assert_eq!(session.geometry_generation(), None);
     assert!(session.take_candidate().is_none());
     assert_eq!(session.next_frame_index, frame_index);
+}
+
+#[test]
+fn configured_canvas_keeps_original_capture_and_paint_across_owner_replacement() {
+    use crate::product::wgpu_policy_tests::{TestPolicy, recipe};
+
+    let source = CanvasSource::new();
+    let selected = recipe(19);
+    let mut session = EditorUiPreviewSession::with_recipe(&selected).unwrap();
+    assert!(matches!(
+        source.prepare(&mut session),
+        UiAuthoringCanvasProjection::Ready(_)
+    ));
+    let candidate = session.take_candidate().unwrap();
+    let original = candidate.render_input.clone();
+    let (_, _, _, _, input, paint, _) = candidate.into_parts();
+    let captured = input.captured::<TestPolicy>().unwrap();
+    assert_eq!(captured.value, 19);
+    assert!(input.captured::<WgpuStockPolicy>().is_none());
+    assert!(Arc::ptr_eq(&captured.stock.ui_packets()[0], &paint));
+    drop(session);
+
+    // Content refresh reconstructs each Canvas from the Session's retained recipe.
+    let mut refreshed = EditorUiPreviewSession::with_recipe(&selected).unwrap();
+    assert!(matches!(
+        source.prepare(&mut refreshed),
+        UiAuthoringCanvasProjection::Ready(_)
+    ));
+    let refreshed = refreshed.take_candidate().unwrap();
+    assert_ne!(refreshed.render_input.installation(), input.installation());
+    assert_eq!(
+        refreshed
+            .render_input
+            .captured::<TestPolicy>()
+            .unwrap()
+            .value,
+        19,
+    );
+
+    let mut successor = EditorUiPreviewSession::with_recipe(&recipe(23)).unwrap();
+    assert!(matches!(
+        source.prepare(&mut successor),
+        UiAuthoringCanvasProjection::Ready(_)
+    ));
+    let successor = successor.take_candidate().unwrap();
+    assert_eq!(
+        successor
+            .render_input
+            .captured::<TestPolicy>()
+            .unwrap()
+            .value,
+        23,
+    );
+    assert_ne!(successor.render_input.installation(), input.installation());
+    assert!(std::ptr::eq(input.packet(), original.packet()));
+    assert!(std::ptr::eq(
+        input.captured::<TestPolicy>().unwrap(),
+        original.captured::<TestPolicy>().unwrap(),
+    ));
+    assert!(Arc::ptr_eq(
+        &input.captured::<TestPolicy>().unwrap().stock.ui_packets()[0],
+        &paint,
+    ));
 }

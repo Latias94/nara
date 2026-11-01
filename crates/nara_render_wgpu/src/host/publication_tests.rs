@@ -343,7 +343,7 @@ fn native_published_output_survives_old_binding_drop_panic_without_reusing_its_i
             .initial_storage
             .is_none()
     );
-    assert_eq!(published_b.image().0.texture, initial_texture);
+    assert_eq!(published_b.image().0.texture(), &initial_texture);
     let final_b = published_b.final_texture::<FinalColor>().unwrap();
     let history_b = published_b
         .history_texture::<FinalColor, _>(fixture.view.id(), &fixture.effect, 0)
@@ -354,6 +354,13 @@ fn native_published_output_survives_old_binding_drop_panic_without_reusing_its_i
     assert!(matches!(
         host.prepare(&producer, &input_b).unwrap_err(),
         WgpuRenderHostError::Backend(WgpuRenderError::FrameAlreadyConsumed { frame_index: 2 })
+    ));
+    let image_b = published_b.into_image();
+    let image_texture_b = image_b.texture::<FinalColor>().unwrap();
+    assert!(Arc::ptr_eq(&final_b.storage, &image_texture_b.storage));
+    assert!(matches!(
+        image_b.texture::<crate::WgpuWorldColor>(),
+        Err(WgpuRenderProgramError::ResourceSemantic)
     ));
 
     let (input_c, probe_c) = fixture.input(3, wgpu::Color::BLUE);
@@ -366,9 +373,10 @@ fn native_published_output_survives_old_binding_drop_panic_without_reusing_its_i
         host.views[&producer.id()].admission.last_frame_index,
         Some(3)
     );
-    assert_ne!(published_b.image().0.texture, published_c.image().0.texture);
+    assert_ne!(image_b.0.texture(), published_c.image().0.texture());
     assert_eq!(read_pixel(&mut host, published_c.image()), [0, 0, 255, 255]);
-    assert_eq!(read_pixel(&mut host, published_b.image()), [0, 255, 0, 255]);
+    assert_eq!(read_pixel(&mut host, &image_b), [0, 255, 0, 255]);
+    assert_eq!(image_texture_b.frame_index(), 2);
     assert_eq!(history_b.frame_index(), 2);
     assert_eq!(probe_a.binding_drops.load(Ordering::SeqCst), 1);
 }
@@ -424,7 +432,7 @@ fn native_final_storage_usage_replaces_incompatible_initial_storage_on_the_first
     let required_usage = final_descriptor(wgpu::TextureUsages::STORAGE_BINDING)
         .native
         .usage;
-    assert!(first.image().0.texture.usage().contains(required_usage));
+    assert!(first.image().0.texture().usage().contains(required_usage));
     assert_eq!(read_pixel(&mut host, first.image()), [255, 0, 0, 255]);
     assert_eq!(
         host.views[&producer.id()].admission.last_frame_index,
@@ -436,8 +444,8 @@ fn native_final_storage_usage_replaces_incompatible_initial_storage_on_the_first
     assert_eq!(*second_probe.predecessors.lock().unwrap(), [Some(1)]);
     let second = host.submit_candidate(&producer, second_candidate).unwrap();
     assert!(!second.outputs().cleanup_panicked());
-    assert!(second.image().0.texture.usage().contains(required_usage));
-    assert_ne!(first.image().0.texture, second.image().0.texture);
+    assert!(second.image().0.texture().usage().contains(required_usage));
+    assert_ne!(first.image().0.texture(), second.image().0.texture());
     assert_eq!(read_pixel(&mut host, second.image()), [0, 0, 255, 255]);
     assert_eq!(read_pixel(&mut host, first.image()), [255, 0, 0, 255]);
     assert_eq!(

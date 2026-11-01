@@ -23,6 +23,8 @@ mod profile;
 mod runtime_time;
 #[cfg(feature = "runtime-ui")]
 mod ui_surface;
+#[cfg(all(test, feature = "render-wgpu"))]
+pub(crate) mod wgpu_policy_tests;
 
 pub(crate) use profile::ProjectProfilePlugins;
 #[cfg(feature = "presentation-ui")]
@@ -92,6 +94,8 @@ struct ProductRecipeSchemaAuthorityPlugin {
     data_contributors: Arc<[(PluginId, PluginDefinitionKey)]>,
     scene_definition: PluginDefinitionKey,
     data_owners: Arc<[ComponentSchemaOwnerSnapshot]>,
+    #[cfg(feature = "render-wgpu")]
+    wgpu_policy: Option<(PluginId, PluginDefinitionKey, bool)>,
 }
 
 impl Plugin for ProductRecipeSchemaAuthorityPlugin {
@@ -117,6 +121,25 @@ impl Plugin for ProductRecipeSchemaAuthorityPlugin {
                 message: "data Schema contribution requires its exact recipe plugin definition"
                     .into(),
             });
+        }
+        #[cfg(feature = "render-wgpu")]
+        if let Some((plugin, definition, active)) = self.wgpu_policy {
+            let selected = context
+                .entries()
+                .iter()
+                .find(|entry| entry.plugin_id() == plugin);
+            let matches = match selected {
+                Some(entry) => active && entry.definition_key() == Some(definition),
+                None => !active,
+            };
+            if !matches {
+                return Err(PluginError::SetupFailed {
+                    plugin,
+                    message:
+                        "WGPU policy requires its exact recipe definition and profile activation"
+                            .into(),
+                });
+            }
         }
         Ok(())
     }
@@ -252,7 +275,7 @@ impl<P: Plugin> SchemaContribution<P> {
         F: Fn(&C) -> P + Send + Sync + 'static,
     {
         let declaration = recipe_declaration::<P>()?;
-        let definition = configured_definition(declaration, configuration, factory)?;
+        let definition = configured_definition(declaration, Arc::new(configuration), factory)?;
         schema_contribution(declaration, definition, providers, Vec::new())
     }
 
@@ -288,7 +311,7 @@ impl<P: Plugin> SchemaContribution<P> {
         F: Fn(&C) -> P + Send + Sync + 'static,
     {
         let declaration = recipe_declaration::<P>()?;
-        let definition = configured_definition(declaration, configuration, factory)?;
+        let definition = configured_definition(declaration, Arc::new(configuration), factory)?;
         schema_contribution(
             declaration,
             definition,
@@ -327,10 +350,27 @@ impl<P: Plugin> SchemaContribution<P> {
 pub struct ProductRecipe {
     entries: BTreeMap<PluginId, ProductRecipeEntry>,
     defaults: default_settings::ProductDefaultSettings,
+    #[cfg(feature = "render-wgpu")]
+    wgpu_policy: Option<RecipeWgpuPolicy>,
     #[cfg(all(feature = "runtime-2d", feature = "serde"))]
     pub(crate) asset_domains: crate::project_content::ProjectAssetDomains,
     #[cfg(all(feature = "runtime-2d", feature = "serde"))]
     pub(crate) runtime_codecs: crate::runtime_content::RuntimeCodecs,
+}
+
+#[cfg(feature = "render-wgpu")]
+#[derive(Clone)]
+struct RecipeWgpuPolicy {
+    plugin: PluginId,
+    definition: PluginDefinitionKey,
+    active: bool,
+    adapter: Arc<
+        dyn Fn() -> Result<
+                nara_render_wgpu::WgpuStockCaptureAdapter,
+                nara_render_wgpu::WgpuRenderProgramError,
+            > + Send
+            + Sync,
+    >,
 }
 
 impl fmt::Debug for ProductRecipe {
@@ -339,6 +379,8 @@ impl fmt::Debug for ProductRecipe {
         debug
             .field("entries", &self.entries.values().collect::<Vec<_>>())
             .field("defaults", &self.defaults);
+        #[cfg(feature = "render-wgpu")]
+        debug.field("wgpu_policy", &self.selected_wgpu_policy());
         #[cfg(all(feature = "runtime-2d", feature = "serde"))]
         debug.field("asset_domains", &self.asset_domains);
         #[cfg(all(feature = "runtime-2d", feature = "serde"))]
@@ -353,6 +395,8 @@ impl ProductRecipe {
         Self {
             entries: BTreeMap::new(),
             defaults: default_settings::ProductDefaultSettings::new(),
+            #[cfg(feature = "render-wgpu")]
+            wgpu_policy: None,
             #[cfg(all(feature = "runtime-2d", feature = "serde"))]
             asset_domains: crate::project_content::ProjectAssetDomains::new(),
             #[cfg(all(feature = "runtime-2d", feature = "serde"))]
@@ -437,6 +481,106 @@ impl ProductRecipe {
         self.entries.values()
     }
 
+    /// Adds and selects the replayable policy/composer entry for WGPU defaults.
+    ///
+    /// Both factories receive the same immutable canonical configuration. The plugin owns Runtime
+    /// capture composition; each Editor Scene or Canvas owner creates a fresh adapter with its own
+    /// installation. Neither factory may reconstruct a retained input through a current policy.
+    /// The plugin must declare the common stock capture dependency and cannot provide Schema.
+    /// Source and processed profiles activate the entry only when they request WGPU; headless
+    /// profiles retain its configuration identity without installing rendering or capture plugins.
+    #[cfg(feature = "render-wgpu")]
+    pub fn select_wgpu_policy<P, C, F, A>(
+        self,
+        configuration: C,
+        plugin_factory: F,
+        adapter_factory: A,
+    ) -> Result<Self, ProductRecipeError>
+    where
+        P: Plugin,
+        C: ProductConfiguration,
+        F: Fn(&C) -> P + Send + Sync + 'static,
+        A: Fn(
+                &C,
+            ) -> Result<
+                nara_render_wgpu::WgpuStockCaptureAdapter,
+                nara_render_wgpu::WgpuRenderProgramError,
+            > + Send
+            + Sync
+            + 'static,
+    {
+        let declaration = recipe_declaration::<P>()?;
+        if self.wgpu_policy.is_some() {
+            return Err(ProductRecipeError::DuplicateDefaultConfiguration {
+                plugin: declaration.id,
+            });
+        }
+        if !declaration
+            .requires_plugins
+            .contains(&nara_render_wgpu::WGPU_STOCK_CAPTURE_PLUGIN_ID)
+        {
+            return Err(ProductRecipeError::WgpuPolicyRequiresStockCapture {
+                plugin: declaration.id,
+            });
+        }
+        let configuration = Arc::new(configuration);
+        let definition =
+            configured_definition(declaration, Arc::clone(&configuration), plugin_factory)?;
+        let entry = recipe_entry::<P>(
+            declaration,
+            ProductRecipeEntryKind::RuntimePlugin,
+            definition,
+            Vec::new(),
+        )?;
+        let selection = RecipeWgpuPolicy {
+            plugin: entry.plugin_id,
+            active: true,
+            definition: entry.definition.key().ok_or(
+                ProductRecipeError::MissingConfigurationIdentity {
+                    plugin: entry.plugin_id,
+                },
+            )?,
+            adapter: Arc::new(move || adapter_factory(&configuration)),
+        };
+        let mut recipe = self.add_runtime_entry(entry)?;
+        recipe.wgpu_policy = Some(selection);
+        Ok(recipe)
+    }
+
+    /// Returns the exact configured plugin selected for the WGPU policy slot, if customized.
+    #[cfg(feature = "render-wgpu")]
+    #[must_use]
+    pub fn selected_wgpu_policy(&self) -> Option<&ProductRecipeEntry> {
+        self.wgpu_policy
+            .as_ref()
+            .and_then(|selection| self.entries.get(&selection.plugin))
+    }
+
+    /// Projects installation onto an admitted profile without removing compiled recipe entries.
+    #[cfg(feature = "render-wgpu")]
+    pub(crate) fn with_profile_capabilities(
+        mut self,
+        capabilities: nara_project::ProductCapabilitySet,
+    ) -> Self {
+        if let Some(selection) = &mut self.wgpu_policy {
+            selection.active = capabilities.contains(nara_project::ProductCapability::RenderWgpu);
+        }
+        self
+    }
+
+    #[cfg(feature = "render-wgpu")]
+    pub(crate) fn create_wgpu_capture_adapter(
+        &self,
+    ) -> Result<nara_render_wgpu::WgpuStockCaptureAdapter, nara_render_wgpu::WgpuRenderProgramError>
+    {
+        let Some(selection) = &self.wgpu_policy else {
+            return nara_render_wgpu::WgpuStockCaptureAdapter::stock();
+        };
+        catch_unwind(AssertUnwindSafe(|| (selection.adapter)())).unwrap_or(Err(
+            nara_render_wgpu::WgpuRenderProgramError::PolicyPanicked,
+        ))
+    }
+
     /// Adds a replayable runtime-only plugin reconstructed with `Default`.
     pub fn add_plugin<P>(self) -> Result<Self, ProductRecipeError>
     where
@@ -468,7 +612,7 @@ impl ProductRecipe {
         F: Fn(&C) -> P + Send + Sync + 'static,
     {
         let declaration = recipe_declaration::<P>()?;
-        let definition = configured_definition(declaration, configuration, factory)?;
+        let definition = configured_definition(declaration, Arc::new(configuration), factory)?;
         self.add_runtime_entry(recipe_entry::<P>(
             declaration,
             ProductRecipeEntryKind::RuntimePlugin,
@@ -489,7 +633,17 @@ impl ProductRecipe {
         F: Fn(&C) -> P + Send + Sync + 'static,
     {
         let declaration = recipe_declaration::<P>()?;
-        let definition = configured_definition(declaration, configuration, factory)?;
+        #[cfg(feature = "render-wgpu")]
+        if self
+            .wgpu_policy
+            .as_ref()
+            .is_some_and(|selection| selection.plugin == declaration.id)
+        {
+            return Err(ProductRecipeError::SelectedWgpuPolicyConfiguration {
+                plugin: declaration.id,
+            });
+        }
+        let definition = configured_definition(declaration, Arc::new(configuration), factory)?;
         self.replace_entry(recipe_entry::<P>(
             declaration,
             ProductRecipeEntryKind::RuntimePlugin,
@@ -620,6 +774,21 @@ impl ProductRecipe {
             canonical_configuration.extend_from_slice(&key.definition().version().to_le_bytes());
             canonical_configuration.extend_from_slice(&key.configuration().as_bytes());
         }
+        #[cfg(feature = "render-wgpu")]
+        let wgpu_policy = self.wgpu_policy.as_ref().map(|selection| {
+            canonical_configuration.extend_from_slice(b"nara.product-recipe.wgpu-policy.v1\0");
+            write_canonical_string(&mut canonical_configuration, selection.plugin.as_str());
+            write_canonical_string(
+                &mut canonical_configuration,
+                selection.definition.definition().as_str(),
+            );
+            canonical_configuration
+                .extend_from_slice(&selection.definition.definition().version().to_le_bytes());
+            canonical_configuration
+                .extend_from_slice(&selection.definition.configuration().as_bytes());
+            canonical_configuration.push(u8::from(selection.active));
+            (selection.plugin, selection.definition, selection.active)
+        });
         let providers: Arc<[RecipeSchemaProviderBinding]> = providers.into();
         let data_contributors: Arc<[(PluginId, PluginDefinitionKey)]> = data_contributors.into();
         PluginDefinition::infallible::<ProductRecipeSchemaAuthorityPlugin, _>(
@@ -630,6 +799,8 @@ impl ProductRecipe {
                 data_contributors: Arc::clone(&data_contributors),
                 scene_definition,
                 data_owners: Arc::clone(&data_owners),
+                #[cfg(feature = "render-wgpu")]
+                wgpu_policy,
             },
         )
     }
@@ -677,6 +848,18 @@ impl ProductRecipe {
             .add_definition(scene_definition)
             .add_definition(authority);
         self.entries.into_values().fold(builder, |builder, entry| {
+            #[cfg(feature = "render-wgpu")]
+            if let Some(selection) = &self.wgpu_policy
+                && selection.plugin == entry.plugin_id
+            {
+                if !selection.active {
+                    return builder;
+                }
+                return builder.add_slot(
+                    PluginSlot::required(SLOT_WGPU_SELECTED_POLICY, entry.plugin_id),
+                    entry.definition,
+                );
+            }
             builder.add_definition(entry.definition)
         })
     }
@@ -686,7 +869,10 @@ impl PluginGroup for ProductRecipe {
     const ID: PluginGroupId = PRODUCT_RECIPE_GROUP_ID;
 
     fn build(self) -> PluginGroupBuilder {
-        if self.defaults.is_empty() {
+        let plain_defaults = self.defaults.is_empty();
+        #[cfg(feature = "render-wgpu")]
+        let plain_defaults = plain_defaults && self.wgpu_policy.is_none();
+        if plain_defaults {
             self.build_entries(PluginGroupBuilder::new())
         } else {
             self.with_defaults(default_settings::MissingProductDefaults)
@@ -697,6 +883,14 @@ impl PluginGroup for ProductRecipe {
 
 #[derive(Debug, Error, Clone, PartialEq, Eq)]
 pub enum ProductRecipeError {
+    #[cfg(feature = "render-wgpu")]
+    #[error("selected WGPU policy plugin {plugin} must require the stock capture plugin")]
+    WgpuPolicyRequiresStockCapture { plugin: PluginId },
+    #[cfg(feature = "render-wgpu")]
+    #[error(
+        "selected WGPU policy plugin {plugin} must keep its paired capture adapter configuration"
+    )]
+    SelectedWgpuPolicyConfiguration { plugin: PluginId },
     #[cfg(all(feature = "runtime-2d", feature = "serde"))]
     #[error(transparent)]
     RuntimeCodec(#[from] crate::runtime_content::RuntimeCodecSelectionError),
@@ -766,7 +960,7 @@ const fn recipe_definition_id(declaration: &PluginDeclaration) -> PluginDefiniti
 
 fn configured_definition<P, C, F>(
     declaration: &'static PluginDeclaration,
-    configuration: C,
+    configuration: Arc<C>,
     factory: F,
 ) -> Result<PluginDefinition, ProductRecipeError>
 where
@@ -978,6 +1172,12 @@ const SLOT_WGPU_WINDOW_PRESENTATION: PluginSlotId =
 #[cfg(feature = "render-wgpu")]
 const SLOT_WGPU_STOCK_POLICY: PluginSlotId =
     PluginSlotId::new("nara.plugins.slot.render-wgpu.stock-policy");
+#[cfg(feature = "render-wgpu")]
+const SLOT_WGPU_STOCK_CAPTURE: PluginSlotId =
+    PluginSlotId::new("nara.plugins.slot.render-wgpu.stock-capture");
+#[cfg(feature = "render-wgpu")]
+const SLOT_WGPU_SELECTED_POLICY: PluginSlotId =
+    PluginSlotId::new("nara.plugins.slot.render-wgpu.selected-policy");
 
 /// Minimal runtime defaults for headless examples and code-first games.
 #[derive(Debug, Default, Clone, Copy)]
@@ -1324,6 +1524,13 @@ impl PluginGroup for WgpuBackendPlugins {
             )
             .add_slot(
                 PluginSlot::required(
+                    SLOT_WGPU_STOCK_CAPTURE,
+                    nara_render_wgpu::WGPU_STOCK_CAPTURE_PLUGIN_ID,
+                ),
+                PluginDefinition::for_default::<nara_render_wgpu::WgpuStockCapturePlugin>(),
+            )
+            .add_slot(
+                PluginSlot::optional(
                     SLOT_WGPU_STOCK_POLICY,
                     nara_render_wgpu::WGPU_STOCK_POLICY_PLUGIN_ID,
                 ),

@@ -90,16 +90,41 @@ fn test_image_output(
         1,
     );
     let view = texture.create_view(&wgpu::TextureViewDescriptor::default());
+    let descriptor = crate::WgpuProgramTextureDescriptor {
+        native: wgpu::TextureDescriptor {
+            label: Some("test_retained_image"),
+            size: texture.size(),
+            mip_level_count: texture.mip_level_count(),
+            sample_count: texture.sample_count(),
+            dimension: texture.dimension(),
+            format: texture.format(),
+            usage: texture.usage(),
+            view_formats: &[],
+        },
+        transfer: if texture.format().is_srgb() {
+            crate::TextureTransfer::Srgb
+        } else {
+            crate::TextureTransfer::Linear
+        },
+        alpha: crate::TextureAlpha::Premultiplied,
+    };
     crate::output::WgpuImageOutput(std::sync::Arc::new(crate::output::WgpuImageStorage {
-        epoch_lost: std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)),
-        _reservation: std::sync::Arc::new(
-            std::sync::Arc::new(crate::output::OutputBudget::default())
-                .reserve(u64::from(texture.width()) * u64::from(texture.height()) * 4)
-                .unwrap(),
-        ),
         receipt,
-        texture,
-        view,
+        resource: std::sync::Arc::new(crate::program::ProgramResourceStorage {
+            backend_instance_id,
+            device_epoch,
+            epoch_lost: std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)),
+            producer: receipt.producer_id(),
+            source: receipt.source_generation(),
+            frame_index: receipt.render_transaction_frame_index(),
+            descriptor: descriptor.resource::<crate::WgpuWorldColor>(),
+            _reservation: std::sync::Arc::new(
+                std::sync::Arc::new(crate::output::OutputBudget::default())
+                    .reserve(u64::from(texture.width()) * u64::from(texture.height()) * 4)
+                    .unwrap(),
+            ),
+            native: crate::program::NativeResource::Texture { texture, view },
+        }),
     }))
 }
 
@@ -203,7 +228,7 @@ fn renderer_shutdown_preserves_rejected_state_and_releases_bindings_idempotently
         view_formats: &[],
     });
     let display = crate::output::WgpuImageDisplay::issue(test_image_output(texture, 1, 1));
-    let view = display.output().0.view.clone();
+    let view = display.output().0.view().clone();
     let id = renderer.register_image(&display).unwrap();
     let binding = renderer.external_binding(id).unwrap();
     let observed_scope = dear_imgui_wgpu::WgpuFrameScope {
@@ -601,19 +626,8 @@ fn owned_renderer_records_exact_external_binding_revisions_and_excludes_clipped_
     let mismatched_output = crate::output::WgpuImageDisplay {
         output: crate::output::WgpuImageOutput(std::sync::Arc::new(
             crate::output::WgpuImageStorage {
-                epoch_lost: std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)),
-                _reservation: std::sync::Arc::new(
-                    std::sync::Arc::new(crate::output::OutputBudget::default())
-                        .reserve(
-                            u64::from(image.0.texture.width())
-                                * u64::from(image.0.texture.height())
-                                * 4,
-                        )
-                        .unwrap(),
-                ),
-                receipt: test_image_output(image.0.texture.clone(), 1, 1).receipt(),
-                texture: image.0.texture.clone(),
-                view: image.0.view.clone(),
+                receipt: test_image_output(image.0.texture().clone(), 1, 1).receipt(),
+                resource: std::sync::Arc::clone(&image.0.resource),
             },
         )),
         occurrence: mirror.occurrence(),
@@ -1359,9 +1373,9 @@ mod native {
                 .unwrap();
             let alias = image
                 .0
-                .texture
+                .texture()
                 .create_view(&wgpu::TextureViewDescriptor::default());
-            assert_ne!(alias, image.0.view);
+            assert_ne!(&alias, image.0.view());
             let display = execution.display_image(image.clone()).unwrap();
             let mirror = execution.display_image(image).unwrap();
             let texture = renderer.register_image(&display).unwrap();
@@ -1581,10 +1595,10 @@ mod native {
                         self.display.receipt().output_version(),
                         successor.receipt().output_version()
                     );
-                    assert_ne!(self.display.output().0.view, successor.0.view);
+                    assert_ne!(self.display.output().0.view(), successor.0.view());
                     self.successor = Some(successor);
                     let stale = WgpuImageDisplay::issue(super::test_image_output(
-                        self.display.output().0.texture.clone(),
+                        self.display.output().0.texture().clone(),
                         self.renderer.backend_instance_id,
                         self.renderer.device_epoch + 1,
                     ));

@@ -268,7 +268,7 @@ fn native_window_sample_dedup_and_command_limit_stop_growth_at_admission() {
         device: &namespace.device,
         queue: &namespace.queue,
         encoder: &mut encoder,
-        target_view: &display.output().0.view,
+        target_view: display.output().0.view(),
         surface_format: display.output().format(),
         surface_extent: target.extent(),
         viewports: &displays,

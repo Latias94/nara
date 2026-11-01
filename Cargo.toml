@@ -13,6 +13,7 @@ exclude = [
     "tests/fixtures/module-consumer",
     "tests/fixtures/behavior-languages",
     "tests/fixtures/ui-module-consumer",
+    "tests/fixtures/stock-composition-consumer",
     "samples/collect-game",
     "samples/two-level-game",
 ]

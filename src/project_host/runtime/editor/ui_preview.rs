@@ -13,10 +13,7 @@ use nara_render::{
     ViewLoadOp, ViewMapping2d, ViewportRect,
 };
 #[cfg(feature = "render-wgpu")]
-use nara_render_wgpu::{
-    WgpuPolicyDefinition, WgpuPolicyInstallation, WgpuRenderInput, WgpuStockCapture,
-    WgpuStockPolicy,
-};
+use nara_render_wgpu::{WgpuRenderInput, WgpuStockCapture, WgpuStockCaptureAdapter};
 use nara_scene::{SceneAuthoringRevision, SceneOccurrenceKey, SourceDocumentKey};
 use nara_tooling::{EditorDocumentId, EditorGestureStamp};
 use nara_ui::__private::{
@@ -132,7 +129,7 @@ pub(super) struct EditorUiPreviewSession {
     compiler: UiAuthoringCanvasCompiler,
     planner: UiPresentationPlanner,
     #[cfg(feature = "render-wgpu")]
-    policy: WgpuPolicyInstallation<WgpuStockPolicy>,
+    policy: WgpuStockCaptureAdapter,
     render_generation: EditorRenderGeneration,
     view_id: RenderViewId,
     target: Handle<RenderImage2d>,
@@ -169,7 +166,13 @@ impl std::fmt::Debug for EditorUiPreviewSession {
 }
 
 impl EditorUiPreviewSession {
+    #[cfg(test)]
     pub(super) fn new() -> Result<Self, UiPreviewError> {
+        Self::with_recipe(&crate::ProductRecipe::new())
+    }
+
+    pub(super) fn with_recipe(recipe: &crate::ProductRecipe) -> Result<Self, UiPreviewError> {
+        let _ = recipe;
         let compiler = UiAuthoringCanvasCompiler::new()?;
         let render_generation = EditorRenderGeneration::try_acquire()
             .ok_or(UiPreviewError::RenderGenerationExhausted)?;
@@ -179,7 +182,7 @@ impl EditorUiPreviewSession {
             compiler,
             planner: UiPresentationPlanner::default(),
             #[cfg(feature = "render-wgpu")]
-            policy: WgpuPolicyDefinition::new(WgpuStockPolicy::new()).install()?,
+            policy: recipe.create_wgpu_capture_adapter()?,
             render_generation,
             view_id: RenderViewId::try_acquire().ok_or(UiPreviewError::ViewIdentityExhausted)?,
             target: RenderImage2d::allocate_handle()?,
@@ -376,7 +379,7 @@ impl EditorUiPreviewSession {
         #[cfg(feature = "render-wgpu")]
         let render_input = self.policy.capture(
             render_packet,
-            Arc::new(WgpuStockCapture::new().with_ui(vec![Arc::clone(&paint_packet)], None, None)),
+            WgpuStockCapture::new().with_ui(vec![Arc::clone(&paint_packet)], None, None),
         )?;
         self.next_frame_index = frame_index;
         Ok(EditorUiPreviewCandidate {

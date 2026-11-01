@@ -74,6 +74,155 @@ fn public_check_returns_the_exact_loader_owned_startup_closure() {
     );
 }
 
+#[cfg(feature = "render-wgpu")]
+#[test]
+fn shared_policy_recipe_checks_headless_content_and_preserves_source_processed_selection() {
+    use nara::{
+        ProductConfiguration,
+        app::{App, Plugin, PluginCategory, PluginDeclaration, PluginError, PluginId},
+        fs::RelativePath,
+        project_host::{
+            ingest_project_manifest, resolve_product_recipe, resolve_runtime_configuration,
+        },
+        render_wgpu::{WGPU_CAPTURE_PLUGIN_ID, WGPU_STOCK_CAPTURE_PLUGIN_ID},
+    };
+
+    struct PolicyPlugin;
+    impl Plugin for PolicyPlugin {
+        fn declaration() -> &'static PluginDeclaration {
+            static DECLARATION: PluginDeclaration = PluginDeclaration::new(
+                PluginId::new("test.check.profile-policy"),
+                PluginCategory::Runtime,
+            )
+            .requires_plugins(&[WGPU_STOCK_CAPTURE_PLUGIN_ID]);
+            &DECLARATION
+        }
+
+        fn build(&self, _app: &mut App) -> Result<(), PluginError> {
+            panic!("Check cannot build the selected policy plugin")
+        }
+    }
+
+    #[derive(Default)]
+    struct ContentPlugin;
+    impl Plugin for ContentPlugin {
+        fn declaration() -> &'static PluginDeclaration {
+            static DECLARATION: PluginDeclaration = PluginDeclaration::new(
+                PluginId::new("test.check.shared-content"),
+                PluginCategory::Runtime,
+            );
+            &DECLARATION
+        }
+
+        fn build(&self, _app: &mut App) -> Result<(), PluginError> {
+            panic!("Check cannot build the shared content plugin")
+        }
+    }
+
+    struct Configuration(u32);
+    impl ProductConfiguration for Configuration {
+        fn write_canonical(&self, output: &mut Vec<u8>) {
+            output.extend_from_slice(&self.0.to_le_bytes());
+        }
+    }
+
+    let recipe = |value| {
+        ProductRecipe::new()
+            .add_plugin::<ContentPlugin>()
+            .unwrap()
+            .select_wgpu_policy::<PolicyPlugin, _, _, _>(
+                Configuration(value),
+                |_| panic!("Check cannot invoke the policy factory"),
+                |_| panic!("Check cannot invoke the Editor adapter factory"),
+            )
+            .unwrap()
+    };
+    let project = TestProject::with_prefab_startup();
+    project.select_local_headless_profile();
+    let manifest_path = project.path().join("nara.toml");
+    let mut manifest = fs::read_to_string(&manifest_path).unwrap();
+    manifest.push_str(
+        "\n[profiles.presented.capabilities]\nrequested = [\"runtime-2d\", \"render-wgpu\"]\n",
+    );
+    fs::write(manifest_path, manifest).unwrap();
+    let selected = recipe(19);
+    let original_fingerprint = selected
+        .selected_wgpu_policy()
+        .unwrap()
+        .configuration_fingerprint();
+    for profile in [None, Some("presented")] {
+        let root = project.root_capability();
+        let manifest = root
+            .open_file(&RelativePath::new("nara.toml").unwrap())
+            .unwrap();
+        let candidate = ingest_project_manifest(&manifest, profile).unwrap();
+        let source = resolve_product_recipe(&candidate, selected.clone()).unwrap();
+        let processed =
+            resolve_runtime_configuration(candidate.runtime_configuration(), selected.clone())
+                .unwrap();
+        assert_eq!(
+            source.plugin_plan().fingerprint(),
+            processed.plugin_plan().fingerprint(),
+        );
+        let active = profile.is_some();
+        for plugin in [
+            PolicyPlugin::declaration().id,
+            WGPU_CAPTURE_PLUGIN_ID,
+            WGPU_STOCK_CAPTURE_PLUGIN_ID,
+        ] {
+            assert_eq!(
+                source
+                    .plugin_plan()
+                    .entries()
+                    .iter()
+                    .any(|entry| entry.plugin_id() == plugin),
+                active,
+            );
+        }
+        assert!(
+            source
+                .plugin_plan()
+                .entries()
+                .iter()
+                .any(|entry| entry.plugin_id() == ContentPlugin::declaration().id)
+        );
+        let changed =
+            resolve_runtime_configuration(candidate.runtime_configuration(), recipe(23)).unwrap();
+        assert_ne!(
+            processed.plugin_plan().fingerprint(),
+            changed.plugin_plan().fingerprint(),
+        );
+        assert_eq!(
+            processed.schema_validation().composition_fingerprint(),
+            changed.schema_validation().composition_fingerprint(),
+        );
+
+        let request = ProjectCheckRequest::new(root, selected.clone());
+        let request = match profile {
+            Some(profile) => request.with_profile(profile),
+            None => request,
+        };
+        let checked = check_project(request).unwrap();
+        assert_eq!(
+            checked.schema_fingerprint(),
+            source.schema_validation().composition_fingerprint(),
+        );
+        assert!(
+            checked
+                .members()
+                .iter()
+                .any(|member| member.path().as_str() == "prefabs/enemy.prefab.json")
+        );
+        assert_eq!(
+            selected
+                .selected_wgpu_policy()
+                .unwrap()
+                .configuration_fingerprint(),
+            original_fingerprint,
+        );
+    }
+}
+
 #[test]
 fn unreferenced_import_does_not_enter_the_checked_startup_closure() {
     let project = TestProject::with_prefab_startup();

@@ -273,7 +273,9 @@ impl EditorAuthoringRuntime {
     pub(super) fn new(
         project: ProjectContentSnapshot,
         registry: &ComponentRegistrySnapshot,
+        recipe: &crate::ProductRecipe,
     ) -> Result<Self, EditorAuthoringConstructionFailure> {
+        let _ = recipe;
         #[cfg(not(feature = "presentation-2d"))]
         let _ = registry;
         let mut app = App::new();
@@ -281,7 +283,7 @@ impl EditorAuthoringRuntime {
             configure_authoring_app(&mut app)?;
             #[cfg(feature = "presentation-2d")]
             let preview =
-                EditorPreviewSession::install_trusted(&mut app, project.clone(), registry)?;
+                EditorPreviewSession::install_trusted(&mut app, project.clone(), registry, recipe)?;
             publish_snapshot_assets(
                 app.world_mut()
                     .map_err(|_| runtime_error("project.editor.preview-world-unavailable"))?,
@@ -321,20 +323,31 @@ impl EditorAuthoringRuntime {
         })
     }
 
+    #[cfg(test)]
     pub(super) fn new_authoring(
         project: &AuthoringProjectSessionSnapshot,
         registry: &ComponentRegistrySnapshot,
     ) -> Result<Self, EditorAuthoringConstructionFailure> {
+        Self::new_authoring_with_recipe(project, registry, &crate::ProductRecipe::new())
+    }
+
+    pub(super) fn new_authoring_with_recipe(
+        project: &AuthoringProjectSessionSnapshot,
+        registry: &ComponentRegistrySnapshot,
+        recipe: &crate::ProductRecipe,
+    ) -> Result<Self, EditorAuthoringConstructionFailure> {
+        let _ = recipe;
         #[cfg(not(feature = "presentation-2d"))]
         let _ = registry;
         let mut app = App::new();
         let preparation = (|| {
             configure_authoring_app(&mut app)?;
             #[cfg(feature = "presentation-2d")]
-            let preview = EditorPreviewSession::install_authoring(
+            let preview = EditorPreviewSession::install_authoring_with_recipe(
                 &mut app,
                 registry,
                 project.asset_database(),
+                recipe,
             )?;
             publish_authoring_image_records(
                 app.world_mut()
@@ -384,8 +397,9 @@ impl EditorAuthoringRuntime {
         &self,
         project: ProjectContentSnapshot,
         registry: &ComponentRegistrySnapshot,
+        recipe: &crate::ProductRecipe,
     ) -> Result<Self, EditorAuthoringConstructionFailure> {
-        let replacement = Self::new(project, registry)?;
+        let replacement = Self::new(project, registry, recipe)?;
         #[cfg(feature = "presentation-2d")]
         let replacement = {
             let mut replacement = replacement;

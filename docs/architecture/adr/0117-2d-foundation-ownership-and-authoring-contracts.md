@@ -20,6 +20,14 @@ general-purpose 2D authoring path, not implementing every Proposed ADR or promis
 This ADR refines only the clauses listed below. Unrelated guarantees in the referenced ADRs remain
 binding. Acceptance authorizes the changed contracts; it is not implementation or verification evidence.
 
+The shared stock-construction selection in
+[ADR0094](0094-minimal-render-execution-boundary-and-evidence-gated-extensions.md#shared-stock-program-construction)
+retains ordered 2D Views and captured WorldCanvas mapping while making world-raster effects,
+optional Canvas resolution and final full-resolution UI explicit wiring choices. Effects name
+their actual pixel space; target-sized effects do not silently inherit fixed-world coordinates.
+The default policy uses the same lowering as external policies, with original capture, UI
+completion, producer and native retirement ownership unchanged.
+
 ### One game definition and one execution owner
 
 App configures systems, resources, plugin contributions, and persistent schema. The resulting

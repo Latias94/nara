@@ -2107,6 +2107,7 @@ dependencies = [
  "dear-imgui-winit",
  "dunce",
  "nara",
+ "nara-stock-composition-consumer",
  "nara_render_wgpu",
  "nara_tasks",
  "rustix 1.1.4",
@@ -2115,6 +2116,34 @@ dependencies = [
  "thiserror 2.0.18",
  "windows-sys 0.61.2",
  "winit",
+]
+
+[[package]]
+name = "nara-stock-blur-effect"
+version = "0.0.0"
+dependencies = [
+ "nara_render_wgpu",
+ "wgpu",
+]
+
+[[package]]
+name = "nara-stock-composition-consumer"
+version = "0.0.0"
+dependencies = [
+ "half",
+ "nara",
+ "nara-stock-blur-effect",
+ "nara-stock-grade-effect",
+ "nara_render_wgpu",
+ "wgpu",
+]
+
+[[package]]
+name = "nara-stock-grade-effect"
+version = "0.0.0"
+dependencies = [
+ "nara_render_wgpu",
+ "wgpu",
 ]
 
 [[package]]

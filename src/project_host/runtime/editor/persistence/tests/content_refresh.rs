@@ -161,3 +161,156 @@ fn retry_and_runtime_retirement_revalidate_all_sources_after_the_representative_
         }
     }
 }
+
+#[cfg(all(feature = "presentation-2d", feature = "render-wgpu"))]
+#[test]
+fn custom_scene_policy_and_original_picking_batches_survive_content_refresh() {
+    use crate::product::wgpu_policy_tests::{TestPolicy, recipe};
+    use nara_reflect::ComponentTypeId;
+    use nara_render::Extent2d;
+    use nara_render_wgpu::WgpuStockPolicy;
+    use nara_scene::SceneComponentRecord;
+
+    let fixture = Fixture::new();
+    let manifest_path = fixture.root.join("nara.toml");
+    let manifest = fs::read_to_string(&manifest_path).unwrap().replace(
+        "requested = [\"runtime-2d\"]",
+        "requested = [\"runtime-2d\", \"presentation-2d\", \"render-wgpu\"]",
+    );
+    fs::write(manifest_path, manifest).unwrap();
+    fs::write(
+        fixture.root.join("prefabs/p.json"),
+        PrefabDocument::default().to_json_string().unwrap(),
+    )
+    .unwrap();
+    let registry_snapshot: nara_reflect::ComponentRegistrySnapshot =
+        crate::project_host::authoring::first_party_authoring_preview_registry(
+            built_in_schema_providers(),
+        )
+        .unwrap();
+    let mut world = nara_ecs::World::new();
+    let entity = world
+        .spawn((
+            nara_transform::Transform2d::default(),
+            nara_sprite::Sprite::from_color(
+                nara_core::Vec2::new(32.0, 32.0),
+                nara_core::Color::WHITE,
+            ),
+        ))
+        .id();
+    let mut body = SceneEntityRecord::new(SceneEntityId::new("body").unwrap());
+    for name in ["nara.transform.Transform2d", "nara.sprite.Sprite"] {
+        let component = ComponentTypeId::new(name);
+        body = body.with_component(
+            component.clone(),
+            SceneComponentRecord::new(
+                registry_snapshot.schema(&component).unwrap().version,
+                registry_snapshot
+                    .encode_component(&component, &world, entity)
+                    .unwrap()
+                    .unwrap(),
+            ),
+        );
+    }
+    let mut anchor = SceneEntityRecord::new(SceneEntityId::new("anchor").unwrap());
+    anchor.prefab = Some(nara_scene::PrefabInstance {
+        source: nara_asset::AssetRef::path("p.json").unwrap(),
+        overrides: Default::default(),
+    });
+    fs::write(
+        fixture.root.join("scenes/startup.scene.json"),
+        SceneDocument::from_ordered_roots([body, anchor])
+            .to_json_string()
+            .unwrap(),
+    )
+    .unwrap();
+    let mut editor = EditorProjectSession::open_trusted_compiled(
+        fixture.capability(),
+        super::super::super::TrustedCompiledEditorProjectIntent::new().with_recipe(recipe(19)),
+    )
+    .unwrap();
+    let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        let scene = editor.workspace.active_document().unwrap();
+        editor.configure_editor_preview(Extent2d::new(320, 180));
+        editor.drive_editor_frame(Duration::ZERO);
+        let original = editor.take_editor_preview_candidate().unwrap();
+        let original_input = original.render_input().clone();
+        let original_batches = original.sprite_batches().clone();
+        let original_capture = original_input.captured::<TestPolicy>().unwrap();
+        assert_eq!(original_capture.value, 19);
+        assert!(original_input.captured::<WgpuStockPolicy>().is_none());
+        assert_eq!(original_batches.total_instances(), 1);
+        assert!(std::ptr::eq(
+            original_batches.as_slice(),
+            original_capture.stock.sprite_batches().unwrap().as_slice(),
+        ));
+        assert_eq!(original.hits()[0].entity().as_str(), "body");
+        assert!(original.hits()[0].contains_clip_point([0.0, 0.0]));
+
+        let prefab = fixture.add(&mut editor, EditorDocumentKind::Prefab, "p.json");
+        save_entity(&mut editor, prefab, "refreshed-prefab");
+        editor.advance_project_content_refresh();
+        assert!(
+            editor.project_content.is_current(),
+            "{:?}",
+            editor.project_content,
+        );
+        let deadline = Instant::now() + Duration::from_secs(5);
+        while editor.authoring_retirements.is_pending() {
+            assert!(
+                Instant::now() < deadline,
+                "the original Scene producer did not retire",
+            );
+            editor.advance_authoring_retirement();
+            std::thread::yield_now();
+        }
+        assert!(
+            editor
+                .apply_workspace_command(EditorWorkspaceCommand::SetActiveDocument {
+                    document: scene,
+                })
+                .applied
+        );
+        editor.drive_editor_frame(Duration::ZERO);
+        let refreshed = editor.take_editor_preview_candidate().unwrap();
+        assert_eq!(
+            refreshed
+                .render_input()
+                .captured::<TestPolicy>()
+                .unwrap()
+                .value,
+            19,
+        );
+        assert_ne!(
+            refreshed.render_input().installation(),
+            original_input.installation(),
+        );
+        assert_ne!(
+            refreshed.packet().source_generation(),
+            original.packet().source_generation(),
+        );
+        assert_eq!(refreshed.hits()[0].entity(), original.hits()[0].entity());
+        assert!(refreshed.hits()[0].contains_clip_point([0.0, 0.0]));
+        assert!(std::ptr::eq(
+            original.sprite_batches().as_slice(),
+            original_batches.as_slice(),
+        ));
+        assert!(std::ptr::eq(
+            original.render_input().captured::<TestPolicy>().unwrap(),
+            original_capture,
+        ));
+
+        let mut presentation = super::super::super::presentation::EditorPreviewPresentation::new();
+        let (accepted, retained_input) = presentation.accept(original).unwrap();
+        assert_eq!(accepted.document(), scene);
+        assert_eq!(retained_input.installation(), original_input.installation());
+        assert!(std::ptr::eq(
+            retained_input.packet(),
+            original_input.packet()
+        ));
+    }));
+    close(&mut editor);
+    if let Err(payload) = result {
+        std::panic::resume_unwind(payload);
+    }
+}

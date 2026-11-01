@@ -43,7 +43,7 @@ impl<Source: 'static, Dest: 'static> CanvasCompositeCapture<Source, Dest> {
         }
     }
 
-    fn validate(&self) -> Result<(), WgpuRenderProgramError> {
+    pub(crate) fn validate(&self) -> Result<(), WgpuRenderProgramError> {
         let source = self.source.descriptor();
         let destination = self.target.descriptor();
         let extent = self.frame.extent();

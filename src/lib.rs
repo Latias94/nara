@@ -473,10 +473,12 @@ pub mod backend_prelude {
     pub use nara_render_wgpu::{
         SurfaceAcquireAction, SurfaceResizeAction, SurfaceTextureStatus,
         WGPU_CAPTURE_PLUGIN_DECLARATION, WGPU_CAPTURE_PLUGIN_ID,
+        WGPU_STOCK_CAPTURE_PLUGIN_DECLARATION, WGPU_STOCK_CAPTURE_PLUGIN_ID,
         WGPU_STOCK_POLICY_PLUGIN_DECLARATION, WGPU_STOCK_POLICY_PLUGIN_ID,
         WGPU_WINDOW_PRESENTATION_PLUGIN_DECLARATION, WGPU_WINDOW_PRESENTATION_PLUGIN_ID,
         WgpuBackendState, WgpuCapturePlugin, WgpuFrameTransactionStats, WgpuRenderError,
-        WgpuRenderHost, WgpuRenderProducer, WgpuStockPolicyPlugin, WgpuWindowPresentationPlugin,
+        WgpuRenderHost, WgpuRenderProducer, WgpuStockCapturePlugin, WgpuStockPolicyPlugin,
+        WgpuWindowPresentationPlugin,
     };
     #[cfg(all(feature = "presentation-2d", feature = "render-wgpu"))]
     pub use nara_render_wgpu::{

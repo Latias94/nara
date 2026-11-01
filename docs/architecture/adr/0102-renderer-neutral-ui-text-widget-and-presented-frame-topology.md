@@ -105,6 +105,14 @@ component, layout, or Editor-shell abstraction.
 
 ## Decision
 
+UI collection may refuse before acquiring any backend attempt because result capacity is
+unavailable, prior outcomes are undrained or original outcome reservations remain pending. The
+concrete rendering owner reports that frame as deferred, returns its original transport result
+and allows the same managed Runtime to retry after the condition clears. It must not acquire a
+replacement permit, discard a pending original sidecar or classify these admission conditions as
+invalid render topology. Missing, replaced, closed or mismatched UI owners and malformed attempts
+retain their explicit integration-fault behavior.
+
 Nara compiles bounded authoring snapshots into one immutable renderer-neutral frame. Text and
 widget behavior are separate deep modules; Runtime and future Editor products use separate
 adapters.

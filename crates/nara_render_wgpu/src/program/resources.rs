@@ -185,7 +185,7 @@ pub struct WgpuProgramRead(pub(super) ResourceRead);
 pub struct WgpuProgramWrite(pub(super) ResourceWrite);
 
 /// An exact resource selected for the candidate's complete publication group.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct WgpuProgramOutput(pub(super) ResourceVersion);
 
 #[derive(Debug)]

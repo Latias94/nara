@@ -21,6 +21,7 @@ thiserror.workspace = true
 winit.workspace = true
 
 [dev-dependencies]
+nara-stock-composition-consumer = { path = "../tests/fixtures/stock-composition-consumer" }
 nara_tasks = { workspace = true, features = ["test-support"] }
 
 [target.'cfg(all(target_os = "linux", target_arch = "x86_64"))'.dependencies]

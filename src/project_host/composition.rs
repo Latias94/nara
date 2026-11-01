@@ -890,6 +890,12 @@ fn resolve_runtime_composition(
     mut request: ProjectRuntimeAppPlugins,
     known_providers: impl IntoIterator<Item = ComponentSchemaProviderDefinition>,
 ) -> Result<ResolvedRuntimeComposition, RuntimePlanError> {
+    #[cfg(feature = "render-wgpu")]
+    {
+        request.recipe = request
+            .recipe
+            .with_profile_capabilities(capabilities.normalized);
+    }
     if let Some(plugin) = request
         .recipe
         .unsupported_default_plugin(capabilities.normalized)

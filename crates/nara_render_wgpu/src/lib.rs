@@ -82,9 +82,11 @@ pub use crate::observation::WgpuRenderObservation;
 pub use crate::output::{WgpuDisplayOccurrence, WgpuImageDisplay, WgpuImageOutput};
 pub use crate::plugin::{
     WGPU_BACKEND_SHUTDOWN_OBLIGATION, WGPU_CAPTURE_PLUGIN_DECLARATION, WGPU_CAPTURE_PLUGIN_ID,
+    WGPU_STOCK_CAPTURE_PLUGIN_DECLARATION, WGPU_STOCK_CAPTURE_PLUGIN_ID,
     WGPU_STOCK_POLICY_PLUGIN_DECLARATION, WGPU_STOCK_POLICY_PLUGIN_ID,
     WGPU_WINDOW_PRESENTATION_PLUGIN_DECLARATION, WGPU_WINDOW_PRESENTATION_PLUGIN_ID,
-    WgpuCapturePlugin, WgpuPolicyFrameWriter, WgpuStockPolicyPlugin, WgpuWindowPresentationPlugin,
+    WgpuCapturePlugin, WgpuPolicyFrameWriter, WgpuStockCapturePlugin, WgpuStockCaptureSet,
+    WgpuStockFrame, WgpuStockFrameReader, WgpuStockPolicyPlugin, WgpuWindowPresentationPlugin,
     install_wgpu_policy,
 };
 #[cfg(feature = "stock-sprite")]
@@ -115,7 +117,12 @@ pub use crate::program::{
 };
 pub use crate::requirements::{WgpuDeviceRequirements, WgpuDeviceRequirementsError};
 pub use crate::retirement::{WgpuGpuRetirement, WgpuGpuRetirementError};
-pub use crate::stock_policy::{WgpuStockCapture, WgpuStockPolicy, WgpuStockPolicyBindings};
+#[cfg(feature = "stock-ui")]
+pub use crate::stock_policy::WgpuCompositeColor;
+pub use crate::stock_policy::{
+    WgpuSceneColor, WgpuStockBindings, WgpuStockCapture, WgpuStockCaptureAdapter, WgpuStockPolicy,
+    WgpuStockProgramBuilder, WgpuStockStages, WgpuWorldColor,
+};
 pub use crate::submission::{WgpuSubmissionPrefix, WgpuSubmissionPrefixError};
 pub use crate::telemetry::{
     MAX_ADAPTER_SUMMARY_FIELD_BYTES, MAX_BUFFERED_FRAME_COMPLETIONS, MAX_PENDING_FRAME_COMPLETIONS,

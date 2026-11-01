@@ -106,6 +106,16 @@ impl ProductRecipe {
         self,
         defaults: EditedPluginGroup<G>,
     ) -> ProductPlugins<G> {
+        #[cfg(feature = "render-wgpu")]
+        let defaults = if self
+            .wgpu_policy
+            .as_ref()
+            .is_some_and(|selection| selection.active)
+        {
+            defaults.disable_slot(super::SLOT_WGPU_STOCK_POLICY)
+        } else {
+            defaults
+        };
         ProductPlugins {
             defaults,
             recipe: self,

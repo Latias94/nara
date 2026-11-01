@@ -24,6 +24,12 @@ This ADR decides how render graph concepts relate to that phase model.
 
 ## Decision
 
+The [finite program and shared stock-construction refinements in ADR0094](0094-minimal-render-execution-boundary-and-evidence-gated-extensions.md#shared-stock-program-construction)
+now select the exact-wgpu resource graph and typed policy boundary for the admitted Scene-effect
+workflow. The Phase1 rationale below remains historical context; it cannot require a second fixed
+stock draw path or prohibit the selected shared world/Canvas/UI program construction. Neutral
+domain extraction and ordering retain their existing owners.
+
 nara will **not require a full render graph in Phase 1**, but the render architecture must be **render-graph-ready**.
 
 Phase 1 renderer:

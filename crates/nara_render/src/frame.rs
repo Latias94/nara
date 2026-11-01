@@ -83,7 +83,9 @@ impl From<RuntimeGeneration> for RenderFrameSourceGeneration {
 
 /// Owned, bounded, ordered world views for one exclusive destination transaction.
 /// A fixed world canvas adds one owner-local image-to-window edge without changing target identity.
-#[derive(Debug, PartialEq)]
+/// Cloning preserves CPU facts only; target acquisition, execution and UI permissions have
+/// separate owners and cannot be duplicated by this packet.
+#[derive(Debug, Clone, PartialEq)]
 pub struct RenderFramePacket {
     pub(crate) source_generation: RenderFrameSourceGeneration,
     frame_index: u64,

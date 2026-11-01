@@ -1,0 +1,11 @@
+[package]
+name = "nara-stock-blur-effect"
+version = "0.0.0"
+edition = "2024"
+rust-version = "1.95"
+license = "MIT OR Apache-2.0"
+publish = false
+
+[dependencies]
+nara_render_wgpu = { path = "../../../../../crates/nara_render_wgpu", default-features = false }
+wgpu = "=30.0.1"

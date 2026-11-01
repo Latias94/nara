@@ -6,7 +6,8 @@ native-window integration, followed by the public stock-composition design, with
 The [finite prerequisite in Accepted ADR0094](adr/0094-minimal-render-execution-boundary-and-evidence-gated-extensions.md#finite-captured-wgpu-programs)
 admits the bounded native program and original typed policy capture. Their implementation evidence
 is tracked in the [ledger](adr/implementation-status.md). Captured View/history prerequisites
-have scoped production qualification; the public stock-composition successor remains unimplemented.
+have scoped production qualification; the public stock-composition successor is in production
+replacement and has not completed its independent/native qualification.
 Proposed [ADR0121](adr/0121-composable-render-programs-and-host-execution.md) remains Proposed
 until its complete production consumers qualify the selected contract.
 
@@ -417,7 +418,7 @@ full0121 remains Proposed.
 ## Next Production Unit: Public Stock Composition
 
 The native-window/content/drawing consumer does not complete the ordinary external Scene-effect
-workflow. Current `WgpuStockPolicy::build` owns the whole world/Canvas/UI graph. Its intermediate
+workflow. At the unit's `3d7eb7b` baseline, `WgpuStockPolicy::build` owns the whole world/Canvas/UI graph. Its intermediate
 markers and binding fields are private; Sprite lowering is crate-private. Runtime collectors
 require the concrete stock installation, and Scene/Canvas constructors install that definition
 directly. Public Features and an alternate scalar policy therefore do not yet let a normal
@@ -460,6 +461,51 @@ submission owners. The existing comparison blur writes fixed `rgba32float` stora
 be silently reused as a general stock-format shader. Use actual supported attachment formats,
 explicit sampling/color semantics and a format-appropriate numeric oracle. A graph-only blur or
 another manually assembled policy is not complete consumer evidence for this seam.
+
+### Selected Construction And Capture Replacement
+
+Accepted ADR0094's shared-construction refinement selects `WgpuStockStages` through the existing
+policy interface. Its original declarations bind once through the candidate context. One
+`WgpuStockProgramBuilder` owns the ordinary finite graph and accumulated stock observations:
+`world` writes ordered Views, `resolve_canvas` explicitly consumes world-raster color when a
+Canvas exists, and `finish` composes full-resolution UI over the caller-selected target-sized
+Scene. Caller-authored typed operations use that same graph between these steps. The default
+policy invokes these helpers directly, replacing its duplicated fixed graph body.
+
+`WgpuWorldColor` and `WgpuSceneColor` distinguish the world raster from Canvas-resolved pixels.
+Without a Canvas the caller finishes from its world version, avoiding an unnecessary physical
+copy merely to rename a semantic port. An effect preserves the meaning of its chosen pixel space
+while producing a distinct version. Untouched Scene versions may join the same output group for
+before/after use. Stage bindings must belong to the original declaration; foreign bindings,
+missing Canvas, target-shape/color mismatch and ordinary graph/output limits reject.
+
+`WgpuStockCapturePlugin` separates stock collection from the default policy installation.
+`WgpuStockFrameReader` moves the complete snapshot and optional original UI sidecar only for the
+exact selected available capture route. Incomplete composition retains its original draft until
+logical Close rather than silently replacing permissions. Ordinary composers submit through
+`WgpuPolicyFrameWriter`; refusal returns the original sidecar. Scene/Canvas construction can use
+a move-owned `WgpuStockCaptureAdapter` whose erasure covers one complete typed capture and grants
+no World/native/presentation access. Existing product definitions select and fingerprint compiled
+configuration. These are implemented-source directions under qualification, not a complete
+consumer result; the independent effect packages and actual Editor/Runtime integrations remain
+the acceptance authority.
+
+The construction comparison selects shared stages for stock-content effects: a full alternate
+policy already fits the execution interface, but at this baseline it must either reproduce the
+private Sprite lowering or omit normal stock content. Adding public extraction/quad internals
+solely to make that control reusable would freeze a second drawing interface. The independent
+consumer therefore replaces whole policy wiring while sharing stock lowering; the already
+qualified non-stock scalar policy remains the complete-replacement execution control. This is an
+ownership/authoring choice, not a measured speed claim or proof that every renderer should use
+stock stages. Complete external stock-effect acceptance still requires all three real entry paths.
+
+The concrete consumer also requires the exact post-UI output as a public typed input. The stock
+marker is `WgpuCompositeColor`; the existing published-frame typed getter retains its original
+meaning. `WgpuImageOutput` now keeps that selected program-resource owner rather than duplicating
+its native handles, epoch and allocation guard. Its typed texture lease checks the same semantic
+identity and imports through the existing graph path. This supports actual Editor image numeric
+observation and Nara-drawn composition without a readback-only service, arbitrary port relabeling
+or retention of the entire publication and capture.
 
 ## Implementation Order And Deletion
 

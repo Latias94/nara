@@ -465,11 +465,18 @@ impl WgpuRenderProgramBuilder {
     }
 
     pub fn finish(
-        mut self,
+        self,
         outputs: &[WgpuProgramOutput],
     ) -> Result<WgpuRenderProgram, WgpuRenderProgramError> {
+        self.finish_output_refs(outputs.iter())
+    }
+
+    pub(crate) fn finish_output_refs<'a>(
+        mut self,
+        outputs: impl ExactSizeIterator<Item = &'a WgpuProgramOutput> + Clone,
+    ) -> Result<WgpuRenderProgram, WgpuRenderProgramError> {
         self.graph
-            .set_output_group_refs(outputs.iter().map(|output| &output.0))?;
+            .set_output_group_refs(outputs.map(|output| &output.0))?;
         let graph = self.graph.compile()?;
         Ok(WgpuRenderProgram(Arc::new(CompiledProgram {
             source: self.source,

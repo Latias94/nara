@@ -271,10 +271,11 @@ impl EditorProjectSession {
             return;
         }
 
-        let replacement_authoring_runtime = match self
-            .authoring_runtime
-            .rebuild_for_project(successor.clone(), &preview_registry)
-        {
+        let replacement_authoring_runtime = match self.authoring_runtime.rebuild_for_project(
+            successor.clone(),
+            &preview_registry,
+            &self.recipe,
+        ) {
             Ok(runtime) => runtime,
             Err(failure) => {
                 self.authoring_retirements.retain(failure.retirement);
@@ -311,21 +312,22 @@ impl EditorProjectSession {
             }
         };
         #[cfg(feature = "presentation-ui")]
-        let replacement_ui_preview = match super::ui_preview::EditorUiPreviewSession::new() {
-            Ok(preview) => preview,
-            Err(_) => {
-                self.retain_authoring_runtime(replacement_authoring_runtime);
-                self.reject_project_content_refresh(
-                    request,
-                    EditorProjectContentRefreshFailure::PreviewRejected,
-                );
-                let _ = self.diagnostics.extend(single_error(
-                    "project.editor.content-refresh-ui-preview-rejected",
-                    "the saved project content could not replace the Editor UI preview owner",
-                ));
-                return;
-            }
-        };
+        let replacement_ui_preview =
+            match super::ui_preview::EditorUiPreviewSession::with_recipe(&self.recipe) {
+                Ok(preview) => preview,
+                Err(_) => {
+                    self.retain_authoring_runtime(replacement_authoring_runtime);
+                    self.reject_project_content_refresh(
+                        request,
+                        EditorProjectContentRefreshFailure::PreviewRejected,
+                    );
+                    let _ = self.diagnostics.extend(single_error(
+                        "project.editor.content-refresh-ui-preview-rejected",
+                        "the saved project content could not replace the Editor UI preview owner",
+                    ));
+                    return;
+                }
+            };
 
         let generation = EditorProjectContentGeneration::new(self.next_project_content_generation);
         let Some(next_generation) = self.next_project_content_generation.checked_add(1) else {

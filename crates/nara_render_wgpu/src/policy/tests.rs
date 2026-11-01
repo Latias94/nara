@@ -1,4 +1,5 @@
 use super::*;
+mod stock_composition;
 use std::sync::{Mutex, atomic::AtomicUsize};
 
 use nara_core::{Color, Mat3};

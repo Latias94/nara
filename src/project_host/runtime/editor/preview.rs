@@ -17,10 +17,7 @@ use nara_render::{
     RenderFrameSourceGeneration, RenderImage2d, RenderTarget, ViewportRect,
 };
 #[cfg(feature = "render-wgpu")]
-use nara_render_wgpu::{
-    WgpuPolicyDefinition, WgpuPolicyInstallation, WgpuRenderInput, WgpuStockCapture,
-    WgpuStockPolicy,
-};
+use nara_render_wgpu::{WgpuRenderInput, WgpuStockCapture, WgpuStockCaptureAdapter};
 use nara_scene::{
     __private::AuthoringPreviewOmission, ExpandedSceneCandidate, SceneAuthoringRevision,
     SceneDocument, SceneEntityId, SceneEntitySource, SceneProjection, SourceDocumentKey,
@@ -114,7 +111,6 @@ pub struct EditorPreviewCandidate {
     render_input: WgpuRenderInput,
     #[cfg(not(feature = "render-wgpu"))]
     packet: RenderFramePacket,
-    #[cfg(not(feature = "render-wgpu"))]
     sprite_batches: SpriteBatches,
     hits: Vec<EditorPreviewHit>,
     omissions: EditorAuthoringPreviewOmissions,
@@ -163,18 +159,7 @@ impl EditorPreviewCandidate {
     /// Borrows the exact Sprite snapshots retained by this candidate's capture.
     #[must_use]
     pub fn sprite_batches(&self) -> &SpriteBatches {
-        #[cfg(feature = "render-wgpu")]
-        {
-            self.render_input
-                .captured::<WgpuStockPolicy>()
-                .expect("Scene preview retains its original stock capture")
-                .sprite_batches()
-                .expect("Scene preview captures its extracted Sprite batches")
-        }
-        #[cfg(not(feature = "render-wgpu"))]
-        {
-            &self.sprite_batches
-        }
+        &self.sprite_batches
     }
 
     #[cfg(feature = "render-wgpu")]
@@ -461,7 +446,7 @@ pub(super) struct EditorPreviewSession {
     generation: EditorRenderGeneration,
     target: Handle<RenderImage2d>,
     #[cfg(feature = "render-wgpu")]
-    policy: WgpuPolicyInstallation<WgpuStockPolicy>,
+    policy: WgpuStockCaptureAdapter,
     extent: Option<Extent2d>,
     geometry_revision: u64,
     candidate: Option<EditorPreviewCandidate>,
@@ -487,18 +472,30 @@ impl EditorPreviewSession {
         app: &mut App,
         project: ProjectContentSnapshot,
         registry: &ComponentRegistrySnapshot,
+        recipe: &crate::ProductRecipe,
     ) -> Result<Self, DiagnosticReport> {
         Self::install(
             app,
             EditorPreviewProject::TrustedCompiled(project),
             registry,
+            recipe,
         )
     }
 
+    #[cfg(test)]
     pub(super) fn install_authoring(
         app: &mut App,
         registry: &ComponentRegistrySnapshot,
         database: Arc<ProjectAssetDatabase>,
+    ) -> Result<Self, DiagnosticReport> {
+        Self::install_authoring_with_recipe(app, registry, database, &crate::ProductRecipe::new())
+    }
+
+    pub(super) fn install_authoring_with_recipe(
+        app: &mut App,
+        registry: &ComponentRegistrySnapshot,
+        database: Arc<ProjectAssetDatabase>,
+        recipe: &crate::ProductRecipe,
     ) -> Result<Self, DiagnosticReport> {
         let admitted_count = database.len();
         Self::install(
@@ -509,6 +506,7 @@ impl EditorPreviewSession {
                 additional_path_bytes: 0,
             }),
             registry,
+            recipe,
         )
     }
 
@@ -516,12 +514,14 @@ impl EditorPreviewSession {
         app: &mut App,
         project: EditorPreviewProject,
         registry: &ComponentRegistrySnapshot,
+        recipe: &crate::ProductRecipe,
     ) -> Result<Self, DiagnosticReport> {
+        let _ = recipe;
         let generation = EditorRenderGeneration::try_acquire()
             .ok_or_else(|| preview_error("project.editor.preview-generation-exhausted"))?;
         #[cfg(feature = "render-wgpu")]
-        let policy = WgpuPolicyDefinition::new(WgpuStockPolicy::new())
-            .install()
+        let policy = recipe
+            .create_wgpu_capture_adapter()
             .map_err(|_| preview_error("project.editor.preview-policy-install-failed"))?;
         let input = Arc::new(Mutex::new(None));
         app.insert_resource(EditorPreviewInput(Arc::clone(&input)))
@@ -736,7 +736,7 @@ impl EditorPreviewSession {
             .policy
             .capture(
                 packet,
-                Arc::new(WgpuStockCapture::new().with_sprites(sprite_batches)),
+                WgpuStockCapture::new().with_sprites(sprite_batches.clone()),
             )
             .map_err(|_| preview_error("project.editor.preview-policy-capture-rejected"))?;
         self.candidate = Some(EditorPreviewCandidate {
@@ -748,7 +748,6 @@ impl EditorPreviewSession {
             render_input,
             #[cfg(not(feature = "render-wgpu"))]
             packet,
-            #[cfg(not(feature = "render-wgpu"))]
             sprite_batches,
             hits,
             omissions: accepted.omissions.clone(),

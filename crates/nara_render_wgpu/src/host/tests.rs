@@ -1545,7 +1545,7 @@ fn native_offscreen_outputs_retain_exact_pixels_through_resize_and_close() {
     ));
     let second = execution.submit(&producer, &second_input).unwrap();
     assert!(!Arc::ptr_eq(&first.0, &second.0));
-    assert_ne!(first.0.texture, second.0.texture);
+    assert_ne!(first.0.texture(), second.0.texture());
     assert_ne!(
         first.receipt().output_version(),
         second.receipt().output_version()
@@ -1810,7 +1810,7 @@ fn native_failed_submission_allows_retry_of_the_same_original_input() {
     );
     assert_eq!(execution.frame_transaction_stats().packet_admissions(), 1);
     assert_eq!(execution.frame_transaction_stats().queue_submissions(), 1);
-    assert_ne!(output.0.texture, first.0.texture);
+    assert_ne!(output.0.texture(), first.0.texture());
     assert_ne!(
         output.receipt().output_version(),
         first.receipt().output_version()
@@ -1893,7 +1893,7 @@ fn native_image_preflight_refusal_preserves_the_original_reserved_storage_for_re
     *host.backend.stock_quad_resources().textures_mut() =
         crate::texture::WgpuSpriteTextureCache::with_image_residency_limits(1, 4);
     let output = host.submit(&producer, &input).unwrap();
-    assert_eq!(output.0.texture, texture);
+    assert_eq!(output.0.texture(), &texture);
     assert!(
         host.views[&producer.id()]
             .target
@@ -2250,7 +2250,7 @@ fn read_output_pixel(
                 device.create_command_encoder(&wgpu::CommandEncoderDescriptor::default());
             encoder.copy_texture_to_buffer(
                 wgpu::TexelCopyTextureInfo {
-                    texture: &output.0.texture,
+                    texture: output.0.texture(),
                     mip_level: 0,
                     origin: wgpu::Origin3d { x, y, z: 0 },
                     aspect: wgpu::TextureAspect::All,
@@ -2336,12 +2336,37 @@ fn allocated_test_output(
     let (texture, view, reservation) = execution
         .allocate_output_storage(namespace, receipt.target())
         .unwrap();
+    let descriptor = crate::WgpuProgramTextureDescriptor {
+        native: wgpu::TextureDescriptor {
+            label: Some("test_allocated_image_output"),
+            size: texture.size(),
+            mip_level_count: texture.mip_level_count(),
+            sample_count: texture.sample_count(),
+            dimension: texture.dimension(),
+            format: texture.format(),
+            usage: texture.usage(),
+            view_formats: &[],
+        },
+        transfer: if texture.format().is_srgb() {
+            crate::TextureTransfer::Srgb
+        } else {
+            crate::TextureTransfer::Linear
+        },
+        alpha: crate::TextureAlpha::Premultiplied,
+    };
     WgpuImageOutput(Arc::new(WgpuImageStorage {
-        epoch_lost: Arc::clone(&namespace.epoch_lost),
         receipt,
-        texture,
-        view,
-        _reservation: Arc::new(reservation),
+        resource: Arc::new(crate::program::ProgramResourceStorage {
+            backend_instance_id: namespace.backend_instance_id,
+            device_epoch: namespace.device_epoch,
+            epoch_lost: Arc::clone(&namespace.epoch_lost),
+            producer: receipt.producer_id(),
+            source: receipt.source_generation(),
+            frame_index: receipt.render_transaction_frame_index(),
+            descriptor: descriptor.resource::<crate::WgpuWorldColor>(),
+            native: crate::program::NativeResource::Texture { texture, view },
+            _reservation: Arc::new(reservation),
+        }),
     }))
 }
 

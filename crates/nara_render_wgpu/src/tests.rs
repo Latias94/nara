@@ -85,6 +85,7 @@ fn install_test_plugins(app: &mut App, with_window: bool) {
     .unwrap();
     app.add_plugins((
         WgpuCapturePlugin,
+        WgpuStockCapturePlugin,
         WgpuStockPolicyPlugin,
         WgpuWindowPresentationPlugin,
     ))
@@ -228,13 +229,14 @@ fn accept_held_stock_ui_capture(
     let Some(submissions) = held.submissions.take() else {
         return;
     };
-    assert!(writer.can_collect_ui(&installation));
-    assert!(writer.collect_ui(submissions));
-    assert!(
-        writer
-            .capture(&installation, Arc::clone(&held.capture))
-            .unwrap()
-    );
+    assert!(writer.can_capture_with_ui(&installation));
+    writer
+        .capture_with_ui(
+            &installation,
+            Arc::clone(&held.capture),
+            WgpuUiSubmission::from_state(WgpuUiSubmissionState::Prepared(submissions)),
+        )
+        .unwrap();
 }
 
 #[cfg(feature = "stock-ui")]
@@ -327,8 +329,12 @@ fn compiled_but_uninstalled_sprite_contribution_does_not_collect_domain_batches(
         nara_sprite_render::SpriteRenderPlugin,
     ))
     .unwrap();
-    app.add_plugins((WgpuCapturePlugin, WgpuStockPolicyPlugin))
-        .unwrap();
+    app.add_plugins((
+        WgpuCapturePlugin,
+        WgpuStockCapturePlugin,
+        WgpuStockPolicyPlugin,
+    ))
+    .unwrap();
     app.insert_resource(UninstalledSpriteContributionObservation::default())
         .unwrap();
     app.add_systems(CoreStage::Prepare, inject_sprite_domain_work)
@@ -386,8 +392,12 @@ fn compiled_but_uninstalled_ui_contribution_does_not_drain_the_backend_frame() {
         nara_ui_render::UiRenderPlugin::default(),
     ))
     .unwrap();
-    app.add_plugins((WgpuCapturePlugin, WgpuStockPolicyPlugin))
-        .unwrap();
+    app.add_plugins((
+        WgpuCapturePlugin,
+        WgpuStockCapturePlugin,
+        WgpuStockPolicyPlugin,
+    ))
+    .unwrap();
     app.insert_resource(UninstalledUiContributionObservation::default())
         .unwrap();
     app.add_systems(
@@ -535,8 +545,13 @@ fn blocked_ui_collection_keeps_the_existing_transaction_and_next_frame_available
         nara_ui_render::UiRenderPlugin::default(),
     ))
     .unwrap();
-    app.add_plugins((WgpuCapturePlugin, WgpuStockPolicyPlugin, WgpuStockUiPlugin))
-        .unwrap();
+    app.add_plugins((
+        WgpuCapturePlugin,
+        WgpuStockCapturePlugin,
+        WgpuStockPolicyPlugin,
+        WgpuStockUiPlugin,
+    ))
+    .unwrap();
     app.world_mut().unwrap().spawn((
         nara_render::Camera2d::default(),
         nara_transform::Transform2d::default(),
@@ -645,6 +660,7 @@ fn managed_shutdown_returns_buffered_ui_permissions_before_world_destruction() {
         nara_image::ImagePreparePlugin,
         nara_ui_render::UiRenderPlugin::default(),
         WgpuCapturePlugin,
+        WgpuStockCapturePlugin,
         WgpuStockPolicyPlugin,
         WgpuStockUiPlugin,
     ))
@@ -1613,6 +1629,7 @@ fn stock_ui_input(
             primary_window: Some(window),
         },
         WgpuCapturePlugin,
+        WgpuStockCapturePlugin,
         WgpuStockPolicyPlugin,
         WgpuWindowPresentationPlugin,
     ))

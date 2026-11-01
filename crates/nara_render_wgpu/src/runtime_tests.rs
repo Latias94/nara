@@ -418,6 +418,83 @@ fn a_topology_capture_error_still_faults_the_actual_runtime() {
     finish(runtime);
 }
 
+#[cfg(feature = "stock-ui")]
+#[test]
+fn ui_collection_backpressure_returns_the_original_result_and_allows_runtime_recovery() {
+    use nara_ui_render::UiPresentationIntegrationError;
+
+    for error in [
+        UiPresentationIntegrationError::OutcomeCapacityUnavailable { additional: 1 },
+        UiPresentationIntegrationError::PendingPresentationOutcomes { count: 1 },
+        UiPresentationIntegrationError::OutstandingBackendOutcomeReservations { count: 1 },
+    ] {
+        let mut runtime = runtime(false);
+        control(
+            &mut runtime,
+            HarnessMutation::CaptureError(WgpuFrameCaptureError::UiPresentation(error)),
+        );
+        let mut host = WgpuRenderHost::offscreen();
+        let producer = host.create_producer().unwrap();
+        let captured = capture(&mut runtime);
+        let identity = captured.identity();
+        let result =
+            host.execute_runtime_frame(&producer, &BackendWindowHandles::default(), captured);
+        assert_eq!(result.identity(), identity);
+        assert_eq!(
+            result
+                .status
+                .as_ref()
+                .unwrap()
+                .last_skip()
+                .unwrap()
+                .reason(),
+            nara_render::RenderFrameSkipReason::Deferred,
+        );
+        assert_eq!(host.frame_transaction_stats().queue_submissions(), 0);
+        let completed = complete_runtime_frame(&mut runtime, result).unwrap();
+        assert!(completed.post_operation_fault.is_none());
+        assert_eq!(runtime.state(), RuntimeState::Running);
+        assert!(runtime.fault().is_none());
+        control(&mut runtime, HarnessMutation::EmptyFrame(19));
+        let next = capture(&mut runtime);
+        assert_eq!(next.identity().connection(), identity.connection());
+        assert_eq!(next.identity().sequence(), identity.sequence() + 1);
+        let result = host.execute_runtime_frame(&producer, &BackendWindowHandles::default(), next);
+        let completed = complete_runtime_frame(&mut runtime, result).unwrap();
+        assert!(completed.post_operation_fault.is_none());
+        assert_eq!(runtime.state(), RuntimeState::Running);
+        assert_eq!(runtime.world().resource::<RenderFrame>().index, 19);
+        assert_eq!(host.retained_resource_bytes(), 0);
+        drop(host);
+        finish(runtime);
+    }
+}
+
+#[cfg(feature = "stock-ui")]
+#[test]
+fn a_changed_ui_outcome_owner_still_faults_the_actual_runtime() {
+    let mut runtime = runtime(false);
+    control(
+        &mut runtime,
+        HarnessMutation::CaptureError(WgpuFrameCaptureError::UiPresentation(
+            nara_ui_render::UiPresentationIntegrationError::BackendOutcomeOwnerChanged,
+        )),
+    );
+    let mut host = WgpuRenderHost::offscreen();
+    let producer = host.create_producer().unwrap();
+    let captured = capture(&mut runtime);
+    let result = host.execute_runtime_frame(&producer, &BackendWindowHandles::default(), captured);
+    assert_eq!(host.frame_transaction_stats().queue_submissions(), 0);
+    let completed = complete_runtime_frame(&mut runtime, result).unwrap();
+    assert_eq!(
+        completed.post_operation_fault.unwrap().kind(),
+        RuntimeFaultKind::System
+    );
+    assert_eq!(runtime.state(), RuntimeState::Faulted);
+    drop(host);
+    finish(runtime);
+}
+
 #[test]
 fn host_rejects_foreign_captured_source_before_native_authority_and_returns_original_result() {
     let mut owner = runtime(false);

@@ -2213,7 +2213,7 @@ impl WgpuRenderHost {
         Ok(operation(
             &namespace.device,
             &namespace.queue,
-            &output.0.view,
+            output.0.view(),
         ))
     }
 
@@ -2279,7 +2279,7 @@ impl WgpuRenderHost {
                 .create_command_encoder(&wgpu::CommandEncoderDescriptor {
                     label: Some("nara_image_use"),
                 });
-        views.extend(outputs.iter().map(|output| &output.0.view));
+        views.extend(outputs.iter().map(|output| output.0.view()));
         let result = native_callback("image use", || {
             operation(&namespace.device, &namespace.queue, &mut encoder, &views)
         });
@@ -2767,11 +2767,10 @@ impl WgpuRenderHost {
             .find(|(version, _)| *version == final_version)
             .map(|(_, storage)| storage)
             .expect("the complete stock output group contains its final version");
-        let crate::program::NativeResource::Texture { texture, view } = &storage.native else {
+        let crate::program::NativeResource::Texture { .. } = &storage.native else {
             unreachable!("the stock policy declares a texture output")
         };
         let image = WgpuImageOutput(Arc::new(WgpuImageStorage {
-            epoch_lost: Arc::clone(&namespace.epoch_lost),
             receipt: WgpuSubmittedImageReceipt::new(
                 view_id,
                 target,
@@ -2782,9 +2781,7 @@ impl WgpuRenderHost {
                 namespace.device_epoch,
                 packet.frame_index(),
             ),
-            texture: texture.clone(),
-            view: view.clone(),
-            _reservation: Arc::clone(&storage._reservation),
+            resource: Arc::clone(storage),
         }));
         Ok(crate::WgpuPublishedFrame {
             image,

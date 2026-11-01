@@ -36,9 +36,12 @@ immutable capture requirements remain. Its former topology restriction does not 
 native program or create a permanent alternate draw path. Stock Runtime, Editor and image consumers
 must migrate together, preserving exact generation, ordering, UI completion and native custody.
 
-Nara's stock render plan is a closed, private first-party implementation. Public domains provide
-content and owned backend-neutral packets; they do not construct render topology or invoke internal
-pipeline stages.
+The shared stock-construction refinement in
+[ADR0094](0094-minimal-render-execution-boundary-and-evidence-gated-extensions.md#shared-stock-program-construction)
+supersedes the historical closed-topology restriction for the admitted exact-wgpu policy boundary.
+Default and external policies reuse the same world/Canvas/UI lowering in one finite program.
+Public neutral domains still provide complete immutable packets and do not expose half-built
+extraction, batching or arbitrary neutral phase insertion.
 
 ```mermaid
 flowchart LR

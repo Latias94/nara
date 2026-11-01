@@ -180,7 +180,7 @@ impl WgpuEditorImguiRenderer {
         {
             return Err(WgpuRenderHostError::StaleImageSubmission);
         }
-        let view = &display.output().0.view;
+        let view = display.output().0.view();
         let texture = match &mut self.owner {
             RendererOwner::Docked(renderer) => renderer
                 .register_external_texture(view)
@@ -221,7 +221,7 @@ impl WgpuEditorImguiRenderer {
         {
             return Err(WgpuRenderHostError::StaleImageSubmission);
         }
-        let view = &display.output().0.view;
+        let view = display.output().0.view();
         match &mut self.owner {
             RendererOwner::Docked(renderer) => renderer
                 .update_external_texture(texture, view)
