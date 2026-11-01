@@ -4051,6 +4051,7 @@ fn single_report(diagnostic: Diagnostic) -> DiagnosticReport {
 
 #[cfg(test)]
 mod tests {
+    mod final_reference_demand;
     mod reference_demand;
     mod source_readiness;
 

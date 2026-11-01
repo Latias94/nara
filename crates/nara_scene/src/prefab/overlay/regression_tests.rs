@@ -783,20 +783,14 @@ fn production_wire_claims_round_trip_and_reject_unknown_members() {
 mod reference_regressions {
     use std::collections::BTreeMap;
 
-    use nara_asset::AssetRef;
-    use nara_core::{ByteLimit, DepthLimit, ItemLimit};
-    use nara_identity::{
-        EntityReference, PersistentRuntimeId, PersistentRuntimeNamespaceId,
-        PersistentRuntimeReference,
-    };
+    use nara_identity::EntityReference;
     use nara_reflect::{
         ComponentCapability, ComponentFieldId, ComponentFieldPath, ComponentFieldPathSegment,
-        ComponentFieldSchema, ComponentSchema, ComponentSchemaVersion, ComponentShapeMember,
-        ComponentTypeId, ComponentValue, ComponentValueKind, ComponentValueMaterializationLimits,
-        ComponentValueShape, collect_declared_asset_references_from_schema,
+        ComponentFieldSchema, ComponentSchema, ComponentSchemaVersion, ComponentTypeId,
+        ComponentValue, ComponentValueShape,
     };
 
-    use super::super::references::bind_references;
+    use super::super::references::plan_bindings;
     use super::super::*;
 
     fn id(name: &str) -> SceneEntityId {
@@ -829,17 +823,7 @@ mod reference_regressions {
             ComponentFieldPath::from_fields(["links"]),
             shape,
         )
-        .with_capabilities([
-            ComponentCapability::EntityRef,
-            ComponentCapability::AssetRef,
-        ])])
-    }
-
-    fn list_value() -> ComponentValue {
-        ComponentValue::map([(
-            "links",
-            ComponentValue::List(vec![local("socket"), local("socket")]),
-        )])
+        .with_capabilities([ComponentCapability::EntityRef])])
     }
 
     fn slot(index: u32) -> ComponentFieldPath {
@@ -858,295 +842,34 @@ mod reference_regressions {
     }
 
     #[test]
-    fn equal_spelling_and_repeated_sources_bind_each_payload_slot_to_its_complete_target() {
+    fn serialized_bindings_preserve_exact_slot_targets_without_resolving_them() {
         let schema = schema(ComponentValueShape::list(ComponentValueShape::EntityRef));
-        for right in [PrefabEntityTarget::addition(id("socket")), nested("right")] {
-            let targets = BTreeMap::from([
-                (nested("left"), id("left-output")),
-                (right.clone(), id("right-output")),
-            ]);
-            let bindings = vec![
-                binding(slot(0), nested("left")),
-                binding(slot(1), right.clone()),
-            ];
-            let loaded: Vec<PrefabReferenceBinding> =
-                serde_json::from_slice(&serde_json::to_vec(&bindings).unwrap()).unwrap();
-            assert_eq!(bindings, loaded);
-            let bound = bind_references(
-                &schema,
-                &list_value(),
-                &loaded,
-                &targets,
-                Default::default(),
-            )
-            .unwrap();
-            assert_eq!(bound.get_path(&slot(0)).unwrap(), &local("left-output"));
-            assert_eq!(bound.get_path(&slot(1)).unwrap(), &local("right-output"));
-            if !right.through.is_empty() {
-                let mut rebound = targets.clone();
-                rebound.remove(&right);
-                let mut changed = right.clone();
-                changed.through[0].expected_base =
-                    crate::tests::named_prefab_source_key("replacement-inner");
-                rebound.insert(changed, id("right-output"));
-                assert_eq!(
-                    bind_references(
-                        &schema,
-                        &list_value(),
-                        &loaded,
-                        &rebound,
-                        Default::default()
-                    ),
-                    Err(PrefabExpansionFailureKind::MissingTarget)
-                );
-            }
-        }
-    }
-
-    #[test]
-    fn incomplete_duplicate_stray_stale_and_missing_target_bindings_preserve_all_inputs() {
-        let schema = schema(ComponentValueShape::list(ComponentValueShape::EntityRef));
-        let value = list_value();
-        let target = PrefabEntityTarget::addition(id("socket"));
-        let targets = BTreeMap::from([(target.clone(), id("output"))]);
-        let first = binding(slot(0), target.clone());
-        let second = binding(slot(1), target.clone());
-        let mut stale = second.clone();
-        stale.expected = id("old-local");
-        let missing = PrefabEntityTarget::addition(id("missing"));
-        let cases = [
-            (vec![], PrefabExpansionFailureKind::Reference),
-            (vec![first.clone()], PrefabExpansionFailureKind::Reference),
-            (
-                vec![first.clone(), first.clone(), second.clone()],
-                PrefabExpansionFailureKind::Reference,
-            ),
-            (
-                vec![first.clone(), second, binding(slot(2), target.clone())],
-                PrefabExpansionFailureKind::Reference,
-            ),
-            (
-                vec![first.clone(), stale],
-                PrefabExpansionFailureKind::Reference,
-            ),
-            (
-                vec![first, binding(slot(1), missing.clone())],
-                PrefabExpansionFailureKind::MissingTarget,
-            ),
+        let value =
+            ComponentValue::map([("links", ComponentValue::List(vec![local("socket"); 3]))]);
+        // Deliberately differ from payload order and preserve each complete typed target.
+        let bindings = vec![
+            binding(slot(2), PrefabEntityTarget::addition(id("socket"))),
+            binding(slot(0), nested("left")),
+            binding(slot(1), nested("right")),
         ];
-        for (bindings, expected) in cases {
-            let before = (value.clone(), bindings.clone(), targets.clone());
-            assert_eq!(
-                bind_references(&schema, &value, &bindings, &targets, Default::default()),
-                Err(expected)
-            );
-            assert_eq!(
-                serde_json::from_slice::<Vec<PrefabReferenceBinding>>(
-                    &serde_json::to_vec(&bindings).unwrap()
-                )
-                .unwrap(),
-                bindings
-            );
-            assert_eq!((value.clone(), bindings, targets.clone()), before);
-        }
-    }
-
-    #[test]
-    fn nested_container_replacement_replans_slots_and_preserves_external_reference_types() {
-        let schema = schema(ComponentValueShape::keyed_list(
-            ComponentValueShape::record_members([
-                ComponentShapeMember::new("id", ComponentValueKind::String)
-                    .with_id(ComponentFieldId::new("row-id")),
-                ComponentShapeMember::new(
-                    "target",
-                    ComponentValueShape::optional(ComponentValueShape::EntityRef),
-                ),
-                ComponentShapeMember::new(
-                    "others",
-                    ComponentValueShape::map(ComponentValueShape::EntityRef),
-                ),
-                ComponentShapeMember::new(
-                    "portrait",
-                    ComponentValueShape::from(ComponentValueKind::AssetRef),
-                ),
-            ]),
-            ComponentFieldId::new("row-id"),
-        ));
-        let stable = AssetRef::stable_id("23456789-2345-4345-8345-234567890abc").unwrap();
-        let portrait = ComponentValue::map([
-            ("kind", ComponentValue::String("stable_id".into())),
-            (
-                "value",
-                ComponentValue::String(stable.as_stable_id().unwrap().to_string()),
-            ),
+        let expected = BTreeMap::from([
+            (slot(0), nested("left")),
+            (slot(1), nested("right")),
+            (slot(2), PrefabEntityTarget::addition(id("socket"))),
         ]);
-        let persistent = ComponentValue::EntityReference(EntityReference::Persistent {
-            entity: PersistentRuntimeReference::new(
-                PersistentRuntimeNamespaceId::new("overlay.fixture").unwrap(),
-                PersistentRuntimeId::parse_str("34567890-3456-4456-8456-345678901abc").unwrap(),
-            ),
-        });
-        let first = ComponentValue::map([
-            ("id", ComponentValue::String("a".into())),
-            ("target", persistent.clone()),
-            (
-                "others",
-                ComponentValue::map([("name.with.dot", local("socket"))]),
-            ),
-            ("portrait", portrait.clone()),
-        ]);
-        let second = ComponentValue::map([
-            ("id", ComponentValue::String("b".into())),
-            ("target", ComponentValue::Null),
-            (
-                "others",
-                ComponentValue::map([] as [(&str, ComponentValue); 0]),
-            ),
-            ("portrait", portrait.clone()),
-        ]);
-        let value = ComponentValue::map([(
-            "links",
-            ComponentValue::List(vec![first.clone(), second.clone()]),
-        )]);
-        let coordinate = |index, fields: &[&str]| {
-            let mut segments = slot(index).into_segments();
-            segments.extend(
-                fields
-                    .iter()
-                    .map(|name| ComponentFieldPathSegment::field(*name)),
-            );
-            ComponentFieldPath::new(segments)
-        };
-        let target = PrefabEntityTarget::addition(id("socket"));
-        let targets = BTreeMap::from([(target.clone(), id("output"))]);
-        let valid = binding(coordinate(0, &["others", "name.with.dot"]), target.clone());
-        let bound = bind_references(
-            &schema,
-            &value,
-            std::slice::from_ref(&valid),
-            &targets,
-            Default::default(),
-        )
-        .unwrap();
-        assert_eq!(
-            bound
-                .get_path(&coordinate(0, &["others", "name.with.dot"]))
-                .unwrap(),
-            &local("output")
-        );
-        assert_eq!(
-            bound.get_path(&coordinate(0, &["target"])).unwrap(),
-            &persistent
-        );
-        assert_eq!(
-            bound.get_path(&coordinate(1, &["target"])).unwrap(),
-            &ComponentValue::Null
-        );
-        assert_eq!(
-            bound.get_path(&coordinate(0, &["portrait"])).unwrap(),
-            &portrait
-        );
-        let assets =
-            collect_declared_asset_references_from_schema(&schema, schema.version(), &bound)
-                .unwrap();
-        assert_eq!(assets.len(), 2);
-        assert!(
-            assets
-                .iter()
-                .all(|reference| reference.asset_ref() == &stable)
-        );
-        for forbidden in [
-            coordinate(0, &["target"]),
-            coordinate(1, &["target"]),
-            coordinate(0, &["portrait"]),
-            coordinate(0, &["id"]),
-        ] {
+        let before = (value.clone(), bindings.clone());
+        let json: Vec<PrefabReferenceBinding> =
+            serde_json::from_slice(&serde_json::to_vec(&bindings).unwrap()).unwrap();
+        let ron: Vec<PrefabReferenceBinding> =
+            ron::from_str(&ron::to_string(&bindings).unwrap()).unwrap();
+        for loaded in [json, ron] {
+            assert_eq!(loaded, bindings);
             assert_eq!(
-                bind_references(
-                    &schema,
-                    &value,
-                    &[valid.clone(), binding(forbidden, target.clone())],
-                    &targets,
-                    Default::default()
-                ),
-                Err(PrefabExpansionFailureKind::Reference)
+                plan_bindings(&schema, &value, &loaded, Default::default()),
+                Ok(expected.clone()),
             );
         }
-        let replacement =
-            ComponentValue::map([("links", ComponentValue::List(vec![second, first]))]);
-        assert_eq!(
-            bind_references(
-                &schema,
-                &replacement,
-                &[valid],
-                &targets,
-                Default::default()
-            ),
-            Err(PrefabExpansionFailureKind::Reference)
-        );
-        let rebound = bind_references(
-            &schema,
-            &replacement,
-            &[binding(coordinate(1, &["others", "name.with.dot"]), target)],
-            &targets,
-            Default::default(),
-        )
-        .unwrap();
-        assert_eq!(
-            rebound
-                .get_path(&coordinate(1, &["others", "name.with.dot"]))
-                .unwrap(),
-            &local("output")
-        );
-    }
-
-    #[test]
-    fn unsupported_reference_shapes_and_explicit_work_limits_reject_before_copy() {
-        let targets = BTreeMap::new();
-        let opaque = schema(ComponentValueKind::Map.into());
-        let hidden =
-            ComponentValue::map([("links", ComponentValue::map([("hidden", local("socket"))]))]);
-        assert_eq!(
-            bind_references(&opaque, &hidden, &[], &targets, Default::default()),
-            Err(PrefabExpansionFailureKind::Reference)
-        );
-        let required = schema(ComponentValueShape::EntityRef);
-        for invalid in [
-            ComponentValue::map([] as [(&str, ComponentValue); 0]),
-            ComponentValue::map([("links", ComponentValue::Null)]),
-            ComponentValue::map([("links", ComponentValue::String("socket".into()))]),
-        ] {
-            assert_eq!(
-                bind_references(&required, &invalid, &[], &targets, Default::default()),
-                Err(PrefabExpansionFailureKind::Reference)
-            );
-        }
-        let limits = ComponentValueMaterializationLimits::new(
-            ItemLimit::new(8).unwrap(),
-            ByteLimit::new(1024).unwrap(),
-            DepthLimit::new(8).unwrap(),
-        );
-        let list = schema(ComponentValueShape::list(ComponentValueShape::EntityRef));
-        let target = PrefabEntityTarget::addition(id("socket"));
-        let targets = BTreeMap::from([(target.clone(), id("output"))]);
-        let excessive = (0..9)
-            .map(|index| binding(slot(index), target.clone()))
-            .collect::<Vec<_>>();
-        let excessive_value =
-            ComponentValue::map([("links", ComponentValue::List(vec![local("socket"); 9]))]);
-        assert_eq!(
-            bind_references(&list, &excessive_value, &excessive, &targets, limits),
-            Err(PrefabExpansionFailureKind::WorkLimit)
-        );
-        let nullable = schema(ComponentValueShape::list(ComponentValueShape::optional(
-            ComponentValueShape::EntityRef,
-        )));
-        let oversized =
-            ComponentValue::map([("links", ComponentValue::List(vec![ComponentValue::Null; 9]))]);
-        assert_eq!(
-            bind_references(&nullable, &oversized, &[], &targets, limits),
-            Err(PrefabExpansionFailureKind::WorkLimit)
-        );
+        assert_eq!((value, bindings), before);
     }
 }
 

@@ -4,14 +4,14 @@ use std::collections::BTreeMap;
 use std::mem::size_of;
 
 use nara_asset::AssetRef;
-use nara_reflect::__private::plan_declared_entity_references;
 use nara_reflect::{
     ComponentCodecError, ComponentEntityReferenceRewriteError, ComponentFieldPathSegment,
     ComponentSchema, ComponentTypeId, ComponentValue, ComponentValueCost,
-    ComponentValueMaterializationLimits, EntityReference, effective_component_value_owned,
+    ComponentValueMaterializationLimits, effective_component_value_owned,
 };
 
-use super::{Compiler, Program, Record, ScopeId};
+use super::reference_program::{ReferenceProgram, ReferencePrograms};
+use super::{Compiler, Program, Record, instance_from_inputs};
 use crate::diagnostics::{
     error as diagnostic_error, with_codec_error, with_migration_error, with_public_locator,
 };
@@ -21,19 +21,10 @@ use crate::prefab::{
 };
 use crate::provenance::provenance_string_bytes;
 use crate::{
-    PrefabComponentIntent, PrefabEntityOrigin, PrefabEntityTarget, PrefabExpansionFailure,
-    PrefabExpansionFailureKind, PrefabOverlaySlot, PrefabPropertyIntent, PrefabReferenceBinding,
-    ResolvedPrefabSource, SceneComponentRecord, SceneDocument, SceneEntityId,
+    PrefabComponentIntent, PrefabExpansionFailure, PrefabExpansionFailureKind, PrefabOverlaySlot,
+    PrefabPropertyIntent, PrefabReferenceBinding, ResolvedPrefabSource, SceneComponentRecord,
+    SceneDocument, SceneEntityId,
 };
-
-type Targets = BTreeMap<PrefabEntityTarget, SceneEntityId>;
-type SourceNamespace = BTreeMap<SceneEntityId, SceneEntityId>;
-
-#[derive(Default)]
-struct ValueNamespaces {
-    sources: BTreeMap<ScopeId, SourceNamespace>,
-    targets: BTreeMap<ScopeId, Targets>,
-}
 
 impl<'root, 'context, 'owner, F, E> Compiler<'root, 'context, 'owner, F, E>
 where
@@ -42,8 +33,8 @@ where
     pub(super) fn materialize_components(
         &mut self,
         document: &mut SceneDocument,
-    ) -> Result<(), PrefabExpansionFailure> {
-        let mut namespaces = ValueNamespaces::default();
+    ) -> Result<ReferencePrograms, PrefabExpansionFailure> {
+        let mut references = BTreeMap::new();
 
         for entity in &mut document.entities {
             let node = *self
@@ -77,19 +68,41 @@ where
             }
             self.context.usage.materialized_components = count;
 
-            // Move the private program index aside so interpreting a record can borrow the
-            // compiler mutably without copying its property suffix or any source payload.
+            self.admit(
+                self.nodes[node]
+                    .programs
+                    .keys()
+                    .try_fold(128usize, |bytes, component| {
+                        bytes
+                            .checked_add(256)?
+                            .checked_add(provenance_string_bytes(component.as_str())?)
+                    })
+                    .and_then(|bytes| {
+                        bytes.checked_add(provenance_string_bytes(
+                            self.nodes[node].origin.entity().as_str(),
+                        )?)
+                    }),
+            )?;
+            // Move the private program index only after admission. Interpreting a record
+            // can then borrow the compiler without copying its suffix or source payload.
             let programs = std::mem::take(&mut self.nodes[node].programs);
             let source_entity = self.nodes[node].origin.entity().clone();
-            for (component, program) in &programs {
-                let record = self
-                    .materialize_program(component, program, &source_entity, &mut namespaces)
-                    .map_err(|failure| self.record_failure(program.record, failure))?;
-                entity.components.insert(component.clone(), record);
-            }
+            let mut component_references = BTreeMap::new();
+            let result = (|| {
+                for (component, program) in &programs {
+                    let (record, origins) = self
+                        .materialize_program(component, program, &source_entity)
+                        .map_err(|failure| self.record_failure(program.record, failure))?;
+                    component_references.insert(component.clone(), origins);
+                    entity.components.insert(component.clone(), record);
+                }
+                Ok::<_, PrefabExpansionFailure>(())
+            })();
             self.nodes[node].programs = programs;
+            result?;
+            references.insert(node, component_references);
         }
-        Ok(())
+        Ok(references)
     }
 
     fn materialize_program(
@@ -97,8 +110,7 @@ where
         component: &ComponentTypeId,
         program: &Program,
         entity: &SceneEntityId,
-        namespaces: &mut ValueNamespaces,
-    ) -> Result<SceneComponentRecord, PrefabExpansionFailure> {
+    ) -> Result<(SceneComponentRecord, ReferenceProgram), PrefabExpansionFailure> {
         let authority = self.context.authority;
         let original = self.component(program.record, component);
         #[cfg(feature = "serde")]
@@ -175,13 +187,22 @@ where
             })
             .and_then(|bytes| bytes.checked_add(size_of::<SceneComponentRecord>()));
         self.admit(metadata)?;
+        // Every attempt pays for this clone before allocation, including attempts whose
+        // materialized counters are later released when reference demand opens a scope.
+        self.admit(value_work_bytes(cost))?;
         self.replace_value_cost(ComponentValueCost::ZERO, cost, entity)?;
         let mut record = self.component(program.record, component).clone();
         if opaque {
-            return Ok(record);
+            return Ok((
+                record,
+                ReferenceProgram {
+                    origins: BTreeMap::new(),
+                    plan: None,
+                },
+            ));
         }
 
-        if let Record::Source { scope, .. } = program.record {
+        let mut references = if let Record::Source { scope, .. } = program.record {
             let previous_version = record.version;
             let value = std::mem::replace(&mut record.value, ComponentValue::Null);
             let migrated = match authority.migrate_owned(component, &record, value) {
@@ -213,64 +234,37 @@ where
             let migrated_cost = self.bounded_value_cost(&record.value, cost)?;
             self.replace_value_cost(cost, migrated_cost, entity)?;
             let schema = authority.current_schema(component, &record)?;
-            self.materialize_defaults(schema, &mut record, entity, 0)?;
+            self.materialize_defaults(schema, &mut record, entity)?;
             components::validate_value(
                 schema,
                 &record.value,
                 self.value_program_limits(record.value.cost())?,
             )?;
-            self.ensure_source_namespace(scope, namespaces)?;
-            self.remap_source_references(
-                schema,
-                &mut record.value,
-                &namespaces.sources[&scope],
-                entity,
-                component,
-            )?;
+            self.source_reference_origins(schema, &record.value, scope, entity, component)?
         } else {
-            let scope = match program.record {
-                Record::Addition { scope, .. } | Record::Set { scope, .. } => scope,
+            let (scope, slot) = match program.record {
+                Record::Addition { scope, index } => (scope, PrefabOverlaySlot::Addition { index }),
+                Record::Set { scope, index } => (scope, PrefabOverlaySlot::Component { index }),
                 Record::Source { .. } => unreachable!("source records were handled above"),
             };
-            self.ensure_value_targets(scope, namespaces)?;
-            let targets = &namespaces.targets[&scope];
-            let limits = self.value_program_limits(record.value.cost())?;
             let bindings = self.value_bindings(program.record, component);
-            let growth = references::binding_growth(bindings, targets, limits)?;
             let binding_bytes = binding_work_bytes(bindings);
             self.admit(binding_bytes)?;
-            self.admit(Some(growth))?;
             let schema = authority.current_schema(component, &record)?;
-            self.materialize_defaults(schema, &mut record, entity, growth)?;
+            self.materialize_defaults(schema, &mut record, entity)?;
 
             let old_cost = record.value.cost();
             let limits = self.value_program_limits(old_cost)?;
             components::validate_value(schema, &record.value, limits)?;
             self.reserve_value_reference_work(schema, old_cost, limits)?;
-            let predicted_bytes = old_cost
-                .logical_bytes()
-                .checked_add(growth)
-                .ok_or(PrefabExpansionFailureKind::WorkLimit)?;
-            self.context
-                .preflight_materialized_value_cost(
-                    old_cost.nodes(),
-                    old_cost.nodes(),
-                    old_cost.logical_bytes(),
-                    predicted_bytes,
-                    entity,
-                )
-                .ok_or(PrefabExpansionFailureKind::WorkLimit)?;
-            let bound = references::bind_references(
+            let bindings = references::plan_bindings(
                 schema,
                 &record.value,
                 self.value_bindings(program.record, component),
-                targets,
                 limits,
             )?;
-            components::validate_value(schema, &bound, limits)?;
-            self.replace_value_cost(old_cost, bound.cost(), entity)?;
-            record.value = bound;
-        }
+            self.scope_reference_bindings(bindings, scope, Some(slot))?
+        };
 
         let schema = authority.current_schema(component, &record)?;
         for &(scope, index) in &program.properties {
@@ -293,6 +287,7 @@ where
             }
             let old_cost = record.value.cost();
             let limits = self.value_program_limits(old_cost)?;
+            let claim_count = claims.len();
             let claim_work = claims.iter().try_fold(
                 (0usize, ComponentValueCost::ZERO),
                 |(bytes, values), claim| {
@@ -325,8 +320,7 @@ where
             let (claim_bytes, claim_values) =
                 claim_work.ok_or(PrefabExpansionFailureKind::WorkLimit)?;
             self.admit(Some(claim_bytes))?;
-            self.ensure_value_targets(scope, namespaces)?;
-            // apply_claims keeps an immutable base and an isolated candidate; its default
+            // prepare_claims keeps an immutable base and an isolated candidate; its default
             // and binding plans are separately bounded before copying selected payloads.
             for _ in 0..2 {
                 if !self
@@ -338,19 +332,31 @@ where
             }
             self.reserve_value_reference_work(schema, old_cost, limits)?;
             self.reserve_value_reference_work(schema, claim_values, limits)?;
+            let site = self.scopes[scope]
+                .site
+                .as_ref()
+                .ok_or(PrefabExpansionFailureKind::OwnerAdmission)?;
+            let overlay = instance_from_inputs(self.root.entities, &self.scopes, site)
+                .and_then(|instance| instance.overrides.as_ref())
+                .ok_or(PrefabExpansionFailureKind::OwnerAdmission)?;
             let PrefabComponentIntent::Properties {
                 version, claims, ..
-            } = &self.overlay(scope).unwrap().components[index]
+            } = &overlay.components[index]
             else {
                 return Err(PrefabExpansionFailureKind::OwnerAdmission.into());
             };
-            let value = properties::apply_claims(
+            let prepared = properties::prepare_claims(
                 schema,
                 *version,
                 &record.value,
                 claims,
-                &namespaces.targets[&scope],
                 limits,
+                |bytes| {
+                    self.context
+                        .reserve_scratch_bytes(Some(bytes), Some(entity), None)
+                        .then_some(())
+                        .ok_or(PrefabExpansionFailureKind::WorkLimit)
+                },
             )
             .map_err(|reason| {
                 self.scope_failure(
@@ -359,14 +365,29 @@ where
                     reason.into(),
                 )
             })?;
-            self.reserve_value_reference_work(schema, value.cost(), limits)?;
-            references::validate_references(schema, &value, limits)?;
-            self.replace_value_cost(old_cost, value.cost(), entity)?;
-            record.value = value;
+            if prepared.replacements.len() != claim_count {
+                return Err(PrefabExpansionFailureKind::OwnerAdmission.into());
+            }
+            self.replace_reference_origins(
+                &mut references.origins,
+                prepared.replacements,
+                scope,
+                index,
+            )?;
+            self.replace_value_cost(old_cost, prepared.value.cost(), entity)?;
+            record.value = prepared.value;
+            references.plan = None;
         }
-        // The structural owner rewrites these internal references only after all suffixes
-        // have run, so a later pin can replace a reference to an entity deleted outside.
-        Ok(record)
+        let limits = self.value_program_limits(record.value.cost())?;
+        self.validate_reference_program(
+            schema,
+            &record.value,
+            &mut references,
+            limits,
+            entity,
+            component,
+        )?;
+        Ok((record, references))
     }
 
     fn value_bindings(
@@ -387,7 +408,7 @@ where
         }
     }
 
-    fn value_program_limits(
+    pub(super) fn value_program_limits(
         &self,
         replaced: ComponentValueCost,
     ) -> Result<ComponentValueMaterializationLimits, PrefabExpansionFailure> {
@@ -443,23 +464,9 @@ where
         schema: &ComponentSchema,
         record: &mut SceneComponentRecord,
         entity: &SceneEntityId,
-        binding_growth: usize,
     ) -> Result<(), PrefabExpansionFailure> {
         let old_cost = record.value.cost();
-        self.context
-            .preflight_materialized_value_cost(
-                old_cost.nodes(),
-                old_cost.nodes(),
-                old_cost.logical_bytes(),
-                old_cost
-                    .logical_bytes()
-                    .checked_add(binding_growth)
-                    .ok_or(PrefabExpansionFailureKind::WorkLimit)?,
-                entity,
-            )
-            .ok_or(PrefabExpansionFailureKind::WorkLimit)?;
-        let limits =
-            components::reserve_cost(self.value_program_limits(old_cost)?, 0, binding_growth)?;
+        let limits = self.value_program_limits(old_cost)?;
         if !self
             .context
             .reserve_component_temporary(schema, old_cost, Some(entity))
@@ -516,66 +523,7 @@ where
         self.replace_value_cost(old_cost, cost, entity)
     }
 
-    fn ensure_source_namespace(
-        &mut self,
-        scope: ScopeId,
-        namespaces: &mut ValueNamespaces,
-    ) -> Result<(), PrefabExpansionFailure> {
-        if namespaces.sources.contains_key(&scope) {
-            return Ok(());
-        }
-        let bytes = self.scopes[scope]
-            .nodes
-            .iter()
-            .filter_map(|(origin, node)| match origin {
-                PrefabEntityOrigin::SourceEntity(id) => {
-                    Some((id, &self.value_ids[&self.nodes[*node].locator]))
-                }
-                PrefabEntityOrigin::InstanceAddition(_) => None,
-            })
-            .try_fold(128usize, |bytes, (id, locator)| {
-                bytes
-                    .checked_add(128)?
-                    .checked_add(provenance_string_bytes(id.as_str())?)?
-                    .checked_add(provenance_string_bytes(locator.as_str())?)
-            });
-        self.admit(bytes)?;
-        let namespace = self.scopes[scope]
-            .nodes
-            .iter()
-            .filter_map(|(origin, node)| match origin {
-                PrefabEntityOrigin::SourceEntity(id) => Some((
-                    id.clone(),
-                    self.value_ids[&self.nodes[*node].locator].clone(),
-                )),
-                PrefabEntityOrigin::InstanceAddition(_) => None,
-            })
-            .collect();
-        namespaces.sources.insert(scope, namespace);
-        Ok(())
-    }
-
-    fn ensure_value_targets(
-        &mut self,
-        scope: ScopeId,
-        namespaces: &mut ValueNamespaces,
-    ) -> Result<(), PrefabExpansionFailure> {
-        if !namespaces.targets.contains_key(&scope) {
-            self.admit(Some(128))?;
-            self.admit(self.target_index_bytes(scope))?;
-            let mut targets = self.target_nodes(scope)?;
-            self.admit(targets.values().try_fold(0usize, |bytes, locator| {
-                bytes.checked_add(provenance_string_bytes(self.value_ids[locator].as_str())?)
-            }))?;
-            for value in targets.values_mut() {
-                *value = self.value_ids[value].clone();
-            }
-            namespaces.targets.insert(scope, targets);
-        }
-        Ok(())
-    }
-
-    fn reserve_value_reference_work(
+    pub(super) fn reserve_value_reference_work(
         &mut self,
         schema: &ComponentSchema,
         cost: ComponentValueCost,
@@ -588,84 +536,21 @@ where
                     bytes
                         .checked_add(128)?
                         .checked_add(provenance_string_bytes(field.id().as_str())?)?
-                        .checked_add(field.path().segments().len().checked_mul(96)?)
+                        .checked_add(field.path().segments().iter().try_fold(
+                            0usize,
+                            |bytes, segment| {
+                                bytes.checked_add(96)?.checked_add(match segment {
+                                    ComponentFieldPathSegment::Field(name) => name.len(),
+                                    ComponentFieldPathSegment::Index(_) => 0,
+                                })
+                            },
+                        )?)
                 })
             });
         self.admit(bytes)
     }
 
-    fn remap_source_references(
-        &mut self,
-        schema: &ComponentSchema,
-        value: &mut ComponentValue,
-        namespace: &SourceNamespace,
-        entity: &SceneEntityId,
-        component: &ComponentTypeId,
-    ) -> Result<(), PrefabExpansionFailure> {
-        let cost = value.cost();
-        let limits = self.value_program_limits(cost)?;
-        self.reserve_value_reference_work(schema, cost, limits)?;
-        let plan = plan_declared_entity_references::<PrefabReferenceRemapError>(
-            schema,
-            value,
-            crate::validation::reference_traversal_limits(limits),
-        )
-        .map_err(|error| self.source_value_reference_error(entity, component, &error))?;
-        let mut before = 0usize;
-        let mut after = 0usize;
-        plan.visit(value, |_, reference| {
-            if let EntityReference::SceneLocal { entity } = reference {
-                let mapped = namespace
-                    .get(entity)
-                    .ok_or(PrefabReferenceRemapError::MissingSourceEntity)?;
-                let overflow = || PrefabReferenceRemapError::MaterializedValue {
-                    observed: usize::MAX,
-                    maximum: limits.bytes().get(),
-                };
-                before = before
-                    .checked_add(entity.as_str().len())
-                    .ok_or_else(overflow)?;
-                after = after
-                    .checked_add(mapped.as_str().len())
-                    .ok_or_else(overflow)?;
-            }
-            Ok(())
-        })
-        .map_err(|error| self.source_value_reference_error(entity, component, &error))?;
-        let bytes = cost
-            .logical_bytes()
-            .checked_sub(before)
-            .and_then(|bytes| bytes.checked_add(after))
-            .ok_or(PrefabExpansionFailureKind::WorkLimit)?;
-        self.admit(Some(after))?;
-        let (nodes, bytes) = self
-            .context
-            .preflight_materialized_value_cost(
-                cost.nodes(),
-                cost.nodes(),
-                cost.logical_bytes(),
-                bytes,
-                entity,
-            )
-            .ok_or(PrefabExpansionFailureKind::WorkLimit)?;
-        plan.rewrite_in_place(value, |_, reference| {
-            Ok(match reference {
-                EntityReference::SceneLocal { entity } => EntityReference::SceneLocal {
-                    entity: namespace
-                        .get(entity)
-                        .ok_or(PrefabReferenceRemapError::MissingSourceEntity)?
-                        .clone(),
-                },
-                EntityReference::Persistent { .. } => reference.clone(),
-            })
-        })
-        .map_err(|error| self.source_value_reference_error(entity, component, &error))?;
-        self.context.usage.materialized_value_nodes = nodes;
-        self.context.usage.materialized_value_bytes = bytes;
-        Ok(())
-    }
-
-    fn source_value_reference_error(
+    pub(super) fn source_value_reference_error(
         &mut self,
         entity: &SceneEntityId,
         component: &ComponentTypeId,
@@ -737,7 +622,8 @@ fn binding_work_bytes(bindings: &[PrefabReferenceBinding]) -> Option<usize> {
         binding.slot.segments().iter().try_fold(
             bytes
                 .checked_add(128)?
-                .checked_add(binding.expected.as_str().len())?,
+                .checked_add(binding.expected.as_str().len())?
+                .checked_add(super::target_clone_bytes(&binding.target)?)?,
             |bytes, segment| {
                 bytes.checked_add(96)?.checked_add(match segment {
                     ComponentFieldPathSegment::Field(name) => name.len(),

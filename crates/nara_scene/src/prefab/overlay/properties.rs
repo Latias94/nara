@@ -2,6 +2,9 @@
 
 use std::collections::BTreeMap;
 
+use nara_reflect::__private::{
+    ComponentPropertyAdmissionError, resolve_component_property_storage_path_with_admission,
+};
 use nara_reflect::{
     ComponentFieldPath, ComponentFieldPathError, ComponentFieldPathSegment, ComponentFieldSchema,
     ComponentPropertyError, ComponentPropertyPath, ComponentPropertyStep, ComponentSchema,
@@ -9,12 +12,13 @@ use nara_reflect::{
     ComponentValueShape, effective_component_value_owned, resolve_component_property_with_limits,
 };
 
+#[cfg(test)]
 use crate::SceneEntityId;
 
 use super::components::{
     check_value_cost, codec_failure, effective_value, reserve_cost, shape_failure, validate_value,
 };
-use super::references::{bind_property_references, binding_growth};
+use super::references::plan_property_bindings;
 use super::{
     PrefabEntityTarget, PrefabExpansionFailureKind, PrefabPropertyClaim, PrefabPropertyIntent,
 };
@@ -23,14 +27,31 @@ use super::{
 #[path = "properties/owned_candidate_tests.rs"]
 mod owned_candidate_tests;
 
-pub(super) fn apply_claims(
+/// One successful subtree replacement and its still-unresolved payload reference intent.
+/// Coordinates belong only to this unpublished value, never to durable property identity.
+#[derive(Debug)]
+pub(super) struct PropertyReferenceReplacement {
+    pub(super) path: ComponentFieldPath,
+    pub(super) references: BTreeMap<ComponentFieldPath, PrefabEntityTarget>,
+}
+
+#[derive(Debug)]
+pub(super) struct PreparedPropertyClaims {
+    pub(super) value: ComponentValue,
+    pub(super) replacements: Vec<PropertyReferenceReplacement>,
+}
+
+/// Composes values and validates binding grammar without resolving entity targets.
+/// The enclosing compiler owns each replacement's scope and admits its complete storage
+/// coordinate before copying it, independently of whether it contains any references.
+pub(super) fn prepare_claims(
     schema: &ComponentSchema,
     version: ComponentSchemaVersion,
     original: &ComponentValue,
     claims: &[PrefabPropertyClaim],
-    targets: &BTreeMap<PrefabEntityTarget, SceneEntityId>,
     limits: ComponentValueMaterializationLimits,
-) -> Result<ComponentValue, PrefabExpansionFailureKind> {
+    mut admit_path: impl FnMut(usize) -> Result<(), PrefabExpansionFailureKind>,
+) -> Result<PreparedPropertyClaims, PrefabExpansionFailureKind> {
     if version != schema.version() {
         return Err(PrefabExpansionFailureKind::Component);
     }
@@ -49,9 +70,8 @@ pub(super) fn apply_claims(
         })
         .collect::<Result<Vec<_>, _>>()?;
     for (claim, field) in claims.iter().zip(&fields) {
-        // Reserve every introduced subtree and binding's positive growth before cloning
-        // the inherited value. This intentionally does not credit removed subtrees.
-        bytes = bytes.saturating_add(binding_growth(&claim.bindings, targets, limits)?);
+        // Reserve introduced payloads before cloning. Actual target-ID growth is admitted
+        // after all suffixes select the final references, before their final rewrite.
         if matches!(&claim.intent, PrefabPropertyIntent::Absent)
             && let Some(default) = field.default_value()
         {
@@ -116,9 +136,24 @@ pub(super) fn apply_claims(
     }
 
     let mut candidate = original.clone();
+    let mut replacements = Vec::with_capacity(claims.len());
     for (claim, field) in claims.iter().zip(&fields) {
         match &claim.intent {
             PrefabPropertyIntent::Absent => {
+                let references = match field.default_value() {
+                    Some(default) => plan_property_bindings(
+                        field,
+                        field.shape(),
+                        default,
+                        &claim.bindings,
+                        limits,
+                    )?,
+                    None => BTreeMap::new(),
+                };
+                replacements.push(PropertyReferenceReplacement {
+                    path: clone_storage_path(field.path(), &mut admit_path)?,
+                    references,
+                });
                 if !root_missing(&candidate, field)? {
                     candidate
                         .remove_path(field.path())
@@ -139,17 +174,31 @@ pub(super) fn apply_claims(
                     .map_err(property_failure)?
                     .shape
                 };
-                let bound = bind_property_references(
-                    field,
-                    shape,
-                    value,
-                    &claim.bindings,
-                    targets,
-                    limits,
-                )?;
+                let references =
+                    plan_property_bindings(field, shape, value, &claim.bindings, limits)?;
+                let storage = if claim.path.steps.is_empty() {
+                    clone_storage_path(field.path(), &mut admit_path)?
+                } else {
+                    resolve_component_property_storage_path_with_admission(
+                        schema,
+                        version,
+                        &base,
+                        &claim.path,
+                        base_limits,
+                        &mut admit_path,
+                    )
+                    .map_err(|error| match error {
+                        ComponentPropertyAdmissionError::Property(error) => property_failure(error),
+                        ComponentPropertyAdmissionError::Admission(error) => error,
+                    })?
+                };
+                replacements.push(PropertyReferenceReplacement {
+                    path: storage,
+                    references,
+                });
                 if root_missing(&candidate, field)? {
                     let initial = if claim.path.steps.is_empty() {
-                        &bound
+                        value
                     } else {
                         field
                             .default_value()
@@ -167,7 +216,13 @@ pub(super) fn apply_claims(
                 // Complete validation and enclosing-key preservation follow all replacements.
                 candidate = claim
                     .path
-                    .replace_in_owned_value_with_limits(schema, version, candidate, bound, limits)
+                    .replace_in_owned_value_with_limits(
+                        schema,
+                        version,
+                        candidate,
+                        value.clone(),
+                        limits,
+                    )
                     .map_err(property_failure)?;
             }
         }
@@ -178,29 +233,87 @@ pub(super) fn apply_claims(
     }
     drop(effective);
 
-    // Absent may expose a default with local references. Only that newly exposed payload
-    // consumes these bindings; inherited references do not change namespace again.
+    // Absent exposes its raw default with the declaring claim's origin plan. Target lookup
+    // waits until subsequent outer pins have finished; inherited leaves retain their scopes.
     for (claim, field) in claims.iter().zip(&fields) {
         if matches!(&claim.intent, PrefabPropertyIntent::Absent)
             && let Some(default) = field.default_value()
         {
-            let bound = bind_property_references(
-                field,
-                field.shape(),
-                default,
-                &claim.bindings,
-                targets,
-                limits,
-            )?;
             candidate = effective_component_value_owned(schema, candidate, limits)
                 .map_err(codec_failure)?;
             candidate
-                .set_path(field.path(), bound)
+                .set_path(field.path(), default.clone())
                 .map_err(|_| PrefabExpansionFailureKind::Component)?;
         }
     }
     validate_value(schema, &candidate, limits)?;
-    Ok(candidate)
+    Ok(PreparedPropertyClaims {
+        value: candidate,
+        replacements,
+    })
+}
+
+/// Resolves the prepared one-layer result for focused value/selector conformance tests.
+/// Production compilation retains these plans through every outer layer before lookup.
+#[cfg(test)]
+pub(super) fn apply_claims(
+    schema: &ComponentSchema,
+    version: ComponentSchemaVersion,
+    original: &ComponentValue,
+    claims: &[PrefabPropertyClaim],
+    targets: &BTreeMap<PrefabEntityTarget, SceneEntityId>,
+    limits: ComponentValueMaterializationLimits,
+) -> Result<ComponentValue, PrefabExpansionFailureKind> {
+    let prepared = prepare_claims(schema, version, original, claims, limits, |_| Ok(()))?;
+    let mut value = prepared.value;
+    for replacement in prepared.replacements {
+        for (relative, target) in replacement.references {
+            let target = targets
+                .get(&target)
+                .ok_or(PrefabExpansionFailureKind::MissingTarget)?;
+            let path = ComponentFieldPath::new(
+                replacement
+                    .path
+                    .segments()
+                    .iter()
+                    .chain(relative.segments())
+                    .cloned(),
+            );
+            value
+                .replace_path(
+                    &path,
+                    ComponentValue::EntityReference(nara_identity::EntityReference::SceneLocal {
+                        entity: target.clone(),
+                    }),
+                )
+                .map_err(|_| PrefabExpansionFailureKind::Reference)?;
+        }
+    }
+    check_value_cost(&value, limits)?;
+    Ok(value)
+}
+
+fn clone_storage_path(
+    path: &ComponentFieldPath,
+    admit: &mut impl FnMut(usize) -> Result<(), PrefabExpansionFailureKind>,
+) -> Result<ComponentFieldPath, PrefabExpansionFailureKind> {
+    let bytes = path
+        .segments()
+        .iter()
+        .try_fold(
+            std::mem::size_of::<ComponentFieldPath>(),
+            |bytes, segment| {
+                bytes
+                    .checked_add(std::mem::size_of::<ComponentFieldPathSegment>())?
+                    .checked_add(match segment {
+                        ComponentFieldPathSegment::Field(name) => name.len(),
+                        ComponentFieldPathSegment::Index(_) => 0,
+                    })
+            },
+        )
+        .ok_or(PrefabExpansionFailureKind::WorkLimit)?;
+    admit(bytes)?;
+    Ok(path.clone())
 }
 
 fn property_failure(error: ComponentPropertyError) -> PrefabExpansionFailureKind {

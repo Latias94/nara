@@ -21,7 +21,6 @@ use crate::{
         with_entity_reference_rewrite_error, with_public_locator, with_public_u64,
     },
     schema_authority::SchemaAuthority,
-    validation::reference_traversal_limits,
 };
 
 #[cfg(test)]
@@ -1692,10 +1691,6 @@ where
                 })
             });
         self.reserve_scratch_bytes(bytes, anchor, source)
-    }
-
-    fn prefab_reference_traversal_limits(&self) -> EntityReferenceTraversalLimits {
-        reference_traversal_limits(self.materialization_limits())
     }
 
     fn materialization_limits(&self) -> ComponentValueMaterializationLimits {

@@ -12,6 +12,7 @@ use crate::prefab::PrefabExpansionWorkingSet;
 use crate::provenance::{provenance_asset_ref_bytes, provenance_string_bytes};
 
 mod output;
+mod reference_program;
 mod values;
 
 type NodeId = usize;
@@ -69,6 +70,31 @@ struct Scope {
     output: BTreeSet<NodeId>,
 }
 
+/// Borrows declarations independently of the compiler's mutable admission owner.
+fn instance_from_inputs<'a>(
+    root_entities: &'a [SceneEntityRecord],
+    scopes: &'a [Scope],
+    site: &Site,
+) -> Option<&'a PrefabInstance> {
+    let entities = scopes[site.source]
+        .source
+        .as_ref()
+        .map_or(root_entities, |source| &source.document().entities);
+    let mut instance = entities.get(site.entity)?.prefab.as_ref()?;
+    for segment in &site.segments {
+        let overlay = instance.overrides.as_ref()?;
+        instance = match *segment {
+            PrefabInstancePathSegment::Addition { index } => {
+                overlay.additions.get(index)?.prefab.as_ref()?
+            }
+            PrefabInstancePathSegment::InstanceClaim { index } => {
+                overlay.instances.get(index)?.value.as_ref()?
+            }
+        };
+    }
+    Some(instance)
+}
+
 struct Compiler<'root, 'context, 'owner, F, E> {
     root: SourceTopology<'root>,
     selected_anchor: Option<NodeId>,
@@ -76,7 +102,6 @@ struct Compiler<'root, 'context, 'owner, F, E> {
     scopes: Vec<Scope>,
     nodes: Vec<Node>,
     locators: BTreeMap<SceneEntityId, NodeId>,
-    value_ids: BTreeMap<SceneEntityId, SceneEntityId>,
     postorder: Vec<ScopeId>,
 }
 
@@ -137,7 +162,6 @@ where
         scopes: Vec::new(),
         nodes: Vec::new(),
         locators: BTreeMap::new(),
-        value_ids: BTreeMap::new(),
         postorder: Vec::new(),
     };
     compiler.admit(Some(size_of::<Scope>()))?;
@@ -156,49 +180,27 @@ where
     compiler.register_scope(0)?;
     let mut scanned = 0;
     let mut layout = compiler.close_structure(&mut scanned)?;
-    // A retained value's bindings may enter a source; discarded programs never do.
-    // Structural demands for that new scope close before selecting its final values.
+    let baseline = compiler.context.usage;
+    let source_upgrade_required = compiler.context.source_upgrade_required;
+    // Reference intent follows the effective leaves, including every property suffix.
+    // A newly entered scope invalidates this unpublished value/visibility candidate.
     loop {
         compiler.compose_programs()?;
-        let mut binding_bytes = Some(0usize);
-        for &node in &compiler.scopes[0].output {
-            if !compiler.selects_values(node) {
-                continue;
-            }
-            for (component, program) in &compiler.nodes[node].programs {
-                compiler.program_bindings(component, program, |_, _, target| {
-                    binding_bytes = binding_bytes.and_then(|bytes| {
-                        bytes
-                            .checked_add(target_clone_bytes(target)?)?
-                            .checked_add(64)
-                    });
-                });
-            }
+        let mut references = compiler.materialize_components(&mut layout)?;
+        if compiler.close_reference_demands(&mut references)? {
+            return compiler.materialize(layout, references);
         }
-        compiler.admit(binding_bytes)?;
-        let mut demanded = Vec::new();
-        for &node in &compiler.scopes[0].output {
-            if !compiler.selects_values(node) {
-                continue;
-            }
-            for (component, program) in &compiler.nodes[node].programs {
-                compiler.program_bindings(component, program, |scope, slot, target| {
-                    demanded.push((scope, slot, target.clone()))
-                });
-            }
-        }
-        let previous = compiler.scopes.len();
-        for (scope, slot, target) in demanded {
-            compiler
-                .resolve(scope, &target)
-                .map_err(|failure| compiler.scope_failure(scope, Some(slot), failure))?;
-        }
-        if previous == compiler.scopes.len() {
-            break;
-        }
+
+        drop(references);
+        drop(layout);
+        // Release only the discarded materialization. Source acquisition, structural
+        // allocations and all normalization scratch remain cumulatively admitted.
+        compiler.context.usage.materialized_components = baseline.materialized_components;
+        compiler.context.usage.materialized_value_nodes = baseline.materialized_value_nodes;
+        compiler.context.usage.materialized_value_bytes = baseline.materialized_value_bytes;
+        compiler.context.source_upgrade_required = source_upgrade_required;
         layout = compiler.close_structure(&mut scanned)?;
     }
-    compiler.materialize(layout)
 }
 
 impl<'root, 'context, 'owner, F, E> Compiler<'root, 'context, 'owner, F, E>
@@ -242,23 +244,7 @@ where
     }
 
     fn instance(&self, site: &Site) -> Option<&PrefabInstance> {
-        let mut instance = self
-            .source_entities(site.source)
-            .get(site.entity)?
-            .prefab
-            .as_ref()?;
-        for segment in &site.segments {
-            let overlay = instance.overrides.as_ref()?;
-            instance = match *segment {
-                PrefabInstancePathSegment::Addition { index } => {
-                    overlay.additions.get(index)?.prefab.as_ref()?
-                }
-                PrefabInstancePathSegment::InstanceClaim { index } => {
-                    overlay.instances.get(index)?.value.as_ref()?
-                }
-            };
-        }
-        Some(instance)
+        instance_from_inputs(self.root.entities, &self.scopes, site)
     }
 
     fn overlay(&self, scope: ScopeId) -> Option<&PrefabOverlay> {
@@ -1314,62 +1300,6 @@ where
         }
 
         Ok(())
-    }
-
-    fn program_bindings(
-        &self,
-        component: &ComponentTypeId,
-        program: &Program,
-        mut visit: impl FnMut(ScopeId, PrefabOverlaySlot, &PrefabEntityTarget),
-    ) {
-        match program.record {
-            Record::Source { .. } => {}
-            Record::Addition { scope, index } => {
-                for binding in self.overlay(scope).unwrap().additions[index]
-                    .bindings
-                    .get(component)
-                    .into_iter()
-                    .flatten()
-                {
-                    visit(
-                        scope,
-                        PrefabOverlaySlot::Addition { index },
-                        &binding.target,
-                    );
-                }
-            }
-            Record::Set { scope, index } => {
-                if let PrefabComponentIntent::Set { bindings, .. } =
-                    &self.overlay(scope).unwrap().components[index]
-                {
-                    for binding in bindings {
-                        visit(
-                            scope,
-                            PrefabOverlaySlot::Component { index },
-                            &binding.target,
-                        );
-                    }
-                }
-            }
-        }
-        for &(scope, index) in &program.properties {
-            if let PrefabComponentIntent::Properties { claims, .. } =
-                &self.overlay(scope).unwrap().components[index]
-            {
-                for (claim_index, claim) in claims.iter().enumerate() {
-                    for binding in &claim.bindings {
-                        visit(
-                            scope,
-                            PrefabOverlaySlot::Property {
-                                component_index: index,
-                                claim_index,
-                            },
-                            &binding.target,
-                        );
-                    }
-                }
-            }
-        }
     }
 
     fn layout_scope(

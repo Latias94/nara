@@ -178,6 +178,91 @@ fn native_property_expansion_accepts_large_admitted_values_and_preserves_budget_
     }
 }
 
+#[test]
+fn scalar_pins_admit_repeated_schema_storage_prefixes_before_retaining_paths() {
+    let storage_name = "v".repeat(64 * 1024);
+    let schema = ComponentSchema::new(
+        large_component(),
+        "Long storage path",
+        ComponentSchemaVersion::ONE,
+    )
+    .with_capabilities([ComponentCapability::Scene])
+    .with_fields([ComponentFieldSchema::required(
+        ComponentFieldId::new("values"),
+        "Values",
+        ComponentFieldPath::from_fields([storage_name.clone()]),
+        ComponentValueShape::map(ComponentValueKind::U64.into()),
+    )
+    .with_capabilities([ComponentCapability::Scene])]);
+    let mut registry = nara_reflect::ComponentRegistryBuilder::from_owner_catalog_candidate(
+        ComponentSchemaOwnerId::new("game.overlay-links"),
+        ComponentSchemaCatalog::default(),
+        None,
+    )
+    .unwrap();
+    registry
+        .register_persistent_component_with_codec::<LargePropertyValue, _, _>(
+            schema,
+            |value| Ok(LargePropertyValue(value.clone())),
+            |value| Ok(value.0.clone()),
+        )
+        .unwrap();
+    let registry = registry.freeze().unwrap();
+    let value = ComponentValue::map([(
+        storage_name,
+        ComponentValue::map((0..512).map(|index| (format!("key_{index}"), ComponentValue::U64(0)))),
+    )]);
+    let sources = InMemoryPrefabSourceResolver::new().with_prefab(
+        request("base"),
+        key("base"),
+        PrefabDocument::from_ordered_roots([
+            SceneEntityRecord::new(id("host")).with_component(large_component(), record(value))
+        ]),
+    );
+    let limits = PrefabExpansionLimits::default()
+        .with_working_bytes(ByteLimit::new(40 * 1024 * 1024).unwrap());
+    for pin_count in [1, 512] {
+        let mut overlay = PrefabOverlay::new(key("base"));
+        overlay.components.push(PrefabComponentIntent::Properties {
+            target: PrefabEntityTarget::source(id("host")),
+            component: large_component(),
+            version: ComponentSchemaVersion::ONE,
+            claims: (0..pin_count)
+                .map(|index| PrefabPropertyClaim {
+                    path: ComponentPropertyPath::new(ComponentFieldId::new("values")).with_steps([
+                        nara_reflect::ComponentPropertyStep::MapEntry(format!("key_{index}",)),
+                    ]),
+                    intent: PrefabPropertyIntent::Set(ComponentValue::U64(7)),
+                    bindings: Vec::new(),
+                })
+                .collect(),
+        });
+        let report = expand(&registry, &scene(overlay), &sources, limits);
+        if pin_count == 1 {
+            assert!(report.failure.is_none(), "{:?}", report.diagnostics);
+            let result = expanded(&report)
+                .entities
+                .iter()
+                .find_map(|entity| entity.components.get(&large_component()))
+                .unwrap();
+            let ComponentValue::Map(fields) = &result.value else {
+                panic!("expected component fields")
+            };
+            assert_eq!(
+                fields.values().next().unwrap().get("key_0"),
+                Some(&ComponentValue::U64(7))
+            );
+        } else {
+            let diagnostic = rejected(&report, "scene.prefab-expansion-budget-exceeded");
+            assert_eq!(
+                field(diagnostic, "budget-kind"),
+                DiagnosticValueRef::Identifier("working-bytes"),
+            );
+            assert_budget_failure(report.failure.as_ref().unwrap());
+        }
+    }
+}
+
 #[cfg(feature = "serde")]
 fn authoring_expand(
     document: &SceneDocument,

@@ -849,16 +849,6 @@ fn only_retained_selected_bindings_open_a_structurally_suppressed_dependency() {
                 component: component(),
             });
         } else if mode == "repaired" {
-            fixture.sources.insert(
-                request("needed-by-binding"),
-                (
-                    key("needed-by-binding"),
-                    Arc::new(PrefabDocument::from_ordered_roots([
-                        SceneEntityRecord::new(id("socket"))
-                            .with_component(component(), record(ComponentValue::Bool(false))),
-                    ])),
-                ),
-            );
             outer.components.push(PrefabComponentIntent::Properties {
                 target: inside("host"),
                 component: component(),
@@ -887,7 +877,8 @@ fn only_retained_selected_bindings_open_a_structurally_suppressed_dependency() {
         let (report, reads) = fixture.selected(&basis, Default::default());
         assert_eq!(
             reads.contains(&request("needed-by-binding")),
-            mode != "discarded"
+            mode == "missing",
+            "only the surviving reference can demand its nested source"
         );
         if mode == "discarded" {
             assert_success(&report);

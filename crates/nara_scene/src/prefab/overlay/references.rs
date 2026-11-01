@@ -1,4 +1,4 @@
-//! Exact, single-consumption binding of schema-declared local reference payload slots.
+//! Exact, single-consumption syntax plans for schema-declared local reference payload slots.
 
 use std::collections::BTreeMap;
 
@@ -9,111 +9,90 @@ use nara_reflect::__private::{
     plan_declared_value_entity_references,
 };
 use nara_reflect::{
-    ComponentEntityReferenceRewriteError, ComponentFieldSchema, ComponentSchema, ComponentValue,
-    ComponentValueMaterializationLimits, ComponentValueShape, EntityReferenceTraversalLimits,
+    ComponentEntityReferenceRewriteError, ComponentFieldPath, ComponentFieldSchema,
+    ComponentSchema, ComponentValue, ComponentValueMaterializationLimits, ComponentValueShape,
+    EntityReferenceTraversalLimits,
 };
 
-use crate::SceneEntityId;
-
+use super::components::check_value_cost;
 use super::{PrefabEntityTarget, PrefabExpansionFailureKind, PrefabReferenceBinding};
 
-/// Reserves growth before default materialization or property/base copying. Taking only
-/// positive deltas is conservative when another slot shrinks; no payload is copied here.
-pub(super) fn binding_growth(
-    bindings: &[PrefabReferenceBinding],
-    targets: &BTreeMap<PrefabEntityTarget, SceneEntityId>,
-    limits: ComponentValueMaterializationLimits,
-) -> Result<usize, PrefabExpansionFailureKind> {
-    if bindings.len() > limits.nodes().get() {
-        return Err(PrefabExpansionFailureKind::WorkLimit);
-    }
-    let mut growth = 0usize;
-    for binding in bindings {
-        let target = targets
-            .get(&binding.target)
-            .ok_or(PrefabExpansionFailureKind::MissingTarget)?;
-        growth = growth
-            .checked_add(
-                target
-                    .as_str()
-                    .len()
-                    .saturating_sub(binding.expected.as_str().len()),
-            )
-            .filter(|growth| *growth <= limits.bytes().get())
-            .ok_or(PrefabExpansionFailureKind::WorkLimit)?;
-    }
-    Ok(growth)
-}
-
-pub(super) fn bind_references(
+/// Validates binding grammar in a complete, default-materialized component value.
+///
+/// The caller admits complete planner scratch and path/target copies from bounded metadata.
+/// This retains authored targets without checking their existence or survival. The compiler
+/// resolves only the references selected after all component and property replacements.
+pub(super) fn plan_bindings(
     schema: &ComponentSchema,
     value: &ComponentValue,
     bindings: &[PrefabReferenceBinding],
-    targets: &BTreeMap<PrefabEntityTarget, SceneEntityId>,
     limits: ComponentValueMaterializationLimits,
-) -> Result<ComponentValue, PrefabExpansionFailureKind> {
+) -> Result<BTreeMap<ComponentFieldPath, PrefabEntityTarget>, PrefabExpansionFailureKind> {
+    check_value_cost(value, limits)?;
     let traversal = traversal_limits(limits, schema.fields().iter())?;
     let plan =
         plan_declared_entity_references::<PrefabExpansionFailureKind>(schema, value, traversal)
             .map_err(reference_error)?;
-    bind_plan(plan, value, bindings, targets, limits)
+    match_bindings(plan, value, bindings, limits)
 }
 
-pub(super) fn bind_property_references(
+/// Plans bindings relative to the selected replacement payload, including an empty scalar path.
+///
+/// Defaults and scratch admission have the same caller-owned contract as [`plan_bindings`].
+pub(super) fn plan_property_bindings(
     field: &ComponentFieldSchema,
     shape: &ComponentValueShape,
     payload: &ComponentValue,
     bindings: &[PrefabReferenceBinding],
-    targets: &BTreeMap<PrefabEntityTarget, SceneEntityId>,
     limits: ComponentValueMaterializationLimits,
-) -> Result<ComponentValue, PrefabExpansionFailureKind> {
+) -> Result<BTreeMap<ComponentFieldPath, PrefabEntityTarget>, PrefabExpansionFailureKind> {
+    check_value_cost(payload, limits)?;
     let traversal = traversal_limits(limits, std::iter::once(field))?;
     // Reflect roots this plan at the selected payload, including an empty scalar slot.
     let plan = plan_declared_value_entity_references::<PrefabExpansionFailureKind>(
         field, shape, payload, traversal,
     )
     .map_err(reference_error)?;
-    bind_plan(plan, payload, bindings, targets, limits)
-}
-
-pub(super) fn validate_references(
-    schema: &ComponentSchema,
-    value: &ComponentValue,
-    limits: ComponentValueMaterializationLimits,
-) -> Result<(), PrefabExpansionFailureKind> {
-    plan_declared_entity_references::<PrefabExpansionFailureKind>(
-        schema,
-        value,
-        traversal_limits(limits, schema.fields().iter())?,
-    )
-    .map(|_| ())
-    .map_err(reference_error)
+    match_bindings(plan, payload, bindings, limits)
 }
 
 fn traversal_limits<'field>(
     limits: ComponentValueMaterializationLimits,
     fields: impl Iterator<Item = &'field ComponentFieldSchema>,
 ) -> Result<EntityReferenceTraversalLimits, PrefabExpansionFailureKind> {
-    // Reflect charges plan entries and their paths in addition to the payload. A payload
-    // allowance must not charge that metadata twice. Bound it by admitted field identities,
-    // payload size and depth while retaining separate exact candidate-value checks below.
-    let (field_count, id_bytes) = fields.fold((0usize, 0usize), |(count, bytes), field| {
-        (
-            count.saturating_add(1),
-            bytes.max(field.id().as_str().len()),
-        )
-    });
-    let path_factor = limits.depth().get().saturating_add(2);
+    // Reflect charges plan entries and paths as well as the payload. The caller admits that
+    // scratch separately; derive finite traversal ceilings rather than charging it against
+    // the exact payload allowance again. An unrepresentable ceiling is a work refusal.
+    let mut field_count = 0usize;
+    let mut id_bytes = 0usize;
+    for field in fields {
+        field_count = field_count
+            .checked_add(1)
+            .ok_or(PrefabExpansionFailureKind::WorkLimit)?;
+        id_bytes = id_bytes.max(field.id().as_str().len());
+    }
+    let path_factor = limits
+        .depth()
+        .get()
+        .checked_add(2)
+        .ok_or(PrefabExpansionFailureKind::WorkLimit)?;
     let nodes = limits
         .nodes()
         .get()
-        .saturating_mul(path_factor)
-        .saturating_add(field_count);
+        .checked_mul(path_factor)
+        .and_then(|nodes| nodes.checked_add(field_count))
+        .ok_or(PrefabExpansionFailureKind::WorkLimit)?;
+    let identity_bytes = limits
+        .nodes()
+        .get()
+        .checked_mul(id_bytes)
+        .ok_or(PrefabExpansionFailureKind::WorkLimit)?;
     let bytes = limits
         .bytes()
         .get()
-        .saturating_mul(path_factor)
-        .saturating_add(limits.nodes().get().saturating_mul(id_bytes));
+        .checked_mul(path_factor)
+        .and_then(|bytes| bytes.checked_add(identity_bytes))
+        .ok_or(PrefabExpansionFailureKind::WorkLimit)?;
     Ok(EntityReferenceTraversalLimits::new(
         ItemLimit::new(nodes).ok_or(PrefabExpansionFailureKind::WorkLimit)?,
         ByteLimit::new(bytes).ok_or(PrefabExpansionFailureKind::WorkLimit)?,
@@ -136,13 +115,12 @@ fn reference_error(
     }
 }
 
-fn bind_plan(
+fn match_bindings(
     plan: DeclaredEntityReferencePlan,
     value: &ComponentValue,
     bindings: &[PrefabReferenceBinding],
-    targets: &BTreeMap<PrefabEntityTarget, SceneEntityId>,
     limits: ComponentValueMaterializationLimits,
-) -> Result<ComponentValue, PrefabExpansionFailureKind> {
+) -> Result<BTreeMap<ComponentFieldPath, PrefabEntityTarget>, PrefabExpansionFailureKind> {
     if bindings.len() > limits.nodes().get() {
         return Err(PrefabExpansionFailureKind::WorkLimit);
     }
@@ -153,16 +131,14 @@ fn bind_plan(
         {
             return Err(PrefabExpansionFailureKind::WorkLimit);
         }
-        // The compiler admits raw binding metadata before calling this helper. Its cost
-        // belongs to that work budget, not to this component's candidate-value allowance.
+        // Complete path and target copies belong to the caller's admitted planner scratch,
+        // independently of the payload's exact node and byte allowance.
         if pending.insert(&binding.slot, binding).is_some() {
             return Err(PrefabExpansionFailureKind::Reference);
         }
     }
 
-    let mut resolved = BTreeMap::new();
-    let mut original_reference_bytes = 0usize;
-    let mut resolved_reference_bytes = 0usize;
+    let mut planned = BTreeMap::new();
     plan.visit(value, |slot, reference| {
         if let EntityReference::SceneLocal { entity } = reference {
             let binding = pending
@@ -171,14 +147,7 @@ fn bind_plan(
             if entity != &binding.expected {
                 return Err(PrefabExpansionFailureKind::Reference);
             }
-            let target = targets
-                .get(&binding.target)
-                .ok_or(PrefabExpansionFailureKind::MissingTarget)?;
-            original_reference_bytes =
-                original_reference_bytes.saturating_add(entity.as_str().len());
-            resolved_reference_bytes =
-                resolved_reference_bytes.saturating_add(target.as_str().len());
-            resolved.insert(slot.clone(), target);
+            planned.insert(slot.clone(), binding.target.clone());
         }
         Ok::<_, PrefabExpansionFailureKind>(())
     })
@@ -187,124 +156,9 @@ fn bind_plan(
     if !pending.is_empty() {
         return Err(PrefabExpansionFailureKind::Reference);
     }
-    let cost = value
-        .cost_up_to(limits.nodes().get(), limits.bytes().get())
-        .ok_or(PrefabExpansionFailureKind::WorkLimit)?;
-    let candidate_bytes = cost
-        .logical_bytes()
-        .checked_sub(original_reference_bytes)
-        .and_then(|bytes| bytes.checked_add(resolved_reference_bytes))
-        .ok_or(PrefabExpansionFailureKind::WorkLimit)?;
-    if candidate_bytes > limits.bytes().get() {
-        return Err(PrefabExpansionFailureKind::WorkLimit);
-    }
-
-    let mut candidate = value.clone();
-    plan.rewrite_in_place(&mut candidate, |slot, reference| {
-        Ok::<_, PrefabExpansionFailureKind>(match reference {
-            EntityReference::SceneLocal { .. } => EntityReference::SceneLocal {
-                entity: (*resolved
-                    .get(slot)
-                    .ok_or(PrefabExpansionFailureKind::Reference)?)
-                .clone(),
-            },
-            EntityReference::Persistent { .. } => reference.clone(),
-        })
-    })
-    .map_err(reference_error)?;
-    Ok(candidate)
+    Ok(planned)
 }
 
 #[cfg(test)]
-mod tests {
-    use nara_core::{ByteLimit, DepthLimit, ItemLimit};
-    use nara_reflect::{ComponentCapability, ComponentFieldId, ComponentFieldPath};
-
-    use super::*;
-
-    fn id(name: &str) -> SceneEntityId {
-        SceneEntityId::new(name).unwrap()
-    }
-
-    fn local(name: &str) -> ComponentValue {
-        ComponentValue::EntityReference(EntityReference::SceneLocal { entity: id(name) })
-    }
-
-    fn field() -> ComponentFieldSchema {
-        ComponentFieldSchema::required(
-            ComponentFieldId::new("link"),
-            "Link",
-            ComponentFieldPath::from_fields(["wire_link"]),
-            ComponentValueShape::EntityRef,
-        )
-        .with_capabilities([ComponentCapability::EntityRef])
-    }
-
-    fn binding() -> PrefabReferenceBinding {
-        PrefabReferenceBinding {
-            slot: ComponentFieldPath::empty(),
-            expected: id("socket"),
-            target: PrefabEntityTarget::source(id("socket")),
-        }
-    }
-
-    #[test]
-    fn scalar_slots_require_one_matching_binding_and_reject_unused_bindings() {
-        let field = field();
-        let binding = binding();
-        let targets = BTreeMap::from([(binding.target.clone(), id("output"))]);
-        let bind = |value: &ComponentValue, bindings: &[PrefabReferenceBinding]| {
-            bind_property_references(
-                &field,
-                field.shape(),
-                value,
-                bindings,
-                &targets,
-                Default::default(),
-            )
-        };
-        assert_eq!(
-            bind(&local("socket"), std::slice::from_ref(&binding)),
-            Ok(local("output"))
-        );
-        assert_eq!(
-            bind(&local("socket"), &[]),
-            Err(PrefabExpansionFailureKind::Reference)
-        );
-        assert_eq!(
-            bind(&local("stale"), std::slice::from_ref(&binding)),
-            Err(PrefabExpansionFailureKind::Reference)
-        );
-        assert_eq!(
-            bind(&local("socket"), &[binding.clone(), binding.clone()]),
-            Err(PrefabExpansionFailureKind::Reference)
-        );
-        assert_eq!(
-            bind(&ComponentValue::Null, &[binding]),
-            Err(PrefabExpansionFailureKind::Reference)
-        );
-    }
-
-    #[test]
-    fn resolved_reference_growth_obeys_the_compilers_value_budget() {
-        let field = field();
-        let binding = binding();
-        let targets = BTreeMap::from([(binding.target.clone(), id(&"x".repeat(512)))]);
-        let limits = ComponentValueMaterializationLimits::new(
-            ItemLimit::new(128).unwrap(),
-            ByteLimit::new(128).unwrap(),
-            DepthLimit::new(64).unwrap(),
-        );
-        assert_eq!(
-            bind_property_references(
-                &field,
-                field.shape(),
-                &local("socket"),
-                &[binding],
-                &targets,
-                limits
-            ),
-            Err(PrefabExpansionFailureKind::WorkLimit),
-        );
-    }
-}
+#[path = "references/tests.rs"]
+mod tests;

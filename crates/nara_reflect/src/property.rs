@@ -402,6 +402,57 @@ pub fn resolve_component_property_with_limits<'schema, 'value>(
     Ok(resolved)
 }
 
+/// Resolves a selector to its storage coordinate in the exact supplied schema/value snapshot.
+///
+/// This internal owner seam shares selector, schema/version and raw value-budget admission
+/// with [`ComponentPropertyPath::replace_in_owned_value_with_limits`]. It does not materialize
+/// defaults or validate complete value semantics; those remain the owner's responsibility.
+/// The coordinate is transient: resolve again after the schema or value changes. It is neither
+/// a durable selector/address nor authority to edit, retain or publish the supplied value.
+///
+/// Before copying the complete root storage coordinate, the callback admits its segment storage
+/// and string bytes. Later storage-vector growth, selected wire-name copies and declaration
+/// scratch are admitted before allocation. These are modeled storage allowances, not allocator/RSS bounds.
+/// Refusal returns the exact caller error without performing the denied allocation step.
+#[doc(hidden)]
+pub fn resolve_component_property_storage_path_with_admission<E>(
+    schema: &ComponentSchema,
+    version: ComponentSchemaVersion,
+    value: &ComponentValue,
+    path: &ComponentPropertyPath,
+    limits: ComponentValueMaterializationLimits,
+    mut admit: impl FnMut(usize) -> Result<(), E>,
+) -> Result<ComponentFieldPath, ComponentPropertyAdmissionError<E>> {
+    let mut refusal = None;
+    let result = {
+        let mut callback = |_, _, allocated| {
+            if allocated == 0 {
+                return true;
+            }
+            match admit(allocated) {
+                Ok(()) => true,
+                Err(error) => {
+                    refusal = Some(error);
+                    false
+                }
+            }
+        };
+        resolve_location_with_admission(
+            schema,
+            version,
+            value,
+            path,
+            Some(limits),
+            Some(&mut callback),
+        )
+        .map(|(_, storage)| storage)
+    };
+    match refusal {
+        Some(error) => Err(ComponentPropertyAdmissionError::Admission(error)),
+        None => result.map_err(ComponentPropertyAdmissionError::Property),
+    }
+}
+
 /// Resolves only a selector's schema claim, retaining its owning field and selected shape.
 ///
 /// The caller supplies an admitted schema. Current version, durable IDs, tombstones and keyed
@@ -628,6 +679,23 @@ fn resolve_location<'schema, 'value>(
     ),
     ComponentPropertyError,
 > {
+    resolve_location_with_admission(schema, version, value, path, limits, None)
+}
+
+fn resolve_location_with_admission<'schema, 'value>(
+    schema: &'schema ComponentSchema,
+    version: ComponentSchemaVersion,
+    value: &'value ComponentValue,
+    path: &ComponentPropertyPath,
+    limits: Option<ComponentValueMaterializationLimits>,
+    mut admission: Option<&mut PropertyAdmission<'_>>,
+) -> Result<
+    (
+        ResolvedComponentProperty<'schema, 'value>,
+        ComponentFieldPath,
+    ),
+    ComponentPropertyError,
+> {
     if version != schema.version {
         return Err(ComponentPropertyError::VersionMismatch {
             expected: schema.version,
@@ -638,17 +706,25 @@ fn resolve_location<'schema, 'value>(
     validate_component_shape_budget(schema)
         .map_err(|(_, error)| ComponentPropertyError::InvalidSchema(error))?;
     admit_property_value(value, limits)?;
-    let root = resolve_root_field(schema, &path.root, None, &mut None)?;
+    let root = resolve_root_field(schema, &path.root, None, &mut admission)?;
     let current = value
         .get_path(&root.path)
         .map_err(ComponentPropertyError::ValueUnavailable)?;
+    if admission.is_some() {
+        admit_property_work(
+            &mut admission,
+            0,
+            0,
+            storage_path_bytes(root.path.segments())?,
+        )?;
+    }
     let selected = resolve_root_location(
         root,
         Some(current),
         path,
         None,
         Some(root.path.segments().to_vec()),
-        None,
+        admission,
     )?;
     Ok((
         ResolvedComponentProperty {
@@ -738,6 +814,8 @@ fn resolve_root_location<'schema, 'value>(
                     .transpose()
                     .map_err(ComponentPropertyError::InvalidValue)?;
                 if let Some(storage) = &mut storage {
+                    reserve_storage(storage, &mut admission)?;
+                    admit_property_work(&mut admission, 0, 0, member.name.len())?;
                     storage.push(ComponentFieldPathSegment::field(&member.name));
                 }
                 shape = &member.shape;
@@ -826,10 +904,10 @@ fn resolve_root_location<'schema, 'value>(
                 })?;
                 current = Some(&items[index]);
                 if let Some(storage) = &mut storage {
-                    storage.push(ComponentFieldPathSegment::index(
-                        u32::try_from(index)
-                            .map_err(|_| ComponentPropertyError::StorageIndexOverflow)?,
-                    ));
+                    let index = u32::try_from(index)
+                        .map_err(|_| ComponentPropertyError::StorageIndexOverflow)?;
+                    reserve_storage(storage, &mut admission)?;
+                    storage.push(ComponentFieldPathSegment::index(index));
                 }
             }
             ComponentPropertyStep::MapEntry(key) => {
@@ -848,6 +926,8 @@ fn resolve_root_location<'schema, 'value>(
                     })
                     .transpose()?;
                 if let Some(storage) = &mut storage {
+                    reserve_storage(storage, &mut admission)?;
+                    admit_property_work(&mut admission, 0, 0, key.len())?;
                     storage.push(ComponentFieldPathSegment::field(key));
                 }
                 shape = entry;
@@ -918,6 +998,48 @@ fn admit_property_work(
     Ok(())
 }
 
+fn storage_path_bytes(
+    segments: &[ComponentFieldPathSegment],
+) -> Result<usize, ComponentPropertyError> {
+    let bytes = segments
+        .len()
+        .checked_mul(size_of::<ComponentFieldPathSegment>())
+        .ok_or(ComponentPropertyError::ReadBudgetExceeded)?;
+    segments.iter().try_fold(bytes, |bytes, segment| {
+        bytes
+            .checked_add(match segment {
+                ComponentFieldPathSegment::Field(name) => name.len(),
+                ComponentFieldPathSegment::Index(_) => 0,
+            })
+            .ok_or(ComponentPropertyError::ReadBudgetExceeded)
+    })
+}
+
+fn reserve_storage(
+    storage: &mut Vec<ComponentFieldPathSegment>,
+    admission: &mut Option<&mut PropertyAdmission<'_>>,
+) -> Result<(), ComponentPropertyError> {
+    if admission.is_none() || storage.len() < storage.capacity() {
+        return Ok(());
+    }
+    let capacity = storage
+        .len()
+        .checked_add(1)
+        .and_then(|minimum| {
+            storage
+                .capacity()
+                .checked_mul(2)
+                .map(|doubled| minimum.max(doubled).max(4))
+        })
+        .ok_or(ComponentPropertyError::ReadBudgetExceeded)?;
+    let allocated = capacity
+        .checked_mul(size_of::<ComponentFieldPathSegment>())
+        .ok_or(ComponentPropertyError::ReadBudgetExceeded)?;
+    admit_property_work(admission, 0, 0, allocated)?;
+    storage.reserve_exact(capacity - storage.len());
+    Ok(())
+}
+
 fn reserve_declaration(
     declaration: &mut Vec<ComponentMemberPathSegment>,
     admission: &mut Option<&mut PropertyAdmission<'_>>,
@@ -963,5 +1085,7 @@ fn resolve_root_field<'schema>(
 
 #[cfg(test)]
 mod admission_tests;
+#[cfg(test)]
+mod storage_path_tests;
 #[cfg(test)]
 mod value_admission_tests;
