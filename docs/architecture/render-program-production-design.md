@@ -486,9 +486,11 @@ logical Close rather than silently replacing permissions. Ordinary composers sub
 `WgpuPolicyFrameWriter`; refusal returns the original sidecar. Scene/Canvas construction can use
 a move-owned `WgpuStockCaptureAdapter` whose erasure covers one complete typed capture and grants
 no World/native/presentation access. Existing product definitions select and fingerprint compiled
-configuration. These are implemented-source directions under qualification, not a complete
-consumer result; the independent effect packages and actual Editor/Runtime integrations remain
-the acceptance authority.
+configuration. These owners and their independent effect packages now have
+[complete stock-composition qualification](../knowledge/engineering/verification/2026-11/2026-11-01T013746Z-shared-stock-composition-original-captures-and-native-scene-effects-qualification-2f250ecb33b24b5091f28a141cd6b244.md)
+through actual Runtime, native Scene View and offscreen consumers. The record retains failure
+corrections and support limits; it does not promote full0121 or qualify the editable Nara-drawn
+Inspector.
 
 The construction comparison selects shared stages for stock-content effects: a full alternate
 policy already fits the execution interface, but at this baseline it must either reproduce the
@@ -497,7 +499,8 @@ solely to make that control reusable would freeze a second drawing interface. Th
 consumer therefore replaces whole policy wiring while sharing stock lowering; the already
 qualified non-stock scalar policy remains the complete-replacement execution control. This is an
 ownership/authoring choice, not a measured speed claim or proof that every renderer should use
-stock stages. Complete external stock-effect acceptance still requires all three real entry paths.
+stock stages. All three real entry paths execute the same independent packages in the linked
+qualification; no performance winner is inferred.
 
 The concrete consumer also requires the exact post-UI output as a public typed input. The stock
 marker is `WgpuCompositeColor`; the existing published-frame typed getter retains its original

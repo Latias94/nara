@@ -4,8 +4,9 @@ Date: 2026-10-31. Last reviewed: 2026-11-01. Status: private CPU/DX12/cost compa
 ownership, immutable outputs, finite typed programs, original policy capture and captured
 View/history transactions qualified in their recorded scopes. Complete Source/Processed capture
 interleaving, independent native streams, clipped numeric drawing and physical-pump handoff now
-have their own scoped qualification. Public stock-stage Scene effects and the editable
-Nara-drawn Inspector remain open.
+have their own scoped qualification. Shared public stock-stage effects now have complete
+Runtime/native Scene View/offscreen qualification. Broader View/time facts, durable materials,
+reproducible cost attribution and the editable Nara-drawn Inspector retain their separate gates.
 Baseline: `a0995e7b65288ae67a5786b5312e6166b679d171`.
 Parent: [foundation R8/R9a](2026-10-23-foundation-architecture-rebaseline-plan.md#r8-external-render-feature-and-host-local-execution).
 Candidate: Proposed [ADR0121](../architecture/adr/0121-composable-render-programs-and-host-execution.md).
@@ -270,14 +271,16 @@ within their recorded scopes. A release-only measurement was incorrectly selecte
 debug command and refused its prerequisite; no performance result or fully green broad run is
 claimed. This checkpoint does not close the complete outcome or promote Proposed0121.
 
-The next [public stock-composition unit](../architecture/render-program-production-design.md#next-production-unit-public-stock-composition)
-must close the remaining actual API gap: stock world/Canvas/UI lowering is currently fixed inside
-one build, ordinary collectors require its concrete installation, and Scene/Canvas construction
-hardcodes that definition. Compare shared typed stages with full replacement using the same
-external blur/second-effect packages across Runtime, Scene View and offscreen, with crisp HUD and
-exact final UI binding. Expose explicit world-raster versus resolved-target effect inputs rather
-than freezing one implicit pre-UI pixel space. This follows the selected graph/Host model and
-does not add another executor, string-slot registry or full0121 qualification claim.
+The [public stock-composition unit](../architecture/render-program-production-design.md#next-production-unit-public-stock-composition)
+closes that actual API gap at `c836fdb`: shared world/Canvas/UI stages, policy-independent original
+capture handoff and recipe-selected Scene/Canvas adapters replace fixed policy construction and
+default-policy picking assumptions. Its [qualification](../knowledge/engineering/verification/2026-11/2026-11-01T013746Z-shared-stock-composition-original-captures-and-native-scene-effects-qualification-2f250ecb33b24b5091f28a141cd6b244.md)
+executes the same external blur/grade packages through Runtime, actual Scene View and offscreen,
+with distinct world/resolved pixel inputs, crisp HUD, exact final UI binding and old output/capture
+retention. Final profile activation and definition pairing pass Headless/Check and source/processed
+configuration controls. The record preserves earlier failures, overlapping counts, native platform
+limits and unmeasured costs. Continue the remaining View/time, material and editable Nara-drawn
+Editor gates under the existing foundation plan; full0121 is not promoted.
 
 The [first executable comparison](../knowledge/engineering/verification/2026-10/2026-10-31T060722Z-private-render-graph-buffer-history-and-viable-controls-comparison-on-dx12-d6aca1996b2342659bd07933b33e0e64.md)
 records 61 unique CPU tests, seven actual DX12 tests and one subsequent actual submission-failure

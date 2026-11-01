@@ -263,3 +263,14 @@ platform limits. The next [public stock-composition seam](../architecture/render
 replaces fixed stock world/Canvas/UI wiring through the same external Scene-effect consumers.
 This advances F1/F2/F3 without closing the report's Schema/Prefab evolution, joint motion/execution,
 durable material or editable Nara-drawn Inspector gates.
+
+The [shared stock-composition successor](../knowledge/engineering/verification/2026-11/2026-11-01T013746Z-shared-stock-composition-original-captures-and-native-scene-effects-qualification-2f250ecb33b24b5091f28a141cd6b244.md)
+now qualifies that concrete Runtime/native Scene View/offscreen consumer at `c836fdb`. It preserves
+original captures, UI completion and exact resource semantics, with independently authored
+blur/grade packages and numeric output checks. The same supplied archive still matches; no new
+roadmap or full0121 promotion follows. A separate actual-consumer ergonomics audit selects the
+[registry ownership sub-unit](../plans/2026-11-01-component-registry-ownership-plan.md) inside R12:
+mutable construction publishes the existing immutable snapshot, keeping failed-candidate recovery
+and exact App/Scene eligibility. Its independent review added the installed-but-unadmitted owner
+refusal boundary. That plan is unimplemented and does not replace the still-open authored
+evolution, joint motion/execution, durable material or editable Nara-drawn Inspector work.

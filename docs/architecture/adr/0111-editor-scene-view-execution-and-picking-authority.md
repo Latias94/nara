@@ -14,6 +14,7 @@
 **Current Unit**: [Render Composition And Host Execution](../../plans/2026-10-31-render-composition-and-host-execution-plan.md)
 **Selected Design**: [Render Host Ownership And Production Transition](../render-host-ownership-design.md), implementation step3
 **Current Implementation Evidence**: [Immutable outputs, owned producers and original native prefixes](../../knowledge/engineering/verification/2026-10/2026-10-31T121248Z-immutable-render-outputs-owning-producers-and-original-native-prefix-qualification-1b4de7f4305740698abba87b589f9459.md)
+and [shared stock composition with actual native Scene effects](../../knowledge/engineering/verification/2026-11/2026-11-01T013746Z-shared-stock-composition-original-captures-and-native-scene-effects-qualification-2f250ecb33b24b5091f28a141cd6b244.md)
 **Historical Implementation Plan**: [Editor Scene Composition and Scene View v1](../../plans/2026-08-16-1440-feat-editor-scene-view-and-composition-plan.md)
 **Historical Initial Implementation**: `1f97c48` (`feat(editor): establish scene view gpu execution`)
 **Historical Completed Implementation**: `f99de44` (`feat(editor): prove scene authoring trajectory`)

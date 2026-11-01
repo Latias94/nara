@@ -6,14 +6,15 @@ device acquisition, submission and retirement. The
 [independent consumer](../../tests/fixtures/render-program-consumer/README.md) implements the
 whole workload through public APIs without a World, Runtime, window or private executor.
 
-This guide covers the bounded prerequisite admitted by
+This guide covers the finite programs and shared stock construction admitted by
 [ADR0094](../architecture/adr/0094-minimal-render-execution-boundary-and-evidence-gated-extensions.md#finite-captured-wgpu-programs).
-The [typed policy replacement](../knowledge/engineering/verification/2026-10/2026-10-31T192756Z-original-typed-render-policy-capture-and-complete-consumer-qualification-df7f9377f51142b78060b53617c800a1.md)
-also carries ordinary Runtime/Editor consumers and an independent alternate policy through this
-Host. The [captured-history successor](../knowledge/engineering/verification/2026-10/2026-10-31T210034Z-captured-view-histories-and-original-submission-cleanup-production-qualification-5c061376803446c0bff1a95495ca55c7.md)
-adds exact View/Feature history candidates and independent temporal consumers. Complete
-cross-stream composition and custom-drawn Editor qualification remain in the
-[render unit](../plans/2026-10-31-render-composition-and-host-execution-plan.md).
+Original typed policy captures, exact View/Feature histories and independently paced native/image
+consumers use that same Host. The [stock-composition qualification](../knowledge/engineering/verification/2026-11/2026-11-01T013746Z-shared-stock-composition-original-captures-and-native-scene-effects-qualification-2f250ecb33b24b5091f28a141cd6b244.md)
+adds independent blur/grade packages through ordinary Runtime, actual Editor Scene View and
+offscreen, with exact HUD and retained original images. Durable materials, broader View/time
+facts, measured costs and the editable Nara-drawn Inspector retain their gates in the
+[foundation plan](../plans/2026-10-23-foundation-architecture-rebaseline-plan.md). Full0121 remains
+Proposed; these workflows do not qualify a platform beyond their recorded evidence.
 
 ## Definitions, Instances And Captures
 
