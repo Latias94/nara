@@ -132,10 +132,32 @@ copying component payloads or borrowing from a growing arena.
    payload and clears preceding property batches; Suppress clears the value program. Properties
    append a batch retaining its own declaring namespace and immutable input. A later replacement
    cannot legalize an earlier invalid Add, but can discard a previous payload interpretation.
-   Only bindings retained by the final program introduce reference-target demand.
-6. Allocate the final surviving ID map, evaluate selected value programs, apply defaults before
-   binding, collect effective assets and validate final references/hierarchy/provenance. Emit the
-   existing immutable expanded result only after complete success.
+   Normalize the selected raw payload/defaults and apply every retained property suffix before
+   resolving reference targets. Binding grammar remains exact, but an overwritten reference does
+   not introduce a target or source-read demand merely because its batch remains in the program.
+6. Retain a private value plus transient reference-origin table while composing properties. Each
+   actual storage coordinate carries the reference's original declaration scope and typed target.
+   The same Reflect selector/replacement walker provides those snapshot-relative positions; Scene
+   does not implement another selector evaluator. Replace/remove only the actual modified subtree's
+   origin entries, including default exposure. Equal bare reference values do not imply equal origin.
+   Admit complete storage-path copies before allocation, including repeated Schema prefixes and
+   selected wire names for scalar claims that contain no references.
+7. Resolve only references still present in the final selected values. If resolution enters a new
+   source occurrence, stop using the old demand batch, close structure and recompute affected
+   programs before continuing. Every nonterminal round must open a previously unopened occurrence
+   and remains within the existing cycle/depth/instance/work limits.
+8. Allocate final surviving IDs, admit their actual replacement costs and lower selected references.
+   Transient origin metadata is working storage, not fabricated component-value bytes. Collect
+   effective assets and validate final references/hierarchy/provenance, then emit the existing
+   immutable result. No compiler symbol, storage path or unresolved target is persisted as identity.
+
+The [qualified final-reference-demand correction](../knowledge/engineering/verification/2026-11/2026-11-01T231259Z-final-reference-demand-and-preallocated-property-paths-qualification-fdb7dce644a84dcbb5b8b81fee9ec514.md)
+at `74d5fc7` fixes an inherited missing reference rejected before its repairing property pin,
+and an overwritten binding that demanded a missing nested source. Complete component Set selection
+alone did not cover these cases. Syntax/Schema/selector and declaration-conflict checks remain;
+target resolution waits for final surviving leaves. Retained storage paths are admitted before
+copying, including scalar pins. Owner, real-file Host, independent and selected native conversion
+evidence qualify this correction, not the future inline-reference format or complete CP2 extraction.
 
 Retain ADR 0101's three sequence roles: declaring-layer roots, an anchor's nested roots, and its
 containing-layer children. Same-parent reorder preserves its sequence; crossing to another parent

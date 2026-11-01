@@ -53,8 +53,12 @@ the authored hierarchy contract, not just adding a root flag. The
 [pure identity ownership prerequisite](../../knowledge/engineering/verification/2026-11/2026-11-01T215838Z-canonical-source-identity-ownership-prerequisite-25574e28909847799bbcd2c2b1f1d469.md)
 is qualified under ADRs0007/0038/0058: Identity owns canonical pure values, Asset compares metadata
 and Scene retains interpretation, with772 owner tests,220 Root controls,15 independent consumers,
-three public association controls, docs and minimal/portable compilation. New reference variants, contextual defaults,
-source graph compilation and complete extraction/recovery remain unimplemented. The generic
+three public association controls, docs and minimal/portable compilation. The
+[final-reference-demand correction](../../knowledge/engineering/verification/2026-11/2026-11-01T231259Z-final-reference-demand-and-preallocated-property-paths-qualification-fdb7dce644a84dcbb5b8b81fee9ec514.md)
+is qualified at `74d5fc7`: scoped normalized values survive property composition before lookup,
+only surviving references open sources, actual IDs lower last, and retained storage paths are
+admitted before copying. New reference variants, lexical input environments, contextual defaults,
+source graph replacement and complete extraction/recovery remain unimplemented. The generic
 value-tree alternative and record-owned sidecar alternative retain their comparison rationale
 in the plan; no source/Native qualification follows from representation selection.
 

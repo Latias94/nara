@@ -120,6 +120,17 @@ root, placement and inline-reference replacement; value relocation alone does no
   value and declaration scope; persistent payload-coordinate sidecars are removed by the CP2
   replacement. Runtime entity IDs, private materialization locators and backend handles are not
   source references. A path to an independent source is not an automatic World/activation lookup.
+- In the CP2 replacement, payload references and instance arguments use the actual lexical
+  containing-source occurrence of their declaration. An overlay's operation target still uses
+  the selected base namespace; that target does not select its new payload's environment. P can
+  therefore override a property inside its Q instance to reference P:b without changing Q.
+  Unqualified input uses resolve only in that lexical environment. An explicit canonical-checked
+  route can instead select an input in a nested occurrence. Root binding preserves each
+  contributor's declaration environment while merging effective entity identity. Input binding
+  cycles are detected on the current resolution chain by actual occurrence and input ID;
+  completed repeated bindings are not cycles. The same bounded source compiler resolves them.
+  Moving declarations to another source requires an explicit reference remap, including dormant
+  payloads and contextual defaults; copying their bytes does not establish reference continuity.
 - Compilation failures retain their actual source declaration when established: the containing
   input or a resolved canonical Prefab, its local anchor, and the nested addition/instance-claim
   path. Declaration-array indices address one immutable snapshot, not durable entity identity.

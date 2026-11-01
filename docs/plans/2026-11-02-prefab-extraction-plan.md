@@ -2,6 +2,8 @@
 
 **Status:** Root/placement/inline-reference direction selected after independent comparison.
 The [pure identity ownership prerequisite is qualified](../knowledge/engineering/verification/2026-11/2026-11-01T215838Z-canonical-source-identity-ownership-prerequisite-25574e28909847799bbcd2c2b1f1d469.md).
+The [final reference-demand prerequisite is qualified](../knowledge/engineering/verification/2026-11/2026-11-01T231259Z-final-reference-demand-and-preallocated-property-paths-qualification-fdb7dce644a84dcbb5b8b81fee9ec514.md).
+Lexical payload/input scope is selected below; its new value syntax is not implemented yet.
 No extraction implementation or qualification is claimed; the remaining replacement and complete
 consumer stay in this unit.
 **Parent:** [Foundation R5](2026-10-23-foundation-architecture-rebaseline-plan.md#r5-durable-addressing-prefab-overlays-and-projection-lifetime).
@@ -104,6 +106,12 @@ Source preservation may retain an unresolved declared input, while activation mu
 required surviving reference or refuse specifically. Runtime publication receives fully resolved
 references; authoring bindings cannot silently pass through a Native-only spawn path.
 
+Also qualify the ordinary Inspector operation: P overrides an entity-reference property inside
+its Q instance to point at P's own local b, while Q has no declared inputs and remains unchanged.
+An operation target inside Q does not by itself select the new value's reference environment.
+Keep this concrete requirement when selecting payload/input scope. The instance override must
+be expressible without editing the reusable asset.
+
 If bindings remain separate metadata, their versioned payload must own them atomically. A binding
 map on an entity beside its component map allows a component replacement to leave stale reference
 intent behind. Compare full-record binding ownership in `SceneComponentRecord` with the current
@@ -133,9 +141,48 @@ boundary. This choice does not claim that extending an enum alone is Native-safe
 Flat compiled entities contain neither Prefab declarations nor unresolved authored targets/inputs.
 All Native admission paths must reject surviving authored-only references after defaults and
 before codecs or World mutation, including hand-written codecs and processed admission. Opaque
+value contents and undeclared retained fields do not exempt typed authored-reference leaves
+from that Native gate. Prove the complete effective value set before invoking its first codec;
+an invalid later component must not let an earlier codec run. Source preservation/admission
+retains its separate role and can keep authored values without claiming a Native result. Opaque
 records stay complete in source preservation; neither their representation nor a pure key grants
 interpretation, extraction or execution authority. Retain one shared Reflect walker and one Scene
 compiler, with no second catalog or evaluator.
+
+### Lexical Payload And Input Scope
+
+Select one lexical source environment for every authored payload, contextual default and instance
+argument. A P-authored overlay may target Q's entities, but its payload references still start in
+that actual P occurrence. Structural target scope and value scope are separate facts. This
+supports the ordinary instance override to P:b without adding inputs to the reusable Q asset.
+Q's own outward dependencies remain declared inputs with explicit instance arguments.
+
+Selected-base payload scope plus an explicit containing-source reference was a viable alternative.
+It keeps shorter inherited-target spellings, but gives payloads different default environments
+according to their container and adds a second scope qualifier. Prefer one lexical rule across
+direct records, additions, pins and arguments; nested targets use explicit routes. This replaces
+the incumbent binding-table scope rather than retaining a compatibility interpretation.
+
+Reference syntax shares the existing canonical-checked occurrence route and has an entity-origin
+or declared-input endpoint. Structural targets retain their entity-only endpoint role. A plain
+Input(u) means the empty-route input endpoint in the payload's lexical environment; it has no
+fallback to the selected base, parent or another occurrence with the same canonical key. An
+explicit `through[a @ Q] / Input(u)` selects that actual Q occurrence's input environment.
+This is one value language, with no second expression evaluator or implicit caller capture.
+
+For the control P.u = P:c and P.a binding Q.u = P:b, Q's direct Input(u) resolves to b; a
+P-authored overlay's plain Input(u) resolves to c. That overlay can explicitly select Q.u through
+a's canonical route. Root binding preserves both declaration facets even when they share one
+final entity. A selected nested instance claim retains its actual lexical declaration environment,
+independently of the target overlay scope and final hierarchy.
+
+Only surviving input uses demand their arguments. Arguments use their own lexical source scope,
+so an argument can route back into the input being bound. Reject a cycle on the current resolution
+chain keyed by actual occurrence and input ID, for example P.a's Q.u argument selecting
+`through[a @ Q] / Input(u)`. Repeated completed bindings remain valid. Admit route traversal,
+binding state and source demand within the existing finite compiler work/storage allowances.
+Extraction remaps moved lexical declarations, including dormant values/defaults and arguments;
+equal bytes in a different source do not prove equal reference meaning.
 
 Source-dependent reference defaults need explicit version/field-bound contextual declarations in
 the authored record. They remain part of the complete tree even when an explicit value hides them.
@@ -144,6 +191,31 @@ outward targets to declared inputs without covertly changing omission into a val
 Null and context-free Persistent defaults can continue using the canonical Schema template.
 Schema succession must account for contextual defaults explicitly. Default editing retains field
 capability and preservation constraints; this is not an alternate path around readonly fields.
+
+### Final Reference Demand Prerequisite
+
+After the pure-identity commit, a production regression reproduced early target lookup rejecting
+an inherited missing reference even when an outer property pin fully replaced it. The same
+program-wide binding scan demanded a missing nested source for an overwritten leaf. The qualified
+prerequisite corrects these in the existing compiler before adding inline reference variants.
+
+Keep each unpublished normalized value together with a transient path-to-declaration-origin map.
+Exact binding grammar, Schema, selector and key checks remain; target resolution waits until all
+property suffixes select the final leaves. Actual Reflect storage coordinates identify changed
+subtrees, and source/default provenance follows the real declaration scope. The path table is
+private compilation state, not durable reference syntax or a second value/selector interpreter.
+Do not encode artificial reference symbols as entity-ID strings: their length would distort the
+inclusive component-value budget. Metadata remains separately admitted working storage. Admit
+every retained property storage coordinate before copying it, including the complete Schema
+prefix and selected wire names. Scalar claims with no references still retain these paths;
+short durable selectors do not bound the storage names they resolve to.
+
+Only surviving references can open source occurrences. Opening one invalidates the current
+structural/value demand batch and requires the existing compiler closure to resume. Final lower
+checks declaring-layer visibility and final survival, admits actual ID growth and generated-ID
+costs, and consumes the normalized candidate. The repair control must succeed; leaving the same
+reference uncorrected must refuse. Overwritten missing-source demand must cause zero reads, and
+a one-byte final local ID must retain exact/one-short budget behavior.
 
 ## Scene Module Interface
 
@@ -188,6 +260,11 @@ Q/sidecar and recovery conflicts must remain repairable and distinguishable.
 2. Replace the owning source format/compiler/authoring semantics. Exercise the actual shared
    compiler for Native and source-authoring interpretations; do not create a test-only evaluator.
    Update bounded decode, defaults, references, provenance, construction and exact history together.
+   Separate source publish/patch/classification admission from Native preflight before enabling
+   authored-only value variants; shared current callers cannot inherit an unconditional Native
+   rejection. Preserve their source capabilities and meaningful validation without a fake codec
+   or a second interpreter. Native registry, complete Scene preparation, processed admission/cook
+   and direct data-component setters each need their real after-defaults admission gate.
 3. Implement Scene-owned extraction and complete declaration/occurrence correspondence. Qualify
    root, non-root, nested/repeated, cross-cut reference, dormant and unknown-semantics controls.
 4. Integrate complete inventory, borrowed Review, execution retirement, new-member publication,

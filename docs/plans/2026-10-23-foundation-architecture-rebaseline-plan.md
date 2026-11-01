@@ -546,6 +546,11 @@ consumer. Its selected direction combines explicit root binding/forest mounting,
 typed placements, inline reference values and separate flat compiled output. The pure identity
 ownership prerequisite is qualified separately; no extraction qualification follows from that
 prerequisite, the earlier source study or CP1 result.
+The [qualified final-reference-demand correction](../knowledge/engineering/verification/2026-11/2026-11-01T231259Z-final-reference-demand-and-preallocated-property-paths-qualification-fdb7dce644a84dcbb5b8b81fee9ec514.md)
+removes eager lookup of overwritten property references and admits retained storage paths before
+copying. The next inline-reference replacement uses lexical payload/input scope independently of
+structural target scope; explicit routes select nested inputs. Its implementation and complete
+CP2 extraction remain in the same open unit.
 
 Acceptance: nested and repeated instances, base rename/reorder/delete, same-name members,
 Behavior migration, convert-to-local and explicit remap. Long edit churn preserves stale-alias
