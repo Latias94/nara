@@ -787,46 +787,99 @@ fn retained_construction_resolves_existing_and_local_sibling_owners_in_declarati
 fn retained_construction_last_invalid_write_and_raw_write_limit_preserve_source() {
     let bundle = link_bundle();
     let document = SceneDocument::from_ordered_roots([SceneEntityRecord::new(id("existing"))]);
-    let session = open_with_bundle(&document, &bundle, SceneAuthoringHistoryLimits::default());
-    let mut draft = session
-        .begin_authoring_construction(session.revision())
-        .unwrap();
-    let local = draft
-        .create_entity(ScenePlacement::last(ScenePlacementOwner::Root))
-        .unwrap();
     let component = ComponentTypeId::new("game.Link");
-    draft.add_component(&local, component.clone()).unwrap();
-    for amount in 0..7 {
+    // One entity and one component share the construction allowance with every raw write.
+    let raw_write_limit = nara_scene::MAX_AUTHORING_EDIT_OPERATIONS - 2;
+    assert_eq!(raw_write_limit, 254);
+    for (write_count, last_amount) in [
+        (raw_write_limit - 1, 256),
+        (raw_write_limit, 256),
+        (raw_write_limit - 1, 7),
+        (raw_write_limit, 7),
+    ] {
+        let mut session =
+            open_with_bundle(&document, &bundle, SceneAuthoringHistoryLimits::default());
+        let before = session.shared_document();
+        let revision = session.revision();
+        let content = session.content_state();
+        let history = session.history_status();
+        let mut draft = session.begin_authoring_construction(revision).unwrap();
+        let local = draft
+            .create_entity(ScenePlacement::last(ScenePlacementOwner::Root))
+            .unwrap();
+        draft.add_component(&local, component.clone()).unwrap();
+        for _ in 1..write_count {
+            draft
+                .set_property(
+                    &local,
+                    component.clone(),
+                    root_property("amount"),
+                    ComponentValue::U64(1),
+                )
+                .unwrap();
+        }
         draft
             .set_property(
                 &local,
                 component.clone(),
                 root_property("amount"),
-                ComponentValue::U64(amount),
+                ComponentValue::U64(last_amount),
             )
             .unwrap();
+        if write_count == raw_write_limit {
+            // Refusing a correcting write must leave the previous, possibly invalid value intact.
+            assert!(
+                draft
+                    .set_property(
+                        &local,
+                        component.clone(),
+                        root_property("amount"),
+                        ComponentValue::U64(1),
+                    )
+                    .is_err()
+            );
+        }
+
+        let result = session.prepare_authoring_construction(&draft);
+        assert!(std::sync::Arc::ptr_eq(&before, &session.shared_document()));
+        assert_eq!(session.document(), &document);
+        assert_eq!(session.revision(), revision);
+        assert_eq!(session.content_state(), content);
+        assert_eq!(session.history_status(), history);
+        if last_amount == 256 {
+            assert!(result.is_err());
+            continue;
+        }
+
+        let prepared = result.unwrap();
+        let created = prepared.entity(&local).unwrap().clone();
+        assert_eq!(prepared.patch().operations.len(), 3);
+        let expected = prepared.document().clone();
+        let record = expected
+            .entities
+            .iter()
+            .find(|record| record.id == created)
+            .unwrap();
+        assert_eq!(
+            record.components[&component].value.field("amount"),
+            Ok(&ComponentValue::U64(last_amount))
+        );
+        let committed = session.commit_authoring_construction(prepared).unwrap();
+        assert!(committed.report().applied);
+        assert_eq!(committed.entity(&local), Some(&created));
+        assert_eq!(session.document(), &expected);
+        assert_eq!(session.history_status().undo_depth, 1);
+        assert_eq!(session.history_status().redo_depth, 0);
+        assert!(session.undo_authoring().applied);
+        assert_eq!(session.document(), &document);
+        assert_eq!(session.content_state(), content);
+        assert_eq!(session.history_status().undo_depth, 0);
+        assert_eq!(session.history_status().redo_depth, 1);
+        assert!(session.redo_authoring().applied);
+        assert_eq!(session.document(), &expected);
+        assert_eq!(session.history_status().undo_depth, 1);
+        assert_eq!(session.history_status().redo_depth, 0);
     }
-    draft
-        .set_property(
-            &local,
-            component.clone(),
-            root_property("amount"),
-            ComponentValue::U64(256),
-        )
-        .unwrap();
-    assert!(
-        draft
-            .set_property(
-                &local,
-                component,
-                root_property("amount"),
-                ComponentValue::U64(1)
-            )
-            .is_err()
-    );
-    assert!(session.prepare_authoring_construction(&draft).is_err());
-    assert_eq!(session.document(), &document);
-    assert_eq!(session.history_status().undo_depth, 0);
 }
 
 #[test]
@@ -1227,52 +1280,111 @@ fn mixed_operation_budget_is_independent_of_the_field_write_budget() {
 fn retained_construction_bounds_declarations_and_coalesced_property_roots_together() {
     let bundle = link_bundle();
     let document = SceneDocument::from_ordered_roots([SceneEntityRecord::new(id("existing"))]);
-    let session = open_with_bundle(&document, &bundle, SceneAuthoringHistoryLimits::default());
-    for (count, accepted) in [(254, true), (255, false)] {
-        let mut draft = session
-            .begin_authoring_construction(session.revision())
-            .unwrap();
+    let component = ComponentTypeId::new("game.Link");
+    let operation_limit = nara_scene::MAX_AUTHORING_EDIT_OPERATIONS;
+    assert_eq!(operation_limit, 256);
+    for write_count in [0, 1, 8] {
+        let mut session =
+            open_with_bundle(&document, &bundle, SceneAuthoringHistoryLimits::default());
+        let before = session.shared_document();
+        let revision = session.revision();
+        let content = session.content_state();
+        let history = session.history_status();
+        let mut draft = session.begin_authoring_construction(revision).unwrap();
         draft
-            .add_component(id("existing"), ComponentTypeId::new("game.Link"))
+            .add_component(id("existing"), component.clone())
             .unwrap();
-        for _ in 0..count {
+        let entity_count = operation_limit - 1 - write_count;
+        for _ in 0..entity_count - 1 {
             draft
                 .create_entity(ScenePlacement::last(ScenePlacementOwner::Root))
                 .unwrap();
         }
-        if !accepted {
-            assert!(
-                draft
-                    .create_entity(ScenePlacement::last(ScenePlacementOwner::Root))
-                    .is_err()
-            );
-            drop(session.prepare_authoring_construction(&draft).unwrap());
-        }
-        for amount in 0..if accepted { 8 } else { 1 } {
+        let mut last_amount = 1;
+        for index in 0..write_count {
+            last_amount = 10 + index as u64;
             draft
                 .set_property(
                     id("existing"),
-                    ComponentTypeId::new("game.Link"),
+                    component.clone(),
                     root_property("amount"),
-                    ComponentValue::U64(amount),
+                    ComponentValue::U64(last_amount),
                 )
                 .unwrap();
         }
-        let result = session.prepare_authoring_construction(&draft);
-        if accepted {
-            let prepared = result.unwrap();
-            assert_eq!(prepared.patch().operations.len(), 256);
-            drop(prepared);
-        } else {
-            assert!(result.is_err());
-            assert!(
-                draft
-                    .create_entity(ScenePlacement::last(ScenePlacementOwner::Root))
-                    .is_err()
-            );
-        }
+
+        // At 255 raw operations there is exactly one slot left, regardless of root coalescing.
+        let field_roots = usize::from(write_count != 0);
+        let one_short = session.prepare_authoring_construction(&draft).unwrap();
+        assert_eq!(
+            one_short.patch().operations.len(),
+            entity_count + field_roots
+        );
+        assert!(std::sync::Arc::ptr_eq(&before, &session.shared_document()));
         assert_eq!(session.document(), &document);
+        assert_eq!(session.revision(), revision);
+        assert_eq!(session.content_state(), content);
+        assert_eq!(session.history_status(), history);
+        drop(one_short);
+
+        let local = draft
+            .create_entity(ScenePlacement::last(ScenePlacementOwner::Root))
+            .unwrap();
+        assert!(
+            draft
+                .create_entity(ScenePlacement::last(ScenePlacementOwner::Root))
+                .is_err()
+        );
+        assert!(draft.add_component(&local, component.clone()).is_err());
+        assert!(
+            draft
+                .set_property(
+                    id("existing"),
+                    component.clone(),
+                    root_property("amount"),
+                    ComponentValue::U64(255),
+                )
+                .is_err()
+        );
+
+        let prepared = session.prepare_authoring_construction(&draft).unwrap();
+        assert_eq!(
+            prepared.patch().operations.len(),
+            entity_count + 1 + field_roots
+        );
+        let created = prepared.entity(&local).unwrap().clone();
+        let expected = prepared.document().clone();
+        assert_eq!(expected.entities.len(), entity_count + 1);
+        assert_eq!(expected.roots.len(), entity_count + 1);
+        let existing = expected
+            .entities
+            .iter()
+            .find(|record| record.id == id("existing"))
+            .unwrap();
+        assert_eq!(
+            existing.components[&component].value.field("amount"),
+            Ok(&ComponentValue::U64(last_amount))
+        );
+        assert!(std::sync::Arc::ptr_eq(&before, &session.shared_document()));
+        assert_eq!(session.document(), &document);
+        assert_eq!(session.revision(), revision);
+        assert_eq!(session.content_state(), content);
+        assert_eq!(session.history_status(), history);
+        let committed = session.commit_authoring_construction(prepared).unwrap();
+        assert!(committed.report().applied);
+        assert_eq!(committed.entity(&local), Some(&created));
+        assert_eq!(session.document(), &expected);
+        assert_eq!(session.history_status().undo_depth, 1);
+        assert_eq!(session.history_status().redo_depth, 0);
+        assert!(session.undo_authoring().applied);
+        assert_eq!(session.document(), &document);
+        assert_eq!(session.content_state(), content);
         assert_eq!(session.history_status().undo_depth, 0);
+        assert_eq!(session.history_status().redo_depth, 1);
+        assert!(session.redo_authoring().applied);
+        assert_eq!(session.document(), &expected);
+        assert_eq!(session.history_status().undo_depth, 1);
+        assert_eq!(session.history_status().redo_depth, 0);
     }
 }
 
